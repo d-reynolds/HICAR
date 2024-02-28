@@ -61,6 +61,13 @@ contains
                 if (err /= 0) stop "variable:grid:2d: Allocation request failed"
 
                 this%data_2dd = 0
+            elseif (this%dtype == kINTEGER) then
+                allocate(this%data_2di(grid%ims:grid%ime,    &
+                                       grid%jms:grid%jme), stat=err)
+                if (err /= 0) stop "variable:grid:2d: Allocation request failed"
+
+                this%data_2di = 0
+        
             endif
 
             if (trim(this%forcing_var) /= "") then

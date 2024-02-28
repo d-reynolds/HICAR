@@ -931,7 +931,7 @@ contains
                                 domain%soil_water_content_liq%data_3d , &
                                 DZS , FNDSOILW , FNDSNOWH ,             &
                                 domain%skin_temperature%data_2d,        &
-                                int(domain%snow_nlayers%data_2d),       &
+                                domain%snow_nlayers%data_2di,           &
                                 domain%veg_leaf_temperature%data_2d,    &
                                 domain%ground_surf_temperature%data_2d, &
                                 domain%canopy_water_ice%data_2d,        &
@@ -1569,7 +1569,7 @@ contains
                              domain%irr_amt_flood%data_2d,             &  ! only used if iopt_irr > 0
                              domain%evap_heat_sprinkler%data_2d,       &  ! only used if iopt_irr > 0
                              landuse_name,                             &
-                             int(domain%snow_nlayers%data_2d),         &
+                             domain%snow_nlayers%data_2di,             &
                              domain%veg_leaf_temperature%data_2d,      &
                              domain%ground_surf_temperature%data_2d,   &
                              domain%canopy_water_ice%data_2d,          &

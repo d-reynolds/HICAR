@@ -1184,7 +1184,7 @@ contains
         if (0<opt%vars_to_allocate( kVARS%iwv) )                        call setup(this%iwv,                     this%grid2d )
         if (0<opt%vars_to_allocate( kVARS%iwl) )                        call setup(this%iwl,                     this%grid2d )
         if (0<opt%vars_to_allocate( kVARS%iwi) )                        call setup(this%iwi,                     this%grid2d )
-        if (0<opt%vars_to_allocate( kVARS%snow_nlayers) )               call setup(this%snow_nlayers,            this%grid2d )
+        if (0<opt%vars_to_allocate( kVARS%snow_nlayers) )               call setup(this%snow_nlayers,            this%grid2d, dtype=kINTEGER )
         ! integer variable_t types aren't available (yet...)
         if (0<opt%vars_to_allocate( kVARS%convective_precipitation) )   allocate(this%cu_precipitation_bucket  (ims:ime, jms:jme),          source=0)
         if (0<opt%vars_to_allocate( kVARS%precipitation) )              allocate(this%precipitation_bucket     (ims:ime, jms:jme),          source=0)
