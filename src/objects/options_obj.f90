@@ -612,6 +612,7 @@ contains
         names(:)            = ""
         inputinterval       =  3600
         outputinterval      =  3600
+        output_file_frequency = ""
         frames_per_outfile  =  24
         restartinterval     =  24 ! in units of outputintervals
 
