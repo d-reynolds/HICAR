@@ -39,7 +39,7 @@ module reader_interface
       ! Note n_variables may be smaller then size(variables) so that it doesn't
       ! have to keep reallocating variables whenever something is added or removed
       integer, public :: n_vars = 0
-      
+      logical, public :: eof      
       type(var_dict_t)    :: variables      ! a dictionary with all forcing data
       
       ! list of input files

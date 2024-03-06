@@ -44,7 +44,7 @@ contains
         call this%reader%init(this%i_s_r,this%i_e_r,this%k_s_r,this%k_e_r,this%j_s_r,this%j_e_r,options)
         this%n_children = size(this%children)
         this%n_r = this%reader%n_vars
-
+        this%files_to_read = this%reader%eof
 
         !Setup writing capability
         call this%outputer%init(domain,options,this%i_s_w,this%i_e_w,this%k_s_w,this%k_e_w,this%j_s_w,this%j_e_w)
@@ -121,28 +121,6 @@ contains
             best = abs(1 - ( x / y ))
         endif
   
-        !do i=kNUM_SERVERS,1,-1
-        !    if (mod(kNUM_SERVERS,i)==0) then
-        !        ysplit = i
-        !        xsplit = kNUM_SERVERS / i
-
-        !        x = (nx/float(xsplit))
-        !        y = (ny/float(ysplit))
-
-        !        if (y > x) then
-        !            current = abs(1 - ( y / x ))
-        !        else
-        !            current = abs(1 - ( x / y ))
-        !        endif
-
-        !        if (current < best) then
-        !            best = current
-        !            xs = xsplit
-        !            ys = ysplit
-        !        endif
-        !    endif
-        !enddo
-        !On exit, xs and ys have the number of servers in each direction
         
         row_slice = nint(ny*1.0/ys)
         j_s = 1 + row_slice*(ceiling(this%server_id*1.0/xs)-1)
@@ -168,14 +146,6 @@ contains
         mins = abs(j_e-j_e_w)
         j_e = j_e_w(minloc(mins,dim=1))
     
-        !do n = 1,size(i_s_w)
-        !    passed_children(n) = .False.
-            
-        !    if ( (i_s_w(n) >= i_s) .and. (i_e_w(n) <= i_e) .and. &
-        !         (j_s_w(n) >= j_s) .and. (j_e_w(n) <= j_e)) then
-        !        passed_children(n) = .True.
-        !    endif
-        !enddo
         passed_children = .False.
         passed_children(max((this_image()-(kNUM_PROC_PER_NODE-1)),1):(this_image()-1)) = .True.
         
@@ -277,7 +247,8 @@ contains
 
         ! read file into buffer array
         call this%reader%read_next_step(parent_read_buffer,this%IO_comms)
-        
+        this%files_to_read = .not.(this%reader%eof)
+
         ! Loop through child images and send chunks of buffer array to each one
         do i=1,this%n_children
             n = this%children(i)

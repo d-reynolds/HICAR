@@ -17,7 +17,7 @@
 !!
 !!-----------------------------------------
 program icar
-    use mpi
+    use mpi,                only : MPI_MAX_PROCESSOR_NAME, MPI_COMM_WORLD, MPI_init, MPI_initialized
     use iso_fortran_env
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
@@ -84,8 +84,9 @@ program icar
     ! Model structure must be initialized first. 
     ! The domain dimensions will be used when establishing I/O client-server relations
     call init_model(options, domain, boundary)
-
+    if (this_image()==1) flush(output_unit)
     call init_IO(exec_team, domain, boundary, options, ioclient, ioserver, write_buffer, read_buffer)        
+    if (this_image()==1) flush(output_unit)
 
     select case(exec_team)
     case(kCOMPUTE_TEAM)
@@ -124,10 +125,10 @@ program icar
             if (this_image()==1) write(*,*) "Reading restart data"
             call ioclient%receive_rst(domain, write_buffer)
         endif
-        
+        if (this_image()==1) flush(output_unit)
         ! physics drivers need to be initialized after restart data are potentially read in.
         call init_physics(options, domain, boundary)
-
+        if (this_image()==1) flush(output_unit)
         call output_timer%start()
         call ioclient%push(domain, write_buffer)
 
@@ -137,6 +138,7 @@ program icar
     case(kIO_TEAM)
     
         call ioserver%read_file(read_buffer)
+
         do i = 1,ioserver%n_children
             EVENT POST (read_ev[ioserver%children(i)])
         enddo
@@ -222,7 +224,7 @@ program icar
             ! this is the meat of the model physics, run all the physics for the current time step looping over internal timesteps
             if (.not.(options%wind%wind_only)) then
                 call physics_timer%start()
-                call step(domain, boundary, step_end(next_input, next_output), options,           &
+                call step(domain, boundary, step_end(next_input, next_output, options%parameters%end_time), options,           &
                                 mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, &
                                 send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer)
                 call physics_timer%stop()
@@ -278,7 +280,7 @@ program icar
         do while (end_ev_cnt < ioserver%n_children .and. io_timer%get_time() < 600.)
             !See of it is time to read
             call EVENT_QUERY(child_read_ev,ev_cnt)
-            if (ev_cnt == ioserver%n_children .and. next_input<=options%parameters%end_time) then
+            if (ev_cnt == ioserver%n_children .and. ioserver%files_to_read) then
                 !Do an event wait to decrement the event counter
                 EVENT WAIT (child_read_ev, UNTIL_COUNT=ioserver%n_children)
 
@@ -288,8 +290,6 @@ program icar
                     EVENT POST (read_ev[ioserver%children(i)])
                 enddo
 
-                next_input = next_input + options%io_options%input_dt
-                
                 call io_timer%reset()
                 call io_timer%start()
             endif
@@ -297,7 +297,7 @@ program icar
             
             !See if all of our children are ready for a write
             call EVENT_QUERY(write_ev,ev_cnt)
-            if (ev_cnt == ioserver%n_children .and. next_output<=options%parameters%end_time) then
+            if (ev_cnt == ioserver%n_children) then
                 !Do an event wait to decrement the event counter
                 EVENT WAIT (write_ev, UNTIL_COUNT=ioserver%n_children)
 
@@ -393,10 +393,9 @@ contains
     
     end function
 
-    function step_end(time1, time2) result(min_time)
+    function step_end(time1, time2, end_time) result(min_time)
         implicit none
-        type(Time_type), intent(in) :: time1
-        type(Time_type), intent(in) :: time2
+        type(Time_type), intent(in) :: time1, time2, end_time
         type(Time_type) :: min_time
 
         if (time1 <= time2 ) then
@@ -405,6 +404,9 @@ contains
             min_time = time2
         endif
 
+        if (end_time < min_time) then
+            min_time = end_time
+        endif
     end function
 
 
@@ -518,7 +520,8 @@ contains
         call co_max(i_s_w); call co_max(i_e_w); call co_max(i_s_r); call co_max(i_e_r)
         call co_max(j_s_w); call co_max(j_e_w); call co_max(j_s_r); call co_max(j_e_r)
         call co_max(k_s_w); call co_max(k_e_w); call co_max(k_s_r); call co_max(k_e_r)            
-        
+
+
         select case(exec_team)
         case(kIO_TEAM)
             CALL MPI_COMM_DUP( splitComm, ioserver%IO_comms, ierr )
@@ -534,7 +537,7 @@ contains
                 flush(output_unit)
             endif
 
-            !Contribute k-extents for wrie variables, in case we had to expand beyond the domain k extent due to a large soil variable
+            !Contribute k-extents for write variables, in case we had to expand beyond the domain k extent due to a large soil variable
             if ( ioserver%k_e_w > maxval(k_e_w)) k_e_w(1) = ioserver%k_e_w
 
             n_r = ioserver%n_r
@@ -575,7 +578,6 @@ contains
         call co_max(n_w)
         call co_max(n_r)
         call co_max(n_restart)
-        
         
         !Initialize read/write buffers. They are coarrays, defined by the comax of the read and write bounds for each compute image
         allocate(write_buffer(n_w,1:nx_w+1,1:nz_w,1:ny_w+1)[*])

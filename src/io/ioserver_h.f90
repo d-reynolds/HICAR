@@ -41,6 +41,7 @@ module ioserver_interface
       ! have to keep reallocating variables whenever something is added or removed
       integer, public :: n_input_variables, n_output_variables, n_children, IO_comms
       integer, public :: server_id = -1
+      logical, public :: files_to_read
 
       ! time variable , publicis stored outside of the variable list... probably need to think about that some
       type(output_t) :: outputer

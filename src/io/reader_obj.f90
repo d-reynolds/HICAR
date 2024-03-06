@@ -156,6 +156,7 @@ contains
             ! if we have run out of input files, stop with an error message
             if (this%curfile > size(this%file_list)) then
                 if (this_image()==kNUM_PROC_PER_NODE) write(*,*) 'End of file list'
+                this%eof = .True.
                 !stop "Ran out of files to process while searching for matching time variable!"
             endif
 
@@ -226,6 +227,7 @@ contains
             if (trim(file_list(n))==trim(filename)) this%curfile = n
         enddo
 
+        this%eof = .False.
     end subroutine
 
     !>------------------------------------------------------------
