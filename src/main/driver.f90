@@ -17,8 +17,8 @@
 !!
 !!-----------------------------------------
 program icar
-    use mpi,                only : MPI_MAX_PROCESSOR_NAME, MPI_COMM_WORLD, MPI_init, MPI_initialized
-    use iso_fortran_env
+    use, intrinsic iso_fortran_env
+    use mpi_f08
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
@@ -41,7 +41,7 @@ program icar
     type(options_t) :: options
     type(domain_t)  :: domain
     type(boundary_t):: boundary, add_cond
-    type(event_type)  :: written_ev[*], write_ev[*], read_ev[*], child_read_ev[*], end_ev[*]
+    type(event_type), allocatable :: written_ev[:], write_ev[:], read_ev[:], child_read_ev[:], end_ev[:]
     type(output_t)  :: restart_dataset
     type(output_t)  :: output_dataset
     type(ioserver_t)  :: ioserver
@@ -57,19 +57,26 @@ program icar
     real :: t_val
     logical :: init_flag
 
-
+    !if (this_image()==1) write(*,*) 'Before MPI init'
+    !if (this_image()==1) flush(output_unit)
     !Initialize MPI if needed
+    allocate(write_buffer(5,5,5,5)[*])
     init_flag = .False.
     call MPI_initialized(init_flag, ierr)
     if (.not.(init_flag)) then
         call MPI_INIT(ierr)
         init_flag = .True.
     endif
+    write(*,*) team_number()
+    flush(output_unit)
+    if (this_image()==20) write_buffer(1,1,1,1)[20] = write_buffer(1,1,1,1)
+    if (this_image()==20) write(*,*) 'Past MPI init'
+    if (this_image()==20) flush(output_unit)
+    call MPI_Barrier(MPI_COMM_WORLD,ierr)
 
     !Determine split of processes which will become I/O servers and which will be compute tasks
     !Also sets constants for the program to keep track of this splitting
     call split_processes(exec_team)
-
     call small_time_delta%set(1)
     
     call total_timer%start()
@@ -83,6 +90,10 @@ program icar
     
     ! Model structure must be initialized first. 
     ! The domain dimensions will be used when establishing I/O client-server relations
+
+    if (this_image()==1) write(*,*) 'Before init'
+    if (this_image()==1) flush(output_unit)
+
     call init_model(options, domain, boundary)
     if (this_image()==1) flush(output_unit)
     call init_IO(exec_team, domain, boundary, options, ioclient, ioserver, write_buffer, read_buffer)        
@@ -359,7 +370,7 @@ program icar
     if (this_image()==1) write(*,*) "halo-exchange  : ", t_val 
     t_val = timer_mean(wind_timer)
     if (this_image()==1) write(*,*) "winds          : ", t_val 
-
+    CALL MPI_Finalize()
 contains
 
     !subroutine safe_wait(event, err_msg, until_count)
@@ -413,18 +424,24 @@ contains
     subroutine split_processes(exec_team)
         implicit none
         integer, intent(inout) :: exec_team
-        integer :: n, k, name_len, ierr, node_name_i, node_names(num_images())
+        integer :: n, k, name_len, ierr, node_name_i
         character(len=MPI_MAX_PROCESSOR_NAME) :: node_name
+        integer, allocatable :: node_names(:) 
         
+        allocate(node_names(num_images()))
+
         node_names = 0
         node_name_i = 0
-        
+       
+
         call MPI_Get_processor_name(node_name, name_len, ierr)
         do n = 1,name_len
             node_name_i = node_name_i + ichar(node_name(n:n))*n*10
         enddo
+
         node_names(this_image()) = node_name_i
-        call co_max(node_names)
+        
+        call MPI_Allreduce(MPI_IN_PLACE,node_names,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
         
         kNUM_PROC_PER_NODE = count(node_names==node_names(1))
 
@@ -438,7 +455,7 @@ contains
             write(*,*) 'If the total number of compute processes is odd-numbered,'
             write(*,*) 'this may lead to errors with domain decomposition'
         endif
-        
+ 
         if (mod(this_image(),(num_images()/kNUM_SERVERS)) == 0) then
             exec_team = kIO_TEAM
         else
@@ -468,9 +485,10 @@ contains
 
         integer, allocatable, dimension(:) :: i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r
         integer, allocatable, dimension(:,:) :: childrens
-        integer :: nx_w, ny_w, nz_w, n_w, nx_r, ny_r, nz_r, n_r, n_restart, i, globalComm, splitComm, color, ierr
+        integer :: nx_w, ny_w, nz_w, n_w, nx_r, ny_r, nz_r, n_r, n_restart, i, color, ierr
         integer :: out_i, rst_i, var_indx
-        
+        type(MPI_Comm) :: globalComm, splitComm
+
         allocate(i_s_w(num_images())); allocate(i_e_w(num_images()))
         allocate(i_s_r(num_images())); allocate(i_e_r(num_images()))
         
@@ -498,13 +516,13 @@ contains
             color = 1
         end select
 
-        CALL MPI_COMM_DUP( MPI_COMM_WORLD, globalComm, ierr )
+        CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
         ! Assign all images in the IO team to the IO_comms MPI communicator. Use image indexing within initial team to get indexing of global MPI ranks
-        CALL MPI_COMM_SPLIT( globalComm, color, (this_image()-1), splitComm, ierr )
+        CALL MPI_Comm_split( globalComm, color, (this_image()-1), splitComm, ierr )
         
         select case (exec_team)
         case (kCOMPUTE_TEAM)
-            CALL MPI_COMM_DUP( splitComm, domain%IO_comms, ierr )
+            CALL MPI_Comm_dup( splitComm, domain%IO_comms, ierr )
             call ioclient%init(domain, boundary, options)
             
             i_s_w(this_image()) = ioclient%i_s_w; i_e_w(this_image()) = ioclient%i_e_w
@@ -517,14 +535,24 @@ contains
             k_s_r(this_image()) = ioclient%k_s_r; k_e_r(this_image()) = ioclient%k_e_r
         end select
 
-        call co_max(i_s_w); call co_max(i_e_w); call co_max(i_s_r); call co_max(i_e_r)
-        call co_max(j_s_w); call co_max(j_e_w); call co_max(j_s_r); call co_max(j_e_r)
-        call co_max(k_s_w); call co_max(k_e_w); call co_max(k_s_r); call co_max(k_e_r)            
-
+        call MPI_Allreduce(MPI_IN_PLACE,i_s_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,i_e_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,i_s_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,i_e_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        
+        call MPI_Allreduce(MPI_IN_PLACE,j_s_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,j_e_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,j_s_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,j_e_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        
+        call MPI_Allreduce(MPI_IN_PLACE,k_s_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,k_e_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,k_s_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,k_e_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
 
         select case(exec_team)
         case(kIO_TEAM)
-            CALL MPI_COMM_DUP( splitComm, ioserver%IO_comms, ierr )
+            CALL MPI_Comm_dup( splitComm, ioserver%IO_comms, ierr )
             call ioserver%init(domain, options,i_s_r,i_e_r,k_s_r,k_e_r,j_s_r,j_e_r,i_s_w,i_e_w,k_s_w,k_e_w,j_s_w,j_e_w)
             
             if (ioserver%server_id==1) then
@@ -546,7 +574,7 @@ contains
             childrens(ioserver%server_id,1:ioserver%n_children) = ioserver%children
         end select
 
-        call co_max(childrens)
+        call MPI_Allreduce(MPI_IN_PLACE,childrens,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
 
         select case(exec_team)
         case(kCOMPUTE_TEAM)
@@ -567,18 +595,18 @@ contains
             nz_r = k_e_r(this_image()) - k_s_r(this_image()) + 1
         end select
 
-        call co_max(nx_w)
-        call co_max(ny_w)
-        call co_max(nz_w)
+        call MPI_Allreduce(MPI_IN_PLACE,nx_w,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,ny_w,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,nz_w,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
 
-        call co_max(nx_r)
-        call co_max(ny_r)
-        call co_max(nz_r)
+        call MPI_Allreduce(MPI_IN_PLACE,nx_r,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,ny_r,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,nz_r,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
 
-        call co_max(n_w)
-        call co_max(n_r)
-        call co_max(n_restart)
-        
+        call MPI_Allreduce(MPI_IN_PLACE,n_w,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        !call MPI_Allreduce(n_restart_l,n_restart,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+
         !Initialize read/write buffers. They are coarrays, defined by the comax of the read and write bounds for each compute image
         allocate(write_buffer(n_w,1:nx_w+1,1:nz_w,1:ny_w+1)[*])
         allocate(read_buffer(n_r,1:nx_r+1,1:nz_r,1:ny_r+1)[*])

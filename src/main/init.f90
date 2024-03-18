@@ -17,7 +17,7 @@
 !!
 !! ----------------------------------------------------------------------------
 module initialization
-    use data_structures
+    !use data_structures
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
@@ -35,7 +35,7 @@ module initialization
     use wind_iterative_old,         only : init_iter_winds_old
     use wind_iterative,         only : init_iter_winds
 
-    use icar_constants,             only : kITERATIVE_WINDS, kWIND_LINEAR
+    use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
     use ioclient_interface,         only : ioclient_t
     use time_step,                  only : init_time_step
     use iso_fortran_env
@@ -69,6 +69,7 @@ contains
         num_threads = 1
 #endif
         if (this_image()==1) call welcome_message()
+        if (this_image()==1) flush(output_unit)
 
         if (this_image()==1) then
             write(*,*) "  Number of coarray image:",num_images()
@@ -77,19 +78,28 @@ contains
 
         ! read in options file
         if (this_image()==1) write(*,*) "Initializing Options"
+        if (this_image()==1) flush(output_unit)
         call options%init()
         
         if (this_image()==1) write(*,*) "Initializing Domain"
+        if (this_image()==1) flush(output_unit)
         call domain%init(options)
 
         if (this_image()==1) write(*,*) "Initializing boundary condition data structure"
+        if (this_image()==1) flush(output_unit)
         call boundary%init(options,domain%latitude%data_2d,domain%longitude%data_2d,domain%variables_to_force)
 
+        if (this_image()==1) write(*,*) "Initializing time step helpers"
+        if (this_image()==1) flush(output_unit)
         call init_time_step()
 
+        if (this_image()==1) write(*,*) "Initializing atmospheric utilities"
+        if (this_image()==1) flush(output_unit)
         ! initialize the atmospheric helper utilities
         call init_atm_utilities(options)
 
+        if (this_image()==1) write(*,*) "Initializing Winds"
+        if (this_image()==1) flush(output_unit)
         if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
             !call init_iter_winds_old(domain)
             call init_iter_winds(domain)

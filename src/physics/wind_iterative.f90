@@ -28,7 +28,7 @@ module wind_iterative
     use petscksp
     use petscdm
     use petscdmda
-    
+
     implicit none
     private
     public:: init_iter_winds, calc_iter_winds, finalize_iter_winds
@@ -88,13 +88,13 @@ contains
             call update_coefs(domain)
         endif
                                                                 
-        call KSPCreate(domain%IO_comms,ksp,ierr)
+        call KSPCreate(domain%IO_comms%MPI_VAL,ksp,ierr)
         conv_tol = 1e-4
 
         !call KSPSetTolerances(ksp,conv_tol,PETSC_DEFAULT_REAL,PETSC_DEFAULT_REAL,PETSC_DEFAULT_INTEGER,ierr)
         call KSPSetType(ksp,KSPBCGS,ierr);
         
-        call DMDACreate3d(domain%IO_comms,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
+        call DMDACreate3d(domain%IO_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
                           xl, PETSC_NULL_INTEGER,yl,da,ierr)
         
@@ -735,7 +735,7 @@ contains
         type(domain_t), intent(in) :: domain
         PetscErrorCode ierr
 
-        
+        PETSC_COMM_WORLD = domain%IO_comms%MPI_VAL
         call PetscInitialize(PETSC_NULL_CHARACTER, ierr)
         if (ierr .ne. 0) then
             print*,'Unable to initialize PETSc'

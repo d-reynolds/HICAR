@@ -272,7 +272,8 @@ contains
         type(variable_t)  :: var
         character(len=kMAX_NAME_LENGTH) :: name
         
-        err = nf90_open(options%io_options%restart_in_file, IOR(nf90_nowrite,NF90_NETCDF4), ncid, comm = this%IO_comms, info = MPI_INFO_NULL)
+        err = nf90_open(options%io_options%restart_in_file, IOR(nf90_nowrite,NF90_NETCDF4), ncid, &
+                comm = this%IO_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL)
         
         ! setup start/count arrays accordingly
         start_3d = (/ this%i_s_w,this%j_s_w,this%k_s_w,options%io_options%restart_step_in_file /)

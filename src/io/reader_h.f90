@@ -12,7 +12,7 @@
 !!
 !!----------------------------------------------------------
 module reader_interface
-  use mpi
+  use mpi_f08
   use netcdf
   use icar_constants
   use options_interface,  only : options_t
@@ -74,7 +74,7 @@ module reader_interface
           implicit none
           class(reader_t), intent(inout)   :: this
           real, allocatable, intent(inout) :: buffer(:,:,:,:)
-          integer, intent(in)              :: par_comms
+          type(MPI_Comm), intent(in)              :: par_comms
     end subroutine
 
     module subroutine close_file(this)

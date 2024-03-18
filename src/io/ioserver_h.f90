@@ -11,7 +11,7 @@
 !!
 !!----------------------------------------------------------
 module ioserver_interface
-  use mpi
+  use mpi_f08
   use netcdf
   use icar_constants
   use variable_interface, only : variable_t
@@ -39,7 +39,8 @@ module ioserver_interface
       ! Store the variables to be written
       ! Note n_variables may be smaller then size(variables) so that it doesn't
       ! have to keep reallocating variables whenever something is added or removed
-      integer, public :: n_input_variables, n_output_variables, n_children, IO_comms
+      integer, public :: n_input_variables, n_output_variables, n_children
+      type(MPI_Comm), public :: IO_comms
       integer, public :: server_id = -1
       logical, public :: files_to_read
 

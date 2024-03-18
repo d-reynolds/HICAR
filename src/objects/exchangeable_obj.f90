@@ -1,5 +1,7 @@
 submodule(exchangeable_interface) exchangeable_implementation
 
+  use iso_fortran_env
+
   implicit none
 
   ! these are all global for a given image, so we save them in the module instead of in the individual objects
@@ -17,26 +19,10 @@ contains
     character(len=kMAX_NAME_LENGTH), intent(in),    optional :: forcing_var
 
     integer :: err, my_index
+    real, allocatable :: write_buffer(:,:,:)[:]
 
     halo_size = grid%halo_size
 
-
-    this%north_boundary = (grid%yimg == grid%yimages)
-    this%south_boundary = (grid%yimg == 1)
-    this%east_boundary  = (grid%ximg == grid%ximages)
-    this%west_boundary  = (grid%ximg == 1)
-
-    if (associated(this%data_3d)) then
-        deallocate(this%data_3d)
-        nullify(this%data_3d)
-    endif
-
-    this%dtype = kREAL
-    allocate(this%data_3d(grid%ims:grid%ime, &
-                          grid%kms:grid%kme, &
-                          grid%jms:grid%jme), stat=err)
-    if (err /= 0) stop "exchangeable:dqdt_3d: Allocation request failed"
-    this%data_3d = 0
 
     !Based on how grids are intialized, we can find out if this is a x/y staggered grid
     this%xe = 0
@@ -56,11 +42,39 @@ contains
         this%ye = 1
     endif
 
+    write(*,*) 'coarray allocation, image:  ',this_image()
+    flush(output_unit)
+    allocate( write_buffer(10, 10, 10)[*])
+
+    write(*,*) 'before coarray allocation, image:  ',this_image()
+    flush(output_unit)
     allocate( this%halo_south_in( grid%ns_halo_nx+grid%halo_size*2, grid%halo_nz, halo_size+this%ye   )[*])
     allocate( this%halo_north_in( grid%ns_halo_nx+grid%halo_size*2, grid%halo_nz, halo_size           )[*])
     allocate( this%halo_east_in(  halo_size        ,  grid%halo_nz, grid%ew_halo_ny+grid%halo_size*2  )[*])
     allocate( this%halo_west_in(  halo_size+this%xe,  grid%halo_nz, grid%ew_halo_ny+grid%halo_size*2  )[*])
-    
+    write(*,*) 'after coarray allocation, image:  ',this_image()
+    flush(output_unit)
+    ! If we are not a compute process, we have done our job and waited around to allocate the coarrays. Now exit
+    ! if (FINDLOC(DOM_IMG_INDX,this_image(),dim=1)==0) return
+
+    this%north_boundary = (grid%yimg == grid%yimages)
+    this%south_boundary = (grid%yimg == 1)
+    this%east_boundary  = (grid%ximg == grid%ximages)
+    this%west_boundary  = (grid%ximg == 1)
+
+    if (associated(this%data_3d)) then
+        deallocate(this%data_3d)
+        nullify(this%data_3d)
+    endif
+
+    this%dtype = kREAL
+    allocate(this%data_3d(grid%ims:grid%ime, &
+                          grid%kms:grid%kme, &
+                          grid%jms:grid%jme), stat=err)
+    if (err /= 0) stop "exchangeable:dqdt_3d: Allocation request failed"
+    this%data_3d = 0
+
+
     if (.not.allocated(neighbors)) call this%set_neighbors(grid)
 
     if (present(metadata)) then

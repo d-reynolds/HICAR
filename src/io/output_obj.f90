@@ -51,7 +51,8 @@ contains
         implicit none
         class(output_t),  intent(inout)  :: this
         type(options_t),  intent(in)     :: options
-        integer,          intent(in)     :: par_comms, out_var_indices(:)
+        type(MPI_Comm),   intent(in)     :: par_comms
+        integer,          intent(in)     :: out_var_indices(:)
         
         integer                       :: error
         character(len=MAXFILELENGTH), allocatable :: file_list(:)
@@ -151,7 +152,7 @@ contains
     module subroutine save_out_file(this, time, par_comms, out_var_indices, rst_var_indices)
         class(output_t),  intent(inout) :: this
         type(Time_type),  intent(in)  :: time
-        integer,          intent(in)  :: par_comms
+        type(MPI_Comm),   intent(in)     :: par_comms
         integer,          intent(in)  :: out_var_indices(:), rst_var_indices(:)
 
 
@@ -205,7 +206,7 @@ contains
     subroutine save_rst_file(this, time, par_comms, rst_var_indices)
         class(output_t),  intent(inout) :: this
         type(Time_type),  intent(in)  :: time
-        integer,          intent(in)  :: par_comms
+        type(MPI_Comm),   intent(in)     :: par_comms
         integer,          intent(in)  :: rst_var_indices(:)
 
         this%active_nc_id = this%rst_ncfile_id
@@ -324,15 +325,17 @@ contains
         character(len=kMAX_FILE_LENGTH), intent(in)    :: filename
 
         type(Time_type),                 intent(in)    :: time
-        integer,                         intent(in)    :: par_comms
+        type(MPI_Comm),                  intent(in)    :: par_comms
         integer,                         intent(in)    :: var_indx_list(:)
 
         integer :: err
         
         ! open file
-        err = nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), this%active_nc_id, comm = par_comms, info = MPI_INFO_NULL)
+        err = nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), this%active_nc_id, &
+                comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL)
         if (err /= NF90_NOERR) then
-            call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id, comm = par_comms, info = MPI_INFO_NULL), "Opening:"//trim(filename))
+            call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id, &
+                    comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL), "Opening:"//trim(filename))
             this%creating=.True.
         else
             ! in case we need to add a new variable when setting up variables

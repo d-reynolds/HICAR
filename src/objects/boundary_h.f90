@@ -1,6 +1,6 @@
 module boundary_interface
 
-    use mpi
+    use mpi_f08
     use netcdf
     use icar_constants
     use options_interface,        only : options_t

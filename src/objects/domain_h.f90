@@ -1,5 +1,6 @@
 module domain_interface
   use iso_c_binding
+  use mpi_f08
   use options_interface,        only : options_t
   use boundary_interface,       only : boundary_t
   use exchangeable_interface,   only : exchangeable_t
@@ -399,7 +400,7 @@ module domain_interface
     real, allocatable :: west_buffer_2d(:,:,:)
 
     ! MPI communicator object for doing parallel communications among domain objects
-    integer, public :: IO_comms
+    type(MPI_Comm), public :: IO_comms
 
     ! contains the size of the domain (or the local tile?)
     integer :: nx, ny, nz, nx_global, ny_global

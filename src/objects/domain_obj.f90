@@ -20,6 +20,8 @@ submodule(domain_interface) domain_implementation
     use wind_surf,            only : calc_Sx, calc_TPI
     use output_metadata,            only : get_varname
     use mod_wrf_constants,    only : gravity, R_d, KARMAN
+    use iso_fortran_env
+
     implicit none
 
     interface setup
@@ -368,6 +370,8 @@ contains
             var = this%exch_vars%next()
             if (var%three_d) n_3d = n_3d + 1
         end do
+        if (this_image()==1) write(*,*) "In Setup Batch Exch"
+        if (this_image()==1) flush(output_unit)
 
         ! Determine number of 2D and 3D vars present
         n_2d = (this%adv_vars%n_vars+this%exch_vars%n_vars)-n_3d
@@ -403,7 +407,9 @@ contains
             if (.not.(this%east_boundary)) allocate(this%east_buffer_2d(n_2d,1:this%grid%halo_size,1:(this%grid%ew_halo_ny+this%grid%halo_size*2)))
             if (.not.(this%west_boundary)) allocate(this%west_buffer_2d(n_2d,1:this%grid%halo_size,1:(this%grid%ew_halo_ny+this%grid%halo_size*2)))
         endif
-    
+        if (this_image()==1) write(*,*) "Made Arrays"
+        if (this_image()==1) flush(output_unit)
+
     end subroutine setup_batch_exch
 
     !> -------------------------------

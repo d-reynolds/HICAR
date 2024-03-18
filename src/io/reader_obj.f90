@@ -72,7 +72,7 @@ contains
     module subroutine read_next_step(this, buffer, par_comms)
         class(reader_t), intent(inout) :: this
         real, allocatable, intent(inout) :: buffer(:,:,:,:)
-        integer, intent(in)              :: par_comms
+        type(MPI_Comm), intent(in)              :: par_comms
 
         real, allocatable :: data3d(:,:,:,:)
         type(variable_t)  :: var
@@ -84,7 +84,8 @@ contains
 
         !See if we must open the file
         if (this%ncfile_id < 0) then
-            err = nf90_open(this%file_list(this%curfile), IOR(nf90_nowrite,NF90_NETCDF4), this%ncfile_id, comm = par_comms, info = MPI_INFO_NULL)
+            err = nf90_open(this%file_list(this%curfile), IOR(nf90_nowrite,NF90_NETCDF4), this%ncfile_id, &
+                    comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL)
         endif
         
 
