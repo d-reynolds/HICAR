@@ -32,8 +32,6 @@ module initialization
     use mod_atm_utilities,          only : init_atm_utilities
     use wind,                       only : update_winds, init_winds
     use linear_theory_winds,        only : setup_linwinds
-    use wind_iterative_old,         only : init_iter_winds_old
-    use wind_iterative,         only : init_iter_winds
 
     use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
     use ioclient_interface,         only : ioclient_t
@@ -98,12 +96,6 @@ contains
         ! initialize the atmospheric helper utilities
         call init_atm_utilities(options)
 
-        if (this_image()==1) write(*,*) "Initializing Winds"
-        if (this_image()==1) flush(output_unit)
-        if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
-            !call init_iter_winds_old(domain)
-            call init_iter_winds(domain)
-        endif
         if (options%physics%windtype==kWIND_LINEAR .or. &
                  options%physics%windtype==kLINEAR_OBRIEN_WINDS .or. &
                  options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then

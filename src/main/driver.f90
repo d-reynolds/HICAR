@@ -41,7 +41,7 @@ program icar
     type(options_t) :: options
     type(domain_t)  :: domain
     type(boundary_t):: boundary, add_cond
-    type(event_type), allocatable :: written_ev[:], write_ev[:], read_ev[:], child_read_ev[:], end_ev[:]
+    type(event_type):: written_ev[*], write_ev[*], read_ev[*], child_read_ev[*], end_ev[*]
     type(output_t)  :: restart_dataset
     type(output_t)  :: output_dataset
     type(ioserver_t)  :: ioserver
@@ -60,19 +60,12 @@ program icar
     !if (this_image()==1) write(*,*) 'Before MPI init'
     !if (this_image()==1) flush(output_unit)
     !Initialize MPI if needed
-    allocate(write_buffer(5,5,5,5)[*])
     init_flag = .False.
     call MPI_initialized(init_flag, ierr)
     if (.not.(init_flag)) then
         call MPI_INIT(ierr)
         init_flag = .True.
     endif
-    write(*,*) team_number()
-    flush(output_unit)
-    if (this_image()==20) write_buffer(1,1,1,1)[20] = write_buffer(1,1,1,1)
-    if (this_image()==20) write(*,*) 'Past MPI init'
-    if (this_image()==20) flush(output_unit)
-    call MPI_Barrier(MPI_COMM_WORLD,ierr)
 
     !Determine split of processes which will become I/O servers and which will be compute tasks
     !Also sets constants for the program to keep track of this splitting
@@ -282,7 +275,7 @@ program icar
         
         EVENT POST (end_ev[ioclient%server])
 
-        if (options%physics%windtype==kITERATIVE_WINDS) call finalize_iter_winds() 
+        if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) call finalize_iter_winds() 
     case (kIO_TEAM)
     
         call io_timer%start()

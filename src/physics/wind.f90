@@ -10,7 +10,7 @@
 module wind    
 
     use linear_theory_winds, only : linear_perturb
-    use wind_iterative,      only : calc_iter_winds
+    use wind_iterative,      only : calc_iter_winds, init_iter_winds
     use wind_iterative_old,      only : calc_iter_winds_old
 
     !use mod_blocking,        only : update_froude_number, initialize_blocking
@@ -385,7 +385,7 @@ contains
         endif
         
         
-        call update_stability(domain)
+        if (options%wind%alpha_const<=0 .or. options%wind%Sx) call update_stability(domain)
 
         ! rotate winds from cardinal directions to grid orientation (e.g. u is grid relative not truly E-W)
         call make_winds_grid_relative(domain%u%meta_data%dqdt_3d, domain%v%meta_data%dqdt_3d, domain%sintheta, domain%costheta)
@@ -749,7 +749,12 @@ contains
         do i=kms,kme
             domain%advection_dz(:,i,:) = options%parameters%dz_levels(i)
         enddo
-        
+
+        if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
+            !call init_iter_winds_old(domain)
+            call init_iter_winds(domain)
+        endif
+
         if (options%wind%thermal) call init_thermal_winds(domain, options)
         
     end subroutine init_winds
