@@ -106,10 +106,10 @@ contains
         
     end subroutine
     
-    subroutine apply_thermal_winds(tskin, exner, pot, z, dz_mass, r_dist, v_dist, r_drop, u, v, dzdx, dzdy, K_h) !v_dist, r_drop, v_drop,
+    subroutine apply_thermal_winds(tskin, exner, pot, z, dz_mass, u, v, dzdx, dzdy, K_h)
         implicit none
         real, intent(in), dimension(ims:ime,kms:kme,jms:jme)      :: exner, pot, z, dz_mass, dzdx, dzdy
-        real, intent(in), dimension(ims:ime,jms:jme)              :: tskin, r_dist, v_dist, r_drop
+        real, intent(in), dimension(ims:ime,jms:jme)              :: tskin
         real, intent(inout), dimension(ims:ime+1,kms:kme,jms:jme) :: u
         real, intent(inout), dimension(ims:ime,kms:kme,jms:jme+1) :: v
         real, optional, intent(in), dimension(ims:ime,kms:kme,jms:jme)      :: K_h

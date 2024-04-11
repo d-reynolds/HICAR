@@ -96,9 +96,6 @@ module land_surface
     integer :: exchange_term
     real*8  :: last_model_time
     real*8  :: Delta_t !! MJ added to detect the time for outputting 
-    real    :: lh_feedback_fraction, sh_feedback_fraction
-    real    :: sfc_layer_thickness
-
 
     !Noah-MP specific
     real    :: NMP_SOILTSTEP
@@ -507,15 +504,14 @@ contains
         real, intent(in) :: dt
         integer :: i,j,k
         integer, SAVE :: nz = 0
-        real :: layer_fraction
 
-        if (nz==0) then
-            layer_fraction = 0
-            do k=kts, kte
-                layer_fraction = maxval(domain%dz_interface%data_3d(:,k,:)) + layer_fraction
-                if (layer_fraction < sfc_layer_thickness) nz=k
-            end do
-        end if
+        !if (nz==0) then
+        !    layer_fraction = 0
+        !    do k=kts, kte
+        !        layer_fraction = maxval(domain%dz_interface%data_3d(:,k,:)) + layer_fraction
+        !        if (layer_fraction < sfc_layer_thickness) nz=k
+        !    end do
+        !end if
 
         associate(density       => domain%density%data_3d,             &
                   sensible_heat => domain%sensible_heat%data_2d,           &
@@ -529,26 +525,20 @@ contains
         do j = jts, jte
         do k = kts, kts + nz
         do i = its, ite
-            ! compute the fraction of the current gridcell that is within the surface layer
-            if (k==kts) Then
-                layer_fraction = min(1.0, sfc_layer_thickness / dz(i,k,j))
-            else
-                layer_fraction = max(0.0, min(1.0, (sfc_layer_thickness - sum(dz(i,kts:k-1,j))) / dz(i,k,j) ) )
-            endif
 
             ! convert sensible heat flux to a temperature delta term
             ! (J/(s*m^2) * s / (J/(kg*K)) => kg*K/m^2) ... /((kg/m^3) * m) => K
-            dTemp(i,j) = (sh_feedback_fraction * sensible_heat(i,j) * dt/cp)  &
-                     / (density(i,k,j) * sfc_layer_thickness)
+            dTemp(i,j) = (sensible_heat(i,j) * dt/cp)  &
+                     / (density(i,k,j))
             ! add temperature delta converted back to potential temperature
-            th(i,k,j) = th(i,k,j) + (dTemp(i,j) / pii(i,k,j)) * layer_fraction
+            th(i,k,j) = th(i,k,j) + (dTemp(i,j) / pii(i,k,j))
 
             ! convert latent heat flux to a mixing ratio tendancy term
             ! (J/(s*m^2) * s / (J/kg) => kg/m^2) ... / (kg/m^3 * m) => kg/kg
-            lhdQV(i,j) = (lh_feedback_fraction * latent_heat(i,j) / XLV * dt) &
-                    / (density(i,k,j) * sfc_layer_thickness)
+            lhdQV(i,j) = (latent_heat(i,j) / XLV * dt) &
+                    / (density(i,k,j))
             ! add water vapor in kg/kg
-            qv(i,k,j) = qv(i,k,j) + lhdQV(i,j) * layer_fraction
+            qv(i,k,j) = qv(i,k,j) + lhdQV(i,j)
 
         end do ! i
         end do ! k
@@ -693,10 +683,6 @@ contains
         kts = domain%grid%kts
         kte = domain%grid%kte
 
-        lh_feedback_fraction = options%lsm_options%lh_feedback_fraction
-        sh_feedback_fraction = options%lsm_options%sh_feedback_fraction
-        sfc_layer_thickness = options%lsm_options%sfc_layer_thickness
-
         allocate(SW(ims:ime,jms:jme))
 
         allocate(dTemp(its:ite,jts:jte))
@@ -760,13 +746,7 @@ contains
             ! call lsm_simple_init(domain,options)
         endif
         
-        if (options%parameters%rho_snow_ext /="" .AND. options%parameters%swe_ext /="") then
-            FNDSNOWH = .True.
-            if (this_image()==1) write(*,*) "    Find snow height in file i.s.o. calculating them from SWE: FNDSNOWH=", FNDSNOWH
-        elseif(options%parameters%hsnow_ext /="" ) then  ! read in external snowheight if supplied
-            FNDSNOWH= .True.
-            if (this_image()==1) write(*,*) "    Find snow height in file i.s.o. calculating them from SWE: FNDSNOWH=", FNDSNOWH
-        elseif(options%parameters%snowh_var /="" .or. options%parameters%swe_var /="") then 
+        if(options%parameters%snowh_var /="" .or. options%parameters%swe_var /="") then 
             FNDSNOWH= .True.
             if (this_image()==1) write(*,*) "    Find snow height in file i.s.o. calculating them from SWE: FNDSNOWH=", FNDSNOWH
         else
@@ -1346,7 +1326,6 @@ contains
 
                 ! RAINBL(i,j) = [kg m-2]   RAINBL = domain%accumulated_precipitation%data_2dd  ! used to store last time step accumulated precip so that it can be subtracted from the current step
                 current_precipitation = (domain%accumulated_precipitation%data_2dd - RAINBL) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
-                if (allocated(domain%rain_fraction)) current_precipitation = current_precipitation * domain%rain_fraction(:,:,domain%model_time%get_month())
 
                 CHS = domain%chs%data_2d*windspd
                 CHS2 = domain%chs2%data_2d*windspd
@@ -1458,7 +1437,6 @@ contains
                 
                 current_snow = (domain%accumulated_snowfall%data_2dd-SNOWBL)!+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
                 current_precipitation = (domain%accumulated_precipitation%data_2dd - RAINBL) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
-                if (allocated(domain%rain_fraction)) current_precipitation = current_precipitation * domain%rain_fraction(:,:,domain%model_time%get_month())
 
 !                do I = ims,ime
 !                  do J = jms,jme
@@ -1495,7 +1473,7 @@ contains
                              domain%cosine_zenith_angle%data_2d,       &
                              domain%latitude%data_2d,                  &
                              domain%longitude%data_2d,                 &
-                             domain%dz_interface%data_3d * options%lsm_options%dz_lsm_modification, & ! domain%dz_interface%data_3d,              & !
+                             domain%dz_interface%data_3d,              & ! domain%dz_interface%data_3d,              & !
                              lsm_dt,                                   &
                              DZS,                                      &
                              num_soil_layers,                          &
@@ -1525,8 +1503,8 @@ contains
                              domain%soil_texture_4%data_2d,            &  ! only used if iopt_soil = 2
                              domain%temperature%data_3d,               &
                              domain%water_vapor%data_3d,               &
-                             domain%u_mass%data_3d * options%lsm_options%wind_enhancement, &
-                             domain%v_mass%data_3d * options%lsm_options%wind_enhancement, &
+                             domain%u_mass%data_3d,                    &
+                             domain%v_mass%data_3d,                    &
                              SW,                                       &
                              domain%shortwave_direct%data_2d,          &  ! only used in urban modules, which are currently disabled
                              domain%shortwave_diffuse%data_2d,         &  ! only used in urban modules, which are currently disabled

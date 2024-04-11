@@ -51,16 +51,6 @@ module microphysics
     real,allocatable,dimension(:,:) :: SR, last_rain, last_snow, this_precip, this_snow,refl_10cm
 
 
-    ! microphysics specific flag.  If it returns the current hourly precip (e.g. Morrison), then set this to false.
-    ! for use in "distributing" precipitation.
-    logical :: precip_delta
-
-    ! amounts of precipitation to "distribute" to surrounding grid cells
-    integer, parameter :: npoints=8
-    real,    dimension(npoints) :: dist_fraction = [ 0.1,0.15,0.1, 0.15,0.15, 0.1,0.15,0.1]
-    integer, dimension(npoints) :: x_list = [ -1,0,1, -1,1, -1,0,1]
-    integer, dimension(npoints) :: y_list = [ 1,1,1, 0,0, -1,-1,-1]
-
     public :: mp, mp_var_request
 contains
 
@@ -83,29 +73,23 @@ contains
         if (options%physics%microphysics    == kMP_THOMPSON) then
             if (this_image()==1) write(*,*) "    Thompson Microphysics"
             call thompson_init(options%mp_options)
-            precip_delta=.True.
         elseif (options%physics%microphysics    == kMP_THOMP_AER) then
             if (this_image()==1) write(*,*) "    Thompson Eidhammer Microphysics"
             call thompson_aer_init()
-            precip_delta=.True.
         elseif (options%physics%microphysics == kMP_SB04) then
             if (this_image()==1) write(*,*) "    Simple Microphysics"
-            precip_delta=.True.
         elseif (options%physics%microphysics==kMP_MORRISON) then
             if (this_image()==1) write(*,*) "    Morrison Microphysics"
             call MORR_TWO_MOMENT_INIT(hail_opt=1)
-            precip_delta=.False.
         elseif (options%physics%microphysics==kMP_ISHMAEL) then
             if (this_image()==1) write(*,*) "    Jensen-Ischmael Microphysics"
             call jensen_ishmael_init()
         elseif (options%physics%microphysics==kMP_WSM6) then
             if (this_image()==1) write(*,*) "    WSM6 Microphysics"
             call wsm6init(rhoair0,rhowater,rhosnow,cliq,cpv)
-            precip_delta=.True.
         elseif (options%physics%microphysics==kMP_WSM3) then
             if (this_image()==1) write(*,*) "    WSM3 Microphysics"
             call wsm3init(rhoair0,rhowater,rhosnow,cliq,cpv, allowed_to_read=.True.)
-            precip_delta=.True.
         endif
 
         update_interval = options%mp_options%update_interval
@@ -347,122 +331,6 @@ contains
 
 
     end subroutine
-
-    !>----------------------------------------------------------
-    !! Distribute the microphysics precipitation to neighboring grid cells
-    !!
-    !! Because ICAR can be too aggressive at putting precip on mountain tops, this
-    !! routine smooths out the precip by keeping only a fraction of it locally, and
-    !! distributing the rest to the neighboring grid cells, weighted by distance.
-    !!
-    !! @param   [inout]current_precip   accumulated model precip at this time step
-    !! @param   [in]last_precip         accumulated model precip prior to microphysics call
-    !! @param   [in]local_fraction      fraction of precip to maintain in the local gridcell
-    !! @param   [in]precip_delta        Flag to calculate this time steps precip as a delta from previous
-    !!
-    !!----------------------------------------------------------
-    subroutine distribute_precip(current_precip, last_precip, local_fraction, precip_delta)
-        implicit none
-        real, dimension(:,:), intent(inout) :: current_precip, last_precip
-        real, intent(in) :: local_fraction
-        logical, intent(in) :: precip_delta
-        ! relies on module variable this_precip as a temporary array
-
-        integer :: i,j, nx,ny
-        integer :: x,y, point
-
-        nx=size(current_precip,1)
-        ny=size(current_precip,2)
-
-        if (precip_delta) then
-            do j=2,ny-1
-                do i=2,nx-1
-                    this_precip(i,j)    = current_precip(i,j)-last_precip(i,j)
-                    current_precip(i,j) = last_precip(i,j)
-                end do
-            end do
-        else
-            do j=2,ny-1
-                do i=2,nx-1
-                    this_precip(i,j)    = last_precip(i,j)
-                    current_precip(i,j) = current_precip(i,j)-last_precip(i,j)
-                end do
-            end do
-        endif
-
-        do j=2,ny-1
-            do i=2,nx-1
-                current_precip(i,j) = current_precip(i,j)+this_precip(i,j)*local_fraction
-                do point=1,npoints
-                    x = i + x_list(point)
-                    y = j + y_list(point)
-                    current_precip(i,j) = current_precip(i,j) + this_precip(x,y) * (1-local_fraction) * dist_fraction(point)
-                end do
-            end do
-        end do
-
-    end subroutine distribute_precip
-
-    !>----------------------------------------------------------
-    !! Bias correct the precipitation
-    !!
-    !! Apply a pre-computed bias correction multiplier to the currently predicted precipitation
-    !! rain_fraction should be 3D where the last dimension corresponds to some fractional distance
-    !! through the year.
-    !!
-    !! @param   [in]current_date        Current date-time in the model simulation (used to compute time in rain_fraction)
-    !! @param   [in]rain_fraction       Multiplier to apply to the current precipitation
-    !! @param   [inout]current_precip   The current (potentially accumulated) predicted precipitation
-    !! @param   [inout]last_precip      The last value of current_precip (in case it is accumulated)
-    !! @param   [in]precip_delta        Flag that current_precip is an accumulation
-    !!
-    !!----------------------------------------------------------
-    subroutine apply_rain_fraction(current_date, rain_fraction, current_precip, last_precip, precip_delta)
-        implicit none
-        type(Time_type),        intent(in)      :: current_date
-        real, dimension(:,:,:), intent(in)      :: rain_fraction
-        real, dimension(:,:),   intent(inout)   :: current_precip, last_precip
-        logical,                intent(in)      :: precip_delta
-        ! relies on module variable this_precip as a temporary array
-
-        integer :: i,j, nx,ny
-        integer :: x,y, point
-        integer :: n_correction_points, correction_step
-        real    :: year_fraction
-
-        nx=size(current_precip,1)
-        ny=size(current_precip,2)
-
-        n_correction_points = size(rain_fraction,3)
-        year_fraction = current_date%year_fraction()
-        correction_step = min(  floor(n_correction_points * year_fraction)+1, &
-                                n_correction_points)
-
-        if (precip_delta) then
-            do j=2,ny-1
-                do i=2,nx-1
-                    this_precip(i,j)    = current_precip(i,j)-last_precip(i,j)
-                    current_precip(i,j) = last_precip(i,j)
-                end do
-            end do
-        else
-            ! In this case, last_precip is actually the current precip delta
-            do j=2,ny-1
-                do i=2,nx-1
-                    this_precip(i,j)    = last_precip(i,j)
-                    ! We have to remove the currently predicted precip from the accumulated precip
-                    current_precip(i,j) = current_precip(i,j)-last_precip(i,j)
-                end do
-            end do
-        endif
-
-        do j=2,ny-1
-            do i=2,nx-1
-                current_precip(i,j) = current_precip(i,j)+this_precip(i,j)*rain_fraction(i,j,correction_step)
-            end do
-        end do
-
-    end subroutine apply_rain_fraction
 
 
     subroutine process_subdomain(domain, options, dt,       &
@@ -738,16 +606,6 @@ contains
         if (associated(domain%accumulated_snowfall%data_2dd)) then
             domain%accumulated_snowfall%data_2dd = domain%accumulated_snowfall%data_2dd + snowfall
         endif
-        ! needs to be converted to work on specified tile or better, maybe moved out of microphysics driver entirely...
-        ! if (options%use_bias_correction) then
-        !     call apply_rain_fraction(domain%model_time, domain%rain_fraction, domain%rain, last_rain, precip_delta)
-        !     call apply_rain_fraction(domain%model_time, domain%rain_fraction, domain%snow, last_snow, precip_delta)
-        ! endif
-        !
-        ! if (options%mp_options%local_precip_fraction<1) then
-        !     call distribute_precip(domain%rain, last_rain, options%mp_options%local_precip_fraction, precip_delta)
-        !     call distribute_precip(domain%snow, last_snow, options%mp_options%local_precip_fraction, precip_delta)
-        ! endif
 
     end subroutine process_subdomain
 
@@ -851,13 +709,6 @@ contains
             ! calculate the actual time step for the microphysics
             mp_dt = domain%model_time%seconds()-last_model_time
 
-            
-            ! If we are going to distribute the current precip over a few grid cells, we need to keep track of
-            ! the last_precip so we know how much fell
-            ! if (options%mp_options%local_precip_fraction<1) then
-            !     last_rain = domain%accumulated_precipitation%data_2dd
-            !     last_snow = domain%accumulated_snowfall%data_2d
-            ! endif
 
             ! set the current tile to the top layer to process microphysics for
             if (options%mp_options%top_mp_level>0) then

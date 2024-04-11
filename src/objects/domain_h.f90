@@ -83,7 +83,6 @@ module domain_interface
     type(variable_t) :: snowfall_ground
     type(variable_t) :: rainfall_ground
     integer,allocatable :: snowfall_bucket(:,:)
-    type(variable_t) :: external_precipitation
     type(variable_t) :: cloud_fraction
     type(variable_t) :: longwave
     type(variable_t) :: shortwave
@@ -335,7 +334,6 @@ module domain_interface
     real,                       allocatable :: relax_filter_2d(:,:)
     real,                       allocatable :: relax_filter_3d(:,:,:)
     real,                       allocatable :: advection_dz(:,:,:)
-    real,                       allocatable :: rain_fraction(:,:,:) ! monthly varying fraction to multiple precipitation  [-]
     ! store the ratio between the average dz and each grid cells topographically modified dz (for space varying dz only)
     real,                       allocatable :: jacobian(:,:,:)
     real,                       allocatable :: jacobian_u(:,:,:)
@@ -444,9 +442,6 @@ module domain_interface
     type(variable_t) :: factor_p
     type(variable_t) :: Sliq_out
     type(variable_t) :: hlm
-    type(variable_t) :: ridge_dist
-    type(variable_t) :: valley_dist
-    type(variable_t) :: ridge_drop
     type(variable_t) :: shd
 
 
@@ -468,7 +463,6 @@ module domain_interface
     procedure :: get_initial_conditions
     procedure :: diagnostic_update
     procedure :: interpolate_forcing
-    procedure :: interpolate_external
     procedure :: update_delta_fields
     procedure :: apply_forcing
 
@@ -486,24 +480,16 @@ module domain_interface
     end subroutine
     
     ! read initial atmospheric conditions from forcing data
-    module subroutine get_initial_conditions(this, forcing, options, external_conditions)
+    module subroutine get_initial_conditions(this, forcing, options)
         implicit none
         class(domain_t),  intent(inout) :: this
         type(boundary_t), intent(inout) :: forcing
-        type(boundary_t), intent(inout), optional :: external_conditions  ! external data such as SWE
         type(options_t),  intent(in)    :: options
     end subroutine
 
     module subroutine diagnostic_update(this,options)
         implicit none
         class(domain_t),  intent(inout) :: this
-        type(options_t),  intent(in)    :: options
-    end subroutine
-
-    module subroutine interpolate_external(this, external_conditions, options)
-        implicit none
-        class(domain_t),  intent(inout) :: this
-        type(boundary_t), intent(in)    :: external_conditions
         type(options_t),  intent(in)    :: options
     end subroutine
 

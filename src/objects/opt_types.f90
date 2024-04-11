@@ -31,7 +31,6 @@ module options_types
     ! store wind solver and parameterization options
     ! ------------------------------------------------
     type wind_type
-        logical :: terr_diff
         logical :: Sx
         logical :: thermal
         real    :: TPI_scale
@@ -68,20 +67,7 @@ module options_types
 
         integer :: update_interval  ! maximum number of seconds between updates
         integer :: top_mp_level     ! top model level to process in the microphysics
-        real    :: local_precip_fraction    ! fraction of grid cell precip to keep local vs distributing to surrounding
     end type mp_options_type
-
-    ! ------------------------------------------------
-    ! store Blocked flow options
-    ! ------------------------------------------------
-    type block_options_type
-        real    :: blocking_contribution  ! fractional contribution of flow blocking perturbation that is added [0-1]
-        real    :: smooth_froude_distance ! distance (m) over which Froude number is smoothed
-        integer :: n_smoothing_passes     ! number of times the smoothing window is applied
-        real    :: block_fr_max           ! max froude no at which flow is only partially blocked above, no blocking
-        real    :: block_fr_min           ! min froude no at which flow is only partially blocked below, full blocking
-        logical :: block_flow             ! switch to use or not use the flow blocking parameterization
-    end type block_options_type
 
     ! ------------------------------------------------
     ! store Linear Theory options
@@ -166,23 +152,10 @@ module options_types
     end type sfc_options_type
 
     ! ------------------------------------------------
-    ! store Online Bias Correction options
-    ! ------------------------------------------------
-    type bias_options_type
-        character(len=MAXFILELENGTH):: filename             ! file containing bias correction data
-        character(len=MAXVARLENGTH) :: rain_fraction_var    ! name of variable containing the fraction to multiply rain by
-    end type bias_options_type
-
-    ! ------------------------------------------------
     ! store Land Surface Model options
     ! ------------------------------------------------
     type lsm_options_type
         character (len=MAXVARLENGTH) :: LU_Categories   ! land use categories to read from VEGPARM.tbl (e.g. "USGS")
-        real :: lh_feedback_fraction                    ! fraction of latent heat added back to the atmosphere
-        real :: sh_feedback_fraction                    ! fraction of sensible heat added back to the atmosphere
-        real :: sfc_layer_thickness                     ! thickness of atmosphere to spread heat flux over.
-        real :: dz_lsm_modification                     ! ability to change the apparent thickness of the lowest model level to compensate for issues in the LSM?
-        real :: wind_enhancement                        ! enhancement to winds in LSM to mitigate low bias in driving models
         real :: max_swe                                 ! maximum value for Snow water equivalent (excess above this is removed)
         real :: snow_den_const                          ! variable for converting snow height into SWE or visa versa when input data is incomplete 
         integer :: fsm_nsnow_max                        ! maximum number of snow layers for FSM2 to use. Set here, since it will
@@ -236,7 +209,6 @@ module options_types
        integer :: cldovrlp                             ! how RRTMG considers cloud overlapping (1 = random, 2 = maximum-random, 3 = maximum, 4 = exponential, 5 = exponential-random)
        logical :: read_ghg                             ! Eihter use default green house gas mixing ratio, or read the in from file
        real    :: tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
-       logical :: use_simple_sw
     end type rad_options_type
 
     ! ------------------------------------------------
@@ -283,7 +255,7 @@ module options_types
         character (len=MAXVARLENGTH) :: version, comment, phys_suite
 
         ! file names
-        character (len=MAXFILELENGTH) :: init_conditions_file, linear_mask_file, nsq_calibration_file, external_files
+        character (len=MAXFILELENGTH) :: init_conditions_file, linear_mask_file, nsq_calibration_file
 
         character (len=MAXFILELENGTH), dimension(:), allocatable :: boundary_files
 
@@ -299,12 +271,9 @@ module options_types
                                         vegtype_var,vegfrac_var, albedo_var, vegfracmax_var, lai_var, canwat_var, &
                                         linear_mask_var, nsq_calibration_var, &
                                         swdown_var, lwdown_var, &
-                                        sst_var, rain_var, time_var, sinalpha_var, cosalpha_var, &
-                                        lat_ext, lon_ext, swe_ext, hsnow_ext, rho_snow_ext, tss_ext, &
-                                        tsoil2D_ext, tsoil3D_ext, z_ext, time_ext
+                                        sst_var, rain_var, time_var, sinalpha_var, cosalpha_var
 
-        character(len=MAXVARLENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, ridge_dist_var, &
-                                       valley_dist_var, ridge_drop_var, shd_var, factor_p_var !!MJ added
+        character(len=MAXVARLENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, factor_p_var !!MJ added
                                         
 
         character(len=MAXVARLENGTH) :: vars_to_read(kMAX_STORAGE_VARS)
@@ -315,7 +284,7 @@ module options_types
 
         ! Filenames for files to read various physics options from
         character(len=MAXFILELENGTH) :: mp_options_filename, lt_options_filename, adv_options_filename, &
-                                        lsm_options_filename, bias_options_filename, block_options_filename, &
+                                        lsm_options_filename, &
                                         cu_options_filename, rad_options_filename, pbl_options_filename, sfc_options_filename
         character(len=MAXFILELENGTH) :: calendar
 
@@ -328,8 +297,6 @@ module options_types
         logical :: compute_z            ! flag that we need to compute z from p this is determined from the vars specified (not read)
         logical :: readz                ! read atmospheric grid elevations from file
         logical :: readdz               ! read atm model layer thicknesses from namelist
-        logical :: mean_winds           ! use only a mean wind field across the entire model domain
-        logical :: mean_fields          ! use only a mean forcing field across the model boundaries
         logical :: restart              ! this is a restart run, read model conditions from a restart file
         logical :: qv_is_relative_humidity! if true the input water vapor is assumed to be relative humidity instead of mixing ratio
         logical :: qv_is_spec_humidity  ! if true the input water vapor is assumed to be specific humidity instead of mixing ratio
@@ -340,9 +307,6 @@ module options_types
                                         ! Doesn't play nice with linear winds
         logical :: batched_exch         ! Whether or not do do halo_exchanges with a batched approached or singular
         
-        logical :: high_res_soil_state  ! read the soil state from the high res input file not the low res file
-
-        integer :: buffer               ! buffer to remove from all sides of the high res grid supplied
         ! various integer parameters/options
         integer :: ntimesteps           ! total number of time steps to be simulated (from the first forcing data)
         integer :: nz                   ! number of model vertical levels
@@ -354,7 +318,6 @@ module options_types
 
         real :: smooth_wind_distance    ! distance over which to smooth the forcing wind field (m)
         logical :: time_varying_z       ! read in a new z coordinate every time step and interpolate accordingly
-
 
         integer :: longitude_system     ! specify center for longitude system
                                         ! 0 = kPRIME_CENTERED    (-180 - 180)
@@ -373,8 +336,6 @@ module options_types
 
         ! note this can't be allocatable because gfortran does not support allocatable components inside derived type coarrays...
         real, dimension(MAXLEVELS)::dz_levels ! model layer thicknesses to be read from namelist
-        logical :: space_varying_dz     ! allow the vertical dimension to vary horizontally in space to permit smoothing at higher vertical levels
-        logical :: dz_modifies_wind     ! use spatial variability in dz (relative to the base dz) speed up (or slow down) the horizontal wind component proportionatly, decreased dz = faster winds
         real    :: flat_z_height        ! height above mean ground level [m] above which z levels are flat in space
         logical :: use_agl_height       ! interpolate from forcing to model layers using Z above ground level, not sea level
         logical :: sleve                ! Using a sleve space_varying_dz offers control over the decay of terrain features in the vertical grid structure. See Schär et al 2002, Leuenberger et al 2009
@@ -395,13 +356,11 @@ module options_types
         logical :: use_mp_options
         logical :: use_cu_options
         logical :: use_lt_options
-        logical :: use_block_options
         logical :: use_adv_options
         logical :: use_lsm_options
         logical :: use_rad_options
         logical :: use_pbl_options
         logical :: use_sfc_options
-        logical :: use_bias_correction
 
         integer :: warning_level        ! level of warnings to issue when checking options settings 0-10.
                                         ! 0  = Don't print anything

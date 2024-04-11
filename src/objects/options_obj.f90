@@ -61,12 +61,10 @@ contains
 
         call time_parameters_namelist(         options_filename,   this)
         call lt_parameters_namelist(    this%parameters%lt_options_filename,    this)
-        call block_parameters_namelist( this%parameters%block_options_filename, this)
         call mp_parameters_namelist(    this%parameters%mp_options_filename,    this)
         call adv_parameters_namelist(   this%parameters%adv_options_filename,   this)
         call lsm_parameters_namelist(   this%parameters%lsm_options_filename,   this)
         call cu_parameters_namelist(    this%parameters%cu_options_filename,    this)
-        call bias_parameters_namelist(  this%parameters%bias_options_filename,  this)
         call rad_parameters_namelist(   this%parameters%rad_options_filename,   this)
         call pbl_parameters_namelist(   this%parameters%pbl_options_filename,   this)
         call sfc_parameters_namelist(   this%parameters%sfc_options_filename,   this)
@@ -488,7 +486,7 @@ contains
         pbl = 0 ! 0 = no PBL,
                 ! 1 = Stupid PBL (only in LSM=1 module),
                 ! 2 = local PBL diffusion after Louis 1979
-                ! 3 = YSU PBL (not complete)
+                ! 3 = YSU PBL
 
         lsm = 0 ! 0 = no LSM,
                 ! 1 = Fluxes from GCM,
@@ -523,7 +521,7 @@ contains
                 ! 2 = Kain-Fritsch scheme
 
         adv = 1 ! 0 = no ADV,
-                ! 1 = upwind advection scheme
+                ! 1 = standard advection scheme
                 ! 2 = MPDATA
 
         wind= 1 ! 0 = no LT,
@@ -733,11 +731,10 @@ contains
                                         psvar, pslvar, snowh_var, &
                                         soiltype_var, soil_t_var,soil_vwc_var,swe_var, soil_deept_var,           &
                                         vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var, linear_mask_var, nsq_calibration_var,  &
-                                        swdown_var, lwdown_var, sst_var, rain_var, time_var, sinalpha_var, cosalpha_var, &
-                                        lat_ext, lon_ext, swe_ext, hsnow_ext, rho_snow_ext, tss_ext, tsoil2D_ext, tsoil3D_ext, z_ext, time_ext
+                                        swdown_var, lwdown_var, sst_var, rain_var, time_var, sinalpha_var, cosalpha_var
 
 
-        character(len=MAXVARLENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, ridge_dist_var, valley_dist_var, ridge_drop_var, shd_var, factor_p_var  !!MJ added
+        character(len=MAXVARLENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, factor_p_var  !!MJ added
 
         namelist /var_list/ pvar,pbvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,qncvar,qnivar,qnrvar,qngvar,qnsvar,&
                             i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
@@ -748,9 +745,7 @@ contains
                             soiltype_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
                             vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var, linear_mask_var, nsq_calibration_var,  &
                             swdown_var, lwdown_var, sst_var, rain_var, time_var, sinalpha_var, cosalpha_var, &
-                            lat_ext, lon_ext, swe_ext, hsnow_ext, rho_snow_ext, tss_ext, tsoil2D_ext, tsoil3D_ext, z_ext, time_ext, &
-                            svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, ridge_dist_var, valley_dist_var, &
-                            ridge_drop_var, shd_var, factor_p_var !! MJ added
+                            svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, factor_p_var !! MJ added
 
         ! no default values supplied for variable names
         hgtvar=""
@@ -827,19 +822,6 @@ contains
         rain_var=""
         sinalpha_var=""
         cosalpha_var=""
-        lat_ext=""
-        lon_ext=""
-        swe_ext=""
-        hsnow_ext=""
-        rho_snow_ext=""
-        tss_ext=""
-        tsoil2D_ext=""
-        tsoil3D_ext=""
-        z_ext = ""
-        time_ext = ""
-        ridge_dist_var = ""
-        valley_dist_var = ""
-        ridge_drop_var = ""
         shd_var = ""
 
         !! MJ added
@@ -999,22 +981,6 @@ contains
         options%linear_mask_var     = linear_mask_var
         options%nsq_calibration_var = nsq_calibration_var
 
-        !------------------------------------------------------
-        ! external variables for initialization  -  mainly snow-related, can be extended later on. swe only for now?
-        !------------------------------------------------------
-        options%ext_var_list(:) = ""
-        j=1
-        options%lat_ext         = lat_ext
-        options%lon_ext         = lon_ext
-        options%swe_ext         = swe_ext      ; options%ext_var_list(j) = swe_ext;       options%ext_dim_list(j) = 2;    j = j + 1
-        options%rho_snow_ext    = rho_snow_ext ; options%ext_var_list(j) = rho_snow_ext;  options%ext_dim_list(j) = 2;    j = j + 1
-        options%hsnow_ext       = hsnow_ext    ; options%ext_var_list(j) = hsnow_ext;     options%ext_dim_list(j) = 2;    j = j + 1
-        options%tss_ext         = tss_ext      ; options%ext_var_list(j) = tss_ext;       options%ext_dim_list(j) = 2;    j = j + 1
-        options%tsoil2D_ext     = tsoil2D_ext    ; options%ext_var_list(j) = tsoil2D_ext;     options%ext_dim_list(j) = 2;    j = j + 1
-        options%tsoil3D_ext     = tsoil3D_ext    ; options%ext_var_list(j) = tsoil3D_ext;     options%ext_dim_list(j) = 3;    j = j + 1
-        ! options%z_ext      = z_ext   ; options%ext_var_list(j) = z_ext;       options%ext_dim_list(j) = 3;    j = j + 1
-        options%time_ext        = time_ext    ; options%ext_var_list(j) = time_ext;      options%ext_dim_list(j) = 1;    j = j + 1
-        
         !! MJ added
         options%svf_var               = svf_var
         options%hlm_var               = hlm_var
@@ -1022,9 +988,6 @@ contains
         options%slope_angle_var       = slope_angle_var
         options%aspect_angle_var      = aspect_angle_var
         options%factor_p_var          = factor_p_var
-        options%ridge_dist_var        = ridge_dist_var
-        options%valley_dist_var       = valley_dist_var
-        options%ridge_drop_var        = ridge_drop_var
         options%shd_var               = shd_var
 
     end subroutine var_namelist
@@ -1049,37 +1012,34 @@ contains
         real    :: dx, dxlow, t_offset, rh_limit, sst_min_limit, cp_limit, smooth_wind_distance, agl_cap
         integer :: ntimesteps, wind_iterations
         integer :: longitude_system
-        integer :: nz,buffer, warning_level
+        integer :: nz, warning_level
         logical :: ideal, readz, readdz, interactive, debug, surface_io_only, &
-                   mean_winds, mean_fields, restart, advect_density, z_is_geopotential, z_is_on_interface,&
-                   high_res_soil_state, use_agl_height, time_varying_z, t_is_potential, qv_is_spec_humidity, &
+                   restart, advect_density, z_is_geopotential, z_is_on_interface,&
+                   use_agl_height, time_varying_z, t_is_potential, qv_is_spec_humidity, &
                    qv_is_relative_humidity, &
-                   use_mp_options, use_lt_options, use_adv_options, use_lsm_options, use_bias_correction, &
-                   use_block_options, use_cu_options, use_rad_options, use_pbl_options, use_sfc_options, batched_exch
+                   use_mp_options, use_lt_options, use_adv_options, use_lsm_options, &
+                   use_cu_options, use_rad_options, use_pbl_options, use_sfc_options, batched_exch
 
         character(len=MAXFILELENGTH) :: date, calendar, start_date, forcing_start_date, end_date
         integer :: year, month, day, hour, minute, second
         character(len=MAXFILELENGTH) :: mp_options_filename, lt_options_filename, &
                                         adv_options_filename, lsm_options_filename, &
-                                        bias_options_filename, block_options_filename, &
                                         cu_options_filename, rad_options_filename, pbl_options_filename, sfc_options_filename
 
 
         namelist /parameters/ ntimesteps, wind_iterations, surface_io_only,                &
                               dx, dxlow, ideal, readz, readdz, nz, t_offset, rh_limit, sst_min_limit, cp_limit, &
                               debug, warning_level, interactive, restart,                                &
-                              buffer, advect_density, smooth_wind_distance,                              &
-                              mean_winds, mean_fields, z_is_geopotential, z_is_on_interface,             &
-                              date, calendar, high_res_soil_state, t_is_potential,                       &
+                              advect_density, smooth_wind_distance,                              &
+                              z_is_geopotential, z_is_on_interface,             &
+                              date, calendar, t_is_potential,                       &
                               qv_is_relative_humidity, qv_is_spec_humidity,                              &
                               use_agl_height, agl_cap, start_date, forcing_start_date, end_date,         &
                               time_varying_z,  longitude_system, batched_exch,            &
                               mp_options_filename,      use_mp_options,     &
-                              block_options_filename,   use_block_options,  &
                               lt_options_filename,      use_lt_options,     &
                               lsm_options_filename,     use_lsm_options,    &
                               adv_options_filename,     use_adv_options,    &
-                              bias_options_filename,    use_bias_correction,&
                               cu_options_filename,      use_cu_options,     &
                               rad_options_filename,     use_rad_options,    &
                               sfc_options_filename,     use_sfc_options,    &
@@ -1087,20 +1047,17 @@ contains
 
 !       default parameters
         surface_io_only     = .False.
-        mean_fields         = .False.
-        mean_winds          = .False.
         t_offset            = (-9999)
         rh_limit            = -1
         sst_min_limit       = 273.15
         cp_limit            = 500
-        buffer              = 0
         advect_density      = .True.
         t_is_potential      = .True.
         qv_is_spec_humidity = .False.
         qv_is_relative_humidity=.False.
         z_is_geopotential   = .False.
         z_is_on_interface   = .False.
-        wind_iterations     = 100
+        wind_iterations     = 800
         dxlow               = 100000
         restart             = .False.
         ideal               = .False.
@@ -1112,7 +1069,6 @@ contains
         nz                  =  MAXLEVELS
         smooth_wind_distance= -9999
         calendar            = "gregorian"
-        high_res_soil_state = .False.
         use_agl_height      = .True.
         agl_cap             = 800
         date                = ""
@@ -1147,12 +1103,6 @@ contains
         
         use_sfc_options=.False.
         sfc_options_filename = filename
-
-        use_bias_correction=.False.
-        bias_options_filename = filename
-
-        use_block_options=.False.
-        block_options_filename = filename
 
         open(io_newunit(name_unit), file=filename)
         read(name_unit,nml=parameters)
@@ -1249,9 +1199,6 @@ contains
         options%ideal            = ideal
         options%readz            = readz
         options%readdz           = readdz
-        options%buffer           = buffer
-        options%mean_winds       = mean_winds
-        options%mean_fields      = mean_fields
         options%advect_density   = advect_density
         options%debug            = debug
         options%interactive      = interactive
@@ -1270,7 +1217,6 @@ contains
 
         options%nz = nz
         options%wind_iterations = wind_iterations
-        options%high_res_soil_state = high_res_soil_state
         options%time_varying_z = time_varying_z
 
         options%use_mp_options      = use_mp_options
@@ -1297,12 +1243,6 @@ contains
         options%use_sfc_options     = use_sfc_options
         options%sfc_options_filename= sfc_options_filename
 
-        options%use_bias_correction  = use_bias_correction
-        options%bias_options_filename= bias_options_filename
-
-        options%use_block_options     = use_block_options
-        options%block_options_filename= block_options_filename
-
         ! options are updated when complete
     end subroutine parameters_namelist
 
@@ -1323,13 +1263,12 @@ contains
         real    :: C_cubes, C_sqrd, mu_r, t_adjust
         logical :: Ef_rw_l, EF_sw_l
         integer :: top_mp_level
-        real    :: local_precip_fraction
         integer :: update_interval
 
         namelist /mp_parameters/ Nt_c, TNO, am_s, rho_g, av_s, bv_s, fv_s, av_g, bv_g, av_i,    &   ! thompson microphysics parameters
                                 Ef_si, Ef_rs, Ef_rg, Ef_ri,                                     &   ! thompson microphysics parameters
                                 C_cubes, C_sqrd, mu_r, Ef_rw_l, Ef_sw_l, t_adjust,              &   ! thompson microphysics parameters
-                                top_mp_level, local_precip_fraction, update_interval
+                                top_mp_level, update_interval
 
         ! because mp_options could be in a separate file (should probably set all namelists up to have this option)
         if (options%parameters%use_mp_options) then
@@ -1364,7 +1303,6 @@ contains
 
         update_interval       = 0 ! update every time step
         top_mp_level          = 0 ! if <=0 just use the actual model top
-        local_precip_fraction = 1 ! if <1: the remaining fraction (e.g. 1-x) of precip gets distributed to the surrounding grid cells
 
         ! read in the namelist
         if (options%parameters%use_mp_options) then
@@ -1399,73 +1337,8 @@ contains
 
         options%mp_options%update_interval      = update_interval
         options%mp_options%top_mp_level         = top_mp_level
-        options%mp_options%local_precip_fraction= local_precip_fraction
 
     end subroutine mp_parameters_namelist
-
-    !> -------------------------------
-    !! Initialize the blocking options
-    !!
-    !! Reads the block_parameters namelist or sets default values
-    !!
-    !! -------------------------------
-    subroutine block_parameters_namelist(filename, options)
-        implicit none
-
-        character(len=*),   intent(in)   :: filename
-        type(options_t),    intent(inout):: options
-
-        integer :: name_unit
-
-        real    :: blocking_contribution  ! fractional contribution of flow blocking perturbation that is added [0-1]
-        real    :: smooth_froude_distance ! distance (m) over which Froude number is smoothed
-        integer :: n_smoothing_passes     ! number of times the smoothing window is applied
-        real    :: block_fr_max           ! max froude no at which flow is only partially blocked above, no blocking
-        real    :: block_fr_min           ! min froude no at which flow is only partially blocked below, full blocking
-        logical :: block_flow             ! use a blocking parameterization
-
-
-        ! define the namelist
-        namelist /block_parameters/ smooth_froude_distance, &
-                                    n_smoothing_passes,     &
-                                    block_fr_max,           &
-                                    block_fr_min,           &
-                                    blocking_contribution,  &
-                                    block_flow
-
-        ! because block_options could be in a separate file
-        if (options%parameters%use_block_options) then
-            if (trim(filename)/=trim(get_options_file())) then
-                call version_check(filename,options%parameters)
-            endif
-        endif
-
-        ! set default values
-        smooth_froude_distance  = 6000
-        n_smoothing_passes      = 3
-        block_fr_max            = 0.75
-        block_fr_min            = 0.5
-        blocking_contribution   = 0.5
-        block_flow              = .False.
-
-        ! read the namelist options
-        if (options%parameters%use_block_options) then
-            open(io_newunit(name_unit), file=filename)
-            read(name_unit,nml=block_parameters)
-            close(name_unit)
-        endif
-
-        ! copy values into data type
-        associate( opt => options%block_options )
-            opt%smooth_froude_distance = smooth_froude_distance
-            opt%n_smoothing_passes     = n_smoothing_passes
-            opt%block_fr_max           = block_fr_max
-            opt%block_fr_min           = block_fr_min
-            opt%blocking_contribution  = blocking_contribution
-            opt%block_flow             = block_flow
-        end associate
-
-    end subroutine block_parameters_namelist
 
 
     !> -------------------------------
@@ -1904,54 +1777,6 @@ contains
 
 
     !> -------------------------------
-    !! Initialize the bias correction options
-    !!
-    !! Reads the bias_parameters namelist or sets default values
-    !!
-    !! -------------------------------
-    subroutine bias_parameters_namelist(filename, options)
-        implicit none
-        character(len=*),   intent(in)   :: filename
-        type(options_t),    intent(inout):: options
-
-        type(bias_options_type)     ::  bias_options
-        integer :: name_unit
-
-        character(len=MAXFILELENGTH):: bias_correction_filename ! file containing bias correction data
-        character(len=MAXVARLENGTH) :: rain_fraction_var        ! name of variable containing the fraction to multiply rain by
-
-        ! define the namelist
-        namelist /bias_parameters/ bias_correction_filename, rain_fraction_var
-
-         ! because adv_options could be in a separate file
-         if (options%parameters%use_bias_correction) then
-             if (trim(filename)/=trim(get_options_file())) then
-                 call version_check(filename,options%parameters)
-             endif
-         endif
-
-
-        ! set default values
-        bias_correction_filename = options%parameters%init_conditions_file
-        rain_fraction_var        = "rain_fraction"
-
-        ! read the namelist options
-        if (options%parameters%use_bias_correction) then
-            open(io_newunit(name_unit), file=filename)
-            read(name_unit,nml=bias_parameters)
-            close(name_unit)
-        endif
-
-        ! store everything in the bias_options structure
-        bias_options%filename           = bias_correction_filename
-        bias_options%rain_fraction_var  = rain_fraction_var
-
-        ! copy the data back into the global options data structure
-        options%bias_options = bias_options
-    end subroutine bias_parameters_namelist
-
-
-    !> -------------------------------
     !! Initialize the land surface model options
     !!
     !! Reads the lsm_parameters namelist or sets default values
@@ -1966,11 +1791,6 @@ contains
         integer :: name_unit
 
         character(len=MAXVARLENGTH) :: LU_Categories ! Category definitions (e.g. USGS, MODIFIED_IGBP_MODIS_NOAH)
-        real    :: lh_feedback_fraction
-        real    :: sh_feedback_fraction
-        real    :: sfc_layer_thickness
-        real    :: dz_lsm_modification
-        real    :: wind_enhancement
         real    :: max_swe
         real    :: snow_den_const                    ! variable for converting snow height into SWE or visa versa when input data is incomplete 
 
@@ -1988,11 +1808,10 @@ contains
         integer :: lake_category                    ! index that defines the lake category in (some) LU_Categories
 
         ! define the namelist
-        namelist /lsm_parameters/ LU_Categories, lh_feedback_fraction, sh_feedback_fraction, update_interval, &
+        namelist /lsm_parameters/ LU_Categories, update_interval, &
                                   urban_category, ice_category, water_category, lake_category, snow_den_const,&
-                                  monthly_vegfrac, monthly_albedo, sfc_layer_thickness, dz_lsm_modification,  &
-                                  wind_enhancement, max_swe, surface_diagnostics,  nmp_dveg, nmp_opt_crs,     &
-                                  nmp_opt_sfc, nmp_opt_btr, nmp_opt_run, nmp_opt_infdv, nmp_opt_frz,          &
+                                  monthly_vegfrac, monthly_albedo, max_swe, surface_diagnostics,  nmp_dveg,   &
+                                  nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_run, nmp_opt_infdv, nmp_opt_frz, &
                                   nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot,           &
                                   nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo,          &
                                   nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, nmp_soiltstep,       &
@@ -2019,12 +1838,6 @@ contains
         ice_category    = -1
         water_category  = -1
         lake_category   = -1
-
-        lh_feedback_fraction = 1.0
-        sh_feedback_fraction = 1.0 !0.625
-        sfc_layer_thickness  = 50.0
-        dz_lsm_modification  = 1.0 !0.5
-        wind_enhancement = 1.0 !1.5
         
         sf_urban_phys = 1
         
@@ -2075,11 +1888,6 @@ contains
         lsm_options%ice_category         = ice_category
         lsm_options%water_category       = water_category
         lsm_options%lake_category        = lake_category
-        lsm_options%lh_feedback_fraction = lh_feedback_fraction
-        lsm_options%sh_feedback_fraction = sh_feedback_fraction
-        lsm_options%sfc_layer_thickness  = sfc_layer_thickness
-        lsm_options%dz_lsm_modification  = dz_lsm_modification
-        lsm_options%wind_enhancement     = wind_enhancement
         lsm_options%max_swe              = max_swe
         lsm_options%snow_den_const       = snow_den_const
         lsm_options%fsm_nsnow_max        = fsm_nsnow_max
@@ -2153,9 +1961,8 @@ contains
         integer :: cldovrlp                          ! how RRTMG considers cloud overlapping
         logical :: read_ghg
         real    :: tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
-        logical :: use_simple_sw
         ! define the namelist
-        namelist /rad_parameters/ update_interval_rrtmg, icloud, read_ghg, use_simple_sw, cldovrlp, tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
+        namelist /rad_parameters/ update_interval_rrtmg, icloud, read_ghg, cldovrlp, tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
 
 
          ! because adv_options could be in a separate file
@@ -2172,7 +1979,6 @@ contains
         cldovrlp        = 2    ! maximum-random overlap
         read_ghg        = .false.
         tzone=0. !! MJ added
-        use_simple_sw   = .false.
 
         ! read the namelist options
         if (options%parameters%use_rad_options) then
@@ -2187,7 +1993,6 @@ contains
         rad_options%cldovrlp              = cldovrlp
         rad_options%read_ghg              = read_ghg
         rad_options%tzone                 = tzone
-        rad_options%use_simple_sw         = use_simple_sw
 
         ! copy the data back into the global options data structure
         options%rad_options = rad_options
@@ -2211,16 +2016,14 @@ contains
         integer :: name_unit, this_level
         real, allocatable, dimension(:) :: dz_levels
         real, dimension(45) :: fulldz
-        logical :: space_varying, dz_modifies_wind, sleve
+        logical :: sleve
 
         real :: flat_z_height, decay_rate_L_topo, decay_rate_S_topo, sleve_n
         integer :: terrain_smooth_windowsize, terrain_smooth_cycles
 
-        namelist /z_info/ dz_levels, space_varying, dz_modifies_wind, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n
+        namelist /z_info/ dz_levels, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n
 
         this_level=1
-        space_varying = .False.
-        dz_modifies_wind = .False.
         flat_z_height = -1
         sleve = .False.
         terrain_smooth_windowsize = 3
@@ -2275,8 +2078,6 @@ contains
             options%dz_levels(1:options%nz) = fulldz(1:options%nz)
         endif
 
-        options%dz_modifies_wind = dz_modifies_wind
-        options%space_varying_dz = space_varying
         options%flat_z_height = flat_z_height
         options%sleve = sleve
         options%terrain_smooth_windowsize = terrain_smooth_windowsize
@@ -2284,13 +2085,6 @@ contains
         options%decay_rate_L_topo = decay_rate_L_topo  ! decay_rate_large_scale_topography
         options%decay_rate_S_topo = decay_rate_S_topo ! decay_rate_small_scale_topography !
         options%sleve_n = sleve_n
-
-
-        if (dz_modifies_wind) then
-            write(*,*) "WARNING: setting dz_modifies_wind to true is not recommended, use wind = 2 instead"
-            write(*,*) "if you want to continue and enable this, you will need to change this code in the options_obj"
-            error stop
-        endif
 
     end subroutine model_levels_namelist
 
@@ -2353,7 +2147,7 @@ contains
         type(parameter_options_type), intent(inout) :: options
 
         character(len=MAXFILELENGTH) :: init_conditions_file, output_file, forcing_file_list, &
-                                        linear_mask_file, nsq_calibration_file, external_files
+                                        linear_mask_file, nsq_calibration_file
 
         character(len=MAXFILELENGTH), allocatable :: boundary_files(:)
         integer :: name_unit, nfiles, i
@@ -2361,20 +2155,17 @@ contains
         ! set up namelist structures
 
         namelist /files_list/ init_conditions_file, output_file, boundary_files, forcing_file_list, &
-                              linear_mask_file, nsq_calibration_file, external_files
+                              linear_mask_file, nsq_calibration_file
 
         linear_mask_file="MISSING"
         nsq_calibration_file="MISSING"
         allocate(boundary_files(MAX_NUMBER_FILES))
         boundary_files="MISSING"
         forcing_file_list="MISSING"
-        external_files="MISSING"
 
         open(io_newunit(name_unit), file=filename)
         read(name_unit,nml=files_list)
         close(name_unit)
-
-        options%external_files = external_files
 
         options%init_conditions_file=init_conditions_file
 
@@ -2416,14 +2207,13 @@ contains
         integer :: name_unit, update_frequency             ! logical unit number for namelist
         !Define parameters
         integer :: roughness
-        logical :: terr_diff, Sx, wind_only, thermal
+        logical :: Sx, wind_only, thermal
         real    :: Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const
         
         !Make name-list
-        namelist /wind/ terr_diff, Sx, thermal, wind_only, Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, roughness, alpha_const, update_frequency
+        namelist /wind/ Sx, thermal, wind_only, Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, roughness, alpha_const, update_frequency
         
         !Set defaults
-        terr_diff = .False.
         Sx = .False.
         thermal = .False.
         roughness = 0 ! No roughness correction, the only one implemented so far
@@ -2446,7 +2236,6 @@ contains
         
         
         !Store into options object
-        options%wind%terr_diff = terr_diff
         options%wind%Sx = Sx
         options%wind%thermal = thermal
         options%wind%Sx_dmax = Sx_dmax
@@ -2518,7 +2307,6 @@ contains
                 options%time_options%cfl_strictness = 4
                 options%parameters%use_agl_height = .True.
                 options%parameters%agl_cap = 800
-                options%parameters%space_varying_dz = .True.
                 options%parameters%sleve = .True.
                 options%parameters%advect_density = .True.
 

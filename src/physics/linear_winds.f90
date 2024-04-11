@@ -51,7 +51,7 @@ module linear_theory_winds
     use linear_theory_lut_disk_io,  only: read_LUT, write_LUT
     use mod_atm_utilities,         only : calc_stability, calc_u, calc_v, &
                                           calc_speed, calc_direction,     &
-                                          blocking_fraction, options_t
+                                          options_t
     use array_utilities,            only: smooth_array, calc_weight, &
                                           linear_space
     use icar_constants,             only: kMAX_FILE_LENGTH, DOM_IMG_INDX, kNUM_SERVERS, kNUM_COMPUTE, kNUM_PROC_PER_NODE
@@ -66,7 +66,6 @@ module linear_theory_winds
     logical :: module_initialized = .False.
     logical :: variable_N
     logical :: smooth_nsq
-    logical :: using_blocked_flow
     real    :: N_squared
 
     logical :: debug_print = .false.
@@ -751,32 +750,11 @@ contains
                         !$omp end critical (print_lock)
                     endif
 
-                    if (options%parameters%space_varying_dz) then
-
-                        ! call update_irregular_grid(u,v, nsq_values(j), z, domain, minimum_layer_size)
-                        call linear_perturbation(u, v, exp(nsq_values(j)),                                                                      &
-                                                 domain%global_z_interface(:,z,:) - domain%global_terrain,                                      &
-                                                 domain%global_z_interface(:,z,:) - domain%global_terrain + domain%global_dz_interface(:,z,:),  &
-                                                 minimum_layer_size, domain%terrain_frequency, lt_data_m)
-
-                    else
-                        layer_height = domain%z%data_3d(ims,z,jms) - domain%terrain%data_2d(ims,jms)
-                        layer_height_bottom = layer_height - (options%parameters%dz_levels(z) / 2)
-                        layer_height_top    = layer_height + (options%parameters%dz_levels(z) / 2)
-
-                        if (z>1) then
-                            if (layer_height_bottom /= sum(options%parameters%dz_levels(1:z-1))) then
-                                print*, my_index, layer_height_bottom - sum(options%parameters%dz_levels(1:z-1)), "layer_height_bottom = ", layer_height_bottom, "sum(dz) = ", sum(options%parameters%dz_levels(1:z-1))
-                            endif
-                            if (layer_height_top /= sum(options%parameters%dz_levels(1:z))) then
-                                print*, my_index, layer_height_top - sum(options%parameters%dz_levels(1:z)), "layer_height_top = ", layer_height_top, "sum(dz) = ", sum(options%parameters%dz_levels(1:z))
-                            endif
-                        endif
-
-                        call linear_perturbation(u, v, exp(nsq_values(j)),                                  &
-                                                 layer_height_bottom, layer_height_top, minimum_layer_size, &
-                                                 domain%terrain_frequency, lt_data_m)
-                    endif
+                    ! call update_irregular_grid(u,v, nsq_values(j), z, domain, minimum_layer_size)
+                    call linear_perturbation(u, v, exp(nsq_values(j)),                                                                      &
+                                             domain%global_z_interface(:,z,:) - domain%global_terrain,                                      &
+                                             domain%global_z_interface(:,z,:) - domain%global_terrain + domain%global_dz_interface(:,z,:),  &
+                                             minimum_layer_size, domain%terrain_frequency, lt_data_m)
                     ! need to handle stagger (nxu /= nx) and the buffer around edges of the domain
                     if (nxu /= nx) then
                         temporary_u(:,:) = real( real(                                              &
@@ -869,7 +847,7 @@ contains
         real,allocatable :: u1d(:),v1d(:)
         integer :: ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme
         real :: dweight, nweight, sweight, curspd, curdir, curnsq, wind_first, wind_second
-        real :: blocked, hydrometeors
+        real :: hydrometeors
 
         ! pointers to the u/v data to be updated so they can point to different places depending on the update flag
         real, pointer :: u3d(:,:,:), v3d(:,:,:), nsquared(:,:,:)
@@ -997,9 +975,9 @@ contains
         endif
 
         !$omp parallel firstprivate(ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme, nx,nxu,ny,nyv,nz), &
-        !$omp firstprivate(reverse, vsmooth, winsz, using_blocked_flow), default(none), &
+        !$omp firstprivate(reverse, vsmooth, winsz), default(none), &
         !$omp private(i,j,k,step, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
-        !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v, blocked), &
+        !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v), &
         !$omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
         !$omp shared(domain, u3d,v3d, nsquared, spd_values, dir_values, nsq_values, hi_u_LUT, hi_v_LUT, linear_mask), &
         !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution, nsq_calibration), &
@@ -1017,14 +995,6 @@ contains
 
             do j=1, nz
                 do i=1, nxu
-
-                    ! if (using_blocked_flow) then
-                    !     blocked = blocking_fraction(domain%froude(min(i,nx),min(k,ny)))
-                    ! else
-                        blocked = 0
-                    ! endif
-                    if (blocked<1) then
-
                         uk = min(k,ny)
                         vi = min(i,nx)
 
@@ -1128,8 +1098,6 @@ contains
                                 v3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
                             ! endif
                         endif
-
-                    endif
                 end do
             end do
         end do
@@ -1170,8 +1138,6 @@ contains
         use_spatial_linear_fields = options%lt_options%spatial_linear_fields    ! use a spatially varying linear wind perturbation
         use_linear_mask           = options%lt_options%linear_mask              ! use a spatial mask for the linear wind field
         use_nsq_calibration       = options%lt_options%nsq_calibration          ! use a spatial mask to calibrate the nsquared (brunt vaisala frequency) field
-
-        using_blocked_flow        = options%block_options%block_flow
 
         ! Look up table generation parameters, range for each parameter, and number of steps to cover that range
         dirmax = options%lt_options%dirmax

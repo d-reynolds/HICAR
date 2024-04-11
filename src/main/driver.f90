@@ -40,7 +40,7 @@ program icar
 
     type(options_t) :: options
     type(domain_t)  :: domain
-    type(boundary_t):: boundary, add_cond
+    type(boundary_t):: boundary
     type(event_type)  :: written_ev[*], write_ev[*], read_ev[*], child_read_ev[*], end_ev[*]
     type(output_t)  :: restart_dataset
     type(output_t)  :: output_dataset
@@ -107,7 +107,7 @@ program icar
 
         call boundary%update_computed_vars(options, update=options%parameters%time_varying_z)
 
-        call init_model_state(options, domain, boundary, add_cond) ! added boundary structure for external files (additional conditions)
+        call init_model_state(options, domain, boundary) ! added boundary structure
 
         if (options%parameters%restart) then
             sync all !Matching IO sync call

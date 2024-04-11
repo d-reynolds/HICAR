@@ -413,11 +413,10 @@ contains
     !! and interpolating the first time step of forcing data on to the high res domain grids
     !!
     !! -------------------------------
-    module subroutine get_initial_conditions(this, forcing, options, external_conditions)
+    module subroutine get_initial_conditions(this, forcing, options)
       implicit none
       class(domain_t),  intent(inout) :: this
       type(boundary_t), intent(inout) :: forcing
-      type(boundary_t), intent(inout), optional :: external_conditions
       type(options_t),  intent(in)    :: options
 
       integer :: i
@@ -431,20 +430,6 @@ contains
       if (allocated(this%znw).or.allocated(this%znu)) call init_znu(this)
 
 
-      ! - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-      ! read in any external variables, such as SWE or snow height.
-      ! if (present(external_conditions).AND. (options%parameters%restart .eqv. .False.))    then
-      if (present(external_conditions).AND. (options%parameters%restart .neqv. .True.))    then
-        ! if (this_image()==1) write(*,*) "   (Dom) - Setting up ext files.  "
-        ! create geographic lookup table for domain
-        call setup_geo_interpolation(this, external_conditions, options)
-
-        ! interpolate external variables to the hi-res grid
-        call this%interpolate_external( external_conditions, options)
-        ! if (this_image()==1) write(*,*) " interpolating exteral conditions"
-      endif
-
-      ! - - - - - - - - - - - - - - - - - - -  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
       call diagnostic_update(this,options)
       call this%enforce_limits()
       this%model_time = options%parameters%start_time
@@ -967,7 +952,6 @@ contains
         if (0<opt%vars_to_allocate( kVARS%ice3_c))                      call setup(this%ice3_c,           this%grid,     forcing_var=opt%parameters%i3cvar,      list=this%variables_to_force, force_boundaries=.True.)
         if (0<opt%vars_to_allocate( kVARS%precipitation) )              call setup(this%accumulated_precipitation,this%grid2d, dtype=kDOUBLE )
         if (0<opt%vars_to_allocate( kVARS%convective_precipitation) )   call setup(this%accumulated_convective_pcp,this%grid2d )
-        if (0<opt%vars_to_allocate( kVARS%external_precipitation) )     call setup(this%external_precipitation,   this%grid2d,   forcing_var=opt%parameters%rain_var,  list=this%variables_to_force)
         if (0<opt%vars_to_allocate( kVARS%snowfall) )                   call setup(this%accumulated_snowfall,     this%grid2d, dtype=kDOUBLE )
         if (0<opt%vars_to_allocate( kVARS%pressure) )                   call setup(this%pressure,                 this%grid,     forcing_var=opt%parameters%pvar,       list=this%variables_to_force, force_boundaries=.False.)
         if (0<opt%vars_to_allocate( kVARS%temperature) )                call setup(this%temperature,              this%grid )
@@ -1243,9 +1227,6 @@ contains
         if (0<opt%vars_to_allocate( kVARS%aspect_angle) )               call setup(this%aspect_angle,       this%grid2d)        
         if (0<opt%vars_to_allocate( kVARS%svf) )                        call setup(this%svf,                this%grid2d) 
         if (0<opt%vars_to_allocate( kVARS%factor_p) )                   call setup(this%factor_p,           this%grid2d) 
-        if (0<opt%vars_to_allocate( kVARS%ridge_dist) )                 call setup(this%ridge_dist,         this%grid2d) 
-        if (0<opt%vars_to_allocate( kVARS%valley_dist) )                call setup(this%valley_dist,        this%grid2d) 
-        if (0<opt%vars_to_allocate( kVARS%ridge_drop) )                 call setup(this%ridge_drop,         this%grid2d) 
         if (0<opt%vars_to_allocate( kVARS%hlm) )                        call setup(this%hlm,                this%grid_hlm) 
         if (0<opt%vars_to_allocate( kVARS%shd) )                        call setup(this%shd,                this%grid2d) 
 
@@ -1928,18 +1909,12 @@ contains
             endif
 
 
-            if (options%parameters%space_varying_dz) then
-                max_level = find_flat_model_level(options, nz, dz)
+            max_level = find_flat_model_level(options, nz, dz)
 
-                smooth_height = sum(dz(1:max_level))
+            smooth_height = sum(dz(1:max_level))
 
-                jacobian(:,i,:) = (smooth_height - terrain) / smooth_height ! sum(dz(1:max_level))
-                global_jacobian(:,i,:) = (smooth_height - global_z_interface(:,i,:) ) /smooth_height !sum(dz(1:max_level))
-
-            else
-                jacobian = 1
-                global_jacobian = 1
-            endif
+            jacobian(:,i,:) = (smooth_height - terrain) / smooth_height ! sum(dz(1:max_level))
+            global_jacobian(:,i,:) = (smooth_height - global_z_interface(:,i,:) ) /smooth_height !sum(dz(1:max_level))
 
             dz_mass(:,i,:)      = dz(i) / 2 * jacobian(:,i,:)
             dz_interface(:,i,:) = dz(i) * jacobian(:,i,:)
@@ -2261,12 +2236,6 @@ contains
         !  neighbor_dzdy(this%ims:this%ime,:,this%jme+1) = (3*this%geo_v%z(:,:,this%jme+1) - &
         !                                   4*this%geo_v%z(:,:,this%jme) + this%geo_v%z(:,:,this%jme-1)) / (2*this%dx)
         !  this%dzdy_v(:,:,:) = neighbor_dzdy(this%ims:this%ime,:,this%jms:this%jme+1)
-
-        if (this%east_boundary .and. this%grid%yimg==8) then
-            call io_write("dzdx_u_in_domain.nc", "dzdx_u", this%dzdx_u)
-            call io_write("jacobian_u_in_domain.nc", "jacobian_u", this%jacobian_u)
-            call io_write("geo_u_z_in_domain.nc", "geo_u_z", this%geo_u%z)
-        endif
 
         this%dzdy(:,:,:) = (this%geo_v%z(:,:,this%jms+1:this%jme+1) - this%geo_v%z(:,:,this%jms:this%jme))/(this%dx)
 
@@ -2764,33 +2733,6 @@ contains
             endif
         endif
 
-        if (options%parameters%ridge_dist_var /= "") then
-            call io_read(options%parameters%init_conditions_file,   &
-                           options%parameters%ridge_dist_var,       &
-                           temporary_data)
-            if (associated(this%ridge_dist%data_2d)) then
-                this%ridge_dist%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-            endif
-        endif
-        
-        if (options%parameters%valley_dist_var /= "") then
-            call io_read(options%parameters%init_conditions_file,   &
-                           options%parameters%valley_dist_var,       &
-                           temporary_data)
-            if (associated(this%valley_dist%data_2d)) then
-                this%valley_dist%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-            endif
-        endif
-        
-        if (options%parameters%ridge_drop_var /= "") then
-            call io_read(options%parameters%init_conditions_file,   &
-                           options%parameters%ridge_drop_var,       &
-                           temporary_data)
-            if (associated(this%ridge_drop%data_2d)) then
-                this%ridge_drop%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-            endif
-        endif
-        
         if (options%parameters%shd_var /= "") then
             call io_read(options%parameters%init_conditions_file,   &
                            options%parameters%shd_var,       &
@@ -2937,8 +2879,6 @@ contains
         call this%info%add_attribute("source","ICAR version:"//trim(options%parameters%version))
 
         ! Add info on grid setting:
-        write(a_string,*) options%parameters%space_varying_dz
-        call this%info%add_attribute("space_varying_dz",a_string)
         write(a_string,*) options%parameters%sleve
         call this%info%add_attribute("sleve",a_string)
         if (options%parameters%sleve) then
@@ -3020,8 +2960,6 @@ contains
                       kVARS%u_latitude,             kVARS%u_longitude,              &
                       kVARS%v_latitude,             kVARS%v_longitude,              &
                       kVARS%temperature_interface,  kVars%density])
-
-        if (trim(options%parameters%rain_var) /= "") call options%alloc_vars([kVARS%external_precipitation])
 
         ! List the variables that are required for any restart
         call options%restart_vars(                                                  &
@@ -3693,117 +3631,8 @@ contains
                 enddo
             enddo
         endif
-        if (associated(this%external_precipitation%data_2d)) then
-            if (associated(this%accumulated_precipitation%data_2d)) then
-                this%accumulated_precipitation%data_2d = this%accumulated_precipitation%data_2d + (this%external_precipitation%data_2d * dt)
-            endif
-            if (associated(this%accumulated_precipitation%data_2dd)) then
-                this%accumulated_precipitation%data_2dd = this%accumulated_precipitation%data_2dd + (this%external_precipitation%data_2d * dt)
-            endif
-        endif
 
 
-    end subroutine
-
-    !> -----------------------------------------------------------------------------------------------------------------
-    !! Loop through external variables if supplied and interpolate the external data to the domain
-    !!
-    !! -----------------------------------------------------------------------------------------------------------------
-    module subroutine interpolate_external(this, external_conditions, options)
-        implicit none
-        class(domain_t),  intent(inout) :: this
-        type(boundary_t), intent(in)    :: external_conditions
-        type(options_t), intent(in)     :: options
-
-        integer :: i, nsoil=4
-        character(len=99) :: varname
-        type(variable_t) :: external_var, external_var2
-        ! real, allocatable :: ext_snowheight_int(:,:)
-
-        if(options%parameters%external_files/="MISSING") then
-          ! -------  repeat this code block for other external variables?   -----------------
-          if(options%parameters%swe_ext/="") then
-
-            varname = options%parameters%swe_ext   !   options%ext_var_list(j)
-
-            if (this_image()==1) write(*,*) "    interpolating external var ", trim(varname) , " for initial conditions"
-            external_var =external_conditions%variables%get_var(trim(varname))  ! the external variable
-
-            if (associated(this%snow_water_equivalent%data_2d)) then
-                call geo_interp2d(  this%snow_water_equivalent%data_2d, & ! ( this%grid2d% ids : this%grid2d% ide, this%grid2d% jds : this%grid2d% jde)   ,            &
-                                    external_var%data_2d,               &
-                                    external_conditions%geo%geolut )
-            endif
-
-          endif
-
-          ! -------  external snow height   -----------------
-          if (options%parameters%hsnow_ext/="") then
-
-            varname = options%parameters%hsnow_ext   !   options%ext_var_list(j)
-
-            if (this_image()==1) write(*,*) "    interpolating external var ", trim(varname) , " for initial conditions"
-            external_var =external_conditions%variables%get_var(trim(varname))  ! the external variable
-
-            if (associated(this%snow_height%data_2d)) then
-                call geo_interp2d(  this%snow_height%data_2d, & ! ( this%grid2d% ids : this%grid2d% ide, this%grid2d% jds : this%grid2d% jde)   ,            &
-                                    external_var%data_2d,               &
-                                    external_conditions%geo%geolut )
-            endif
-          ! -------  external snow height from external swe and density  -----------------
-          elseif (options%parameters%swe_ext/="" .AND. options%parameters%rho_snow_ext/="") then
-
-            varname = options%parameters%rho_snow_ext   !   options%ext_var_list(j)
-
-            if (this_image()==1) write(*,*) "    interpolating external var ", trim(varname) , " to calculate initial snow height"
-            external_var =external_conditions%variables%get_var(trim(varname))  ! the external variable
-            external_var2 =external_conditions%variables%get_var(trim(options%parameters%swe_ext))  ! the external swe
-            if (associated(this%snow_height%data_2d)) then
-                call geo_interp2d(  this%snow_height%data_2d, &
-                                    external_var2%data_2d / external_var%data_2d,               &  ! ext_swe / rho_snow_swe = hsnow_ext
-                                    external_conditions%geo%geolut )
-            endif
-          endif
-
-          ! ------ soil temperature  (2D or 3D)_______________________
-          if (options%parameters%tsoil2D_ext/="") then
-
-            varname = options%parameters%tsoil2D_ext   !   options%ext_var_list(j)
-
-            if (this_image()==1) write(*,*) "    interpolating external var ", trim(varname) , " for initial conditions"
-            external_var =external_conditions%variables%get_var(trim(varname))  ! the external variable
-
-            if (associated(this%soil_deep_temperature%data_2d)) then
-
-                call geo_interp2d(  this%soil_deep_temperature%data_2d, &
-                                    external_var%data_2d,               &
-                                    external_conditions%geo%geolut )
-                if (associated(this%soil_temperature%data_3d)) then
-                    do i=1,nsoil
-                        this%soil_temperature%data_3d(:,i,:) = this%soil_deep_temperature%data_2d
-                    enddo
-                endif
-            endif
-
-          elseif (options%parameters%tsoil3D_ext/="") then  ! if 3D soil is provided we take the lowest level only. (can/should be expanded later)
-
-            varname = options%parameters%tsoil3D_ext
-
-            if (this_image()==1) write(*,*) "    interpolating external var ", trim(varname) , " for initial conditions"
-            external_var =external_conditions%variables%get_var(trim(varname))  ! the external variable
-
-            if (associated(this%soil_deep_temperature%data_2d)) then
-                call geo_interp2d(  this%soil_deep_temperature%data_2d, &
-                                    external_var%data_3d(:,size(external_var%data_3d,2),:)  ,               &
-                                    external_conditions%geo%geolut )
-                if (associated(this%soil_temperature%data_3d)) then
-                    do i=1,nsoil
-                        this%soil_temperature%data_3d(:,i,:) = this%soil_deep_temperature%data_2d
-                    enddo
-                endif
-            endif
-          endif
-        endif
     end subroutine
 
 
