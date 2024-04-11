@@ -91,7 +91,7 @@ module linear_theory_winds
     !! Linear wind look up table values and tables
     real, allocatable,          dimension(:)           :: dir_values, nsq_values, spd_values
     ! Look Up Tables for linear perturbation are nspd x n_dir_values x n_nsq_values x nx x nz x ny
-    real, allocatable,          dimension(:,:,:,:,:,:) :: hi_u_LUT[:], hi_v_LUT[:] !, rev_u_LUT, rev_v_LUT
+    real, allocatable,          dimension(:,:,:,:,:,:) :: hi_u_LUT, hi_v_LUT !, rev_u_LUT, rev_v_LUT
     ! real, pointer,              dimension(:,:,:,:,:,:) :: u_LUT, v_LUT
     real, allocatable,          dimension(:,:)         :: linear_mask, nsq_calibration
 
@@ -568,10 +568,10 @@ contains
 
     subroutine copy_data_to_remote(wind, grids, LUT, i,j,k, z)
         implicit none
-        real,              intent(in)   :: wind(:,:)
-        type(grid_t),      intent(in)   :: grids(:)
-        real, allocatable, intent(inout):: LUT(:,:,:,:,:,:)[:]
-        integer,           intent(in)   :: i,j,k, z
+        real,           intent(in)  :: wind(:,:)
+        type(grid_t),   intent(in)  :: grids(:)
+        real,           intent(inout):: LUT(:,:,:,:,:,:)[*]
+        integer,        intent(in)  :: i,j,k, z
 
         integer :: img
 
@@ -582,6 +582,7 @@ contains
                       jme => grids(img)%jme  &
                 )
             !$omp critical
+            !this can be done as some kind of collective (is a 2D broadcast-y thing)
             LUT(k,i,j, 1:ime-ims+1, z, 1:jme-jms+1)[DOM_IMG_INDX(img)] = wind(ims:ime,jms:jme)
             !$omp end critical
 
@@ -613,10 +614,12 @@ contains
 
         type(grid_t), allocatable :: u_grids(:), v_grids(:)
 
+        ! append total number of images and the current image number to the LUT filename
+        LUT_file = trim(options%lt_options%u_LUT_Filename) // "_" // trim(str(num_images())) // "_" // trim(str(this_image())) // ".nc"
 
         ims = lbound(domain%z%data_3d,1)
         jms = lbound(domain%z%data_3d,3)
-        
+
         ! the domain to work over
         nz = size(domain%u%data_3d,  2)
 
@@ -647,13 +650,20 @@ contains
         else
             my_index = FINDLOC(DOM_IMG_INDX,this_image(),dim=1)
         endif
-        ! append total number of images and the current image number to the LUT filename
-        LUT_file = trim(options%lt_options%u_LUT_Filename) // "_" // trim(str(kNUM_COMPUTE)) // "_" // trim(str(my_index)) // ".nc"
+
+        ! create the array of spd, dir, and nsq values to create LUTs for
+        ! generates the values for each look up table dimension
+        ! generate table of wind directions to be used
+        call linear_space(dir_values,dirmin,dirmax,n_dir_values)
+        ! generate table of wind speeds to be used
+        call linear_space(nsq_values,nsqmin,nsqmax,n_nsq_values)
+        ! generate table of Brunt-Vaisalla frequencies (Nsq) to be used
+        call linear_space(spd_values,spdmin,spdmax,n_spd_values)
 
         ! Allocate the (LARGE) look up tables for both U and V
         if (.not.options%lt_options%read_LUT) then
-            allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny)[*], source=0.0)
-            allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv)[*], source=0.0)
+            allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny), source=0.0)
+            allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv), source=0.0)
             
             ! If we are an IO image, we only need to stick around long enough to allocate the coarrays with everyone
             ! This should be changed in the future once coarray teams are better supported accross compilers, such
@@ -670,9 +680,9 @@ contains
                 if (this_image()==1) write(*,*) "WARNING: LUT on disk does not match that specified in the namelist or does not exist."
                 if (this_image()==1) write(*,*) "    LUT will be recreated"
                 if (allocated(hi_u_LUT)) deallocate(hi_u_LUT)
-                allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny)[*], source=0.0)
+                allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny), source=0.0)
                 if (allocated(hi_v_LUT)) deallocate(hi_v_LUT)
-                allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv)[*], source=0.0)
+                allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv), source=0.0)
             endif
             if (mod(this_image(),(num_images()/kNUM_SERVERS)) == 0) return
         endif
@@ -684,15 +694,6 @@ contains
         else
             stop_pos  = nint((real(my_index) / kNUM_COMPUTE) * total_LUT_entries) - 1
         endif
-
-        ! create the array of spd, dir, and nsq values to create LUTs for
-        ! generates the values for each look up table dimension
-        ! generate table of wind directions to be used
-        call linear_space(dir_values,dirmin,dirmax,n_dir_values)
-        ! generate table of wind speeds to be used
-        call linear_space(nsq_values,nsqmin,nsqmax,n_nsq_values)
-        ! generate table of Brunt-Vaisalla frequencies (Nsq) to be used
-        call linear_space(spd_values,spdmin,spdmax,n_spd_values)
 
         ! if (options%parameters%debug) then
         if (this_image()==1) write(*,*) "Local Look up Table size:", 4*product(shape(hi_u_LUT))/real(2**20), "MB"
