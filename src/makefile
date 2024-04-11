@@ -407,7 +407,6 @@ OBJS=	\
 		$(BUILD)assertions.o		\
 		$(BUILD)atm_utilities.o		\
 		$(BUILD)pbl_utilities.o		\
-		$(BUILD)co_utilities.o		\
 		$(BUILD)default_output_metadata.o\
 		$(BUILD)ioserver_h.o                      \
 		$(BUILD)ioserver_obj.o                      \
@@ -475,7 +474,6 @@ endif
 CAF_TEST_EXECUTABLES = 	caf_options_test 				\
 						caf_init_test 					\
 						caf_domain_init_test			\
-						caf_bcast_test					\
 						caf_write_domain_test			\
 						caf_options_test				\
 						caf_boundary_test				\
@@ -541,10 +539,10 @@ fftw_test: $(BUILD)test_fftw.o $(OBJS)
 fftshift_test: $(BUILD)test_fftshift.o $(OBJS)
 	${LINKER} $^ -o $@ ${LFLAGS}
 
-time_obj_test: $(BUILD)test_time_obj.o $(BUILD)time_obj.o $(BUILD)time_h.o $(BUILD)time_delta_obj.o $(BUILD)co_utilities.o
+time_obj_test: $(BUILD)test_time_obj.o $(BUILD)time_obj.o $(BUILD)time_h.o $(BUILD)time_delta_obj.o
 	${LINKER} $^ -o $@ ${LFLAGS}
 
-calendar_test: $(BUILD)test_calendar.o $(BUILD)time_obj.o $(BUILD)time_h.o $(BUILD)time_delta_obj.o $(BUILD)co_utilities.o
+calendar_test: $(BUILD)test_calendar.o $(BUILD)time_obj.o $(BUILD)time_h.o $(BUILD)time_delta_obj.o
 	${LINKER} $^ -o $@ ${LFLAGS}
 
 mpdata_test: $(BUILD)test_mpdata.o $(BUILD)adv_mpdata.o
@@ -561,7 +559,7 @@ blocking_test: $(BUILD)test_blocking.o $(BUILD)io_routines.o $(BUILD)winds_block
 array_util_test: $(BUILD)test_array_utilities.o $(OBJS)
 	${LINKER} $^ -o $@ ${LFLAGS}
 
-variable_dict_test: $(BUILD)test_variable_dict.o $(BUILD)co_utilities.o	 	\
+variable_dict_test: $(BUILD)test_variable_dict.o 	\
 					$(BUILD)variable_dict_h.o	$(BUILD)variable_dict_obj.o	\
 					$(BUILD)variable_h.o		$(BUILD)variable_obj.o		\
 					$(BUILD)grid_h.o			$(BUILD)grid_obj.o			\
@@ -602,7 +600,7 @@ caf_no_forcing_test: $(BUILD)test_caf_no_forcing.o							\
 					$(BUILD)icar_constants.o $(BUILD)io_routines.o		\
 					$(BUILD)model_tracking.o $(BUILD)string.o           \
 					$(BUILD)assertions.o	 $(BUILD)atm_utilities.o    \ $(BUILD)pbl_utilities.o		\
-					$(BUILD)co_utilities.o   $(BUILD)default_output_metadata.o \
+					$(BUILD)default_output_metadata.o \
 					$(BUILD)ra_driver.o      $(BUILD)ra_simple.o		\
 					$(BUILD)pbl_driver.o     $(BUILD)pbl_simple.o		\
 					$(BUILD)pbl_diagnostic.o     $(BUILD)pbl_ysu.o           \
@@ -631,10 +629,6 @@ caf_init_test: $(BUILD)test_caf_init.o $(OBJS)
 	${LINKER} $^ -o $@ ${LFLAGS}
 
 caf_init-write_test: $(BUILD)test_caf_init-write.o $(OBJS)
-	${LINKER} $^ -o $@ ${LFLAGS}
-
-caf_bcast_test: $(BUILD)test_caf_bcast.o	\
-				$(BUILD)co_utilities.o $(BUILD)icar_constants.o
 	${LINKER} $^ -o $@ ${LFLAGS}
 
 caf_boundary_test: $(BUILD)test_caf_boundary.o $(OBJS)
@@ -724,7 +718,7 @@ $(BUILD)meta_data_obj.o: $(OBJECTS)meta_data_obj.f90 $(BUILD)meta_data_h.o
 
 $(BUILD)meta_data_h.o: $(OBJECTS)meta_data_h.f90 $(BUILD)icar_constants.o
 
-$(BUILD)variable_obj.o: $(OBJECTS)variable_obj.f90 $(BUILD)variable_h.o $(BUILD)co_utilities.o
+$(BUILD)variable_obj.o: $(OBJECTS)variable_obj.f90 $(BUILD)variable_h.o
 
 $(BUILD)variable_h.o: $(OBJECTS)variable_h.f90 $(BUILD)meta_data_h.o $(BUILD)icar_constants.o $(BUILD)grid_h.o
 
@@ -761,7 +755,7 @@ $(BUILD)boundary_h.o: $(OBJECTS)boundary_h.f90 $(BUILD)options_h.o				\
 
 $(BUILD)boundary_obj.o: $(OBJECTS)boundary_obj.f90 $(BUILD)boundary_h.o					\
 					$(BUILD)string.o $(BUILD)atm_utilities.o $(BUILD)time_io.o			\
-					$(BUILD)io_routines.o $(BUILD)co_utilities.o $(BUILD)geo_reader.o	\
+					$(BUILD)io_routines.o $(BUILD)geo_reader.o	\
 					$(BUILD)vinterp.o $(BUILD)array_utilities.o $(BUILD)icar_constants.o $(BUILD)debug_utils.o
 
 
@@ -772,7 +766,7 @@ $(BUILD)domain_h.o: $(OBJECTS)domain_h.f90 $(BUILD)options_h.o $(BUILD)exchangea
 
 $(BUILD)domain_obj.o: $(OBJECTS)domain_obj.f90 $(BUILD)domain_h.o $(BUILD)options_h.o $(BUILD)grid_h.o 	\
 					$(BUILD)string.o $(BUILD)assertions.o $(BUILD)geo_reader.o $(BUILD)meta_data_h.o	\
-					$(BUILD)atm_utilities.o $(BUILD)io_routines.o $(BUILD)co_utilities.o 				\
+					$(BUILD)atm_utilities.o $(BUILD)io_routines.o				\
 					$(BUILD)array_utilities.o $(BUILD)vinterp.o $(BUILD)wind_surf.o
 
 ###################################################################
@@ -793,8 +787,6 @@ $(BUILD)time_step.o:$(MAIN)time_step.f90 $(BUILD)data_structures.o $(BUILD)wind.
 #	Utility Routines
 ###################################################################
 
-$(BUILD)co_utilities.o:$(UTIL)co_utilities.f90 $(BUILD)icar_constants.o
-
 $(BUILD)time_delta_obj.o:$(UTIL)time_delta_obj.f90 $(BUILD)icar_constants.o
 
 $(BUILD)timer_h.o:$(OBJECTS)timer_h.f90
@@ -803,7 +795,7 @@ $(BUILD)timer_obj.o:$(UTIL)time_obj.f90 $(BUILD)timer_h.o
 
 $(BUILD)time_h.o:$(UTIL)time_h.f90 $(BUILD)time_delta_obj.o
 
-$(BUILD)time_obj.o:$(UTIL)time_obj.f90 $(BUILD)time_h.o $(BUILD)co_utilities.o
+$(BUILD)time_obj.o:$(UTIL)time_obj.f90 $(BUILD)time_h.o
 
 $(BUILD)time_io.o:$(UTIL)time_io.f90 $(BUILD)time_h.o $(BUILD)data_structures.o \
 					$(BUILD)icar_constants.o $(BUILD)string.o $(BUILD)io_routines.o
@@ -856,7 +848,7 @@ $(BUILD)mp_wsm6.o:$(PHYS)mp_wsm6.f90 $(BUILD)wrf_constants.o
 
 $(BUILD)mp_thompson.o:$(PHYS)mp_thompson.f90 $(BUILD)opt_types.o
 
-$(BUILD)mp_thompson_aer.o:$(PHYS)mp_thompson_aer.f90 $(BUILD)co_utilities.o
+$(BUILD)mp_thompson_aer.o:$(PHYS)mp_thompson_aer.f90
 
 $(BUILD)mp_simple.o:$(PHYS)mp_simple.f90 $(BUILD)data_structures.o $(BUILD)options_h.o
 
@@ -1058,8 +1050,6 @@ $(BUILD)test_caf_no_forcing.o: $(TESTS)test_caf_no_forcing.f90 $(BUILD)domain_h.
 
 $(BUILD)test_caf_output.o: $(TESTS)test_caf_output.f90 $(BUILD)output_h.o $(BUILD)variable_h.o  \
 							$(BUILD)default_output_metadata.o $(BUILD)icar_constants.o
-
-$(BUILD)test_caf_bcast.o: $(TESTS)test_caf_bcast.f90 $(BUILD)co_utilities.o
 
 $(BUILD)test_variable_dict.o: $(TESTS)test_variable_dict.f90 $(BUILD)grid_h.o \
 						$(BUILD)variable_h.o $(BUILD)variable_dict_h.o

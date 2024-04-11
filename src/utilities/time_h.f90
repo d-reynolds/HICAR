@@ -52,7 +52,6 @@ module time_object
         procedure, public  :: as_string   => as_string
         procedure, public  :: equals      => equals_with_precision
         procedure, public  :: units       => units
-        procedure, public  :: broadcast   => bcast
         procedure, public  :: get_calendar=> get_calendar
         procedure, public  :: get_month   => get_month
 
@@ -324,15 +323,6 @@ interface
         character(len=MAXSTRINGLENGTH) :: units
 
     end function units
-
-    module subroutine bcast(this, source, first_image, last_image)
-        implicit none
-        class(Time_type), intent(inout) :: this
-        integer,          intent(in)    :: source
-        integer,          intent(in)    :: first_image
-        integer,          intent(in)    :: last_image
-
-    end subroutine
 
 
     !>------------------------------------------------------------

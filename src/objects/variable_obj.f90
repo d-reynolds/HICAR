@@ -1,5 +1,4 @@
 submodule(variable_interface) variable_implementation
-    use co_util,        only : broadcast
     implicit none
 
 
@@ -170,94 +169,6 @@ contains
 
                 this%dqdt_3d = 0
             endif
-        endif
-
-    end subroutine
-
-
-    module subroutine bcast_var(this, source, start_img, end_img)
-        implicit none
-        class(variable_t),  intent(inout) :: this
-        integer,            intent(in)    :: source
-        integer,            intent(in),   optional :: start_img, end_img
-
-        integer :: first, last, attr_array_size
-        character(len=kMAX_STRING_LENGTH) :: error_message
-        integer :: i
-
-        if (present(start_img)) first = start_img
-        if (present(end_img))   last  = end_img
-
-
-        ! all the components of the variable that may need to be broadcast
-        ! First we simply broadcast all the "easy" scalar values
-        call broadcast(this%unlimited_dim, source, first, last, create_co_array=.True.)
-        call broadcast(this%n_dimensions,  source, first, last, create_co_array=.True.)
-        call broadcast(this%three_d,       source, first, last, create_co_array=.True.)
-        call broadcast(this%two_d,         source, first, last, create_co_array=.True.)
-        call broadcast(this%forcing_var,   source, first, last, create_co_array=.True.)
-
-        ! these attributes are inherited from meta_data parent class and must be broadcast too
-        call broadcast(this%name,          source, first, last, create_co_array=.True.)
-        call broadcast(this%n_attrs,       source, first, last, create_co_array=.True.)
-
-        ! we have to figure out how big the attribute array is as n_attrs is the number stored in it, not the memory allocated for it
-        if (this_image()==source) then
-            if (allocated(this%attributes)) then
-                attr_array_size = size(this%attributes)
-            else
-                attr_array_size = 1
-                allocate( this%attributes( attr_array_size ) )
-            endif
-        endif
-
-        call broadcast(attr_array_size,    source, first, last, create_co_array=.True.)
-
-        if (.not.allocated(this%attributes)) allocate(this%attributes(attr_array_size))
-        do i=1, this%n_attrs
-            call broadcast(this%attributes(i)%name,  source, first, last, create_co_array=.True.)
-            call broadcast(this%attributes(i)%value, source, first, last, create_co_array=.True.)
-        enddo
-
-
-        ! Handle anything that potentially has 2 or 3 dimensions separately
-        ! First handle the if 3D case
-        if (this%three_d) then
-            if (size(this%dim_len) /= 3) deallocate(this%dim_len)
-            if (.not.allocated(this%dim_len))       allocate(this%dim_len(3))
-            call broadcast(this%dim_len, source, first, last, create_co_array=.True.)
-
-            if (.not.allocated(this%dimensions))    allocate(this%dimensions(3))
-            call broadcast(this%dimensions, source, first, last, create_co_array=.True.)
-
-            if (.not.associated(this%data_3d))      allocate(this%data_3d(this%dim_len(1), this%dim_len(2), this%dim_len(3)))
-            if (any(shape(this%data_3d) /= this%dim_len)) then
-                write(error_message, '(A,A,A,I6,A,3I5,A,3I5)') &
-                        "ERROR: variable ", trim(this%name), " has the wrong shape on image: ", &
-                        this_image(), " has:",shape(this%data_3d)," should have:",this%dim_len
-                write(*,*) trim(error_message)
-                stop
-            endif
-            call broadcast(this%data_3d, source, first, last, create_co_array=.True.)
-
-        ! Then handle the if 2D case
-        else if (this%two_d) then
-            if (allocated(this%dim_len) .and. (size(this%dim_len) /= 2)) deallocate(this%dim_len)
-            if (.not.allocated(this%dim_len))       allocate(this%dim_len(2))
-            call broadcast(this%dim_len, source, first, last, create_co_array=.True.)
-
-            if (.not.allocated(this%dimensions))    allocate(this%dimensions(2))
-            call broadcast(this%dimensions, source, first, last, create_co_array=.True.)
-
-            if (.not.associated(this%data_2d))      allocate(this%data_2d(this%dim_len(1), this%dim_len(2)))
-            if (any(shape(this%data_2d) /= this%dim_len)) then
-                write(error_message, '(A,A,A,I6,A,2I5,A,2I5)') &
-                        "ERROR: variable ", trim(this%name), " has the wrong shape on image: ", &
-                        this_image(), " has:",shape(this%data_2d)," should have:",this%dim_len
-                write(*,*) trim(error_message)
-                stop
-            endif
-            call broadcast(this%data_2d, source, first, last, create_co_array=.True.)
         endif
 
     end subroutine

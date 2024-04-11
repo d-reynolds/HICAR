@@ -12,7 +12,6 @@ submodule(domain_interface) domain_implementation
     use mod_atm_utilities,    only : exner_function, update_pressure, compute_ivt, compute_iq
     use icar_constants
     use string,               only : str
-    use co_util,              only : broadcast
     use io_routines,          only : io_write, io_read
     use geo,                  only : geo_lut, geo_interp, geo_interp2d, standardize_coordinates
     use array_utilities,      only : array_offset_x, array_offset_y, smooth_array, smooth_array_2d, make_2d_x, make_2d_y

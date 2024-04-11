@@ -44,8 +44,6 @@
 !
       MODULE module_mp_thompson_aer
 
-          use co_util,     only : broadcast
-
 !       USE module_wrf_error
 !       USE module_mp_radar
 ! #if ( defined( DM_PARALLEL ) && ( ! defined( STUBMPI ) ) )

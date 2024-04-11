@@ -37,10 +37,8 @@ module variable_interface
         integer :: xstag = 0
         integer :: ystag = 0
     contains
-        procedure, public  :: bcast_var
         procedure, public  :: init_grid
         procedure, public  :: init_dims
-        generic,   public  :: broadcast  => bcast_var
         generic,   public  :: initialize => init_grid
         generic,   public  :: initialize => init_dims
 
@@ -50,14 +48,6 @@ module variable_interface
     end type
 
     interface
-
-        module subroutine bcast_var(this, source, start_img, end_img)
-            implicit none
-            class(variable_t),  intent(inout) :: this
-            integer,            intent(in)    :: source
-            integer,            intent(in),   optional :: start_img, end_img
-        end subroutine
-
 
         module subroutine init_grid(this, grid, forcing_var, force_boundaries, dtype)
             implicit none
