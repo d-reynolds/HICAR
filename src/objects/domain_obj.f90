@@ -2268,11 +2268,6 @@ contains
         !                                   4*this%geo_v%z(:,:,this%jme) + this%geo_v%z(:,:,this%jme-1)) / (2*this%dx)
         !  this%dzdy_v(:,:,:) = neighbor_dzdy(this%ims:this%ime,:,this%jms:this%jme+1)
 
-        if (this%east_boundary .and. this%grid%yimg==8) then
-            call io_write("dzdx_u_in_domain.nc", "dzdx_u", this%dzdx_u)
-            call io_write("jacobian_u_in_domain.nc", "jacobian_u", this%jacobian_u)
-            call io_write("geo_u_z_in_domain.nc", "geo_u_z", this%geo_u%z)
-        endif
 
         this%dzdy(:,:,:) = (this%geo_v%z(:,:,this%jms+1:this%jme+1) - this%geo_v%z(:,:,this%jms:this%jme))/(this%dx)
 

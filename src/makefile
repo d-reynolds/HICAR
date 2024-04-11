@@ -210,7 +210,7 @@ endif
 ifeq ($(COMPILER), cray)
 	COMP= -h noomp -O2 -c -eI
 	LINK= -fopenmp
-	PREPROC= -eZ
+	PREPROC= -eT
 	MODOUTPUT= -J $(BUILD) -em
 endif
 
@@ -222,7 +222,7 @@ ifeq ($(MODE), debugslow)
 		LINK=
 	endif
 	ifeq ($(COMPILER), gnu)
-		COMP= -c -g -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion
+		COMP= -c -g -ffree-line-length-none -Wconversion #-fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion
 		LINK=
 	endif
 	ifeq ($(COMPILER), cray)
@@ -242,7 +242,7 @@ ifeq ($(MODE), debug)
 		LINK=
 	endif
 	ifeq ($(COMPILER), cray)
-		COMP=-h noomp -c -eI -g -R cpbs
+		COMP=-hcaf -h noomp -c  -g #-R cpbs
 		LINK=-h noomp
 		PREPROC=-eZ
 		MODOUTPUT=-e m -J $(BUILD)
@@ -781,7 +781,7 @@ $(BUILD)domain_obj.o: $(OBJECTS)domain_obj.f90 $(BUILD)domain_h.o $(BUILD)option
 
 $(BUILD)init.o:$(MAIN)init.f90 $(BUILD)data_structures.o $(BUILD)options_h.o $(BUILD)domain_h.o $(BUILD)boundary_h.o $(BUILD)icar_constants.o\
 	 				$(BUILD)mp_driver.o $(BUILD)time_step.o $(BUILD)advection_driver.o $(BUILD)atm_utilities.o $(BUILD)wind.o $(BUILD)ra_driver.o \
-					$(BUILD)pbl_driver.o $(BUILD)cu_driver.o $(BUILD)lsm_driver.o $(BUILD)sfc_driver.o $(BUILD)io_routines.o $(BUILD)wind_iterative.o $(BUILD)wind_iterative_old.o
+					$(BUILD)pbl_driver.o $(BUILD)cu_driver.o $(BUILD)lsm_driver.o $(BUILD)sfc_driver.o $(BUILD)io_routines.o
 
 $(BUILD)time_step.o:$(MAIN)time_step.f90 $(BUILD)data_structures.o $(BUILD)wind.o $(BUILD)string.o 	\
 					$(BUILD)advection_driver.o $(BUILD)mp_driver.o $(BUILD)domain_h.o $(BUILD)boundary_h.o \
