@@ -11,8 +11,8 @@ program test_init
 
     implicit none
 
-    type(options_type) :: options
-    type(domain_type)  :: domain
+    type(options_t) :: options
+    type(domain_t)  :: domain
     call init_options("icar_options.nml",options)
     call init_domain(options,domain)
 

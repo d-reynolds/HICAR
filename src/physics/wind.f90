@@ -88,7 +88,7 @@ contains
             
             
             if (options%wind%thermal) then
-                call options%alloc_vars([kVARS%potential_temperature, kVARS%skin_temperature, kVARS%ridge_dist, kVARS%valley_dist, kVARS%ridge_drop])
+                call options%alloc_vars([kVARS%potential_temperature, kVARS%skin_temperature])
                 call options%exch_vars([kVARS%skin_temperature])
                 
                 call options%restart_vars([kVARS%potential_temperature, kVARS%skin_temperature])
@@ -407,13 +407,12 @@ contains
             ! If model is running with a pbl scheme that supplies a 3D K_h, pass that here
             if (options%physics%boundarylayer == kPBL_YSU) then
                 call apply_thermal_winds(domain%skin_temperature%data_2d,domain%exner%data_3d,domain%potential_temperature%data_3d,  &
-                                     domain%z%data_3d, domain%dz_mass%data_3d,domain%ridge_dist%data_2d,domain%valley_dist%data_2d, &
-                                     domain%ridge_drop%data_2d,domain%u%meta_data%dqdt_3d, domain%v%meta_data%dqdt_3d,domain%dzdx,domain%dzdy,  &
-                                     domain%coeff_heat_exchange_3d%data_3d)
+                                     domain%z%data_3d, domain%dz_mass%data_3d,domain%u%meta_data%dqdt_3d, domain%v%meta_data%dqdt_3d,&
+                                     domain%dzdx,domain%dzdy, domain%coeff_heat_exchange_3d%data_3d)
             else
                 call apply_thermal_winds(domain%skin_temperature%data_2d,domain%exner%data_3d,domain%potential_temperature%data_3d,  &
-                                     domain%z%data_3d, domain%dz_mass%data_3d,domain%ridge_dist%data_2d,domain%valley_dist%data_2d, &
-                                     domain%ridge_drop%data_2d,domain%u%meta_data%dqdt_3d, domain%v%meta_data%dqdt_3d,domain%dzdx,domain%dzdy)
+                                     domain%z%data_3d, domain%dz_mass%data_3d,                                                       &
+                                     domain%u%meta_data%dqdt_3d, domain%v%meta_data%dqdt_3d,domain%dzdx,domain%dzdy)
             endif
             call domain%u%exchange_x(do_metadata=.True.)
             call domain%v%exchange_y(do_metadata=.True.)

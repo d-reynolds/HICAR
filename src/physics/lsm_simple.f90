@@ -64,8 +64,8 @@ module module_lsm_simple
 contains
     subroutine lsm_simple_init(domain,options)
         implicit none
-        type(domain_type), intent(in) :: domain
-        type(options_type),intent(in)    :: options
+        type(domain_t), intent(in) :: domain
+        type(options_t),intent(in)    :: options
         integer :: nx,ny
 
         nx=size(domain%terrain,1)
@@ -169,7 +169,7 @@ contains
         real,dimension(:,:), intent(in) :: rain,snow,swdown,lwdown,wind
         real,dimension(:,:), intent(inout) :: sensible_heat, latent_heat, ground_heat, &
                                               tskin, swe
-        type(options_type),intent(in)    :: options
+        type(options_t),intent(in)    :: options
         real, intent(in) :: dt
         integer :: nx,ny,j,k,nz
 

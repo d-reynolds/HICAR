@@ -3,8 +3,6 @@
 !!
 !!  Utilities exist to convert u, v into speed and direction (and vice versa)
 !!  Compute the dry and moist lapse rates and Brunt Vaisalla stabilities
-!!  Compute the terrain blocking froude number (U / (terrain_height * brunt_vaisalla_frequency ))
-!!  Compute the fraction of flow that is blocked (linear interpolation between froude_max and froude_min)
 !!
 !!  @author
 !!  Ethan Gutmann (gutmann@ucar.edu)
@@ -515,20 +513,6 @@ contains
 
     end function calc_Ri
 
-    !>----------------------------------------------------------
-    !! Compute the fraction of blocking winds to apply
-    !!
-    !!----------------------------------------------------------
-    function blocking_fraction(froude) result(fraction)
-        implicit none
-        real, intent(in) :: froude
-        real :: fraction
-
-        fraction = (max_froude-froude) * froude_gain
-        fraction = min(max( fraction, 0.), 1.)
-
-    end function blocking_fraction
-    
     
     pure function calc_thresh_ang(Ri,WS) result(theta)
         implicit none
@@ -743,8 +727,6 @@ contains
         N_squared   = options%lt_options%N_squared
         variable_N  = options%lt_options%variable_N
 
-        max_froude  = options%block_options%block_fr_max
-        min_froude  = options%block_options%block_fr_min
         froude_gain = 1 / max(max_froude-min_froude, 0.001)
 
     end subroutine init_atm_utilities
