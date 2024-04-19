@@ -59,7 +59,7 @@ contains
     function write_lut(filename, uLUT, vLUT, dz, options) result(error)
         implicit none
         character(len=*), intent(in) :: filename
-        real, dimension(:,:,:,:,:,:), intent(in) :: uLUT[*], vLUT[*]
+        real, dimension(:,:,:,:,:,:), intent(in) :: uLUT, vLUT
         real, dimension(:),           intent(in) :: dz
         type(lt_options_type),        intent(in) :: options
         integer :: error

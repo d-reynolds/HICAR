@@ -21,17 +21,17 @@ module wind_iterative
 #include <petsc/finclude/petscdm.h>
 #include <petsc/finclude/petscdmda.h>
 
-    !use exchangeable_interface,   only : exchangeable_t
     use domain_interface,  only : domain_t
     !use options_interface, only : options_t
     !use grid_interface,    only : grid_t
     use petscksp
     use petscdm
     use petscdmda
+    use iso_fortran_env
 
     implicit none
     private
-    public:: init_iter_winds, calc_iter_winds, finalize_iter_winds
+    public:: init_petsc_comms, init_iter_winds, calc_iter_winds, finalize_iter_winds
     real, parameter::deg2rad=0.017453293 !2*pi/360
     real, parameter :: rad2deg=57.2957779371
     real, allocatable, dimension(:,:,:) :: A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, H_coef, I_coef, &
@@ -122,9 +122,9 @@ contains
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
 
         !Exchange u and v, since the outer points are not updated in above function
-        call domain%u%exchange_x(update)
-        call domain%v%exchange_y(update)
-        
+        call domain%halo%exch_var(domain%u,meta_data=update)
+        call domain%halo%exch_var(domain%v,meta_data=update)
+ 
         call VecDestroy(localX,ierr)
         call DMDestroy(da,ierr)
         call KSPDestroy(ksp,ierr)
@@ -231,12 +231,12 @@ contains
         !PETSc arrays are zero-indexed
         
         if (update) then
-            domain%u%meta_data%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%u%meta_data%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
+            domain%u%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%u%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
                                                             0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
                                                             lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
             (1/domain%jacobian_u(i_start:i_end,:,j_s:j_e))*domain%dzdx_u(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/rho_u(i_start:i_end,:,j_s:j_e)
             
-            domain%v%meta_data%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%v%meta_data%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
+            domain%v%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%v%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
                                                             0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
                                                             lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
             (1/domain%jacobian_v(i_s:i_e,:,j_start:j_end))*domain%dzdy_v(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/rho_v(i_s:i_e,:,j_start:j_end)
@@ -730,7 +730,7 @@ contains
         call PetscFinalize(ierr)
     end subroutine
 
-    subroutine init_iter_winds(domain)
+    subroutine init_petsc_comms(domain)
         implicit none
         type(domain_t), intent(in) :: domain
         PetscErrorCode ierr
@@ -740,7 +740,14 @@ contains
         if (ierr .ne. 0) then
             print*,'Unable to initialize PETSc'
             stop
-        endif 
+        endif
+
+    end subroutine
+
+    subroutine init_iter_winds(domain)
+        implicit none
+        type(domain_t), intent(in) :: domain
+        
         call init_module_vars(domain)
         if(this_image()==1) write(*,*) 'Initialized PETSc'
     end subroutine

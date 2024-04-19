@@ -143,10 +143,10 @@ contains
     !! Generate the domain decomposition mapping and compute the indicies for local memory
     !!
     !! -------------------------------
-    module subroutine set_grid_dimensions(this, nx, ny, nz, adv_order, nx_extra, ny_extra, for_image)
+    module subroutine set_grid_dimensions(this, nx, ny, nz, global_nz, adv_order, nx_extra, ny_extra, for_image)
       class(grid_t),   intent(inout) :: this
       integer,         intent(in)    :: nx, ny, nz
-      integer,         intent(in), optional :: adv_order, nx_extra, ny_extra, for_image
+      integer,         intent(in), optional :: global_nz, adv_order, nx_extra, ny_extra, for_image
 
       integer :: nx_e, ny_e, halo_size
       integer :: image
@@ -219,8 +219,19 @@ contains
 
       this%ns_halo_nx = this%nx_global / this%ximages + 1 + nx_e  ! number of grid cells in x in the ns halo
       this%ew_halo_ny = this%ny_global / this%yimages + 1 + ny_e  ! number of grid cells in y in the ew halo
-
-
+      
+      !If we have been passed the global_nz, it means that this grid is not the global, 3D grid. Thus, pass the global_nz to
+      !create_MPI_types so that the window nz is set correctly in accordance with what is done in halo_obj.f90. If this 3D grid's nz
+      !is larger than the global_nz, however, we have a problem, and should not try to make an MPI type for communication. There are
+      !only a few 3D grids with nz's larger than 8, none of which should need to be exchanged, and the model should almost always be 
+      !run with more than 8 z levels. So this should not be an issue.
+      if (present(global_nz)) then
+        if (this%nz <= global_nz) then
+          call create_MPI_types(this, nx_e, ny_e, win_nz=global_nz)
+        endif
+      else
+        call create_MPI_types(this, nx_e, ny_e)
+      endif
   end subroutine
 
   !> -------------------------------
@@ -253,6 +264,62 @@ contains
 
       grid%nx = grid%ime - grid%ims + 1
       grid%ny = grid%jme - grid%jms + 1
+
+  end subroutine
+
+  subroutine create_MPI_types(grid, xstag, ystag, win_nz)
+      type(grid_t), intent(inout)   :: grid
+      integer, intent(in) :: xstag, ystag 
+      integer, optional, intent(in) :: win_nz
+
+      integer :: nz_win
+
+      nz_win = grid%nz
+      if (present(win_nz)) nz_win = win_nz
+
+      if (grid%is3d) then
+        call MPI_Type_create_subarray(3, [grid%nx, grid%nz, grid%ny], [(grid%ite-grid%its+1), grid%nz, grid%halo_size+ystag], &
+                [grid%halo_size,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_halo)
+        call MPI_Type_create_subarray(3, [grid%nx, grid%nz, grid%ny], [grid%halo_size+xstag, grid%nz, (grid%jte-grid%jts+1)], &
+                [0,0,grid%halo_size], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_halo)
+        call MPI_Type_create_subarray(3, [grid%nx, grid%nz, grid%ny], [grid%halo_size, grid%nz, grid%halo_size], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_halo)
+
+
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx-xstag+2*grid%halo_size, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), grid%nz, grid%halo_size+ystag], &
+                [grid%halo_size,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_win_halo)
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny-ystag+2*grid%halo_size], [grid%halo_size+xstag, grid%nz, (grid%jte-grid%jts+1)], &
+                [0,0,grid%halo_size], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_win_halo)
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx-xstag+2*grid%halo_size, nz_win, grid%halo_size+1], [grid%halo_size, grid%nz, grid%halo_size], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_NS_win_halo)
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny-ystag+2*grid%halo_size], [grid%halo_size, grid%nz, grid%halo_size], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_EW_win_halo)
+
+      else
+        call MPI_Type_create_subarray(2, [grid%nx, grid%ny], [(grid%ite-grid%its+1), grid%halo_size], &
+                [grid%halo_size,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_halo)
+        call MPI_Type_create_subarray(2, [grid%nx, grid%ny], [grid%halo_size, (grid%jte-grid%jts+1)], &
+                [0,grid%halo_size], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_halo)
+        call MPI_Type_create_subarray(2, [grid%nx, grid%ny], [grid%halo_size, grid%halo_size], &
+                [0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_halo)
+
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx-xstag+2*grid%halo_size, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), 1, grid%halo_size+ystag], &
+                [grid%halo_size,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_win_halo)
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny-ystag+2*grid%halo_size], [grid%halo_size+xstag, 1, (grid%jte-grid%jts+1)], &
+                [0,0,grid%halo_size], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_win_halo)
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx-xstag+2*grid%halo_size, nz_win, grid%halo_size+1], [grid%halo_size, 1, grid%halo_size], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_NS_win_halo)
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny-ystag+2*grid%halo_size], [grid%halo_size, 1, grid%halo_size], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_EW_win_halo)
+
+      endif
+      call MPI_Type_commit(grid%NS_halo)
+      call MPI_Type_commit(grid%NS_win_halo)
+      call MPI_Type_commit(grid%EW_halo)
+      call MPI_Type_commit(grid%EW_win_halo)
+      call MPI_Type_commit(grid%corner_halo)
+      call MPI_Type_commit(grid%corner_NS_win_halo)
+      call MPI_Type_commit(grid%corner_EW_win_halo)
 
   end subroutine
 

@@ -570,7 +570,7 @@ contains
         implicit none
         real,           intent(in)  :: wind(:,:)
         type(grid_t),   intent(in)  :: grids(:)
-        real,           intent(inout):: LUT(:,:,:,:,:,:)[*]
+        real,           intent(inout):: LUT(:,:,:,:,:,:)
         integer,        intent(in)  :: i,j,k, z
 
         integer :: img
@@ -583,7 +583,7 @@ contains
                 )
             !$omp critical
             !this can be done as some kind of collective (is a 2D broadcast-y thing)
-            LUT(k,i,j, 1:ime-ims+1, z, 1:jme-jms+1)[DOM_IMG_INDX(img)] = wind(ims:ime,jms:jme)
+            !LUT(k,i,j, 1:ime-ims+1, z, 1:jme-jms+1)[DOM_IMG_INDX(img)] = wind(ims:ime,jms:jme)
             !$omp end critical
 
             end associate
@@ -855,8 +855,8 @@ contains
 
 
         if (update) then
-            u3d => domain%u%meta_data%dqdt_3d
-            v3d => domain%v%meta_data%dqdt_3d
+            u3d => domain%u%dqdt_3d
+            v3d => domain%v%dqdt_3d
         else
             u3d => domain%u%data_3d
             v3d => domain%v%data_3d

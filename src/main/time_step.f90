@@ -264,8 +264,8 @@ contains
             present_dt_seconds = future_dt_seconds
         endif
         
-        future_dt_seconds = compute_dt(domain%dx, domain%u%meta_data%dqdt_3d, domain%v%meta_data%dqdt_3d, &
-                        domain%w%meta_data%dqdt_3d, domain%density%data_3d, options%parameters%dz_levels, &
+        future_dt_seconds = compute_dt(domain%dx, domain%u%dqdt_3d, domain%v%dqdt_3d, &
+                        domain%w%dqdt_3d, domain%density%data_3d, options%parameters%dz_levels, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time_options%cfl_reduction_factor, &
@@ -353,6 +353,11 @@ contains
 
         ! now just loop over internal timesteps computing all physics in order (operator splitting...)
         do while (domain%model_time < end_time)
+            
+            call send_timer%start()
+            call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+            call send_timer%stop()
+
             !Determine dt
             if (last_wind_update >= options%wind%update_dt%seconds()) then
 
@@ -436,13 +441,10 @@ contains
                 if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" convect")
 
                 
-                call exch_timer%start()
-                if (options%parameters%batched_exch) then
-                    call domain%halo_3d_exchange_batch(send_timer, ret_timer, wait_timer)
-                else
-                    call domain%halo_exchange(send_timer,ret_timer,wait_timer)
-                endif
-                call exch_timer%stop()
+                call ret_timer%start()
+                call domain%halo%halo_3d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call ret_timer%stop()
 
 
                 call adv_timer%start()

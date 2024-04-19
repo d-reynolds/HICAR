@@ -2,7 +2,6 @@ module output_metadata
 
     use icar_constants
     use variable_interface,     only : variable_t
-    use exchangeable_interface, only : exchangeable_t
     use meta_data_interface,    only : attribute_t
     implicit none
 
@@ -12,7 +11,7 @@ module output_metadata
     !! Generic interface to the netcdf read routines
     !!------------------------------------------------------------
     interface get_metadata
-        module procedure get_metadata_2d, get_metadata_2dd, get_metadata_3d, get_metadata_nod, get_metadata_var, get_metadata_exch
+        module procedure get_metadata_2d, get_metadata_2dd, get_metadata_3d, get_metadata_nod, get_metadata_var
     end interface
 
 
@@ -40,53 +39,6 @@ contains
         !meta_data%two_d     = .False.
         !meta_data%three_d   = .False.
     end function get_metadata_nod
-
-    !>------------------------------------------------------------
-    !! Get generic metadata for an exchangeable object
-    !!
-    !! Sets the internal data pointer to point to the input data provided
-    !!------------------------------------------------------------
-    function get_metadata_exch(var_idx, input_var) result(meta_data)
-        implicit none
-        integer, intent(in)              :: var_idx
-        type(exchangeable_t),intent(in)  :: input_var
-
-        type(variable_t) :: meta_data       ! function result
-        !integer          :: local_shape(2)  ! store the shape of the input data array
-
-        if (var_idx>kMAX_STORAGE_VARS) then
-            stop "Invalid variable metadata requested"
-        endif
-
-        if (.not.allocated(var_meta)) call init_var_meta()
-
-        meta_data = var_meta(var_idx)
-
-        meta_data%two_d     = input_var%meta_data%two_d
-        meta_data%three_d   = input_var%meta_data%three_d
-        meta_data%grid      = input_var%meta_data%grid
-        if(meta_data%two_d) then
-            if (allocated(input_var%meta_data%dim_len)) allocate(meta_data%dim_len,source=input_var%meta_data%dim_len)
-            if (allocated(input_var%meta_data%global_dim_len)) allocate(meta_data%global_dim_len,source=input_var%meta_data%global_dim_len)
-
-            meta_data%data_2d => input_var%meta_data%data_2d
-        else
-            if (allocated(input_var%meta_data%dim_len)) then
-                allocate(meta_data%dim_len(3))
-                meta_data%dim_len(1) = input_var%meta_data%dim_len(1)
-                meta_data%dim_len(2) = input_var%meta_data%dim_len(3)
-                meta_data%dim_len(3) = input_var%meta_data%dim_len(2)
-            endif
-            if (allocated(input_var%meta_data%global_dim_len)) then
-                allocate(meta_data%global_dim_len(3))
-                meta_data%global_dim_len(1) = input_var%meta_data%global_dim_len(1)
-                meta_data%global_dim_len(2) = input_var%meta_data%global_dim_len(3)
-                meta_data%global_dim_len(3) = input_var%meta_data%global_dim_len(2)
-            endif
-            meta_data%data_3d => input_var%meta_data%data_3d
-        endif
-
-    end function get_metadata_exch
 
     !>------------------------------------------------------------
     !! Get generic metadata for a variable

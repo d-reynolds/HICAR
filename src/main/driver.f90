@@ -29,7 +29,7 @@ program icar
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
     use icar_constants
-    use wind_iterative,     only : finalize_iter_winds
+    use wind_iterative,     only : init_petsc_comms, finalize_iter_winds
     use ioserver_interface, only : ioserver_t
     use ioclient_interface, only : ioclient_t
     use io_routines,        only : io_write
@@ -59,6 +59,7 @@ program icar
 
     !if (this_image()==1) write(*,*) 'Before MPI init'
     !if (this_image()==1) flush(output_unit)
+
     !Initialize MPI if needed
     init_flag = .False.
     call MPI_initialized(init_flag, ierr)
@@ -69,7 +70,8 @@ program icar
 
     !Determine split of processes which will become I/O servers and which will be compute tasks
     !Also sets constants for the program to keep track of this splitting
-    call split_processes(exec_team)
+    call split_processes(exec_team, domain, ioserver)
+
     call small_time_delta%set(1)
     
     call total_timer%start()
@@ -359,8 +361,10 @@ program icar
     if (this_image()==1) write(*,*) "wind bal       : ", t_val
     t_val = timer_mean(diagnostic_timer)
     if (this_image()==1) write(*,*) "diagnostic     : ", t_val
-    t_val = timer_mean(exch_timer)
-    if (this_image()==1) write(*,*) "halo-exchange  : ", t_val 
+    t_val = timer_mean(send_timer)
+    if (this_image()==1) write(*,*) "halo-exchange(send)  : ", t_val 
+    t_val = timer_mean(ret_timer)
+    if (this_image()==1) write(*,*) "halo-exchange(retrieve)  : ", t_val
     t_val = timer_mean(wind_timer)
     if (this_image()==1) write(*,*) "winds          : ", t_val 
     CALL MPI_Finalize()
@@ -414,13 +418,18 @@ contains
     end function
 
 
-    subroutine split_processes(exec_team)
+    subroutine split_processes(exec_team, domain, ioserver)
         implicit none
         integer, intent(inout) :: exec_team
-        integer :: n, k, name_len, ierr, node_name_i
+        type(domain_t), intent(inout) :: domain
+        type(ioserver_t), intent(inout) :: ioserver
+
+        integer :: n, k, name_len, color, ierr, node_name_i
         character(len=MPI_MAX_PROCESSOR_NAME) :: node_name
         integer, allocatable :: node_names(:) 
-        
+
+        type(MPI_Comm) :: globalComm, splitComm
+ 
         allocate(node_names(num_images()))
 
         node_names = 0
@@ -451,10 +460,26 @@ contains
  
         if (mod(this_image(),(num_images()/kNUM_SERVERS)) == 0) then
             exec_team = kIO_TEAM
+            color = 1
         else
             exec_team = kCOMPUTE_TEAM
+            color = 0
         endif
-        
+       
+        CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
+        ! Assign all images in the IO team to the IO_comms MPI communicator. Use image indexing within initial team to get indexing of global MPI ranks
+        CALL MPI_Comm_split( globalComm, color, (this_image()-1), splitComm, ierr )
+
+        select case (exec_team)
+        case (kCOMPUTE_TEAM)
+            CALL MPI_Comm_dup( splitComm, domain%IO_comms, ierr )
+
+            if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) call init_petsc_comms(domain)
+        case (kIO_TEAM)
+            CALL MPI_Comm_dup( splitComm, ioserver%IO_comms, ierr )
+
+        end select
+
         k = 1
         allocate(DOM_IMG_INDX(kNUM_COMPUTE))
         do n = 1,kNUM_COMPUTE
@@ -478,9 +503,8 @@ contains
 
         integer, allocatable, dimension(:) :: i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r
         integer, allocatable, dimension(:,:) :: childrens
-        integer :: nx_w, ny_w, nz_w, n_w, nx_r, ny_r, nz_r, n_r, n_restart, i, color, ierr
+        integer :: nx_w, ny_w, nz_w, n_w, nx_r, ny_r, nz_r, n_r, n_restart, i, ierr
         integer :: out_i, rst_i, var_indx
-        type(MPI_Comm) :: globalComm, splitComm
 
         allocate(i_s_w(num_images())); allocate(i_e_w(num_images()))
         allocate(i_s_r(num_images())); allocate(i_e_r(num_images()))
@@ -502,20 +526,10 @@ contains
         
         childrens = 0
         
-        select case (exec_team)
-        case (kCOMPUTE_TEAM)
-            color = 0
-        case(kIO_TEAM)
-            color = 1
-        end select
-
-        CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
-        ! Assign all images in the IO team to the IO_comms MPI communicator. Use image indexing within initial team to get indexing of global MPI ranks
-        CALL MPI_Comm_split( globalComm, color, (this_image()-1), splitComm, ierr )
         
         select case (exec_team)
         case (kCOMPUTE_TEAM)
-            CALL MPI_Comm_dup( splitComm, domain%IO_comms, ierr )
+            if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) call init_petsc_comms(domain)
             call ioclient%init(domain, boundary, options)
             
             i_s_w(this_image()) = ioclient%i_s_w; i_e_w(this_image()) = ioclient%i_e_w
@@ -545,7 +559,6 @@ contains
 
         select case(exec_team)
         case(kIO_TEAM)
-            CALL MPI_Comm_dup( splitComm, ioserver%IO_comms, ierr )
             call ioserver%init(domain, options,i_s_r,i_e_r,k_s_r,k_e_r,j_s_r,j_e_r,i_s_w,i_e_w,k_s_w,k_e_w,j_s_w,j_e_w)
             
             if (ioserver%server_id==1) then

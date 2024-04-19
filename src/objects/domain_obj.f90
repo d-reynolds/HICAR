@@ -24,7 +24,7 @@ submodule(domain_interface) domain_implementation
     implicit none
 
     interface setup
-        module procedure setup_var, setup_exch
+        module procedure setup_var
     end interface
     
     real, allocatable :: mod_temp_3d(:,:,:), surf_temp_1(:,:), surf_temp_2(:,:)
@@ -58,7 +58,7 @@ contains
 
         call set_var_lists(this, options)
 
-        if (options%parameters%batched_exch) call setup_batch_exch(this)
+        call this%halo%init(this%exch_vars, this%adv_vars, this%grid, this%IO_comms)
 
         call init_relax_filters(this)
 
@@ -71,27 +71,27 @@ contains
         integer :: var_list(kMAX_STORAGE_VARS)
 
         !Advection variables -- these are exchanged AND advected
-        if (options%vars_to_advect(kVARS%water_vapor)>0) call this%adv_vars%add_var('qv', this%water_vapor%meta_data)
-        if (options%vars_to_advect(kVARS%potential_temperature)>0) call this%adv_vars%add_var('theta', this%potential_temperature%meta_data) 
-        if (options%vars_to_advect(kVARS%cloud_water)>0) call this%adv_vars%add_var('qc', this%cloud_water_mass%meta_data)                  
-        if (options%vars_to_advect(kVARS%rain_in_air)>0) call this%adv_vars%add_var('qr', this%rain_mass%meta_data)                    
-        if (options%vars_to_advect(kVARS%snow_in_air)>0) call this%adv_vars%add_var('qs', this%snow_mass%meta_data)                    
-        if (options%vars_to_advect(kVARS%cloud_ice)>0) call this%adv_vars%add_var('qi', this%cloud_ice_mass%meta_data)                      
-        if (options%vars_to_advect(kVARS%graupel_in_air)>0) call this%adv_vars%add_var('qg', this%graupel_mass%meta_data)                 
-        if (options%vars_to_advect(kVARS%ice_number_concentration)>0)  call this%adv_vars%add_var('ni', this%cloud_ice_number%meta_data)       
-        if (options%vars_to_advect(kVARS%rain_number_concentration)>0) call this%adv_vars%add_var('nr', this%rain_number%meta_data)      
-        if (options%vars_to_advect(kVARS%snow_number_concentration)>0) call this%adv_vars%add_var('ns', this%snow_number%meta_data)      
-        if (options%vars_to_advect(kVARS%graupel_number_concentration)>0) call this%adv_vars%add_var('ng', this%graupel_number%meta_data)   
-        if (options%vars_to_advect(kVARS%ice1_a)>0) call this%adv_vars%add_var('ice1_a', this%ice1_a%meta_data)   
-        if (options%vars_to_advect(kVARS%ice1_c)>0) call this%adv_vars%add_var('ice1_c', this%ice1_c%meta_data)   
-        if (options%vars_to_advect(kVARS%ice2_mass)>0) call this%adv_vars%add_var('ice2_mass', this%ice2_mass%meta_data)   
-        if (options%vars_to_advect(kVARS%ice2_number)>0) call this%adv_vars%add_var('ice2_number', this%ice2_number%meta_data)   
-        if (options%vars_to_advect(kVARS%ice2_a)>0) call this%adv_vars%add_var('ice2_a', this%ice2_a%meta_data)   
-        if (options%vars_to_advect(kVARS%ice2_c)>0) call this%adv_vars%add_var('ice2_c', this%ice2_c%meta_data)   
-        if (options%vars_to_advect(kVARS%ice3_mass)>0) call this%adv_vars%add_var('ice3_mass', this%ice3_mass%meta_data)   
-        if (options%vars_to_advect(kVARS%ice3_number)>0) call this%adv_vars%add_var('ice3_number', this%ice3_number%meta_data)   
-        if (options%vars_to_advect(kVARS%ice3_a)>0) call this%adv_vars%add_var('ice3_a', this%ice3_a%meta_data)   
-        if (options%vars_to_advect(kVARS%ice3_c)>0) call this%adv_vars%add_var('ice3_c', this%ice3_c%meta_data)   
+        if (options%vars_to_advect(kVARS%water_vapor)>0) call this%adv_vars%add_var('qv', this%water_vapor)
+        if (options%vars_to_advect(kVARS%potential_temperature)>0) call this%adv_vars%add_var('theta', this%potential_temperature) 
+        if (options%vars_to_advect(kVARS%cloud_water)>0) call this%adv_vars%add_var('qc', this%cloud_water_mass)                  
+        if (options%vars_to_advect(kVARS%rain_in_air)>0) call this%adv_vars%add_var('qr', this%rain_mass)                    
+        if (options%vars_to_advect(kVARS%snow_in_air)>0) call this%adv_vars%add_var('qs', this%snow_mass)                    
+        if (options%vars_to_advect(kVARS%cloud_ice)>0) call this%adv_vars%add_var('qi', this%cloud_ice_mass)                      
+        if (options%vars_to_advect(kVARS%graupel_in_air)>0) call this%adv_vars%add_var('qg', this%graupel_mass)                 
+        if (options%vars_to_advect(kVARS%ice_number_concentration)>0)  call this%adv_vars%add_var('ni', this%cloud_ice_number)       
+        if (options%vars_to_advect(kVARS%rain_number_concentration)>0) call this%adv_vars%add_var('nr', this%rain_number)      
+        if (options%vars_to_advect(kVARS%snow_number_concentration)>0) call this%adv_vars%add_var('ns', this%snow_number)      
+        if (options%vars_to_advect(kVARS%graupel_number_concentration)>0) call this%adv_vars%add_var('ng', this%graupel_number)   
+        if (options%vars_to_advect(kVARS%ice1_a)>0) call this%adv_vars%add_var('ice1_a', this%ice1_a)   
+        if (options%vars_to_advect(kVARS%ice1_c)>0) call this%adv_vars%add_var('ice1_c', this%ice1_c)   
+        if (options%vars_to_advect(kVARS%ice2_mass)>0) call this%adv_vars%add_var('ice2_mass', this%ice2_mass)   
+        if (options%vars_to_advect(kVARS%ice2_number)>0) call this%adv_vars%add_var('ice2_number', this%ice2_number)   
+        if (options%vars_to_advect(kVARS%ice2_a)>0) call this%adv_vars%add_var('ice2_a', this%ice2_a)   
+        if (options%vars_to_advect(kVARS%ice2_c)>0) call this%adv_vars%add_var('ice2_c', this%ice2_c)   
+        if (options%vars_to_advect(kVARS%ice3_mass)>0) call this%adv_vars%add_var('ice3_mass', this%ice3_mass)   
+        if (options%vars_to_advect(kVARS%ice3_number)>0) call this%adv_vars%add_var('ice3_number', this%ice3_number)   
+        if (options%vars_to_advect(kVARS%ice3_a)>0) call this%adv_vars%add_var('ice3_a', this%ice3_a)   
+        if (options%vars_to_advect(kVARS%ice3_c)>0) call this%adv_vars%add_var('ice3_c', this%ice3_c)   
 
         !Exchange-only variables
         if (options%vars_to_exch(kVARS%sensible_heat)>0) call this%exch_vars%add_var('hfss', this%sensible_heat) 
@@ -103,33 +103,33 @@ contains
         if (options%vars_to_exch(kVARS%Nsnow)>0) call this%exch_vars%add_var('Nsnow', this%Nsnow)   
 
         var_list = options%io_options%vars_for_output + options%vars_for_restart
-        if (0<var_list( kVARS%u) )                          call this%vars_to_out%add_var( trim( get_varname( kVARS%u                            )), this%u%meta_data)
-        if (0<var_list( kVARS%v) )                          call this%vars_to_out%add_var( trim( get_varname( kVARS%v                            )), this%v%meta_data)
-        if (0<var_list( kVARS%w) )                          call this%vars_to_out%add_var( trim( get_varname( kVARS%w                            )), this%w%meta_data)
+        if (0<var_list( kVARS%u) )                          call this%vars_to_out%add_var( trim( get_varname( kVARS%u                            )), this%u)
+        if (0<var_list( kVARS%v) )                          call this%vars_to_out%add_var( trim( get_varname( kVARS%v                            )), this%v)
+        if (0<var_list( kVARS%w) )                          call this%vars_to_out%add_var( trim( get_varname( kVARS%w                            )), this%w)
         if (0<var_list( kVARS%w_real) )                     call this%vars_to_out%add_var( trim( get_varname( kVARS%w_real                       )), this%w_real)
         if (0<var_list( kVARS%nsquared) )                   call this%vars_to_out%add_var( trim( get_varname( kVARS%nsquared                     )), this%nsquared)
-        if (0<var_list( kVARS%water_vapor) )                call this%vars_to_out%add_var( trim( get_varname( kVARS%water_vapor                  )), this%water_vapor%meta_data)
-        if (0<var_list( kVARS%potential_temperature) )      call this%vars_to_out%add_var( trim( get_varname( kVARS%potential_temperature        )), this%potential_temperature%meta_data)
-        if (0<var_list( kVARS%cloud_water) )                call this%vars_to_out%add_var( trim( get_varname( kVARS%cloud_water                  )), this%cloud_water_mass%meta_data)
-        if (0<var_list( kVARS%cloud_number_concentration))  call this%vars_to_out%add_var( trim( get_varname( kVARS%cloud_number_concentration   )), this%cloud_number%meta_data)
-        if (0<var_list( kVARS%cloud_ice) )                  call this%vars_to_out%add_var( trim( get_varname( kVARS%cloud_ice                    )), this%cloud_ice_mass%meta_data)
-        if (0<var_list( kVARS%ice_number_concentration))    call this%vars_to_out%add_var( trim( get_varname( kVARS%ice_number_concentration     )), this%cloud_ice_number%meta_data)
-        if (0<var_list( kVARS%rain_in_air) )                call this%vars_to_out%add_var( trim( get_varname( kVARS%rain_in_air                  )), this%rain_mass%meta_data)
-        if (0<var_list( kVARS%rain_number_concentration))   call this%vars_to_out%add_var( trim( get_varname( kVARS%rain_number_concentration    )), this%rain_number%meta_data)
-        if (0<var_list( kVARS%snow_in_air) )                call this%vars_to_out%add_var( trim( get_varname( kVARS%snow_in_air                  )), this%snow_mass%meta_data)
-        if (0<var_list( kVARS%snow_number_concentration) )  call this%vars_to_out%add_var( trim( get_varname( kVARS%snow_number_concentration    )), this%snow_number%meta_data)
-        if (0<var_list( kVARS%graupel_in_air) )             call this%vars_to_out%add_var( trim( get_varname( kVARS%graupel_in_air               )), this%graupel_mass%meta_data)
-        if (0<var_list( kVARS%graupel_number_concentration))call this%vars_to_out%add_var( trim( get_varname( kVARS%graupel_number_concentration )), this%graupel_number%meta_data)
-        if (0<var_list( kVARS%ice1_a))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice1_a                       )), this%ice1_a%meta_data)
-        if (0<var_list( kVARS%ice1_c))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice1_c                       )), this%ice1_c%meta_data)
-        if (0<var_list( kVARS%ice2_mass))                   call this%vars_to_out%add_var( trim( get_varname( kVARS%ice2_mass                    )), this%ice2_mass%meta_data)
-        if (0<var_list( kVARS%ice2_number))                 call this%vars_to_out%add_var( trim( get_varname( kVARS%ice2_number                  )), this%ice2_number%meta_data)
-        if (0<var_list( kVARS%ice2_a))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice2_a                       )), this%ice2_a%meta_data)
-        if (0<var_list( kVARS%ice2_c))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice2_c                       )), this%ice2_c%meta_data)
-        if (0<var_list( kVARS%ice3_mass))                   call this%vars_to_out%add_var( trim( get_varname( kVARS%ice3_mass                    )), this%ice3_mass%meta_data)
-        if (0<var_list( kVARS%ice3_number))                 call this%vars_to_out%add_var( trim( get_varname( kVARS%ice3_number                  )), this%ice3_number%meta_data)
-        if (0<var_list( kVARS%ice3_a))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice3_a                       )), this%ice3_a%meta_data)
-        if (0<var_list( kVARS%ice3_c))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice3_c                       )), this%ice3_c%meta_data)
+        if (0<var_list( kVARS%water_vapor) )                call this%vars_to_out%add_var( trim( get_varname( kVARS%water_vapor                  )), this%water_vapor)
+        if (0<var_list( kVARS%potential_temperature) )      call this%vars_to_out%add_var( trim( get_varname( kVARS%potential_temperature        )), this%potential_temperature)
+        if (0<var_list( kVARS%cloud_water) )                call this%vars_to_out%add_var( trim( get_varname( kVARS%cloud_water                  )), this%cloud_water_mass)
+        if (0<var_list( kVARS%cloud_number_concentration))  call this%vars_to_out%add_var( trim( get_varname( kVARS%cloud_number_concentration   )), this%cloud_number)
+        if (0<var_list( kVARS%cloud_ice) )                  call this%vars_to_out%add_var( trim( get_varname( kVARS%cloud_ice                    )), this%cloud_ice_mass)
+        if (0<var_list( kVARS%ice_number_concentration))    call this%vars_to_out%add_var( trim( get_varname( kVARS%ice_number_concentration     )), this%cloud_ice_number)
+        if (0<var_list( kVARS%rain_in_air) )                call this%vars_to_out%add_var( trim( get_varname( kVARS%rain_in_air                  )), this%rain_mass)
+        if (0<var_list( kVARS%rain_number_concentration))   call this%vars_to_out%add_var( trim( get_varname( kVARS%rain_number_concentration    )), this%rain_number)
+        if (0<var_list( kVARS%snow_in_air) )                call this%vars_to_out%add_var( trim( get_varname( kVARS%snow_in_air                  )), this%snow_mass)
+        if (0<var_list( kVARS%snow_number_concentration) )  call this%vars_to_out%add_var( trim( get_varname( kVARS%snow_number_concentration    )), this%snow_number)
+        if (0<var_list( kVARS%graupel_in_air) )             call this%vars_to_out%add_var( trim( get_varname( kVARS%graupel_in_air               )), this%graupel_mass)
+        if (0<var_list( kVARS%graupel_number_concentration))call this%vars_to_out%add_var( trim( get_varname( kVARS%graupel_number_concentration )), this%graupel_number)
+        if (0<var_list( kVARS%ice1_a))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice1_a                       )), this%ice1_a)
+        if (0<var_list( kVARS%ice1_c))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice1_c                       )), this%ice1_c)
+        if (0<var_list( kVARS%ice2_mass))                   call this%vars_to_out%add_var( trim( get_varname( kVARS%ice2_mass                    )), this%ice2_mass)
+        if (0<var_list( kVARS%ice2_number))                 call this%vars_to_out%add_var( trim( get_varname( kVARS%ice2_number                  )), this%ice2_number)
+        if (0<var_list( kVARS%ice2_a))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice2_a                       )), this%ice2_a)
+        if (0<var_list( kVARS%ice2_c))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice2_c                       )), this%ice2_c)
+        if (0<var_list( kVARS%ice3_mass))                   call this%vars_to_out%add_var( trim( get_varname( kVARS%ice3_mass                    )), this%ice3_mass)
+        if (0<var_list( kVARS%ice3_number))                 call this%vars_to_out%add_var( trim( get_varname( kVARS%ice3_number                  )), this%ice3_number)
+        if (0<var_list( kVARS%ice3_a))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice3_a                       )), this%ice3_a)
+        if (0<var_list( kVARS%ice3_c))                      call this%vars_to_out%add_var( trim( get_varname( kVARS%ice3_c                       )), this%ice3_c)
 
         if (0<var_list( kVARS%precipitation) )              call this%vars_to_out%add_var( trim( get_varname( kVARS%precipitation                )), this%accumulated_precipitation)
         if (0<var_list( kVARS%convective_precipitation) )   call this%vars_to_out%add_var( trim( get_varname( kVARS%convective_precipitation     )), this%accumulated_convective_pcp)
@@ -344,74 +344,6 @@ contains
     end subroutine set_var_lists
 
     !> -------------------------------
-    !! Initialize the arrays and co-arrays needed to perform a batch exchange
-    !!
-    !! -------------------------------
-    module subroutine setup_batch_exch(this)
-        implicit none
-        class(domain_t),  intent(inout) :: this
-        type(variable_t) :: var
-
-        integer :: n_2d, n_3d = 0
-      
-        ! Loop over all adv_vars and count how many are 3D
-        call this%adv_vars%reset_iterator()
-        
-        do while (this%adv_vars%has_more_elements())
-            var = this%adv_vars%next()
-            if (var%three_d) n_3d = n_3d + 1
-        end do
-        
-        ! Loop over all exch vars and count how many are 3D
-        call this%exch_vars%reset_iterator()
-        
-        do while (this%exch_vars%has_more_elements())
-            var = this%exch_vars%next()
-            if (var%three_d) n_3d = n_3d + 1
-        end do
-        if (this_image()==1) write(*,*) "In Setup Batch Exch"
-        if (this_image()==1) flush(output_unit)
-
-        ! Determine number of 2D and 3D vars present
-        n_2d = (this%adv_vars%n_vars+this%exch_vars%n_vars)-n_3d
-
-        allocate(this%north_in_3d(n_3d,1:(this%grid%ns_halo_nx+this%grid%halo_size*2),&
-                        this%kms:this%kme,1:this%grid%halo_size)[*])
-        allocate(this%south_in_3d(n_3d,1:(this%grid%ns_halo_nx+this%grid%halo_size*2),&
-                        this%kms:this%kme,1:this%grid%halo_size)[*])
-        allocate(this%east_in_3d(n_3d,1:this%grid%halo_size,&
-                        this%kms:this%kme,1:(this%grid%ew_halo_ny+this%grid%halo_size*2))[*])
-        allocate(this%west_in_3d(n_3d,1:this%grid%halo_size,&
-                        this%kms:this%kme,1:(this%grid%ew_halo_ny+this%grid%halo_size*2))[*])
-
-        if (.not.(this%north_boundary)) allocate(this%north_buffer_3d(n_3d,1:(this%grid%ns_halo_nx+this%grid%halo_size*2),&
-                        this%kms:this%kme,1:this%grid%halo_size))
-        if (.not.(this%south_boundary)) allocate(this%south_buffer_3d(n_3d,1:(this%grid%ns_halo_nx+this%grid%halo_size*2),&
-                        this%kms:this%kme,1:this%grid%halo_size))
-        if (.not.(this%east_boundary)) allocate(this%east_buffer_3d(n_3d,1:this%grid%halo_size,&
-                        this%kms:this%kme,1:(this%grid%ew_halo_ny+this%grid%halo_size*2)))
-        if (.not.(this%west_boundary)) allocate(this%west_buffer_3d(n_3d,1:this%grid%halo_size,&
-                        this%kms:this%kme,1:(this%grid%ew_halo_ny+this%grid%halo_size*2)))
-      
-
-        ! If no 2D vars present, don't allocate arrays (nothing should be calling exch 2D then)
-        if (n_2d > 0) then
-            allocate(this%north_in_2d(n_2d,1:(this%grid%ns_halo_nx+this%grid%halo_size*2),1:this%grid%halo_size)[*])
-            allocate(this%south_in_2d(n_2d,1:(this%grid%ns_halo_nx+this%grid%halo_size*2),1:this%grid%halo_size)[*])
-            allocate(this%east_in_2d(n_2d,1:this%grid%halo_size,1:(this%grid%ew_halo_ny+this%grid%halo_size*2))[*])
-            allocate(this%west_in_2d(n_2d,1:this%grid%halo_size,1:(this%grid%ew_halo_ny+this%grid%halo_size*2))[*])
-
-            if (.not.(this%north_boundary)) allocate(this%north_buffer_2d(n_2d,1:(this%grid%ns_halo_nx+this%grid%halo_size*2),1:this%grid%halo_size))
-            if (.not.(this%south_boundary)) allocate(this%south_buffer_2d(n_2d,1:(this%grid%ns_halo_nx+this%grid%halo_size*2),1:this%grid%halo_size))
-            if (.not.(this%east_boundary)) allocate(this%east_buffer_2d(n_2d,1:this%grid%halo_size,1:(this%grid%ew_halo_ny+this%grid%halo_size*2)))
-            if (.not.(this%west_boundary)) allocate(this%west_buffer_2d(n_2d,1:this%grid%halo_size,1:(this%grid%ew_halo_ny+this%grid%halo_size*2)))
-        endif
-        if (this_image()==1) write(*,*) "Made Arrays"
-        if (this_image()==1) flush(output_unit)
-
-    end subroutine setup_batch_exch
-
-    !> -------------------------------
     !! Set up the initial conditions for the domain
     !!
     !! This includes setting up all of the geographic interpolation now that we have the forcing grid
@@ -431,11 +363,12 @@ contains
 
       ! for all variables with a forcing_var /= "", get forcing, interpolate to local domain
       call this%interpolate_forcing(forcing)
-      
+
       if (allocated(this%znw).or.allocated(this%znu)) call init_znu(this)
 
 
       call diagnostic_update(this,options)
+
       call this%enforce_limits()
       this%model_time = options%parameters%start_time
 
@@ -583,325 +516,91 @@ contains
     end subroutine diagnostic_update
 
 
-
     !> -------------------------------
     !! Send the halos from all exchangable objects to their neighbors
     !!
     !! -------------------------------
-    module subroutine halo_send(this)
-      class(domain_t), intent(inout) :: this
-      if (associated(this%water_vapor%data_3d))           call this%water_vapor%send()
-      if (associated(this%potential_temperature%data_3d)) call this%potential_temperature%send()
-      if (associated(this%cloud_water_mass%data_3d))      call this%cloud_water_mass%send()
-      if (associated(this%cloud_number%data_3d))          call this%cloud_number%send()
-      if (associated(this%cloud_ice_mass%data_3d))        call this%cloud_ice_mass%send()
-      if (associated(this%cloud_ice_number%data_3d))      call this%cloud_ice_number%send()
-      if (associated(this%rain_mass%data_3d))             call this%rain_mass%send()
-      if (associated(this%rain_number%data_3d))           call this%rain_number%send()
-      if (associated(this%snow_mass%data_3d))             call this%snow_mass%send()
-      if (associated(this%snow_number%data_3d))           call this%snow_number%send()
-      if (associated(this%graupel_mass%data_3d))          call this%graupel_mass%send()
-      if (associated(this%graupel_number%data_3d))        call this%graupel_number%send()
-      if (associated(this%ice1_a%data_3d))                call this%ice1_a%send()
-      if (associated(this%ice1_c%data_3d))                call this%ice1_c%send()
-      if (associated(this%ice2_mass%data_3d))             call this%ice2_mass%send()
-      if (associated(this%ice2_number%data_3d))           call this%ice2_number%send()
-      if (associated(this%ice2_a%data_3d))                call this%ice2_a%send()
-      if (associated(this%ice2_c%data_3d))                call this%ice2_c%send()
-      if (associated(this%ice3_mass%data_3d))             call this%ice3_mass%send()
-      if (associated(this%ice3_number%data_3d))           call this%ice3_number%send()
-      if (associated(this%ice3_a%data_3d))                call this%ice3_a%send()
-      if (associated(this%ice3_c%data_3d))                call this%ice3_c%send()
+    !module subroutine halo_send(this)
+    !  class(domain_t), intent(inout) :: this
+    !  if (associated(this%water_vapor%data_3d))           call this%water_vapor%send()
+    !  if (associated(this%potential_temperature%data_3d)) call this%potential_temperature%send()
+    !  if (associated(this%cloud_water_mass%data_3d))      call this%cloud_water_mass%send()
+    !  if (associated(this%cloud_number%data_3d))          call this%cloud_number%send()
+    !  if (associated(this%cloud_ice_mass%data_3d))        call this%cloud_ice_mass%send()
+    !  if (associated(this%cloud_ice_number%data_3d))      call this%cloud_ice_number%send()
+    !  if (associated(this%rain_mass%data_3d))             call this%rain_mass%send()
+    !  if (associated(this%rain_number%data_3d))           call this%rain_number%send()
+    !  if (associated(this%snow_mass%data_3d))             call this%snow_mass%send()
+    !  if (associated(this%snow_number%data_3d))           call this%snow_number%send()
+    !  if (associated(this%graupel_mass%data_3d))          call this%graupel_mass%send()
+    !  if (associated(this%graupel_number%data_3d))        call this%graupel_number%send()
+    !  if (associated(this%ice1_a%data_3d))                call this%ice1_a%send()
+    !  if (associated(this%ice1_c%data_3d))                call this%ice1_c%send()
+    !  if (associated(this%ice2_mass%data_3d))             call this%ice2_mass%send()
+    !  if (associated(this%ice2_number%data_3d))           call this%ice2_number%send()
+    !  if (associated(this%ice2_a%data_3d))                call this%ice2_a%send()
+    !  if (associated(this%ice2_c%data_3d))                call this%ice2_c%send()
+    !  if (associated(this%ice3_mass%data_3d))             call this%ice3_mass%send()
+    !  if (associated(this%ice3_number%data_3d))           call this%ice3_number%send()
+    !  if (associated(this%ice3_a%data_3d))                call this%ice3_a%send()
+    !  if (associated(this%ice3_c%data_3d))                call this%ice3_c%send()
 
-    end subroutine
+    !end subroutine
 
     !> -------------------------------
     !! Get the halos from all exchangable objects from their neighbors
     !!
     !! -------------------------------
-    module subroutine halo_retrieve(this, wait_timer)
-      class(domain_t), intent(inout) :: this
-      type(timer_t),   intent(inout) :: wait_timer
+    !module subroutine halo_retrieve(this, wait_timer)
+    !  class(domain_t), intent(inout) :: this
+    !  type(timer_t),   intent(inout) :: wait_timer
       
-      call wait_timer%start()
-      if (associated(this%potential_temperature%data_3d)) call this%potential_temperature%retrieve()! the first retrieve call will sync all
-      call wait_timer%stop()
+    !  call wait_timer%start()
+    !  if (associated(this%potential_temperature%data_3d)) call this%potential_temperature%retrieve()! the first retrieve call will sync all
+    !  call wait_timer%stop()
       
-      if (associated(this%water_vapor%data_3d))           call this%water_vapor%retrieve(no_sync=.True.)
-      if (associated(this%cloud_water_mass%data_3d))      call this%cloud_water_mass%retrieve(no_sync=.True.)
-      if (associated(this%cloud_number%data_3d))          call this%cloud_number%retrieve(no_sync=.True.)
-      if (associated(this%cloud_ice_mass%data_3d))        call this%cloud_ice_mass%retrieve(no_sync=.True.)
-      if (associated(this%cloud_ice_number%data_3d))      call this%cloud_ice_number%retrieve(no_sync=.True.)
-      if (associated(this%rain_mass%data_3d))             call this%rain_mass%retrieve(no_sync=.True.)
-      if (associated(this%rain_number%data_3d))           call this%rain_number%retrieve(no_sync=.True.)
-      if (associated(this%snow_mass%data_3d))             call this%snow_mass%retrieve(no_sync=.True.)
-      if (associated(this%snow_number%data_3d))           call this%snow_number%retrieve(no_sync=.True.)
-      if (associated(this%graupel_mass%data_3d))          call this%graupel_mass%retrieve(no_sync=.True.)
-      if (associated(this%graupel_number%data_3d))        call this%graupel_number%retrieve(no_sync=.True.)
-      if (associated(this%ice1_a%data_3d))                call this%ice1_a%retrieve(no_sync=.True.)
-      if (associated(this%ice1_c%data_3d))                call this%ice1_c%retrieve(no_sync=.True.)
-      if (associated(this%ice2_mass%data_3d))             call this%ice2_mass%retrieve(no_sync=.True.)
-      if (associated(this%ice2_number%data_3d))           call this%ice2_number%retrieve(no_sync=.True.)
-      if (associated(this%ice2_a%data_3d))                call this%ice2_a%retrieve(no_sync=.True.)
-      if (associated(this%ice2_c%data_3d))                call this%ice2_c%retrieve(no_sync=.True.)
-      if (associated(this%ice3_mass%data_3d))             call this%ice3_mass%retrieve(no_sync=.True.)
-      if (associated(this%ice3_number%data_3d))           call this%ice3_number%retrieve(no_sync=.True.)
-      if (associated(this%ice3_a%data_3d))                call this%ice3_a%retrieve(no_sync=.True.)
-      if (associated(this%ice3_c%data_3d))                call this%ice3_c%retrieve(no_sync=.True.)
+    !  if (associated(this%water_vapor%data_3d))           call this%water_vapor%retrieve(no_sync=.True.)
+    !  if (associated(this%cloud_water_mass%data_3d))      call this%cloud_water_mass%retrieve(no_sync=.True.)
+    !  if (associated(this%cloud_number%data_3d))          call this%cloud_number%retrieve(no_sync=.True.)
+    !  if (associated(this%cloud_ice_mass%data_3d))        call this%cloud_ice_mass%retrieve(no_sync=.True.)
+    !  if (associated(this%cloud_ice_number%data_3d))      call this%cloud_ice_number%retrieve(no_sync=.True.)
+    !  if (associated(this%rain_mass%data_3d))             call this%rain_mass%retrieve(no_sync=.True.)
+    !  if (associated(this%rain_number%data_3d))           call this%rain_number%retrieve(no_sync=.True.)
+    !  if (associated(this%snow_mass%data_3d))             call this%snow_mass%retrieve(no_sync=.True.)
+    !  if (associated(this%snow_number%data_3d))           call this%snow_number%retrieve(no_sync=.True.)
+    !  if (associated(this%graupel_mass%data_3d))          call this%graupel_mass%retrieve(no_sync=.True.)
+    !  if (associated(this%graupel_number%data_3d))        call this%graupel_number%retrieve(no_sync=.True.)
+    !  if (associated(this%ice1_a%data_3d))                call this%ice1_a%retrieve(no_sync=.True.)
+    !  if (associated(this%ice1_c%data_3d))                call this%ice1_c%retrieve(no_sync=.True.)
+    !  if (associated(this%ice2_mass%data_3d))             call this%ice2_mass%retrieve(no_sync=.True.)
+    !  if (associated(this%ice2_number%data_3d))           call this%ice2_number%retrieve(no_sync=.True.)
+    !  if (associated(this%ice2_a%data_3d))                call this%ice2_a%retrieve(no_sync=.True.)
+    !  if (associated(this%ice2_c%data_3d))                call this%ice2_c%retrieve(no_sync=.True.)
+    !  if (associated(this%ice3_mass%data_3d))             call this%ice3_mass%retrieve(no_sync=.True.)
+    !  if (associated(this%ice3_number%data_3d))           call this%ice3_number%retrieve(no_sync=.True.)
+    !  if (associated(this%ice3_a%data_3d))                call this%ice3_a%retrieve(no_sync=.True.)
+    !  if (associated(this%ice3_c%data_3d))                call this%ice3_c%retrieve(no_sync=.True.)
 
-    end subroutine
+    !end subroutine
 
     !> -------------------------------
     !! Send and get the halos from all exchangable objects to/from their neighbors
     !!
     !! -------------------------------
-    module subroutine halo_exchange(this, send_timer, ret_timer, wait_timer)
-      class(domain_t), intent(inout) :: this
-      type(timer_t),   intent(inout) :: send_timer, ret_timer, wait_timer
+    !module subroutine halo_exchange_old(this, send_timer, ret_timer, wait_timer)
+    !  class(domain_t), intent(inout) :: this
+    !  type(timer_t),   intent(inout) :: send_timer, ret_timer, wait_timer
       
-      call send_timer%start()
-      call this%halo_send()
-      call send_timer%stop()
+    !  call send_timer%start()
+    !  call this%halo_send()
+    !  call send_timer%stop()
 
-      call ret_timer%start()
-      call this%halo_retrieve(wait_timer)
-      call ret_timer%stop()
+    !  call ret_timer%start()
+    !  call this%halo_retrieve(wait_timer)
+    !  call ret_timer%stop()
 
-    end subroutine
-    
-    module subroutine halo_3d_send_batch(this, exch_var_only)
-        class(domain_t), intent(inout) :: this
-        logical, intent(in) :: exch_var_only
-        
-        type(variable_t) :: var
-        integer :: n, k_max
-
-        call this%adv_vars%reset_iterator()
-        call this%exch_vars%reset_iterator()
-        n = 1
-        ! Now iterate through the dictionary as long as there are more elements present
-        if (.not.(exch_var_only)) then
-            do while (this%adv_vars%has_more_elements())
-                ! get the next variable
-                var = this%adv_vars%next()
-                if (var%three_d) then
-                    if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+3),:,:) = &
-                            var%data_3d(this%its-1:this%ite+1,:,(this%jte-this%grid%halo_size+1):this%jte)
-                    if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+3),:,:) = &
-                            var%data_3d(this%its-1:this%ite+1,:,this%jts:(this%jts+this%grid%halo_size-1))
-                    if (.not.(this%east_boundary)) this%east_buffer_3d(n,:,:,1:(this%jte-this%jts+3)) = &
-                            var%data_3d((this%ite-this%grid%halo_size+1):this%ite,:,this%jts-1:this%jte+1)
-                    if (.not.(this%west_boundary)) this%west_buffer_3d(n,:,:,1:(this%jte-this%jts+3)) = &
-                            var%data_3d(this%its:(this%its+this%grid%halo_size)-1,:,this%jts-1:this%jte+1)
-
-                    n = n+1
-                endif
-            enddo
-        endif
-
-        ! Now iterate through the exchange-only objects as long as there are more elements present
-        do while (this%exch_vars%has_more_elements())
-            ! get the next variable
-            var = this%exch_vars%next()
-            if (var%three_d) then
-                k_max = ubound(var%data_3d,2)
-                if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+3),1:k_max,:) = &
-                        var%data_3d(this%its-1:this%ite+1,1:k_max,(this%jte-this%grid%halo_size+1):this%jte)
-                if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+3),1:k_max,:) = &
-                        var%data_3d(this%its-1:this%ite+1,1:k_max,this%jts:(this%jts+this%grid%halo_size-1))
-                if (.not.(this%east_boundary)) this%east_buffer_3d(n,:,1:k_max,1:(this%jte-this%jts+3)) = &
-                        var%data_3d((this%ite-this%grid%halo_size+1):this%ite,1:k_max,this%jts-1:this%jte+1)
-                if (.not.(this%west_boundary)) this%west_buffer_3d(n,:,1:k_max,1:(this%jte-this%jts+3)) = &
-                        var%data_3d(this%its:(this%its+this%grid%halo_size)-1,1:k_max,this%jts-1:this%jte+1)
-
-                n = n+1
-            endif
-        enddo
-
-        if (.not.(this%north_boundary)) then
-            !DIR$ PGAS DEFER_SYNC
-            this%south_in_3d(:,:,:,:)[this%north_neighbor] = this%north_buffer_3d(:,:,:,:)
-        endif
-        if (.not.(this%south_boundary)) then
-            !DIR$ PGAS DEFER_SYNC
-            this%north_in_3d(:,:,:,:)[this%south_neighbor] = this%south_buffer_3d(:,:,:,:)
-        endif
-        if (.not.(this%east_boundary)) then
-            !DIR$ PGAS DEFER_SYNC
-            this%west_in_3d(:,:,:,:)[this%east_neighbor] = this%east_buffer_3d(:,:,:,:)
-        endif
-        if (.not.(this%west_boundary)) then
-            !DIR$ PGAS DEFER_SYNC
-            this%east_in_3d(:,:,:,:)[this%west_neighbor] = this%west_buffer_3d(:,:,:,:)
-        endif
-
-    end subroutine halo_3d_send_batch
-
-    module subroutine halo_3d_retrieve_batch(this, exch_var_only, wait_timer)
-        class(domain_t), intent(inout) :: this
-        logical, intent(in) :: exch_var_only
-        type(timer_t), optional,  intent(inout) :: wait_timer
-        
-        type(variable_t) :: var
-        integer :: n, k_max
-
-        if (present(wait_timer)) call wait_timer%start()
-        sync images( this%neighbors )
-        if (present(wait_timer)) call wait_timer%stop()
-
-        call this%adv_vars%reset_iterator()
-        call this%exch_vars%reset_iterator()
-        n = 1
-        ! Now iterate through the dictionary as long as there are more elements present
-        if (.not.(exch_var_only)) then
-            do while (this%adv_vars%has_more_elements())
-                ! get the next variable
-                var = this%adv_vars%next()
-                if (var%three_d) then
-                    if (.not.(this%north_boundary)) var%data_3d(this%its-1:this%ite+1,:,(this%jte+1):this%jme) = &
-                            this%north_in_3d(n,1:(this%ite-this%its+3),:,:)
-                    if (.not.(this%south_boundary)) var%data_3d(this%its-1:this%ite+1,:,this%jms:(this%jts-1)) = &
-                            this%south_in_3d(n,1:(this%ite-this%its+3),:,:)
-                    if (.not.(this%east_boundary)) var%data_3d((this%ite+1):this%ime,:,this%jts-1:this%jte+1) = &
-                            this%east_in_3d(n,:,:,1:(this%jte-this%jts+3))
-                    if (.not.(this%west_boundary)) var%data_3d(this%ims:(this%its-1),:,this%jts-1:this%jte+1) = &
-                            this%west_in_3d(n,:,:,1:(this%jte-this%jts+3))
-                    n = n+1
-                endif
-            enddo
-        endif
-    
-        ! Now iterate through the exchange-only objects as long as there are more elements present
-        do while (this%exch_vars%has_more_elements())
-            ! get the next variable
-            var = this%exch_vars%next()
-            if (var%three_d) then
-                k_max = ubound(var%data_3d,2)
-                if (.not.(this%north_boundary)) var%data_3d(this%its-1:this%ite+1,1:k_max,(this%jte+1):this%jme) = &
-                        this%north_in_3d(n,1:(this%ite-this%its+3),1:k_max,:)
-                if (.not.(this%south_boundary)) var%data_3d(this%its-1:this%ite+1,1:k_max,this%jms:(this%jts-1)) = &
-                        this%south_in_3d(n,1:(this%ite-this%its+3),1:k_max,:)
-                if (.not.(this%east_boundary)) var%data_3d((this%ite+1):this%ime,1:k_max,this%jts-1:this%jte+1) = &
-                        this%east_in_3d(n,:,1:k_max,1:(this%jte-this%jts+3))
-                if (.not.(this%west_boundary)) var%data_3d(this%ims:(this%its-1),1:k_max,this%jts-1:this%jte+1) = &
-                        this%west_in_3d(n,:,1:k_max,1:(this%jte-this%jts+3))
-                n = n+1
-            endif
-        enddo
-
-    
-    end subroutine halo_3d_retrieve_batch
-
-    module subroutine halo_2d_send_batch(this)
-        class(domain_t), intent(inout) :: this
-        type(variable_t) :: var
-        integer :: n
-
-        call this%exch_vars%reset_iterator()
-        n = 1
-        ! Now iterate through the exchange-only objects as long as there are more elements present
-        do while (this%exch_vars%has_more_elements())
-            ! get the next variable
-            var = this%exch_vars%next()
-            if (var%two_d) then
-                if (.not.(this%north_boundary)) this%north_buffer_2d(n,1:(this%ite-this%its+3),:) = &
-                        var%data_2d(this%its-1:this%ite+1,(this%jte-this%grid%halo_size+1):this%jte)
-                if (.not.(this%south_boundary)) this%south_buffer_2d(n,1:(this%ite-this%its+3),:) = &
-                        var%data_2d(this%its-1:this%ite+1,this%jts:(this%jts+this%grid%halo_size-1))
-                if (.not.(this%east_boundary)) this%east_buffer_2d(n,:,1:(this%jte-this%jts+3)) = &
-                        var%data_2d((this%ite-this%grid%halo_size+1):this%ite,this%jts-1:this%jte+1)
-                if (.not.(this%west_boundary)) this%west_buffer_2d(n,:,1:(this%jte-this%jts+3)) = &
-                        var%data_2d(this%its:(this%its+this%grid%halo_size)-1,this%jts-1:this%jte+1)
-
-                n = n+1
-            endif
-        enddo
-
-        if (.not.(this%north_boundary)) then
-            !DIR$ PGAS DEFER_SYNC
-            this%south_in_2d(:,:,:)[this%north_neighbor] = this%north_buffer_2d(:,:,:)
-        endif
-        if (.not.(this%south_boundary)) then
-            !DIR$ PGAS DEFER_SYNC
-            this%north_in_2d(:,:,:)[this%south_neighbor] = this%south_buffer_2d(:,:,:)
-        endif
-        if (.not.(this%east_boundary)) then
-            !DIR$ PGAS DEFER_SYNC
-            this%west_in_2d(:,:,:)[this%east_neighbor] = this%east_buffer_2d(:,:,:)
-        endif
-        if (.not.(this%west_boundary)) then
-            !DIR$ PGAS DEFER_SYNC
-            this%east_in_2d(:,:,:)[this%west_neighbor] = this%west_buffer_2d(:,:,:)
-        endif
-
-    end subroutine halo_2d_send_batch
-
-    module subroutine halo_2d_retrieve_batch(this)
-        class(domain_t), intent(inout) :: this
-        type(variable_t) :: var
-        integer :: n
-
-        sync images( this%neighbors )
-
-        call this%exch_vars%reset_iterator()
-        n = 1    
-        ! Now iterate through the exchange-only objects as long as there are more elements present
-        do while (this%exch_vars%has_more_elements())
-            ! get the next variable
-            var = this%exch_vars%next()
-            if (var%two_d) then
-                if (.not.(this%north_boundary)) var%data_2d(this%its-1:this%ite+1,(this%jte+1):this%jme) = this%north_in_2d(n,1:(this%ite-this%its+3),:)
-                if (.not.(this%south_boundary)) var%data_2d(this%its-1:this%ite+1,this%jms:(this%jts-1)) = this%south_in_2d(n,1:(this%ite-this%its+3),:)
-                if (.not.(this%east_boundary)) var%data_2d((this%ite+1):this%ime,this%jts-1:this%jte+1) = this%east_in_2d(n,:,1:(this%jte-this%jts+3))
-                if (.not.(this%west_boundary)) var%data_2d(this%ims:(this%its-1),this%jts-1:this%jte+1) = this%west_in_2d(n,:,1:(this%jte-this%jts+3))
-                n = n+1
-            endif
-        enddo
-
-    
-    end subroutine halo_2d_retrieve_batch
-
-    !> -------------------------------
-    !! Send and get the data from all exch+adv objects to/from their neighbors (3D)
-    !!
-    !! -------------------------------
-    module subroutine halo_3d_exchange_batch(this, send_timer, ret_timer, wait_timer, exch_var_only)
-        class(domain_t), intent(inout) :: this
-        type(timer_t),   optional, intent(inout) :: send_timer, ret_timer, wait_timer
-        logical, optional, intent(in) :: exch_var_only
-        
-        logical :: exch_only
-        
-        exch_only = .False.
-        if (present(exch_var_only)) exch_only = exch_var_only
-
-        if (present(send_timer)) call send_timer%start()
-        call this%halo_3d_send_batch(exch_var_only=exch_only)
-        if (present(send_timer)) call send_timer%stop()
-
-        if (present(ret_timer)) call ret_timer%start()
-        if (present(wait_timer)) then
-            call this%halo_3d_retrieve_batch(exch_only,wait_timer)
-        else
-            call this%halo_3d_retrieve_batch(exch_only)
-        endif
-        if (present(ret_timer)) call ret_timer%stop()
-    end subroutine
-
-
-    !> -------------------------------
-    !! Send and get the data from all exch+adv objects to/from their neighbors (2D)
-    !!
-    !! -------------------------------
-    module subroutine halo_2d_exchange_batch(this)
-        class(domain_t), intent(inout) :: this
-        
-        call this%halo_2d_send_batch()
-
-        call this%halo_2d_retrieve_batch()
-    end subroutine
-
-
+    !end subroutine
+   
     !> -------------------------------
     !! Allocate and or initialize all domain variables if they have been requested
     !!
@@ -1278,41 +977,6 @@ contains
         endif
 
     end subroutine
-
-
-    !> -------------------------------
-    !! Setup an exchangeable variable.
-    !!
-    !! Initializes the variable
-    !! including the forcing_variable if it was set
-    !! and adds that variable to the list of variables that has forcing data if the list is supplied
-    !! and the forcing_var is both present and not blank ("")
-    !!
-    !! -------------------------------
-    subroutine setup_exch(var, grid, forcing_var, list, force_boundaries)
-        implicit none
-        type(exchangeable_t),   intent(inout) :: var
-        type(grid_t),           intent(in)    :: grid
-        character(len=*),       intent(in),   optional :: forcing_var
-        type(var_dict_t),       intent(inout),optional :: list
-        logical,                intent(in),   optional :: force_boundaries
-
-        if (present(forcing_var)) then
-            call var%initialize(grid, forcing_var=forcing_var)
-
-            if (present(list)) then
-                if (Len(Trim(forcing_var)) /= 0) then
-                    if (present(force_boundaries)) var%meta_data%force_boundaries = force_boundaries
-                    call list%add_var(forcing_var, var%meta_data)
-                endif
-            endif
-        else
-
-            call var%initialize(grid)
-        endif
-
-    end subroutine
-
 
     !> ---------------------------------
     !! Read the core model variables from disk
@@ -2994,7 +2658,7 @@ contains
         type(options_t), intent(in)     :: options
 
         real, allocatable :: temporary_data(:,:)
-        integer :: nx_global, ny_global, nz_global, nsmooth, n_neighbors, current, adv_order, my_index
+        integer :: nx_global, ny_global, nz_global, nsmooth, adv_order
 
         nsmooth = max(1, int(options%parameters%smooth_wind_distance / options%parameters%dx))
         if (options%parameters%smooth_wind_distance == 0.0) nsmooth = 0
@@ -3027,27 +2691,27 @@ contains
         call this%v_grid%set_grid_dimensions( nx_global, ny_global, nz_global,adv_order=adv_order, ny_extra = 1)
 
         ! for 2D mass variables
-        call this%grid2d%set_grid_dimensions( nx_global, ny_global, 0,adv_order=adv_order)
+        call this%grid2d%set_grid_dimensions( nx_global, ny_global, 0, global_nz=nz_global, adv_order=adv_order)
 
         ! setup a 2D lat/lon grid extended by nsmooth grid cells so that smoothing can take place "across" images
         ! This just sets up the fields to interpolate u and v to so that the input data are handled on an extended
         ! grid.  They are then subset to the u_grid and v_grids above before actual use.
-        call this%u_grid2d%set_grid_dimensions(     nx_global, ny_global, 0,adv_order=adv_order, nx_extra = 1)
+        call this%u_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, global_nz=nz_global, adv_order=adv_order, nx_extra = 1)
 
         ! handle the v-grid too
-        call this%v_grid2d%set_grid_dimensions(     nx_global, ny_global, 0,adv_order=adv_order, ny_extra = 1)
+        call this%v_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, global_nz=nz_global, adv_order=adv_order, ny_extra = 1)
         
-        call this%grid_soil%set_grid_dimensions(         nx_global, ny_global, kSOIL_GRID_Z,adv_order=adv_order)
-        call this%grid_snow%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z,adv_order=adv_order)
-        call this%grid_snowsoil%set_grid_dimensions(     nx_global, ny_global, kSNOWSOIL_GRID_Z,adv_order=adv_order)
-        call this%grid_soilcomp%set_grid_dimensions(     nx_global, ny_global, kSOILCOMP_GRID_Z,adv_order=adv_order)
-        call this%grid_gecros%set_grid_dimensions(       nx_global, ny_global, kGECROS_GRID_Z,adv_order=adv_order)
-        call this%grid_croptype%set_grid_dimensions(     nx_global, ny_global, kCROP_GRID_Z,adv_order=adv_order)
-        call this%grid_monthly%set_grid_dimensions(      nx_global, ny_global, kMONTH_GRID_Z,adv_order=adv_order)
-        call this%grid_lake%set_grid_dimensions(         nx_global, ny_global, kLAKE_Z,adv_order=adv_order)
-        call this%grid_lake_soisno%set_grid_dimensions(  nx_global, ny_global, kLAKE_SOISNO_Z,adv_order=adv_order)
-        call this%grid_lake_soi%set_grid_dimensions(     nx_global, ny_global, kLAKE_SOI_Z,adv_order=adv_order)
-        call this%grid_lake_soisno_1%set_grid_dimensions(nx_global, ny_global, kLAKE_SOISNO_1_Z,adv_order=adv_order)
+        call this%grid_soil%set_grid_dimensions(         nx_global, ny_global, kSOIL_GRID_Z, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_snow%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_snowsoil%set_grid_dimensions(     nx_global, ny_global, kSNOWSOIL_GRID_Z, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_soilcomp%set_grid_dimensions(     nx_global, ny_global, kSOILCOMP_GRID_Z, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_gecros%set_grid_dimensions(       nx_global, ny_global, kGECROS_GRID_Z, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_croptype%set_grid_dimensions(     nx_global, ny_global, kCROP_GRID_Z, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_monthly%set_grid_dimensions(      nx_global, ny_global, kMONTH_GRID_Z, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_lake%set_grid_dimensions(         nx_global, ny_global, kLAKE_Z, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_lake_soisno%set_grid_dimensions(  nx_global, ny_global, kLAKE_SOISNO_Z, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_lake_soi%set_grid_dimensions(     nx_global, ny_global, kLAKE_SOI_Z, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_lake_soisno_1%set_grid_dimensions(nx_global, ny_global, kLAKE_SOISNO_1_Z, global_nz=nz_global, adv_order=adv_order)
         call this%grid_hlm%set_grid_dimensions(     nx_global, ny_global, 90,adv_order=adv_order) !! MJ added
 
 
@@ -3081,83 +2745,7 @@ contains
         this%khs=this%grid%kms;                                          this%khe=this%grid%kme
 
 
-        my_index = FINDLOC(DOM_IMG_INDX,this_image(),dim=1)
-        !If we were found/are a compute process
-        if (my_index > 0) then
-            !Compute cardinal direction neighbors
-            if (.not.(this%south_boundary)) this%south_neighbor = DOM_IMG_INDX(my_index - this%grid%ximages)
-            if (.not.(this%north_boundary)) this%north_neighbor = DOM_IMG_INDX(my_index + this%grid%ximages)
-            if (.not.(this%east_boundary)) this%east_neighbor  = DOM_IMG_INDX(my_index + 1)
-            if (.not.(this%west_boundary)) this%west_neighbor  = DOM_IMG_INDX(my_index - 1)
 
-            n_neighbors = merge(0,1,this%south_boundary)  &
-                     +merge(0,1,this%north_boundary)  &
-                     +merge(0,1,this%east_boundary)   &
-                     +merge(0,1,this%west_boundary)
-            n_neighbors = max(1, n_neighbors)
-
-            allocate(this%neighbors(n_neighbors))
-
-            current = 1
-            if (.not. this%south_boundary) then
-                this%neighbors(current) = this%south_neighbor
-                current = current+1
-            endif
-            if (.not. this%north_boundary) then
-                this%neighbors(current) = this%north_neighbor
-                current = current+1
-            endif
-            if (.not. this%east_boundary) then
-                this%neighbors(current) = this%east_neighbor
-                current = current+1
-            endif
-            if (.not. this%west_boundary) then
-                this%neighbors(current) = this%west_neighbor
-                current = current+1
-            endif
-            
-        ! if current = 1 then all of the boundaries were set, just store ourself as our "neighbor"
-            if (current == 1) then
-                this%neighbors(current) = this_image()
-            endif
-
-            !Compute diagonal direction neighbors
-            if (.not.(this%south_boundary) .and. .not.(this%west_boundary)) this%southwest_neighbor = DOM_IMG_INDX(my_index - this%grid%ximages - 1)
-            if (.not.(this%north_boundary) .and. .not.(this%west_boundary)) this%northwest_neighbor = DOM_IMG_INDX(my_index + this%grid%ximages - 1)
-            if (.not.(this%south_boundary) .and. .not.(this%east_boundary)) this%southeast_neighbor  = DOM_IMG_INDX(my_index - this%grid%ximages + 1)
-            if (.not.(this%north_boundary) .and. .not.(this%east_boundary)) this%northeast_neighbor  = DOM_IMG_INDX(my_index + this%grid%ximages + 1)
-
-            n_neighbors = merge(1,0,(.not.(this%south_boundary) .and. .not.(this%west_boundary)))  &
-                     +merge(1,0,(.not.(this%north_boundary) .and. .not.(this%west_boundary)))  &
-                     +merge(1,0,(.not.(this%south_boundary) .and. .not.(this%east_boundary)))   &
-                     +merge(1,0,(.not.(this%north_boundary) .and. .not.(this%east_boundary)))
-            n_neighbors = max(1, n_neighbors)
-
-            allocate(this%corner_neighbors(n_neighbors))
-
-            current = 1
-            if (.not.(this%south_boundary) .and. .not.(this%west_boundary)) then
-                this%corner_neighbors(current) = this%southwest_neighbor
-                current = current+1
-            endif
-            if (.not.(this%north_boundary) .and. .not.(this%west_boundary)) then
-                this%corner_neighbors(current) = this%northwest_neighbor
-                current = current+1
-            endif
-            if (.not.(this%south_boundary) .and. .not.(this%east_boundary)) then
-                this%corner_neighbors(current) = this%southeast_neighbor
-                current = current+1
-            endif
-            if (.not.(this%north_boundary) .and. .not.(this%east_boundary)) then
-                this%corner_neighbors(current) = this%northeast_neighbor
-                current = current+1
-            endif
-
-        ! if current = 1 then all of the boundaries were set, just store ourself as our "neighbor"
-            if (current == 1) then
-                this%corner_neighbors(current) = this_image()
-            endif
-        endif
     end subroutine
 
     !> -------------------------------
@@ -3175,28 +2763,28 @@ contains
       if (present(update_in)) update = update_in
 
       if (update) then
-        if (associated(this%water_vapor%meta_data%dqdt_3d)      ) where(this%water_vapor%meta_data%dqdt_3d < 0)           this%water_vapor%meta_data%dqdt_3d = 0
-        if (associated(this%potential_temperature%meta_data%dqdt_3d) ) where(this%potential_temperature%meta_data%dqdt_3d < 0) this%potential_temperature%meta_data%dqdt_3d = 0
-        if (associated(this%cloud_water_mass%meta_data%dqdt_3d) ) where(this%cloud_water_mass%meta_data%dqdt_3d < 0)      this%cloud_water_mass%meta_data%dqdt_3d = 0
-        if (associated(this%cloud_number%meta_data%dqdt_3d)     ) where(this%cloud_number%meta_data%dqdt_3d < 0)          this%cloud_number%meta_data%dqdt_3d = 0
-        if (associated(this%cloud_ice_mass%meta_data%dqdt_3d)   ) where(this%cloud_ice_mass%meta_data%dqdt_3d < 0)        this%cloud_ice_mass%meta_data%dqdt_3d = 0
-        if (associated(this%cloud_ice_number%meta_data%dqdt_3d) ) where(this%cloud_ice_number%meta_data%dqdt_3d < 0)      this%cloud_ice_number%meta_data%dqdt_3d = 0
-        if (associated(this%rain_mass%meta_data%dqdt_3d)        ) where(this%rain_mass%meta_data%dqdt_3d < 0)             this%rain_mass%meta_data%dqdt_3d = 0
-        if (associated(this%rain_number%meta_data%dqdt_3d)      ) where(this%rain_number%meta_data%dqdt_3d < 0)           this%rain_number%meta_data%dqdt_3d = 0
-        if (associated(this%snow_mass%meta_data%dqdt_3d)        ) where(this%snow_mass%meta_data%dqdt_3d < 0)             this%snow_mass%meta_data%dqdt_3d = 0
-        if (associated(this%snow_number%meta_data%dqdt_3d)      ) where(this%snow_number%meta_data%dqdt_3d < 0)           this%snow_number%meta_data%dqdt_3d = 0
-        if (associated(this%graupel_mass%meta_data%dqdt_3d)     ) where(this%graupel_mass%meta_data%dqdt_3d < 0)          this%graupel_mass%meta_data%dqdt_3d = 0
-        if (associated(this%graupel_number%meta_data%dqdt_3d)   ) where(this%graupel_number%meta_data%dqdt_3d < 0)        this%graupel_number%meta_data%dqdt_3d = 0
-        if (associated(this%ice1_a%meta_data%dqdt_3d)           ) where(this%ice1_a%meta_data%dqdt_3d < 0)                this%ice1_a%meta_data%dqdt_3d = 0
-        if (associated(this%ice1_c%meta_data%dqdt_3d)           ) where(this%ice1_c%meta_data%dqdt_3d < 0)                this%ice1_c%meta_data%dqdt_3d = 0
-        if (associated(this%ice2_mass%meta_data%dqdt_3d)        ) where(this%ice2_mass%meta_data%dqdt_3d < 0)             this%ice2_mass%meta_data%dqdt_3d = 0
-        if (associated(this%ice2_number%meta_data%dqdt_3d)      ) where(this%ice2_number%meta_data%dqdt_3d < 0)           this%ice2_number%meta_data%dqdt_3d = 0
-        if (associated(this%ice2_a%meta_data%dqdt_3d)           ) where(this%ice2_a%meta_data%dqdt_3d < 0)                this%ice2_a%meta_data%dqdt_3d = 0
-        if (associated(this%ice2_c%meta_data%dqdt_3d)           ) where(this%ice2_c%meta_data%dqdt_3d < 0)                this%ice2_c%meta_data%dqdt_3d = 0
-        if (associated(this%ice3_mass%meta_data%dqdt_3d)        ) where(this%ice3_mass%meta_data%dqdt_3d < 0)             this%ice3_mass%meta_data%dqdt_3d = 0
-        if (associated(this%ice3_number%meta_data%dqdt_3d)      ) where(this%ice3_number%meta_data%dqdt_3d < 0)           this%ice3_number%meta_data%dqdt_3d = 0
-        if (associated(this%ice3_a%meta_data%dqdt_3d)           ) where(this%ice3_a%meta_data%dqdt_3d < 0)                this%ice3_a%meta_data%dqdt_3d = 0
-        if (associated(this%ice3_c%meta_data%dqdt_3d)           ) where(this%ice3_c%meta_data%dqdt_3d < 0)                this%ice3_c%meta_data%dqdt_3d = 0
+        if (associated(this%water_vapor%dqdt_3d)      ) where(this%water_vapor%dqdt_3d < 0)           this%water_vapor%dqdt_3d = 0
+        if (associated(this%potential_temperature%dqdt_3d) ) where(this%potential_temperature%dqdt_3d < 0) this%potential_temperature%dqdt_3d = 0
+        if (associated(this%cloud_water_mass%dqdt_3d) ) where(this%cloud_water_mass%dqdt_3d < 0)      this%cloud_water_mass%dqdt_3d = 0
+        if (associated(this%cloud_number%dqdt_3d)     ) where(this%cloud_number%dqdt_3d < 0)          this%cloud_number%dqdt_3d = 0
+        if (associated(this%cloud_ice_mass%dqdt_3d)   ) where(this%cloud_ice_mass%dqdt_3d < 0)        this%cloud_ice_mass%dqdt_3d = 0
+        if (associated(this%cloud_ice_number%dqdt_3d) ) where(this%cloud_ice_number%dqdt_3d < 0)      this%cloud_ice_number%dqdt_3d = 0
+        if (associated(this%rain_mass%dqdt_3d)        ) where(this%rain_mass%dqdt_3d < 0)             this%rain_mass%dqdt_3d = 0
+        if (associated(this%rain_number%dqdt_3d)      ) where(this%rain_number%dqdt_3d < 0)           this%rain_number%dqdt_3d = 0
+        if (associated(this%snow_mass%dqdt_3d)        ) where(this%snow_mass%dqdt_3d < 0)             this%snow_mass%dqdt_3d = 0
+        if (associated(this%snow_number%dqdt_3d)      ) where(this%snow_number%dqdt_3d < 0)           this%snow_number%dqdt_3d = 0
+        if (associated(this%graupel_mass%dqdt_3d)     ) where(this%graupel_mass%dqdt_3d < 0)          this%graupel_mass%dqdt_3d = 0
+        if (associated(this%graupel_number%dqdt_3d)   ) where(this%graupel_number%dqdt_3d < 0)        this%graupel_number%dqdt_3d = 0
+        if (associated(this%ice1_a%dqdt_3d)           ) where(this%ice1_a%dqdt_3d < 0)                this%ice1_a%dqdt_3d = 0
+        if (associated(this%ice1_c%dqdt_3d)           ) where(this%ice1_c%dqdt_3d < 0)                this%ice1_c%dqdt_3d = 0
+        if (associated(this%ice2_mass%dqdt_3d)        ) where(this%ice2_mass%dqdt_3d < 0)             this%ice2_mass%dqdt_3d = 0
+        if (associated(this%ice2_number%dqdt_3d)      ) where(this%ice2_number%dqdt_3d < 0)           this%ice2_number%dqdt_3d = 0
+        if (associated(this%ice2_a%dqdt_3d)           ) where(this%ice2_a%dqdt_3d < 0)                this%ice2_a%dqdt_3d = 0
+        if (associated(this%ice2_c%dqdt_3d)           ) where(this%ice2_c%dqdt_3d < 0)                this%ice2_c%dqdt_3d = 0
+        if (associated(this%ice3_mass%dqdt_3d)        ) where(this%ice3_mass%dqdt_3d < 0)             this%ice3_mass%dqdt_3d = 0
+        if (associated(this%ice3_number%dqdt_3d)      ) where(this%ice3_number%dqdt_3d < 0)           this%ice3_number%dqdt_3d = 0
+        if (associated(this%ice3_a%dqdt_3d)           ) where(this%ice3_a%dqdt_3d < 0)                this%ice3_a%dqdt_3d = 0
+        if (associated(this%ice3_c%dqdt_3d)           ) where(this%ice3_c%dqdt_3d < 0)                this%ice3_c%dqdt_3d = 0
 
       else
         if (associated(this%water_vapor%data_3d)           ) where(this%water_vapor%data_3d < 0)             this%water_vapor%data_3d = 0
@@ -3518,7 +3106,7 @@ contains
 
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
-        var_to_update = this%w%meta_data
+        var_to_update = this%w
         var_to_update%dqdt_3d = (var_to_update%dqdt_3d - var_to_update%data_3d) / dt%seconds()
 
     end subroutine
@@ -3631,7 +3219,7 @@ contains
             do j = jms,jme
                 do k = this%kms,this%kme
                     do i = ims,ime
-                        this%w%meta_data%data_3d(i,k,j) = this%w%meta_data%data_3d(i,k,j) + (this%w%meta_data%dqdt_3d(i,k,j) * dt)
+                        this%w%data_3d(i,k,j) = this%w%data_3d(i,k,j) + (this%w%dqdt_3d(i,k,j) * dt)
                     enddo
                 enddo
             enddo
@@ -3695,9 +3283,9 @@ contains
 
             else
                 var_is_pressure = (trim(var_to_interpolate%forcing_var) == trim(this%pressure%forcing_var))
-                var_is_potential_temp = (trim(var_to_interpolate%forcing_var) == trim(this%potential_temperature%meta_data%forcing_var))
-                var_is_u = (trim(var_to_interpolate%forcing_var) == trim(this%u%meta_data%forcing_var))
-                var_is_v = (trim(var_to_interpolate%forcing_var) == trim(this%v%meta_data%forcing_var))
+                var_is_potential_temp = (trim(var_to_interpolate%forcing_var) == trim(this%potential_temperature%forcing_var))
+                var_is_u = (trim(var_to_interpolate%forcing_var) == trim(this%u%forcing_var))
+                var_is_v = (trim(var_to_interpolate%forcing_var) == trim(this%v%forcing_var))
                 
                 !If we are dealing with anything but pressure and temperature (basically mass/number species), consider height above ground
                 !for interpolation. If the user has not selected AGL interpolation in the namelist, this will result in standard z-interpolation
@@ -3727,7 +3315,7 @@ contains
         if (update_only) then
             call adjust_pressure_temp(pressure%dqdt_3d,potential_temp%dqdt_3d, forcing%geo%z, this%geo%z)
             this%pressure%dqdt_3d = pressure%dqdt_3d
-            this%potential_temperature%meta_data%dqdt_3d = potential_temp%dqdt_3d
+            this%potential_temperature%dqdt_3d = potential_temp%dqdt_3d
             !this%w_real%dqdt_3d = 0
         else
             call adjust_pressure_temp(pressure%data_3d,potential_temp%data_3d, forcing%geo%z, this%geo%z)

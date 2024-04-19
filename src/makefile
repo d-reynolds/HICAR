@@ -334,6 +334,10 @@ endif
 
 ASSERT=-DUSE_ASSERTIONS=$(USE_ASSERTIONS)
 
+ifeq ($(COMPILER), cray)
+	COMP += -DCRAY_PE
+endif
+
 ###################################################################
 ###################################################################
 #
@@ -398,8 +402,8 @@ OBJS=	\
 		$(BUILD)variable_dict_obj.o	\
 		$(BUILD)grid_h.o			\
 		$(BUILD)grid_obj.o			\
-		$(BUILD)exchangeable_h.o	\
-		$(BUILD)exchangeable_obj.o	\
+		$(BUILD)halo_h.o	\
+		$(BUILD)halo_obj.o	\
 		$(BUILD)domain_h.o			\
 		$(BUILD)domain_obj.o		\
 		$(BUILD)boundary_h.o		\
@@ -596,7 +600,6 @@ caf_no_forcing_test: $(BUILD)test_caf_no_forcing.o							\
 					$(BUILD)variable_dict_h.o $(BUILD)variable_dict_obj.o	\
 					$(BUILD)time_delta_obj.o $(BUILD)time_obj.o    		\
 					$(BUILD)time_h.o	\
-					$(BUILD)exchangeable_h.o $(BUILD)exchangeable_obj.o \
 					$(BUILD)icar_constants.o $(BUILD)io_routines.o		\
 					$(BUILD)model_tracking.o $(BUILD)string.o           \
 					$(BUILD)assertions.o	 $(BUILD)atm_utilities.o    \ $(BUILD)pbl_utilities.o		\
@@ -730,11 +733,7 @@ $(BUILD)grid_obj.o: $(OBJECTS)grid_obj.f90 $(BUILD)grid_h.o $(BUILD)assertions.o
 
 $(BUILD)grid_h.o: $(OBJECTS)grid_h.f90 $(BUILD)icar_constants.o $(BUILD)wrf_constants.o $(BUILD)io_routines.o
 
-$(BUILD)exchangeable_obj.o: $(OBJECTS)exchangeable_obj.f90 $(BUILD)exchangeable_h.o $(BUILD)assertions.o
-
-$(BUILD)exchangeable_h.o: $(OBJECTS)exchangeable_h.f90 $(BUILD)grid_h.o $(BUILD)variable_h.o $(BUILD)assertions.o
-
-$(BUILD)default_output_metadata.o: $(IO)default_output_metadata.f90 $(BUILD)icar_constants.o $(BUILD)variable_h.o $(BUILD)exchangeable_h.o $(BUILD)meta_data_h.o
+$(BUILD)default_output_metadata.o: $(IO)default_output_metadata.f90 $(BUILD)icar_constants.o $(BUILD)variable_h.o $(BUILD)meta_data_h.o
 
 $(BUILD)ioserver_h.o: $(IO)ioserver_h.f90 $(BUILD)icar_constants.o $(BUILD)time_h.o $(BUILD)output_h.o $(BUILD)options_h.o $(BUILD)reader_h.o $(BUILD)variable_h.o $(BUILD)boundary_h.o $(BUILD)domain_h.o
 $(BUILD)ioserver_obj.o: $(IO)ioserver_obj.f90 $(BUILD)ioserver_h.o $(BUILD)debug_utils.o $(BUILD)timer_h.o
@@ -758,8 +757,12 @@ $(BUILD)boundary_obj.o: $(OBJECTS)boundary_obj.f90 $(BUILD)boundary_h.o					\
 					$(BUILD)io_routines.o $(BUILD)geo_reader.o	\
 					$(BUILD)vinterp.o $(BUILD)array_utilities.o $(BUILD)icar_constants.o $(BUILD)debug_utils.o
 
+$(BUILD)halo_obj.o: $(OBJECTS)halo_obj.f90 $(BUILD)halo_h.o $(BUILD)assertions.o
 
-$(BUILD)domain_h.o: $(OBJECTS)domain_h.f90 $(BUILD)options_h.o $(BUILD)exchangeable_h.o \
+$(BUILD)halo_h.o: $(OBJECTS)halo_h.f90 $(BUILD)variable_dict_h.o $(BUILD)grid_h.o $(BUILD)variable_h.o $(BUILD)assertions.o
+
+
+$(BUILD)domain_h.o: $(OBJECTS)domain_h.f90 $(BUILD)options_h.o  $(BUILD)halo_h.o\
 					$(BUILD)grid_h.o 	$(BUILD)meta_data_h.o $(BUILD)data_structures.o	\
 					$(BUILD)time_h.o 	$(BUILD)boundary_h.o	 						\
 					$(BUILD)time_io.o 	$(BUILD)io_routines.o
@@ -973,7 +976,7 @@ $(BUILD)adv_mpdata.o:$(PHYS)adv_mpdata.f90 $(PHYS)adv_mpdata_FCT_core.f90 $(BUIL
 ###################################################################
 #	Wind related code
 ###################################################################
-$(BUILD)wind.o:$(PHYS)wind.f90  $(BUILD)atm_utilities.o $(BUILD)data_structures.o $(BUILD)boundary_h.o $(BUILD)exchangeable_h.o \
+$(BUILD)wind.o:$(PHYS)wind.f90  $(BUILD)atm_utilities.o $(BUILD)data_structures.o $(BUILD)boundary_h.o \
 				$(BUILD)domain_h.o $(BUILD)variable_h.o $(BUILD)wind_iterative.o $(BUILD)options_h.o $(BUILD)linear_winds.o \
 				$(BUILD)wind_surf.o $(BUILD)wind_thermal.o $(BUILD)wind_iterative_old.o
 

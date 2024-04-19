@@ -3,7 +3,6 @@ module domain_interface
   use mpi_f08
   use options_interface,        only : options_t
   use boundary_interface,       only : boundary_t
-  use exchangeable_interface,   only : exchangeable_t
   use grid_interface,           only : grid_t
   use variable_interface,       only : variable_t
   use variable_dict_interface,  only : var_dict_t
@@ -11,6 +10,7 @@ module domain_interface
   use time_object,              only : Time_type
   use time_delta_object,        only : time_delta_t
   use data_structures,          only : interpolable_type, tendencies_type
+  use halo_interface,           only : halo_t
   use timer_interface,          only : timer_t
 
   implicit none
@@ -27,6 +27,7 @@ module domain_interface
     type(grid_t)         :: grid_soilcomp, grid_gecros, grid_croptype
     type(grid_t)         :: grid_hlm !! MJ added
     type(grid_t)         :: grid_lake , grid_lake_soisno, grid_lake_soi, grid_lake_soisno_1
+    type(halo_t)         :: halo
 
     type(Time_type) :: model_time
 
@@ -35,32 +36,32 @@ module domain_interface
     ! core model species to be advected
 
     ! wind field to control advection
-    type(exchangeable_t) :: u
-    type(exchangeable_t) :: v
-    type(exchangeable_t) :: w
+    type(variable_t) :: u
+    type(variable_t) :: v
+    type(variable_t) :: w
 
-    type(exchangeable_t) :: water_vapor
-    type(exchangeable_t) :: potential_temperature
-    type(exchangeable_t) :: cloud_water_mass
-    type(exchangeable_t) :: cloud_number
-    type(exchangeable_t) :: cloud_ice_mass
-    type(exchangeable_t) :: cloud_ice_number
-    type(exchangeable_t) :: rain_mass
-    type(exchangeable_t) :: rain_number
-    type(exchangeable_t) :: snow_mass
-    type(exchangeable_t) :: snow_number
-    type(exchangeable_t) :: graupel_mass
-    type(exchangeable_t) :: graupel_number
-    type(exchangeable_t) :: ice1_a
-    type(exchangeable_t) :: ice1_c
-    type(exchangeable_t) :: ice2_mass
-    type(exchangeable_t) :: ice2_number
-    type(exchangeable_t) :: ice2_a
-    type(exchangeable_t) :: ice2_c
-    type(exchangeable_t) :: ice3_mass
-    type(exchangeable_t) :: ice3_number
-    type(exchangeable_t) :: ice3_a
-    type(exchangeable_t) :: ice3_c
+    type(variable_t) :: water_vapor
+    type(variable_t) :: potential_temperature
+    type(variable_t) :: cloud_water_mass
+    type(variable_t) :: cloud_number
+    type(variable_t) :: cloud_ice_mass
+    type(variable_t) :: cloud_ice_number
+    type(variable_t) :: rain_mass
+    type(variable_t) :: rain_number
+    type(variable_t) :: snow_mass
+    type(variable_t) :: snow_number
+    type(variable_t) :: graupel_mass
+    type(variable_t) :: graupel_number
+    type(variable_t) :: ice1_a
+    type(variable_t) :: ice1_c
+    type(variable_t) :: ice2_mass
+    type(variable_t) :: ice2_number
+    type(variable_t) :: ice2_a
+    type(variable_t) :: ice2_c
+    type(variable_t) :: ice3_mass
+    type(variable_t) :: ice3_number
+    type(variable_t) :: ice3_a
+    type(variable_t) :: ice3_c
 
     ! other model variables (not advected)
     type(variable_t) :: exner
@@ -373,39 +374,12 @@ module domain_interface
     ! real, allocatable :: transfer_3d(:,:,:)[:]
     ! real, allocatable :: transfer_2d(:,:)[:]
     
-    ! Neighboring images of this image
-    integer, allocatable :: neighbors(:)
-    integer, allocatable :: corner_neighbors(:)
-
-    real, allocatable :: south_in_3d(:,:,:,:)[:]
-    real, allocatable :: north_in_3d(:,:,:,:)[:]
-    real, allocatable :: west_in_3d(:,:,:,:)[:]
-    real, allocatable :: east_in_3d(:,:,:,:)[:]
-
-    real, allocatable :: north_buffer_3d(:,:,:,:)
-    real, allocatable :: south_buffer_3d(:,:,:,:)
-    real, allocatable :: east_buffer_3d(:,:,:,:)
-    real, allocatable :: west_buffer_3d(:,:,:,:)
-
-    real, allocatable :: south_in_2d(:,:,:)[:]
-    real, allocatable :: north_in_2d(:,:,:)[:]
-    real, allocatable :: west_in_2d(:,:,:)[:]
-    real, allocatable :: east_in_2d(:,:,:)[:]
-
-    real, allocatable :: north_buffer_2d(:,:,:)
-    real, allocatable :: south_buffer_2d(:,:,:)
-    real, allocatable :: east_buffer_2d(:,:,:)
-    real, allocatable :: west_buffer_2d(:,:,:)
-
     ! MPI communicator object for doing parallel communications among domain objects
     type(MPI_Comm), public :: IO_comms
 
     ! contains the size of the domain (or the local tile?)
     integer :: nx, ny, nz, nx_global, ny_global
     integer :: ximg, ximages, yimg, yimages
-    integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor
-    integer :: northwest_neighbor, southwest_neighbor, northeast_neighbor, southeast_neighbor
-
 
     logical :: north_boundary = .True.
     logical :: south_boundary = .True.
@@ -450,15 +424,6 @@ module domain_interface
     procedure :: init
     procedure :: var_request
     
-    procedure :: halo_send
-    procedure :: halo_retrieve
-    procedure :: halo_exchange
-    procedure :: halo_3d_send_batch
-    procedure :: halo_3d_retrieve_batch
-    procedure :: halo_3d_exchange_batch
-    procedure :: halo_2d_send_batch
-    procedure :: halo_2d_retrieve_batch
-    procedure :: halo_2d_exchange_batch
     procedure :: enforce_limits
 
     procedure :: get_initial_conditions
@@ -507,60 +472,12 @@ module domain_interface
         type(options_t), intent(inout)  :: options
     end subroutine
 
-    module subroutine halo_send(this)
-        implicit none
-        class(domain_t), intent(inout) :: this
-    end subroutine
-
-    module subroutine halo_retrieve(this, wait_timer)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        type(timer_t),   intent(inout) :: wait_timer
-    end subroutine
-
     ! Exchange subdomain boundary information
-    module subroutine halo_exchange(this, send_timer, ret_timer, wait_timer)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        type(timer_t),   intent(inout) :: send_timer, ret_timer, wait_timer
-    end subroutine
-
-    module subroutine halo_3d_send_batch(this, exch_var_only)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        logical, intent(in) :: exch_var_only
-    end subroutine
-
-    module subroutine halo_3d_retrieve_batch(this, exch_var_only, wait_timer)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        logical, intent(in) :: exch_var_only
-        type(timer_t), optional,   intent(inout) :: wait_timer
-    end subroutine
-
-    ! Exchange subdomain boundary information as a batched exchange
-    module subroutine halo_3d_exchange_batch(this, send_timer, ret_timer, wait_timer, exch_var_only)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        type(timer_t),   optional, intent(inout) :: send_timer, ret_timer, wait_timer
-        logical, optional, intent(in) :: exch_var_only
-    end subroutine
-
-    module subroutine halo_2d_send_batch(this)
-        implicit none
-        class(domain_t), intent(inout) :: this
-    end subroutine
-
-    module subroutine halo_2d_retrieve_batch(this)
-        implicit none
-        class(domain_t), intent(inout) :: this
-    end subroutine
-
-    ! Exchange subdomain boundary information as a batched exchange
-    module subroutine halo_2d_exchange_batch(this)
-        implicit none
-        class(domain_t), intent(inout) :: this
-    end subroutine
+    !module subroutine halo_exchange(this, two_d, exch_only)
+    !    implicit none
+    !    class(domain_t), intent(inout) :: this
+    !    logical, optional,   intent(in) :: two_d, exch_only
+    !end subroutine
 
     ! Make sure no hydrometeors are getting below 0
     module subroutine enforce_limits(this,update_in)

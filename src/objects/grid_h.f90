@@ -2,6 +2,7 @@ module grid_interface
 
     use icar_constants 
     use mod_wrf_constants, only : epsilon
+    use mpi_f08
     implicit none
 
     private
@@ -23,6 +24,15 @@ module grid_interface
         logical :: is2d, is3d
         character(len=kMAX_DIM_LENGTH), allocatable :: dimensions(:)
 
+        type(MPI_Datatype) :: NS_halo
+        type(MPI_Datatype) :: NS_win_halo
+
+        type(MPI_Datatype) :: EW_halo
+        type(MPI_Datatype) :: EW_win_halo
+
+        type(MPI_Datatype) :: corner_halo
+        type(MPI_Datatype) :: corner_NS_win_halo
+        type(MPI_Datatype) :: corner_EW_win_halo
     contains
         procedure :: get_dims
         procedure :: domain_decomposition
@@ -45,11 +55,11 @@ interface
         integer,        intent(in), optional :: for_image
     end subroutine
 
-    module subroutine set_grid_dimensions(this, nx, ny, nz, adv_order, nx_extra, ny_extra, for_image)
+    module subroutine set_grid_dimensions(this, nx, ny, nz, global_nz, adv_order, nx_extra, ny_extra, for_image)
         implicit none
         class(grid_t),   intent(inout) :: this
         integer,         intent(in)    :: nx, ny, nz
-        integer,         intent(in), optional :: adv_order, nx_extra, ny_extra, for_image
+        integer,         intent(in), optional :: global_nz, adv_order, nx_extra, ny_extra, for_image
     end subroutine
 end interface
 end module

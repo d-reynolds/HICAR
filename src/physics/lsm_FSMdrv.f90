@@ -10,6 +10,7 @@ module module_sf_FSMdrv
     use mod_wrf_constants,   only : piconst, XLS
     use icar_constants
     use options_interface,   only : options_t
+    use variable_interface,  only : variable_t
     use domain_interface,    only : domain_t
     use io_routines,         only : io_write, io_read, io_add_attribute
     use FSM_interface , only:  FSM_SETUP,FSM_DRIVE,FSM_PHYSICS, FSM_SNOWSLIDE, FSM_SNOWSLIDE_END, FSM_CUMULATE_SD, FSM_SNOWTRAN_SETUP, FSM_SNOWTRAN_SALT_START, FSM_SNOWTRAN_SALT, FSM_SNOWTRAN_SALT_END, FSM_SNOWTRAN_SUSP_START, FSM_SNOWTRAN_SUSP, FSM_SNOWTRAN_SUSP_END, FSM_SNOWTRAN_ACCUM
@@ -70,7 +71,8 @@ module module_sf_FSMdrv
 
     private
     public :: sm_FSM_init,sm_FSM
-    
+   
+    type(variable_t) :: Qs_u_var, Qs_v_var, SD_0_var, Sice_0_var  
     integer :: ids,ide,jds,jde,kds,kde ! Domain dimensions
     integer :: ims,ime,jms,jme,kms,kme ! Local Memory dimensions
     integer :: its,ite,jts,jte,kts,kte ! Processing Tile dimensions
@@ -117,6 +119,13 @@ contains
         
         last_output = options%parameters%start_time
         last_snowslide = 4000
+
+        if (SNTRAN+SNSLID > 0) then
+            call Qs_u_var%initialize(domain%grid2d)
+            call Qs_v_var%initialize(domain%grid2d)
+            call SD_0_var%initialize(domain%grid2d)
+            call Sice_0_var%initialize(domain%grid2d)
+        endif
         !!
         allocate(lat_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(lon_HICAR(Nx_HICAR,Ny_HICAR))
@@ -534,9 +543,11 @@ contains
             domain%Ds%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Ds(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
         enddo
 
+        call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.True.)
+        call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.False.,exch_var_only=.True.)      
 
-        call domain%halo_2d_exchange_batch()      
-        call domain%halo_3d_exchange_batch(exch_var_only=.True.)      
+        if (corners) call domain%halo%exch_var(domain%Ds,corners=corners)
+        if (corners) call domain%halo%exch_var(domain%fsnow,corners=corners)
 
         fsnow = TRANSPOSE(domain%fsnow%data_2d(its:ite,jts:jte))
         Nsnow = TRANSPOSE(domain%Nsnow%data_2d(its:ite,jts:jte))                        
@@ -548,54 +559,53 @@ contains
             Ds(i,:,:) = TRANSPOSE(domain%Ds%data_3d(its:ite,i,jts:jte))
         enddo
         
-        if (corners) then
-            ! Need to handle corner exchanges necesarry for snowslide
-            if (.not.(domain%south_boundary) .and. .not.(domain%west_boundary)) then
-                !DIR$ PGAS DEFER_SYNC
-                domain%east_in_2d(1,1,1)[domain%southwest_neighbor] = fsnow(2,2)
-                !DIR$ PGAS DEFER_SYNC
-                domain%east_in_3d(1,1,1:NNsmax_HICAR,1)[domain%southwest_neighbor] = Ds(1:NNsmax_HICAR,2,2)
-            endif
-            if (.not.(domain%north_boundary) .and. .not.(domain%west_boundary)) then
-                !DIR$ PGAS DEFER_SYNC
-                domain%south_in_2d(1,1,1)[domain%northwest_neighbor] = fsnow(Nx_HICAR-1,2)
-                !DIR$ PGAS DEFER_SYNC
-                domain%south_in_3d(1,1,1:NNsmax_HICAR,1)[domain%northwest_neighbor] = Ds(1:NNsmax_HICAR,Nx_HICAR-1,2)
-            endif
-            if (.not.(domain%south_boundary) .and. .not.(domain%east_boundary)) then
-                !DIR$ PGAS DEFER_SYNC
-                domain%north_in_2d(1,1,1)[domain%southeast_neighbor] = fsnow(2,Ny_HICAR-1)
-                !DIR$ PGAS DEFER_SYNC
-                domain%north_in_3d(1,1,1:NNsmax_HICAR,1)[domain%southeast_neighbor] = Ds(1:NNsmax_HICAR,2,Ny_HICAR-1)
-            endif
-            if (.not.(domain%north_boundary) .and. .not.(domain%east_boundary)) then
-                !DIR$ PGAS DEFER_SYNC
-                domain%west_in_2d(1,1,1)[domain%northeast_neighbor] = fsnow(Nx_HICAR-1,Ny_HICAR-1)
-                !DIR$ PGAS DEFER_SYNC
-                domain%west_in_3d(1,1,1:NNsmax_HICAR,1)[domain%northeast_neighbor] = Ds(1:NNsmax_HICAR,Nx_HICAR-1,Ny_HICAR-1)
-            endif
+        !if (corners) then
+        !    ! Need to handle corner exchanges necesarry for snowslide
+        !    if (.not.(domain%south_boundary) .and. .not.(domain%west_boundary)) then
+        !        !DIR$ PGAS DEFER_SYNC
+        !        domain%east_in_2d(1,1,1)[domain%southwest_neighbor] = fsnow(2,2)
+        !        !DIR$ PGAS DEFER_SYNC
+        !        domain%east_in_3d(1,1,1:NNsmax_HICAR,1)[domain%southwest_neighbor] = Ds(1:NNsmax_HICAR,2,2)
+        !    endif
+        !    if (.not.(domain%north_boundary) .and. .not.(domain%west_boundary)) then
+        !        !DIR$ PGAS DEFER_SYNC
+        !        domain%south_in_2d(1,1,1)[domain%northwest_neighbor] = fsnow(Nx_HICAR-1,2)
+        !        !DIR$ PGAS DEFER_SYNC
+        !        domain%south_in_3d(1,1,1:NNsmax_HICAR,1)[domain%northwest_neighbor] = Ds(1:NNsmax_HICAR,Nx_HICAR-1,2)
+        !    endif
+        !    if (.not.(domain%south_boundary) .and. .not.(domain%east_boundary)) then
+        !        !DIR$ PGAS DEFER_SYNC
+        !        domain%north_in_2d(1,1,1)[domain%southeast_neighbor] = fsnow(2,Ny_HICAR-1)
+        !        !DIR$ PGAS DEFER_SYNC
+        !        domain%north_in_3d(1,1,1:NNsmax_HICAR,1)[domain%southeast_neighbor] = Ds(1:NNsmax_HICAR,2,Ny_HICAR-1)
+        !    endif
+        !    if (.not.(domain%north_boundary) .and. .not.(domain%east_boundary)) then
+        !        !DIR$ PGAS DEFER_SYNC
+        !        domain%west_in_2d(1,1,1)[domain%northeast_neighbor] = fsnow(Nx_HICAR-1,Ny_HICAR-1)
+        !        !DIR$ PGAS DEFER_SYNC
+        !        domain%west_in_3d(1,1,1:NNsmax_HICAR,1)[domain%northeast_neighbor] = Ds(1:NNsmax_HICAR,Nx_HICAR-1,Ny_HICAR-1)
+        !    endif
 
-            sync images ( domain%corner_neighbors )
+        !    sync images ( domain%corner_neighbors )
 
-            if (.not.(domain%south_boundary) .and. .not.(domain%west_boundary)) then
-                fsnow(1,1) = domain%west_in_2d(1,1,1)
-                Ds(1:NNsmax_HICAR,1,1) = domain%west_in_3d(1,1,1:NNsmax_HICAR,1)
-            endif
-            if (.not.(domain%north_boundary) .and. .not.(domain%west_boundary)) then
-                fsnow(Nx_HICAR,1) = domain%north_in_2d(1,1,1)
-                Ds(1:NNsmax_HICAR,Nx_HICAR,1) = domain%north_in_3d(1,1,1:NNsmax_HICAR,1)
-            endif
-            if (.not.(domain%south_boundary) .and. .not.(domain%east_boundary)) then
-                fsnow(1,Ny_HICAR) = domain%south_in_2d(1,1,1)
-                Ds(1:NNsmax_HICAR,1,Ny_HICAR) = domain%south_in_3d(1,1,1:NNsmax_HICAR,1)
-            endif
-            if (.not.(domain%north_boundary) .and. .not.(domain%east_boundary)) then
-                fsnow(Nx_HICAR,Ny_HICAR) = domain%east_in_2d(1,1,1)
-                Ds(1:NNsmax_HICAR,Nx_HICAR,Ny_HICAR) = domain%east_in_3d(1,1,1:NNsmax_HICAR,1)
-            endif
-
-        
-        endif
+        !    if (.not.(domain%south_boundary) .and. .not.(domain%west_boundary)) then
+        !        fsnow(1,1) = domain%west_in_2d(1,1,1)
+        !        Ds(1:NNsmax_HICAR,1,1) = domain%west_in_3d(1,1,1:NNsmax_HICAR,1)
+        !    endif
+        !    if (.not.(domain%north_boundary) .and. .not.(domain%west_boundary)) then
+        !        fsnow(Nx_HICAR,1) = domain%north_in_2d(1,1,1)
+        !        Ds(1:NNsmax_HICAR,Nx_HICAR,1) = domain%north_in_3d(1,1,1:NNsmax_HICAR,1)
+        !    endif
+        !    if (.not.(domain%south_boundary) .and. .not.(domain%east_boundary)) then
+        !        fsnow(1,Ny_HICAR) = domain%south_in_2d(1,1,1)
+        !        Ds(1:NNsmax_HICAR,1,Ny_HICAR) = domain%south_in_3d(1,1,1:NNsmax_HICAR,1)
+        !    endif
+        !    if (.not.(domain%north_boundary) .and. .not.(domain%east_boundary)) then
+        !        fsnow(Nx_HICAR,Ny_HICAR) = domain%east_in_2d(1,1,1)
+        !        Ds(1:NNsmax_HICAR,Nx_HICAR,Ny_HICAR) = domain%east_in_3d(1,1,1:NNsmax_HICAR,1)
+        !    endif
+        ! 
+        !endif
         
     end subroutine exch_FSM_state_vars
     
@@ -606,36 +616,45 @@ contains
         type(domain_t), intent(inout) :: domain
         real, dimension(Nx_HICAR,Ny_HICAR), intent(inout) :: Qs_u, Qs_v
 
-        if (.not.(domain%south_boundary)) then
-            domain%south_buffer_2d(1,1:Ny_HICAR,1) = Qs_v(2,1:Ny_HICAR)
-            !       !DIR$ PGAS DEFER_SYNC
-            domain%north_in_2d(:,:,:)[domain%south_neighbor] = domain%south_buffer_2d(:,:,:)
-        endif
-        if (.not.(domain%north_boundary)) then
-            domain%north_buffer_2d(1,1:Ny_HICAR,1) = Qs_v(Nx_HICAR-1,1:Ny_HICAR)
-            !       !DIR$ PGAS DEFER_SYNC
-            domain%south_in_2d(:,:,:)[domain%north_neighbor] = domain%north_buffer_2d(:,:,:)
-        endif
+        Qs_u_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = transpose(Qs_u(2:Nx_HICAR-1,2:Ny_HICAR-1))
+        Qs_v_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = transpose(Qs_v(2:Nx_HICAR-1,2:Ny_HICAR-1))
         
-        if (.not.(domain%east_boundary)) then
-            domain%east_buffer_2d(1,1,1:Nx_HICAR) = Qs_u(1:Nx_HICAR,Ny_HICAR-1)
-            !       !DIR$ PGAS DEFER_SYNC
-            domain%west_in_2d(:,:,:)[domain%east_neighbor] = domain%east_buffer_2d(:,:,:)
-        endif
-        if (.not.(domain%west_boundary)) then
-            domain%west_buffer_2d(1,1,1:Nx_HICAR) = Qs_u(1:Nx_HICAR,2)
-            !       !DIR$ PGAS DEFER_SYNC
-            domain%east_in_2d(:,:,:)[domain%west_neighbor] = domain%west_buffer_2d(:,:,:)
-        endif
+        call domain%halo%exch_var(Qs_u_var)
+        call domain%halo%exch_var(Qs_v_var)
 
-        sync images ( domain%neighbors )
+        Qs_u = transpose(Qs_u_var%data_2d(its:ite,jts:jte))
+        Qs_v = transpose(Qs_v_var%data_2d(its:ite,jts:jte))
+
+        !if (.not.(domain%south_boundary)) then
+        !    domain%south_buffer_2d(1,1:Ny_HICAR,1) = Qs_v(2,1:Ny_HICAR)
+        !    !       !DIR$ PGAS DEFER_SYNC
+        !    domain%north_in_2d(:,:,:)[domain%south_neighbor] = domain%south_buffer_2d(:,:,:)
+       ! endif
+       ! if (.not.(domain%north_boundary)) then
+       !     domain%north_buffer_2d(1,1:Ny_HICAR,1) = Qs_v(Nx_HICAR-1,1:Ny_HICAR)
+       !     !       !DIR$ PGAS DEFER_SYNC
+       !     domain%south_in_2d(:,:,:)[domain%north_neighbor] = domain%north_buffer_2d(:,:,:)
+       ! endif
+       ! 
+       ! if (.not.(domain%east_boundary)) then
+       !     domain%east_buffer_2d(1,1,1:Nx_HICAR) = Qs_u(1:Nx_HICAR,Ny_HICAR-1)
+       !     !       !DIR$ PGAS DEFER_SYNC
+       !     domain%west_in_2d(:,:,:)[domain%east_neighbor] = domain%east_buffer_2d(:,:,:)
+      !  endif
+      !  if (.not.(domain%west_boundary)) then
+      !      domain%west_buffer_2d(1,1,1:Nx_HICAR) = Qs_u(1:Nx_HICAR,2)
+      !      !       !DIR$ PGAS DEFER_SYNC
+      !      domain%east_in_2d(:,:,:)[domain%west_neighbor] = domain%west_buffer_2d(:,:,:)
+      !  endif
+
+        !sync images ( domain%neighbors )
         
-        if (.not.(domain%south_boundary)) Qs_v(1,2:Ny_HICAR-1) = domain%south_in_2d(1,2:Ny_HICAR-1,1)
-        if (.not.(domain%north_boundary)) Qs_v(Nx_HICAR,2:Ny_HICAR-1) = domain%north_in_2d(1,2:Ny_HICAR-1,1)
-        if (.not.(domain%east_boundary)) Qs_u(2:Nx_HICAR-1,Ny_HICAR) = domain%east_in_2d(1,1,2:Nx_HICAR-1)
-        if (.not.(domain%west_boundary)) Qs_u(2:Nx_HICAR-1,1) = domain%west_in_2d(1,1,2:Nx_HICAR-1)
+        !if (.not.(domain%south_boundary)) Qs_v(1,2:Ny_HICAR-1) = domain%south_in_2d(1,2:Ny_HICAR-1,1)
+        !if (.not.(domain%north_boundary)) Qs_v(Nx_HICAR,2:Ny_HICAR-1) = domain%north_in_2d(1,2:Ny_HICAR-1,1)
+        !if (.not.(domain%east_boundary)) Qs_u(2:Nx_HICAR-1,Ny_HICAR) = domain%east_in_2d(1,1,2:Nx_HICAR-1)
+        !if (.not.(domain%west_boundary)) Qs_u(2:Nx_HICAR-1,1) = domain%west_in_2d(1,1,2:Nx_HICAR-1)
         
-        sync images ( domain%neighbors )
+        !sync images ( domain%neighbors )
 
     end subroutine exch_SNTRAN_Qs
 
@@ -646,87 +665,99 @@ contains
         
         real, dimension(Nx_HICAR,Ny_HICAR), intent(inout) :: SD_0, Sice_0
 
-        if (.not.(domain%south_boundary)) then
-            domain%south_buffer_2d(1,2:Ny_HICAR-1,1) = SD_0(2,2:Ny_HICAR-1)
-            domain%south_buffer_2d(2,2:Ny_HICAR-1,1) = Sice_0(2,2:Ny_HICAR-1)
-            !DIR$ PGAS DEFER_SYNC
-            domain%north_in_2d(1:2,2:Ny_HICAR-1,1)[domain%south_neighbor] = domain%south_buffer_2d(1:2,2:Ny_HICAR-1,1)
-
-            if (.not.(domain%east_boundary)) then
-                !DIR$ PGAS DEFER_SYNC
-                domain%north_in_2d(1:2,1,1)[domain%southeast_neighbor] = domain%south_buffer_2d(1:2,Ny_HICAR-1,1)
-            endif
-        endif
-        if (.not.(domain%north_boundary)) then
-            domain%north_buffer_2d(1,2:Ny_HICAR-1,1) = SD_0(Nx_HICAR-1,2:Ny_HICAR-1)
-            domain%north_buffer_2d(2,2:Ny_HICAR-1,1) = Sice_0(Nx_HICAR-1,2:Ny_HICAR-1)
-            !DIR$ PGAS DEFER_SYNC
-            domain%south_in_2d(1:2,2:Ny_HICAR-1,1)[domain%north_neighbor] = domain%north_buffer_2d(1:2,2:Ny_HICAR-1,1)
-            
-            if (.not.(domain%west_boundary)) then
-                !DIR$ PGAS DEFER_SYNC
-                domain%south_in_2d(1:2,1,1)[domain%northwest_neighbor] = domain%north_buffer_2d(1:2,2,1)
-            endif
-        endif
+        SD_0_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = transpose(SD_0(2:Nx_HICAR-1,2:Ny_HICAR-1))
+        Sice_0_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = transpose(Sice_0(2:Nx_HICAR-1,2:Ny_HICAR-1))
         
-        if (.not.(domain%east_boundary)) then
-            domain%east_buffer_2d(1,1,2:Nx_HICAR-1) = SD_0(2:Nx_HICAR-1,Ny_HICAR-1)
-            domain%east_buffer_2d(2,1,2:Nx_HICAR-1) = Sice_0(2:Nx_HICAR-1,Ny_HICAR-1)
-            !DIR$ PGAS DEFER_SYNC
-            domain%west_in_2d(1:2,1,2:Nx_HICAR-1)[domain%east_neighbor] = domain%east_buffer_2d(1:2,1,2:Nx_HICAR-1)
+        call domain%halo%exch_var(SD_0_var)
+        call domain%halo%exch_var(Sice_0_var)
+        call domain%halo%exch_var(SD_0_var, corners=.True.)
+        call domain%halo%exch_var(Sice_0_var, corners=.True.)
 
-            if (.not.(domain%north_boundary)) then
-                !DIR$ PGAS DEFER_SYNC
-                domain%west_in_2d(1:2,1,1)[domain%northeast_neighbor] = domain%east_buffer_2d(1:2,1,Nx_HICAR-1)
-            endif
-        endif
-        if (.not.(domain%west_boundary)) then
-            domain%west_buffer_2d(1,1,2:Nx_HICAR-1) = SD_0(2:Nx_HICAR-1,2)
-            domain%west_buffer_2d(2,1,2:Nx_HICAR-1) = Sice_0(2:Nx_HICAR-1,2)
-            !DIR$ PGAS DEFER_SYNC
-            domain%east_in_2d(1:2,1,2:Nx_HICAR-1)[domain%west_neighbor] = domain%west_buffer_2d(1:2,1,2:Nx_HICAR-1)
+        SD_0 = transpose(SD_0_var%data_2d(its:ite,jts:jte))
+        Sice_0 = transpose(Sice_0_var%data_2d(its:ite,jts:jte))
 
-            if (.not.(domain%south_boundary)) then
-                !DIR$ PGAS DEFER_SYNC
-                domain%east_in_2d(1:2,1,1)[domain%southwest_neighbor] = domain%west_buffer_2d(1:2,1,2)
-            endif
-        endif
 
-        sync images ( domain%neighbors )
-        sync images ( domain%corner_neighbors )
+       ! if (.not.(domain%south_boundary)) then
+       !     domain%south_buffer_2d(1,2:Ny_HICAR-1,1) = SD_0(2,2:Ny_HICAR-1)
+       !     domain%south_buffer_2d(2,2:Ny_HICAR-1,1) = Sice_0(2,2:Ny_HICAR-1)
+       !     !DIR$ PGAS DEFER_SYNC
+       !     domain%north_in_2d(1:2,2:Ny_HICAR-1,1)[domain%south_neighbor] = domain%south_buffer_2d(1:2,2:Ny_HICAR-1,1)
 
-        if (.not.(domain%south_boundary)) then
-            SD_0(1,2:Ny_HICAR-1) = domain%south_in_2d(1,2:Ny_HICAR-1,1)
-            Sice_0(1,2:Ny_HICAR-1) = domain%south_in_2d(2,2:Ny_HICAR-1,1)
-            if (.not.(domain%east_boundary)) then
-                SD_0(1,Ny_HICAR) = domain%south_in_2d(1,1,1)
-                Sice_0(1,Ny_HICAR) = domain%south_in_2d(2,1,1)
-            endif
-        endif
-        if (.not.(domain%north_boundary)) then
-            SD_0(Nx_HICAR,2:Ny_HICAR-1) = domain%north_in_2d(1,2:Ny_HICAR-1,1)
-            Sice_0(Nx_HICAR,2:Ny_HICAR-1) = domain%north_in_2d(2,2:Ny_HICAR-1,1)
-            if (.not.(domain%west_boundary)) then
-                SD_0(Nx_HICAR,1) = domain%north_in_2d(1,1,1)
-                Sice_0(Nx_HICAR,1) = domain%north_in_2d(2,1,1)
-            endif
-        endif
-        if (.not.(domain%east_boundary)) then
-            SD_0(2:Nx_HICAR-1,Ny_HICAR) = domain%east_in_2d(1,1,2:Nx_HICAR-1)
-            Sice_0(2:Nx_HICAR-1,Ny_HICAR) = domain%east_in_2d(2,1,2:Nx_HICAR-1)
-            if (.not.(domain%north_boundary)) then
-                SD_0(Nx_HICAR,Ny_HICAR) = domain%east_in_2d(1,1,1)
-                Sice_0(Nx_HICAR,Ny_HICAR) = domain%east_in_2d(2,1,1)
-            endif
-        endif
-        if (.not.(domain%west_boundary)) then
-            SD_0(2:Nx_HICAR-1,1) = domain%west_in_2d(1,1,2:Nx_HICAR-1)
-            Sice_0(2:Nx_HICAR-1,1) = domain%west_in_2d(2,1,2:Nx_HICAR-1)
-            if (.not.(domain%south_boundary)) then
-                SD_0(1,1) = domain%west_in_2d(1,1,1)
-                Sice_0(1,1) = domain%west_in_2d(2,1,1)
-            endif
-        endif
+       !     if (.not.(domain%east_boundary)) then
+       !         !DIR$ PGAS DEFER_SYNC
+       !         domain%north_in_2d(1:2,1,1)[domain%southeast_neighbor] = domain%south_buffer_2d(1:2,Ny_HICAR-1,1)
+       !     endif
+       ! endif
+       ! if (.not.(domain%north_boundary)) then
+       !     domain%north_buffer_2d(1,2:Ny_HICAR-1,1) = SD_0(Nx_HICAR-1,2:Ny_HICAR-1)
+       !     domain%north_buffer_2d(2,2:Ny_HICAR-1,1) = Sice_0(Nx_HICAR-1,2:Ny_HICAR-1)
+       !     !DIR$ PGAS DEFER_SYNC
+       !     domain%south_in_2d(1:2,2:Ny_HICAR-1,1)[domain%north_neighbor] = domain%north_buffer_2d(1:2,2:Ny_HICAR-1,1)
+       !     
+       !     if (.not.(domain%west_boundary)) then
+       !         !DIR$ PGAS DEFER_SYNC
+       !         domain%south_in_2d(1:2,1,1)[domain%northwest_neighbor] = domain%north_buffer_2d(1:2,2,1)
+       !     endif
+       ! endif
+       ! 
+       ! if (.not.(domain%east_boundary)) then
+       !     domain%east_buffer_2d(1,1,2:Nx_HICAR-1) = SD_0(2:Nx_HICAR-1,Ny_HICAR-1)
+       !     domain%east_buffer_2d(2,1,2:Nx_HICAR-1) = Sice_0(2:Nx_HICAR-1,Ny_HICAR-1)
+       !     !DIR$ PGAS DEFER_SYNC
+       !     domain%west_in_2d(1:2,1,2:Nx_HICAR-1)[domain%east_neighbor] = domain%east_buffer_2d(1:2,1,2:Nx_HICAR-1)
+
+       !     if (.not.(domain%north_boundary)) then
+       !         !DIR$ PGAS DEFER_SYNC
+       !         domain%west_in_2d(1:2,1,1)[domain%northeast_neighbor] = domain%east_buffer_2d(1:2,1,Nx_HICAR-1)
+       !     endif
+       ! endif
+        !if (.not.(domain%west_boundary)) then
+        !    domain%west_buffer_2d(1,1,2:Nx_HICAR-1) = SD_0(2:Nx_HICAR-1,2)
+        !    domain%west_buffer_2d(2,1,2:Nx_HICAR-1) = Sice_0(2:Nx_HICAR-1,2)
+        !    !DIR$ PGAS DEFER_SYNC
+        !    domain%east_in_2d(1:2,1,2:Nx_HICAR-1)[domain%west_neighbor] = domain%west_buffer_2d(1:2,1,2:Nx_HICAR-1)
+
+        !    if (.not.(domain%south_boundary)) then
+        !        !DIR$ PGAS DEFER_SYNC
+        !        domain%east_in_2d(1:2,1,1)[domain%southwest_neighbor] = domain%west_buffer_2d(1:2,1,2)
+        !    endif
+        !endif
+
+        !sync images ( domain%neighbors )
+        !sync images ( domain%corner_neighbors )
+
+       ! if (.not.(domain%south_boundary)) then
+       !     SD_0(1,2:Ny_HICAR-1) = domain%south_in_2d(1,2:Ny_HICAR-1,1)
+       !     Sice_0(1,2:Ny_HICAR-1) = domain%south_in_2d(2,2:Ny_HICAR-1,1)
+       !     if (.not.(domain%east_boundary)) then
+       !         SD_0(1,Ny_HICAR) = domain%south_in_2d(1,1,1)
+       !         Sice_0(1,Ny_HICAR) = domain%south_in_2d(2,1,1)
+       !     endif
+       ! endif
+       ! if (.not.(domain%north_boundary)) then
+       !     SD_0(Nx_HICAR,2:Ny_HICAR-1) = domain%north_in_2d(1,2:Ny_HICAR-1,1)
+       !     Sice_0(Nx_HICAR,2:Ny_HICAR-1) = domain%north_in_2d(2,2:Ny_HICAR-1,1)
+       !     if (.not.(domain%west_boundary)) then
+       !         SD_0(Nx_HICAR,1) = domain%north_in_2d(1,1,1)
+       !         Sice_0(Nx_HICAR,1) = domain%north_in_2d(2,1,1)
+       !     endif
+       ! endif
+       ! if (.not.(domain%east_boundary)) then
+       !     SD_0(2:Nx_HICAR-1,Ny_HICAR) = domain%east_in_2d(1,1,2:Nx_HICAR-1)
+       !     Sice_0(2:Nx_HICAR-1,Ny_HICAR) = domain%east_in_2d(2,1,2:Nx_HICAR-1)
+       !     if (.not.(domain%north_boundary)) then
+       !         SD_0(Nx_HICAR,Ny_HICAR) = domain%east_in_2d(1,1,1)
+       !         Sice_0(Nx_HICAR,Ny_HICAR) = domain%east_in_2d(2,1,1)
+       !     endif
+       ! endif
+        !if (.not.(domain%west_boundary)) then
+        !    SD_0(2:Nx_HICAR-1,1) = domain%west_in_2d(1,1,2:Nx_HICAR-1)
+        !    Sice_0(2:Nx_HICAR-1,1) = domain%west_in_2d(2,1,2:Nx_HICAR-1)
+        !    if (.not.(domain%south_boundary)) then
+        !        SD_0(1,1) = domain%west_in_2d(1,1,1)
+        !        Sice_0(1,1) = domain%west_in_2d(2,1,1)
+        !    endif
+        !endif
 
 
     end subroutine exch_SLIDE_buffers

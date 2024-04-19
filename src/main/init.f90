@@ -31,6 +31,7 @@ module initialization
     use io_routines,          only : io_read, io_write
     use mod_atm_utilities,          only : init_atm_utilities
     use wind,                       only : update_winds, init_winds
+    use wind_iterative,             only : init_iter_winds
     use linear_theory_winds,        only : setup_linwinds
 
     use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
@@ -96,6 +97,11 @@ contains
         ! initialize the atmospheric helper utilities
         call init_atm_utilities(options)
 
+        if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
+            !call init_iter_winds_old(domain)
+            call init_iter_winds(domain)
+        endif
+
         if (options%physics%windtype==kWIND_LINEAR .or. &
                  options%physics%windtype==kLINEAR_OBRIEN_WINDS .or. &
                  options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
@@ -113,12 +119,13 @@ contains
         type(domain_t),  intent(inout) :: domain
         type(boundary_t),intent(in)    :: forcing
 
-        if (this_image()==1) write(*,*) "Updating initial winds"
+        if (this_image()==1) write(*,*) "Init initial winds"
+        if (this_image()==1) flush(output_unit)
         call init_winds(domain,options)
-        if (this_image()==1) flush(output_unit)
 
-        call update_winds(domain, forcing, options)
+        if (this_image()==1) write(*,*) "Updating initial winds"
         if (this_image()==1) flush(output_unit)
+        call update_winds(domain, forcing, options)
 
         ! initialize microphysics code (e.g. compute look up tables in Thompson et al)
         call mp_init(options) !this could easily be moved to init_model...
