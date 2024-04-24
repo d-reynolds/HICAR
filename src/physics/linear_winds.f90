@@ -37,6 +37,7 @@
 module linear_theory_winds
     use iso_c_binding
     use iso_fortran_env
+    use mpi_f08
     use fft,                        only: fftw_execute_dft,                    &
                                           fftw_alloc_complex, fftw_free,       &
                                           fftw_plan_dft_2d, fftw_destroy_plan, &
@@ -316,7 +317,8 @@ contains
 
         step_size = min(minimum_step, minval(z_top - z_bottom))
         if (step_size < 5) then
-            if (this_image()==1) write(*,*) "WARNING: Very small vertical step size in linear winds, check layer thicknesses in output"
+            write(*,*) "WARNING: Very small vertical step size in linear winds. z_top min: ",minval(z_top)," z_top max: ",maxval(z_top)
+            flush(output_unit)
         endif
 
         current_z = start_z + step_size/2 ! we want the value in the middle of each theoretical layer
@@ -326,7 +328,6 @@ contains
         lt_data%v_accumulator = 0
 
         do while (current_z < end_z)
-
             call linear_perturbation_at_height(U,V,Nsq,current_z, fourier_terrain, lt_data)
 
             layer_fraction = max(0.0,                                                                                       &
@@ -566,22 +567,52 @@ contains
 
     end subroutine setup_remote_grids
 
-    subroutine copy_data_to_remote(wind, grids, LUT, i,j,k, z)
+    subroutine copy_data_to_remote(wind, grids, LUT_win, i, j, k, z, LUT_nx, LUT_nz, LUT_ny)
         implicit none
         real,           intent(in)  :: wind(:,:)
         type(grid_t),   intent(in)  :: grids(:)
-        real,           intent(inout):: LUT(:,:,:,:,:,:)
-        integer,        intent(in)  :: i,j,k, z
+        !real,           intent(inout):: LUT(:,:,:,:,:,:)
+        type(MPI_Win),  intent(in)  :: LUT_win
+        integer,        intent(in)  :: i, j, k, z, LUT_nx, LUT_nz, LUT_ny
 
-        integer :: img
+        integer :: img, msg_size, wind_nx, wind_ny
+        INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+        type(MPI_Datatype) :: LUT_type, send_type
 
+
+        msg_size = 1
+        disp = 0
+
+        wind_nx = size(wind,1)
+        wind_ny = size(wind,2)
+        
         do img = 1, kNUM_COMPUTE
             associate(ims => grids(img)%ims, &
-                      ime => grids(img)%ime, &
                       jms => grids(img)%jms, &
-                      jme => grids(img)%jme  &
+                      nx  => grids(img)%nx,  &
+                      ny  => grids(img)%ny   &
                 )
+
             !$omp critical
+       
+
+            !Create the subarray types, which describe how to traverse the two arrays in memory to extract the values wanted
+            call MPI_Type_create_subarray(6, [n_spd_values, n_dir_values, n_nsq_values, LUT_nx, LUT_nz, LUT_ny], [1, 1, 1, nx, 1, ny], &
+                [(k-1),(i-1),(j-1),0,(z-1),0], MPI_ORDER_FORTRAN, MPI_REAL, LUT_type)
+
+            call MPI_Type_create_subarray(2, [wind_nx, wind_ny], [nx, ny], &
+                [0,0], MPI_ORDER_FORTRAN, MPI_REAL, send_type)
+
+            ! Commit the types so that they can be used
+            call MPI_Type_commit(send_type)
+            call MPI_Type_commit(LUT_type)
+            !Perform the put
+            call MPI_Put(wind(ims,jms), msg_size, send_type, (img-1), disp, msg_size, LUT_type, LUT_win)
+ 
+            !Free the types
+            call MPI_Type_free(send_type)
+            call MPI_Type_free(LUT_type)
+
             !this can be done as some kind of collective (is a 2D broadcast-y thing)
             !LUT(k,i,j, 1:ime-ims+1, z, 1:jme-jms+1)[DOM_IMG_INDX(img)] = wind(ims:ime,jms:jme)
             !$omp end critical
@@ -603,7 +634,7 @@ contains
 
         ! local variables used to calculate the LUT
         real :: u,v, layer_height, layer_height_bottom, layer_height_top
-        integer :: nx,ny,nz, nxu,nyv, i,j,k,z,ik, error
+        integer :: nx,ny,nz, nxu,nyv, i,j,k,z,ik, n, error
         integer :: fftnx, fftny
         integer, dimension(3,2) :: LUT_dims
         integer :: loops_completed ! this is just used to measure progress in the LUT creation
@@ -611,6 +642,14 @@ contains
         integer :: ims, jms, this_n, my_index
         real, allocatable :: temporary_u(:,:), temporary_v(:,:)
         character(len=kMAX_FILE_LENGTH) :: LUT_file
+
+        type(c_ptr) :: tmp_ptr
+        integer(KIND=MPI_ADDRESS_KIND) :: win_size
+
+        ! MPI windows
+        type(MPI_Win) :: U_LUT_win, V_LUT_win
+        ! MPI buffers
+        real, pointer, dimension(:,:,:,:,:,:) :: U_LUT_p, V_LUT_p
 
         type(grid_t), allocatable :: u_grids(:), v_grids(:)
 
@@ -645,12 +684,8 @@ contains
 
         total_LUT_entries = n_dir_values * n_spd_values * n_nsq_values
         
-        if (mod(this_image(),(num_images()/kNUM_SERVERS)) == 0) then
-            my_index = 1
-        else
-            my_index = FINDLOC(DOM_IMG_INDX,this_image(),dim=1)
-        endif
-
+        my_index = FINDLOC(DOM_IMG_INDX,this_image(),dim=1)
+        
         ! create the array of spd, dir, and nsq values to create LUTs for
         ! generates the values for each look up table dimension
         ! generate table of wind directions to be used
@@ -664,12 +699,6 @@ contains
         if (.not.options%lt_options%read_LUT) then
             allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny), source=0.0)
             allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv), source=0.0)
-            
-            ! If we are an IO image, we only need to stick around long enough to allocate the coarrays with everyone
-            ! This should be changed in the future once coarray teams are better supported accross compilers, such
-            ! that we can allocate the coarrays from within the compute team and do not have to worry about global barriers
-            if (mod(this_image(),(num_images()/kNUM_SERVERS)) == 0) return
-            
             error=0
         else
             if (this_image()==1) write(*,*) "    Reading LUT from file: ", trim(LUT_file)
@@ -684,7 +713,6 @@ contains
                 if (allocated(hi_v_LUT)) deallocate(hi_v_LUT)
                 allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv), source=0.0)
             endif
-            if (mod(this_image(),(num_images()/kNUM_SERVERS)) == 0) return
         endif
 
         
@@ -706,6 +734,18 @@ contains
             ! loop over combinations of U, V, and Nsq values
             loops_completed = 0
             if (this_image()==1) write(*,*) "    Initializing linear theory"
+            if (this_image()==1) flush(output_unit)
+            ! Create MPI windows which will be used for one-sided communication of LUTs as they are being calculated
+            win_size = n_spd_values*n_dir_values*n_nsq_values*nxu*nz*ny
+            call MPI_WIN_ALLOCATE(win_size*kREAL, kREAL, MPI_INFO_NULL, domain%IO_comms, tmp_ptr, U_LUT_win)
+            call C_F_POINTER(tmp_ptr, U_LUT_p, [n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny])
+
+            win_size = n_spd_values*n_dir_values*n_nsq_values*nx*nz*nyv
+            call MPI_WIN_ALLOCATE(win_size*kREAL, kREAL, MPI_INFO_NULL, domain%IO_comms, tmp_ptr, V_LUT_win)
+            call C_F_POINTER(tmp_ptr, V_LUT_p, [n_spd_values, n_dir_values, n_nsq_values, nx, nz, nyv])
+            U_LUT_p = 1.0
+            V_LUT_p = 1.0
+
             ! $omp parallel default(shared) &
             ! $omp private(i,j,k,ik,ijk, z, u,v, layer_height, layer_height_bottom, layer_height_top, temporary_u, temporary_v) &
             ! $omp firstprivate(minimum_layer_size, n_dir_values, n_spd_values, n_nsq_values, nz,nx,ny,nxu,nyv,fftnx,fftny) &
@@ -719,7 +759,9 @@ contains
             allocate(temporary_v(fftnx - buffer*2,   fftny - buffer*2+1), source=0.0)
             this_n = stop_pos-start_pos+1
             ! $omp do
-
+        
+            !call MPI_Win_fence(0,U_LUT_win)
+            !call MPI_Win_fence(0,V_LUT_win)
             do ijk = start_pos, stop_pos
                 ! loop over the combined ijk space to improve parallelization (more granular parallelization)
                 ! because it is one combined loop, we have to calculate the i,k indicies from the combined ik variable
@@ -743,11 +785,13 @@ contains
                 if ((spd_values(k)==15).and.(abs(u-15) < 1).and.(j==15)) debug_print=.True.
                 ! calculate the linear wind field for the current u and v values
 
+
                 do z=1,nz
                     ! print the current status if this is being run "interactively"
                     if (options%parameters%interactive) then
                         !$omp critical (print_lock)
                         if (this_image()==1) write(*,"(f5.1,A)") loops_completed/real(nz*(stop_pos-start_pos+1))*100," %"
+                        if (this_image()==1) flush(output_unit)
                         !$omp end critical (print_lock)
                     endif
 
@@ -756,6 +800,7 @@ contains
                                              domain%global_z_interface(:,z,:) - domain%global_terrain,                                      &
                                              domain%global_z_interface(:,z,:) - domain%global_terrain + domain%global_dz_interface(:,z,:),  &
                                              minimum_layer_size, domain%terrain_frequency, lt_data_m)
+
                     ! need to handle stagger (nxu /= nx) and the buffer around edges of the domain
                     if (nxu /= nx) then
                         temporary_u(:,:) = real( real(                                              &
@@ -765,9 +810,13 @@ contains
                         temporary_v(:,:) = real( real(                                              &
                                 ( lt_data_m%v_perturb(1+buffer:fftnx-buffer,     buffer:fftny-buffer)         &
                                 + lt_data_m%v_perturb(1+buffer:fftnx-buffer,     1+buffer:fftny-buffer+1)) )) / 2
+                        call MPI_Win_fence(0,U_LUT_win)
+                        call MPI_Win_fence(0,V_LUT_win)
+                        call copy_data_to_remote(temporary_u, u_grids, U_LUT_win, i,j,k, z, nxu, nz, ny)
+                        call copy_data_to_remote(temporary_v, v_grids, V_LUT_win, i,j,k, z, nx, nz, nyv)
+                        call MPI_Win_fence(0,U_LUT_win)
+                        call MPI_Win_fence(0,V_LUT_win)
 
-                        call copy_data_to_remote(temporary_u, u_grids, hi_u_LUT, i,j,k, z)
-                        call copy_data_to_remote(temporary_v, v_grids, hi_v_LUT, i,j,k, z)
                     else
                         stop "ERROR: linear wind LUT creation not set up for non-staggered grids yet"
                         ! hi_u_LUT(k,i,j,:,z,:) = real( real(                                                    &
@@ -781,13 +830,7 @@ contains
                     loops_completed = loops_completed+1
                     !$omp end critical (print_lock)
 
-                    ! for now sync images ([DOM_IMG_INDX]) has to be inside the z loop to conserve memory for large domains
-                    !$omp critical
-                    sync images ([DOM_IMG_INDX])
-                    !$omp end critical
-
                 enddo
-
             end do
             ! $omp end do
 
@@ -796,20 +839,29 @@ contains
             do i=1, (total_LUT_entries/kNUM_COMPUTE+1) - this_n
                 ! the syncs should be outside of the z loop, but this is a little more forgiving with memory requirements
                 do z=1,nz
-                    !$omp critical
-                    sync images ([DOM_IMG_INDX])
-                    !$omp end critical
+                    call MPI_Win_fence(0,U_LUT_win)
+                    call MPI_Win_fence(0,V_LUT_win)
+                    call MPI_Win_fence(0,U_LUT_win)
+                    call MPI_Win_fence(0,V_LUT_win)
                 enddo
             enddo
+
+            call MPI_Win_fence(0,U_LUT_win)
+            call MPI_Win_fence(0,V_LUT_win)
+       
+            hi_u_LUT = U_LUT_p(:,:,:,:,:,:)
+            hi_v_LUT = V_LUT_p(:,:,:,:,:,:)
+
+            call MPI_Win_free(U_LUT_win)
+            call MPI_Win_free(V_LUT_win)
 
             ! memory needs to be freed so this structure can be used again when removing linear winds
             call destroy_linear_theory_data(lt_data_m)
             ! $omp end parallel
-
-            sync images ([DOM_IMG_INDX])
-
+!
             if (this_image()==1) write(*,*) "All images: 100 % Complete"
             if (this_image()==1) write(*,*) char(10),"--------  Linear wind look up table generation complete ---------"
+            if (this_image()==1) flush(output_unit)
         endif
 
         if ((options%lt_options%write_LUT).and.(.not.reverse)) then

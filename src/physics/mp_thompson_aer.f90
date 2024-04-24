@@ -3620,9 +3620,10 @@
       DOUBLE PRECISION:: massg, massr, dvg, dvr, t1, t2, z1, z2, y1, y2
       LOGICAL force_read_thompson, write_thompson_tables
       LOGICAL lexist,lopen
-      INTEGER, allocatable :: good[:]
+      !INTEGER, allocatable :: good[:]
+      integer :: good
     !   LOGICAL, EXTERNAL :: wrf_dm_on_monitor
-      allocate(good[*])
+      !allocate(good[*])
 
 !+---+
 
@@ -3803,9 +3804,10 @@
       DOUBLE PRECISION:: y1, y2, y3, y4
       LOGICAL force_read_thompson, write_thompson_tables
       LOGICAL lexist,lopen
-      INTEGER, allocatable :: good[:]
+      !INTEGER, allocatable :: good[:]
+      integer :: good
     !   LOGICAL, EXTERNAL :: wrf_dm_on_monitor
-      allocate(good[*])
+      !allocate(good[*])
 
 !+---+
 
@@ -4085,9 +4087,10 @@
       REAL:: T_adjust
       LOGICAL force_read_thompson, write_thompson_tables
       LOGICAL lexist,lopen
-      INTEGER, allocatable :: good[:]
+      !INTEGER, allocatable :: good[:]
+      integer :: good
     !   LOGICAL, EXTERNAL :: wrf_dm_on_monitor
-      allocate(good[*])
+      !allocate(good[*])
 
 !+---+
     !   CALL nl_get_force_read_thompson(1,force_read_thompson)

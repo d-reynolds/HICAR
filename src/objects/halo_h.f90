@@ -138,11 +138,11 @@ interface
         type(MPI_comm), intent(inout) :: comms
     end subroutine init
 
-    module subroutine exch_var(this, var, meta_data, corners)
+    module subroutine exch_var(this, var, do_dqdt, corners)
         implicit none
         class(halo_t),     intent(inout) :: this
         type(variable_t),  intent(inout) :: var
-        logical,          intent(in), optional :: meta_data, corners
+        logical,          intent(in), optional :: do_dqdt, corners
     end subroutine exch_var
 
 
@@ -180,119 +180,119 @@ interface
     end subroutine halo_2d_retrieve_batch
 
 
-    module subroutine put_north(this,var,do_metadata)
+    module subroutine put_north(this,var,do_dqdt)
         implicit none
         class(halo_t), intent(inout) :: this
         class(variable_t), intent(in) :: var
-        logical, optional, intent(in) :: do_metadata
+        logical, optional, intent(in) :: do_dqdt
     end subroutine
 
-    module subroutine put_south(this,var,do_metadata)
+    module subroutine put_south(this,var,do_dqdt)
         implicit none
         class(halo_t), intent(inout) :: this
         class(variable_t), intent(in) :: var
-        logical, optional, intent(in) :: do_metadata
+        logical, optional, intent(in) :: do_dqdt
     end subroutine
 
-    module subroutine retrieve_north_halo(this,var,do_metadata)
+    module subroutine retrieve_north_halo(this,var,do_dqdt)
         implicit none
         class(halo_t), intent(inout) :: this
         class(variable_t), intent(in) :: var
-        logical, optional, intent(in) :: do_metadata
+        logical, optional, intent(in) :: do_dqdt
     end subroutine
 
-    module subroutine retrieve_south_halo(this,var,do_metadata)
+    module subroutine retrieve_south_halo(this,var,do_dqdt)
         implicit none
         class(halo_t), intent(inout) :: this
         class(variable_t), intent(in) :: var
-        logical, optional, intent(in) :: do_metadata
+        logical, optional, intent(in) :: do_dqdt
     end subroutine
 
-    module subroutine put_east(this,var,do_metadata)
+    module subroutine put_east(this,var,do_dqdt)
         implicit none
         class(halo_t), intent(inout) :: this
         class(variable_t), intent(in) :: var
-        logical, optional, intent(in) :: do_metadata
+        logical, optional, intent(in) :: do_dqdt
     end subroutine
 
-    module subroutine put_west(this,var,do_metadata)
+    module subroutine put_west(this,var,do_dqdt)
         implicit none
         class(halo_t), intent(inout) :: this
         class(variable_t), intent(in) :: var
-        logical, optional, intent(in) :: do_metadata
+        logical, optional, intent(in) :: do_dqdt
 
     end subroutine
 
-    module subroutine retrieve_east_halo(this,var,do_metadata)
+    module subroutine retrieve_east_halo(this,var,do_dqdt)
         implicit none
         class(halo_t), intent(inout) :: this
         class(variable_t), intent(in) :: var
-        logical, optional, intent(in) :: do_metadata
+        logical, optional, intent(in) :: do_dqdt
 
     end subroutine
 
-    module subroutine retrieve_west_halo(this,var,do_metadata)
+    module subroutine retrieve_west_halo(this,var,do_dqdt)
         implicit none
         class(halo_t), intent(inout) :: this
         class(variable_t), intent(in) :: var
-        logical, optional, intent(in) :: do_metadata
+        logical, optional, intent(in) :: do_dqdt
 
     end subroutine
 
-  module subroutine put_northwest(this,var,do_metadata)
+  module subroutine put_northwest(this,var,do_dqdt)
       implicit none 
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
   end subroutine
 
-  module subroutine put_northeast(this,var,do_metadata)
+  module subroutine put_northeast(this,var,do_dqdt)
       implicit none 
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
   end subroutine
 
-  module subroutine put_southeast(this,var,do_metadata)
+  module subroutine put_southeast(this,var,do_dqdt)
       implicit none 
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
   end subroutine
 
-  module subroutine put_southwest(this,var,do_metadata)
+  module subroutine put_southwest(this,var,do_dqdt)
       implicit none 
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
   end subroutine
 
-  module subroutine retrieve_northwest_halo(this,var,do_metadata)
+  module subroutine retrieve_northwest_halo(this,var,do_dqdt)
       implicit none 
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
   end subroutine
 
-  module subroutine retrieve_northeast_halo(this,var,do_metadata)
+  module subroutine retrieve_northeast_halo(this,var,do_dqdt)
       implicit none 
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
   end subroutine
 
-  module subroutine retrieve_southeast_halo(this,var,do_metadata)
+  module subroutine retrieve_southeast_halo(this,var,do_dqdt)
       implicit none 
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
   end subroutine
 
-  module subroutine retrieve_southwest_halo(this,var,do_metadata)
+  module subroutine retrieve_southwest_halo(this,var,do_dqdt)
       implicit none 
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
   end subroutine
 
 end interface

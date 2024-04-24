@@ -9,7 +9,7 @@
 !! ----------------------------------------------------------------------------
 module time_step
     use iso_fortran_env
-
+    use mpi_f08
     use data_structures             ! *_type  types and kCONSTANTS
     use microphysics,               only : mp
     use advection,                  only : advect
@@ -29,23 +29,11 @@ module time_step
 
     implicit none
     private
-    double precision  :: future_dt_seconds
-    double precision, allocatable  :: dt_sec_dom[:]
     double precision, parameter  :: DT_BIG = 36000.0
-    public :: step, update_dt, dt_reduce, init_time_step
+    double precision  :: future_dt_seconds = DT_BIG
+    public :: step
 
 contains
-
-    subroutine init_time_step()
-    
-        ! Before splitting processes, allocate the dt array used for calculating
-        ! time step accross domain images. Set to a large dt here, so that IO processes,
-        ! which should never update dt_sec_dom, never contribute a dt to the global reduce
-        allocate(dt_sec_dom[*])
-        dt_sec_dom = DT_BIG
-        future_dt_seconds = DT_BIG
-
-    end subroutine
 
     !>------------------------------------------------------------
     !!  Calculate the maximum stable time step given some CFL criteria
@@ -237,22 +225,10 @@ contains
         ! compute internal timestep dt to maintain stability
         ! courant condition for 3D advection. 
                 
-        !First, set dt to whatever the dt for the current time step was calculated to be
-        !call dt%set(seconds=min(future_seconds,120.0D0))
-
         update_in = .False.
         if (present(update)) update_in = update
-        !If not update, then compute for data_3d and dqdt_3d
-            ! present_time = __
-            ! reduce(present_time)
-        ! else
-            ! present_time = future_time
-        !Compute for just dqdt_3d
-        ! future_time = ___
-        ! reduce(future_time)
-        ! call dt%set(seconds=min(present_time,future_seconds))
         
-
+        ! If this is the first step (future_dt_seconds has not yet been set)
         if (future_dt_seconds == DT_BIG) then
             present_dt_seconds = compute_dt(domain%dx, domain%u%data_3d, domain%v%data_3d, &
                             domain%w%data_3d, domain%density%data_3d, options%parameters%dz_levels, &
@@ -271,49 +247,15 @@ contains
                         options%time_options%cfl_reduction_factor, &
                         cfl_strictness=options%time_options%cfl_strictness, use_density=.false.)
                 
-        !pass to reduce min(present_seconds, future_seconds)
-        call dt_reduce(min(present_dt_seconds, future_dt_seconds),seconds_out)
+        !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
+        call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_DOUBLE, MPI_MIN, domain%IO_comms)
+        
         ! Set dt to the outcome of reduce
         call dt%set(seconds=seconds_out)
         if (this_image()==1) write(*,*) 'time_step: ',dt%seconds()
 
     end subroutine update_dt
     
-    !Wrapper function to enable the I/O Processes to call CO_Min as well
-    subroutine dt_reduce(seconds_in, seconds_out)
-        implicit none
-        double precision, intent(in)    :: seconds_in
-        double precision, intent(inout) :: seconds_out
-
-        integer :: i
-        ! perform a reduction across all images to find the minimum time step required
-!#ifndef __INTEL_COMPILER
-!        call CO_MIN(seconds)
-!#endif
-!#ifdef __INTEL_COMPILER
-!         seconds = dx / 100
-!#endif
-
-        dt_sec_dom = seconds_in
-        seconds_out = DT_BIG
-
-        sync images (DOM_IMG_INDX)
-        
-        do i = 1,size(DOM_IMG_INDX)
-            seconds_out = min(seconds_out,dt_sec_dom[DOM_IMG_INDX(i)])
-        enddo
-        
-        !seconds_out = min(dt_sec_dom[DOM_IMG_INDX])
-
-        
-        !future_seconds = seconds
-        ! set an upper bound on dt to keep microphysics and convection stable (?)
-        ! store this back in the dt time_delta data structure
-        
-
-    end subroutine dt_reduce
-    
-
     !>------------------------------------------------------------
     !!  Step forward one IO time step.
     !!

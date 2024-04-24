@@ -130,8 +130,8 @@ contains
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
 
         !Exchange u and v, since the outer points are not updated in above function
-        call domain%halo%exch_var(domain%u,meta_data=update)
-        call domain%halo%exch_var(domain%v,meta_data=update)
+        call domain%halo%exch_var(domain%u,do_dqdt=update)
+        call domain%halo%exch_var(domain%v,do_dqdt=update)
 
         call VecDestroy(localX,ierr)
         call DMDestroy(da,ierr)

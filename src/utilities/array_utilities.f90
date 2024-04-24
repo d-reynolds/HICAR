@@ -417,80 +417,128 @@ contains
 
     end subroutine smooth_array_3d
 
-    subroutine smooth_array_2d(input,windowsize)
+
+    !> Smooths a 2D array using a moving window.
+    !! Parameters:
+    !!   - input: The input 2D array to be smoothed.
+    !!   - windowsize: The size of the moving window used for smoothing.
+    !! Notes:
+    !!   - This subroutine modifies the input array in-place.
+    !!   - The size of the input array must be larger than the window size.
+    !!   - The window size must be an odd number.
+    !! Example usage:
+    !!   > call smooth_array_2d(my_array, 1)
+    !!     This will smooth the 2D array "my_array" using a 3x3 moving window.
+    !!     The result will be stored in "my_array".
+    subroutine smooth_array_2d(input, windowsize)
         implicit none
-        real, intent(inout), dimension(:,:):: input     !> 2 dimensional input field to be smoothed
-        integer,intent(in)::windowsize                  !> halfwidth-1/2 of window to smooth over
-                                                        ! Specified in grid cells, (+/- windowsize)
-        real,allocatable,dimension(:,:)::inputtemp      !> temporary array to store the input data in
-        integer::i,j,nx,ny,startx,endx,starty,endy      ! various array indices/bounds
-        ! intermediate sums to speed up the computation
-        real,allocatable,dimension(:) :: rowsums,rowmeans
-        real :: cursum
-        integer :: cur_n,curcol,ncols,nrows
-
-        nx = size(input,1)
-        ny = size(input,2)
-
-        allocate(inputtemp(nx,ny))
-
-        inputtemp = input !make a copy so we always use the unsmoothed data when computing the smoothed data
-        ! if ((windowsize*2+1)>nx) then
-        !     write(*,*) "WARNING can not operate if windowsize*2+1 is larger than nx"
-        !     write(*,*) "NX         = ", nx
-        !     write(*,*) "windowsize = ", windowsize
-        !     stop
-        ! endif
-
-        !parallelize over a slower dimension (not the slowest because it is MUCH easier this way)
-        ! as long as the inner loops (the array operations) are over the fastest dimension we are mostly OK
-        !$omp parallel firstprivate(windowsize,nx,ny), &
-        !$omp private(i,j,startx,endx,starty,endy, rowsums,rowmeans,nrows,ncols,cursum), &
-        !$omp shared(input,inputtemp)
-        allocate(rowsums(nx))
-        allocate(rowmeans(nx))
-        nrows = min(nx,windowsize * 2 + 1)
-        ncols = min(ny,windowsize * 2 + 1)
+        real, intent(inout), dimension(:,:):: input
+        integer, intent(in):: windowsize
+        real, dimension(:,:), allocatable:: temp
+        integer:: i, j, nx, ny, starti, endi, startj, endj
+        real:: runningsum, count
+    
+        nx = size(input, 1)
+        ny = size(input, 2)
+        allocate(temp(nx, ny))
+    
+        temp = input
+    
+        !$omp parallel private(i, j, starti, endi, startj, endj, runningsum, count)
         !$omp do schedule(static)
-        do j=1,ny
-
-            ! so we pre-compute the sum over rows for each column in the current window
-            rowsums = 0
-            do i = -1*windowsize, windowsize, 1
-                starty = max(1,min(ny,j+i))
-                rowsums = rowsums + inputtemp(1:nx,starty)
-            enddo
-
-            ! for a parallel algorithm (in 2D) we recompute the row sums for every y
-            rowmeans = rowsums / nrows
-            cursum = sum(rowmeans(1:windowsize)) + rowmeans(1) * (windowsize + 1)
-
-            do i=1,nx
-                ! if we are pinned to the left edge
-                if ((i - windowsize)<=1) then
-                    startx = 1
-                    endx   = i + windowsize
-                    cursum = cursum - rowmeans(startx) + rowmeans(endx)
-                ! if we are pinned to the right edge
-                else if ((i + windowsize) > nx) then
-                    startx = i - windowsize
-                    endx   = nx
-                    cursum = cursum - rowmeans(startx-1) + rowmeans(endx)
-                ! if we are in the middle (this is the most common)
-                else
-                    startx = i - windowsize
-                    endx   = i + windowsize
-                    cursum = cursum - rowmeans(startx-1) + rowmeans(endx)
-                endif
-
-                input(i,j) = cursum / ncols
-
-            enddo
-        enddo
+        do j = 1, ny
+            do i = 1, nx
+                runningsum = 0.0
+                count = 0.0
+                starti = max(1, i - windowsize)
+                endi = min(nx, i + windowsize)
+                startj = max(1, j - windowsize)
+                endj = min(ny, j + windowsize)
+                runningsum = sum(temp(starti:endi, startj:endj)) / ((endi - starti + 1) * (endj - startj + 1))
+                input(i, j) = runningsum
+            end do
+        end do
         !$omp end do
         !$omp end parallel
-
+    
+        deallocate(temp)
+    
     end subroutine smooth_array_2d
+
+    ! subroutine smooth_array_2d(input,windowsize)
+    !     implicit none
+    !     real, intent(inout), dimension(:,:):: input     !> 2 dimensional input field to be smoothed
+    !     integer,intent(in)::windowsize                  !> halfwidth-1/2 of window to smooth over
+    !                                                     ! Specified in grid cells, (+/- windowsize)
+    !     real,allocatable,dimension(:,:)::inputtemp      !> temporary array to store the input data in
+    !     integer::i,j,nx,ny,startx,endx,starty,endy      ! various array indices/bounds
+    !     ! intermediate sums to speed up the computation
+    !     real,allocatable,dimension(:) :: rowsums,rowmeans
+    !     real :: cursum
+    !     integer :: cur_n,curcol,ncols,nrows
+
+    !     nx = size(input,1)
+    !     ny = size(input,2)
+
+    !     allocate(inputtemp(nx,ny))
+
+    !     inputtemp = input !make a copy so we always use the unsmoothed data when computing the smoothed data
+    !     ! if ((windowsize*2+1)>nx) then
+    !     !     write(*,*) "WARNING can not operate if windowsize*2+1 is larger than nx"
+    !     !     write(*,*) "NX         = ", nx
+    !     !     write(*,*) "windowsize = ", windowsize
+    !     !     stop
+    !     ! endif
+
+    !     !parallelize over a slower dimension (not the slowest because it is MUCH easier this way)
+    !     ! as long as the inner loops (the array operations) are over the fastest dimension we are mostly OK
+    !     !$omp parallel firstprivate(windowsize,nx,ny), &
+    !     !$omp private(i,j,startx,endx,starty,endy, rowsums,rowmeans,nrows,ncols,cursum), &
+    !     !$omp shared(input,inputtemp)
+    !     allocate(rowsums(nx))
+    !     allocate(rowmeans(nx))
+    !     nrows = min(nx,windowsize * 2 + 1)
+    !     ncols = min(ny,windowsize * 2 + 1)
+    !     !$omp do schedule(static)
+    !     do j=1,ny
+
+    !         ! so we pre-compute the sum over rows for each column in the current window
+    !         rowsums = 0
+    !         do i = -1*windowsize, windowsize, 1
+    !             starty = max(1,min(ny,j+i))
+    !             rowsums = rowsums + inputtemp(1:nx,starty)
+    !         enddo
+
+    !         ! for a parallel algorithm (in 2D) we recompute the row sums for every y
+    !         rowmeans = rowsums / nrows
+    !         cursum = sum(rowmeans(1:windowsize)) + rowmeans(1) * (windowsize + 1)
+
+    !         do i=1,nx
+    !             ! if we are pinned to the left edge
+    !             if ((i - windowsize)<=1) then
+    !                 startx = 1
+    !                 endx   = i + windowsize
+    !                 cursum = cursum - rowmeans(startx) + rowmeans(endx)
+    !             ! if we are pinned to the right edge
+    !             else if ((i + windowsize) > nx) then
+    !                 startx = i - windowsize
+    !                 endx   = nx
+    !                 cursum = cursum - rowmeans(startx-1) + rowmeans(endx)
+    !             ! if we are in the middle (this is the most common)
+    !             else
+    !                 startx = i - windowsize
+    !                 endx   = i + windowsize
+    !                 cursum = cursum - rowmeans(startx-1) + rowmeans(endx)
+    !             endif
+
+    !             input(i,j) = cursum / ncols
+
+    !         enddo
+    !     enddo
+    !     !$omp end do
+    !     !$omp end parallel
+
+    !end subroutine smooth_array_2d
 
 
     !>------------------------------------------------------------

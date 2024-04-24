@@ -23,7 +23,7 @@ program icar
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
     use output_interface,   only : output_t
-    use time_step,          only : step, dt_reduce                ! Advance the model forward in time
+    use time_step,          only : step                ! Advance the model forward in time
     use initialization,     only : init_model, init_physics, init_model_state
     use timer_interface,    only : timer_t
     use time_object,        only : Time_type

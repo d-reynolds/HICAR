@@ -997,18 +997,17 @@ contains
                        temporary_data)
         this%terrain%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
         
-        !while we have global terrain loaded, pass to split_topography
-        if (options%parameters%sleve) call split_topography(this, temporary_data, options)  ! here h1 and h2 are calculated
-        
         allocate(this%neighbor_terrain(this%ihs:this%ihe, this%jhs:this%jhe), &
                     source=temporary_data(this%ihs:this%ihe, this%jhs:this%jhe))
         allocate(temp_offset(1:this%grid%ide+1,1:this%grid%jde+1))
 
         if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
              (options%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
-            this%global_terrain = temporary_data ! save the global terrain map for the linear wind solution
+             allocate(this%global_terrain(this%ids:this%ide, this%jds:this%jde), source=temporary_data)
         end if
 
+        !while we have global terrain loaded, pass to split_topography
+        if (options%parameters%sleve) call split_topography(this, temporary_data, options)  ! here h1 and h2 are calculated
 
         ! Read the latitude data
         call io_read(options%parameters%init_conditions_file,   &
@@ -1414,7 +1413,8 @@ contains
                     ! !     z_u(:,1,:) is the terrain on the u grid, and it needs to be offset in the z-dir
                     ! !     to reach mass levels (so by dz[i]/2)
 
-                    neighbor_z(:,i,:)  = (dz_scl(i)/2)  + h1*b1_mass + h2*b2_mass
+                    neighbor_z(:,i,:)  = (dz_scl(i)/2)  + h1(this%ihs:this%ihe,this%jhs:this%jhe)*b1_mass + &
+                                                          h2(this%ihs:this%ihe,this%jhs:this%jhe)*b2_mass
                     z_u(:,i,:)   = (dz_scl(i)/2) + h1_u*b1_mass + h2_u*b2_mass
                     z_v(:,i,:)   = (dz_scl(i)/2) + h1_v*b1_mass + h2_v*b2_mass
 
@@ -1446,7 +1446,8 @@ contains
 
                         global_z_interface(:,i,:)  = global_z_interface(:,i-1,:) + global_dz_interface(:,i-1,:)
 
-                        neighbor_z(:,i,:)  = (sum(dz_scl(1:(i-1))) + dz_scl(i)/2)  + h1*b1_mass + h2*b2_mass  
+                        neighbor_z(:,i,:)  = (sum(dz_scl(1:(i-1))) + dz_scl(i)/2)  + h1(this%ihs:this%ihe,this%jhs:this%jhe)*b1_mass + &
+                                                                                     h2(this%ihs:this%ihe,this%jhs:this%jhe)*b2_mass  
                         z_u(:,i,:)   = (sum(dz_scl(1:(i-1))) + dz_scl(i)/2) + h1_u*b1_mass + h2_u*b2_mass  
                         z_v(:,i,:)   = (sum(dz_scl(1:(i-1))) + dz_scl(i)/2) + h1_v*b1_mass + h2_v*b2_mass  
 
@@ -1482,7 +1483,7 @@ contains
                     dz_mass(:,i,:)   =  global_dz_interface(ims:ime,i-1,jms:jme) / 2  +  global_dz_interface(ims:ime,i,jms:jme) / 2
                 endif ! if (i>kms)
                 
-                neighbor_jacobian(:,i,:) = 1 + h1*db1_mass + h2*db2_mass
+                neighbor_jacobian(:,i,:) = 1 + h1(this%ihs:this%ihe,this%jhs:this%jhe)*db1_mass + h2(this%ihs:this%ihe,this%jhs:this%jhe)*db2_mass
                 jacobian_u(:,i,:) = 1 + h1_u*db1_mass + h2_u*db2_mass
                 jacobian_v(:,i,:) = 1 + h1_v*db1_mass + h2_v*db2_mass
 
@@ -1821,8 +1822,11 @@ contains
         allocate(neighbor_dzdx( this% ihs : this% ihe+1, this% khs : this% khe, this% jhs : this% jhe) )
         allocate(neighbor_dzdy( this% ihs : this% ihe, this% khs : this% khe, this% jhs : this% jhe+1) )
 
-        neighbor_z(:,1,:) = this%neighbor_terrain + (options%parameters%dz_levels(1)/2)*neighbor_jacobian(:,1,:)
-
+        if (allocated(this%neighbor_terrain)) then
+                neighbor_z(:,1,:) = this%neighbor_terrain + (options%parameters%dz_levels(1)/2)*neighbor_jacobian(:,1,:)
+        else
+                neighbor_z(:,1,:) = this%global_terrain(this%ihs:this%ihe, this%jhs:this%jhe) + (options%parameters%dz_levels(1)/2)*neighbor_jacobian(:,1,:)
+        endif
         do i=2,this%khe
             neighbor_z(:,i,:) = neighbor_z(:,i-1,:) + (((options%parameters%dz_levels(i)) / 2)*neighbor_jacobian(:,i,:)) + &
                                                   (((options%parameters%dz_levels(i-1)) / 2)*neighbor_jacobian(:,i-1,:))
@@ -1939,13 +1943,19 @@ contains
         real, allocatable :: temp(:,:)
         integer :: i
 
+        if (allocated(this%global_terrain)) then
+                allocate(this%h1( this% ids : this% ide, &
+                                  this% jds : this% jde) )
 
-        allocate(this%h1( this% ihs : this% ihe, &
-                          this% jhs : this% jhe) )
+                allocate(this%h2( this% ids : this% ide, &
+                                  this% jds : this% jde) )
+        else
+                allocate(this%h1( this% ihs : this% ihe, &
+                                  this% jhs : this% jhe) )
 
-        allocate(this%h2( this% ihs : this% ihe, &
-                          this% jhs : this% jhe) )
-
+                allocate(this%h2( this% ihs : this% ihe, &
+                                  this% jhs : this% jhe) )
+        endif
         allocate(this%h1_u( this%u_grid2d% ims : this%u_grid2d% ime,   &
                             this%u_grid2d% jms : this%u_grid2d% jme) )
 
@@ -1982,17 +1992,18 @@ contains
         allocate(temp(this%ids:this%ide,this%jds:this%jde))
         temp =  global_terr
 
-
-        h2 = temp(this%ihs:this%ihe,this%jhs:this%jhe)
         ! Smooth the terrain to attain the large-scale contribution h1 (_u/v):
-        
         do i =1,options%parameters%terrain_smooth_cycles
           call smooth_array( temp, windowsize  =  options%parameters%terrain_smooth_windowsize)
         enddo
         
-        h1   =  temp(this%ihs:this%ihe,this%jhs:this%jhe)
-        h2   =  h2 - h1
-
+        if (allocated(this%global_terrain)) then
+                h1   =  temp
+                h2   =  global_terr - h1
+        else
+                h1   =  temp(this%ihs:this%ihe,this%jhs:this%jhe)
+                h2   =  global_terr(this%ihs:this%ihe,this%jhs:this%jhe) - h1
+        endif
         ! offset the global terrain for the h_(u/v) calculations:
         deallocate(temp)
         allocate(temp(this%ids:this%ide+1,this%jds:this%jde))

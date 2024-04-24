@@ -36,7 +36,6 @@ module initialization
 
     use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
     use ioclient_interface,         only : ioclient_t
-    use time_step,                  only : init_time_step
     use iso_fortran_env
 
 
@@ -88,10 +87,6 @@ contains
         if (this_image()==1) flush(output_unit)
         call boundary%init(options,domain%latitude%data_2d,domain%longitude%data_2d,domain%variables_to_force)
 
-        if (this_image()==1) write(*,*) "Initializing time step helpers"
-        if (this_image()==1) flush(output_unit)
-        call init_time_step()
-
         if (this_image()==1) write(*,*) "Initializing atmospheric utilities"
         if (this_image()==1) flush(output_unit)
         ! initialize the atmospheric helper utilities
@@ -100,12 +95,6 @@ contains
         if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
             !call init_iter_winds_old(domain)
             call init_iter_winds(domain)
-        endif
-
-        if (options%physics%windtype==kWIND_LINEAR .or. &
-                 options%physics%windtype==kLINEAR_OBRIEN_WINDS .or. &
-                 options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
-            call setup_linwinds(domain, options, .False., options%parameters%advect_density)
         endif
 
         if (this_image()==1) write(*,'(/ A)') "Finished basic initialization"
@@ -118,6 +107,12 @@ contains
         type(options_t), intent(inout) :: options
         type(domain_t),  intent(inout) :: domain
         type(boundary_t),intent(in)    :: forcing
+
+        if (options%physics%windtype==kWIND_LINEAR .or. &
+                 options%physics%windtype==kLINEAR_OBRIEN_WINDS .or. &
+                 options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
+            call setup_linwinds(domain, options, .False., options%parameters%advect_density)
+        endif
 
         if (this_image()==1) write(*,*) "Init initial winds"
         if (this_image()==1) flush(output_unit)

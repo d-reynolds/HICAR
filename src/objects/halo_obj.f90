@@ -188,16 +188,16 @@ contains
     !! the according halo exchange using the pre-allocated halo
     !!
     !! -------------------------------
-    module subroutine exch_var(this, var,meta_data,corners)
+    module subroutine exch_var(this, var, do_dqdt, corners)
         class(halo_t),     intent(inout) :: this
         type(variable_t), intent(inout) :: var
-        logical, optional, intent(in) :: meta_data, corners
+        logical, optional, intent(in) :: do_dqdt, corners
         
         integer :: xdim, ydim
-        logical :: metadata, do_corners
+        logical :: dqdt, do_corners
 
-        metadata=.False.
-        if (present(meta_data)) metadata=meta_data
+        dqdt=.False.
+        if (present(do_dqdt)) dqdt=do_dqdt
 
         do_corners=.False.
         if (present(corners)) do_corners=corners
@@ -209,10 +209,10 @@ contains
                 call MPI_Win_fence(0,this%east_in_win)
                 call MPI_Win_fence(0,this%west_in_win)
 #endif
-                if (.not. this%north_boundary .and. .not.this%west_boundary) call this%put_northeast(var, metadata)
-                if (.not. this%north_boundary .and. .not.this%east_boundary) call this%put_northwest(var, metadata)
-                if (.not. this%south_boundary .and. .not.this%east_boundary)  call this%put_southeast(var, metadata)
-                if (.not. this%south_boundary .and. .not.this%west_boundary)  call this%put_southwest(var, metadata)
+                if (.not. this%north_boundary .and. .not.this%west_boundary) call this%put_northeast(var, dqdt)
+                if (.not. this%north_boundary .and. .not.this%east_boundary) call this%put_northwest(var, dqdt)
+                if (.not. this%south_boundary .and. .not.this%east_boundary)  call this%put_southeast(var, dqdt)
+                if (.not. this%south_boundary .and. .not.this%west_boundary)  call this%put_southwest(var, dqdt)
 
 #ifdef CRAY_PE
                 sync images( this%corner_neighbors )
@@ -223,10 +223,10 @@ contains
                 call MPI_Win_fence(0,this%west_in_win)
 #endif
 
-                if (.not. this%north_boundary .and. .not.this%west_boundary) call this%retrieve_northwest_halo(var, metadata)
-                if (.not. this%north_boundary .and. .not.this%east_boundary) call this%retrieve_northeast_halo(var, metadata)
-                if (.not. this%south_boundary .and. .not.this%east_boundary)  call this%retrieve_southeast_halo(var, metadata)
-                if (.not. this%south_boundary .and. .not.this%west_boundary)  call this%retrieve_southwest_halo(var, metadata)
+                if (.not. this%north_boundary .and. .not.this%west_boundary) call this%retrieve_northwest_halo(var, dqdt)
+                if (.not. this%north_boundary .and. .not.this%east_boundary) call this%retrieve_northeast_halo(var, dqdt)
+                if (.not. this%south_boundary .and. .not.this%east_boundary)  call this%retrieve_southeast_halo(var, dqdt)
+                if (.not. this%south_boundary .and. .not.this%west_boundary)  call this%retrieve_southwest_halo(var, dqdt)
 
                 return
         endif
@@ -237,8 +237,8 @@ contains
                 call MPI_Win_fence(0,this%east_in_win)
                 call MPI_Win_fence(0,this%west_in_win)
 #endif
-                if (.not. this%east_boundary)  call this%put_east(var, metadata)
-                if (.not. this%west_boundary)  call this%put_west(var, metadata)
+                if (.not. this%east_boundary)  call this%put_east(var, dqdt)
+                if (.not. this%west_boundary)  call this%put_west(var, dqdt)
 
 #ifdef CRAY_PE
                 sync images( this%neighbors )
@@ -247,15 +247,15 @@ contains
                 call MPI_Win_fence(0,this%west_in_win) 
 #endif
 
-                if (.not. this%east_boundary)  call this%retrieve_east_halo(var, metadata)
-                if (.not. this%west_boundary)  call this%retrieve_west_halo(var, metadata)
+                if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
+                if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
  
 #ifndef CRAY_PE                
                 call MPI_Win_fence(0,this%south_in_win) 
                 call MPI_Win_fence(0,this%north_in_win)
 #endif
-                if (.not. this%north_boundary) call this%put_north(var, metadata)
-                if (.not. this%south_boundary) call this%put_south(var, metadata)
+                if (.not. this%north_boundary) call this%put_north(var, dqdt)
+                if (.not. this%south_boundary) call this%put_south(var, dqdt)
 
 #ifdef CRAY_PE
                 sync images( this%neighbors )
@@ -264,8 +264,8 @@ contains
                 call MPI_Win_fence(0,this%north_in_win) 
 #endif
     
-                if (.not. this%north_boundary) call this%retrieve_north_halo(var, metadata)
-                if (.not. this%south_boundary) call this%retrieve_south_halo(var, metadata)
+                if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
+                if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
             endif
 
             ! if staggered in y direction, we need to carefully call the put and get commands
@@ -274,8 +274,8 @@ contains
                 call MPI_Win_fence(0,this%south_in_win)
                 call MPI_Win_fence(0,this%north_in_win)
 #endif
-                if (.not. this%north_boundary) call this%put_north(var, metadata)
-                if (.not. this%south_boundary) call this%put_south(var, metadata)
+                if (.not. this%north_boundary) call this%put_north(var, dqdt)
+                if (.not. this%south_boundary) call this%put_south(var, dqdt)
 
 #ifdef CRAY_PE
                 sync images( this%neighbors )
@@ -284,15 +284,15 @@ contains
                 call MPI_Win_fence(0,this%north_in_win)
 #endif
  
-                if (.not. this%north_boundary) call this%retrieve_north_halo(var, metadata)
-                if (.not. this%south_boundary) call this%retrieve_south_halo(var, metadata)
+                if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
+                if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
 
 #ifndef CRAY_PE   
                 call MPI_Win_fence(0,this%east_in_win)
                 call MPI_Win_fence(0,this%west_in_win)
 #endif
-                if (.not. this%east_boundary)  call this%put_east(var, metadata)
-                if (.not. this%west_boundary)  call this%put_west(var, metadata)
+                if (.not. this%east_boundary)  call this%put_east(var, dqdt)
+                if (.not. this%west_boundary)  call this%put_west(var, dqdt)
 
 #ifdef CRAY_PE
                 sync images( this%neighbors )
@@ -300,8 +300,8 @@ contains
                 call MPI_Win_fence(0,this%east_in_win)
                 call MPI_Win_fence(0,this%west_in_win)                
 #endif
-                if (.not. this%east_boundary)  call this%retrieve_east_halo(var, metadata)
-                if (.not. this%west_boundary)  call this%retrieve_west_halo(var, metadata)
+                if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
+                if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
             endif
 
             if((var%ystag+var%xstag)==0) then
@@ -311,10 +311,10 @@ contains
                 call MPI_Win_fence(0,this%east_in_win)
                 call MPI_Win_fence(0,this%west_in_win)
 #endif
-                if (.not. this%north_boundary) call this%put_north(var, metadata)
-                if (.not. this%south_boundary) call this%put_south(var, metadata)
-                if (.not. this%east_boundary)  call this%put_east(var, metadata)
-                if (.not. this%west_boundary)  call this%put_west(var, metadata)
+                if (.not. this%north_boundary) call this%put_north(var, dqdt)
+                if (.not. this%south_boundary) call this%put_south(var, dqdt)
+                if (.not. this%east_boundary)  call this%put_east(var, dqdt)
+                if (.not. this%west_boundary)  call this%put_west(var, dqdt)
 
 #ifdef CRAY_PE
                 sync images( this%neighbors )
@@ -324,10 +324,10 @@ contains
                 call MPI_Win_fence(0,this%east_in_win)
                 call MPI_Win_fence(0,this%west_in_win)
 #endif
-                if (.not. this%north_boundary) call this%retrieve_north_halo(var, metadata)
-                if (.not. this%south_boundary) call this%retrieve_south_halo(var, metadata)
-                if (.not. this%east_boundary)  call this%retrieve_east_halo(var, metadata)
-                if (.not. this%west_boundary)  call this%retrieve_west_halo(var, metadata)
+                if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
+                if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
+                if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
+                if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
             endif
 
     end subroutine exch_var
@@ -780,15 +780,15 @@ contains
     end subroutine
 
 
-  module subroutine put_north(this,var,do_metadata)
+  module subroutine put_north(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
       integer :: n, nx, offs, msg_size
-      logical :: metadata
+      logical :: dqdt
       INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       offs=var%ystag
       disp = 0
@@ -797,7 +797,7 @@ contains
       if (var%two_d) then
           n = ubound(var%data_2d,2)
           nx = size(var%data_2d,1)
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%south_in_3d(1+this%halo_size:nx-this%halo_size,1,1:(this%halo_size+offs))[this%north_neighbor] = var%dqdt_2d(var%grid%its:var%grid%ite,(n-this%halo_size*2+1-offs):(n-this%halo_size))
@@ -817,7 +817,7 @@ contains
       else
           n = ubound(var%data_3d,3)
           nx = size(var%data_3d,1)
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%south_in_3d(1+this%halo_size:nx-this%halo_size,var%grid%kts:var%grid%kte,1:(this%halo_size+offs))[this%north_neighbor] = &
@@ -841,16 +841,16 @@ contains
 
 
 
-  module subroutine put_south(this,var,do_metadata)
+  module subroutine put_south(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
       integer :: start, nx, offs, msg_size
-      logical :: metadata
+      logical :: dqdt
       INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       offs=var%ystag
       disp = 0
@@ -858,7 +858,7 @@ contains
       if (var%two_d) then
           start = lbound(var%data_2d,2)
           nx = size(var%data_2d,1)
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%north_in_3d(1+this%halo_size:nx-this%halo_size,1,1:this%halo_size)[this%south_neighbor] = var%dqdt_2d(var%grid%its:var%grid%ite,(start+this%halo_size+offs):(start+this%halo_size*2-1+offs))
@@ -878,7 +878,7 @@ contains
       else
           start = lbound(var%data_3d,3)
           nx = size(var%data_3d,1)
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%north_in_3d(1+this%halo_size:nx-this%halo_size,var%grid%kts:var%grid%kte,1:this%halo_size)[this%south_neighbor] = &
@@ -901,16 +901,16 @@ contains
   end subroutine
 
 
-  module subroutine put_east(this,var,do_metadata)
+  module subroutine put_east(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
       integer :: n, ny, msg_size, offs
-      logical :: metadata
+      logical :: dqdt
       INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       offs=var%xstag
       disp = 0
@@ -919,7 +919,7 @@ contains
       if (var%two_d) then
           n = ubound(var%data_2d,1)
           ny = size(var%data_2d,2)
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%west_in_3d(1:(this%halo_size+offs),1,1+this%halo_size:ny-this%halo_size)[this%east_neighbor] = var%dqdt_2d((n-this%halo_size*2+1-offs):(n-this%halo_size),var%grid%jts:var%grid%jte)
@@ -939,7 +939,7 @@ contains
       else
           n = ubound(var%data_3d,1)
           ny = size(var%data_3d,3)
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%west_in_3d(1:(this%halo_size+offs),var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size)[this%east_neighbor] = &
@@ -964,16 +964,16 @@ contains
 
 
 
-  module subroutine put_west(this,var,do_metadata)
+  module subroutine put_west(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
       integer :: start, ny, msg_size, offs
-      logical :: metadata
+      logical :: dqdt
       INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       offs=var%xstag
       disp = 0
@@ -982,7 +982,7 @@ contains
       if (var%two_d) then
           start = lbound(var%data_2d,1)
           ny = size(var%data_2d,2)
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%east_in_3d(1:this%halo_size,1,1+this%halo_size:ny-this%halo_size)[this%west_neighbor] = var%dqdt_2d((start+this%halo_size+offs):(start+this%halo_size*2-1+offs),var%grid%jts:var%grid%jte)
@@ -1002,7 +1002,7 @@ contains
       else
           start = lbound(var%data_3d,1)
           ny = size(var%data_3d,3)
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%east_in_3d(1:this%halo_size,var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size)[this%west_neighbor] = &
@@ -1024,22 +1024,22 @@ contains
       endif
   end subroutine
 
-  module subroutine retrieve_north_halo(this,var,do_metadata)
+  module subroutine retrieve_north_halo(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
       integer :: n, nx, offs
-      logical :: metadata
+      logical :: dqdt
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       offs=var%ystag
       
       if (var%two_d) then
           n = ubound(var%data_2d,2)
           nx = size(var%data_2d,1)
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_2d(var%grid%its:var%grid%ite,n-this%halo_size+1:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size,1,1:this%halo_size)
           else
               var%data_2d(var%grid%its:var%grid%ite,n-this%halo_size+1:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size,1,1:this%halo_size)
@@ -1047,7 +1047,7 @@ contains
       else
           n = ubound(var%data_3d,3)
           nx = size(var%data_3d,1)
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_3d(var%grid%its:var%grid%ite,var%grid%kts:var%grid%kte,n-this%halo_size+1:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size,var%grid%kts:var%grid%kte,1:this%halo_size)
           else
               var%data_3d(var%grid%its:var%grid%ite,var%grid%kts:var%grid%kte,n-this%halo_size+1:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size,var%grid%kts:var%grid%kte,1:this%halo_size)
@@ -1055,15 +1055,15 @@ contains
       endif
   end subroutine
 
-  module subroutine retrieve_south_halo(this,var,do_metadata)
+  module subroutine retrieve_south_halo(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
       integer :: start, nx, offs
-      logical :: metadata
+      logical :: dqdt
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       offs=var%ystag
      
@@ -1071,7 +1071,7 @@ contains
       if (var%two_d) then
           start = lbound(var%data_2d,2)
           nx = size(var%data_2d,1)
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_2d(var%grid%its:var%grid%ite,start:start+this%halo_size-1+offs) = this%south_in_3d(1+this%halo_size:nx-this%halo_size,1,1:(this%halo_size+offs))
           else
               var%data_2d(var%grid%its:var%grid%ite,start:start+this%halo_size-1+offs) = this%south_in_3d(1+this%halo_size:nx-this%halo_size,1,1:(this%halo_size+offs))
@@ -1079,7 +1079,7 @@ contains
       else
           start = lbound(var%data_3d,3)
           nx = size(var%data_3d,1)
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_3d(var%grid%its:var%grid%ite,var%grid%kts:var%grid%kte,start:start+this%halo_size-1+offs) = this%south_in_3d(1+this%halo_size:nx-this%halo_size,var%grid%kts:var%grid%kte,1:(this%halo_size+offs))
           else
               var%data_3d(var%grid%its:var%grid%ite,var%grid%kts:var%grid%kte,start:start+this%halo_size-1+offs) = this%south_in_3d(1+this%halo_size:nx-this%halo_size,var%grid%kts:var%grid%kte,1:(this%halo_size+offs))
@@ -1087,22 +1087,22 @@ contains
       endif
   end subroutine
 
-  module subroutine retrieve_east_halo(this,var,do_metadata)
+  module subroutine retrieve_east_halo(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
       integer :: n, ny, offs
-      logical :: metadata
+      logical :: dqdt
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       offs=var%xstag
 
       if (var%two_d) then
           n = ubound(var%data_2d,1)
           ny = size(var%data_2d,2)
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_2d(n-this%halo_size+1:n,var%grid%jts:var%grid%jte) = this%east_in_3d(1:this%halo_size,1,1+this%halo_size:ny-this%halo_size)
           else
               var%data_2d(n-this%halo_size+1:n,var%grid%jts:var%grid%jte) = this%east_in_3d(1:this%halo_size,1,1+this%halo_size:ny-this%halo_size)
@@ -1110,7 +1110,7 @@ contains
       else
           n = ubound(var%data_3d,1)
           ny = size(var%data_3d,3)
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_3d(n-this%halo_size+1:n,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte) = this%east_in_3d(1:this%halo_size,var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size)
           else
               var%data_3d(n-this%halo_size+1:n,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte) = this%east_in_3d(1:this%halo_size,var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size)
@@ -1118,22 +1118,22 @@ contains
       endif
   end subroutine
 
-  module subroutine retrieve_west_halo(this,var,do_metadata)
+  module subroutine retrieve_west_halo(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
       integer :: start, ny, offs
-      logical :: metadata
+      logical :: dqdt
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       offs=var%xstag
       
       if (var%two_d) then
           start = lbound(var%data_2d,1)
           ny = size(var%data_2d,2)
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_2d(start:start+this%halo_size-1+offs,var%grid%jts:var%grid%jte) = this%west_in_3d(1:(this%halo_size+offs),1,1+this%halo_size:ny-this%halo_size)
           else
               var%data_2d(start:start+this%halo_size-1+offs,var%grid%jts:var%grid%jte) = this%west_in_3d(1:(this%halo_size+offs),1,1+this%halo_size:ny-this%halo_size)
@@ -1141,7 +1141,7 @@ contains
       else
           start = lbound(var%data_3d,1)
           ny = size(var%data_3d,3)
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_3d(start:start+this%halo_size-1+offs,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte) = this%west_in_3d(1:(this%halo_size+offs),var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size)
           else
               var%data_3d(start:start+this%halo_size-1+offs,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte) = this%west_in_3d(1:(this%halo_size+offs),var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size)
@@ -1151,22 +1151,22 @@ contains
 
 
 
-  module subroutine put_northeast(this,var,do_metadata)
+  module subroutine put_northeast(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
-      logical :: metadata
+      logical, optional, intent(in) :: do_dqdt
+      logical :: dqdt
       integer :: msg_size
       INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       disp = 0
       msg_size = 1
 
       if (var%two_d) then
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%west_in_3d(1:this%halo_size,1,1:this%halo_size)[this%northeast_neighbor] = var%dqdt_2d(this%ite-this%halo_size:this%ite,this%jte-this%halo_size:this%jte)
@@ -1184,7 +1184,7 @@ contains
 #endif
           endif
       else
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%northeast_neighbor] = var%dqdt_3d(this%ite-this%halo_size:this%ite,this%kts:this%kte,this%jte-this%halo_size:this%jte)
@@ -1204,22 +1204,22 @@ contains
       endif
   end subroutine
 
-  module subroutine put_northwest(this,var,do_metadata)
+  module subroutine put_northwest(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
-      logical :: metadata
+      logical, optional, intent(in) :: do_dqdt
+      logical :: dqdt
       integer :: msg_size
       INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       disp = 0
       msg_size = 1
 
       if (var%two_d) then
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%south_in_3d(1:this%halo_size,1,1:this%halo_size)[this%northwest_neighbor] = var%dqdt_2d(this%its:this%its+this%halo_size,this%jte-this%halo_size:this%jte)
@@ -1237,7 +1237,7 @@ contains
 #endif
           endif
       else
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%northwest_neighbor] = var%dqdt_3d(this%its:this%its+this%halo_size,this%kts:this%kte,this%jte-this%halo_size:this%jte)
@@ -1258,22 +1258,22 @@ contains
   end subroutine
 
 
-  module subroutine put_southwest(this,var,do_metadata)
+  module subroutine put_southwest(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
-      logical :: metadata
+      logical, optional, intent(in) :: do_dqdt
+      logical :: dqdt
       integer :: msg_size
       INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       disp = 0
       msg_size = 1
 
       if (var%two_d) then
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%east_in_3d(1:this%halo_size,1,1:this%halo_size)[this%southwest_neighbor] = var%dqdt_2d(this%its:this%its+this%halo_size,this%jts:this%jts+this%halo_size)
@@ -1291,7 +1291,7 @@ contains
 #endif
           endif
       else
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%southwest_neighbor] = var%dqdt_3d(this%its:this%its+this%halo_size,this%kts:this%kte,this%jts:this%jts+this%halo_size)
@@ -1311,22 +1311,22 @@ contains
       endif
   end subroutine
 
-  module subroutine put_southeast(this,var,do_metadata)
+  module subroutine put_southeast(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
-      logical :: metadata
+      logical, optional, intent(in) :: do_dqdt
+      logical :: dqdt
       integer :: msg_size
       INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       disp = 0
       msg_size = 1
 
       if (var%two_d) then
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%north_in_3d(1:this%halo_size,1,1:this%halo_size)[this%southeast_neighbor] = var%dqdt_2d(this%ite-this%halo_size:this%ite,this%jts:this%jts+this%halo_size)
@@ -1344,7 +1344,7 @@ contains
 #endif
           endif
       else
-          if (metadata) then
+          if (dqdt) then
 #ifdef CRAY_PE
               !DIR$ PGAS DEFER_SYNC
               this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%southeast_neighbor] = var%dqdt_3d(this%ite-this%halo_size:this%ite,this%kts:this%kte,this%jts:this%jts+this%halo_size)
@@ -1365,24 +1365,24 @@ contains
   end subroutine
 
 
-  module subroutine retrieve_northeast_halo(this,var,do_metadata)
+  module subroutine retrieve_northeast_halo(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
 
-      logical :: metadata
+      logical :: dqdt
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       if (var%two_d) then
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_2d(this%ite+1:this%ime,this%jte+1:this%jme) = this%east_in_3d(1:this%halo_size,1,1:this%halo_size)
           else
               var%data_2d(this%ite+1:this%ime,this%jte+1:this%jme) = this%east_in_3d(1:this%halo_size,1,1:this%halo_size)
           endif
       else
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_3d(this%ite+1:this%ime,this%kts:this%kte,this%jte+1:this%jme) = this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
           else
               var%data_3d(this%ite+1:this%ime,this%kts:this%kte,this%jte+1:this%jme) = this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
@@ -1390,24 +1390,24 @@ contains
       endif
   end subroutine
 
-  module subroutine retrieve_northwest_halo(this,var,do_metadata)
+  module subroutine retrieve_northwest_halo(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
 
-      logical :: metadata
+      logical :: dqdt
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       if (var%two_d) then
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_2d(this%ims:this%its-1,this%jte+1:this%jme) = this%north_in_3d(1:this%halo_size,1,1:this%halo_size)
           else
               var%data_2d(this%ims:this%its-1,this%jte+1:this%jme) = this%north_in_3d(1:this%halo_size,1,1:this%halo_size)
           endif
       else
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_3d(this%ims:this%its-1,this%kts:this%kte,this%jte+1:this%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
           else
               var%data_3d(this%ims:this%its-1,this%kts:this%kte,this%jte+1:this%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
@@ -1415,24 +1415,24 @@ contains
       endif
   end subroutine
 
-  module subroutine retrieve_southwest_halo(this,var,do_metadata)
+  module subroutine retrieve_southwest_halo(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
 
-      logical :: metadata
+      logical :: dqdt
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       if (var%two_d) then
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_2d(this%ims:this%its-1,this%jms:this%jts-1) = this%west_in_3d(1:this%halo_size,1,1:this%halo_size)
           else
               var%data_2d(this%ims:this%its-1,this%jms:this%jts-1) = this%west_in_3d(1:this%halo_size,1,1:this%halo_size)
           endif
       else
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_3d(this%ims:this%its-1,this%kts:this%kte,this%jms:this%jts-1) = this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
           else
               var%data_3d(this%ims:this%its-1,this%kts:this%kte,this%jms:this%jts-1) = this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
@@ -1440,24 +1440,24 @@ contains
       endif
   end subroutine
 
-  module subroutine retrieve_southeast_halo(this,var,do_metadata)
+  module subroutine retrieve_southeast_halo(this,var,do_dqdt)
       class(halo_t), intent(inout) :: this
       class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_metadata
+      logical, optional, intent(in) :: do_dqdt
 
-      logical :: metadata
+      logical :: dqdt
 
-      metadata=.False.
-      if (present(do_metadata)) metadata=do_metadata
+      dqdt=.False.
+      if (present(do_dqdt)) dqdt=do_dqdt
       
       if (var%two_d) then
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_2d(this%ite+1:this%ime,this%jms:this%jts-1) = this%south_in_3d(1:this%halo_size,1,1:this%halo_size)
           else
               var%data_2d(this%ite+1:this%ime,this%jms:this%jts-1) = this%south_in_3d(1:this%halo_size,1,1:this%halo_size)
           endif
       else
-          if (metadata) then
+          if (dqdt) then
               var%dqdt_3d(this%ite+1:this%ime,this%kts:this%kte,this%jms:this%jts-1) = this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
           else
               var%data_3d(this%ite+1:this%ime,this%kts:this%kte,this%jms:this%jts-1) = this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
