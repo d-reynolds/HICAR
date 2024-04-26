@@ -28,6 +28,7 @@ module wind_iterative_old
     use petscdm
     use petscdmda
     use array_utilities,      only : smooth_array_3d
+    use icar_constants,       only : STD_OUT_PE
 
     implicit none
     private
@@ -88,13 +89,13 @@ contains
             call update_coefs(domain)
         endif
                                                                 
-        call KSPCreate(domain%IO_comms%MPI_VAL,ksp,ierr)
+        call KSPCreate(domain%compute_comms%MPI_VAL,ksp,ierr)
         conv_tol = 1e-10
 
         call KSPSetTolerances(ksp,conv_tol,PETSC_DEFAULT_REAL,PETSC_DEFAULT_REAL,PETSC_DEFAULT_INTEGER,ierr)
         call KSPSetType(ksp,KSPBCGSL,ierr);
         
-        call DMDACreate3d(domain%IO_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
+        call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
                           xl, PETSC_NULL_INTEGER,yl,da,ierr)
         
@@ -113,13 +114,13 @@ contains
         call KSPGetSolution(ksp,x,ierr)
         call KSPGetConvergedReason(ksp, reason, ierr)
         call KSPGetIterationNumber(ksp, iteration, ierr)
-        if(this_image()==1) write(*,*) 'Solved PETSc after ',iteration,' iterations, reason: ',reason
+        if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iteration,' iterations, reason: ',reason
         
         !Subset global solution x to local grid so that we can access ghost-points
         call DMGlobalToLocalBegin(da,x,INSERT_VALUES,localX,ierr)
         call DMGlobalToLocalEnd(da,x,INSERT_VALUES,localX,ierr)
 
-        if ( this_image()==1 .and. reason < 0) then
+        if ( STD_OUT_PE .and. reason < 0) then
             write (*,*) 'PETSc ERROR: convergence failed after ',iteration,' iterations'
             write (*,*) 'PETSc KSP Error code:  ',reason
             !stop
@@ -271,14 +272,14 @@ contains
 
     end subroutine calc_updated_winds
 
-    subroutine ComputeRHS(ksp,vec_b,dummy,ierr)
+    subroutine ComputeRHS(ksp, vec_b, dummy, ierr)
         implicit none
         
-        PetscErrorCode  ierr
-        KSP ksp
-        Vec vec_b, x
-        integer dummy(*)
-        DM             dm
+        PetscErrorCode :: ierr
+        KSP :: ksp
+        Vec :: vec_b, x
+        integer :: dummy(*)
+        DM      ::       dm
 
         PetscInt       i,j,k,mx,my,mz,xm,ym,zm,xs,ys,zs
         DMDALocalInfo       :: info(DMDA_LOCAL_INFO_SIZE)
@@ -719,7 +720,7 @@ contains
         type(domain_t), intent(in) :: domain
         PetscErrorCode ierr
 
-        PETSC_COMM_WORLD = domain%IO_comms%MPI_VAL
+        PETSC_COMM_WORLD = domain%compute_comms%MPI_VAL
         
         call PetscInitialize(PETSC_NULL_CHARACTER, ierr)
         if (ierr .ne. 0) then
@@ -727,12 +728,14 @@ contains
             stop
         endif 
         call init_module_vars(domain)
-        if(this_image()==1) write(*,*) 'Initialized PETSc'
+        if(STD_OUT_PE) write(*,*) 'Initialized PETSc'
     end subroutine
     
     subroutine init_module_vars(domain)
         implicit none
         type(domain_t), intent(in) :: domain
+
+        integer :: ierr
 
         i_s = domain%its-1
         i_e = domain%ite+1
@@ -812,9 +815,9 @@ contains
             if (domain%grid%ximg == 1) yl(domain%grid%yimg) = domain%grid%ny-hs*2
         
             !Wait for all images to contribute their dimension            
-            call CO_MAX(xl)
-            call CO_MAX(yl)
-            
+            call MPI_Allreduce(MPI_IN_PLACE,xl,domain%grid%ximages,MPI_INT,MPI_MAX,domain%compute_comms, ierr)
+            call MPI_Allreduce(MPI_IN_PLACE,yl,domain%grid%yimages,MPI_INT,MPI_MAX,domain%compute_comms, ierr)
+
             !Add points to xy-edges to accomodate ghost-points of DMDA grid
             !cells at boundaries have 1 extra for ghost-point, and should also be corrected
             !to have the hs which was falsely removed added back on

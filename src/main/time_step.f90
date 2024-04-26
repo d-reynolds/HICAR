@@ -248,11 +248,11 @@ contains
                         cfl_strictness=options%time_options%cfl_strictness, use_density=.false.)
                 
         !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
-        call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_DOUBLE, MPI_MIN, domain%IO_comms)
+        call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_DOUBLE, MPI_MIN, domain%compute_comms)
         
         ! Set dt to the outcome of reduce
         call dt%set(seconds=seconds_out)
-        if (this_image()==1) write(*,*) 'time_step: ',dt%seconds()
+        if (STD_OUT_PE) write(*,*) 'time_step: ',dt%seconds()
 
     end subroutine update_dt
     
@@ -281,6 +281,7 @@ contains
 
         real            :: last_print_time
         real, save      :: last_wind_update
+        logical         :: last_loop
 
         type(time_delta_t) :: time_step_size, dt_saver
         type(time_delta_t), save      :: dt
@@ -293,11 +294,12 @@ contains
         ! Initialize to just over update_dt to force an update on first loop
         if (domain%model_time==options%parameters%start_time) last_wind_update = options%wind%update_dt%seconds() + 1
 
+        last_loop = .False.
         ! now just loop over internal timesteps computing all physics in order (operator splitting...)
-        do while (domain%model_time < end_time)
+        do while (domain%model_time < end_time .and. .not.(last_loop))
             
             call send_timer%start()
-            call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+            !call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
             call send_timer%stop()
 
             !Determine dt
@@ -322,6 +324,10 @@ contains
             if ((domain%model_time + dt) > end_time) then
                 dt_saver = dt
                 dt = end_time - domain%model_time
+
+                ! Sometimes, due to very small time differences, in the inequality controling the loop,
+                ! the physics loop can run again. Stop that from happening here
+                last_loop = .True.
             endif
             
             ! ! apply/update boundary conditions including internal wind and pressure changes.
@@ -341,25 +347,25 @@ contains
             endif
 
             ! if an interactive run was requested than print status updates everytime at least 5% of the progress has been made
-            if (options%parameters%interactive .and. (this_image()==1)) then
+            if (options%parameters%interactive .and. (STD_OUT_PE)) then
                 call print_progress(domain%model_time, end_time, time_step_size, dt, last_print_time)
             endif
             ! this if is to avoid round off errors causing an additional physics call that won't really do anything
 
             if (real(dt%seconds()) > 1e-3) then
 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" init", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" init", fix=.True.)
 
                 ! first process the halo section of the domain (currently hard coded at 1 should come from domain?)
                 call rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" rad(domain", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" rad(domain", fix=.True.)
                 call rad_timer%stop()
 
                 call lsm_timer%start()
                 call sfc(domain, options, real(dt%seconds()))!, halo=1)
                 call lsm(domain, options, real(dt%seconds()))!, halo=1)
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" lsm")
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" lsm")
                 call lsm_timer%stop()
 
                 call pbl_timer%start()
@@ -377,30 +383,30 @@ contains
                 !         dt = end_time - domain%model_time
                 !     endif
                 ! endif
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" pbl")
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" pbl")
 
                 call convect(domain, options, real(dt%seconds()))!, halo=1)
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" convect")
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" convect")
 
                 
                 call ret_timer%start()
-                call domain%halo%halo_3d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
-                !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                !call domain%halo%halo_3d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
                 call ret_timer%stop()
 
 
                 call adv_timer%start()
                 call advect(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" advect(domain", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" advect(domain", fix=.True.)
                 call adv_timer%stop()
                                 
                 call mp_timer%start()
 
                 call mp(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" mp_halo", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" mp_halo", fix=.True.)
                 call mp_timer%stop()
                 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" domain%halo_send", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%halo_send", fix=.True.)
 
 
                 !If we are in the last ~10 updates of a time step and a variable drops below 0, we have probably over-shot a value of 0. Force back to 0
@@ -410,7 +416,7 @@ contains
                 endif
 
 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" domain%apply_forcing", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%apply_forcing", fix=.True.)
 
             endif
             ! step model_time forward

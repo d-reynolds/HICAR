@@ -68,27 +68,27 @@ contains
         implicit none
         type(options_t), intent(inout) :: options
 
-        if (this_image()==1) write(*,*) ""
-        if (this_image()==1) write(*,*) "Initializing Microphysics"
+        if (STD_OUT_PE) write(*,*) ""
+        if (STD_OUT_PE) write(*,*) "Initializing Microphysics"
         if (options%physics%microphysics    == kMP_THOMPSON) then
-            if (this_image()==1) write(*,*) "    Thompson Microphysics"
+            if (STD_OUT_PE) write(*,*) "    Thompson Microphysics"
             call thompson_init(options%mp_options)
         elseif (options%physics%microphysics    == kMP_THOMP_AER) then
-            if (this_image()==1) write(*,*) "    Thompson Eidhammer Microphysics"
+            if (STD_OUT_PE) write(*,*) "    Thompson Eidhammer Microphysics"
             call thompson_aer_init()
         elseif (options%physics%microphysics == kMP_SB04) then
-            if (this_image()==1) write(*,*) "    Simple Microphysics"
+            if (STD_OUT_PE) write(*,*) "    Simple Microphysics"
         elseif (options%physics%microphysics==kMP_MORRISON) then
-            if (this_image()==1) write(*,*) "    Morrison Microphysics"
+            if (STD_OUT_PE) write(*,*) "    Morrison Microphysics"
             call MORR_TWO_MOMENT_INIT(hail_opt=1)
         elseif (options%physics%microphysics==kMP_ISHMAEL) then
-            if (this_image()==1) write(*,*) "    Jensen-Ischmael Microphysics"
+            if (STD_OUT_PE) write(*,*) "    Jensen-Ischmael Microphysics"
             call jensen_ishmael_init()
         elseif (options%physics%microphysics==kMP_WSM6) then
-            if (this_image()==1) write(*,*) "    WSM6 Microphysics"
+            if (STD_OUT_PE) write(*,*) "    WSM6 Microphysics"
             call wsm6init(rhoair0,rhowater,rhosnow,cliq,cpv)
         elseif (options%physics%microphysics==kMP_WSM3) then
-            if (this_image()==1) write(*,*) "    WSM3 Microphysics"
+            if (STD_OUT_PE) write(*,*) "    WSM3 Microphysics"
             call wsm3init(rhoair0,rhowater,rhosnow,cliq,cpv, allowed_to_read=.True.)
         endif
 
@@ -275,7 +275,7 @@ contains
 
         ! For the ideal test case(s), we need to be able to advect qv, without initializing microphysics:
         elseif (options%parameters%ideal) then
-                if (this_image()==1) write(*,*) "    allocating water vapor for ideal test case."
+                if (STD_OUT_PE) write(*,*) "    allocating water vapor for ideal test case."
                 call options%alloc_vars( [kVARS%water_vapor] )
                 call options%advect_vars( [kVARS%water_vapor] )
         endif

@@ -40,8 +40,7 @@ module ioserver_interface
       ! Note n_variables may be smaller then size(variables) so that it doesn't
       ! have to keep reallocating variables whenever something is added or removed
       integer, public :: n_input_variables, n_output_variables, n_children
-      type(MPI_Comm), public :: IO_comms
-      integer, public :: server_id = -1
+      type(MPI_Comm), public :: IO_comms, client_comms
       logical, public :: files_to_read
 
       ! time variable , publicis stored outside of the variable list... probably need to think about that some
@@ -51,12 +50,20 @@ module ioserver_interface
       type(Time_type), public :: io_time
 
       real, pointer :: parent_write_buffer(:,:,:,:)
+      real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer
+
+      type(MPI_Win) :: write_win, read_win
+      type(MPI_Group) :: children_group
+
+      ! These MPI datatypes describe the access patterns between the IO read/write buffers and
+      ! the child read/write buffers
+      type(MPI_Datatype), allocatable, dimension(:) :: get_types, put_types, child_get_types, child_put_types
 
       ! store status of the object -- are we a parent or child process
       logical :: creating = .false.
       
       ! coarray-indices of child io processes, indexed according to the COMPUTE_TEAM
-      integer, public, allocatable :: children(:)
+      integer, allocatable :: children_ranks(:)
       
       ! coarray-index of parent io process, indexed according to the IO_TEAM
       integer :: parent_id = 0
@@ -72,7 +79,8 @@ module ioserver_interface
 
       integer, allocatable, dimension(:) :: isrc, ierc, ksrc, kerc, jsrc, jerc, iswc, iewc, kswc, kewc, jswc, jewc
       
-      integer, public :: i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, n_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_r, n_restart
+      integer :: i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_restart
+      integer :: nx_w, nz_w, ny_w, n_w, nx_r, nz_r, ny_r, n_r
       integer         :: ide, kde, jde
       integer :: restart_counter = 0
       integer :: output_counter = 0
@@ -109,12 +117,11 @@ module ioserver_interface
       !! Initialize the object (e.g. allocate the variables array)
       !!
       !!----------------------------------------------------------
-      module subroutine init(this, domain, options, isrc, ierc, ksrc, kerc, jsrc, jerc, iswc, iewc, kswc, kewc, jswc, jewc)
+      module subroutine init(this, domain, options)
           implicit none
           class(ioserver_t),   intent(inout) :: this
           type(domain_t),      intent(inout) :: domain
           type(options_t),     intent(in)    :: options
-          integer, allocatable, dimension(:), intent(in) :: isrc, ierc, ksrc, kerc, jsrc, jerc, iswc, iewc, kswc, kewc, jswc, jewc
 
       end subroutine
 
@@ -122,28 +129,25 @@ module ioserver_interface
       !! Increase the size of the variables array if necessary
       !!
       !!----------------------------------------------------------
-      module subroutine write_file(this, time, write_buffer)
+      module subroutine write_file(this, time)
           implicit none
           class(ioserver_t),   intent(inout)  :: this
           type(Time_type),  intent(in)        :: time
-          real, allocatable, intent(in)       :: write_buffer(:,:,:,:)[:]
       end subroutine
 
       !>----------------------------------------------------------
       !! Set the domain data structure to be used when writing
       !!
       !!----------------------------------------------------------
-      module subroutine read_file(this, read_buffer)
+      module subroutine read_file(this)
           implicit none
           class(ioserver_t), intent(inout)   :: this
-          real, allocatable, intent(inout)   :: read_buffer(:,:,:,:)[:]
       end subroutine
       
       ! Same as above, but for restart file
-      module subroutine read_restart_file(this, options, write_buffer)
+      module subroutine read_restart_file(this, options)
           class(ioserver_t),   intent(inout) :: this
           type(options_t),     intent(in)    :: options
-          real, intent(inout), allocatable   :: write_buffer(:,:,:,:)[:]
       end subroutine
 
       module subroutine close_files(this)

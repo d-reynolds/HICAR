@@ -41,24 +41,22 @@ program icar
     type(options_t) :: options
     type(domain_t)  :: domain
     type(boundary_t):: boundary
-    type(event_type)  :: written_ev[*], write_ev[*], read_ev[*], child_read_ev[*], end_ev[*]
+    !type(event_type)  :: written_ev[*], write_ev[*], read_ev[*], child_read_ev[*], end_ev[*]
     type(output_t)  :: restart_dataset
     type(output_t)  :: output_dataset
     type(ioserver_t)  :: ioserver
     type(ioclient_t)  :: ioclient
-    real, allocatable :: write_buffer(:,:,:,:)[:], read_buffer(:,:,:,:)[:]
 
-    type(timer_t)   :: io_timer, initialization_timer, total_timer, input_timer, output_timer, physics_timer, wind_timer, mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer
+    type(timer_t)   :: initialization_timer, total_timer, input_timer, output_timer, physics_timer, wind_timer, mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer
     type(Time_type) :: next_output, next_input
     type(time_delta_t) :: small_time_delta
     
     integer :: i, ierr, exec_team
-    integer :: sleep_cnt, ev_cnt, end_ev_cnt
     real :: t_val
-    logical :: init_flag
+    logical :: init_flag, io_loop
 
-    !if (this_image()==1) write(*,*) 'Before MPI init'
-    !if (this_image()==1) flush(output_unit)
+    !if (STD_OUT_PE) write(*,*) 'Before MPI init'
+    !if (STD_OUT_PE) flush(output_unit)
 
     !Initialize MPI if needed
     init_flag = .False.
@@ -70,13 +68,13 @@ program icar
 
     !Determine split of processes which will become I/O servers and which will be compute tasks
     !Also sets constants for the program to keep track of this splitting
-    call split_processes(exec_team, domain, ioserver)
+
+    !We should first read in options here
+
+    call split_processes(exec_team, domain, ioserver, ioclient)
 
     call small_time_delta%set(1)
-    
-    call total_timer%start()
-    call initialization_timer%start()
-    
+        
     !-----------------------------------------
     !  Model Initialization
     !
@@ -86,89 +84,56 @@ program icar
     ! Model structure must be initialized first. 
     ! The domain dimensions will be used when establishing I/O client-server relations
 
-    if (this_image()==1) write(*,*) 'Before init'
-    if (this_image()==1) flush(output_unit)
+    if (STD_OUT_PE) write(*,*) 'Before init'
+    if (STD_OUT_PE) flush(output_unit)
 
     call init_model(options, domain, boundary)
-    if (this_image()==1) flush(output_unit)
-    call init_IO(exec_team, domain, boundary, options, ioclient, ioserver, write_buffer, read_buffer)        
-    if (this_image()==1) flush(output_unit)
+    if (STD_OUT_PE) flush(output_unit)
+    !call init_IO(exec_team, domain, boundary, options, ioclient, ioserver)        
+    !if (STD_OUT_PE) flush(output_unit)
 
     select case(exec_team)
     case(kCOMPUTE_TEAM)
-    
-        call EVENT_QUERY(read_ev,ev_cnt)
-        sleep_cnt = 0
-        do while(ev_cnt == 0)
-            call sleep(1)
-            sleep_cnt = sleep_cnt + 1
-            call EVENT_QUERY(read_ev,ev_cnt)
-            if (sleep_cnt >= kTIMEOUT) stop 'Timeout on waiting for reading of initial conditions'
-        enddo
-        !Finally, do an event wait to decrement the event counter
-        EVENT WAIT (read_ev)
+        call total_timer%start()
+        call initialization_timer%start()    
 
-        call ioclient%receive(boundary, read_buffer)
-        EVENT POST (child_read_ev[ioclient%server])
+        call ioclient%init(domain, boundary, options)
+
+        if (STD_OUT_PE) write(*,*) "Receiving initial data"
+        if (STD_OUT_PE) flush(output_unit)
+
+        call ioclient%receive(boundary)
+
+        if (STD_OUT_PE) write(*,*) "Populating boundary object"
+        if (STD_OUT_PE) flush(output_unit)
 
         call boundary%update_computed_vars(options, update=options%parameters%time_varying_z)
+
+        if (STD_OUT_PE) write(*,*) "Inizializing model state"
+        if (STD_OUT_PE) flush(output_unit)
 
         call init_model_state(options, domain, boundary) ! added boundary structure
 
         if (options%parameters%restart) then
-            sync all !Matching IO sync call
-            call EVENT_QUERY(read_ev,ev_cnt)
-            sleep_cnt = 0
-            do while(ev_cnt == 0)
-                call sleep(1)
-                sleep_cnt = sleep_cnt + 1
-                call EVENT_QUERY(read_ev,ev_cnt)
-                if (sleep_cnt >= kTIMEOUT) stop 'Timeout on waiting for reading of restart data'
-            enddo
-            !Finally, do an event wait to decrement the event counter
-            EVENT WAIT (read_ev)
-
-            if (this_image()==1) write(*,*) "Reading restart data"
-            call ioclient%receive_rst(domain, write_buffer)
+            if (STD_OUT_PE) write(*,*) "Reading restart data"
+            call ioclient%receive_rst(domain)
         endif
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) flush(output_unit)
         ! physics drivers need to be initialized after restart data are potentially read in.
         call init_physics(options, domain, boundary)
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) flush(output_unit)
+
         call output_timer%start()
-        call ioclient%push(domain, write_buffer)
-
-        EVENT POST (write_ev[ioclient%server])
+        call ioclient%push(domain)
         call output_timer%stop()
+
+        call initialization_timer%stop() 
+
         next_output = options%parameters%start_time + options%io_options%output_dt
-    case(kIO_TEAM)
-    
-        call ioserver%read_file(read_buffer)
-
-        do i = 1,ioserver%n_children
-            EVENT POST (read_ev[ioserver%children(i)])
-        enddo
-        
-        if (options%parameters%restart) then
-            sync all !Make sure we don't overwrite the file previously read in before the compute task has used it
-            call ioserver%read_restart_file(options, write_buffer)
-            do i = 1,ioserver%n_children
-                EVENT POST (read_ev[ioserver%children(i)])
-            enddo
-        endif
-                
-        !We do not do output here so that we can continue straight to reading the next input file and not block the compute processes
-        next_output = options%parameters%start_time
-    end select
-    
-    call initialization_timer%stop()
-    next_input = options%parameters%start_time + options%io_options%input_dt
+        next_input = options%parameters%start_time + options%io_options%input_dt
 
 
-    select case(exec_team)
-    case(kCOMPUTE_TEAM)
-
-        if (this_image()==1) write(*,*) "Initialization complete, beginning physics integration."
+        if (STD_OUT_PE) write(*,*) "Initialization complete, beginning physics integration."
         do while (domain%model_time + small_time_delta < options%parameters%end_time)
 
             ! -----------------------------------------------------
@@ -177,25 +142,13 @@ program icar
             !
             ! -----------------------------------------------------
             if ((domain%model_time + small_time_delta + options%io_options%input_dt) >= next_input) then
-                if (this_image()==1) write(*,*) ""
-                if (this_image()==1) write(*,*) " ----------------------------------------------------------------------"
-                if (this_image()==1) write(*,*) "Updating Boundary conditions"
+                if (STD_OUT_PE) write(*,*) ""
+                if (STD_OUT_PE) write(*,*) " ----------------------------------------------------------------------"
+                if (STD_OUT_PE) write(*,*) "Updating Boundary conditions"
                 
                 call input_timer%start()
 
-                call EVENT_QUERY(read_ev,ev_cnt)
-                sleep_cnt = 0
-                do while(ev_cnt == 0)
-                    call sleep(1)
-                    sleep_cnt = sleep_cnt + 1
-                    call EVENT_QUERY(read_ev,ev_cnt)
-                    if (sleep_cnt >= kTIMEOUT) stop 'Timeout on waiting for reading of input'
-                enddo
-                !Finally, do an event wait to decrement the event counter
-                EVENT WAIT (read_ev)
-
-                call ioclient%receive(boundary, read_buffer)
-                EVENT POST (child_read_ev[ioclient%server])
+                call ioclient%receive(boundary)
                 
                 ! after reading all variables that can be read, not compute any remaining variables (e.g. z from p+ps)
                 call boundary%update_computed_vars(options, update=.True.)
@@ -220,12 +173,12 @@ program icar
             !  Integrate physics forward in time
             !
             ! -----------------------------------------------------
-            if (this_image()==1) write(*,*) "Running Physics"
-            if (this_image()==1) write(*,*) "  Model time = ", trim(domain%model_time%as_string())
-            if (this_image()==1) write(*,*) "   End  time = ", trim(options%parameters%end_time%as_string())
-            if (this_image()==1) write(*,*) "  Next Input = ", trim(next_input%as_string())
-            if (this_image()==1) write(*,*) "  Next Output= ", trim(next_output%as_string())
-            if (this_image()==1) flush(output_unit)
+            if (STD_OUT_PE) write(*,*) "Running Physics"
+            if (STD_OUT_PE) write(*,*) "  Model time = ", trim(domain%model_time%as_string())
+            if (STD_OUT_PE) write(*,*) "   End  time = ", trim(options%parameters%end_time%as_string())
+            if (STD_OUT_PE) write(*,*) "  Next Input = ", trim(next_input%as_string())
+            if (STD_OUT_PE) write(*,*) "  Next Output= ", trim(next_output%as_string())
+            if (STD_OUT_PE) flush(output_unit)
             
             ! this is the meat of the model physics, run all the physics for the current time step looping over internal timesteps
             if (.not.(options%wind%wind_only)) then
@@ -243,160 +196,113 @@ program icar
             !  Write output data if it is time
             ! -----------------------------------------------------
             if ((domain%model_time + small_time_delta) >= next_output) then
-                if (this_image()==1) write(*,*) "Writing output file"
+                if (STD_OUT_PE) write(*,*) "Writing output file"
                 call output_timer%start()
-                call EVENT_QUERY(written_ev,ev_cnt)
-                sleep_cnt = 0
-                do while(ev_cnt == 0)
-                    call sleep(1)
-                    sleep_cnt = sleep_cnt + 1
-                    call EVENT_QUERY(written_ev,ev_cnt)
-                    if (sleep_cnt >= kTIMEOUT) stop 'Timeout on waiting for previous output file to be written'
-                enddo
-                !Finally, do an event wait to decrement the event counter
-                EVENT WAIT (written_ev)
-
-                call ioclient%push(domain, write_buffer)
-                EVENT POST (write_ev[ioclient%server])
+                call ioclient%push(domain)
                 next_output = next_output + options%io_options%output_dt
                 call output_timer%stop()
             endif
         end do
         
-        !Wait for final write before ending program
-        call EVENT_QUERY(written_ev,ev_cnt)
-        sleep_cnt = 0
-        do while(ev_cnt == 0)
-            call sleep(1)
-            sleep_cnt = sleep_cnt + 1
-            call EVENT_QUERY(written_ev,ev_cnt)
-            if (sleep_cnt >= kTIMEOUT) stop 'Timeout on waiting for last output file to be written'
-        enddo
-        !Finally, do an event wait to decrement the event counter
-        EVENT WAIT (written_ev)
-        
-        EVENT POST (end_ev[ioclient%server])
-
         if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) call finalize_iter_winds() 
-    case (kIO_TEAM)
+    !
+    !-----------------------------------------
+        call total_timer%stop()
+        if (STD_OUT_PE) then
+            call MPI_Comm_Size(MPI_COMM_WORLD,i)
+            write(*,*) ""
+            write(*,*) "Model run from : ",trim(options%parameters%start_time%as_string())
+            write(*,*) "           to  : ",trim(options%parameters%end_time%as_string())
+            write(*,*) "Domain : ",trim(options%parameters%init_conditions_file)
+            write(*,*) "Number of images:",i
+            write(*,*) ""
+            write(*,*) "Average timing across compute images:"
+        endif
+        t_val = timer_mean(total_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "total          : ", t_val 
+        t_val = timer_mean(initialization_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "init           : ", t_val
+        t_val = timer_mean(input_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "input          : ", t_val
+        t_val = timer_mean(output_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "output         : ", t_val
+        t_val = timer_mean(physics_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "physics        : ", t_val
+        t_val = timer_mean(mp_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "microphysics   : ", t_val
+        t_val = timer_mean(adv_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "advection      : ", t_val
+        t_val = timer_mean(rad_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "radiation      : ", t_val
+        t_val = timer_mean(lsm_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "LSM            : ", t_val
+        t_val = timer_mean(pbl_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "PBL            : ", t_val
+        t_val = timer_mean(forcing_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "forcing        : ", t_val 
+        t_val = timer_mean(wind_bal_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "wind bal       : ", t_val
+        t_val = timer_mean(diagnostic_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "diagnostic     : ", t_val
+        t_val = timer_mean(send_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "halo-exchange(send)  : ", t_val 
+        t_val = timer_mean(ret_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "halo-exchange(retrieve)  : ", t_val
+        t_val = timer_mean(wind_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,*) "winds          : ", t_val     
+
+    case(kIO_TEAM)
     
-        call io_timer%start()
-        call EVENT_QUERY(end_ev,end_ev_cnt)
+        call ioserver%init(domain, options)
 
-        do while (end_ev_cnt < ioserver%n_children .and. io_timer%get_time() < 600.)
-            !See of it is time to read
-            call EVENT_QUERY(child_read_ev,ev_cnt)
-            if (ev_cnt == ioserver%n_children .and. ioserver%files_to_read) then
-                !Do an event wait to decrement the event counter
-                EVENT WAIT (child_read_ev, UNTIL_COUNT=ioserver%n_children)
+        call ioserver%read_file()
+        
+        if (options%parameters%restart) then
+            !sync all !Make sure we don't overwrite the file previously read in before the compute task has used it
+            call ioserver%read_restart_file(options)
+        endif
 
-                call ioserver%read_file(read_buffer)
+        !We do not do output here so that we can continue straight to reading the next input file and not block the compute processes
+        next_output = options%parameters%start_time
+        next_input = options%parameters%start_time !+ options%io_options%input_dt
 
-                do i = 1,ioserver%n_children
-                    EVENT POST (read_ev[ioserver%children(i)])
-                enddo
+        io_loop = .True.
 
-                call io_timer%reset()
-                call io_timer%start()
-            endif
-
-            
-            !See if all of our children are ready for a write
-            call EVENT_QUERY(write_ev,ev_cnt)
-            if (ev_cnt == ioserver%n_children) then
-                !Do an event wait to decrement the event counter
-                EVENT WAIT (write_ev, UNTIL_COUNT=ioserver%n_children)
-
-                call ioserver%write_file(next_output, write_buffer)
-                do i = 1,ioserver%n_children
-                    EVENT POST (written_ev[ioserver%children(i)])
-                enddo 
-                next_output = next_output + options%io_options%output_dt
-                
-                call io_timer%reset()
-                call io_timer%start()
+        do while (io_loop)
+            !See if we even have files to read
+            if (ioserver%files_to_read) then
+                !See of it is time to read
+                if (ioserver%io_time+small_time_delta >= next_input) then
+                    call ioserver%read_file()
+                    next_input = next_input + options%io_options%input_dt
+                endif
             endif
             
-            !See if it is time to end
-            call EVENT_QUERY(end_ev,end_ev_cnt)
+            ! If we aren't yet done, then wait for an output
+            if (ioserver%io_time <= options%parameters%end_time) then
+                call ioserver%write_file(ioserver%io_time)
+                ioserver%io_time = ioserver%io_time + options%io_options%output_dt
+            endif
+            
+            if (.not.(ioserver%files_to_read) .and. ioserver%io_time > options%parameters%end_time) io_loop = .False.
         enddo
         !If we are done with the program
         call ioserver%close_files()
     end select
-    !
-    !-----------------------------------------
-    call total_timer%stop()
-    if (this_image()==1) then
-        write(*,*) ""
-        write(*,*) "Model run from : ",trim(options%parameters%start_time%as_string())
-        write(*,*) "           to  : ",trim(options%parameters%end_time%as_string())
-        write(*,*) "Domain : ",trim(options%parameters%init_conditions_file)
-        write(*,*) "Number of images:",num_images()
-        write(*,*) ""
-        write(*,*) "Average timing across compute images:"
-    endif
-    t_val = timer_mean(total_timer)
-    if (this_image()==1) write(*,*) "total          : ", t_val 
-    t_val = timer_mean(initialization_timer)
-    if (this_image()==1) write(*,*) "init           : ", t_val
-    t_val = timer_mean(input_timer)
-    if (this_image()==1) write(*,*) "input          : ", t_val
-    t_val = timer_mean(output_timer)
-    if (this_image()==1) write(*,*) "output         : ", t_val
-    t_val = timer_mean(physics_timer)
-    if (this_image()==1) write(*,*) "physics        : ", t_val
-    t_val = timer_mean(mp_timer)
-    if (this_image()==1) write(*,*) "microphysics   : ", t_val
-    t_val = timer_mean(adv_timer)
-    if (this_image()==1) write(*,*) "advection      : ", t_val
-    t_val = timer_mean(rad_timer)
-    if (this_image()==1) write(*,*) "radiation      : ", t_val
-    t_val = timer_mean(lsm_timer)
-    if (this_image()==1) write(*,*) "LSM            : ", t_val
-    t_val = timer_mean(pbl_timer)
-    if (this_image()==1) write(*,*) "PBL            : ", t_val
-    t_val = timer_mean(forcing_timer)
-    if (this_image()==1) write(*,*) "forcing        : ", t_val 
-    t_val = timer_mean(wind_bal_timer)
-    if (this_image()==1) write(*,*) "wind bal       : ", t_val
-    t_val = timer_mean(diagnostic_timer)
-    if (this_image()==1) write(*,*) "diagnostic     : ", t_val
-    t_val = timer_mean(send_timer)
-    if (this_image()==1) write(*,*) "halo-exchange(send)  : ", t_val 
-    t_val = timer_mean(ret_timer)
-    if (this_image()==1) write(*,*) "halo-exchange(retrieve)  : ", t_val
-    t_val = timer_mean(wind_timer)
-    if (this_image()==1) write(*,*) "winds          : ", t_val 
+    
     CALL MPI_Finalize()
 contains
 
-    !subroutine safe_wait(event, err_msg, until_count)
-    !    implicit none
-    !    type(event_type), intent(inout)  :: event[*]
-    !    character(len=*), intent(in)     :: err_msg
-    !    integer, intent(in), optional    :: until_count
-    !    integer :: sleep_cnt, ev_cnt, until_cnt
-    !        timer_mean
-    !    call EVENT_QUERY(event,ev_cnt)
-    !    sleep_cnt = 0
-    !    do while(.not.(ev_cnt == 1))
-    !        call sleep(1)
-    !        sleep_cnt = sleep_cnt + 1
-    !        call EVENT_QUERY(event,ev_cnt)
-    !        if (sleep_cnt >= kTIMEOUT) stop trim(err_msg)
-    !    enddo
-    !    !Finally, do an event wait to decrement the event counter
-    !    EVENT WAIT (event)!, UNTIL_COUNT=ioserver%n_children)
-    !end subroutine safe_wait
-
-    function timer_mean(timer) result(mean_t)
+    function timer_mean(timer,comms) result(mean_t)
         implicit none
         type(timer_t), intent(inout) :: timer
-        
+        type(MPI_Comm), intent(in) :: comms
+
         real :: mean_t, t_sum
+        integer :: ierr
             
         t_sum = timer%get_time()
-        call CO_SUM(t_sum)
+        call MPI_Allreduce(MPI_IN_PLACE,t_sum,1,MPI_REAL,MPI_SUM,comms,ierr)
         mean_t = t_sum/kNUM_COMPUTE
     
     end function
@@ -418,47 +324,67 @@ contains
     end function
 
 
-    subroutine split_processes(exec_team, domain, ioserver)
+    subroutine split_processes(exec_team, domain, ioserver, ioclient)
         implicit none
         integer, intent(inout) :: exec_team
         type(domain_t), intent(inout) :: domain
         type(ioserver_t), intent(inout) :: ioserver
+        type(ioclient_t), intent(inout) :: ioclient
 
-        integer :: n, k, name_len, color, ierr, node_name_i
+        integer :: n, k, name_len, color, ierr, node_name_i, num_PE
         character(len=MPI_MAX_PROCESSOR_NAME) :: node_name
         integer, allocatable :: node_names(:) 
 
         type(MPI_Comm) :: globalComm, splitComm
  
-        allocate(node_names(num_images()))
+        call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
+
+        allocate(node_names(num_PE))
 
         node_names = 0
         node_name_i = 0
        
+        call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
+        STD_OUT_PE = (PE_RANK_GLOBAL==0)
 
+        !First, determine information about node/CPU configuration
         call MPI_Get_processor_name(node_name, name_len, ierr)
         do n = 1,name_len
             node_name_i = node_name_i + ichar(node_name(n:n))*n*10
         enddo
 
-        node_names(this_image()) = node_name_i
+        node_names(PE_RANK_GLOBAL+1) = node_name_i
+
+        !Get list of node names on all processes        
+        call MPI_Allreduce(MPI_IN_PLACE,node_names,num_PE,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
         
-        call MPI_Allreduce(MPI_IN_PLACE,node_names,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        
+        !Set global constants related to resource distribution
         kNUM_PROC_PER_NODE = count(node_names==node_names(1))
 
         !Assign one io process per node, this results in best co-array transfer times
-        kNUM_SERVERS = ceiling(num_images()*1.0/kNUM_PROC_PER_NODE)
-        kNUM_COMPUTE = num_images()-kNUM_SERVERS
+        kNUM_SERVERS = ceiling(num_PE*1.0/kNUM_PROC_PER_NODE)
+        kNUM_COMPUTE = num_PE-kNUM_SERVERS
         
-        if ((mod(kNUM_COMPUTE,2) /= 0) .and. this_image()==1) then
+        if ((mod(kNUM_COMPUTE,2) /= 0) .and. STD_OUT_PE) then
             write(*,*) 'WARNING: number of compute processes is odd-numbered.' 
             write(*,*) 'One process per node is used for I/O.'
             write(*,*) 'If the total number of compute processes is odd-numbered,'
             write(*,*) 'this may lead to errors with domain decomposition'
         endif
- 
-        if (mod(this_image(),(num_images()/kNUM_SERVERS)) == 0) then
+
+        k = 1
+        allocate(DOM_IMG_INDX(kNUM_COMPUTE))
+        do n = 1,kNUM_COMPUTE
+            if (mod(k,(num_PE/kNUM_SERVERS)) == 0) k = k+1
+            DOM_IMG_INDX(n) = k
+            k = k+1
+        enddo
+
+
+        !-----------------------------------------
+        ! Assign Compute and IO processes
+        !-----------------------------------------
+        if (mod((PE_RANK_GLOBAL+1),(num_PE/kNUM_SERVERS)) == 0) then
             exec_team = kIO_TEAM
             color = 1
         else
@@ -468,157 +394,34 @@ contains
        
         CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
         ! Assign all images in the IO team to the IO_comms MPI communicator. Use image indexing within initial team to get indexing of global MPI ranks
-        CALL MPI_Comm_split( globalComm, color, (this_image()-1), splitComm, ierr )
+        CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, splitComm, ierr )
 
         select case (exec_team)
         case (kCOMPUTE_TEAM)
-            CALL MPI_Comm_dup( splitComm, domain%IO_comms, ierr )
-
-            if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) call init_petsc_comms(domain)
+            CALL MPI_Comm_dup( splitComm, domain%compute_comms, ierr )
+            ioserver%IO_comms = MPI_COMM_NULL
         case (kIO_TEAM)
             CALL MPI_Comm_dup( splitComm, ioserver%IO_comms, ierr )
-
+            domain%compute_comms = MPI_COMM_NULL
         end select
 
-        k = 1
-        allocate(DOM_IMG_INDX(kNUM_COMPUTE))
-        do n = 1,kNUM_COMPUTE
-            if (mod(k,(num_images()/kNUM_SERVERS)) == 0) k = k+1
-            DOM_IMG_INDX(n) = k
-            k = k+1
-        enddo
-        !form team(team_num,exec_team)
-        
-    end subroutine split_processes
-    
-    subroutine init_IO(exec_team, domain, boundary, options, ioclient, ioserver, write_buffer, read_buffer)
-        implicit none
-        integer, intent(in) :: exec_team
-        type(domain_t),  intent(inout)  :: domain
-        type(boundary_t),intent(in)  :: boundary
-        type(options_t), intent(in)  :: options
-        type(ioclient_t), intent(inout) :: ioclient
-        type(ioserver_t), intent(inout) :: ioserver
-        real, intent(inout), allocatable :: write_buffer(:,:,:,:)[:], read_buffer(:,:,:,:)[:]
+        !-----------------------------------------
+        ! Group server and client processes
+        !-----------------------------------------
+        CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
+        ! Group IO clients with their related server process. This is basically just grouping processes by node
+        CALL MPI_Comm_split( globalComm, node_names(PE_RANK_GLOBAL+1), PE_RANK_GLOBAL, splitComm, ierr )
 
-        integer, allocatable, dimension(:) :: i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r
-        integer, allocatable, dimension(:,:) :: childrens
-        integer :: nx_w, ny_w, nz_w, n_w, nx_r, ny_r, nz_r, n_r, n_restart, i, ierr
-        integer :: out_i, rst_i, var_indx
-
-        allocate(i_s_w(num_images())); allocate(i_e_w(num_images()))
-        allocate(i_s_r(num_images())); allocate(i_e_r(num_images()))
-        
-        allocate(j_s_w(num_images())); allocate(j_e_w(num_images()))
-        allocate(j_s_r(num_images())); allocate(j_e_r(num_images()))
-        
-        allocate(k_s_w(num_images())); allocate(k_e_w(num_images()))
-        allocate(k_s_r(num_images())); allocate(k_e_r(num_images()))
-
-        allocate(childrens(kNUM_SERVERS,num_images()))
-
-        i_s_w = 0; i_e_w = 0; i_s_r = 0; i_e_r = 0
-        j_s_w = 0; j_e_w = 0; j_s_r = 0; j_e_r = 0
-        k_s_w = 0; k_e_w = 0; k_s_r = 0; k_e_r = 0
-        
-        nx_w = 0; ny_w = 0; nz_w = 0; nx_r = 0; ny_r = 0; nz_r = 0;
-        n_w = 0; n_r = 0; n_restart = 0;
-        
-        childrens = 0
-        
-        
         select case (exec_team)
         case (kCOMPUTE_TEAM)
-            if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) call init_petsc_comms(domain)
-            call ioclient%init(domain, boundary, options)
-            
-            i_s_w(this_image()) = ioclient%i_s_w; i_e_w(this_image()) = ioclient%i_e_w
-            i_s_r(this_image()) = ioclient%i_s_r; i_e_r(this_image()) = ioclient%i_e_r
-            
-            j_s_w(this_image()) = ioclient%j_s_w; j_e_w(this_image()) = ioclient%j_e_w
-            j_s_r(this_image()) = ioclient%j_s_r; j_e_r(this_image()) = ioclient%j_e_r
-            
-            k_s_w(this_image()) = ioclient%k_s_w; k_e_w(this_image()) = ioclient%k_e_w
-            k_s_r(this_image()) = ioclient%k_s_r; k_e_r(this_image()) = ioclient%k_e_r
+            CALL MPI_Comm_dup( splitComm, ioclient%parent_comms, ierr )
+            ioserver%client_comms = MPI_COMM_NULL
+        case (kIO_TEAM)
+            CALL MPI_Comm_dup( splitComm, ioserver%client_comms, ierr )
+            ioclient%parent_comms = MPI_COMM_NULL
         end select
 
-        call MPI_Allreduce(MPI_IN_PLACE,i_s_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,i_e_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,i_s_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,i_e_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        
-        call MPI_Allreduce(MPI_IN_PLACE,j_s_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,j_e_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,j_s_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,j_e_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        
-        call MPI_Allreduce(MPI_IN_PLACE,k_s_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,k_e_w,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,k_s_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,k_e_r,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-
-        select case(exec_team)
-        case(kIO_TEAM)
-            call ioserver%init(domain, options,i_s_r,i_e_r,k_s_r,k_e_r,j_s_r,j_e_r,i_s_w,i_e_w,k_s_w,k_e_w,j_s_w,j_e_w)
-            
-            if (ioserver%server_id==1) then
-                write(*,*) "Setting up output files"
-                if (options%io_options%frames_per_outfile<2) then
-                    print*,"  frames per output file should be 2 or more. Currently: ", options%io_options%frames_per_outfile
-                else
-                    print*,"  frames per output file= ", options%io_options%frames_per_outfile
-                end if
-                flush(output_unit)
-            endif
-
-            !Contribute k-extents for write variables, in case we had to expand beyond the domain k extent due to a large soil variable
-            if ( ioserver%k_e_w > maxval(k_e_w)) k_e_w(1) = ioserver%k_e_w
-
-            n_r = ioserver%n_r
-            n_w = ioserver%n_w
-            n_restart = ioserver%n_restart
-            childrens(ioserver%server_id,1:ioserver%n_children) = ioserver%children
-        end select
-
-        call MPI_Allreduce(MPI_IN_PLACE,childrens,num_images(),MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-
-        select case(exec_team)
-        case(kCOMPUTE_TEAM)
-            do i = 1,size(childrens,1)
-                if (findloc(childrens(i,:),this_image(),dim=1) > 0) then
-                    ioclient%server = i*(num_images()/kNUM_SERVERS)
-                    exit
-                endif
-            enddo
-            
-            !Buffer arrays must be initialized in the global image team so both teams have access
-            nx_w = i_e_w(this_image()) - i_s_w(this_image()) + 1
-            ny_w = j_e_w(this_image()) - j_s_w(this_image()) + 1
-            nz_w = k_e_w(this_image()) - k_s_w(this_image()) + 1
-
-            nx_r = i_e_r(this_image()) - i_s_r(this_image()) + 1
-            ny_r = j_e_r(this_image()) - j_s_r(this_image()) + 1
-            nz_r = k_e_r(this_image()) - k_s_r(this_image()) + 1
-        end select
-
-        call MPI_Allreduce(MPI_IN_PLACE,nx_w,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,ny_w,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,nz_w,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-
-        call MPI_Allreduce(MPI_IN_PLACE,nx_r,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,ny_r,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,nz_r,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-
-        call MPI_Allreduce(MPI_IN_PLACE,n_w,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        !call MPI_Allreduce(n_restart_l,n_restart,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-
-        !Initialize read/write buffers. They are coarrays, defined by the comax of the read and write bounds for each compute image
-        allocate(write_buffer(n_w,1:nx_w+1,1:nz_w,1:ny_w+1)[*])
-        allocate(read_buffer(n_r,1:nx_r+1,1:nz_r,1:ny_r+1)[*])
-
-    end subroutine init_IO
-
+    end subroutine split_processes
     
 end program
 

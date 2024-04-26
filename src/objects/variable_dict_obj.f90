@@ -134,7 +134,7 @@ contains
                 err = 3
                 return
             endif
-            write(*,*) this_image(), this%n_vars, this%max_vars
+            write(*,*) this%n_vars, this%max_vars
             stop "Ran out of space in var_dict"
         endif
 

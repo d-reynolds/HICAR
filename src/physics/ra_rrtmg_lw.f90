@@ -11447,6 +11447,7 @@ contains
 !------------------------------------------------------------------
 MODULE module_ra_rrtmg_lw
 
+use icar_constants,    only : STD_OUT_PE
 use mod_wrf_constants, only : cp
 !use module_wrf_error
 !#if (HWRF == 1)
@@ -11913,7 +11914,7 @@ if (read_ghg) then
    CALL read_CAMgases(yr,julian,"RRTMG",co2,n2o,ch4,cfc11,cfc12)
 
 !   IF ( wrf_dm_on_monitor() ) THEN
-    IF (this_image()==1) THEN
+    IF (STD_OUT_PE) THEN
      WRITE(message,*)'CAM-CLWRF interpolated values______ year:',yr,' julian day:',julian
      !call wrf_debug( 100, message)
      ! write(*,*) message
@@ -12465,7 +12466,7 @@ endif
                      snow_mass_factor = (130.0/resnow1d(ncol,k))*(130.0/resnow1d(ncol,k))
                      resnow1d(ncol,k)   = 130.0
                      !IF ( wrf_dm_on_monitor() ) THEN
-                     IF (this_image()==1) then
+                     IF (STD_OUT_PE) then
                        WRITE(message,*)'RRTMG:  reducing snow mass (cloud path) to ', &
                                        nint(snow_mass_factor*100.), ' percent of full value'
                        !call wrf_debug(150, message)

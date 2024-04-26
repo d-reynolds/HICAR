@@ -51,7 +51,7 @@ contains
         integer :: i
 
         options_filename = get_options_file()
-        if (this_image()==1) write(*,*) "Using options file = ", trim(options_filename)
+        if (STD_OUT_PE) write(*,*) "Using options file = ", trim(options_filename)
 
         call version_check(         options_filename,   this%parameters)
         call parameters_namelist(   options_filename,   this%parameters)
@@ -127,7 +127,7 @@ contains
             if (varids(i) <= size(varlist)) then
                 varlist( varids(i) ) = varlist( varids(i) ) + 1
             else
-                if (this_image()==1) write(*,*) "WARNING: trying to add var outside of permitted list:",varids(i), size(varlist)
+                if (STD_OUT_PE) write(*,*) "WARNING: trying to add var outside of permitted list:",varids(i), size(varlist)
                 ierr=1
             endif
         enddo
@@ -275,8 +275,8 @@ contains
 
             ! error -1 means the filename supplied was too long
             elseif (error == -1) then
-                if (this_image()==1) write(*,*) "Options filename = ", trim(options_file), " ...<cutoff>"
-                if (this_image()==1) write(*,*) "Maximum filename length = ", MAXFILELENGTH
+                if (STD_OUT_PE) write(*,*) "Options filename = ", trim(options_file), " ...<cutoff>"
+                if (STD_OUT_PE) write(*,*) "Maximum filename length = ", MAXFILELENGTH
                 stop "ERROR: options filename too long"
             endif
 
@@ -290,7 +290,7 @@ contains
 
         ! if options file does not exist, print an error and quit
         if (.not.file_exists) then
-            if (this_image()==1) write(*,*) "Using options file = ", trim(options_file)
+            if (STD_OUT_PE) write(*,*) "Using options file = ", trim(options_file)
             stop "Options file does not exist. "
         endif
     end function
@@ -323,9 +323,9 @@ contains
         close(name_unit)
 
         if (version.ne.kVERSION_STRING) then
-            if (this_image()==1) write(*,*) "Model version does not match namelist version"
-            if (this_image()==1) write(*,*) "  Model version: ",kVERSION_STRING
-            if (this_image()==1) write(*,*) "  Namelist version: ",trim(version)
+            if (STD_OUT_PE) write(*,*) "Model version does not match namelist version"
+            if (STD_OUT_PE) write(*,*) "  Model version: ",kVERSION_STRING
+            if (STD_OUT_PE) write(*,*) "  Namelist version: ",trim(version)
             call print_model_diffs(version)
             stop
         endif
@@ -333,7 +333,7 @@ contains
         options%comment = comment
         options%phys_suite = phys_suite
 
-        if (this_image()==1) write(*,*) "  Model version: ",trim(version)
+        if (STD_OUT_PE) write(*,*) "  Model version: ",trim(version)
 
     end subroutine version_check
 
@@ -350,24 +350,31 @@ contains
 
         if (options%parameters%t_offset.eq.(-9999)) then
             ! if (options%parameters%warning_level>0) then
-            !     if (this_image()==1) write(*,*) "WARNING, WARNING, WARNING"
-            !     if (this_image()==1) write(*,*) "WARNING, Using default t_offset=0"
-            !     if (this_image()==1) write(*,*) "WARNING, WARNING, WARNING"
+            !     if (STD_OUT_PE) write(*,*) "WARNING, WARNING, WARNING"
+            !     if (STD_OUT_PE) write(*,*) "WARNING, Using default t_offset=0"
+            !     if (STD_OUT_PE) write(*,*) "WARNING, WARNING, WARNING"
             ! endif
             options%parameters%t_offset = 0
         endif
 
+        if (STD_OUT_PE) then
+            if (options%io_options%frames_per_outfile<2) then
+                print*,"Frames per output file should be 2 or more. Currently: ", options%io_options%frames_per_outfile
+            else
+                print*,"Frames per output file= ", options%io_options%frames_per_outfile
+            end if
+        endif
 
         ! convection can modify wind field, and ideal doesn't rebalance winds every timestep
         if ((options%physics%convection.ne.0).and.(options%parameters%ideal)) then
             if (options%parameters%warning_level>3) then
-                if (this_image()==1) write(*,*) ""
-                if (this_image()==1) write(*,*) "WARNING WARNING WARNING"
-                if (this_image()==1) write(*,*) "WARNING, Running convection in ideal mode may be bad..."
-                if (this_image()==1) write(*,*) "WARNING WARNING WARNING"
+                if (STD_OUT_PE) write(*,*) ""
+                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
+                if (STD_OUT_PE) write(*,*) "WARNING, Running convection in ideal mode may be bad..."
+                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
             endif
             if (options%parameters%warning_level==10) then
-                if (this_image()==1) write(*,*) "Set warning_level<10 to continue"
+                if (STD_OUT_PE) write(*,*) "Set warning_level<10 to continue"
                 stop
             endif
         endif
@@ -375,26 +382,26 @@ contains
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
         if ((options%physics%landsurface>1).and.(options%physics%boundarylayer==0)) then
             if (options%parameters%warning_level>2) then
-                if (this_image()==1) write(*,*) ""
-                if (this_image()==1) write(*,*) "WARNING WARNING WARNING"
-                if (this_image()==1) write(*,*) "WARNING, Running LSM without PBL may overheat the surface and CRASH the model. "
-                if (this_image()==1) write(*,*) "WARNING WARNING WARNING"
+                if (STD_OUT_PE) write(*,*) ""
+                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
+                if (STD_OUT_PE) write(*,*) "WARNING, Running LSM without PBL may overheat the surface and CRASH the model. "
+                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
             endif
             if (options%parameters%warning_level>=7) then
-                if (this_image()==1) write(*,*) "Set warning_level<7 to continue"
+                if (STD_OUT_PE) write(*,*) "Set warning_level<7 to continue"
                 stop
             endif
         endif
         ! if using perscribed LSM fluxes, no feedbacks are present, so the surface layer is likely to overheat.
         if ((options%physics%landsurface==1).and.(options%physics%boundarylayer==0)) then
             if (options%parameters%warning_level>0) then
-                if (this_image()==1) write(*,*) ""
-                if (this_image()==1) write(*,*) "WARNING WARNING WARNING"
-                if (this_image()==1) write(*,*) "WARNING, Prescribed LSM fluxes without a PBL may overheat the surface and CRASH. "
-                if (this_image()==1) write(*,*) "WARNING WARNING WARNING"
+                if (STD_OUT_PE) write(*,*) ""
+                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
+                if (STD_OUT_PE) write(*,*) "WARNING, Prescribed LSM fluxes without a PBL may overheat the surface and CRASH. "
+                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
             endif
             if (options%parameters%warning_level>=5) then
-                if (this_image()==1) write(*,*) "Set warning_level<5 to continue"
+                if (STD_OUT_PE) write(*,*) "Set warning_level<5 to continue"
                 stop
             endif
         endif
@@ -403,34 +410,34 @@ contains
         if ((options%parameters%z_is_geopotential .eqv. .False.).and. &
             (options%parameters%zvar=="PH")) then
             if (options%parameters%warning_level>1) then
-                if (this_image()==1) write(*,*) ""
-                if (this_image()==1) write(*,*) "WARNING WARNING WARNING"
-                if (this_image()==1) write(*,*) "WARNING z variable is not assumed to be geopotential height when it is 'PH'."
-                if (this_image()==1) write(*,*) "WARNING If z is geopotential, set z_is_geopotential=True in the namelist."
-                if (this_image()==1) write(*,*) "WARNING WARNING WARNING"
+                if (STD_OUT_PE) write(*,*) ""
+                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
+                if (STD_OUT_PE) write(*,*) "WARNING z variable is not assumed to be geopotential height when it is 'PH'."
+                if (STD_OUT_PE) write(*,*) "WARNING If z is geopotential, set z_is_geopotential=True in the namelist."
+                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
             endif
             if (options%parameters%warning_level>=7) then
-                if (this_image()==1) write(*,*) "Set warning_level<7 to continue"
+                if (STD_OUT_PE) write(*,*) "Set warning_level<7 to continue"
                 stop
             endif
         endif
         if ((options%parameters%z_is_geopotential .eqv. .True.).and. &
             (options%parameters%z_is_on_interface .eqv. .False.)) then
             if (options%parameters%warning_level>1) then
-                if (this_image()==1) write(*,*) ""
-                if (this_image()==1) write(*,*) "WARNING WARNING WARNING"
-                if (this_image()==1) write(*,*) "WARNING geopotential height is no longer assumed to be on model interface levels."
-                if (this_image()==1) write(*,*) "WARNING To interpolate geopotential, set z_is_on_interface=True in the namelist. "
-                if (this_image()==1) write(*,*) "WARNING WARNING WARNING"
+                if (STD_OUT_PE) write(*,*) ""
+                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
+                if (STD_OUT_PE) write(*,*) "WARNING geopotential height is no longer assumed to be on model interface levels."
+                if (STD_OUT_PE) write(*,*) "WARNING To interpolate geopotential, set z_is_on_interface=True in the namelist. "
+                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
             endif
         endif
         
         !! MJ added
         if ((options%physics%radiation_downScaling==1).and.(options%physics%radiation==0 .or. options%physics%radiation==1)) then
-            if (this_image()==1) write(*,*) ""
-            if (this_image()==1) write(*,*) "STOP STOP STOP"
-            if (this_image()==1) write(*,*) "STOP, Running radiation_downScaling should not be used with rad=0 or 1 "
-            if (this_image()==1) write(*,*) "STOP STOP STOP"
+            if (STD_OUT_PE) write(*,*) ""
+            if (STD_OUT_PE) write(*,*) "STOP STOP STOP"
+            if (STD_OUT_PE) write(*,*) "STOP, Running radiation_downScaling should not be used with rad=0 or 1 "
+            if (STD_OUT_PE) write(*,*) "STOP STOP STOP"
             stop
         endif
         
@@ -444,10 +451,10 @@ contains
         
         if (options%wind%alpha_const > 0) then
             if (options%wind%alpha_const > 1.0) then
-                if (this_image()==1) write(*,*) "Alpha currently limited to values between 0.01 and 1.0, setting to 1.0"
+                if (STD_OUT_PE) write(*,*) "Alpha currently limited to values between 0.01 and 1.0, setting to 1.0"
                 options%wind%alpha_const = 1.0
             else if (options%wind%alpha_const < 0.01) then
-                if (this_image()==1) write(*,*) "Alpha currently limited to values between 0.01 and 1.0, setting to 0.01"
+                if (STD_OUT_PE) write(*,*) "Alpha currently limited to values between 0.01 and 1.0, setting to 0.01"
                 options%wind%alpha_const = 0.01
             endif
         endif
@@ -566,7 +573,7 @@ contains
         character(len=*), intent(in) :: var_name
 
         if (trim(inputvar)=="") then
-            if (this_image()==1) write(*,*) "Variable: ",trim(var_name), " is required."
+            if (STD_OUT_PE) write(*,*) "Variable: ",trim(var_name), " is required."
             stop
         endif
 
@@ -668,7 +675,7 @@ contains
         if (.not.(options%parameters%restart)) return
         
         if (minval(restart_date)<0) then
-            if (this_image()==1) write(*,*) "------ Invalid restart_date ERROR ------"
+            if (STD_OUT_PE) write(*,*) "------ Invalid restart_date ERROR ------"
             stop "restart_date must be specified in the namelist"
         endif
 
@@ -687,7 +694,7 @@ contains
         ! check to see if we actually udpated the restart date and print if in a more verbose mode
         if (options%parameters%debug) then
             if (restart_time /= time_at_step) then
-                if (this_image()==1) write(*,*) " updated restart date: ", trim(time_at_step%as_string())
+                if (STD_OUT_PE) write(*,*) " updated restart date: ", trim(time_at_step%as_string())
             endif
         endif
 
@@ -700,14 +707,14 @@ contains
 
 
         if (options%parameters%debug) then
-            if (this_image()==1) write(*,*) " ------------------ "
-            if (this_image()==1) write(*,*) "RESTART INFORMATION"
-            if (this_image()==1) write(*,*) "mjd",         options%io_options%restart_time%mjd()
-            if (this_image()==1) write(*,*) "date:",       trim(options%io_options%restart_time%as_string())
-            if (this_image()==1) write(*,*) "date",        options%io_options%restart_date
-            if (this_image()==1) write(*,*) "file:",   trim(options%io_options%restart_in_file)
-            if (this_image()==1) write(*,*) "forcing step",options%io_options%restart_step_in_file
-            if (this_image()==1) write(*,*) " ------------------ "
+            if (STD_OUT_PE) write(*,*) " ------------------ "
+            if (STD_OUT_PE) write(*,*) "RESTART INFORMATION"
+            if (STD_OUT_PE) write(*,*) "mjd",         options%io_options%restart_time%mjd()
+            if (STD_OUT_PE) write(*,*) "date:",       trim(options%io_options%restart_time%as_string())
+            if (STD_OUT_PE) write(*,*) "date",        options%io_options%restart_date
+            if (STD_OUT_PE) write(*,*) "file:",   trim(options%io_options%restart_in_file)
+            if (STD_OUT_PE) write(*,*) "forcing step",options%io_options%restart_step_in_file
+            if (STD_OUT_PE) write(*,*) " ------------------ "
         endif
 
     end subroutine io_namelist
@@ -857,7 +864,7 @@ contains
         if ((zvar=="") .and. ((pslvar/="") .or. (psvar/=""))) options%compute_z = .True.
         if (options%compute_z) then
             if (pvar=="") then
-                if (this_image()==1) write(*,*) "ERROR: either pressure (pvar) or atmospheric level height (zvar) must be specified"
+                if (STD_OUT_PE) write(*,*) "ERROR: either pressure (pvar) or atmospheric level height (zvar) must be specified"
                 error stop
             endif
         endif
@@ -1109,7 +1116,7 @@ contains
         close(name_unit)
 
         if (ideal) then
-            if (this_image()==1) write(*,*) " Running Idealized simulation "
+            if (STD_OUT_PE) write(*,*) " Running Idealized simulation "
         endif
 
         if ((trim(date)=="").and.(trim(start_date)/="")) date = start_date
@@ -1132,7 +1139,7 @@ contains
 
         if (smooth_wind_distance.eq.(-9999)) then
             smooth_wind_distance=dxlow*2
-            if (this_image()==1) write(*,*) " Default smoothing distance = lowdx*2 = ", smooth_wind_distance
+            if (STD_OUT_PE) write(*,*) " Default smoothing distance = lowdx*2 = ", smooth_wind_distance
         endif
 
         options%t_offset=t_offset
@@ -1745,7 +1752,7 @@ contains
             if (ice_category==-1)   ice_category = -1
             if (water_category==-1) water_category = 16
             ! if (lake_category==-1) lake_category = 16  ! No separate lake category!
-            if((options%physics%watersurface==kWATER_LAKE) .AND. (this_image()==1)) then
+            if((options%physics%watersurface==kWATER_LAKE) .AND. (STD_OUT_PE)) then
                 write(*,*) "WARNING: Lake model selected (water=3), but USGS LU-categories has no lake category"
             endif
 
@@ -1997,7 +2004,7 @@ contains
         ! copy the data back into the global options data structure
         options%rad_options = rad_options
         
-         !if (this_image()==1) write(*,*) " tzone, update_interval_rrtmg ", rad_options%tzone, rad_options%update_interval_rrtmg
+         !if (STD_OUT_PE) write(*,*) " tzone, update_interval_rrtmg ", rad_options%tzone, rad_options%update_interval_rrtmg
     end subroutine rad_parameters_namelist
 
 
@@ -2055,8 +2062,8 @@ contains
 
             ! allocate(options%dz_levels(options%nz))
             if (minval(dz_levels(1:options%nz)) < 0) then
-                if (this_image()==1) write(*,*) "WARNING: dz seems to be less than 0, this is not physical and is probably an error in the namelist"
-                if (this_image()==1) write(*,*) "Note that the gfortran compiler will not read dz_levels spread across multiple lines. "
+                if (STD_OUT_PE) write(*,*) "WARNING: dz seems to be less than 0, this is not physical and is probably an error in the namelist"
+                if (STD_OUT_PE) write(*,*) "Note that the gfortran compiler will not read dz_levels spread across multiple lines. "
                 error stop
             endif
 
@@ -2118,14 +2125,14 @@ contains
         close(file_unit)
         nfiles = i
         ! print out a summary
-        if (this_image()==1) write(*,*) "  Boundary conditions files to be used:"
+        if (STD_OUT_PE) write(*,*) "  Boundary conditions files to be used:"
         if (nfiles>10) then
-            if (this_image()==1) write(*,*) "    nfiles=", trim(str(nfiles)), ", too many to print."
-            if (this_image()==1) write(*,*) "    First file:", trim(forcing_files(1))
-            if (this_image()==1) write(*,*) "    Last file: ", trim(forcing_files(nfiles))
+            if (STD_OUT_PE) write(*,*) "    nfiles=", trim(str(nfiles)), ", too many to print."
+            if (STD_OUT_PE) write(*,*) "    First file:", trim(forcing_files(1))
+            if (STD_OUT_PE) write(*,*) "    Last file: ", trim(forcing_files(nfiles))
         else
             do i=1,nfiles
-                if (this_image()==1) write(*,*) "      ",trim(forcing_files(i))
+                if (STD_OUT_PE) write(*,*) "      ",trim(forcing_files(i))
             enddo
         endif
 
@@ -2288,7 +2295,7 @@ contains
     
         select case (options%parameters%phys_suite)
             case('HICAR')
-                if (options%parameters%dx >= 1000 .and. this_image()==1) then
+                if (options%parameters%dx >= 1000 .and. STD_OUT_PE) then
                     write(*,*) '------------------------------------------------'
                     write(*,*) 'WARNING: Setting HICAR namelist options'
                     write(*,*) 'When user has selected dx => 1000.'

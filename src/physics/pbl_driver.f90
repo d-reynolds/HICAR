@@ -120,17 +120,17 @@ contains
         if (.not.allocated(domain%tend%qv_pbl)) allocate(domain%tend%qv_pbl(ims:ime,kms:kme,jms:jme))
         domain%tend%qv_pbl=0
 
-        if (this_image()==1) write(*,*) "Initializing PBL Scheme"
+        if (STD_OUT_PE) write(*,*) "Initializing PBL Scheme"
 
         if (options%physics%boundarylayer==kPBL_SIMPLE) then
-            if (this_image()==1) write(*,*) "    Simple PBL"
+            if (STD_OUT_PE) write(*,*) "    Simple PBL"
             call init_simple_pbl(domain, options)
         else if (options%physics%boundarylayer==kPBL_DIAGNOSTIC) then
-            if (this_image()==1) write(*,*) "    Diagnostic PBL"
+            if (STD_OUT_PE) write(*,*) "    Diagnostic PBL"
             call init_diagnostic_pbl(domain, options)
         else if (options%physics%boundarylayer==kPBL_YSU) then
 
-            if (this_image()==1) write(*,*) "    YSU PBL"
+            if (STD_OUT_PE) write(*,*) "    YSU PBL"
 
             ! allocate local vars YSU:
             allocate(windspd(ims:ime, jms:jme))
@@ -285,7 +285,7 @@ contains
                 !optional
                     ,regime=regime                          )!  i/o -- regime	flag indicating pbl regime (stable, unstable, etc.) - not used?
 
-                    ! if(this_image()==1 .and. options%parameters%debug) write(*,*) "  pbl height/lev is:", maxval(domain%hpbl%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
+                    ! if(STD_OUT_PE .and. options%parameters%debug) write(*,*) "  pbl height/lev is:", maxval(domain%hpbl%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
 
             !> ------------  add tendency terms  ------------
             !

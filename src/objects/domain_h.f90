@@ -375,7 +375,7 @@ module domain_interface
     ! real, allocatable :: transfer_2d(:,:)[:]
     
     ! MPI communicator object for doing parallel communications among domain objects
-    type(MPI_Comm), public :: IO_comms
+    type(MPI_Comm), public :: compute_comms
 
     ! contains the size of the domain (or the local tile?)
     integer :: nx, ny, nz, nx_global, ny_global

@@ -17,7 +17,7 @@ MODULE module_sf_noahdrv
       &                         SALP_DATA, REFDK_DATA, REFKDT_DATA, FRZK_DATA, ZBOT_DATA, CZIL_DATA,        &
       &                         SMLOW_DATA, SMHIGH_DATA, LVCOEF_DATA, NSLOPE, &
       &                         FRH2O,ZTOPVTBL,ZBOTVTBL
-
+    use icar_constants, only : STD_OUT_PE
 !   USE module_sf_urban,    only: urban
 !   USE module_sf_noahlsm_glacial_only, only: sflx_glacial
 !   USE module_sf_bep,      only: bep
@@ -702,8 +702,8 @@ CONTAINS
 ! snow depth in meters
         SNOWHK=SNOWH(I,J)
         SNCOVR=SNOWC(I,J)
-! if (this_image()==1) write(*,*) "       lsm_noah : SNEQV [m] max:", MAXVAL(SNEQV)
-! if (this_image()==1) write(*,*) "       lsm_noah : SNOWHK max:", MAXVAL(SNOWHK)
+! if (STD_OUT_PE) write(*,*) "       lsm_noah : SNEQV [m] max:", MAXVAL(SNEQV)
+! if (STD_OUT_PE) write(*,*) "       lsm_noah : SNOWHK max:", MAXVAL(SNOWHK)
 ! if "SR" present, set frac of frozen precip ("FFROZP") = snow-ratio ("SR", range:0-1)
 ! SR from e.g. Ferrier microphysics
 ! otherwise define from 1st atmos level temperature
@@ -855,7 +855,7 @@ CONTAINS
     ELSEIF (ICE == 0) THEN
 
        ! Non-glacial land
-       ! if (this_image()==1) write(*,*) "    noadrv: bef SPFLX: SNEQV=",SNEQV," i/j", i,j
+       ! if (STD_OUT_PE) write(*,*) "    noadrv: bef SPFLX: SNEQV=",SNEQV," i/j", i,j
 
        CALL SFLX (I,J,FFROZP, ISURBAN, DT,ZLVL,NSOIL,SLDPTH,      &    !C
                  LOCAL,                                           &    !L
@@ -882,7 +882,7 @@ CONTAINS
 !                  sfcheadrt(i,j),                                   &    !I
 !                  INFXSRT(i,j),ETPND1                          &    !O
                  )
-       ! if (this_image()==1) write(*,*) "    noadrv: aft SPFLX: SNEQV=",SNEQV," i/j", i,j
+       ! if (STD_OUT_PE) write(*,*) "    noadrv: aft SPFLX: SNEQV=",SNEQV," i/j", i,j
 
     ELSEIF (ICE == -1) THEN
 
@@ -1085,7 +1085,7 @@ CONTAINS
 
 ! initialize three Noah LSM related tables
    IF ( allowed_to_read ) THEN
-     if (this_image()==1) write(*,*) '    INITIALIZE THREE Noah LSM RELATED TABLES'
+     if (STD_OUT_PE) write(*,*) '    INITIALIZE THREE Noah LSM RELATED TABLES'
      CALL  SOIL_VEG_GEN_PARM( MMINLU, MMINSL )
    ENDIF
 
@@ -1100,7 +1100,7 @@ CONTAINS
      DO i = its,itf
        IF ( ISLTYP( i,j ) .LT. 1 ) THEN
          errflag = 1
-         if (this_image()==1) WRITE(*,*)"    module_sf_noahlsm.F: lsminit: out of range ISLTYP ",i,j,ISLTYP( i,j )
+         if (STD_OUT_PE) WRITE(*,*)"    module_sf_noahlsm.F: lsminit: out of range ISLTYP ",i,j,ISLTYP( i,j )
 !          CALL wrf_message(err_message)
        ENDIF
        IF(.not.RDMAXALB) THEN
@@ -1174,7 +1174,7 @@ CONTAINS
             SNOWH(I,J)=SNOW(I,J)*0.005               ! SNOW in mm and SNOWH in m
           ENDDO
           ENDDO
-          if (this_image()==1) write(*,*) "    lsm_noah_init: calculate SNOWH from SNOW (HS from SWE)"
+          if (STD_OUT_PE) write(*,*) "    lsm_noah_init: calculate SNOWH from SNOW (HS from SWE)"
         ENDIF
 
 ! initialize canopy water to ZERO
@@ -1240,7 +1240,7 @@ CONTAINS
         IF(ierr .NE. OPEN_OK ) THEN
           WRITE(message,FMT='(A)') &
           'module_sf_noahlsm.F: soil_veg_gen_parm: failure opening VEGPARM.TBL'
-          if (this_image()==1) write(*,*) message
+          if (STD_OUT_PE) write(*,*) message
         END IF
 
 
@@ -1249,15 +1249,15 @@ CONTAINS
         FIND_LUTYPE : DO WHILE (LUMATCH == 0)
            READ (19,*,END=2002)
            READ (19,*,END=2002)LUTYPE
-           if (this_image()==1) print *, LUTYPE 
+           if (STD_OUT_PE) print *, LUTYPE 
            READ (19,*)LUCATS,IINDEX
 
            IF(LUTYPE.EQ.MMINLU)THEN
               WRITE( mess , * ) '    LANDUSE TYPE = ' // TRIM ( LUTYPE ) // ' FOUND', LUCATS,' CATEGORIES'
-              if (this_image()==1) write(*,*) mess
+              if (STD_OUT_PE) write(*,*) mess
               LUMATCH=1
            ELSE
-              if (this_image()==1) write(*,*) "    Skipping over LUTYPE = " // TRIM ( LUTYPE )
+              if (STD_OUT_PE) write(*,*) "    Skipping over LUTYPE = " // TRIM ( LUTYPE )
               DO LC = 1, LUCATS+12
                  read(19,*)
               ENDDO
@@ -1281,7 +1281,7 @@ CONTAINS
              SIZE(ZBOTVTBL) < LUCATS .OR. &
              SIZE(EMISSMINTBL ) < LUCATS .OR. &
              SIZE(EMISSMAXTBL ) < LUCATS ) THEN
-           if (this_image()==1) write(*,*) 'Table sizes too small for value of LUCATS in module_sf_noahdrv.F'
+           if (STD_OUT_PE) write(*,*) 'Table sizes too small for value of LUCATS in module_sf_noahdrv.F'
 		   stop
         ENDIF
 
@@ -1314,7 +1314,7 @@ CONTAINS
 
         CLOSE (19)
         IF (LUMATCH == 0) then
-           if (this_image()==1) write(*,*) "Land Use Dataset '"//MMINLU//"' not found in VEGPARM.TBL."
+           if (STD_OUT_PE) write(*,*) "Land Use Dataset '"//MMINLU//"' not found in VEGPARM.TBL."
 		   stop
         ENDIF
 
@@ -1325,11 +1325,11 @@ CONTAINS
         IF(ierr .NE. OPEN_OK ) THEN
           WRITE(message,FMT='(A)') &
           'module_sf_noahlsm.F: soil_veg_gen_parm: failure opening SOILPARM.TBL'
-          if (this_image()==1) write(*,*) message
+          if (STD_OUT_PE) write(*,*) message
         END IF
 
         WRITE(mess,*) '    INPUT SOIL TEXTURE CLASSIFICATION = ', TRIM ( MMINSL )
-        if (this_image()==1) write(*,*) mess
+        if (STD_OUT_PE) write(*,*) mess
 
         LUMATCH=0
 
@@ -1340,7 +1340,7 @@ CONTAINS
         IF(SLTYPE.EQ.MMINSL)THEN
             WRITE( mess , * ) '    SOIL TEXTURE CLASSIFICATION = ', TRIM ( SLTYPE ) , ' FOUND', &
                   SLCATS,' CATEGORIES'
-            if (this_image()==1) write(*,*) mess
+            if (STD_OUT_PE) write(*,*) mess
           LUMATCH=1
         ENDIF
 ! prevent possible array overwrite, Bill Bovermann, IBM, May 6, 2008
@@ -1383,7 +1383,7 @@ CONTAINS
         IF(ierr .NE. OPEN_OK ) THEN
           WRITE(message,FMT='(A)') &
           'module_sf_noahlsm.F: soil_veg_gen_parm: failure opening GENPARM.TBL'
-          if (this_image()==1) write(*,*) message
+          if (STD_OUT_PE) write(*,*) message
         END IF
 
         READ (19,*)

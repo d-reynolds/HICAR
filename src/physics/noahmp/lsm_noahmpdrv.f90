@@ -1736,7 +1736,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
        IF(.NOT.FNDSNOWH)THEN
           ! If no SNOWH do the following
         !  CALL wrf_message( 'SNOW HEIGHT NOT FOUND - VALUE DEFINED IN LSMINIT' )
-          if (this_image()==1) WRITE(*,*) 'SNOW HEIGHT NOT FOUND - VALUE DEFINED IN LSMINIT'
+          if (STD_OUT_PE) WRITE(*,*) 'SNOW HEIGHT NOT FOUND - VALUE DEFINED IN LSMINIT'
           DO J = jts,jtf
              DO I = its,itf
                 SNOWH(I,J)=SNOW(I,J)*0.005               ! SNOW in mm and SNOWH in m
@@ -1750,7 +1750,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
        DO J = jts,jtf
           DO I = its,itf
              IF ( SNOW(i,j) > 0. .AND. SNOWH(i,j) == 0. .OR. SNOWH(i,j) > 0. .AND. SNOW(i,j) == 0.) THEN
-               IF (this_image()==1) THEN
+               IF (STD_OUT_PE) THEN
                  WRITE(err_message,*)"problem with initial snow fields: snow/snowh>0 while snowh/snow=0 at i,j" &
                                      ,i,j,snow(i,j),snowh(i,j)
                ENDIF
@@ -1768,7 +1768,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
           DO i = its,itf
              IF ( ISLTYP( i,j ) .LT. 1 ) THEN
                 errflag = 1
-                IF (this_image()==1) THEN
+                IF (STD_OUT_PE) THEN
                   WRITE(err_message,*)"module_sf_noahlsm.F: lsminit: out of range ISLTYP ",i,j,ISLTYP( i,j )
                 ENDIF
     !            CALL wrf_message(err_message)

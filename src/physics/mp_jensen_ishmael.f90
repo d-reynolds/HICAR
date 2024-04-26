@@ -24,7 +24,8 @@ module module_mp_jensen_ishmael
   !------------------------------------------------------------------------------------------------------!
 
 !  use module_wrf_error   
-   
+   use icar_constants,    only : STD_OUT_PE
+
   implicit none !.. You are welcome
 
   !.. Constants
@@ -152,7 +153,7 @@ contains
     
   !.. Call to build the aggregation lookup table (JYH)
     call mkcoltb(ndn,ncat,coltab,coltabn,ipair,gnu,tablo,tabhi,cfmas,pwmas,cfvt,pwvt)
-    if (this_image()==1) write(*,*) 'Jensen_ISHMAEL aggregation lookup table built'
+    if (STD_OUT_PE) write(*,*) 'Jensen_ISHMAEL aggregation lookup table built'
 
   !.. Check that tables are allocated (Thanks to JYH and Shaofeng)
     if(.not.allocated(itab)) allocate(itab(51,51,51,11,2))

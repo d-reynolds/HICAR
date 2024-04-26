@@ -708,7 +708,7 @@ contains
                         dw(i,j) = (W_m(i,k,j)-W_m(i,k-1,j))/dz(i,k,j)
                     endif
                     if (abs(du(i,j) + dv(i,j) + dw(i,j)) > 1e-3) then
-                        print*, this_image(), i,k,j , abs(du(i,j) + dv(i,j) + dw(i,j))
+                        print*,  i,k,j , abs(du(i,j) + dv(i,j) + dw(i,j))
                         print*, "Winds are not balanced on entry to advect"
                         !error stop
                     endif

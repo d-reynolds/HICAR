@@ -45,7 +45,7 @@ contains
         ! needs to read each one to find the grid information for it
         ! then create grid and initialize a variable...
         ! also need to explicitly save lat and lon data
-        ! if (this_image() == 1) then
+        ! if (STD_OUT_PE) then
             call this%init_local(options,                           &
                                  options%parameters%boundary_files, &
                                  vars_to_read, var_dimensions,      &
@@ -145,9 +145,9 @@ contains
         this%kts = 1
         this%kte = nz
 
-        if (this%ite < this%its) write(*,*) 'image: ',this_image(),'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        if (this%kte < this%kts) write(*,*) 'image: ',this_image(),'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        if (this%jte < this%jts) write(*,*) 'image: ',this_image(),'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%ite < this%its) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%kte < this%kts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
 
         ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
         do i=1, size(var_list)
@@ -245,12 +245,12 @@ contains
         this%jts = max(this%jts - 8,1)
         this%jte = min(this%jte + 8,ny)
 
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',this_image(),'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',this_image(),'  d_ims: ',d_ims,'  d_ime: ',d_ime,'  d_jms: ',d_jms,'  d_jme: ',d_jme
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',this_image(),'  LLlat: ',LLlat,'  LLlon: ',LLlon,'  URlat: ',URlat,'  URlon: ',URlon
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',this_image(),'  min_loc: ',minloc(LL_d),'  max_loc: ',minloc(UR_d)
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',this_image(),'  min_lat: ',minval(domain_lat),'  max_lat: ',maxval(domain_lat)
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',this_image(),'  lat_corners: ',lat_corners,'  lon_corners: ',lon_corners
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  d_ims: ',d_ims,'  d_ime: ',d_ime,'  d_jms: ',d_jms,'  d_jme: ',d_jme
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  LLlat: ',LLlat,'  LLlon: ',LLlon,'  URlat: ',URlat,'  URlon: ',URlon
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  min_loc: ',minloc(LL_d),'  max_loc: ',minloc(UR_d)
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  min_lat: ',minval(domain_lat),'  max_lat: ',maxval(domain_lat)
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  lat_corners: ',lat_corners,'  lon_corners: ',lon_corners
         if (this%ite < this%its .or. this%jte < this%jts) call io_write('domain_lat.nc',"domain_lat",domain_lat)
         if (this%ite < this%its .or. this%jte < this%jts) call io_write('domain_lon.nc',"domain_lon",domain_lon)
         if (this%ite < this%its .or. this%jte < this%jts) call io_write('boundary_lat.nc',"lat",temp_lat)
@@ -689,7 +689,7 @@ contains
             if (trim(master_var_list(i)) /= '') then
                 vars_to_read(curvar) = master_var_list(i)
                 var_dimensions(curvar) = master_dim_list(i)
-                ! if (this_image()==1) print *, "in variable list: ", vars_to_read(curvar)
+                ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)
                 curvar = curvar + 1
             endif
         enddo

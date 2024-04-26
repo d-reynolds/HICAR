@@ -28,15 +28,15 @@ module initialization
     use planetary_boundary_layer,   only : pbl_init
     use land_surface,               only : lsm_init
     use surface_layer,              only : sfc_init
-    use io_routines,          only : io_read, io_write
+    use io_routines,                only : io_read, io_write
     use mod_atm_utilities,          only : init_atm_utilities
     use wind,                       only : update_winds, init_winds
-    use wind_iterative,             only : init_iter_winds
-    use linear_theory_winds,        only : setup_linwinds
 
     use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
+    use ioserver_interface,         only : ioserver_t
     use ioclient_interface,         only : ioclient_t
     use iso_fortran_env
+    use mpi_f08
 
 
     ! use io_routines,                only : io_read, &
@@ -59,46 +59,43 @@ contains
         type(domain_t),  intent(inout) :: domain
         type(boundary_t),intent(inout) :: boundary ! forcing file for init conditions
 
-        integer :: omp_get_max_threads, num_threads
+        integer :: omp_get_max_threads, num_threads, num_PE
 
 #if defined(_OPENMP)
         num_threads = omp_get_max_threads()
 #else
         num_threads = 1
 #endif
-        if (this_image()==1) call welcome_message()
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) call welcome_message()
+        if (STD_OUT_PE) flush(output_unit)
 
-        if (this_image()==1) then
-            write(*,*) "  Number of coarray image:",num_images()
+        if (STD_OUT_PE) then
+            call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
+
+            write(*,*) "  Number of coarray image:",num_PE
             write(*,*) "  Max number of OpenMP Threads:",num_threads
         endif
 
         ! read in options file
-        if (this_image()==1) write(*,*) "Initializing Options"
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) write(*,*) "Initializing Options"
+        if (STD_OUT_PE) flush(output_unit)
         call options%init()
         
-        if (this_image()==1) write(*,*) "Initializing Domain"
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) write(*,*) "Initializing Domain"
+        if (STD_OUT_PE) flush(output_unit)
         call domain%init(options)
 
-        if (this_image()==1) write(*,*) "Initializing boundary condition data structure"
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) write(*,*) "Initializing boundary condition data structure"
+        if (STD_OUT_PE) flush(output_unit)
         call boundary%init(options,domain%latitude%data_2d,domain%longitude%data_2d,domain%variables_to_force)
 
-        if (this_image()==1) write(*,*) "Initializing atmospheric utilities"
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) write(*,*) "Initializing atmospheric utilities"
+        if (STD_OUT_PE) flush(output_unit)
         ! initialize the atmospheric helper utilities
         call init_atm_utilities(options)
 
-        if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
-            !call init_iter_winds_old(domain)
-            call init_iter_winds(domain)
-        endif
-
-        if (this_image()==1) write(*,'(/ A)') "Finished basic initialization"
-        if (this_image()==1) write(*,'(A /)') "---------------------------------------"
+        if (STD_OUT_PE) write(*,'(/ A)') "Finished basic initialization"
+        if (STD_OUT_PE) write(*,'(A /)') "---------------------------------------"
 
     end subroutine init_model
 
@@ -108,40 +105,35 @@ contains
         type(domain_t),  intent(inout) :: domain
         type(boundary_t),intent(in)    :: forcing
 
-        if (options%physics%windtype==kWIND_LINEAR .or. &
-                 options%physics%windtype==kLINEAR_OBRIEN_WINDS .or. &
-                 options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
-            call setup_linwinds(domain, options, .False., options%parameters%advect_density)
-        endif
 
-        if (this_image()==1) write(*,*) "Init initial winds"
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) write(*,*) "Init initial winds"
+        if (STD_OUT_PE) flush(output_unit)
         call init_winds(domain,options)
 
-        if (this_image()==1) write(*,*) "Updating initial winds"
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) write(*,*) "Updating initial winds"
+        if (STD_OUT_PE) flush(output_unit)
         call update_winds(domain, forcing, options)
 
         ! initialize microphysics code (e.g. compute look up tables in Thompson et al)
         call mp_init(options) !this could easily be moved to init_model...
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) flush(output_unit)
         call init_convection(domain,options)
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) flush(output_unit)
 
         call pbl_init(domain,options)
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) flush(output_unit)
 
         call radiation_init(domain,options)
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) flush(output_unit)
 
         call lsm_init(domain,options)
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) flush(output_unit)
 
         call sfc_init(domain,options)
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) flush(output_unit)
 
         call adv_init(domain,options)
-        if (this_image()==1) flush(output_unit)
+        if (STD_OUT_PE) flush(output_unit)
 
     end subroutine init_physics
 
@@ -151,10 +143,11 @@ contains
         type(domain_t),  intent(inout) :: domain
         type(boundary_t),intent(inout) :: boundary ! forcing file for init conditions
 
-        if (this_image()==1) write(*,*) "Reading Initial conditions from boundary dataset"
+        if (STD_OUT_PE) write(*,*) "Reading Initial conditions from boundary dataset"
         call domain%get_initial_conditions(boundary, options)
 
     end subroutine init_model_state
+
 
     subroutine welcome_message()
         implicit none

@@ -41,7 +41,7 @@ module reader_interface
       integer, public :: n_vars = 0
       logical, public :: eof      
       type(var_dict_t)    :: variables      ! a dictionary with all forcing data
-      
+      type(Time_type) :: model_end_time
       ! list of input files
       character (len=kMAX_FILE_LENGTH), allocatable :: file_list(:)
       character (len=kMAX_NAME_LENGTH)   :: time_var

@@ -38,6 +38,8 @@ contains
 
         this%file_list = options%parameters%boundary_files
         this%time_var  = options%parameters%time_var
+        this%model_end_time = options%parameters%end_time
+
         this%ncfile_id = -1
         ! figure out while file and timestep contains the requested start_time
         call set_curfile_curstep(this, options%parameters%start_time, this%file_list, this%time_var)
@@ -137,6 +139,7 @@ contains
         type(reader_t),   intent(inout) :: this
 
         integer :: steps_in_file
+        type(Time_type), allocatable :: times_in_file(:)
 
         this%curstep = this%curstep + 1 ! this may be all we have to do most of the time
         ! check that we haven't stepped passed the end of the current file
@@ -156,12 +159,21 @@ contains
 
             ! if we have run out of input files, stop with an error message
             if (this%curfile > size(this%file_list)) then
-                if (this_image()==kNUM_PROC_PER_NODE) write(*,*) 'End of file list'
                 this%eof = .True.
-                !stop "Ran out of files to process while searching for matching time variable!"
             endif
 
         endif
+
+        ! Check if the next file to read is beyond the model end time.
+        if (.not.(this%eof)) then
+            !Get time step of the next input step
+            call read_times(this%file_list(this%curfile), this%time_var, times_in_file)
+
+            if (times_in_file(this%curstep) > this%model_end_time) then
+                this%eof = .True.
+            endif
+        endif
+
     end subroutine
 
     !>------------------------------------------------------------
@@ -265,7 +277,7 @@ contains
             if (trim(master_var_list(i)) /= '') then
                 vars_to_read(curvar) = master_var_list(i)
                 var_dimensions(curvar) = master_dim_list(i)
-                ! if (this_image()==1) print *, "in variable list: ", vars_to_read(curvar)
+                ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)
                 curvar = curvar + 1
             endif
         enddo

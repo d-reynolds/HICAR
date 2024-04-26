@@ -93,7 +93,7 @@ contains
         
         allocate(temp_list(MAX_NUMBER_FILES))
         
-        temp_file = 'tmp_outfiles'//trim(str(this_image()))//'.txt'
+        temp_file = 'tmp_outfiles'//trim(str(PE_RANK_GLOBAL))//'.txt'
         cmd_str = 'ls '//trim(this%base_out_file_name)//'*.nc > '//trim(temp_file)
         call system( cmd_str )
         

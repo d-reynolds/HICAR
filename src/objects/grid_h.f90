@@ -47,19 +47,20 @@ interface
         integer, allocatable :: dims(:)
     end function
 
-    module subroutine domain_decomposition(this, nx, ny, nimages, ratio, for_image)
-        implicit none
+    module subroutine domain_decomposition(this, nx, ny, nimages, image, ratio)
         class(grid_t),  intent(inout) :: this
         integer,        intent(in)    :: nx, ny, nimages
+        integer,        intent(in)    :: image
         real,           intent(in), optional :: ratio
-        integer,        intent(in), optional :: for_image
     end subroutine
 
-    module subroutine set_grid_dimensions(this, nx, ny, nz, global_nz, adv_order, nx_extra, ny_extra, for_image)
+    module subroutine set_grid_dimensions(this, nx, ny, nz, image, global_nz, adv_order, nx_extra, ny_extra)
         implicit none
         class(grid_t),   intent(inout) :: this
-        integer,         intent(in)    :: nx, ny, nz
-        integer,         intent(in), optional :: global_nz, adv_order, nx_extra, ny_extra, for_image
+        integer,         intent(in)    :: nx, ny, nz, image
+
+        integer,         intent(in), optional :: global_nz, adv_order, nx_extra, ny_extra
+
     end subroutine
 end interface
 end module

@@ -224,7 +224,7 @@ contains
         !!
         do j = 1, Ny_HICAR
             do i = 1, Nx_HICAR
-                !if (this_image()==1) write(*,*) "  albsH, albsF  ",i, j, domain%albs%data_2d(i+its-1,j+jts-1), albs(i,j)
+                !if (STD_OUT_PE) write(*,*) "  albsH, albsF  ",i, j, domain%albs%data_2d(i+its-1,j+jts-1), albs(i,j)
             end do
         end do
         !SYNC ALL
@@ -284,11 +284,11 @@ contains
         Sdif=TRANSPOSE(domain%shortwave_diffuse%data_2d(its:ite,jts:jte)) !Sdif=0.0
         !!
         if (options%parameters%factor_p_var == "") then 
-            !if (this_image()==1) write(*,*) "facto_p is not read...FSM"
+            !if (STD_OUT_PE) write(*,*) "facto_p is not read...FSM"
             Sf=TRANSPOSE(current_snow(its:ite,jts:jte))
         endif
         if (options%parameters%factor_p_var /= "") then 
-            !if (this_image()==1) write(*,*) "facto_p is read...FSM"
+            !if (STD_OUT_PE) write(*,*) "facto_p is read...FSM"
             Sf=TRANSPOSE(current_snow(its:ite,jts:jte)*domain%factor_p%data_2d(its:ite,jts:jte))
         endif
         !
@@ -503,7 +503,7 @@ contains
 
         !Delta_t=mod(domain%model_time%seconds(),options%io_options%out_dt)
         !if ( abs(options%io_options%out_dt-(Delta_t+dt)) <= 1.e-3 ) then
-        !    if (this_image()==1) write(*,*) "resetting/aggregating vars e.g. runoff during t-1->t"!, Delta_t,Delta_t+dt
+        !    if (STD_OUT_PE) write(*,*) "resetting/aggregating vars e.g. runoff during t-1->t"!, Delta_t,Delta_t+dt
         !    !!
         !    domain%rainfall_tstep%data_2d(its:ite,jts:jte)=rainfall_sum
         !    domain%snowfall_tstep%data_2d(its:ite,jts:jte)=snowfall_sum

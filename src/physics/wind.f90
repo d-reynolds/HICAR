@@ -9,7 +9,7 @@
 !!------------------------------------------------------------
 module wind    
 
-    use linear_theory_winds, only : linear_perturb
+    use linear_theory_winds, only : linear_perturb, setup_linwinds
     use wind_iterative,      only : calc_iter_winds, init_iter_winds
     use wind_iterative_old,      only : calc_iter_winds_old
 
@@ -760,10 +760,15 @@ contains
             domain%advection_dz(:,i,:) = options%parameters%dz_levels(i)
         enddo
 
-        !if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
-        !    !call init_iter_winds_old(domain)
-        !    call init_iter_winds(domain)
-        !endif
+        if (options%physics%windtype==kWIND_LINEAR .or. &
+                 options%physics%windtype==kLINEAR_OBRIEN_WINDS .or. &
+                 options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
+            call setup_linwinds(domain, options, .False., options%parameters%advect_density)
+        endif
+        if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
+            !call init_iter_winds_old(domain)
+            call init_iter_winds(domain)
+        endif
 
         if (options%wind%thermal) call init_thermal_winds(domain, options)
         

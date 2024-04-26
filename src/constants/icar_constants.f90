@@ -8,10 +8,13 @@ module icar_constants
 
     character(len=5) :: kVERSION_STRING = "2.1"
     
-    ! Define team IDs for coarray teams
+    ! Define process info and team info
     integer, parameter :: kCOMPUTE_TEAM = 1
     integer, parameter :: kIO_TEAM = 2
     integer, allocatable :: DOM_IMG_INDX(:)
+    logical :: STD_OUT_PE = .False.
+    integer :: PE_RANK_GLOBAL = -1
+
     integer :: kNUM_SERVERS = 0
     integer :: kNUM_COMPUTE = 0
     integer :: kNUM_PROC_PER_NODE = 0

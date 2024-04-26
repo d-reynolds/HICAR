@@ -58,7 +58,7 @@ contains
 
         call set_var_lists(this, options)
 
-        call this%halo%init(this%exch_vars, this%adv_vars, this%grid, this%IO_comms)
+        call this%halo%init(this%exch_vars, this%adv_vars, this%grid, this%compute_comms)
 
         call init_relax_filters(this)
 
@@ -623,7 +623,7 @@ contains
         allocate( surf_temp_1( ims:ime, jms:jme))
         allocate( surf_temp_2( ims:ime, jms:jme))
 
-        if (this_image()==1) print *,"  Initializing variables"
+        if (STD_OUT_PE) print *,"  Initializing variables"
 
         if (0<opt%vars_to_allocate( kVARS%u) )                          call setup(this%u,                        this%u_grid,   forcing_var=opt%parameters%uvar,       list=this%variables_to_force, force_boundaries=.False.)
         if (0<opt%vars_to_allocate( kVARS%u) )                          call setup(this%u_mass,                   this%grid)
@@ -1108,7 +1108,7 @@ contains
             this%v_latitude%data_2d = temp_offset(this%v_grid%ims:this%v_grid%ime,this%v_grid%jms:this%v_grid%jme)
         endif
 
-        if (this_image()==1) write(*,*) "  Finished reading core domain variables"
+        if (STD_OUT_PE) write(*,*) "  Finished reading core domain variables"
 
     end subroutine
 
@@ -1154,7 +1154,7 @@ contains
         real :: height
 
         if (options%parameters%flat_z_height > nz) then
-            if (this_image()==1) write(*,*) "    Treating flat_z_height as specified in meters above mean terrain height: ", options%parameters%flat_z_height," meters"
+            if (STD_OUT_PE) write(*,*) "    Treating flat_z_height as specified in meters above mean terrain height: ", options%parameters%flat_z_height," meters"
             height = 0
             do j = 1, nz
                 if (height <= options%parameters%flat_z_height) then
@@ -1164,11 +1164,11 @@ contains
             enddo
 
         elseif (options%parameters%flat_z_height <= 0) then
-            if (this_image()==1) write(*,*) "    Treating flat_z_height as counting levels down from the model top: ", options%parameters%flat_z_height," levels"
+            if (STD_OUT_PE) write(*,*) "    Treating flat_z_height as counting levels down from the model top: ", options%parameters%flat_z_height," levels"
             max_level = nz + options%parameters%flat_z_height
 
         else
-            if (this_image()==1) write(*,*) "    Treating flat_z_height as counting levels up from the ground: ", options%parameters%flat_z_height," levels"
+            if (STD_OUT_PE) write(*,*) "    Treating flat_z_height as counting levels up from the ground: ", options%parameters%flat_z_height," levels"
             max_level = options%parameters%flat_z_height
         endif
 
@@ -1354,7 +1354,7 @@ contains
             ! For reference: COSMO1 operational setting (but model top is at ~22000 masl):
             !    Decay Rate for Large-Scale Topography: svc1 = 10000.0000
             !    Decay Rate for Small-Scale Topography: svc2 =  3300.0000
-            if ((this_image()==1)) then
+            if ((STD_OUT_PE)) then
                 write(*,*) "    Using a SLEVE coordinate with a Decay height for Large-Scale Topography: (s1) of ", s1, " m."
                 write(*,*) "    Using a SLEVE coordinate with a Decay height for Small-Scale Topography: (s2) of ", s2, " m."
                 write(*,*) "    Using a sleve_n of ", options%parameters%sleve_n
@@ -1452,11 +1452,11 @@ contains
                         z_v(:,i,:)   = (sum(dz_scl(1:(i-1))) + dz_scl(i)/2) + h1_v*b1_mass + h2_v*b2_mass  
 
                         if ( ANY(global_z_interface(:,i,:)<0) ) then   ! Eror catching. Probably good to engage.
-                        if (this_image()==1) then
-                            write(*,*) "Error: dz_interface below zero (for level  ",i,")"
-                            write(*,*)  "min max dz_interface: ",MINVAL(global_z_interface(:,i,:)),MAXVAL(global_z_interface(:,i,:))
-                            error stop
-                        endif
+                            if (STD_OUT_PE) then
+                                write(*,*) "Error: dz_interface below zero (for level  ",i,")"
+                                write(*,*)  "min max dz_interface: ",MINVAL(global_z_interface(:,i,:)),MAXVAL(global_z_interface(:,i,:))
+                                error stop
+                            endif
                         else if ( ANY(global_z_interface(:,i,:)<=0.01) ) then
                             write(*,*) "WARNING: dz_interface very low (at level ",i,")"
                         endif
@@ -1735,7 +1735,7 @@ contains
             jms = this%jms
             jme = this%jme
 
-            if (this_image()==1) print*, "Reading Sinalpha/cosalpha"
+            if (STD_OUT_PE) print*, "Reading Sinalpha/cosalpha"
 
             call io_read(options%parameters%init_conditions_file, options%parameters%sinalpha_var, lon)
             this%sintheta = lon(ims:ime, jms:jme)
@@ -1794,7 +1794,7 @@ contains
             this%sintheta(ims:ime,jms:jme) = sintheta(ims:ime,jms:jme)
              
         endif
-        if (options%parameters%debug .and.(this_image()==1)) then
+        if (options%parameters%debug .and.(STD_OUT_PE)) then
             print*, ""
             print*, "Domain Geometry"
             print*, "MAX / MIN SIN(theta) (ideally 0)"
@@ -1980,7 +1980,7 @@ contains
                   terrain               => this%terrain%data_2d)
 
 
-        if ((this_image()==1)) then
+        if ((STD_OUT_PE)) then
           write(*,*) "  Setting up the SLEVE vertical coordinate:"
           write(*,*) "    Smoothing large-scale terrain (h1) with a windowsize of ", &
                   options%parameters%terrain_smooth_windowsize, " for ",        &
@@ -2035,7 +2035,7 @@ contains
         h1_v = temp(this%v_grid2d%ims:this%v_grid2d%ime, this%v_grid2d%jms:this%v_grid2d%jme)
         h2_v =  h2_v  - h1_v
         
-        !if (this_image()==1) then
+        !if (STD_OUT_PE) then
         !   write(*,*) "       Max of full topography", MAXVAL(neighbor_terrain )
         !   write(*,*) "       Max of large-scale topography (h1)  ", MAXVAL(h1)
         !   write(*,*) "       Max of small-scale topography (h2)  ", MAXVAL(h2)
@@ -2062,7 +2062,7 @@ contains
         
         !If we don't have an Sx file saved, build one
         !if (.not.(fexist)) then
-        if (this_image()==1) write(*,*) "    Calculating Sx and TPI for wind modification"
+        if (STD_OUT_PE) write(*,*) "    Calculating Sx and TPI for wind modification"
         call calc_TPI(this, options)
         call calc_Sx(this, options, filename)
         !endif
@@ -2145,7 +2145,7 @@ contains
         soil_thickness(1:4) = [0.1, 0.2, 0.5, 1.0]
         init_surf_temp = 280
 
-        if (this_image()==1) write (*,*) "Reading Land Variables"
+        if (STD_OUT_PE) write (*,*) "Reading Land Variables"
         if (associated(this%soil_water_content%data_3d)) then
             nsoil = size(this%soil_water_content%data_3d, 2)
         elseif (associated(this%soil_temperature%data_3d)) then
@@ -2163,7 +2163,7 @@ contains
         endif
 
         if ((options%physics%watersurface==kWATER_LAKE) .AND.(options%parameters%lakedepthvar /= "")) then
-            if (this_image()==1) write(*,*) "   reading lake depth data from hi-res file"
+            if (STD_OUT_PE) write(*,*) "   reading lake depth data from hi-res file"
 
             call io_read(options%parameters%init_conditions_file,   &
                            options%parameters%lakedepthvar,         &
@@ -2191,8 +2191,8 @@ contains
                 this%soil_deep_temperature%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
 
                 if (minval(temporary_data)< 200) then
-                    if (this_image()==1) write(*,*) "WARNING, VERY COLD SOIL TEMPERATURES SPECIFIED:", minval(temporary_data)
-                    if (this_image()==1) write(*,*) trim(options%parameters%init_conditions_file),"  ",trim(options%parameters%soil_deept_var)
+                    if (STD_OUT_PE) write(*,*) "WARNING, VERY COLD SOIL TEMPERATURES SPECIFIED:", minval(temporary_data)
+                    if (STD_OUT_PE) write(*,*) trim(options%parameters%init_conditions_file),"  ",trim(options%parameters%soil_deept_var)
                 endif
                 if (minval(this%soil_deep_temperature%data_2d)< 200) then
                     where(this%soil_deep_temperature%data_2d<200) this%soil_deep_temperature%data_2d=init_surf_temp ! <200 is just broken, set to mean annual air temperature at mid-latidudes
@@ -2307,7 +2307,7 @@ contains
                     enddo
 
                     if (maxval(temporary_data_3d) > 1) then
-                        if (this_image()==1) write(*,*) "Changing input ALBEDO % to fraction"
+                        if (STD_OUT_PE) write(*,*) "Changing input ALBEDO % to fraction"
                         this%albedo%data_3d = this%albedo%data_3d / 100
                     endif
                 endif
@@ -2321,7 +2321,7 @@ contains
                     enddo
 
                     if (maxval(temporary_data) > 1) then
-                        if (this_image()==1) write(*,*) "Changing input ALBEDO % to fraction"
+                        if (STD_OUT_PE) write(*,*) "Changing input ALBEDO % to fraction"
                         this%albedo%data_3d = this%albedo%data_3d / 100
                     endif
                 endif
@@ -2380,7 +2380,7 @@ contains
             endif
         else
             if (associated(this%vegetation_fraction_max%data_2d)) then
-                if (this_image()==1) write(*,*) "    VEGMAX not specified; using default value of 0.8"
+                if (STD_OUT_PE) write(*,*) "    VEGMAX not specified; using default value of 0.8"
                 this%vegetation_fraction_max%data_2d = 80.
             endif
         endif
@@ -2394,7 +2394,7 @@ contains
             endif
         else
             if (associated(this%lai%data_2d)) then
-                if (this_image()==1) write(*,*) "    LAI not specified; using default value of 1"
+                if (STD_OUT_PE) write(*,*) "    LAI not specified; using default value of 1"
                 this%lai%data_2d = 1
             endif
         endif
@@ -2408,7 +2408,7 @@ contains
             endif
         else
             if (associated(this%canopy_water%data_2d)) then
-                if (this_image()==1) write(*,*) "    CANWAT not specified; using default value of 0"
+                if (STD_OUT_PE) write(*,*) "    CANWAT not specified; using default value of 0"
                 this%canopy_water%data_2d = 0
             endif
         endif
@@ -2431,7 +2431,7 @@ contains
                 if (associated(this%hlm%data_3d)) then
                     do i=1,90
                         this%hlm%data_3d(:,i,:) = temporary_data_3d(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme, i)
-                        !if (this_image()==1) write(*,*),"hlm ", i, this%hlm%data_3d(this%grid%its,i,this%grid%jts)
+                        !if (STD_OUT_PE) write(*,*),"hlm ", i, this%hlm%data_3d(this%grid%its,i,this%grid%jts)
                     enddo
                 endif
             endif
@@ -2472,7 +2472,7 @@ contains
                 endif
             endif
             if (options%parameters%factor_p_var /= "") then
-                 !if (this_image()==1) write(*,*) "facto_p is read...domain"
+                 !if (STD_OUT_PE) write(*,*) "facto_p is read...domain"
                 call io_read(options%parameters%init_conditions_file,   &
                                options%parameters%factor_p_var,         &
                                temporary_data)
@@ -2652,7 +2652,7 @@ contains
         !clean output var list
         do i=1, size(options%io_options%vars_for_output)
             if ((options%io_options%vars_for_output(i)+options%vars_for_restart(i) > 0) .and. (options%vars_to_allocate(i) <= 0)) then
-                if (this_image()==1) write(*,*) 'var for kVARS index: ',options%vars_to_allocate(i),' requested for output/restart, but was not allocated by one of the modules'
+                if (STD_OUT_PE) write(*,*) 'var for kVARS index: ',options%vars_to_allocate(i),' requested for output/restart, but was not allocated by one of the modules'
                 options%io_options%vars_for_output(i) = 0
             endif
         enddo
@@ -2669,12 +2669,12 @@ contains
         type(options_t), intent(in)     :: options
 
         real, allocatable :: temporary_data(:,:)
-        integer :: nx_global, ny_global, nz_global, nsmooth, adv_order
+        integer :: nx_global, ny_global, nz_global, nsmooth, adv_order, my_index
 
         nsmooth = max(1, int(options%parameters%smooth_wind_distance / options%parameters%dx))
         if (options%parameters%smooth_wind_distance == 0.0) nsmooth = 0
         this%nsmooth = nsmooth
-        if ((this_image()==1).and.(options%parameters%debug)) write(*,*) "number of gridcells to smooth = ",nsmooth
+        if ((STD_OUT_PE).and.(options%parameters%debug)) write(*,*) "number of gridcells to smooth = ",nsmooth
         ! This doesn't need to read in this variable, it could just request the dimensions
         ! but this is not a performance sensitive part of the code (for now)
         call io_read(options%parameters%init_conditions_file,   &
@@ -2695,35 +2695,43 @@ contains
         !If using MPDATA, we need a halo of size 2 to support the difference stencil
         if (options%physics%advection==kADV_MPDATA) adv_order = 4
 
-        call this%grid%set_grid_dimensions(     nx_global, ny_global, nz_global,adv_order=adv_order)
-        call this%grid8w%set_grid_dimensions(   nx_global, ny_global, nz_global+1,adv_order=adv_order)
+        if (this%compute_comms == MPI_COMM_NULL) then
+            my_index = 1
+        else
+            call MPI_Comm_rank(this%compute_comms, my_index)
+            ! MPI returns rank, which is 0-indexed
+            my_index = my_index + 1
+        endif
 
-        call this%u_grid%set_grid_dimensions( nx_global, ny_global, nz_global,adv_order=adv_order, nx_extra = 1)
-        call this%v_grid%set_grid_dimensions( nx_global, ny_global, nz_global,adv_order=adv_order, ny_extra = 1)
+        call this%grid%set_grid_dimensions(     nx_global, ny_global, nz_global, image=my_index, adv_order=adv_order)
+        call this%grid8w%set_grid_dimensions(   nx_global, ny_global, nz_global+1, image=my_index, adv_order=adv_order)
+
+        call this%u_grid%set_grid_dimensions( nx_global, ny_global, nz_global, image=my_index, adv_order=adv_order, nx_extra = 1)
+        call this%v_grid%set_grid_dimensions( nx_global, ny_global, nz_global, image=my_index, adv_order=adv_order, ny_extra = 1)
 
         ! for 2D mass variables
-        call this%grid2d%set_grid_dimensions( nx_global, ny_global, 0, global_nz=nz_global, adv_order=adv_order)
+        call this%grid2d%set_grid_dimensions( nx_global, ny_global, 0, image=my_index, global_nz=nz_global, adv_order=adv_order)
 
         ! setup a 2D lat/lon grid extended by nsmooth grid cells so that smoothing can take place "across" images
         ! This just sets up the fields to interpolate u and v to so that the input data are handled on an extended
         ! grid.  They are then subset to the u_grid and v_grids above before actual use.
-        call this%u_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, global_nz=nz_global, adv_order=adv_order, nx_extra = 1)
+        call this%u_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, image=my_index, global_nz=nz_global, adv_order=adv_order, nx_extra = 1)
 
         ! handle the v-grid too
-        call this%v_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, global_nz=nz_global, adv_order=adv_order, ny_extra = 1)
+        call this%v_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, image=my_index, global_nz=nz_global, adv_order=adv_order, ny_extra = 1)
         
-        call this%grid_soil%set_grid_dimensions(         nx_global, ny_global, kSOIL_GRID_Z, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_snow%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_snowsoil%set_grid_dimensions(     nx_global, ny_global, kSNOWSOIL_GRID_Z, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_soilcomp%set_grid_dimensions(     nx_global, ny_global, kSOILCOMP_GRID_Z, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_gecros%set_grid_dimensions(       nx_global, ny_global, kGECROS_GRID_Z, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_croptype%set_grid_dimensions(     nx_global, ny_global, kCROP_GRID_Z, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_monthly%set_grid_dimensions(      nx_global, ny_global, kMONTH_GRID_Z, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake%set_grid_dimensions(         nx_global, ny_global, kLAKE_Z, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake_soisno%set_grid_dimensions(  nx_global, ny_global, kLAKE_SOISNO_Z, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake_soi%set_grid_dimensions(     nx_global, ny_global, kLAKE_SOI_Z, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake_soisno_1%set_grid_dimensions(nx_global, ny_global, kLAKE_SOISNO_1_Z, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_hlm%set_grid_dimensions(     nx_global, ny_global, 90,adv_order=adv_order) !! MJ added
+        call this%grid_soil%set_grid_dimensions(         nx_global, ny_global, kSOIL_GRID_Z, image=my_index, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_snow%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z, image=my_index, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_snowsoil%set_grid_dimensions(     nx_global, ny_global, kSNOWSOIL_GRID_Z, image=my_index, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_soilcomp%set_grid_dimensions(     nx_global, ny_global, kSOILCOMP_GRID_Z, image=my_index, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_gecros%set_grid_dimensions(       nx_global, ny_global, kGECROS_GRID_Z, image=my_index, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_croptype%set_grid_dimensions(     nx_global, ny_global, kCROP_GRID_Z, image=my_index, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_monthly%set_grid_dimensions(      nx_global, ny_global, kMONTH_GRID_Z, image=my_index, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_lake%set_grid_dimensions(         nx_global, ny_global, kLAKE_Z, image=my_index, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_lake_soisno%set_grid_dimensions(  nx_global, ny_global, kLAKE_SOISNO_Z, image=my_index, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_lake_soi%set_grid_dimensions(     nx_global, ny_global, kLAKE_SOI_Z, image=my_index, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_lake_soisno_1%set_grid_dimensions(nx_global, ny_global, kLAKE_SOISNO_1_Z, image=my_index, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_hlm%set_grid_dimensions(     nx_global, ny_global, 90, image=my_index, adv_order=adv_order) !! MJ added
 
 
         this%north_boundary = (this%grid%yimg == this%grid%yimages)

@@ -91,25 +91,25 @@ contains
         allocate(day_frac(ims:ime))
 
 
-        if (this_image()==1) write(*,*) "Initializing Radiation"
+        if (STD_OUT_PE) write(*,*) "Initializing Radiation"
 
         if (options%physics%radiation==kRA_BASIC) then
-            if (this_image()==1) write(*,*) "    Basic Radiation"
+            if (STD_OUT_PE) write(*,*) "    Basic Radiation"
         endif
         if (options%physics%radiation==kRA_SIMPLE .or. (options%physics%landsurface>0 .and. options%physics%radiation==0)) then
-            if (this_image()==1) write(*,*) "    Simple Radiation"
+            if (STD_OUT_PE) write(*,*) "    Simple Radiation"
             call ra_simple_init(domain, options)
         endif!! MJ added to detect the time for outputting 
 
         if (options%physics%radiation==kRA_RRTMG) then
-            if (this_image()==1) write(*,*) "    RRTMG"
+            if (STD_OUT_PE) write(*,*) "    RRTMG"
             if(.not.allocated(domain%tend%th_lwrad)) &
                 allocate(domain%tend%th_lwrad(domain%ims:domain%ime,domain%kms:domain%kme,domain%jms:domain%jme))
             if(.not.allocated(domain%tend%th_swrad)) &
                 allocate(domain%tend%th_swrad(domain%ims:domain%ime,domain%kms:domain%kme,domain%jms:domain%jme))
 
             if (options%physics%microphysics .ne. kMP_THOMP_AER) then
-               if (this_image()==1)write(*,*) '    NOTE: When running RRTMG, microphysics option 5 works best.'
+               if (STD_OUT_PE)write(*,*) '    NOTE: When running RRTMG, microphysics option 5 works best.'
             endif
 
             ! needed to allocate module variables so ra_driver can use calc_solar_elevation
@@ -650,34 +650,9 @@ contains
                     endif
                     domain%shortwave_total%data_2d(i,j) = domain%shortwave_diffuse%data_2d(i,j) + &
                                                           domain%shortwave_direct%data_2d(i,j)
-                    !if (this_image()==2) write(*,*),"1-- ele,ele_TJ,elev_th,azim, proj ", trim(domain%model_time%as_string()),solar_elevation_store(i,j)*180./pi, solar_elevation_store_test(i,j), elev_th*180./pi, solar_azimuth_store(i,j)*180./pi, acos(cos_project_angle(i,j))*180./pi 
-                    !if (this_image()==2) write(*,*), trim(domain%model_time%as_string()),solar_elevation_store(i,j)*180./pi, solar_elevation_store_test(i,j)
-                    !if (this_image()==3 ) write(*,*),"2--dif, dir ", trim(domain%model_time%as_string()), SW_dif(i,j), SW_dir(i,j), domain%shortwave%data_2d(i,j)!, solar_azimuth_store(i,j)*180./pi
-                    !if (this_image()==3 ) write(*,*),"3--diff_ds, dir_ds ", domain%shortwave_diffuse%data_2d(i,j), domain%shortwave_direct%data_2d(i,j)
-                    !if (this_image()==3 ) write(*,*),"4--cos_i, SW_i , SW_i2", max(cos_project_angle(i,j),0.),  min(SW_dir(i,j)/max(sin(solar_elevation_store(i,j)),0.01),max_dir)*max(cos_project_angle(i,j),0.), SW_dir(i,j)/max(sin(solar_elevation_store(i,j)),0.01)*max(cos_project_angle(i,j),0.)
                 enddo
             enddo           
-            !sum_SWdif=sum_SWdif+domain%shortwave_diffuse%data_2d*dt/options%io_options%out_dt
-            !sum_SWdir=sum_SWdif+domain%shortwave_direct%data_2d*dt/options%io_options%out_dt
-            !sum_LW=sum_LW+domain%longwave%data_2d*dt/options%io_options%out_dt 
-            !Delta_t=mod(domain%model_time%seconds(),options%io_options%out_dt)
-            !if (this_image()==3) write(*,*),"dt, Delta_t, outDT, Sdif_a, Sdir_a, L_a ", trim(domain%model_time%as_string()), Delta_t, dt, options%io_options%out_dt, sum_SWdif(i,j), sum_SWdir(i,j), sum_LW(i,j) , +domain%longwave%data_2d(i,j)
         endif
-        !! this is to aggregate thge vars such as runoff, meltout, snowfall and rainfall per output interval only FSM 
-!        if (options%physics%radiation==kRA_RRTMG) then 
-!            Delta_t=mod(domain%model_time%seconds(),options%io_options%out_dt)
-!            if ( abs(options%io_options%out_dt-(Delta_t+dt)) <= 1.e-3 ) then
-!                if (this_image()==1) write(*,*) "reset-----------t,t+dt,mod", Delta_t,Delta_t+dt
-!                !!
-!                domain%shortwave_diffuse%data_2d=sum_SWdif
-!                domain%shortwave_direct%data_2d=sum_SWdir
-!                domain%shortwave%data_2d=sum_SWdif+sum_SWdir
-!                domain%longwave%data_2d=sum_LW
-!                sum_SWdif = 0.
-!                sum_SWdir = 0.
-!                sum_LW = 0.
-!            endif
-!        endif
     end subroutine rad
     
     

@@ -37,21 +37,17 @@ contains
     !! return the split that provides the closest match between the number of x and y grid cells
     !!
     !! -------------------------------
-    module subroutine domain_decomposition(this, nx, ny, nimages, ratio, for_image)
+    module subroutine domain_decomposition(this, nx, ny, nimages, image, ratio)
         class(grid_t),  intent(inout) :: this
         integer,        intent(in)    :: nx, ny, nimages
+        integer,        intent(in)    :: image
         real,           intent(in), optional :: ratio
-        integer,        intent(in), optional :: for_image
         real    :: multiplier
         integer :: ysplit, xsplit, xs, ys, i
         real    :: best, current, x, y
-        integer :: image
 
         multiplier=1
         if (present(ratio)) multiplier = ratio
-
-        image = this_image()
-        if (present(for_image)) image = for_image
 
         xsplit = 1
         ysplit = nimages
@@ -143,26 +139,22 @@ contains
     !! Generate the domain decomposition mapping and compute the indicies for local memory
     !!
     !! -------------------------------
-    module subroutine set_grid_dimensions(this, nx, ny, nz, global_nz, adv_order, nx_extra, ny_extra, for_image)
+    module subroutine set_grid_dimensions(this, nx, ny, nz, image, global_nz, adv_order, nx_extra, ny_extra)
       class(grid_t),   intent(inout) :: this
-      integer,         intent(in)    :: nx, ny, nz
-      integer,         intent(in), optional :: global_nz, adv_order, nx_extra, ny_extra, for_image
+      integer,         intent(in)    :: nx, ny, nz, image
+      integer, optional, intent(in)    :: global_nz, adv_order, nx_extra, ny_extra
 
       integer :: nx_e, ny_e, halo_size
-      integer :: image
 
       halo_size = kDEFAULT_HALO_SIZE
       if (present(adv_order)) halo_size = ceiling(adv_order/2.0)
-
-      image = max(1,FINDLOC(DOM_IMG_INDX,this_image(),dim=1))
-      if (present(for_image)) image = for_image
 
       nx_e = 0
       ny_e = 0
       if (present(nx_extra)) nx_e = nx_extra ! used to add 1 to the u-field staggered grid
       if (present(ny_extra)) ny_e = ny_extra ! used to add 1 to the v-field staggered grid
 
-      call this%domain_decomposition(nx, ny, kNUM_COMPUTE, for_image=image)
+      call this%domain_decomposition(nx, ny, kNUM_COMPUTE, image=image)
 
       if (nz<1) then
           this%is2d = .True.

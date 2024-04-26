@@ -88,7 +88,7 @@ contains
         domain%TPI = domain%neighbor_TPI(domain%grid2d%ims:domain%grid2d%ime,domain%grid2d%jms:domain%grid2d%jme)
         
         
-        if ( this_image() == 1 ) then
+        if ( STD_OUT_PE ) then
             !write (*,*) "Saving *_TPI.nc"
             !Save file
             !call io_write("neighbor_TPI.nc", "TPI", domain%neighbor_TPI(:,:) ) 
@@ -318,7 +318,7 @@ contains
             end do
         end do
         
-        if ( this_image() == 1 ) then
+        if ( STD_OUT_PE ) then
             !write (*,*) "Saving *_Sx.nc"
             !Save file
             call io_write(filename, "Sx", domain%Sx(:,:,:,:) ) 

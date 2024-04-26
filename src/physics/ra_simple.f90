@@ -194,19 +194,6 @@ contains
         hour=date%hour
         minute=date%minute
         second=date%second
-        !tzone=1.
-        !if (this_image()==2) write(*,*),"tzone ", tzone
-        !year=2016
-        !month=3
-        !day=3
-        !hour=12
-        !minute=0
-        !second=0
-        !tzone=-5.
-
-        !lon_hr=-71.05
-        !lat_hr=42.35        
-        !!
         calc_solar_elevation_corr = 0
         if(present(solar_azimuth)) solar_azimuth = 0
 
@@ -271,18 +258,6 @@ contains
         where(calc_solar_elevation_corr<0.0) calc_solar_elevation_corr=0.0
         where(calc_solar_elevation_corr>90.0) calc_solar_elevation_corr=90.0
 
-!       if (this_image()==2 .and. j==jms+1) then
-!           write(*,*), trim(date%as_string()),solar_elev_corr_atm_ref_deg, solar_azimuth_angle
-!       endif
-!       if (this_image()==2 .and. j==jms+1) then
-!           write(*,*), trim(date%as_string()), julian_day
-!       endif
-!       if (this_image()==2) write(*,*),"julian_day ", trim(date%as_string()), julian_day
-!       if (this_image()==2) write(*,*),"julian_century ", julian_century
-!       if (this_image()==2) write(*,*),"geom_mean_long_sun_deg ", geom_mean_long_sun_deg
-!       if (this_image()==2) write(*,*),"eccent_earth_orbit ", eccent_earth_orbit
-!       if (this_image()==2) write(*,*),"elev ", calc_solar_elevation_corr(its)
-!       stop
     end function calc_solar_elevation_corr
 
     function calc_solar_elevation(date, lon, j, ims,ime, jms,jme, its,ite, day_frac)

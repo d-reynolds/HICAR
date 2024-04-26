@@ -35,6 +35,7 @@ MODULE module_water_lake
 
 !  USE module_wrf_error
  USE mod_wrf_constants, ONLY : rcp
+ use icar_constants,    only : STD_OUT_PE
 
     implicit none
     integer, parameter ::      r8 = selected_real_kind(12)
@@ -5102,7 +5103,7 @@ end subroutine LakeDebug
         end do
        end do
     write(message,*) "the total number of lake grid is :", numb_lak
-    if(this_image()==1) write(*,*) "   the total number of lake gridcells (in image 1) is :", numb_lak, ""
+    if(STD_OUT_PE) write(*,*) "   the total number of lake gridcells (in image 1) is :", numb_lak, ""
    !  CALL wrf_message(message)
 !    CALL LakeDebug(msg)
 ! initialize lake grid
@@ -5126,7 +5127,7 @@ end subroutine LakeDebug
         snl2d(i,j)             = 0.0
           if ( use_lakedepth.eq.1 .and.lake_depth_flag.eq.0 ) then !mchen
          !  call wrf_error_fatal ( 'STOP: You need lake-depth information. Rerun WPS or set use_lakedepth = 0')
-            if(this_image()==1) write(*,*) ( 'STOP: You need lake-depth information. Rerun WPS or set use_lakedepth = 0')
+            if(STD_OUT_PE) write(*,*) ( 'STOP: You need lake-depth information. Rerun WPS or set use_lakedepth = 0')
           end if
           if ( use_lakedepth.eq.0 .and.lake_depth_flag.eq.1 ) then !mchen
           lake_depth_flag = 0

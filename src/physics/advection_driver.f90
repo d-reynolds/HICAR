@@ -29,13 +29,13 @@ contains
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in) :: options
 
-        if (this_image()==1) write(*,*) ""
-        if (this_image()==1) write(*,*) "Initializing Advection"
+        if (STD_OUT_PE) write(*,*) ""
+        if (STD_OUT_PE) write(*,*) "Initializing Advection"
         if (options%physics%advection==kADV_STD) then
-            if (this_image()==1) write(*,*) "    Standard"
+            if (STD_OUT_PE) write(*,*) "    Standard"
             call adv_std_init(domain,options)
         else if(options%physics%advection==kADV_MPDATA) then
-            if (this_image()==1) write(*,*) "    MP-DATA"
+            if (STD_OUT_PE) write(*,*) "    MP-DATA"
             call mpdata_init(domain,options)
         endif
         

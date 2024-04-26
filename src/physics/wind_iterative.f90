@@ -20,6 +20,7 @@ module wind_iterative
 #include <petsc/finclude/petscksp.h>
 #include <petsc/finclude/petscdm.h>
 #include <petsc/finclude/petscdmda.h>
+    use icar_constants,    only : STD_OUT_PE
 
     use domain_interface,  only : domain_t
     !use options_interface, only : options_t
@@ -88,13 +89,13 @@ contains
             call update_coefs(domain)
         endif
                                                                 
-        call KSPCreate(domain%IO_comms%MPI_VAL,ksp,ierr)
+        call KSPCreate(domain%compute_comms%MPI_VAL,ksp,ierr)
         conv_tol = 1e-4
 
         !call KSPSetTolerances(ksp,conv_tol,PETSC_DEFAULT_REAL,PETSC_DEFAULT_REAL,PETSC_DEFAULT_INTEGER,ierr)
         call KSPSetType(ksp,KSPBCGS,ierr);
         
-        call DMDACreate3d(domain%IO_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
+        call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
                           xl, PETSC_NULL_INTEGER,yl,da,ierr)
         
@@ -111,7 +112,7 @@ contains
         call KSPSolve(ksp,PETSC_NULL_VEC,PETSC_NULL_VEC,ierr)
         
         call KSPGetSolution(ksp,x,ierr)
-        if(this_image()==1) write(*,*) 'Solved PETSc'
+        if(STD_OUT_PE) write(*,*) 'Solved PETSc'
         
         !Subset global solution x to local grid so that we can access ghost-points
         call DMGlobalToLocalBegin(da,x,INSERT_VALUES,localX,ierr)
@@ -735,7 +736,7 @@ contains
         type(domain_t), intent(in) :: domain
         PetscErrorCode ierr
 
-        PETSC_COMM_WORLD = domain%IO_comms%MPI_VAL
+        PETSC_COMM_WORLD = domain%compute_comms%MPI_VAL
         call PetscInitialize(PETSC_NULL_CHARACTER, ierr)
         if (ierr .ne. 0) then
             print*,'Unable to initialize PETSc'
@@ -747,14 +748,16 @@ contains
     subroutine init_iter_winds(domain)
         implicit none
         type(domain_t), intent(in) :: domain
-        
+        call init_petsc_comms(domain)
         call init_module_vars(domain)
-        if(this_image()==1) write(*,*) 'Initialized PETSc'
+        if(STD_OUT_PE) write(*,*) 'Initialized PETSc'
     end subroutine
     
     subroutine init_module_vars(domain)
         implicit none
         type(domain_t), intent(in) :: domain
+
+        integer :: ierr
 
         i_s = domain%its-1
         i_e = domain%ite+1
@@ -789,7 +792,7 @@ contains
             allocate( yl( 1:domain%grid%yimages ))
             xl = 0
             yl = 0
-            
+
             dx = domain%dx
             dzdx = domain%dzdx(i_s:i_e,k_s:k_e,j_s:j_e) 
             dzdy = domain%dzdy(i_s:i_e,k_s:k_e,j_s:j_e)
@@ -808,9 +811,9 @@ contains
             if (domain%grid%ximg == 1) yl(domain%grid%yimg) = domain%grid%ny-hs*2
         
             !Wait for all images to contribute their dimension            
-            call CO_MAX(xl)
-            call CO_MAX(yl)
-            
+            call MPI_Allreduce(MPI_IN_PLACE,xl,domain%grid%ximages,MPI_INT,MPI_MAX,domain%compute_comms, ierr)
+            call MPI_Allreduce(MPI_IN_PLACE,yl,domain%grid%yimages,MPI_INT,MPI_MAX,domain%compute_comms, ierr)
+
             !Add points to xy-edges to accomodate ghost-points of DMDA grid
             !cells at boundaries have 1 extra for ghost-point, and should also be corrected
             !to have the hs which was falsely removed added back on

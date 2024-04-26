@@ -21,6 +21,7 @@
 MODULE MODULE_SF_NOAHMPLSM
 
   use module_sf_gecros, only : gecros
+  use icar_constants,   only : STD_OUT_PE
 
   IMPLICIT NONE
 
@@ -802,7 +803,7 @@ contains
         FVEG = SHDMAX
         IF(FVEG <= 0.05) FVEG = 0.05
      ELSE
-       IF (this_image()==1) THEN
+       IF (STD_OUT_PE) THEN
          WRITE(*,*) "-------- FATAL CALLED IN SFLX -----------"
          WRITE(*,*) "Namelist parameter DVEG unknown"
          STOP
@@ -5818,7 +5819,7 @@ ENDIF   ! CROPTYPE == 0
     ENDIF
 
     IF (ABS(ERR_EST) > 1.) THEN
-       IF (this_image()==1) THEN
+       IF (STD_OUT_PE) THEN
          ! W/m2
          WRITE(message,*) 'TSNOSOI is losing(-)/gaining(+) false energy',ERR_EST,' W/m2'
 !        call wrf_message(trim(message))
@@ -6390,7 +6391,7 @@ ENDIF   ! CROPTYPE == 0
 ! APPLY PHYSICAL BOUNDS TO FLERCHINGER SOLUTION
 ! ----------------------------------------------------------------------
        IF (KCOUNT == 0) THEN
-          IF (this_image()==1) THEN
+          IF (STD_OUT_PE) THEN
             write(message, '("Flerchinger used in NEW version. Iterations=", I6)') NLOG
           ENDIF
   !        call wrf_message(trim(message))
@@ -10260,6 +10261,7 @@ END SUBROUTINE EMERG
 END MODULE MODULE_SF_NOAHMPLSM
 
 MODULE NOAHMP_TABLES
+  use icar_constants,    only : STD_OUT_PE
 
     IMPLICIT NONE
 
@@ -10843,7 +10845,7 @@ CONTAINS
     READ (21,*)
     READ (21,*) SLTYPE
     READ (21,*) SLCATS
-    IF (this_image()==1) THEN
+    IF (STD_OUT_PE) THEN
       WRITE( message , * ) 'SOIL TEXTURE CLASSIFICATION = ', TRIM ( SLTYPE ) , ' FOUND', &
                SLCATS,' CATEGORIES'
     ENDIF

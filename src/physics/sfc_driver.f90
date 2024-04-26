@@ -85,10 +85,10 @@ contains
         ims = domain%ims ; ime = domain%ime ; jms = domain%jms ; jme = domain%jme ; kms = domain%kms ; kme = domain%kme
         its = domain%its ; ite = domain%ite ; jts = domain%jts ; jte = domain%jte ; kts = domain%kts ; kte = domain%kte
 
-        if (this_image()==1) write(*,*) "Initializing Surface Layer scheme"
+        if (STD_OUT_PE) write(*,*) "Initializing Surface Layer scheme"
 
         if (options%physics%surfacelayer==kSFC_MM5REV) then
-            if (this_image()==1) write(*,*) "    Revised MM5"
+            if (STD_OUT_PE) write(*,*) "    Revised MM5"
             
             allocate(windspd(ims:ime, jms:jme))
             allocate(rmol(ims:ime, jms:jme))

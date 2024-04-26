@@ -100,7 +100,7 @@ contains
         type(options_t), intent(in) :: options
         integer :: i, j
 
-        if (this_image()==1) write(*,*) "Initializing Cumulus Scheme"
+        if (STD_OUT_PE) write(*,*) "Initializing Cumulus Scheme"
 
         ! module level variables for easy access... need to think about tiling to permit halo processing separately.
         ids = domain%grid%ids
@@ -144,7 +144,7 @@ contains
         endif
 
         if (options%physics%convection == kCU_TIEDTKE) then
-            if (this_image()==1) write(*,*) "    Tiedtke Cumulus scheme"
+            if (STD_OUT_PE) write(*,*) "    Tiedtke Cumulus scheme"
 
             call tiedtkeinit(domain%tend%th,domain%tend%qv,   &
                              domain%tend%qc,domain%tend%qi,   &
@@ -171,7 +171,7 @@ contains
 
 
         else if (options%physics%convection==kCU_NSAS) then
-            if (this_image()==1) write(*,*) "     NSAS Cumulus scheme"
+            if (STD_OUT_PE) write(*,*) "     NSAS Cumulus scheme"
 
             allocate(lowest_convection_layer(ims:ime,jms:jme))
             allocate(highest_convection_layer(ims:ime,jms:jme))
@@ -202,7 +202,7 @@ contains
                             )
 
         else if (options%physics%convection==kCU_BMJ) then
-            if (this_image()==1) write(*,*) "     BMJ Cumulus scheme"
+            if (STD_OUT_PE) write(*,*) "     BMJ Cumulus scheme"
 
             allocate( CLDEFI(ims:ime,jms:jme) )
             allocate( CUBOT(IMS:IME,JMS:JME) )
@@ -244,9 +244,9 @@ contains
 
          endif
 
-         if ((options%cu_options%stochastic_cu /= kNO_STOCHASTIC) .and.  (this_image()==1)) then
+         if ((options%cu_options%stochastic_cu /= kNO_STOCHASTIC) .and.  (STD_OUT_PE)) then
             write(*,*)"      stochastic W pertubation for convection triggering"  ! to check that it actually turns on/of
-         elseif ((options%cu_options%stochastic_cu == kNO_STOCHASTIC) .and.  (this_image()==1)) then
+         elseif ((options%cu_options%stochastic_cu == kNO_STOCHASTIC) .and.  (STD_OUT_PE)) then
             write(*,*)"      No stochastic W pertubation for convection triggering"
          endif
 

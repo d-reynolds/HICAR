@@ -1,6 +1,7 @@
 !WRF:MODEL_LAYER:PHYSICS
 !
 MODULE module_sf_sfclayrev
+  use icar_constants,    only : STD_OUT_PE
 
  REAL    , PARAMETER ::  VCONVC=1.
  REAL    , PARAMETER ::  CZO=0.0185
@@ -1190,7 +1191,7 @@ CONTAINS
       IF ( shalwater_depth .GT. 0.0 ) THEN
          overwrite_water_depth = .True.
       ELSE
-         if (this_image()==1) write(*,*) "No bathymetry data detected and shalwater_depth not greater than 0.0."
+         if (STD_OUT_PE) write(*,*) "No bathymetry data detected and shalwater_depth not greater than 0.0."
          stop
       END IF
    END IF

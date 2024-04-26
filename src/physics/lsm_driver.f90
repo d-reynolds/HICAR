@@ -487,8 +487,8 @@ contains
                 !endif
                 if (Q2(i,j) < SMALL_QV) Q2(i,j) = SMALL_QV
                 ! TH2(I,J) = T2(I,J)*(1.E5/PSFC(I,J))**ROVCP
-                 if ( isnan(HFX(I,J)) .or. abs(TSK(I,J)-T2(I,J))>30 ) write(*,*) "img-H222",i,j,this_image(), HFX(I,J), TSK(I,J), T2(I,J), CHS2(I,J) 
-                 !if (this_image()==1) write(*,*),"img-H222",i,j,this_image(), RHO, TSK(I,J), T2(I,J),PSFC(I,J)
+                 !if ( isnan(HFX(I,J)) .or. abs(TSK(I,J)-T2(I,J))>30 ) write(*,*) "img-H222",i,j,this_image(), HFX(I,J), TSK(I,J), T2(I,J), CHS2(I,J) 
+                 !if (STD_OUT_PE) write(*,*),"img-H222",i,j,this_image(), RHO, TSK(I,J), T2(I,J),PSFC(I,J)
             enddo
         enddo
         !$omp end do
@@ -656,10 +656,10 @@ contains
 
         if (options%physics%landsurface == 0) return   !! So we cannot (currently) run without lsm but with water.
 
-        if (this_image()==1) write(*,*) "Initializing LSM"
+        if (STD_OUT_PE) write(*,*) "Initializing LSM"
 
-        if (this_image()==1) write(*,*) "    max soil_deep_temperature on init: ", maxval(domain%soil_deep_temperature%data_2d)
-        if (this_image()==1) write(*,*) "    max skin_temperature on init: ", maxval(domain%skin_temperature%data_2d)
+        if (STD_OUT_PE) write(*,*) "    max soil_deep_temperature on init: ", maxval(domain%soil_deep_temperature%data_2d)
+        if (STD_OUT_PE) write(*,*) "    max skin_temperature on init: ", maxval(domain%skin_temperature%data_2d)
 
         exchange_term = 1
 
@@ -748,14 +748,14 @@ contains
         
         if(options%parameters%snowh_var /="" .or. options%parameters%swe_var /="") then 
             FNDSNOWH= .True.
-            if (this_image()==1) write(*,*) "    Find snow height in file i.s.o. calculating them from SWE: FNDSNOWH=", FNDSNOWH
+            if (STD_OUT_PE) write(*,*) "    Find snow height in file i.s.o. calculating them from SWE: FNDSNOWH=", FNDSNOWH
         else
             FNDSNOWH=.False. ! calculate SNOWH from SNOW
         endif
 
         ! Noah Land Surface Model
         if (options%physics%landsurface==kLSM_NOAH) then
-            if (this_image()==1) write(*,*) "    Noah LSM"
+            if (STD_OUT_PE) write(*,*) "    Noah LSM"
 
             !These are still needed for NoahLSM, since it assumes that the exchange coefficients are multiplied by windspeed
             allocate(CHS(ims:ime,jms:jme))
@@ -832,7 +832,7 @@ contains
 
         ! Noah-MP Land Surface Model
         if (options%physics%landsurface==kLSM_NOAHMP) then
-            if (this_image()==1) write(*,*) "    Noah-MP LSM"
+            if (STD_OUT_PE) write(*,*) "    Noah-MP LSM"
 
             FNDSOILW=.False. ! calculate SOILW (this parameter is ignored in LSM_NOAH_INIT)
             RDMAXALB=.False.
@@ -995,7 +995,7 @@ contains
         !                                                     program.
         !                                     = 0, do not use lake depth data.
 
-            if (this_image()==1) write(*,*) "Initializing Lake model"
+            if (STD_OUT_PE) write(*,*) "Initializing Lake model"
 
             ! allocate arrays:
             allocate( lake_or_not(ims:ime, jms:jme))
@@ -1014,7 +1014,7 @@ contains
 
             lake_count=0
             if(ISLAKE==-1) then
-                if(this_image()==1) write(*,*)  "   WARNING: no lake category in LU data: The model will try to guess lake-gridpoints. This option has not been properly tested!"
+                if(STD_OUT_PE) write(*,*)  "   WARNING: no lake category in LU data: The model will try to guess lake-gridpoints. This option has not been properly tested!"
                 lakeflag=0  ! If no lake cat is provided, the lake model will determine lakes based
                             ! on the criterion (ivgtyp(i,j)==iswater .and. ht(i,j)>=lake_min_elev))
             else
@@ -1036,7 +1036,7 @@ contains
 
             ! setlake_depth_flag and use_lakedepth flag. (They seem to be redundant, but whatever):
             if( associated(domain%lake_depth%data_2d) ) then
-                if(this_image()==1) write(*,*) "   Using Lake depth data "
+                if(STD_OUT_PE) write(*,*) "   Using Lake depth data "
                 use_lakedepth = 1
                 lake_depth_flag = 1
             else
@@ -1088,7 +1088,7 @@ contains
         endif
 
         if (options%physics%snowmodel == kSM_FSM) then
-            if (this_image()==1) write(*,*) "    SnowModel: FSM2"
+            if (STD_OUT_PE) write(*,*) "    SnowModel: FSM2"
             call sm_FSM_init(domain,options)
             
             !DZs already allocated in alloc_noah above
@@ -1138,7 +1138,7 @@ contains
                 SW = domain%shortwave%data_2d
             endif
 
-            ! if (this_image()==1) write(*,*) "    lsm start: snow_water_equivalent max:", MAXVAL(domain%snow_water_equivalent%data_2d)
+            ! if (STD_OUT_PE) write(*,*) "    lsm start: snow_water_equivalent max:", MAXVAL(domain%snow_water_equivalent%data_2d)
 
             ! exchange coefficients
             windspd = sqrt(domain%u_10m%data_2d**2 + domain%v_10m%data_2d**2)
@@ -1318,10 +1318,10 @@ contains
                     endif
                 endif
 
-                ! if (this_image()==1) write(*,*) "    lsm start: accumulated_precipitation max:", MAXVAL(domain%accumulated_precipitation%data_2dd)
-                ! if (this_image()==1) write(*,*) "    lsm start: RAINBL max:", MAXVAL(RAINBL)
-                ! if (this_image()==1) write(*,*) "    lsm start: domain%precipitation_bucket max:", MAXVAL(domain%precipitation_bucket)
-                ! if (this_image()==1) write(*,*) "    lsm start: rain_bucket max:", MAXVAL(rain_bucket)
+                ! if (STD_OUT_PE) write(*,*) "    lsm start: accumulated_precipitation max:", MAXVAL(domain%accumulated_precipitation%data_2dd)
+                ! if (STD_OUT_PE) write(*,*) "    lsm start: RAINBL max:", MAXVAL(RAINBL)
+                ! if (STD_OUT_PE) write(*,*) "    lsm start: domain%precipitation_bucket max:", MAXVAL(domain%precipitation_bucket)
+                ! if (STD_OUT_PE) write(*,*) "    lsm start: rain_bucket max:", MAXVAL(rain_bucket)
 
 
                 ! RAINBL(i,j) = [kg m-2]   RAINBL = domain%accumulated_precipitation%data_2dd  ! used to store last time step accumulated precip so that it can be subtracted from the current step
@@ -1430,10 +1430,10 @@ contains
                 !more parameters
                 landuse_name = options%lsm_options%LU_Categories            !test whether this works or if we need something separate
 
-                ! if (this_image()==1) write(*,*) "    lsm start: accumulated_precipitation max:", MAXVAL(domain%accumulated_precipitation%data_2d)
-                ! if (this_image()==1) write(*,*) "    lsm start: RAINBL max:", MAXVAL(RAINBL)
-                ! if (this_image()==1) write(*,*) "    lsm start: domain%precipitation_bucket max:", MAXVAL(domain%precipitation_bucket)
-                ! if (this_image()==1) write(*,*) "    lsm start: rain_bucket max:", MAXVAL(rain_bucket)
+                ! if (STD_OUT_PE) write(*,*) "    lsm start: accumulated_precipitation max:", MAXVAL(domain%accumulated_precipitation%data_2d)
+                ! if (STD_OUT_PE) write(*,*) "    lsm start: RAINBL max:", MAXVAL(RAINBL)
+                ! if (STD_OUT_PE) write(*,*) "    lsm start: domain%precipitation_bucket max:", MAXVAL(domain%precipitation_bucket)
+                ! if (STD_OUT_PE) write(*,*) "    lsm start: rain_bucket max:", MAXVAL(rain_bucket)
                 
                 current_snow = (domain%accumulated_snowfall%data_2dd-SNOWBL)!+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
                 current_precipitation = (domain%accumulated_precipitation%data_2dd - RAINBL) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE

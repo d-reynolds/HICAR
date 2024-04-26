@@ -3,7 +3,9 @@ submodule (restart_interface) restart_implementation
     use io_routines,    only : io_read
     use icar_constants, only : kMAX_FILE_LENGTH
     use time_object,    only : Time_type
-
+    use options_interface, only : options_t
+    use domain_interface,  only : domain_t
+    use output_interface, only : output_t
     implicit none
 
 

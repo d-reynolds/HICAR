@@ -30,14 +30,16 @@ contains
         type(options_t),    intent(in)     :: options
 
         type(variable_t) :: var
-        integer :: n, out_i, rst_i, var_indx
+        type(MPI_Group) :: family_group
 
-        if (this_image()==1) write(*,*) 'Initializing I/O Clients'
+        integer :: n, out_i, rst_i, var_indx, my_rank, comm_size
+        
+        if (STD_OUT_PE) write(*,*) 'Initializing I/O Clients'
     
         this%i_s_r = forcing%its; this%i_e_r = forcing%ite
         this%k_s_r = forcing%kts; this%k_e_r = forcing%kte
         this%j_s_r = forcing%jts; this%j_e_r = forcing%jte
-        
+        this%written = .False.
         
         this%i_s_w = domain%its; this%i_e_w = domain%ite
         this%k_s_w = domain%kts; this%k_e_w = domain%kte+1
@@ -47,6 +49,8 @@ contains
         if (domain%jms == domain%jds) this%j_s_w = domain%jds
         if (domain%jme == domain%jde) this%j_e_w = domain%jde !Add extra to accomodate staggered vars
 
+        call init_with_server(this)
+
         !Setup arrays for information about accessing variables from write buffer
         allocate(this%out_var_indices(count(options%io_options%vars_for_output > 0)))
         allocate(this%rst_var_indices(count(options%vars_for_restart > 0)))
@@ -54,15 +58,13 @@ contains
 
         out_i = 1
         rst_i = 1
-
-        associate(list => domain%vars_to_out)
         
         n = 1
         ! loop through the list of variables that need to be written out
-        call list%reset_iterator()
+        call domain%vars_to_out%reset_iterator()
         
-        do while (list%has_more_elements())
-            var = list%next()
+        do while (domain%vars_to_out%has_more_elements())
+            var = domain%vars_to_out%next()
             
             var_indx = get_varindx(var%name)
             if (options%io_options%vars_for_output(var_indx) > 0) then
@@ -76,30 +78,124 @@ contains
             endif
             n = n+1
         enddo
-        end associate
+
+        call setup_MPI_windows(this)
+
+        !Setup the parent-child group used for buffer communication
+        call MPI_Comm_Group(this%parent_comms,family_group)
+        call MPI_Comm_size(this%parent_comms, comm_size)
+
+        !Our rank is the last process in the group, which is equal to n_children
+        call MPI_Group_Incl(family_group, 1, [comm_size-1], this%parent_group)
+
+        ! Do MPI_Win_Post on read_buffer to indicate that we are open for delivery of input data
+        call MPI_Win_Post(this%parent_group,0,this%read_win)
+
     end subroutine init
+
+    module subroutine init_with_server(this)
+        implicit none
+        class(ioclient_t),   intent(inout) :: this
+
+        call MPI_Gather(this%i_s_w, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+        call MPI_Gather(this%i_e_w, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+        call MPI_Gather(this%k_s_w, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+        call MPI_Gather(this%k_e_w, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+        call MPI_Gather(this%j_s_w, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+        call MPI_Gather(this%j_e_w, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+        call MPI_Gather(this%i_s_r, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+        call MPI_Gather(this%i_e_r, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+        call MPI_Gather(this%k_s_r, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+        call MPI_Gather(this%k_e_r, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+        call MPI_Gather(this%j_s_r, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+        call MPI_Gather(this%j_e_r, 1, MPI_INTEGER, 0, 0, &
+            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+
+    end subroutine init_with_server
+
+
+    subroutine setup_MPI_windows(this)
+        class(ioclient_t),   intent(inout)  :: this
+
+        type(c_ptr) :: tmp_ptr
+        integer(KIND=MPI_ADDRESS_KIND) :: win_size
+        integer :: nx_w, nz_w, ny_w, n_w, ierr
+        integer :: nx_r, nz_r, ny_r, n_r
+
+        real :: realnum
+
+        nx_w = 0
+        nz_w = 0
+        ny_w = 0
+        n_w = 0
+
+        nx_r = 0
+        nz_r = 0
+        ny_r = 0
+        n_r = 0
+
+       ! Setup MPI windows for inter-process communication        
+        call MPI_Allreduce(MPI_IN_PLACE,nx_w,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,ny_w,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,nz_w,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+
+        call MPI_Allreduce(MPI_IN_PLACE,nx_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,ny_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,nz_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+
+        call MPI_Allreduce(MPI_IN_PLACE,n_w,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+
+        ! +1 added to handle variables on staggered grids
+        win_size = n_w*nx_w*nz_w*ny_w
+        call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win)
+        call C_F_POINTER(tmp_ptr, this%write_buffer, [n_w, nx_w, nz_w, ny_w])
+        this%write_buffer = 0
+
+        win_size = n_r*nx_r*nz_r*ny_r
+        call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%read_win)
+        call C_F_POINTER(tmp_ptr, this%read_buffer, [n_r, nx_r, nz_r, ny_r])
+        this%read_buffer = 0
+
+    end subroutine setup_MPI_windows
+
 
     ! This subroutine pushes the output fields from the domain object
     ! to the write buffer for the IO processes to use
-    module subroutine push(this, domain, write_buffer)
+    module subroutine push(this, domain)
         implicit none
         class(ioclient_t),   intent(inout) :: this
         type(domain_t),   intent(inout)    :: domain
-        real, intent(inout), allocatable   :: write_buffer(:,:,:,:)[:]
         
         type(variable_t) :: var
         integer :: i, n, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w
-                
-        associate(list => domain%vars_to_out)
-        
+                        
         n = 1
 
+        !This is false only when it is the first call to push (i.e. first write call)
+        if (this%written) then
+            ! Do MPI_Win_Wait on write_buffer to make sure that server process has completed writing of previous data
+            call MPI_Win_Wait(this%write_win)
+        endif
+        this%written = .False.
+
         ! loop through the list of variables that need to be written out
-        call list%reset_iterator()
+        call domain%vars_to_out%reset_iterator()
         
-        do while (list%has_more_elements())
+        do while (domain%vars_to_out%has_more_elements())
             ! get the next variable in the structure
-            var = list%next()
+            var = domain%vars_to_out%next()
             
             i_s_w = this%i_s_w; i_e_w = this%i_e_w
             j_s_w = this%j_s_w; j_e_w = this%j_e_w
@@ -109,75 +205,87 @@ contains
             ny = j_e_w - j_s_w + 1
             if (var%two_d) then
                 if (var%dtype == kREAL) then
-                    write_buffer(n,1:nx,1,1:ny) = &
+                    this%write_buffer(n,1:nx,1,1:ny) = &
                         var%data_2d(i_s_w:i_e_w,j_s_w:j_e_w)
                 elseif (var%dtype == kDOUBLE) then
-                    write_buffer(n,1:nx,1,1:ny) = &
+                    this%write_buffer(n,1:nx,1,1:ny) = &
                         real(var%data_2dd(i_s_w:i_e_w,j_s_w:j_e_w))
                 endif
             else
-                write_buffer(n,1:nx,1:var%dim_len(2),1:ny) = &
+                this%write_buffer(n,1:nx,1:var%dim_len(2),1:ny) = &
                         var%data_3d(i_s_w:i_e_w,1:var%dim_len(2),j_s_w:j_e_w)
             endif
             n = n+1
         enddo
-        end associate  
-                
+        
+        this%written = .True.
+        ! Do MPI_Win_Post on write_win to inform that server process can begin writing of data
+        call MPI_Win_Post(this%parent_group,0,this%write_win)
+
+
     end subroutine 
     
     ! This subroutine receives the input fields from the IO buffer
     ! for assignment to the forcing object
-    module subroutine receive(this, forcing, read_buffer)
+    module subroutine receive(this, forcing)
         implicit none
         class(ioclient_t), intent(inout) :: this
         type(boundary_t), intent(inout)  :: forcing
-        real, intent(in), allocatable    :: read_buffer(:,:,:,:)[:]
 
         type(variable_t)     :: var
         integer :: i, n, nx, ny
                 
-        associate(list => forcing%variables)
         n = 1
         nx = this%i_e_r - this%i_s_r + 1
         ny = this%j_e_r - this%j_s_r + 1
 
+        ! Do MPI_Win_Wait on read_buffer to make sure that server process has completed data transfer
+        call MPI_Win_Wait(this%read_win)
+
         ! loop through the list of variables that need to be read in
-        call list%reset_iterator()
+        call forcing%variables%reset_iterator()
         
         !If the parent I/O server has not yet written all of our input vars, wait
 
-        do while (list%has_more_elements())
+        do while (forcing%variables%has_more_elements())
             ! get the next variable in the structure
-            var = list%next()
+            var = forcing%variables%next()
             if (var%computed) then
                 cycle
             else
                     if (var%two_d) then
                         if (var%dtype == kREAL) then
-                            var%data_2d = read_buffer(n,1:nx,1,1:ny)
+                            var%data_2d = this%read_buffer(n,1:nx,1,1:ny)
                         elseif (var%dtype == kDOUBLE) then
-                            var%data_2dd = dble(read_buffer(n,1:nx,1,1:ny))
+                            var%data_2dd = dble(this%read_buffer(n,1:nx,1,1:ny))
                         endif
                     else
-                        var%data_3d = read_buffer(n,1:nx,1:var%dim_len(2),1:ny)
+                        var%data_3d = this%read_buffer(n,1:nx,1:var%dim_len(2),1:ny)
                     endif
                     n = n+1
             endif
         enddo
-        end associate
     
+        ! Do MPI_Win_Post on read_buffer to indicate that we are open for delivery of new input data
+        call MPI_Win_Post(this%parent_group,0,this%read_win)
+
+
     end subroutine 
     
     ! This subroutine assigns the data from the write_buffer to the appropriate fields
     ! of the domain object. It is a "reverse write"
-    module subroutine receive_rst(this, domain, write_buffer)
+    module subroutine receive_rst(this, domain)
         implicit none
         class(ioclient_t), intent(inout) :: this
         type(domain_t),   intent(inout)  :: domain
-        real, intent(in), allocatable    :: write_buffer(:,:,:,:)[:]
 
         type(variable_t)     :: var
         integer :: i, n, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w
+
+        ! Because this is for reading restart data, performance is not critical, and 
+        ! we use a simple MPI_fence syncronization
+        call MPI_Win_fence(0,this%write_win)
+        call MPI_Win_fence(0,this%write_win)
 
         do i = 1,size(this%rst_var_indices)
             n = this%rst_var_indices(i)
@@ -192,18 +300,25 @@ contains
             if (var%two_d) then
                 if (var%dtype == kREAL) then
                     var%data_2d(i_s_w:i_e_w,j_s_w:j_e_w) = &
-                         write_buffer(n,1:nx,1,1:ny)
+                        this%write_buffer(n,1:nx,1,1:ny)
                 elseif (var%dtype == kDOUBLE) then
                     var%data_2dd(i_s_w:i_e_w,j_s_w:j_e_w) = &
-                         dble(write_buffer(n,1:nx,1,1:ny))
+                         dble(this%write_buffer(n,1:nx,1,1:ny))
                 endif                
             else
                 var%data_3d(i_s_w:i_e_w,1:var%dim_len(2),j_s_w:j_e_w) = &
-                    write_buffer(n,1:nx,1:var%dim_len(2),1:ny)
+                    this%write_buffer(n,1:nx,1:var%dim_len(2),1:ny)
             endif
         enddo
 
     end subroutine 
 
-    
+
+    !Necesary? Should communicate relevant post/wait calls and free window
+    module subroutine close_client(this)
+        implicit none
+        class(ioclient_t), intent(inout) :: this
+
+    end subroutine close_client
+
 end submodule
