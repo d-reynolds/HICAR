@@ -20,7 +20,6 @@ module ioserver_interface
   use options_interface,  only : options_t
   use time_object,        only : Time_type
   use boundary_interface, only : boundary_t
-  use domain_interface,   only : domain_t
 
   implicit none
 
@@ -49,15 +48,16 @@ module ioserver_interface
       
       type(Time_type), public :: io_time
 
-      real, pointer :: parent_write_buffer(:,:,:,:)
-      real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer
+      real, pointer :: parent_write_buffer_3d(:,:,:,:), parent_write_buffer_2d(:,:,:)
+      real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer_3d
+      real, dimension(:,:,:),   pointer :: write_buffer_2d
 
-      type(MPI_Win) :: write_win, read_win
+      type(MPI_Win) :: write_win_3d, write_win_2d, read_win
       type(MPI_Group) :: children_group
 
       ! These MPI datatypes describe the access patterns between the IO read/write buffers and
       ! the child read/write buffers
-      type(MPI_Datatype), allocatable, dimension(:) :: get_types, put_types, child_get_types, child_put_types
+      type(MPI_Datatype), allocatable, dimension(:) :: get_types_3d, get_types_2d, put_types, child_get_types_3d, child_get_types_2d, child_put_types
 
       ! store status of the object -- are we a parent or child process
       logical :: creating = .false.
@@ -80,7 +80,7 @@ module ioserver_interface
       integer, allocatable, dimension(:) :: isrc, ierc, ksrc, kerc, jsrc, jerc, iswc, iewc, kswc, kewc, jswc, jewc
       
       integer :: i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_restart
-      integer :: nx_w, nz_w, ny_w, n_w, nx_r, nz_r, ny_r, n_r
+      integer :: nx_w, nz_w, ny_w, n_w_3d, n_w_2d, nx_r, nz_r, ny_r, n_r
       integer         :: ide, kde, jde
       integer :: restart_counter = 0
       integer :: output_counter = 0
@@ -117,10 +117,9 @@ module ioserver_interface
       !! Initialize the object (e.g. allocate the variables array)
       !!
       !!----------------------------------------------------------
-      module subroutine init(this, domain, options)
+      module subroutine init(this, options)
           implicit none
           class(ioserver_t),   intent(inout) :: this
-          type(domain_t),      intent(inout) :: domain
           type(options_t),     intent(in)    :: options
 
       end subroutine

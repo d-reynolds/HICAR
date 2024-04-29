@@ -1,5 +1,5 @@
 submodule(output_interface) output_implementation
-  use output_metadata,          only : get_metadata, get_varindx
+  use output_metadata,          only : get_metadata, get_varindx, get_varname
   use debug_module,             only : check_ncdf
   use iso_fortran_env,          only : output_unit
   use time_io,                  only : get_output_time, find_timestep_in_filelist
@@ -11,12 +11,11 @@ submodule(output_interface) output_implementation
 contains
 
 
-    module subroutine init(this, domain, options, its, ite, kts, kte, jts, jte)
+    module subroutine init(this, options, its, ite, kts, kte, jts, jte, ide, kde, jde)
         implicit none
         class(output_t),  intent(inout)  :: this
-        type(domain_t),   intent(inout)  :: domain
         type(options_t),  intent(in)     :: options
-        integer,          intent(in)     :: its, ite, kts, kte, jts, jte
+        integer,          intent(in)     :: its, ite, kts, kte, jts, jte, ide, kde, jde
         
         integer :: i
         
@@ -28,9 +27,9 @@ contains
         this%output_counter = 1
         this%restart_counter = 1
         this%its = its; this%ite = ite; this%kts = kts; this%kte = kte; this%jts = jts; this%jte = jte
-        this%global_dim_len = (/domain%ide, domain%jde, domain%kde /)
+        this%global_dim_len = (/ide, jde, kde/)
 
-        call set_attrs(this, domain)
+        call set_attrs(this, options)
         
         this%base_out_file_name = options%io_options%output_file
         this%output_count = options%io_options%frames_per_outfile
@@ -41,7 +40,7 @@ contains
                 trim(this%base_out_file_name),   &
                 trim(options%parameters%start_time%as_string(this%file_date_format))
 
-        call this%add_variables(domain%vars_to_out)
+        call this%add_variables(options%io_options%vars_for_output + options%vars_for_restart)
         
     end subroutine init
     
@@ -118,14 +117,72 @@ contains
         deallocate(temp_list)
     end subroutine
 
-    module subroutine set_attrs(this, domain)
+    !> -------------------------------
+    !! Populare the metadata structure
+    !!
+    !! -------------------------------
+    module subroutine set_attrs(this, options)
         class(output_t),  intent(inout)  :: this
-        type(domain_t),   intent(in)     :: domain
-        integer :: i
+        type(options_t), intent(in)    :: options
+        character*60 :: a_string
 
-        do i=1,domain%info%n_attrs
-            call this%add_attribute(domain%info%attributes(i)%name, domain%info%attributes(i)%value)
-        enddo
+        call this%add_attribute("comment",options%parameters%comment)
+        call this%add_attribute("source","ICAR version:"//trim(options%parameters%version))
+
+        ! Add info on grid setting:
+        write(a_string,*) options%parameters%sleve
+        call this%add_attribute("sleve",a_string)
+        if (options%parameters%sleve) then
+          write(a_string,*) options%parameters%terrain_smooth_windowsize
+          call this%add_attribute("terrain_smooth_windowsize",a_string )
+          write(a_string,*) options%parameters%terrain_smooth_cycles
+          call this%add_attribute("terrain_smooth_cycles",a_string )
+          write(a_string,*) options%parameters%decay_rate_L_topo
+          call this%add_attribute("decay_rate_L_topo",a_string )
+          write(a_string,*) options%parameters%decay_rate_s_topo
+          call this%add_attribute("decay_rate_S_topo",a_string )
+          write(a_string,*) options%parameters%sleve_n
+          call this%add_attribute("sleve_n",a_string )
+        endif
+        ! Add some more info on physics settings:
+        write(a_string,*) options%physics%boundarylayer
+        call this%add_attribute("pbl", a_string )
+        write(a_string,*) options%physics%landsurface
+        call this%add_attribute("lsm", a_string )
+        write(a_string,*) options%physics%watersurface
+        call this%add_attribute("water", a_string )
+        write(a_string,*) options%physics%microphysics
+        call this%add_attribute("mp", a_string )
+        write(a_string,*) options%physics%radiation
+        call this%add_attribute("rad", a_string )
+        write(a_string,*) options%physics%convection
+        call this%add_attribute("conv", a_string )
+        write(a_string,*) options%physics%advection
+        call this%add_attribute("adv", a_string )
+        write(a_string,*) options%physics%windtype
+        call this%add_attribute("wind", a_string )
+
+
+        call this%add_attribute("ids",str(1))
+        call this%add_attribute("ide",str(this%global_dim_len(1)))
+        call this%add_attribute("jds",str(1))
+        call this%add_attribute("jde",str(this%global_dim_len(2)))
+        call this%add_attribute("kds",str(1))
+        call this%add_attribute("kde",str(this%global_dim_len(3)))
+
+        !call this%add_attribute("ims",str(this%grid%ims))
+        !call this%add_attribute("ime",str(this%grid%ime))
+        !call this%add_attribute("jms",str(this%grid%jms))
+        !call this%add_attribute("jme",str(this%grid%jme))
+        !call this%add_attribute("kms",str(this%grid%kms))
+        !call this%add_attribute("kme",str(this%grid%kme))
+
+        !call this%add_attribute("its",str(this%grid%its))
+        !call this%add_attribute("ite",str(this%grid%ite))
+        !call this%add_attribute("jts",str(this%grid%jts))
+        !call this%add_attribute("jte",str(this%grid%jte))
+        !call this%add_attribute("kts",str(this%grid%kts))
+        !call this%add_attribute("kte",str(this%grid%kte))
 
     end subroutine
 
@@ -360,17 +417,17 @@ contains
 
     module subroutine add_variables(this, vars_to_out)
         class(output_t),  intent(inout)  :: this
-        type(var_dict_t), intent(inout)  :: vars_to_out
+        integer, dimension(:), intent(in):: vars_to_out
 
-        type(variable_t) :: var
+        integer :: i
 
         !Loop through domain vars_to_out, get the var index for the given variable name, and add that var's meta data to local list
-        call vars_to_out%reset_iterator()
-        
-        do while (vars_to_out%has_more_elements())
-            var = vars_to_out%next()
-            call this%add_to_output(get_metadata( get_varindx(var%name) ))
-        end do
+        do i = 1,size(vars_to_out) 
+            if (vars_to_out(i)>0) then
+                !i should equal the kVARS index of the variable we want to output
+                call this%add_to_output(get_metadata(i))
+            endif
+        enddo
     end subroutine
 
     subroutine add_global_attributes(this)

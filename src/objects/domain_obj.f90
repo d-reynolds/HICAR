@@ -43,8 +43,6 @@ contains
         type(options_t), intent(inout) :: options
 
         this%dx = options%parameters%dx
-
-        call this%var_request(options)
         
         call read_domain_shape(this, options)
         
@@ -54,8 +52,6 @@ contains
 
         call read_land_variables(this, options)
         
-        call setup_meta_data(this, options)
-
         call set_var_lists(this, options)
 
         call this%halo%init(this%exch_vars, this%adv_vars, this%grid, this%compute_comms)
@@ -341,6 +337,9 @@ contains
         if (0<var_list( kVARS%froude) )                     call this%vars_to_out%add_var( trim( get_varname( kVARS%froude                       )), this%froude)
         if (0<var_list( kVARS%blk_ri) )                     call this%vars_to_out%add_var( trim( get_varname( kVARS%blk_ri                       )), this%Ri)
 
+        ! Sort the output vars according to their ordering in kVARS. This lets the
+        ! above lines be in any arbitrary order.
+        call this%vars_to_out%sort_by_kVARS()
     end subroutine set_var_lists
 
     !> -------------------------------
@@ -2542,122 +2541,6 @@ contains
         if (associated(this%shortwave_total%data_2d))  this%shortwave_total%data_2d=0.
         if (associated(this%Sliq_out%data_2d))  this%Sliq_out%data_2d=0.
     end subroutine read_land_variables
-
-
-
-    !> -------------------------------
-    !! Populare the metadata structure in the domain for later output
-    !!
-    !! -------------------------------
-    subroutine setup_meta_data(this, options)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        type(options_t), intent(in)    :: options
-        character*60 :: a_string
-
-        call this%info%add_attribute("comment",options%parameters%comment)
-        call this%info%add_attribute("source","ICAR version:"//trim(options%parameters%version))
-
-        ! Add info on grid setting:
-        write(a_string,*) options%parameters%sleve
-        call this%info%add_attribute("sleve",a_string)
-        if (options%parameters%sleve) then
-          write(a_string,*) options%parameters%terrain_smooth_windowsize
-          call this%info%add_attribute("terrain_smooth_windowsize",a_string )
-          write(a_string,*) options%parameters%terrain_smooth_cycles
-          call this%info%add_attribute("terrain_smooth_cycles",a_string )
-          write(a_string,*) options%parameters%decay_rate_L_topo
-          call this%info%add_attribute("decay_rate_L_topo",a_string )
-          write(a_string,*) options%parameters%decay_rate_s_topo
-          call this%info%add_attribute("decay_rate_S_topo",a_string )
-          write(a_string,*) options%parameters%sleve_n
-          call this%info%add_attribute("sleve_n",a_string )
-        endif
-        ! Add some more info on physics settings:
-        write(a_string,*) options%physics%boundarylayer
-        call this%info%add_attribute("pbl", a_string )
-        write(a_string,*) options%physics%landsurface
-        call this%info%add_attribute("lsm", a_string )
-        write(a_string,*) options%physics%watersurface
-        call this%info%add_attribute("water", a_string )
-        write(a_string,*) options%physics%microphysics
-        call this%info%add_attribute("mp", a_string )
-        write(a_string,*) options%physics%radiation
-        call this%info%add_attribute("rad", a_string )
-        write(a_string,*) options%physics%convection
-        call this%info%add_attribute("conv", a_string )
-        write(a_string,*) options%physics%advection
-        call this%info%add_attribute("adv", a_string )
-        write(a_string,*) options%physics%windtype
-        call this%info%add_attribute("wind", a_string )
-
-
-        call this%info%add_attribute("ids",str(this%grid%ids))
-        call this%info%add_attribute("ide",str(this%grid%ide))
-        call this%info%add_attribute("jds",str(this%grid%jds))
-        call this%info%add_attribute("jde",str(this%grid%jde))
-        call this%info%add_attribute("kds",str(this%grid%kds))
-        call this%info%add_attribute("kde",str(this%grid%kde))
-
-        !call this%info%add_attribute("ims",str(this%grid%ims))
-        !call this%info%add_attribute("ime",str(this%grid%ime))
-        !call this%info%add_attribute("jms",str(this%grid%jms))
-        !call this%info%add_attribute("jme",str(this%grid%jme))
-        !call this%info%add_attribute("kms",str(this%grid%kms))
-        !call this%info%add_attribute("kme",str(this%grid%kme))
-
-        !call this%info%add_attribute("its",str(this%grid%its))
-        !call this%info%add_attribute("ite",str(this%grid%ite))
-        !call this%info%add_attribute("jts",str(this%grid%jts))
-        !call this%info%add_attribute("jte",str(this%grid%jte))
-        !call this%info%add_attribute("kts",str(this%grid%kts))
-        !call this%info%add_attribute("kte",str(this%grid%kte))
-
-    end subroutine setup_meta_data
-
-
-    !> -------------------------------
-    !! Add variables needed by all domains to the list of requested variables
-    !!
-    !! -------------------------------
-    module subroutine var_request(this, options)
-        class(domain_t), intent(inout) :: this
-        type(options_t), intent(inout) :: options
-
-        integer :: i
-        
-        ! List the variables that are required to be allocated for any domain
-        call options%alloc_vars(                                                    &
-                     [kVARS%z,                      kVARS%z_interface,              &
-                      kVARS%dz,                     kVARS%dz_interface,             &
-                      kVARS%u,                      kVARS%v,                        &
-                      kVARS%w,                      kVARS%w_real,                   &
-                      kVARS%surface_pressure,       kVARS%roughness_z0,             &
-                      kVARS%terrain,                kVARS%pressure,                 &
-                      kVARS%temperature,            kVARS%pressure_interface,       &
-                      kVARS%exner,                  kVARS%potential_temperature,    &
-                      kVARS%latitude,               kVARS%longitude,                &
-                      kVARS%u_latitude,             kVARS%u_longitude,              &
-                      kVARS%v_latitude,             kVARS%v_longitude,              &
-                      kVARS%temperature_interface,  kVars%density])
-
-        ! List the variables that are required for any restart
-        call options%restart_vars(                                                  &
-                     [kVARS%z,                                                      &
-                      kVARS%terrain,                kVARS%potential_temperature,    &
-                      kVARS%latitude,               kVARS%longitude,                &
-                      kVARS%u_latitude,             kVARS%u_longitude,              &
-                      kVARS%v_latitude,             kVARS%v_longitude               ])
-
-        !clean output var list
-        do i=1, size(options%io_options%vars_for_output)
-            if ((options%io_options%vars_for_output(i)+options%vars_for_restart(i) > 0) .and. (options%vars_to_allocate(i) <= 0)) then
-                if (STD_OUT_PE) write(*,*) 'var for kVARS index: ',options%vars_to_allocate(i),' requested for output/restart, but was not allocated by one of the modules'
-                options%io_options%vars_for_output(i) = 0
-            endif
-        enddo
-
-    end subroutine var_request
 
     !> -------------------------------
     !! Read in the shape of the domain required and setup the grid objects

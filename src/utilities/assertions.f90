@@ -20,7 +20,7 @@ module assertions_mod
 !!
 !! code contributed by Damian Rouson Sourcery Institute
 !!
-    use icar_constants, only : PE_RANK_GLOBAL
+!    use icar_constants, only : PE_RANK_GLOBAL
 
     implicit none
     private
@@ -55,7 +55,7 @@ contains
         if (present(success)) success=assertion
 
         if (.not.assertion) then
-            write(error_unit,*) 'Assertion "',description,'" failed on image ',PE_RANK_GLOBAL+1
+            write(error_unit,*) 'Assertion "',description,'" failed on image '!,PE_RANK_GLOBAL+1 <<--- can be uncommented if this module is ever used
             if (.not. present(success)) error stop
         end if
     end subroutine

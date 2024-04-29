@@ -24,7 +24,7 @@ program icar
     use boundary_interface, only : boundary_t
     use output_interface,   only : output_t
     use time_step,          only : step                ! Advance the model forward in time
-    use initialization,     only : init_model, init_physics, init_model_state
+    use initialization,     only : split_processes, init_options, init_model, init_physics, init_model_state
     use timer_interface,    only : timer_t
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
@@ -55,8 +55,6 @@ program icar
     real :: t_val
     logical :: init_flag, io_loop
 
-    !if (STD_OUT_PE) write(*,*) 'Before MPI init'
-    !if (STD_OUT_PE) flush(output_unit)
 
     !Initialize MPI if needed
     init_flag = .False.
@@ -66,59 +64,44 @@ program icar
         init_flag = .True.
     endif
 
+    call small_time_delta%set(1)
+
     !Determine split of processes which will become I/O servers and which will be compute tasks
     !Also sets constants for the program to keep track of this splitting
-
-    !We should first read in options here
-
     call split_processes(exec_team, domain, ioserver, ioclient)
-
-    call small_time_delta%set(1)
         
     !-----------------------------------------
     !  Model Initialization
     !
-    ! Reads config options and initializes domain and boundary conditions
-    ! First the compute domain has to be established
-    
-    ! Model structure must be initialized first. 
-    ! The domain dimensions will be used when establishing I/O client-server relations
-
-    if (STD_OUT_PE) write(*,*) 'Before init'
+    ! Reads user supplied model options
+    call init_options(options)
     if (STD_OUT_PE) flush(output_unit)
-
-    call init_model(options, domain, boundary)
-    if (STD_OUT_PE) flush(output_unit)
-    !call init_IO(exec_team, domain, boundary, options, ioclient, ioserver)        
-    !if (STD_OUT_PE) flush(output_unit)
 
     select case(exec_team)
     case(kCOMPUTE_TEAM)
         call total_timer%start()
         call initialization_timer%start()    
 
+        call init_model(options,domain,boundary)
         call ioclient%init(domain, boundary, options)
 
         if (STD_OUT_PE) write(*,*) "Receiving initial data"
         if (STD_OUT_PE) flush(output_unit)
-
         call ioclient%receive(boundary)
 
         if (STD_OUT_PE) write(*,*) "Populating boundary object"
         if (STD_OUT_PE) flush(output_unit)
-
         call boundary%update_computed_vars(options, update=options%parameters%time_varying_z)
 
         if (STD_OUT_PE) write(*,*) "Inizializing model state"
         if (STD_OUT_PE) flush(output_unit)
-
         call init_model_state(options, domain, boundary) ! added boundary structure
 
         if (options%parameters%restart) then
             if (STD_OUT_PE) write(*,*) "Reading restart data"
-            call ioclient%receive_rst(domain)
+            call ioclient%receive_rst(domain, options)
         endif
-        if (STD_OUT_PE) flush(output_unit)
+
         ! physics drivers need to be initialized after restart data are potentially read in.
         call init_physics(options, domain, boundary)
         if (STD_OUT_PE) flush(output_unit)
@@ -128,24 +111,25 @@ program icar
         call output_timer%stop()
 
         call initialization_timer%stop() 
+        !  End Compute-Side Initialization
+        !--------------------------------------------------------
 
         next_output = options%parameters%start_time + options%io_options%output_dt
-        next_input = options%parameters%start_time + options%io_options%input_dt
-
+        next_input = options%parameters%start_time
 
         if (STD_OUT_PE) write(*,*) "Initialization complete, beginning physics integration."
         do while (domain%model_time + small_time_delta < options%parameters%end_time)
-
             ! -----------------------------------------------------
             !
             !  Read input data if necessary
             !
             ! -----------------------------------------------------
-            if ((domain%model_time + small_time_delta + options%io_options%input_dt) >= next_input) then
+            if ((domain%model_time + small_time_delta) >= next_input) then
                 if (STD_OUT_PE) write(*,*) ""
                 if (STD_OUT_PE) write(*,*) " ----------------------------------------------------------------------"
                 if (STD_OUT_PE) write(*,*) "Updating Boundary conditions"
-                
+                next_input = next_input + options%io_options%input_dt
+
                 call input_timer%start()
 
                 call ioclient%receive(boundary)
@@ -153,20 +137,14 @@ program icar
                 ! after reading all variables that can be read, not compute any remaining variables (e.g. z from p+ps)
                 call boundary%update_computed_vars(options, update=.True.)
 
-                ! if the vertical levels of the forcing data change over time, they need to be interpolated to the original levels here.
-                if (options%parameters%time_varying_z) then
-                    call boundary%interpolate_original_levels(options)
-                endif
                 call domain%interpolate_forcing(boundary, update=.True.)
                 
                 ! Make the boundary condition dXdt values into units of [X]/s
                 call boundary%update_delta_fields(next_input - domain%model_time)
                 call domain%update_delta_fields(next_input - domain%model_time)
                 
-                next_input = next_input + options%io_options%input_dt
                 call input_timer%stop()
             endif
-
 
             ! -----------------------------------------------------
             !
@@ -253,38 +231,57 @@ program icar
 
     case(kIO_TEAM)
     
-        call ioserver%init(domain, options)
+        !This is, unfortunately, stupidly, needed to allow coarrays to work. 
+        !Perhaps on later releases with better team support it can be removed?
+#ifdef  CRAY_PE
+        !call domain%init(options)
+#endif
+        call ioserver%init(options)
 
+        !Get initial conditions
         call ioserver%read_file()
         
         if (options%parameters%restart) then
-            !sync all !Make sure we don't overwrite the file previously read in before the compute task has used it
             call ioserver%read_restart_file(options)
         endif
 
-        !We do not do output here so that we can continue straight to reading the next input file and not block the compute processes
+        !Get first boundary conditions
+        call ioserver%read_file()
+
+        !  End IO-Side Initialization
+        !--------------------------------------------------------
+
         next_output = options%parameters%start_time
-        next_input = options%parameters%start_time !+ options%io_options%input_dt
+        next_input = options%parameters%start_time
 
         io_loop = .True.
 
         do while (io_loop)
+            
+            ! If we aren't yet done, then wait for an output
+            ! If we are at an output step, do it now
+            if (ioserver%io_time+small_time_delta >= next_output .and. ioserver%io_time <= options%parameters%end_time) then
+                call ioserver%write_file(ioserver%io_time)
+                next_output = next_output + options%io_options%output_dt
+            endif
+
             !See if we even have files to read
             if (ioserver%files_to_read) then
-                !See of it is time to read
+                !See of it is time to read.
                 if (ioserver%io_time+small_time_delta >= next_input) then
                     call ioserver%read_file()
                     next_input = next_input + options%io_options%input_dt
                 endif
+
+                !If we still have files to read, set io_time to be the soonest of either input or output time
+                ioserver%io_time = step_end(next_input,next_output)
+            else
+                !If we have no more files to read, the only thing we could otherwise do is write output
+                ioserver%io_time = next_output
             endif
-            
-            ! If we aren't yet done, then wait for an output
-            if (ioserver%io_time <= options%parameters%end_time) then
-                call ioserver%write_file(ioserver%io_time)
-                ioserver%io_time = ioserver%io_time + options%io_options%output_dt
-            endif
-            
+
             if (.not.(ioserver%files_to_read) .and. ioserver%io_time > options%parameters%end_time) io_loop = .False.
+
         enddo
         !If we are done with the program
         call ioserver%close_files()
@@ -309,7 +306,8 @@ contains
 
     function step_end(time1, time2, end_time) result(min_time)
         implicit none
-        type(Time_type), intent(in) :: time1, time2, end_time
+        type(Time_type), intent(in) :: time1, time2
+        type(Time_type), optional, intent(in) :: end_time
         type(Time_type) :: min_time
 
         if (time1 <= time2 ) then
@@ -318,110 +316,12 @@ contains
             min_time = time2
         endif
 
-        if (end_time < min_time) then
-            min_time = end_time
+        if (present(end_time)) then
+            if (end_time < min_time) then
+                min_time = end_time
+            endif
         endif
     end function
-
-
-    subroutine split_processes(exec_team, domain, ioserver, ioclient)
-        implicit none
-        integer, intent(inout) :: exec_team
-        type(domain_t), intent(inout) :: domain
-        type(ioserver_t), intent(inout) :: ioserver
-        type(ioclient_t), intent(inout) :: ioclient
-
-        integer :: n, k, name_len, color, ierr, node_name_i, num_PE
-        character(len=MPI_MAX_PROCESSOR_NAME) :: node_name
-        integer, allocatable :: node_names(:) 
-
-        type(MPI_Comm) :: globalComm, splitComm
- 
-        call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
-
-        allocate(node_names(num_PE))
-
-        node_names = 0
-        node_name_i = 0
-       
-        call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
-        STD_OUT_PE = (PE_RANK_GLOBAL==0)
-
-        !First, determine information about node/CPU configuration
-        call MPI_Get_processor_name(node_name, name_len, ierr)
-        do n = 1,name_len
-            node_name_i = node_name_i + ichar(node_name(n:n))*n*10
-        enddo
-
-        node_names(PE_RANK_GLOBAL+1) = node_name_i
-
-        !Get list of node names on all processes        
-        call MPI_Allreduce(MPI_IN_PLACE,node_names,num_PE,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        
-        !Set global constants related to resource distribution
-        kNUM_PROC_PER_NODE = count(node_names==node_names(1))
-
-        !Assign one io process per node, this results in best co-array transfer times
-        kNUM_SERVERS = ceiling(num_PE*1.0/kNUM_PROC_PER_NODE)
-        kNUM_COMPUTE = num_PE-kNUM_SERVERS
-        
-        if ((mod(kNUM_COMPUTE,2) /= 0) .and. STD_OUT_PE) then
-            write(*,*) 'WARNING: number of compute processes is odd-numbered.' 
-            write(*,*) 'One process per node is used for I/O.'
-            write(*,*) 'If the total number of compute processes is odd-numbered,'
-            write(*,*) 'this may lead to errors with domain decomposition'
-        endif
-
-        k = 1
-        allocate(DOM_IMG_INDX(kNUM_COMPUTE))
-        do n = 1,kNUM_COMPUTE
-            if (mod(k,(num_PE/kNUM_SERVERS)) == 0) k = k+1
-            DOM_IMG_INDX(n) = k
-            k = k+1
-        enddo
-
-
-        !-----------------------------------------
-        ! Assign Compute and IO processes
-        !-----------------------------------------
-        if (mod((PE_RANK_GLOBAL+1),(num_PE/kNUM_SERVERS)) == 0) then
-            exec_team = kIO_TEAM
-            color = 1
-        else
-            exec_team = kCOMPUTE_TEAM
-            color = 0
-        endif
-       
-        CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
-        ! Assign all images in the IO team to the IO_comms MPI communicator. Use image indexing within initial team to get indexing of global MPI ranks
-        CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, splitComm, ierr )
-
-        select case (exec_team)
-        case (kCOMPUTE_TEAM)
-            CALL MPI_Comm_dup( splitComm, domain%compute_comms, ierr )
-            ioserver%IO_comms = MPI_COMM_NULL
-        case (kIO_TEAM)
-            CALL MPI_Comm_dup( splitComm, ioserver%IO_comms, ierr )
-            domain%compute_comms = MPI_COMM_NULL
-        end select
-
-        !-----------------------------------------
-        ! Group server and client processes
-        !-----------------------------------------
-        CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
-        ! Group IO clients with their related server process. This is basically just grouping processes by node
-        CALL MPI_Comm_split( globalComm, node_names(PE_RANK_GLOBAL+1), PE_RANK_GLOBAL, splitComm, ierr )
-
-        select case (exec_team)
-        case (kCOMPUTE_TEAM)
-            CALL MPI_Comm_dup( splitComm, ioclient%parent_comms, ierr )
-            ioserver%client_comms = MPI_COMM_NULL
-        case (kIO_TEAM)
-            CALL MPI_Comm_dup( splitComm, ioserver%client_comms, ierr )
-            ioclient%parent_comms = MPI_COMM_NULL
-        end select
-
-    end subroutine split_processes
     
 end program
 

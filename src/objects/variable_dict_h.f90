@@ -9,6 +9,7 @@
 module variable_dict_interface
     ! variable type to store... this could be made unlimited but that complicates use
     use variable_interface,     only : variable_t
+    use output_metadata,        only : get_varname
     use icar_constants
 
     !>------------------------------------------------
@@ -20,7 +21,6 @@ module variable_dict_interface
     type var_dict_element
         character(len=kMAX_NAME_LENGTH) :: name         ! serves as the dictionary key
         type(variable_t)                :: var          ! store the primary dictionary variable for the key name
-        type(variable_t)                :: domain_var   ! store the associated dictionary variable
     end type
 
     !>------------------------------------------------
@@ -30,7 +30,6 @@ module variable_dict_interface
     !!
     !! Methods are defined to add to the dictionary and retrieve from it
     !! Note that there is no way to remove objects from the dictionary at present
-    !! Also that the routines to work with an associated variable (domain_var) are not implemented yet
     !!
     !!------------------------------------------------
     type var_dict_t
@@ -54,8 +53,7 @@ module variable_dict_interface
         procedure :: next               ! continue iterating through array elements
         procedure :: get_var            ! get a variable for a given key
         procedure :: add_var            ! store a variable with a given key
-        procedure :: get_domain_var     ! get the associated domain variable for a key
-        procedure :: set_domain_var     ! set the associated domain variable for a key
+        procedure :: sort_by_kVARS
 
         procedure :: init               ! initialize the dictionary (e.g. allocate the var_list)
     end type
@@ -96,7 +94,10 @@ interface
         type(variable_t)                    :: var_data
     end function
 
-
+    module subroutine sort_by_kVARS(this)
+        implicit none
+        class(var_dict_t),   intent(inout)  :: this
+    end subroutine
     !>-------------------------
     !! Primary subroutines to add and retrieve elements
     !!
@@ -109,28 +110,13 @@ interface
         type(variable_t)                :: var_data
     end function
 
-    module subroutine add_var(this, varname, var_data, domain_var, save_state, err)
+    module subroutine add_var(this, varname, var_data, save_state, err)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
         character(len=*),    intent(in)     :: varname
         type(variable_t),    intent(in)     :: var_data
-        type(variable_t),    intent(in), optional :: domain_var
         logical,             intent(in), optional :: save_state
         integer,             intent(out),optional :: err
-    end subroutine
-
-    module function get_domain_var(this, varname) result(var_data)
-        implicit none
-        class(var_dict_t),   intent(in) :: this
-        character(len=*),    intent(in) :: varname
-        type(variable_t),    pointer    :: var_data
-    end function
-
-    module subroutine set_domain_var(this, varname, var_data)
-        implicit none
-        class(var_dict_t),   intent(inout)  :: this
-        character(len=*),    intent(in)     :: varname
-        type(variable_t),    intent(in)     :: var_data
     end subroutine
 
 end interface

@@ -50,22 +50,37 @@ module initialization
 
     implicit none
     private
-    public::init_model, init_physics, init_model_state
+    public::split_processes, init_options, init_model, init_physics, init_model_state
 
 contains
-    subroutine init_model(options,domain,boundary)
-        implicit none
-        type(options_t), intent(inout) :: options
-        type(domain_t),  intent(inout) :: domain
-        type(boundary_t),intent(inout) :: boundary ! forcing file for init conditions
 
-        integer :: omp_get_max_threads, num_threads, num_PE
+
+    subroutine split_processes(exec_team, domain, ioserver, ioclient)
+        implicit none
+        integer, intent(inout) :: exec_team
+        type(domain_t), intent(inout) :: domain
+        type(ioserver_t), intent(inout) :: ioserver
+        type(ioclient_t), intent(inout) :: ioclient
+
+        integer :: n, k, name_len, color, ierr, node_name_i, num_PE
+        integer :: omp_get_max_threads, num_threads
+
+        character(len=MPI_MAX_PROCESSOR_NAME) :: node_name
+        integer, allocatable :: node_names(:) 
+
+        type(MPI_Comm) :: globalComm, splitComm
 
 #if defined(_OPENMP)
         num_threads = omp_get_max_threads()
 #else
         num_threads = 1
 #endif
+
+        call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
+        STD_OUT_PE = (PE_RANK_GLOBAL==0)
+
+        call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
+
         if (STD_OUT_PE) call welcome_message()
         if (STD_OUT_PE) flush(output_unit)
 
@@ -76,10 +91,103 @@ contains
             write(*,*) "  Max number of OpenMP Threads:",num_threads
         endif
 
+        allocate(node_names(num_PE))
+
+        node_names = 0
+        node_name_i = 0
+
+        !First, determine information about node/CPU configuration
+        call MPI_Get_processor_name(node_name, name_len, ierr)
+        do n = 1,name_len
+            node_name_i = node_name_i + ichar(node_name(n:n))*n*10
+        enddo
+
+        node_names(PE_RANK_GLOBAL+1) = node_name_i
+
+        !Get list of node names on all processes        
+        call MPI_Allreduce(MPI_IN_PLACE,node_names,num_PE,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
+        
+        !Set global constants related to resource distribution
+        kNUM_PROC_PER_NODE = count(node_names==node_names(1))
+
+        !Assign one io process per node, this results in best co-array transfer times
+        kNUM_SERVERS = ceiling(num_PE*1.0/kNUM_PROC_PER_NODE)
+        kNUM_COMPUTE = num_PE-kNUM_SERVERS
+        
+        if ((mod(kNUM_COMPUTE,2) /= 0) .and. STD_OUT_PE) then
+            write(*,*) 'WARNING: number of compute processes is odd-numbered.' 
+            write(*,*) 'One process per node is used for I/O.'
+            write(*,*) 'If the total number of compute processes is odd-numbered,'
+            write(*,*) 'this may lead to errors with domain decomposition'
+        endif
+
+        k = 1
+        allocate(DOM_IMG_INDX(kNUM_COMPUTE))
+        do n = 1,kNUM_COMPUTE
+            if (mod(k,(num_PE/kNUM_SERVERS)) == 0) k = k+1
+            DOM_IMG_INDX(n) = k
+            k = k+1
+        enddo
+
+
+        !-----------------------------------------
+        ! Assign Compute and IO processes
+        !-----------------------------------------
+        if (mod((PE_RANK_GLOBAL+1),(num_PE/kNUM_SERVERS)) == 0) then
+            exec_team = kIO_TEAM
+            color = 1
+        else
+            exec_team = kCOMPUTE_TEAM
+            color = 0
+        endif
+    
+        CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
+        ! Assign all images in the IO team to the IO_comms MPI communicator. Use image indexing within initial team to get indexing of global MPI ranks
+        CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, splitComm, ierr )
+
+        select case (exec_team)
+        case (kCOMPUTE_TEAM)
+            CALL MPI_Comm_dup( splitComm, domain%compute_comms, ierr )
+            ioserver%IO_comms = MPI_COMM_NULL
+        case (kIO_TEAM)
+            CALL MPI_Comm_dup( splitComm, ioserver%IO_comms, ierr )
+            domain%compute_comms = MPI_COMM_NULL
+        end select
+
+        !-----------------------------------------
+        ! Group server and client processes
+        !-----------------------------------------
+        CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
+        ! Group IO clients with their related server process. This is basically just grouping processes by node
+        CALL MPI_Comm_split( globalComm, node_names(PE_RANK_GLOBAL+1), PE_RANK_GLOBAL, splitComm, ierr )
+
+        select case (exec_team)
+        case (kCOMPUTE_TEAM)
+            CALL MPI_Comm_dup( splitComm, ioclient%parent_comms, ierr )
+            ioserver%client_comms = MPI_COMM_NULL
+        case (kIO_TEAM)
+            CALL MPI_Comm_dup( splitComm, ioserver%client_comms, ierr )
+            ioclient%parent_comms = MPI_COMM_NULL
+        end select
+
+    end subroutine split_processes
+
+    subroutine init_options(options)
+        implicit none
+        type(options_t), intent(inout) :: options
+
         ! read in options file
         if (STD_OUT_PE) write(*,*) "Initializing Options"
         if (STD_OUT_PE) flush(output_unit)
         call options%init()
+
+    end subroutine init_options
+
+    subroutine init_model(options,domain,boundary)
+        implicit none
+        type(options_t), intent(inout) :: options
+        type(domain_t),  intent(inout) :: domain
+        type(boundary_t),intent(inout) :: boundary ! forcing file for init conditions
         
         if (STD_OUT_PE) write(*,*) "Initializing Domain"
         if (STD_OUT_PE) flush(output_unit)

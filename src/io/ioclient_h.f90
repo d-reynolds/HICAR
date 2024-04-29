@@ -50,21 +50,17 @@ module ioclient_interface
             
       integer, public :: server
       
-      integer, public ::  i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, n_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_r
+      integer, public ::  i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, n_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_r, ide, kde, jde
       integer :: restart_counter = 0
       integer :: output_counter = 0
       integer :: frames_per_outfile, restart_count
 
       logical :: written = .False.
 
-      real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer
-      type(MPI_Win) :: write_win, read_win
+      real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer_3d
+      real, dimension(:,:,:),   pointer :: write_buffer_2d
+      type(MPI_Win) :: write_win_3d, write_win_2d, read_win
       type(MPI_Group) :: parent_group
-
-      !the indices of the output buffer corresponding to the restart vars
-      integer, public, allocatable :: out_var_indices(:), rst_var_indices(:)
-      !the names of the restart vars, indexed the same as the above array
-      character(len=kMAX_NAME_LENGTH), public, allocatable :: rst_var_names(:)
 
   contains
 
@@ -113,10 +109,12 @@ module ioclient_interface
       !! Receive restart data
       !!
       !!----------------------------------------------------------
-      module subroutine receive_rst(this, domain)
+      module subroutine receive_rst(this, domain, options)
           implicit none
           class(ioclient_t), intent(inout) :: this
           type(domain_t),   intent(inout)  :: domain
+          type(options_t),  intent(in)     :: options
+
       end subroutine
 
 

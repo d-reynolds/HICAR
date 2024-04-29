@@ -471,6 +471,12 @@ contains
 
         end associate
 
+        ! if the vertical levels of the forcing data change over time, they need to be interpolated to the original levels here.
+        if (options%parameters%time_varying_z) then
+            call this%interpolate_original_levels(options)
+        endif
+
+
     end subroutine update_computed_vars
 
 

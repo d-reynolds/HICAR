@@ -19,7 +19,6 @@ module domain_interface
   public :: domain_t
 
   type domain_t
-    type(meta_data_t)    :: info
     type(grid_t)         :: grid,   grid8w,  u_grid,   v_grid
     type(grid_t)         :: grid2d, u_grid2d, v_grid2d
     type(grid_t)         :: grid_monthly, grid_soil
@@ -422,7 +421,6 @@ module domain_interface
 
   contains
     procedure :: init
-    procedure :: var_request
     
     procedure :: enforce_limits
 
@@ -464,12 +462,6 @@ module domain_interface
         class(domain_t),  intent(inout) :: this
         type(boundary_t), intent(in)    :: forcing
         logical,          intent(in),   optional :: update
-    end subroutine
-
-    module subroutine var_request(this, options)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        type(options_t), intent(inout)  :: options
     end subroutine
 
     ! Exchange subdomain boundary information

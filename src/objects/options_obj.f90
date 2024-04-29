@@ -78,12 +78,20 @@ contains
 
         call filename_namelist(options_filename, this%parameters)
 
+        call collect_var_requests(this)
+
         ! check for any inconsistencies in the options requested
         call options_check(this)
 
-        call collect_physics_requests(this)
-
     end subroutine init
+
+    subroutine collect_var_requests(options)
+        type(options_t) :: options
+
+        call collect_physics_requests(options)
+        call default_var_requests(options)
+
+    end subroutine collect_var_requests
 
     !> -------------------------------
     !! Call all physics driver var_request routines
@@ -103,9 +111,40 @@ contains
         call mp_var_request(options)
         call adv_var_request(options)
         call wind_var_request(options)
-        call pbl_var_request(options)
 
-    end subroutine
+    end subroutine collect_physics_requests
+
+    !> -------------------------------
+    !! Add variables needed by all domains to the list of requested variables
+    !!
+    !! -------------------------------
+    subroutine default_var_requests(options)
+        type(options_t) :: options
+        
+        ! List the variables that are required to be allocated for any domain
+        call options%alloc_vars(                                                    &
+                     [kVARS%z,                      kVARS%z_interface,              &
+                      kVARS%dz,                     kVARS%dz_interface,             &
+                      kVARS%u,                      kVARS%v,                        &
+                      kVARS%w,                      kVARS%w_real,                   &
+                      kVARS%surface_pressure,       kVARS%roughness_z0,             &
+                      kVARS%terrain,                kVARS%pressure,                 &
+                      kVARS%temperature,            kVARS%pressure_interface,       &
+                      kVARS%exner,                  kVARS%potential_temperature,    &
+                      kVARS%latitude,               kVARS%longitude,                &
+                      kVARS%u_latitude,             kVARS%u_longitude,              &
+                      kVARS%v_latitude,             kVARS%v_longitude,              &
+                      kVARS%temperature_interface,  kVars%density])
+
+        ! List the variables that are required for any restart
+        call options%restart_vars(                                                  &
+                     [kVARS%z,                                                      &
+                      kVARS%terrain,                kVARS%potential_temperature,    &
+                      kVARS%latitude,               kVARS%longitude,                &
+                      kVARS%u_latitude,             kVARS%u_longitude,              &
+                      kVARS%v_latitude,             kVARS%v_longitude               ])
+
+    end subroutine default_var_requests
 
     !> -------------------------------
     !! Add list of new variables to a list of variables
@@ -347,6 +386,7 @@ contains
         ! Minimal error checking on option settings
         implicit none
         type(options_t), intent(inout)::options
+        integer :: i
 
         if (options%parameters%t_offset.eq.(-9999)) then
             ! if (options%parameters%warning_level>0) then
@@ -364,6 +404,16 @@ contains
                 print*,"Frames per output file= ", options%io_options%frames_per_outfile
             end if
         endif
+
+        !clean output var list
+        do i=1, size(options%io_options%vars_for_output)
+            if ((options%io_options%vars_for_output(i)+options%vars_for_restart(i) > 0) .and. (options%vars_to_allocate(i) <= 0)) then
+                !if (STD_OUT_PE) write(*,*) 'variable ',trim(get_varname(options%vars_to_allocate(i))),' requested for output/restart, but was not allocated by one of the modules'
+                if (options%io_options%vars_for_output(i) > 0) options%io_options%vars_for_output(i) = 0
+                if (options%vars_for_restart(i) > 0) options%vars_for_restart(i) = 0
+
+            endif
+        enddo
 
         ! convection can modify wind field, and ideal doesn't rebalance winds every timestep
         if ((options%physics%convection.ne.0).and.(options%parameters%ideal)) then
@@ -482,14 +532,14 @@ contains
         type(options_t), intent(inout)  :: options
 
         integer :: name_unit
-!       variables to be used in the namelist
+        !variables to be used in the namelist
         integer :: pbl, lsm, sfc, sm, water, mp, rad, conv, adv, wind, radiation_downScaling
         character(len=MAXVARLENGTH) :: phys_suite
         
-!       define the namelist
+        !define the namelist
         namelist /physics/ pbl, lsm, sfc, sm, water, mp, rad, conv, adv, wind, phys_suite, radiation_downScaling
 
-!       default values for physics options (advection+linear winds+simple_microphysics)
+        !default values for physics options (advection+linear winds+simple_microphysics)
         pbl = 0 ! 0 = no PBL,
                 ! 1 = Stupid PBL (only in LSM=1 module),
                 ! 2 = local PBL diffusion after Louis 1979
@@ -539,12 +589,12 @@ contains
 
         radiation_downScaling  = 0 !! MJ added, !! note that radiation down scaling works only for simple and rrtmg schemes as they provide the above-topography radiation  per horizontal plane      
 
-!       read the namelist
+        !read the namelist
         open(io_newunit(name_unit), file=filename)
         read(name_unit,nml=physics)
         close(name_unit)
 
-!       store options
+        !store options
         options%physics%boundarylayer = pbl
         options%physics%convection    = conv
         options%physics%advection     = adv
@@ -1052,7 +1102,7 @@ contains
                               sfc_options_filename,     use_sfc_options,    &
                               pbl_options_filename,     use_pbl_options
 
-!       default parameters
+        !default parameters
         surface_io_only     = .False.
         t_offset            = (-9999)
         rh_limit            = -1

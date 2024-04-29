@@ -105,17 +105,15 @@ contains
     !!
     !! @param varname       key to store for the var_data supplied
     !! @param var_data      variable to store associated with key
-    !! @param domain_var    optional additional variable to associated with key
     !! @param save_state    optional store the input array data in a locally allocated array instead of just pointing to it
     !! @param err           optional value to store an error code in so execution doesn't have to stop
     !!
     !!------------------------------------------------
-    module subroutine add_var(this, varname, var_data, domain_var, save_state, err)
+    module subroutine add_var(this, varname, var_data, save_state, err)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
         character(len=*),    intent(in)     :: varname
         type(variable_t),    intent(in)     :: var_data
-        type(variable_t),    intent(in), optional :: domain_var
         logical,             intent(in), optional :: save_state
         integer,             intent(out),optional :: err
 
@@ -173,56 +171,35 @@ contains
         else
         endif
 
-        if (present(domain_var)) then
-            this%var_list(this%n_vars)%domain_var  = domain_var
-        endif
 
     end subroutine
 
+    !>---------------------------
     !>------------------------------------------------
-    !! Retrieve a variable for a given key
-    !!
-    !! NOT IMPLEMENTED YET
-    !!
-    !! @param varname : The key to look for in the dictionary
+    !! Sort the list by the order defined for kVARS in icar_constants.
+    !! Useful when the order in which variables added to a list is random,
+    !! but we need to assume ordering elsewhere (i.e. for IO server/client)
     !!
     !!------------------------------------------------
-    module function get_domain_var(this, varname) result(var_data)
-        implicit none
-        class(var_dict_t),   intent(in) :: this
-        character(len=*),    intent(in) :: varname
-        type(variable_t),    pointer    :: var_data
-
-        if (.not.this%initialized) then
-            stop "variable_dictionary read before being initialized"
-        endif
-        stop "get_domain_var not implemented yet"
-    end function
-
-    !>------------------------------------------------
-    !! Associate a second variable to the dictionary for the key supplied
-    !!
-    !! NOT IMPLEMENTED YET
-    !!
-    !! @param varname       key to store for the var_data supplied
-    !! @param var_data      variable to store associated with key
-    !!
-    !!------------------------------------------------
-    module subroutine set_domain_var(this, varname, var_data)
+    module subroutine sort_by_kVARS(this)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
-        character(len=*),    intent(in)     :: varname
-        type(variable_t),    intent(in)     :: var_data
 
-        if (.not.this%initialized) then
-            call this%init()
-        endif
+        type(var_dict_t) :: sorted
+        type(variable_t) :: var
+        integer :: i, err
+        
+        do i = 1,kMAX_STORAGE_VARS
+            !Get the data for the variable name. Returns 1 if not found
+            var = this%get_var(get_varname(i),err=err)
+            if (err==0) call sorted%add_var(get_varname(i),var)
+        enddo
 
-        stop "set_domain_var not implemented yet"
-
+        this%var_list = sorted%var_list
     end subroutine
 
 
+    !>---------------------------
     !>------------------------------------------------
     !! Reset the iteration sequence in the dictionary
     !!
