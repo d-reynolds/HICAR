@@ -208,7 +208,7 @@ endif
 
 # Cray fortran
 ifeq ($(COMPILER), cray)
-	COMP= -h noomp -O2 -c -eI
+	COMP= -h noomp -hfp3 -O2 -c -eI
 	LINK= -fopenmp
 	PREPROC= -eT
 	MODOUTPUT= -J $(BUILD) -em
@@ -242,7 +242,7 @@ ifeq ($(MODE), debug)
 		LINK=
 	endif
 	ifeq ($(COMPILER), cray)
-		COMP=-hcaf -h noomp -c  -g #-R cpbs
+		COMP=-h noomp -c  -g #-R cpbs
 		LINK=-h noomp
 		PREPROC=-eZ
 		MODOUTPUT=-e m -J $(BUILD)
@@ -301,24 +301,24 @@ endif
 
 
 LINKER=$(F90)
-ifeq ($(COMPILER), gnu)
-	ifeq ($(CAF_MODE), single)
-		CAF_FLAG=-fcoarray=single
-	else
-		ifeq ($(F90), caf)
-			CAF_FLAG=-fcoarray=lib
-		else
-			ifndef CAF_DIR
-				CAF_DIR=${HOME}/usr/local/lib
-			endif
-			CAF_FLAG=-fcoarray=lib
-			CAF_LINK=-L${CAF_DIR} -lcaf_mpi
-			ifneq ($(F90), ftn)
-				LINKER=mpif90
-			endif
-		endif
-	endif
-endif
+#ifeq ($(COMPILER), gnu)
+#	ifeq ($(CAF_MODE), single)
+#		CAF_FLAG=-fcoarray=single
+#	else
+#		ifeq ($(F90), caf)
+#			CAF_FLAG=-fcoarray=lib
+#		else
+#			ifndef CAF_DIR
+#				CAF_DIR=${HOME}/usr/local/lib
+#			endif
+#			CAF_FLAG=-fcoarray=lib
+#			CAF_LINK=-L${CAF_DIR} -lcaf_mpi
+#			ifneq ($(F90), ftn)
+#				LINKER=mpif90
+#			endif
+#		endif
+#	endif
+#endif
 # Intel fortran
 ifeq ($(COMPILER), intel)
 	ifeq ($(CAF_MODE), single)
@@ -335,7 +335,7 @@ endif
 ASSERT=-DUSE_ASSERTIONS=$(USE_ASSERTIONS)
 
 ifeq ($(COMPILER), cray)
-	COMP += -DCRAY_PE
+	#COMP += -DCRAY_PE
 endif
 
 ###################################################################
@@ -725,7 +725,7 @@ $(BUILD)variable_obj.o: $(OBJECTS)variable_obj.f90 $(BUILD)variable_h.o
 
 $(BUILD)variable_h.o: $(OBJECTS)variable_h.f90 $(BUILD)meta_data_h.o $(BUILD)icar_constants.o $(BUILD)grid_h.o
 
-$(BUILD)variable_dict_h.o: $(OBJECTS)variable_dict_h.f90 $(BUILD)variable_h.o $(BUILD)icar_constants.o
+$(BUILD)variable_dict_h.o: $(OBJECTS)variable_dict_h.f90 $(BUILD)variable_h.o $(BUILD)default_output_metadata.o $(BUILD)icar_constants.o
 
 $(BUILD)variable_dict_obj.o: $(OBJECTS)variable_dict_obj.f90 $(BUILD)variable_dict_h.o
 
@@ -851,7 +851,7 @@ $(BUILD)mp_wsm6.o:$(PHYS)mp_wsm6.f90 $(BUILD)wrf_constants.o
 
 $(BUILD)mp_thompson.o:$(PHYS)mp_thompson.f90 $(BUILD)opt_types.o
 
-$(BUILD)mp_thompson_aer.o:$(PHYS)mp_thompson_aer.f90
+$(BUILD)mp_thompson_aer.o:$(PHYS)mp_thompson_aer.f90 $(BUILD)icar_constants.o
 
 $(BUILD)mp_simple.o:$(PHYS)mp_simple.f90 $(BUILD)data_structures.o $(BUILD)options_h.o
 

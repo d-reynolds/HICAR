@@ -234,7 +234,7 @@ program icar
         !This is, unfortunately, stupidly, needed to allow coarrays to work. 
         !Perhaps on later releases with better team support it can be removed?
 #ifdef  CRAY_PE
-        !call domain%init(options)
+        call domain%init(options)
 #endif
         call ioserver%init(options)
 

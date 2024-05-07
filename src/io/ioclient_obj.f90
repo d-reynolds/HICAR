@@ -143,18 +143,18 @@ contains
         win_size = n_w_3d*nx_w*nz_w*ny_w
         call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_3d)
         call C_F_POINTER(tmp_ptr, this%write_buffer_3d, [n_w_3d, nx_w, nz_w, ny_w])
-        this%write_buffer_3d = 0
+        this%write_buffer_3d = kEMPT_BUFF
 
         ! +1 added to handle variables on staggered grids
         win_size = n_w_2d*nx_w*ny_w
         call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_2d)
         call C_F_POINTER(tmp_ptr, this%write_buffer_2d, [n_w_2d, nx_w, ny_w])
-        this%write_buffer_2d = 0
+        this%write_buffer_2d = kEMPT_BUFF
 
         win_size = n_r*nx_r*nz_r*ny_r
         call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%read_win)
         call C_F_POINTER(tmp_ptr, this%read_buffer, [n_r, nx_r, nz_r, ny_r])
-        this%read_buffer = 0
+        this%read_buffer = kEMPT_BUFF
 
     end subroutine setup_MPI_windows
 
@@ -183,7 +183,7 @@ contains
 
         ! loop through the list of variables that need to be written out
         call domain%vars_to_out%reset_iterator()
-        
+
         do while (domain%vars_to_out%has_more_elements())
             ! get the next variable in the structure
             var = domain%vars_to_out%next()

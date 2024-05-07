@@ -85,8 +85,6 @@ contains
         if (STD_OUT_PE) flush(output_unit)
 
         if (STD_OUT_PE) then
-            call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
-
             write(*,*) "  Number of coarray image:",num_PE
             write(*,*) "  Max number of OpenMP Threads:",num_threads
         endif

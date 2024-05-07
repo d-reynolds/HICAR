@@ -114,7 +114,7 @@ contains
 
         ! +1 added to handle variables on staggered grids
         this%nx_w = maxval(this%iewc-this%iswc+1)+1
-        this%nz_w = maxval(this%kewc-this%kswc+1)
+        this%nz_w = this%k_e_w ! this will have been updated in init to reflect the largest z dimension to be output
         this%ny_w = maxval(this%jewc-this%jswc+1)+1
 
         this%nx_r = maxval(this%ierc-this%isrc+1)+1
