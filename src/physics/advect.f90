@@ -14,7 +14,7 @@ module adv_std
     use adv_fluxcorr,      only: WRF_flux_corr
     implicit none
     private
-    real,dimension(:,:,:),allocatable :: U_m, V_m, W_m, rho
+    real,dimension(:,:,:),allocatable :: U_m, V_m, W_m, denom
     integer :: ims, ime, jms, jme, kms, kme, its, ite, jts, jte, i_s, i_e, j_s, j_e, horder, vorder
     real    :: dx
 
@@ -65,30 +65,12 @@ contains
         if (allocated(U_m)) deallocate(U_m)
         if (allocated(V_m)) deallocate(V_m)
         if (allocated(W_m)) deallocate(W_m)
-        !if (allocated(lastqv_m)) deallocate(lastqv_m)
 
         ! allocate the module level arrays
         allocate(U_m     (i_s:i_e+1,kms:kme,j_s:j_e  ))
         allocate(V_m     (i_s:i_e,  kms:kme,j_s:j_e+1))
         allocate(W_m     (i_s:i_e,  kms:kme,j_s:j_e  ))
-        allocate(rho     (ims:ime,  kms:kme,jms:jme  ))
-        !allocate(lastqv_m(ims:ime,  kms:kme,jms:jme  ))
-
-        !     if (.not.allocated(U_4cu_u)) then
-        !         allocate(U_4cu_u(nx,  nz, ny))
-        !         U_4cu_u = 0
-        !         allocate(V_4cu_u(nx+1,nz, ny-1))
-        !         V_4cu_u = 0
-        !         allocate(W_4cu_u(nx+1,nz, ny))
-        !         W_4cu_u = 0
-        !
-        !         allocate(U_4cu_v(nx-1,nz, ny+1))
-        !         U_4cu_v = 0
-        !         allocate(V_4cu_v(nx,  nz, ny))
-        !         V_4cu_v = 0
-        !         allocate(W_4cu_v(nx,  nz, ny+1))
-        !         W_4cu_v = 0
-        !     endif
+        allocate(denom   (ims:ime,  kms:kme,jms:jme  ))
     end subroutine
 
     subroutine adv_std_var_request(options)
@@ -106,30 +88,6 @@ contains
                         [kVARS%u,    kVARS%v,   kVARS%w,     kVARS%dz_interface, kVARS%water_vapor])
 
     end subroutine
-
-!     Note this routine has been manually inlined because the compiler didn't seem to optimize it well and made the array copies
-!     the routine is left in for documentation.
-!     subroutine flux2(l,r,U,nx,nz,ny,f)
-!     !     Calculate the donor cell flux function
-!     !     l = left gridcell scalar
-!     !     r = right gridcell scalar
-!     !     U = Courant number (u*dt/dx)
-!     !
-!     !     If U is positive, return l*U if U is negative return r*U
-!     !     By using the mathematical form instead of the logical form,
-!     !     we can run on the entire grid simultaneously, and avoid branches
-!
-!     !   arguments
-!         implicit none
-!         real, dimension(1:nx,1:nz,1:ny), intent(in) :: l,r,U
-!         real, dimension(1:nx,1:nz,1:ny), intent(inout) :: f
-!         integer,intent(in) :: ny,nz,nx
-!         !   internal parameter
-!         integer ::  err,i!,j,Ny,Nz,Nx
-!         !   main code
-!         f= ((U+ABS(U)) * l + (U-ABS(U)) * r)/2
-!
-!     end subroutine flux2
 
     subroutine flux3(q,flux_x,flux_z,flux_y,t_factor)
         implicit none
@@ -518,13 +476,12 @@ contains
     end subroutine flux3_w_up
 
 
-    subroutine adv_std_advect3d(qfluxes,qold,dz,jaco,t_factor_in)
+    subroutine adv_std_advect3d(qfluxes,qold,dz,t_factor_in)
         ! !DIR$ INLINEALWAYS adv_std_advect3d
         implicit none
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(inout)   :: qfluxes
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: qold
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: dz
-        real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: jaco
         real, optional,                              intent(in)      :: t_factor_in
         ! interal parameters
         real, dimension(i_s:i_e+1,kms:kme,j_s:j_e)   :: flux_x
@@ -548,8 +505,7 @@ contains
                                   ((flux_x(i+1,k,j) - flux_x(i,k,j))  + &
                                    (flux_y(i,k,j+1) - flux_y(i,k,j))  + &
                                    (flux_z(i,k+1,j) - flux_z(i,k,j))  / &
-                                   dz(i,k,j))                         / &
-                                   (jaco(i,k,j)*rho(i,k,j))
+                                   dz(i,k,j))*denom(i,k,j)
                 enddo
             enddo
         enddo
@@ -557,13 +513,12 @@ contains
     end subroutine adv_std_advect3d
     
     
-    subroutine adv_fluxcorr_advect3d(qfluxes,qold,dz,jaco)
+    subroutine adv_fluxcorr_advect3d(qfluxes,qold,dz)
         ! !DIR$ INLINEALWAYS adv_std_advect3d
         implicit none
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(inout)   :: qfluxes
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: qold
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: dz
-        real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: jaco
         ! interal parameters
         real, dimension(i_s:i_e+1,kms:kme,j_s:j_e)   :: flux_x, flux_x_up
         real, dimension(i_s:i_e,  kms:kme,j_s:j_e+1) :: flux_y, flux_y_up
@@ -574,7 +529,7 @@ contains
                 
         call flux3_w_up(qfluxes,flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up)
 
-        call WRF_flux_corr(qold,U_m,V_m,W_m,flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up,jaco,dz,rho)
+        call WRF_flux_corr(qold,U_m,V_m,W_m,flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up,dz,denom)
         
         do j = jts,jte
             do k = kms,kme
@@ -584,106 +539,12 @@ contains
                                   ((flux_x(i+1,k,j) - flux_x(i,k,j))  + &
                                    (flux_y(i,k,j+1) - flux_y(i,k,j))  + &
                                    (flux_z(i,k+1,j) - flux_z(i,k,j))  / &
-                                   dz(i,k,j))                         / &
-                                   (jaco(i,k,j)*rho(i,k,j))
+                                    dz(i,k,j))*denom(i,k,j)
                 enddo
             enddo
         enddo
         
     end subroutine adv_fluxcorr_advect3d
-
-
-    ! subroutine setup_cu_winds(domain, options, dt)
-    !     implicit none
-    !     type(domain_type),  intent(in) :: domain
-    !     type(options_type), intent(in) :: options
-    !     real,               intent(in) :: dt
-    !
-    !     real    :: dx
-    !     integer :: nx,nz,ny
-    !
-    !     dx = domain%dx
-    !     nx = size(domain%dz,1)
-    !     nz = size(domain%dz,2)
-    !     ny = size(domain%dz,3)
-    !
-    !
-    !     U_4cu_u           =  (dt/dx) * (domain%u(1:nx,:,:)      + domain%u(2:nx+1,:,:)) / 2
-    !     V_4cu_u(2:nx,:,:) =  (dt/dx) * (domain%v(1:nx-1,:,2:ny) + domain%v(2:nx,:,2:ny)) / 2
-    !     W_4cu_u(2:nx,:,:) =  (dt/dx) * (domain%w(1:nx-1,:,:)    + domain%w(2:nx,:,:)) / 2
-    !     call rebalance_cu_winds(U_4cu_u, V_4cu_u, W_4cu_u)
-    !
-    !     U_4cu_v(:,:,2:ny) =  (dt/dx) * (domain%u(2:nx,:,1:ny-1) + domain%u(2:nx,:,2:ny)) / 2
-    !     V_4cu_v           =  (dt/dx) * (domain%v(:,:,1:ny)      + domain%v(:,:,2:ny+1)) / 2
-    !     W_4cu_v(:,:,2:ny) =  (dt/dx) * (domain%w(:,:,1:ny-1)    + domain%w(:,:,2:ny)) / 2
-    !     call rebalance_cu_winds(U_4cu_v, V_4cu_v, W_4cu_v)
-    !
-    ! end subroutine setup_cu_winds
-
-    ! subroutine rebalance_cu_winds(u,v,w)
-    !     implicit none
-    !     ! u, v, w 3D east-west, south-north, and up-down winds repsectively
-    !     ! note for this code, u is [nx-1,nz,ny] and v is [nx,nz,ny-1]
-    !     real, dimension(:,:,:), intent(inout) :: u, v, w
-    !
-    !     real, allocatable, dimension(:,:) :: divergence, du, dv
-    !     integer :: i,nx,ny,nz
-    !
-    !     nx = size(w,1)
-    !     nz = size(w,2)
-    !     ny = size(w,3)
-    !
-    !     allocate(divergence(nx-2,ny-2))
-    !     allocate(du(nx-2,ny-2))
-    !     allocate(dv(nx-2,ny-2))
-    !
-    !     do i=1,nz
-    !         ! calculate horizontal divergence
-    !         dv = v(2:nx-1,i,2:ny-1) - v(2:nx-1,i,1:ny-2)
-    !         du = u(2:nx-1,i,2:ny-1) - u(1:nx-2,i,2:ny-1)
-    !         divergence = du + dv
-    !         ! Then calculate w to balance
-    !         if (i==1) then
-    !             ! if this is the first model level start from 0 at the ground
-    !             w(2:nx-1,i,2:ny-1) = 0 - divergence
-    !         else
-    !             ! else calculate w as a change from w at the level below
-    !             w(2:nx-1,i,2:ny-1) = w(2:nx-1,i-1,2:ny-1) - divergence
-    !         endif
-    !     enddo
-    !
-    ! end subroutine rebalance_cu_winds
-    !
-    ! subroutine advect_cu_winds(domain, options, dt)
-    !     implicit none
-    !     type(domain_type),  intent(inout) :: domain
-    !     type(options_type), intent(in)    :: options
-    !     real,               intent(in)    :: dt
-    !
-    !     integer :: nx,nz,ny
-    !
-    !     nx = size(domain%dz,1)
-    !     nz = size(domain%dz,2)
-    !     ny = size(domain%dz,3)
-    !
-    !     ! first put the background u,v,w winds on a staggered grid with respect to the u grid
-    !     ! then advect the u winds
-    !     if (options%advect_density) then
-    !         print*, "ERROR: Density advection not enabled when using convective winds"
-    !         print*, "   Requires update to wind.f90 balance_uvw and advect.f90 (at least)"
-    !         stop
-    !     endif
-    !
-    !     call setup_cu_winds(domain, options, dt)
-    !
-    !     ! set the top boundary condition for CU winds to 0 to prevent artifacts coming in from the "top"
-    !     domain%u_cu(:,nz,:) = 0
-    !     domain%v_cu(:,nz,:) = 0
-    !
-    !     call advect3d(domain%u_cu, U_4cu_u,V_4cu_u,W_4cu_u, domain%rho, domain%dz_inter, nx+1,nz,ny, options)
-    !     call advect3d(domain%v_cu, U_4cu_v,V_4cu_v,W_4cu_v, domain%rho, domain%dz_inter, nx,nz,ny+1, options)
-    !
-    ! end subroutine advect_cu_winds
 
 
     subroutine test_divergence(dz)
@@ -726,68 +587,62 @@ contains
         real,intent(in)::dt
         
         integer :: i, j, k
+        real, dimension(domain%ims:domain%ime,domain%kms:domain%kme,domain%jms:domain%jme) :: rho
         
-        ! if (options%physics%convection > 0) then
-            ! print*, "Advection of convective winds not enabled in ICAR >=1.5 yet"
-            ! stop
-            ! U_m = (domain%u_cu(2:nx,:,:) + domain%u(2:nx,:,:)) * (dt/dx)
-            ! V_m = (domain%v_cu(:,:,2:ny) + domain%v(:,:,2:ny)) * (dt/dx)
-            ! W_m = (domain%w_cu + domain%w)                     * (dt/dx)
-            ! call rebalance_cu_winds(U_m,V_m,W_m)
-        ! else
-             ! Divide only U and V by dx. This minimizes the number of operations per advection step. W cannot be divided by dz,
-             ! since non-uniform dz spacing does not allow for the same spacing to be assumed on either side of a k+1/2 interface,
-             ! as is required for the adv4 scheme.
-            dx = domain%dx
-            
-            if (options%parameters%advect_density) then
-                do i = ims,ime
-                    do j = jms,jme
-                        do k = kms,kme
-                            rho(i,k,j) = domain%density%data_3d(i,k,j)  
-                        enddo
-                    enddo
-                enddo
-            else
-                do i = ims,ime
-                    do j = jms,jme
-                        do k = kms,kme
-                            rho(i,k,j) = 1
-                        enddo
-                    enddo
-                enddo
-            endif
-            do j = j_s,j_e
-                do k = kms,kme
-                    do i = i_s,i_e+1
-                        U_m(i,k,j) = domain%u%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i-1,k,j))*0.5 * &
-                                domain%jacobian_u(i,k,j) / domain%dx
+        dx = domain%dx
+        
+        if (options%parameters%advect_density) then
+            do i = ims,ime
+                do j = jms,jme
+                    do k = kms,kme
+                        rho(i,k,j) = domain%density%data_3d(i,k,j)  
                     enddo
                 enddo
             enddo
-            do j = j_s,j_e+1
-                do k = kms,kme
-                    do i = i_s,i_e
-                        V_m(i,k,j) = domain%v%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i,k,j-1))*0.5 * &
-                                domain%jacobian_v(i,k,j) / domain%dx
+        else
+            do i = ims,ime
+                do j = jms,jme
+                    do k = kms,kme
+                        rho(i,k,j) = 1
                     enddo
                 enddo
             enddo
-            do j = j_s,j_e
-                do k = kms,kme-1
-                    do i = i_s,i_e
-                        W_m(i,k,j) = domain%w%data_3d(i,k,j) * dt * domain%jacobian_w(i,k,j) * &
-                                                ( rho(i,k,j)*domain%advection_dz(i,k+1,j) + &
-                                                  rho(i,k+1,j)*domain%advection_dz(i,k,j) ) / &
-                                                 (domain%advection_dz(i,k,j)+domain%advection_dz(i,k+1,j))
-                    enddo
+        endif
+
+        !Compute the denomenator for all of the flux summation terms here once
+        denom = 1/(rho*domain%jacobian)
+
+        do j = j_s,j_e
+            do k = kms,kme
+                do i = i_s,i_e+1
+                    U_m(i,k,j) = domain%u%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i-1,k,j))*0.5 * &
+                            domain%jacobian_u(i,k,j) / domain%dx
                 enddo
             enddo
-            do j = j_s,j_e
+        enddo
+        do j = j_s,j_e+1
+            do k = kms,kme
                 do i = i_s,i_e
-                    W_m(i,kme,j) = domain%w%data_3d(i,kme,j) * dt * domain%jacobian_w(i,kme,j) * rho(i,kme,j)
+                    V_m(i,k,j) = domain%v%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i,k,j-1))*0.5 * &
+                            domain%jacobian_v(i,k,j) / domain%dx
                 enddo
             enddo
+        enddo
+        do j = j_s,j_e
+            do k = kms,kme-1
+                do i = i_s,i_e
+                    W_m(i,k,j) = domain%w%data_3d(i,k,j) * dt * domain%jacobian_w(i,k,j) * &
+                                            ( rho(i,k,j)*domain%advection_dz(i,k+1,j) + &
+                                                rho(i,k+1,j)*domain%advection_dz(i,k,j) ) / &
+                                                (domain%advection_dz(i,k,j)+domain%advection_dz(i,k+1,j))
+                enddo
+            enddo
+        enddo
+        do j = j_s,j_e
+            do i = i_s,i_e
+                W_m(i,kme,j) = domain%w%data_3d(i,kme,j) * dt * domain%jacobian_w(i,kme,j) * rho(i,kme,j)
+            enddo
+        enddo
     end subroutine adv_std_compute_wind
 
     subroutine setup_advection_dz(domain, options)

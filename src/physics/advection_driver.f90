@@ -89,55 +89,34 @@ contains
             call mpdata_compute_wind(domain,options,dt)
         endif
         
-        if (options%vars_to_advect(kVARS%water_vapor)>0) call adv_var(domain%water_vapor%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)
-        if (options%vars_to_advect(kVARS%potential_temperature)>0) call adv_var(domain%potential_temperature%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options) 
-        if (options%vars_to_advect(kVARS%cloud_water)>0) call adv_var(domain%cloud_water_mass%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)                  
-        if (options%vars_to_advect(kVARS%rain_in_air)>0) call adv_var(domain%rain_mass%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)                    
-        if (options%vars_to_advect(kVARS%snow_in_air)>0) call adv_var(domain%snow_mass%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)                    
-        if (options%vars_to_advect(kVARS%cloud_ice)>0) call adv_var(domain%cloud_ice_mass%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)                      
-        if (options%vars_to_advect(kVARS%graupel_in_air)>0) call adv_var(domain%graupel_mass%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)                 
-        if (options%vars_to_advect(kVARS%ice_number_concentration)>0)  call adv_var(domain%cloud_ice_number%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)       
-        if (options%vars_to_advect(kVARS%rain_number_concentration)>0) call adv_var(domain%rain_number%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)      
-        if (options%vars_to_advect(kVARS%snow_number_concentration)>0) call adv_var(domain%snow_number%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)      
-        if (options%vars_to_advect(kVARS%graupel_number_concentration)>0) call adv_var(domain%graupel_number%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)   
-        if (options%vars_to_advect(kVARS%ice1_a)>0) call adv_var(domain%ice1_a%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)   
-        if (options%vars_to_advect(kVARS%ice1_c)>0) call adv_var(domain%ice1_c%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)   
-        if (options%vars_to_advect(kVARS%ice2_mass)>0) call adv_var(domain%ice2_mass%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)   
-        if (options%vars_to_advect(kVARS%ice2_number)>0) call adv_var(domain%ice2_number%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)   
-        if (options%vars_to_advect(kVARS%ice2_a)>0) call adv_var(domain%ice2_a%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)   
-        if (options%vars_to_advect(kVARS%ice2_c)>0) call adv_var(domain%ice2_c%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)   
-        if (options%vars_to_advect(kVARS%ice3_mass)>0) call adv_var(domain%ice3_mass%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)   
-        if (options%vars_to_advect(kVARS%ice3_number)>0) call adv_var(domain%ice3_number%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)   
-        if (options%vars_to_advect(kVARS%ice3_a)>0) call adv_var(domain%ice3_a%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)   
-        if (options%vars_to_advect(kVARS%ice3_c)>0) call adv_var(domain%ice3_c%data_3d, domain%advection_dz, domain%jacobian, &
-        domain%density%data_3d, options)   
+        if (options%vars_to_advect(kVARS%water_vapor)>0) call adv_var(domain%water_vapor%data_3d, domain%advection_dz, options)
+        if (options%vars_to_advect(kVARS%potential_temperature)>0) call adv_var(domain%potential_temperature%data_3d, domain%advection_dz, options) 
+        if (options%vars_to_advect(kVARS%cloud_water)>0) call adv_var(domain%cloud_water_mass%data_3d, domain%advection_dz, options)                  
+        if (options%vars_to_advect(kVARS%rain_in_air)>0) call adv_var(domain%rain_mass%data_3d, domain%advection_dz, options)                    
+        if (options%vars_to_advect(kVARS%snow_in_air)>0) call adv_var(domain%snow_mass%data_3d, domain%advection_dz, options)                    
+        if (options%vars_to_advect(kVARS%cloud_ice)>0) call adv_var(domain%cloud_ice_mass%data_3d, domain%advection_dz, options)                      
+        if (options%vars_to_advect(kVARS%graupel_in_air)>0) call adv_var(domain%graupel_mass%data_3d, domain%advection_dz, options)                 
+        if (options%vars_to_advect(kVARS%ice_number_concentration)>0)  call adv_var(domain%cloud_ice_number%data_3d, domain%advection_dz, options)       
+        if (options%vars_to_advect(kVARS%rain_number_concentration)>0) call adv_var(domain%rain_number%data_3d, domain%advection_dz, options)      
+        if (options%vars_to_advect(kVARS%snow_number_concentration)>0) call adv_var(domain%snow_number%data_3d, domain%advection_dz, options)      
+        if (options%vars_to_advect(kVARS%graupel_number_concentration)>0) call adv_var(domain%graupel_number%data_3d, domain%advection_dz, options)   
+        if (options%vars_to_advect(kVARS%ice1_a)>0) call adv_var(domain%ice1_a%data_3d, domain%advection_dz, options)   
+        if (options%vars_to_advect(kVARS%ice1_c)>0) call adv_var(domain%ice1_c%data_3d, domain%advection_dz, options)   
+        if (options%vars_to_advect(kVARS%ice2_mass)>0) call adv_var(domain%ice2_mass%data_3d, domain%advection_dz, options)   
+        if (options%vars_to_advect(kVARS%ice2_number)>0) call adv_var(domain%ice2_number%data_3d, domain%advection_dz, options)   
+        if (options%vars_to_advect(kVARS%ice2_a)>0) call adv_var(domain%ice2_a%data_3d, domain%advection_dz, options)   
+        if (options%vars_to_advect(kVARS%ice2_c)>0) call adv_var(domain%ice2_c%data_3d, domain%advection_dz, options)   
+        if (options%vars_to_advect(kVARS%ice3_mass)>0) call adv_var(domain%ice3_mass%data_3d, domain%advection_dz, options)   
+        if (options%vars_to_advect(kVARS%ice3_number)>0) call adv_var(domain%ice3_number%data_3d, domain%advection_dz, options)   
+        if (options%vars_to_advect(kVARS%ice3_a)>0) call adv_var(domain%ice3_a%data_3d, domain%advection_dz, options)   
+        if (options%vars_to_advect(kVARS%ice3_c)>0) call adv_var(domain%ice3_c%data_3d, domain%advection_dz, options)   
 
     end subroutine advect
 
-    subroutine adv_var(var, dz, jaco, rho, options)
+    subroutine adv_var(var, dz, options)
         implicit none
         real, dimension(ims:ime,kms:kme,jms:jme), intent(inout) :: var
-        real, dimension(ims:ime,kms:kme,jms:jme), intent(in) :: dz, jaco, rho
+        real, dimension(ims:ime,kms:kme,jms:jme), intent(in) :: dz
         type(options_t),intent(in)    :: options
         
         integer :: j, k
@@ -151,11 +130,11 @@ contains
                         temp(:,k,j)  = var(:,k,j) 
                     enddo
                 enddo
-                call adv_std_advect3d(temp,var, dz, jaco,t_factor_in=0.333)
-                call adv_std_advect3d(temp,var, dz, jaco,t_factor_in=0.5)
+                call adv_std_advect3d(temp,var, dz,t_factor_in=0.333)
+                call adv_std_advect3d(temp,var, dz,t_factor_in=0.5)
 
                 !final advection call with tendency-fluxes
-                call adv_fluxcorr_advect3d(temp,var, dz, jaco)
+                call adv_fluxcorr_advect3d(temp,var, dz)
 
                 do j = jms,jme
                     do k = kms,kme
@@ -167,9 +146,9 @@ contains
             endif
         else
             if (options%physics%advection==kADV_STD) then
-                call adv_std_advect3d(var,var, dz, jaco)
-            else if(options%physics%advection==kADV_MPDATA) then                                    
-                call mpdata_advect3d(var, rho, jaco, dz, options)
+                call adv_std_advect3d(var,var, dz)
+            !else if(options%physics%advection==kADV_MPDATA) then                                    
+            !    call mpdata_advect3d(var, rho, jaco, dz, options)
             endif
         endif
     end subroutine adv_var
