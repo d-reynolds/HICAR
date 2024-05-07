@@ -18,7 +18,7 @@ module time_step
     use land_surface,               only : lsm
     use surface_layer,              only : sfc
     use planetary_boundary_layer,   only : pbl
-    use radiation,                  only : rad
+    use radiation,                  only : rad, rad_apply_dtheta
     use wind,                       only : balance_uvw, update_winds, update_wind_dqdt
     use domain_interface,           only : domain_t
     use boundary_interface,         only : boundary_t
@@ -298,10 +298,6 @@ contains
         ! now just loop over internal timesteps computing all physics in order (operator splitting...)
         do while (domain%model_time < end_time .and. .not.(last_loop))
             
-            call send_timer%start()
-            !call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
-            call send_timer%stop()
-
             !Determine dt
             if (last_wind_update >= options%wind%update_dt%seconds()) then
 
@@ -356,11 +352,21 @@ contains
 
                 if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" init", fix=.True.)
 
+                call send_timer%start()
+                call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call send_timer%stop()
+    
                 ! first process the halo section of the domain (currently hard coded at 1 should come from domain?)
                 call rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
                 if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" rad(domain", fix=.True.)
                 call rad_timer%stop()
+
+                call ret_timer%start()
+                call domain%halo%halo_3d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call rad_apply_dtheta(domain, options, real(dt%seconds()))
+                !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call ret_timer%stop()
 
                 call lsm_timer%start()
                 call sfc(domain, options, real(dt%seconds()))!, halo=1)
@@ -389,11 +395,6 @@ contains
                 if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" convect")
 
                 
-                call ret_timer%start()
-                !call domain%halo%halo_3d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
-                call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
-                call ret_timer%stop()
-
 
                 call adv_timer%start()
                 call advect(domain, options, real(dt%seconds()))

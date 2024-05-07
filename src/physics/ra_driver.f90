@@ -590,12 +590,6 @@ contains
             endif
         endif
         
-        !If using the RRTMG scheme, then apply tendencies here. This is now outside of interval loop, so this will be called every phys timestep
-        if (options%physics%radiation==kRA_RRTMG) then
-            domain%potential_temperature%data_3d = domain%potential_temperature%data_3d+domain%tend%th_lwrad*dt+domain%tend%th_swrad*dt
-            domain%temperature%data_3d = domain%potential_temperature%data_3d*domain%exner%data_3d
-            domain%tend_swrad%data_3d = domain%tend%th_swrad
-        endif
         
         !! MJ: note that radiation down scaling works only for simple and rrtmg schemes as they provide the above-topography radiation per horizontal plane
         !! MJ corrected, as calc_solar_elevation has largley understimated the zenith angle in Switzerland
@@ -655,6 +649,24 @@ contains
         endif
     end subroutine rad
     
+    subroutine rad_apply_dtheta(domain, options, dt)
+        implicit none
+
+        type(domain_t), intent(inout) :: domain
+        type(options_t),intent(in)    :: options
+        real,           intent(in)    :: dt
+
+        !If using the RRTMG scheme, then apply tendencies here. 
+        !This is done to allow for the halo exchange to be done before the radiation tendencies are applied
+        !This is now outside of interval loop, so this will be called every phys timestep
+        if (options%physics%radiation==kRA_RRTMG) then
+            domain%potential_temperature%data_3d = domain%potential_temperature%data_3d+domain%tend%th_lwrad*dt+domain%tend%th_swrad*dt
+            domain%temperature%data_3d = domain%potential_temperature%data_3d*domain%exner%data_3d
+            domain%tend_swrad%data_3d = domain%tend%th_swrad
+        endif
+
+    end subroutine rad_apply_dtheta
+
     
 ! DR 2023: Taken from WRF mod_radiation_driver
 !---------------------------------------------------------------------
