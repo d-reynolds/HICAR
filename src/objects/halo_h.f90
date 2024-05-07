@@ -3,6 +3,8 @@ module halo_interface
     use grid_interface,           only : grid_t
     use variable_interface,       only : variable_t
     use variable_dict_interface,  only : var_dict_t
+    use timer_interface,          only : timer_t
+
     use mpi_f08
     implicit none
 
@@ -30,27 +32,31 @@ module halo_interface
         type(MPI_win)     :: east_2d_win
         type(MPI_win)     :: west_2d_win
 
-        type(MPI_Datatype) :: NS_3d_win_halo_type
+        type(MPI_Datatype) :: N_3d_win_halo_type
+        type(MPI_Datatype) :: S_3d_win_halo_type
         type(MPI_Datatype) :: EW_3d_win_halo_type
 
         type(MPI_Datatype) :: NS_2d_win_halo_type
         type(MPI_Datatype) :: EW_2d_win_halo_type
 
+        type(MPI_Group)    :: north_neighbor_grp, south_neighbor_grp, east_neighbor_grp, west_neighbor_grp
+
+        type(MPI_comm) :: neighbor_comm
 #ifdef CRAY_PE
     	real, allocatable :: south_batch_in_3d(:,:,:,:)[:]
     	real, allocatable :: north_batch_in_3d(:,:,:,:)[:]
     	real, allocatable :: west_batch_in_3d(:,:,:,:)[:]
     	real, allocatable :: east_batch_in_3d(:,:,:,:)[:]
 
- 	real, allocatable :: south_batch_in_2d(:,:,:)[:]
- 	real, allocatable :: north_batch_in_2d(:,:,:)[:]
+ 	    real, allocatable :: south_batch_in_2d(:,:,:)[:]
+ 	    real, allocatable :: north_batch_in_2d(:,:,:)[:]
         real, allocatable :: west_batch_in_2d(:,:,:)[:]
-   	real, allocatable :: east_batch_in_2d(:,:,:)[:]
+   	    real, allocatable :: east_batch_in_2d(:,:,:)[:]
 #else
-        real, pointer :: south_batch_in_3d(:,:,:,:)
-        real, pointer :: north_batch_in_3d(:,:,:,:)
-        real, pointer :: west_batch_in_3d(:,:,:,:)
-        real, pointer :: east_batch_in_3d(:,:,:,:)
+        real, contiguous, pointer :: south_batch_in_3d(:,:,:,:)
+        real, contiguous, pointer :: north_batch_in_3d(:,:,:,:)
+        real, contiguous, pointer :: west_batch_in_3d(:,:,:,:)
+        real, contiguous, pointer :: east_batch_in_3d(:,:,:,:)
 
         real, pointer :: south_batch_in_2d(:,:,:)
         real, pointer :: north_batch_in_2d(:,:,:)
@@ -71,7 +77,7 @@ module halo_interface
 #endif
    	 real, allocatable :: north_buffer_3d(:,:,:,:)
    	 real, allocatable :: south_buffer_3d(:,:,:,:)
-    	 real, allocatable :: east_buffer_3d(:,:,:,:)
+     real, allocatable :: east_buffer_3d(:,:,:,:)
    	 real, allocatable :: west_buffer_3d(:,:,:,:)
 
    	  real, allocatable :: north_buffer_2d(:,:,:)
@@ -160,11 +166,13 @@ interface
         logical, optional, intent(in) :: exch_var_only
     end subroutine halo_3d_send_batch
 
-    module subroutine halo_3d_retrieve_batch(this, exch_vars, adv_vars,exch_var_only)
+    module subroutine halo_3d_retrieve_batch(this, exch_vars, adv_vars,exch_var_only, wait_timer)
         implicit none
         class(halo_t), intent(inout) :: this
         class(var_dict_t), intent(inout) :: exch_vars, adv_vars
         logical, optional, intent(in) :: exch_var_only
+        type(timer_t), optional,     intent(inout)   :: wait_timer
+
     end subroutine halo_3d_retrieve_batch
 
     module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)

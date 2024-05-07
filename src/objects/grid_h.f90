@@ -15,6 +15,7 @@ module grid_interface
         integer :: jms, jme
         integer :: kms, kme
         integer :: ns_halo_nx, ew_halo_ny, halo_nz, halo_size
+        integer :: nx_e, ny_e
         integer :: nx_global, ny_global
         integer :: nx, ny, nz
 
@@ -54,11 +55,11 @@ interface
         real,           intent(in), optional :: ratio
     end subroutine
 
-    module subroutine set_grid_dimensions(this, nx, ny, nz, image, global_nz, adv_order, nx_extra, ny_extra)
+    module subroutine set_grid_dimensions(this, nx, ny, nz, image, comms, global_nz, adv_order, nx_extra, ny_extra)
         implicit none
         class(grid_t),   intent(inout) :: this
         integer,         intent(in)    :: nx, ny, nz, image
-
+        type(MPI_Comm), optional,  intent(in)    :: comms
         integer,         intent(in), optional :: global_nz, adv_order, nx_extra, ny_extra
 
     end subroutine
