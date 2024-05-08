@@ -120,12 +120,6 @@ contains
         last_output = options%parameters%start_time
         last_snowslide = 4000
 
-        if (SNTRAN+SNSLID > 0) then
-            call Qs_u_var%initialize(domain%grid2d)
-            call Qs_v_var%initialize(domain%grid2d)
-            call SD_0_var%initialize(domain%grid2d)
-            call Sice_0_var%initialize(domain%grid2d)
-        endif
         !!
         allocate(lat_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(lon_HICAR(Nx_HICAR,Ny_HICAR))
@@ -178,6 +172,14 @@ contains
         allocate(meltflux_out_sum(Nx_HICAR,Ny_HICAR)); meltflux_out_sum=0.   
         !!
         call FSM_SETUP()
+
+        if (SNTRAN+SNSLID > 0) then
+            call Qs_u_var%initialize(domain%grid2d)
+            call Qs_v_var%initialize(domain%grid2d)
+            call SD_0_var%initialize(domain%grid2d)
+            call Sice_0_var%initialize(domain%grid2d)
+        endif
+
         !!        
         !! MJ added this block to read in while we use restart file:
         if (options%parameters%restart) then
@@ -568,14 +570,17 @@ contains
         type(domain_t), intent(inout) :: domain
         real, dimension(Nx_HICAR,Ny_HICAR), intent(inout) :: Qs_u, Qs_v
 
-        Qs_u_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = transpose(Qs_u(2:Nx_HICAR-1,2:Ny_HICAR-1))
-        Qs_v_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = transpose(Qs_v(2:Nx_HICAR-1,2:Ny_HICAR-1))
+        Qs_u_var%data_2d = 0.0
+        Qs_v_var%data_2d = 0.0
+
+        Qs_u_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(Qs_u(2:Nx_HICAR-1,2:Ny_HICAR-1))
+        Qs_v_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(Qs_v(2:Nx_HICAR-1,2:Ny_HICAR-1))
         
         call domain%halo%exch_var(Qs_u_var)
         call domain%halo%exch_var(Qs_v_var)
 
-        Qs_u = transpose(Qs_u_var%data_2d(its:ite,jts:jte))
-        Qs_v = transpose(Qs_v_var%data_2d(its:ite,jts:jte))
+        Qs_u = TRANSPOSE(Qs_u_var%data_2d(its:ite,jts:jte))
+        Qs_v = TRANSPOSE(Qs_v_var%data_2d(its:ite,jts:jte))
 
     end subroutine exch_SNTRAN_Qs
 
@@ -586,16 +591,16 @@ contains
         
         real, dimension(Nx_HICAR,Ny_HICAR), intent(inout) :: SD_0, Sice_0
 
-        SD_0_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = transpose(SD_0(2:Nx_HICAR-1,2:Ny_HICAR-1))
-        Sice_0_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = transpose(Sice_0(2:Nx_HICAR-1,2:Ny_HICAR-1))
+        SD_0_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(SD_0(2:Nx_HICAR-1,2:Ny_HICAR-1))
+        Sice_0_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(Sice_0(2:Nx_HICAR-1,2:Ny_HICAR-1))
         
         call domain%halo%exch_var(SD_0_var)
         call domain%halo%exch_var(Sice_0_var)
         call domain%halo%exch_var(SD_0_var, corners=.True.)
         call domain%halo%exch_var(Sice_0_var, corners=.True.)
 
-        SD_0 = transpose(SD_0_var%data_2d(its:ite,jts:jte))
-        Sice_0 = transpose(Sice_0_var%data_2d(its:ite,jts:jte))
+        SD_0 = TRANSPOSE(SD_0_var%data_2d(its:ite,jts:jte))
+        Sice_0 = TRANSPOSE(Sice_0_var%data_2d(its:ite,jts:jte))
 
 
     end subroutine exch_SLIDE_buffers
