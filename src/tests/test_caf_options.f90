@@ -9,7 +9,7 @@ program test_options
 
     call options%init()
 
-    ! if (this_image()==1) then
+    ! if (STD_OUT_PE) then
     !     print*, this_image(), trim(options%comment)
     !     print*, this_image(), trim(options%parameters%comment)
     ! endif

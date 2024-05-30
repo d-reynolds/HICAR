@@ -16,7 +16,7 @@ program test_caf
     allocate(test[*])
     allocate(test%list2(8))
 
-    if (this_image()==1) then
+    if (STD_OUT_PE) then
         print*, this_image(), num_images()
         test%i=1024
         ! allocate(test%list2(8))
