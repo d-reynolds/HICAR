@@ -807,7 +807,7 @@ $(BUILD)string.o:$(UTIL)string.f90
 
 $(BUILD)array_utilities.o:$(UTIL)array_utilities.f90
 
-$(BUILD)atm_utilities.o:$(UTIL)atm_utilities.f90 $(BUILD)icar_constants.o 	\
+$(BUILD)atm_utilities.o:$(UTIL)atm_utilities.f90 $(BUILD)wrf_constants.o $(BUILD)time_h.o	\
 					$(BUILD)data_structures.o $(BUILD)options_h.o $(BUILD)mp_thompson.o \
 					$(BUILD)opt_types.o
 

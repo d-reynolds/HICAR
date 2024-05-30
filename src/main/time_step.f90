@@ -15,9 +15,9 @@ module time_step
     use advection,                  only : advect
     use mod_atm_utilities,          only : exner_function, compute_ivt, compute_iq
     use convection,                 only : convect
-    use land_surface,               only : lsm
+    use land_surface,               only : lsm, lsm_apply_fluxes
     use surface_layer,              only : sfc
-    use planetary_boundary_layer,   only : pbl
+    use planetary_boundary_layer,   only : pbl, pbl_apply_tend
     use radiation,                  only : rad, rad_apply_dtheta
     use wind,                       only : balance_uvw, update_winds, update_wind_dqdt
     use domain_interface,           only : domain_t
@@ -31,6 +31,8 @@ module time_step
     private
     double precision, parameter  :: DT_BIG = 36000.0
     double precision  :: future_dt_seconds = DT_BIG
+    integer :: max_i, max_j, max_k
+
     public :: step
 
 contains
@@ -64,6 +66,7 @@ contains
         
         ! output value
         real :: dt
+
         ! locals
         real :: three_d_cfl = 0.577350269 ! = sqrt(3)/3
         integer :: i, j, k, zoffset
@@ -73,6 +76,9 @@ contains
 
         maxwind1d = 0
         maxwind3d = 0
+        max_i = 0
+        max_j = 0
+        max_k = 0
 
         if (cfl_strictness==1) then
             ! to ensure we are stable for 1D advection:
@@ -123,6 +129,11 @@ contains
                             current_wind = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
                                                ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
                                                ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(k) ))
+                        endif
+                        if (current_wind > maxwind3d) then
+                            max_i = i
+                            max_j = j
+                            max_k = k
                         endif
                         maxwind3d = max(maxwind3d, current_wind)
                     ENDDO
@@ -213,21 +224,16 @@ contains
     !! @param end_time      the end of the current full time step (when step will return)
     !!
     !!------------------------------------------------------------
-    subroutine update_dt(dt, options, domain, update)
+    subroutine update_dt(dt, options, domain)
         implicit none
         type(time_delta_t), intent(inout) :: dt
         type(options_t),    intent(in)    :: options
         type(domain_t),     intent(in)    :: domain
-        logical, optional,  intent(in)    :: update
 
-        logical :: update_in
         double precision                  :: present_dt_seconds, seconds_out
         ! compute internal timestep dt to maintain stability
         ! courant condition for 3D advection. 
                 
-        update_in = .False.
-        if (present(update)) update_in = update
-        
         ! If this is the first step (future_dt_seconds has not yet been set)
         if (future_dt_seconds == DT_BIG) then
             present_dt_seconds = compute_dt(domain%dx, domain%u%data_3d, domain%v%data_3d, &
@@ -250,6 +256,21 @@ contains
         !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
         call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_DOUBLE, MPI_MIN, domain%compute_comms)
         
+        if (min(present_dt_seconds, future_dt_seconds)==seconds_out) then
+            write(*,*) 'time_step determining i:      ',max_i
+            write(*,*) 'time_step determining j:      ',max_j
+            write(*,*) 'time_step determining k:      ',max_k
+            if (present_dt_seconds<future_dt_seconds) then
+                write(*,*) 'time_step determining w_grid: ',domain%w%dqdt_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining u: ',domain%u%dqdt_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining v: ',domain%v%dqdt_3d(max_i,max_k,max_j)
+            else
+                write(*,*) 'time_step determining w_grid: ',domain%w%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining u: ',domain%u%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining v: ',domain%v%data_3d(max_i,max_k,max_j)
+            endif
+
+        endif
         ! Set dt to the outcome of reduce
         call dt%set(seconds=seconds_out)
         if (STD_OUT_PE) write(*,*) 'time_step: ',dt%seconds()
@@ -354,19 +375,15 @@ contains
 
                 call send_timer%start()
                 call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call domain%halo%halo_2d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+
                 call send_timer%stop()
     
-                ! first process the halo section of the domain (currently hard coded at 1 should come from domain?)
                 call rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
                 if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" rad(domain", fix=.True.)
                 call rad_timer%stop()
 
-                call ret_timer%start()
-                call domain%halo%halo_3d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
-                call rad_apply_dtheta(domain, options, real(dt%seconds()))
-                !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
-                call ret_timer%stop()
 
                 call lsm_timer%start()
                 call sfc(domain, options, real(dt%seconds()))!, halo=1)
@@ -377,6 +394,14 @@ contains
                 call pbl_timer%start()
                 call pbl(domain, options, real(dt%seconds()))!, halo=1)
                 call pbl_timer%stop()
+
+                call ret_timer%start()
+                call domain%halo%halo_3d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call domain%halo%halo_2d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call integrate_physics_tendencies(domain, options, real(dt%seconds()))
+                !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call ret_timer%stop()
+
                 ! balance u/v and re-calculate dt after winds have been modified by pbl:
                 ! if (options%physics%boundarylayer==kPBL_YSU) then
                 !     call balance_uvw(   domain%u%data_3d,   domain%v%data_3d,   domain%w%data_3d,       &
@@ -400,6 +425,8 @@ contains
                 call advect(domain, options, real(dt%seconds()))
                 if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" advect(domain", fix=.True.)
                 call adv_timer%stop()
+
+                
                                 
                 call mp_timer%start()
 
@@ -412,7 +439,6 @@ contains
 
                 !If we are in the last ~10 updates of a time step and a variable drops below 0, we have probably over-shot a value of 0. Force back to 0
                 if ((end_time%seconds() - domain%model_time%seconds()) < (dt%seconds()*10)) then
-
                     call domain%enforce_limits()
                 endif
 
@@ -430,4 +456,19 @@ contains
         if (dt_saver%seconds()>0.0) dt = dt_saver
         
     end subroutine step
+
+
+    subroutine integrate_physics_tendencies(domain, options, dt)
+        implicit none
+        type(domain_t),     intent(inout)   :: domain
+        type(options_t),    intent(in)      :: options
+        real,               intent(in)      :: dt
+
+        call rad_apply_dtheta(domain, options, dt)
+        call lsm_apply_fluxes(domain,options,dt)
+        call pbl_apply_tend(domain,options,dt)
+
+    end subroutine integrate_physics_tendencies
+
+
 end module time_step

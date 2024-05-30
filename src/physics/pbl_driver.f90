@@ -46,7 +46,7 @@ module planetary_boundary_layer
     real, allocatable, dimension(:,:,:) :: tend_u_ugrid, tend_v_vgrid, RTHRATEN
 
     private
-    public :: pbl_var_request, pbl_init, pbl, pbl_finalize
+    public :: pbl_var_request, pbl_init, pbl, pbl_finalize, pbl_apply_tend
 
     integer :: ids, ide, jds, jde, kds, kde,  &
                ims, ime, jms, jme, kms, kme,  &
@@ -218,6 +218,14 @@ contains
         endif
         if (options%physics%boundarylayer==kPBL_YSU) then
 
+            ! Reset tendencies before the next pbl call. (not sure if necessary)
+            domain%tend%qv_pbl    = 0
+            domain%tend%th_pbl    = 0
+            domain%tend%qc_pbl    = 0
+            domain%tend%qi_pbl    = 0
+            domain%tend%u         = 0
+            domain%tend%v         = 0
+
             ! windspd=sqrt(  domain%u_mass%data_3d(ims:ime, 1, jms:jme)**2 +     &
             !             domain%v_mass%data_3d(ims:ime, 1, jms:jme)**2   )
             windspd = sqrt(domain%u_10m%data_2d**2 + domain%v_10m%data_2d**2) ! as it is done in lsm_driver.
@@ -287,34 +295,6 @@ contains
 
                     ! if(STD_OUT_PE .and. options%parameters%debug) write(*,*) "  pbl height/lev is:", maxval(domain%hpbl%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
 
-            !> ------------  add tendency terms  ------------
-            !
-            ! Here the tendency terms that were calculated by the ysu routine are added to the domain-wide fields.
-            ! For u and v, we need to re-balance the uvw fields and re-compute dt after we change them. This is done in the
-            ! step routine in time_step.f90, after the pbl call.
-            !
-            !> -----------------------------------------------
-
-            ! Offset u/v tendencies to u and v grid, then add
-            ! call array_offset_x_3d(domain%tend%u , tend_u_ugrid)
-            ! call array_offset_y_3d(domain%tend%v , tend_v_vgrid)
-
-            ! domain%u%data_3d   =  domain%u%data_3d  +  tend_u_ugrid  * dt_in
-            ! domain%v%data_3d   =  domain%v%data_3d  +  tend_v_vgrid  * dt_in
-
-            ! add mass grid tendencies
-            domain%water_vapor%data_3d            =  domain%water_vapor%data_3d            + domain%tend%qv_pbl  * dt_in
-            domain%cloud_water_mass%data_3d       =  domain%cloud_water_mass%data_3d       + domain%tend%qc_pbl  * dt_in
-            domain%potential_temperature%data_3d  =  domain%potential_temperature%data_3d  + domain%tend%th_pbl  * dt_in
-            domain%cloud_ice_mass%data_3d         =  domain%cloud_ice_mass%data_3d         + domain%tend%qi_pbl  * dt_in
-            
-            ! Reset tendencies before the next pbl call. (not sure if necessary)
-            domain%tend%qv_pbl    = 0
-            domain%tend%th_pbl    = 0
-            domain%tend%qc_pbl    = 0
-            domain%tend%qi_pbl    = 0
-            domain%tend%u         = 0
-            domain%tend%v         = 0
 
 
 
@@ -345,6 +325,37 @@ contains
         endif ! End YSU call
 
     end subroutine pbl
+
+    subroutine pbl_apply_tend(domain,options,dt)
+        implicit none
+        type(domain_t),  intent(inout)  :: domain
+        type(options_t), intent(in)     :: options
+        real,            intent(in)     :: dt
+
+        if (options%physics%boundarylayer==kPBL_YSU) then
+            !> ------------  add tendency terms  ------------
+            !
+            ! Here the tendency terms that were calculated by the ysu routine are added to the domain-wide fields.
+            ! For u and v, we need to re-balance the uvw fields and re-compute dt after we change them. This is done in the
+            ! step routine in time_step.f90, after the pbl call.
+            !
+            !> -----------------------------------------------
+
+            ! Offset u/v tendencies to u and v grid, then add
+            ! call array_offset_x_3d(domain%tend%u , tend_u_ugrid)
+            ! call array_offset_y_3d(domain%tend%v , tend_v_vgrid)
+
+            ! domain%u%data_3d   =  domain%u%data_3d  +  tend_u_ugrid  * dt_in
+            ! domain%v%data_3d   =  domain%v%data_3d  +  tend_v_vgrid  * dt_in
+
+            ! add mass grid tendencies
+            domain%water_vapor%data_3d            =  domain%water_vapor%data_3d            + domain%tend%qv_pbl  * dt
+            domain%cloud_water_mass%data_3d       =  domain%cloud_water_mass%data_3d       + domain%tend%qc_pbl  * dt
+            domain%potential_temperature%data_3d  =  domain%potential_temperature%data_3d  + domain%tend%th_pbl  * dt
+            domain%cloud_ice_mass%data_3d         =  domain%cloud_ice_mass%data_3d         + domain%tend%qi_pbl  * dt
+        endif
+    end subroutine pbl_apply_tend
+
 
     subroutine pbl_finalize(options)
         implicit none

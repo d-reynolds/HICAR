@@ -23,8 +23,7 @@
 !!
 !!----------------------------------------------------------
 module radiation
-    use module_ra_simple, only: ra_simple, ra_simple_init, calc_solar_elevation
-    use module_ra_simple, only: calc_solar_azimuth, calc_solar_elevation_corr !! MJ added
+    use module_ra_simple, only: ra_simple
     use module_ra_rrtmg_lw, only: rrtmg_lwinit, rrtmg_lwrad
     use module_ra_rrtmg_sw, only: rrtmg_swinit, rrtmg_swrad
     use options_interface,  only : options_t
@@ -32,7 +31,7 @@ module radiation
     use data_structures
     use icar_constants, only : kVARS
     use mod_wrf_constants, only : cp, R_d, gravity, DEGRAD, DPD, piconst
-    use mod_atm_utilities, only : cal_cldfra3
+    use mod_atm_utilities, only : cal_cldfra3, calc_solar_elevation
     implicit none
     integer :: update_interval
     real*8  :: last_model_time
@@ -40,7 +39,7 @@ module radiation
 
     !! MJ added to aggregate radiation over output interval
     real, allocatable, dimension(:,:) :: sum_SWdif, sum_SWdir, sum_SW, sum_LW, cos_project_angle, solar_elevation_store, solar_azimuth_store
-    real, allocatable                 :: solar_azimuth(:), solar_elevation(:), day_frac(:)
+    real, allocatable                 :: solar_azimuth(:), solar_elevation(:)
     real*8 :: counter
     real*8  :: Delta_t !! MJ added to detect the time for outputting 
     integer :: ims, ime, jms, jme, kms, kme
@@ -88,7 +87,6 @@ contains
         
         allocate(solar_elevation(ims:ime))
         allocate(solar_azimuth(ims:ime)) !! MJ added
-        allocate(day_frac(ims:ime))
 
 
         if (STD_OUT_PE) write(*,*) "Initializing Radiation"
@@ -98,7 +96,7 @@ contains
         endif
         if (options%physics%radiation==kRA_SIMPLE .or. (options%physics%landsurface>0 .and. options%physics%radiation==0)) then
             if (STD_OUT_PE) write(*,*) "    Simple Radiation"
-            call ra_simple_init(domain, options)
+            !call ra_simple_init(domain)
         endif!! MJ added to detect the time for outputting 
 
         if (options%physics%radiation==kRA_RRTMG) then
@@ -111,9 +109,6 @@ contains
             if (options%physics%microphysics .ne. kMP_THOMP_AER) then
                if (STD_OUT_PE)write(*,*) '    NOTE: When running RRTMG, microphysics option 5 works best.'
             endif
-
-            ! needed to allocate module variables so ra_driver can use calc_solar_elevation
-            call ra_simple_init(domain, options)
 
             call rrtmg_lwinit(                           &
                 p_top=(minval(domain%pressure_interface%data_3d(:,domain%kme+1,:))),     allowed_to_read=.TRUE. ,                &
@@ -249,8 +244,9 @@ contains
             ((domain%model_time%seconds() - last_model_time) >= update_interval)) then
             do j = jms,jme
                !! MJ used corr version, as other does not work in Erupe
-                solar_elevation  = calc_solar_elevation_corr(date=domain%model_time, lon=domain%longitude%data_2d, &
-                                j=j, ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite,day_frac=day_frac, solar_azimuth=solar_azimuth)
+                solar_elevation  = calc_solar_elevation(date=domain%model_time, tzone=options%rad_options%tzone, &
+                    lon=domain%longitude%data_2d, lat=domain%latitude%data_2d, j=j, &
+                    ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite, solar_azimuth=solar_azimuth)
                 domain%cosine_zenith_angle%data_2d(its:ite,j)=sin(solar_elevation(its:ite))
                 
                 !If we are doing terrain shading, we will need these later!

@@ -328,7 +328,7 @@ contains
                         
         !Call Snowtran here -- must be done here and not in FSM since we need control over the parallelization of the routine
         if (SNTRAN > 0) then        
-            call exch_FSM_state_vars(domain)
+            !call exch_FSM_state_vars(domain)
             
             call FSM_SNOWTRAN_SETUP()
             
@@ -370,63 +370,64 @@ contains
             call FSM_SNOWTRAN_SUSP_END()
             !------------------------END SUSPENSION------------------------
 
-            !Accumulate all the fluxes calculated above
-            call FSM_SNOWTRAN_ACCUM()
         endif
 
         
         !Call Snowslide here -- must be done here and not in FSM since we need control over the parallelization of the routine
         if (do_snowslide .and. SNSLID > 0) then
-            SD_0 = 0.0
-            Sice_0 = 0.0
-            SD_0_buff = 0.0
-            Sice_0_buff = 0.0
 
-            dm_slide_ = 0.0
-            first_SLIDE = .True.
-            aval = .False.
-            !Snowslide needs the corner snow depth information from corner neighbor processes
-            call exch_FSM_state_vars(domain,corners_in=.True.)
-            
-            do i=1,10
-                call FSM_SNOWSLIDE(SD_0,Sice_0,SD_0_buff,Sice_0_buff,aval,first_SLIDE,dm_slide_)
-                
-                ! Copy interior buffer for exchange
-                call exch_SLIDE_buffers(domain,SD_0_buff,Sice_0_buff)
-                
-                !Now, where the buffer is positive for halo cells, record that an avalanche was passed here
-                aval = .False.
-                where(SD_0_buff > SD_0) aval=.True.
-                aval(j_s:j_e,i_s:i_e) = .False.
-                
-                !Must accumulate slide changes here, since we will loop over calls to snowslide
-                domain%dm_slide%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = &
-                        domain%dm_slide%data_2d(domain%its:domain%ite,domain%jts:domain%jte) + TRANSPOSE(dm_slide_(j_s:j_e,i_s:i_e))
-
-                ! trade over buffer to halo cells, in case avalanching snow was passed on previous iteration.
-                SD_0(1,:) = SD_0_buff(1,:)
-                SD_0(Nx_HICAR,:) = SD_0_buff(Nx_HICAR,:)
-                SD_0(:,1) = SD_0_buff(:,1)
-                SD_0(:,Ny_HICAR) = SD_0_buff(:,Ny_HICAR)
-
-                Sice_0(1,:) = Sice_0_buff(1,:)
-                Sice_0(Nx_HICAR,:) = Sice_0_buff(Nx_HICAR,:)
-                Sice_0(:,1) = Sice_0_buff(:,1)
-                Sice_0(:,Ny_HICAR) = Sice_0_buff(:,Ny_HICAR)
-
-
-            enddo
-            call FSM_SNOWSLIDE_END(SD_0,Sice_0)
-            last_snowslide = 0
-        endif
-        
-        
-        if (SNSLID > 0) then
             last_snowslide = last_snowslide + lsm_dt
+
+            if (do_snowslide) then
+                SD_0 = 0.0
+                Sice_0 = 0.0
+                SD_0_buff = 0.0
+                Sice_0_buff = 0.0
+
+                dm_slide_ = 0.0
+                first_SLIDE = .True.
+                aval = .False.
+                !Snowslide needs the corner snow depth information from corner neighbor processes
+                !call exch_FSM_state_vars(domain,corners_in=.True.)
+                
+                do i=1,10
+                    call FSM_SNOWSLIDE(SD_0,Sice_0,SD_0_buff,Sice_0_buff,aval,first_SLIDE,dm_slide_)
+                    
+                    ! Copy interior buffer for exchange
+                    call exch_SLIDE_buffers(domain,SD_0_buff,Sice_0_buff)
+                    
+                    !Now, where the buffer is positive for halo cells, record that an avalanche was passed here
+                    aval = .False.
+                    where(SD_0_buff > SD_0) aval=.True.
+                    aval(j_s:j_e,i_s:i_e) = .False.
+                    
+                    !Must accumulate slide changes here, since we will loop over calls to snowslide
+                    domain%dm_slide%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = &
+                            domain%dm_slide%data_2d(domain%its:domain%ite,domain%jts:domain%jte) + TRANSPOSE(dm_slide_(j_s:j_e,i_s:i_e))
+
+                    ! trade over buffer to halo cells, in case avalanching snow was passed on previous iteration.
+                    SD_0(1,:) = SD_0_buff(1,:)
+                    SD_0(Nx_HICAR,:) = SD_0_buff(Nx_HICAR,:)
+                    SD_0(:,1) = SD_0_buff(:,1)
+                    SD_0(:,Ny_HICAR) = SD_0_buff(:,Ny_HICAR)
+
+                    Sice_0(1,:) = Sice_0_buff(1,:)
+                    Sice_0(Nx_HICAR,:) = Sice_0_buff(Nx_HICAR,:)
+                    Sice_0(:,1) = Sice_0_buff(:,1)
+                    Sice_0(:,Ny_HICAR) = Sice_0_buff(:,Ny_HICAR)
+
+
+                enddo
+                call FSM_SNOWSLIDE_END(SD_0,Sice_0)
+                last_snowslide = 0
+            endif
         endif
+        
+        !Accumulate all the SNTRAN fluxes calculated above
+        ! Do this here so that the grid and halo are still consistent for SNSLID if it is called
+        if (SNTRAN > 0) call FSM_SNOWTRAN_ACCUM()
 
         !The End.
-        if ( (SNTRAN > 0) .or. do_snowslide) call exch_FSM_state_vars(domain)
         call FSM_CUMULATE_SD()
         
         !! giving feedback to HICAR -- should only be done for snow-covered cells, or cells which were just snowed on
@@ -545,8 +546,15 @@ contains
             domain%Ds%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Ds(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
         enddo
 
-        call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.True.)
-        call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.False.,exch_var_only=.True.)      
+        call domain%halo%exch_var(domain%fsnow)
+        call domain%halo%exch_var(domain%Nsnow)
+        call domain%halo%exch_var(domain%snow_temperature)
+        call domain%halo%exch_var(domain%Sice)
+        call domain%halo%exch_var(domain%Sliq)
+        call domain%halo%exch_var(domain%Ds)
+
+        !call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.True.)
+        !call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.False.,exch_var_only=.True.)      
 
         if (corners) call domain%halo%exch_var(domain%Ds,corners=corners)
         if (corners) call domain%halo%exch_var(domain%fsnow,corners=corners)

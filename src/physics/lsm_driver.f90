@@ -39,13 +39,12 @@ module land_surface
     ! use module_lsm_simple,   only : lsm_simple, lsm_simple_init
     use module_water_simple, only : water_simple
     use module_water_lake,   only : lake, lakeini, nlevsoil, nlevsnow, nlevlake
-    use mod_atm_utilities,   only : sat_mr, calc_Richardson_nr
+    use mod_atm_utilities,   only : sat_mr, calc_Richardson_nr, calc_solar_elevation
     use time_object,         only : Time_type
     use data_structures
     use icar_constants,      only : kVARS, kLSM_SIMPLE, kLSM_NOAH, kLSM_NOAHMP, kPBL_DIAGNOSTIC, kSM_FSM
     use options_interface,   only : options_t
     use domain_interface,    only : domain_t
-    use module_ra_simple,    only : calc_solar_elevation_corr
     use ieee_arithmetic
     use mod_wrf_constants,   only : gravity, KARMAN, cp, R_d, XLV, rcp, STBOLT, epsilon
     use module_sf_FSMdrv,   only : sm_FSM_init, sm_FSM
@@ -53,7 +52,7 @@ module land_surface
     implicit none
 
     private
-    public :: lsm_init, lsm, lsm_var_request
+    public :: lsm_init, lsm, lsm_var_request, lsm_apply_fluxes
 
     ! Noah LSM required variables.  Some of these should be stored in domain, but tested here for now
     integer :: ids,ide,jds,jde,kds,kde ! Domain dimensions
@@ -497,60 +496,57 @@ contains
     end subroutine surface_diagnostics_FSM
         
 
-    subroutine apply_fluxes(domain,dt)
+    subroutine lsm_apply_fluxes(domain,options,dt)
         ! add sensible and latent heat fluxes to the first atm level
         implicit none
         type(domain_t), intent(inout) :: domain
+        type(options_t), intent(in)   :: options
         real, intent(in) :: dt
         integer :: i,j,k
         integer, SAVE :: nz = 0
 
-        !if (nz==0) then
-        !    layer_fraction = 0
-        !    do k=kts, kte
-        !        layer_fraction = maxval(domain%dz_interface%data_3d(:,k,:)) + layer_fraction
-        !        if (layer_fraction < sfc_layer_thickness) nz=k
-        !    end do
-        !end if
+        ! PBL scheme should handle the distribution of sensible and latent heat fluxes. If we are
+        ! running the LSM without a PBL scheme, as may be done for High-resolution runs, then 
+        ! run apply fluxes to still apply heat fluxes calculated by LSM
+        if ( (options%physics%landsurface>0 .or. options%physics%watersurface>0 ) .and. (options%physics%boundarylayer==0)) then
+            associate(density       => domain%density%data_3d,             &
+                    sensible_heat => domain%sensible_heat%data_2d,           &
+                    latent_heat   => domain%latent_heat%data_2d,             &
+                    dz            => domain%dz_interface%data_3d,        &
+                    pii           => domain%exner%data_3d,               &
+                    th            => domain%potential_temperature%data_3d, &
+                    qv            => domain%water_vapor%data_3d          &
+                )
 
-        associate(density       => domain%density%data_3d,             &
-                  sensible_heat => domain%sensible_heat%data_2d,           &
-                  latent_heat   => domain%latent_heat%data_2d,             &
-                  dz            => domain%dz_interface%data_3d,        &
-                  pii           => domain%exner%data_3d,               &
-                  th            => domain%potential_temperature%data_3d, &
-                  qv            => domain%water_vapor%data_3d          &
-            )
+            do j = jts, jte
+            do k = kts, kts + nz
+            do i = its, ite
 
-        do j = jts, jte
-        do k = kts, kts + nz
-        do i = its, ite
+                ! convert sensible heat flux to a temperature delta term
+                ! (J/(s*m^2) * s / (J/(kg*K)) => kg*K/m^2) ... /((kg/m^3) * m) => K
+                dTemp(i,j) = (sensible_heat(i,j) * dt/cp)  &
+                        / (density(i,k,j))
+                ! add temperature delta converted back to potential temperature
+                th(i,k,j) = th(i,k,j) + (dTemp(i,j) / pii(i,k,j))
 
-            ! convert sensible heat flux to a temperature delta term
-            ! (J/(s*m^2) * s / (J/(kg*K)) => kg*K/m^2) ... /((kg/m^3) * m) => K
-            dTemp(i,j) = (sensible_heat(i,j) * dt/cp)  &
-                     / (density(i,k,j))
-            ! add temperature delta converted back to potential temperature
-            th(i,k,j) = th(i,k,j) + (dTemp(i,j) / pii(i,k,j))
+                ! convert latent heat flux to a mixing ratio tendancy term
+                ! (J/(s*m^2) * s / (J/kg) => kg/m^2) ... / (kg/m^3 * m) => kg/kg
+                lhdQV(i,j) = (latent_heat(i,j) / XLV * dt) &
+                        / (density(i,k,j))
+                ! add water vapor in kg/kg
+                qv(i,k,j) = qv(i,k,j) + lhdQV(i,j)
 
-            ! convert latent heat flux to a mixing ratio tendancy term
-            ! (J/(s*m^2) * s / (J/kg) => kg/m^2) ... / (kg/m^3 * m) => kg/kg
-            lhdQV(i,j) = (latent_heat(i,j) / XLV * dt) &
-                    / (density(i,k,j))
-            ! add water vapor in kg/kg
-            qv(i,k,j) = qv(i,k,j) + lhdQV(i,j)
+            end do ! i
+            end do ! k
+            end do ! j
 
-        end do ! i
-        end do ! k
-        end do ! j
+            ! write(*,*) MINVAL(lhdQV), MAXVAL(lhdQV), 'kg/kg (min/max) added to QV at', domain%model_time%hour
 
-        ! write(*,*) MINVAL(lhdQV), MAXVAL(lhdQV), 'kg/kg (min/max) added to QV at', domain%model_time%hour
-
-        ! enforce some minimum water vapor content... just in case
-        where(qv < SMALL_QV) qv = SMALL_QV
-        end associate
-
-    end subroutine apply_fluxes
+            ! enforce some minimum water vapor content... just in case
+            where(qv < SMALL_QV) qv = SMALL_QV
+            end associate
+        endif
+    end subroutine lsm_apply_fluxes
 
     subroutine allocate_noah_data(num_soil_layers)
         implicit none
@@ -1446,12 +1442,9 @@ contains
 
 
                 do j = jms,jme
-                    !! MJ commented as it does not work in Erupe
-                    !solar_elevation  = calc_solar_elevation(date=domain%model_time, lon=domain%longitude%data_2d, &
-                    !                j=j, ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite,day_frac=day_frac)
-
-                    solar_elevation  = calc_solar_elevation_corr(date=domain%model_time, lon=domain%longitude%data_2d, &
-                                     j=j, ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite,day_frac=day_frac)
+                    solar_elevation  = calc_solar_elevation(date=domain%model_time, tzone=options%rad_options%tzone, &
+                        lon=domain%longitude%data_2d, lat=domain%latitude%data_2d, j=j, &
+                        ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite)
                     domain%cosine_zenith_angle%data_2d(ims:ime,j)=sin(solar_elevation(ims:ime))
                 enddo
 
@@ -1711,12 +1704,6 @@ contains
             !!
         endif
         
-        ! PBL scheme should handle the distribution of sensible and latent heat fluxes. If we are
-        ! running the LSM without a PBL scheme, as may be done for High-resolution runs, then 
-        ! run apply fluxes to still apply heat fluxes calculated by LSM
-        if ( (options%physics%landsurface>0 .or. options%physics%watersurface>0 ) .and. (options%physics%boundarylayer==0)) then
-            call apply_fluxes(domain, dt)
-        endif
 
     end subroutine lsm
 end module land_surface
