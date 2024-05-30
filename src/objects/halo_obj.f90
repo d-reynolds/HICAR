@@ -392,14 +392,14 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
     n_2d = (adv_vars%n_vars+exch_vars%n_vars)-n_3d
 
 #ifdef CRAY_PE
-    allocate(this%north_batch_in_3d(n_3d,1:(this%grid%ns_halo_nx+this%halo_size*2),&
+    allocate(this%north_batch_in_3d(n_3d,1:(this%grid%ns_halo_nx+2),&
                     this%kms:this%kme,1:this%halo_size)[*])
-    allocate(this%south_batch_in_3d(n_3d,1:(this%grid%ns_halo_nx+this%halo_size*2),&
+    allocate(this%south_batch_in_3d(n_3d,1:(this%grid%ns_halo_nx+2),&
                     this%kms:this%kme,1:this%halo_size)[*])
     allocate(this%east_batch_in_3d(n_3d,1:this%halo_size,&
-                    this%kms:this%kme,1:(this%grid%ew_halo_ny+this%halo_size*2))[*])
+                    this%kms:this%kme,1:(this%grid%ew_halo_ny+2))[*])
     allocate(this%west_batch_in_3d(n_3d,1:this%halo_size,&
-                    this%kms:this%kme,1:(this%grid%ew_halo_ny+this%halo_size*2))[*])
+                    this%kms:this%kme,1:(this%grid%ew_halo_ny+2))[*])
 
 #else
     if (.not.(comms == MPI_COMM_NULL)) then
@@ -461,14 +461,14 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
     ! If no 2D vars present, don't allocate arrays (nothing should be calling exch 2D then)
     if (n_2d > 0) then
 #ifdef CRAY_PE
-        allocate(this%north_batch_in_2d(n_2d,1:(this%grid%ns_halo_nx+this%halo_size*2),1:this%halo_size)[*])
-        allocate(this%south_batch_in_2d(n_2d,1:(this%grid%ns_halo_nx+this%halo_size*2),1:this%halo_size)[*])
-        allocate(this%east_batch_in_2d(n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+this%halo_size*2))[*])
-        allocate(this%west_batch_in_2d(n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+this%halo_size*2))[*])
+        allocate(this%north_batch_in_2d(n_2d,1:(this%grid%ns_halo_nx+2),1:this%halo_size)[*])
+        allocate(this%south_batch_in_2d(n_2d,1:(this%grid%ns_halo_nx+2),1:this%halo_size)[*])
+        allocate(this%east_batch_in_2d(n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+2))[*])
+        allocate(this%west_batch_in_2d(n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+2))[*])
 #else
         if (.not.(comms == MPI_COMM_NULL)) then
 
-            nx = this%grid%ns_halo_nx+this%halo_size*2
+            nx = this%grid%ns_halo_nx+2
             ny = this%halo_size
             win_size = nx*ny*n_2d
             call MPI_Type_contiguous(nx*ny*n_2d, MPI_REAL, this%NS_2d_win_halo_type)
@@ -483,7 +483,7 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             this%south_batch_in_2d = 1
 
             nx = this%halo_size
-            ny = this%grid%ew_halo_ny+this%halo_size*2
+            ny = this%grid%ew_halo_ny+2
             win_size = nx*ny*n_2d
             call MPI_Type_contiguous(nx*ny*n_2d, MPI_REAL, this%EW_2d_win_halo_type)
             call MPI_Type_commit(this%EW_2d_win_halo_type)
@@ -503,10 +503,10 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
         endif
 #endif
 
-        if (.not.(this%north_boundary)) allocate(this%north_buffer_2d(n_2d,1:(this%grid%ns_halo_nx+this%halo_size*2),1:this%halo_size))
-        if (.not.(this%south_boundary)) allocate(this%south_buffer_2d(n_2d,1:(this%grid%ns_halo_nx+this%halo_size*2),1:this%halo_size))
-        if (.not.(this%east_boundary)) allocate(this%east_buffer_2d(n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+this%halo_size*2)))
-        if (.not.(this%west_boundary)) allocate(this%west_buffer_2d(n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+this%halo_size*2)))
+        if (.not.(this%north_boundary)) allocate(this%north_buffer_2d(n_2d,1:(this%grid%ns_halo_nx+2),1:this%halo_size))
+        if (.not.(this%south_boundary)) allocate(this%south_buffer_2d(n_2d,1:(this%grid%ns_halo_nx+2),1:this%halo_size))
+        if (.not.(this%east_boundary)) allocate(this%east_buffer_2d(n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+2)))
+        if (.not.(this%west_boundary)) allocate(this%west_buffer_2d(n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+2)))
     endif
 
 end subroutine setup_batch_exch
@@ -735,8 +735,8 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)
         this%south_batch_in_2d(:,:,:)[this%north_neighbor] = this%north_buffer_2d(:,:,:)
 #else
         call MPI_Win_Start(this%north_neighbor_grp,0,this%south_2d_win)
-        call MPI_Put(this%north_buffer_2d(:,:,:), msg_size, &
-            this%NS_2d_win_halo_type, this%north_neighbor, disp, msg_size, this%NS_2d_win_halo_type, this%south_2d_win)
+        call MPI_Put(this%north_buffer_2d, size(this%north_buffer_2d), &
+            MPI_REAL, this%north_neighbor, disp, size(this%north_buffer_2d), MPI_REAL, this%south_2d_win)
         call MPI_Win_Complete(this%south_2d_win)
 #endif
     endif
@@ -746,8 +746,8 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)
         this%north_batch_in_2d(:,:,:)[this%south_neighbor] = this%south_buffer_2d(:,:,:)
 #else
         call MPI_Win_Start(this%south_neighbor_grp,0,this%north_2d_win)
-        call MPI_Put(this%south_buffer_2d(:,:,:), msg_size, &
-            this%NS_2d_win_halo_type, this%south_neighbor, disp, msg_size, this%NS_2d_win_halo_type, this%north_2d_win)
+        call MPI_Put(this%south_buffer_2d, size(this%south_buffer_2d), &
+            MPI_REAL, this%south_neighbor, disp, size(this%south_buffer_2d), MPI_REAL, this%north_2d_win)
         call MPI_Win_Complete(this%north_2d_win)
 #endif        
     endif
@@ -757,8 +757,8 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)
         this%west_batch_in_2d(:,:,:)[this%east_neighbor] = this%east_buffer_2d(:,:,:)
 #else
         call MPI_Win_Start(this%east_neighbor_grp,0,this%west_2d_win)
-        call MPI_Put(this%east_buffer_2d(:,:,:), msg_size, &
-            this%EW_2d_win_halo_type, this%east_neighbor, disp, msg_size, this%EW_2d_win_halo_type, this%west_2d_win)
+        call MPI_Put(this%east_buffer_2d, size(this%east_buffer_2d), &
+            MPI_REAL, this%east_neighbor, disp, size(this%east_buffer_2d), MPI_REAL, this%west_2d_win)
         call MPI_Win_Complete(this%west_2d_win)
 #endif  
     endif
@@ -768,8 +768,8 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)
         this%east_batch_in_2d(:,:,:)[this%west_neighbor] = this%west_buffer_2d(:,:,:)
 #else
         call MPI_Win_Start(this%west_neighbor_grp,0,this%east_2d_win)
-        call MPI_Put(this%west_buffer_2d(:,:,:), msg_size, &
-            this%EW_2d_win_halo_type, this%west_neighbor, disp, msg_size, this%EW_2d_win_halo_type, this%east_2d_win)
+        call MPI_Put(this%west_buffer_2d, size(this%west_buffer_2d), &
+            MPI_REAL, this%west_neighbor, disp, size(this%west_buffer_2d), MPI_REAL, this%east_2d_win)
         call MPI_Win_Complete(this%east_2d_win)
 #endif        
     endif
@@ -819,28 +819,31 @@ end subroutine halo_2d_retrieve_batch
 !! Send and get the data from all exch+adv objects to/from their neighbors (3D)
 !!
 !! -------------------------------
-module subroutine batch_exch(this, exch_vars, adv_vars, two_d, exch_var_only)
+module subroutine batch_exch(this, exch_vars, adv_vars, two_d, three_d, exch_var_only)
     class(halo_t), intent(inout) :: this
     class(var_dict_t), intent(inout) :: exch_vars, adv_vars
-    logical, optional, intent(in) :: two_d,exch_var_only
+    logical, optional, intent(in) :: two_d,three_d,exch_var_only
     
-    logical :: twod, exch_only
+    logical :: twod, threed, exch_only
     
     exch_only = .False.
     if (present(exch_var_only)) exch_only = exch_var_only
 
     twod = .False.
     if(present(two_d)) twod = two_d
+    threed = .True.
+    if(present(three_d)) threed = three_d
 
     if (twod) then
         call this%halo_2d_send_batch(exch_vars, adv_vars)
 
         call this%halo_2d_retrieve_batch(exch_vars, adv_vars)
-    else
+    endif
+    if (threed) then
         call this%halo_3d_send_batch(exch_vars, adv_vars, exch_var_only=exch_only)
 
         call this%halo_3d_retrieve_batch(exch_vars, adv_vars, exch_var_only=exch_only)
-     endif
+    endif
 
 end subroutine
 

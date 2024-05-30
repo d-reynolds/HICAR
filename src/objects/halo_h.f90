@@ -152,11 +152,11 @@ interface
     end subroutine exch_var
 
 
-    module subroutine batch_exch(this, exch_vars, adv_vars, two_d, exch_var_only)
+    module subroutine batch_exch(this, exch_vars, adv_vars, two_d, three_d, exch_var_only)
         implicit none
         class(halo_t), intent(inout) :: this
         class(var_dict_t), intent(inout) :: exch_vars, adv_vars
-        logical, optional, intent(in) :: two_d,exch_var_only
+        logical, optional, intent(in) :: two_d,three_d,exch_var_only
     end subroutine
 
     module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
