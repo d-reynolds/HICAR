@@ -68,6 +68,7 @@ contains
         
         PetscErrorCode ierr
         KSP            ksp
+        PC             pc
         DM             da
         Vec            x, localX
         PetscInt       one, x_size
@@ -93,8 +94,11 @@ contains
         conv_tol = 1e-4
 
         !call KSPSetTolerances(ksp,conv_tol,PETSC_DEFAULT_REAL,PETSC_DEFAULT_REAL,PETSC_DEFAULT_INTEGER,ierr)
-        call KSPSetType(ksp,KSPBCGS,ierr);
-        
+        call KSPSetType(ksp,KSPIBCGS,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
+                                              ! KSPPIPEBCGS <--- Could be faster, but needs to be tested...
+        !call KSPGetPC(ksp,pc, ierr)
+        !call PCSetType(pc,PCSOR, ierr)
+
         call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
                           xl, PETSC_NULL_INTEGER,yl,da,ierr)
