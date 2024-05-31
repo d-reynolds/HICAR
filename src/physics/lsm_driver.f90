@@ -47,8 +47,9 @@ module land_surface
     use domain_interface,    only : domain_t
     use ieee_arithmetic
     use mod_wrf_constants,   only : gravity, KARMAN, cp, R_d, XLV, rcp, STBOLT, epsilon
+#ifdef FSM
     use module_sf_FSMdrv,   only : sm_FSM_init, sm_FSM
-
+#endif
     implicit none
 
     private
@@ -1084,6 +1085,7 @@ contains
         endif
 
         if (options%physics%snowmodel == kSM_FSM) then
+#ifdef FSM
             if (STD_OUT_PE) write(*,*) "    SnowModel: FSM2"
             call sm_FSM_init(domain,options)
             
@@ -1098,8 +1100,13 @@ contains
             !allocate(Zs(num_soil_layers))
             !allocate(DZs(num_soil_layers))
             !!
+#else
+            if (STD_OUT_PE) write(*,*) "    User asked to use FSM, but it is not compiled in this version of ICAR"
+            if (STD_OUT_PE) write(*,*) "    Please de-select FSM in the namelist, or recompile ICAR with the FSM library linked"
+            stop "FSM not compiled in this version of ICAR"
+#endif
         endif
-        
+
         ! defines the height of the middle of the first model level
         z_atm = domain%z%data_3d(:,kts,:) - domain%terrain%data_2d
 
@@ -1655,7 +1662,9 @@ contains
                 !!
                 domain%windspd_10m%data_2d(its:ite,jts:jte)=windspd(its:ite,jts:jte)
                 !!
+#ifdef FSM
                 call sm_FSM(domain,options,lsm_dt,current_rain,current_snow,windspd)
+#endif
                 !!
                 
                 !do i = 1, num_soil_layers              ! soil

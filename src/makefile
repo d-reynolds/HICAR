@@ -11,12 +11,9 @@
 #			doc: 		make doxygen documentation in docs/html (requires doxygen)
 #
 # Optional setting:
-#	MODE =	fast:		Enables additional optimizations that are likely to break something
-# 			profile:	Enables profileing
+#	MODE =	profile:	Enables profileing
 # 			debug:		Minimal debug options enabled, still optimized
-# 			debugomp:	same as debug, but OpenMP is enabled
 # 			debugslow:	Optimization curtailed, highly instrumented for debugging
-# 			debugompslow: same as debugslow by OpenMP is enabled
 #
 # Note: adding -jn will parallelize the compile itself over n processors
 #
@@ -24,18 +21,24 @@
 #	make clean; make install MODE=debugompslow -j4
 #
 ###################################################################
-# Variables that need to be set by the user:
+# Variables that need to be set by the user, if not already set in the environment:
+# If running on a HPC cluster, check if any of the dependencies are available as modules first
 #
+# FC         : fortran compiler to use, default = gfortran
 # INSTALLDIR : default = ~/bin/
 # FFTW       : location of fftw installation    default = $home/usr/local
 # LIBNETCDF	 : location of netdcdf libraries	default = compiler/machine dependant /usr/local/lib
 # INCNETCDF	 : location of netcdf headers		default = compiler/machine dependant /usr/local/include
+# PETSC_DIR	 : location of PETSc installation	default = $home/usr/local
 #
+
 # Dependencies: fftw (v3), netcdf (v4)
 #	FFTW is available here: http://www.fftw.org/
 #		FFTW is a C library with fortran headers
 #	netcdf is available here: http://www.unidata.ucar.edu/software/netcdf/
 #		NB Requires the same compiler be used to compile the Fortran interface as is used to compile ICAR
+#	PETSc is available here: https://petsc.org/release/install/
+#		PETSc is a scientific library that is used for solving matrix equations
 
 ###################################################################
 #  Specify where you want the resulting executable installed
@@ -55,6 +58,11 @@ CONST=constants/
 OBJECTS=objects/
 TESTS=tests/
 
+NODENAME := $(shell uname -n)
+
+# get GIT version info
+GIT_VERSION := $(shell git describe --long --dirty --all --always | sed -e's/heads\///')
+
 ###################################################################
 #	Various compiler specific flags, may need to edit
 ###################################################################
@@ -73,18 +81,42 @@ CP=/bin/cp
 # doxygen only required to enable "make doc"
 DOXYGEN=doxygen
 
-ifndef FC
-	FC=gfortran
-endif
-ifndef F90
-	F90=${FC}
+#ifndef FC
+#	FC=gfortran
+#endif
+
+ifeq ($(PE_ENV),GNU)
+	COMPILER=gnu
 endif
 
 ifeq ($(PE_ENV),CRAY)
 	FC=ftn
-	F90=ftn
+	COMPILER=cray
 	ECHO_MOVE=/bin/mv
 endif
+
+LINKER=$(FC)
+
+########################################################################################
+# Try to guess the compiler options suite if not set
+########################################################################################
+ifndef COMPILER
+	find_gfortran=$(findstring gfortran, $(filter gfortran%,$(FC)))
+	ifeq (gfortran, $(find_gfortran))
+			COMPILER=gnu
+	endif
+	ifeq ($(FC),ifort)
+		COMPILER=intel
+	endif
+	ifeq ($(FC),ftn)
+		COMPILER=cray
+	endif
+endif
+
+########################################################################################
+# Now we will try to guess where some dependencies might be located,
+# if they are not found in the environment variables
+########################################################################################
 
 ifndef FFTW
 		FFTW=/usr/local
@@ -106,15 +138,14 @@ endif
 NCDF_PATH = ${NETCDF}
 LIBNETCDF = -L$(NCDF_PATH)/lib -lnetcdff -lnetcdf
 INCNETCDF = -I$(NCDF_PATH)/include
+ifdef NETCDFF
+       LIBNETCDF += -L$(NETCDFF)/lib
+       INCNETCDF += -I$(NETCDFF)/include
+endif
 
 ifdef PETSC_DIR
 	PETSC=$(PETSC_DIR)
 	include $(PETSC)/lib/petsc/conf/variables
-endif
-
-ifdef NETCDFF
-       LIBNETCDF += -L$(NETCDFF)/lib
-       INCNETCDF += -I$(NETCDFF)/include
 endif
 
 USE_ASSERTIONS:=.false.
@@ -123,11 +154,8 @@ ifeq ($(ASSERTIONS),)
   USE_ASSERTIONS:=.true.
 endif
 
-
-##################################
 LIBFSM=
 INFSM=
-
 ifdef FSM_DIR
 	LIBFSM= -L$(FSM_DIR)/lib/FSM_interface -lFSM_interface
 	INFSM=-I$(FSM_DIR)/include/FSM_interface/build
@@ -138,26 +166,6 @@ endif
 #IN_MPI_FFF=-I/usr/lib/x86_64-linux-gnu/openmpi/include -pthread -I/usr/lib/x86_64-linux-gnu/openmpi/lib
 #LIB_MPI_FFF=-L/usr/lib/x86_64-linux-gnu/openmpi/lib -lmpi_usempif08 -lmpi_usempi_ignore_tkr -lmpi_mpifh -lmpi
 
-########################################################################################
-# Try to find the machine information
-########################################################################################
-NODENAME := $(shell uname -n)
-
-ifndef COMPILER
-        find_gfortran=$(findstring gfortran, $(filter gfortran%,$(F90)))
-        ifeq (gfortran, $(find_gfortran))
-                COMPILER=gnu
-        endif
-	ifeq ($(F90),ifort)
-		COMPILER=intel
-	endif
-	ifeq ($(F90),ftn)
-		COMPILER=cray
-	endif
-endif
-
-# get GIT version info
-GIT_VERSION := $(shell git describe --long --dirty --all --always | sed -e's/heads\///')
 
 ########################################################################################
 #
@@ -168,35 +176,11 @@ GIT_VERSION := $(shell git describe --long --dirty --all --always | sed -e's/hea
 
 # GNU fortran
 ifeq ($(COMPILER), gnu)
-	# to enable OpenMP use this line... OpenMP seems to hang with more than 1 thread, probably an OpenCoarrays (v1.9.1) issue with not supporting threading
-	# COMP=-fopenmp -lgomp -O2 -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens # -ffast-math #-flto #
-	# LINK=-fopenmp -lgomp
 	COMP= -fopenmp -lgomp -O2 -mfma -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens #-fcheck=all -Wall  # -ffast-math #-flto #
 	LINK= -fopenmp -lgomp
 	PREPROC=-cpp
 	MODOUTPUT=-J $(BUILD)
 endif
-
-# GNU fortran using OpenSHMEM instead of MPI... experimental
-# Currently works with gcc 6.3 MPT 2.15f and a special version of opencoarrays 1.8.5 compiled in the library directory below
-ifeq ($(COMPILER),oshfort)
-  F90=oshfort
-  FC=$F90
-  # link := $(compile)
-  OSH_FLAGS := -fcoarray=lib -L/glade/u/home/gutmann/usr/local/opencoarrays/openshmem/ -lcaf_openshmem
-  COMP= -O2 -mfma -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens $(OSH_FLAGS) # -ffast-math #-flto #
-  LINK= $(OSH_FLAGS)
-  PREPROC=-cpp
-  MODOUTPUT=-J $(BUILD)
-  # opt := -fcheck=all -Wall -fbacktrace -g -cpp -DUSE_ASSERTIONS=$(USE_ASSERTIONS) -DDEBUG_OUTPUT=$(DEBUG_OUTPUT) -J $(BUILD)/ $(OSH_FLAGS)
-  # link_flags := -fcheck=all -Wall -fbacktrace -g $(OSH_FLAGS)
-  ifeq ($(MODE),debug)
-	COMP= -g -c -ffree-line-length-none -fimplicit-none -fcheck=all -Wall -fbacktrace $(OSH_FLAGS) # -ffast-math #-flto #
-	#   opt := -Ofast -cpp -DUSE_ASSERTIONS=$(USE_ASSERTIONS) -DDEBUG_OUTPUT=$(DEBUG_OUTPUT) -J $(BUILD)/ $(OSH_FLAGS)
-	#   link_flags := -Ofast $(OSH_FLAGS)
-  endif
-endif
-
 
 # Intel fortran
 ifeq ($(COMPILER), intel)
@@ -232,6 +216,7 @@ ifeq ($(MODE), debugslow)
 		MODOUTPUT=-e m -J $(BUILD)
 	endif
 endif
+
 ifeq ($(MODE), debug)
 	ifeq ($(COMPILER), intel)
 		COMP= -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost
@@ -248,40 +233,6 @@ ifeq ($(MODE), debug)
 		MODOUTPUT=-e m -J $(BUILD)
 	endif
 endif
-ifeq ($(MODE), debugompslow)
-	ifeq ($(COMPILER), intel)
-		# COMP= -openmp -liomp5 -debug -debug-parameters all -traceback -ftrapuv -g -fpe0 -c -u -check all -check noarg_temp_created -CB
-		COMP= -qopenmp -liomp5 -debug -c -u	 -ftz -fpe0 -traceback -check all -check noarg_temp_created -fp-stack-check
-		LINK= -qopenmp -liomp5
-	endif
-	ifeq ($(COMPILER), gnu)
-		COMP= -fopenmp -lgomp -c -g -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -ffpe-trap=invalid -Wconversion
-		LINK= -fopenmp -lgomp
-	endif
-	ifeq ($(COMPILER), cray)
-		COMP=-h omp -c -g -m 0 -h develop -R csp -M 399 -hfp0
-		LINK=
-		PREPROC=-eZ
-		MODOUTPUT=-e m -J $(BUILD)
-	endif
-endif
-ifeq ($(MODE), debugomp)
-	ifeq ($(COMPILER), intel)
-		COMP= -qopenmp -liomp5 -debug -c -O3 -u -traceback -fpe0 -ftz -xHost # -fast-transcendentals -check all -check noarg_temp_created -fpe0
-		LINK= -qopenmp -liomp5
-	endif
-	ifeq ($(COMPILER), gnu)
-		COMP= -fopenmp -lgomp -c -O2 -g -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -fimplicit-none -Wconversion # -ftree-vectorize -funroll-loops -march=native  -fno-protect-parens
-		LINK= -fopenmp -lgomp
-		 # -Wall -Wno-unused-variable -Wno-unused-dummy-argument
-	endif
-	ifeq ($(COMPILER), cray)
-		COMP=-O1 -c -g -hfp0
-		LINK=
-		PREPROC=-eZ
-		MODOUTPUT=-e m -J $(BUILD)
-	endif
-endif
 
 PROF=
 ifeq ($(MODE), profile)
@@ -293,49 +244,16 @@ ifeq ($(MODE), profile)
 		PROF=-g -p
 	endif
 endif
-ifeq ($(MODE), fast) # WARNING -ipo (included in -fast) takes forever for very little gain, and this may be unstable
-	ifeq ($(F90), ifort)
-		COMP=-c -u -openmp -liomp5 -fast -ftz #-fast-transcendentals # not available in ifort <13: -align array64byte
-	endif
-endif
-
-
-LINKER=$(F90)
-#ifeq ($(COMPILER), gnu)
-#	ifeq ($(CAF_MODE), single)
-#		CAF_FLAG=-fcoarray=single
-#	else
-#		ifeq ($(F90), caf)
-#			CAF_FLAG=-fcoarray=lib
-#		else
-#			ifndef CAF_DIR
-#				CAF_DIR=${HOME}/usr/local/lib
-#			endif
-#			CAF_FLAG=-fcoarray=lib
-#			CAF_LINK=-L${CAF_DIR} -lcaf_mpi
-#			ifneq ($(F90), ftn)
-#				LINKER=mpif90
-#			endif
-#		endif
-#	endif
-#endif
-# Intel fortran
-ifeq ($(COMPILER), intel)
-	ifeq ($(CAF_MODE), single)
-		CAF_FLAG=-coarray=single
-	else
-		CAF_FLAG=-coarray=distributed
-		CAF_LINK=-L${CAF_DIR}
-		ifneq ($(F90), ftn)
-			LINKER=mpif90
-		endif
-	endif
-endif
 
 ASSERT=-DUSE_ASSERTIONS=$(USE_ASSERTIONS)
 
 ifeq ($(COMPILER), cray)
-	#COMP += -DCRAY_PE
+	ifneq ($(CAF),)
+    	COMP += -DCRAY_PE
+	endif
+endif
+ifdef FSM_DIR
+    COMP += -DFSM
 endif
 
 ###################################################################
@@ -362,7 +280,7 @@ ifeq ($(COMPILER), cray)
 endif
 
 $(info $$NODENAME    = ${NODENAME})
-$(info $$FC          = ${F90})
+$(info $$FC          = ${FC})
 $(info $$FFTW_PATH   = ${FFTW_PATH})
 $(info $$NCDF_PATH   = ${NCDF_PATH})
 $(info $$GIT_VERSION = ${GIT_VERSION})
@@ -450,12 +368,12 @@ OBJS=	\
 		$(BUILD)cu_tiedtke.o		\
 		$(BUILD)cu_nsas.o			\
 		$(BUILD)cu_bmj.o			\
-                $(BUILD)adv_fluxcorr.o      \
+        $(BUILD)adv_fluxcorr.o      \
 		$(BUILD)advection_driver.o	\
 		$(BUILD)advect.o			\
 		$(BUILD)adv_mpdata.o        \
-                $(BUILD)sfc_driver.o            \
-                $(BUILD)sfc_sfclayrev.o            \
+        $(BUILD)sfc_driver.o            \
+        $(BUILD)sfc_sfclayrev.o            \
 		$(BUILD)lsm_driver.o		\
 		$(BUILD)lsm_noahdrv.o		\
 		$(BUILD)lsm_noahlsm.o		\
@@ -497,10 +415,6 @@ TEST_EXECUTABLES= 	fftshift_test			\
 					time_obj_test			\
 					$(CAF_TEST_EXECUTABLES)
 
-# Pre-Coarray Tests that we may want to re-implement
-# mpdata_test			\	(should be easy)
-# blocking_test			\	(may be easy once linear winds is re-implemented)
-
 
 ###################################################################
 #	User facing rules
@@ -527,7 +441,7 @@ allclean:cleanall
 cleanall:clean
 	${RM} icar $(TEST_EXECUTABLES) 2>/dev/null ||:
 
-test: $(TEST_EXECUTABLES) move_i
+#test: $(TEST_EXECUTABLES) move_i
 
 caf_tests:	$(CAF_TEST_EXECUTABLES)
 
@@ -661,38 +575,38 @@ caf_threads_test: $(BUILD)test_caf_threads.o
 ###################################################################
 
 $(BUILD)%.o: $(UTIL)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 $(BUILD)%.o: $(CONST)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 $(BUILD)%.o: $(IO)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 $(BUILD)%.o: $(OBJECTS)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 ifeq ($(COMPILER), cray)
 $(BUILD)%.o: $(NOAHMP)%.f90
-		${F90} ${NMP_FFLAGS} $< -o $@
+		${FC} ${NMP_FFLAGS} $< -o $@
 $(BUILD)%.o: $(PHYS)%.f90
-		${F90} ${PHYS_FFLAGS} $< -o $@
+		${FC} ${PHYS_FFLAGS} $< -o $@
 else
 $(BUILD)%.o: $(NOAHMP)%.f90
-		${F90} ${FFLAGS} $< -o $@
+		${FC} ${FFLAGS} $< -o $@
 $(BUILD)%.o: $(PHYS)%.f90
-		${F90} ${FFLAGS} $< -o $@
+		${FC} ${FFLAGS} $< -o $@
 endif
 
 $(BUILD)%.o: $(TESTS)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 $(BUILD)%.o: $(MAIN)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 
 ###################################################################
-#	driver code for original version of ICAR
+#	driver code
 ###################################################################
 
 $(BUILD)driver.o:$(MAIN)driver.f90 $(BUILD)time_step.o $(BUILD)domain_h.o $(BUILD)timer_h.o \
@@ -895,6 +809,8 @@ $(BUILD)sfc_driver.o: $(PHYS)sfc_driver.f90 $(BUILD)data_structures.o   \
 
 $(BUILD)sfc_sfclayrev.o: $(PHYS)sfc_sfclayrev.f90 $(BUILD)data_structures.o
 
+
+ifdef FSM_DIR
 $(BUILD)lsm_driver.o: $(PHYS)lsm_driver.f90 $(BUILD)data_structures.o	\
 						$(BUILD)lsm_noahdrv.o $(BUILD)lsm_noahlsm.o		\
 						$(BUILD)lsm_noahmpdrv.o $(BUILD)lsm_noahmplsm.o \
@@ -903,20 +819,24 @@ $(BUILD)lsm_driver.o: $(PHYS)lsm_driver.f90 $(BUILD)data_structures.o	\
 						$(BUILD)atm_utilities.o $(BUILD)ra_simple.o	\
 						$(BUILD)opt_types.o	$(BUILD)icar_constants.o
 
-ifdef FSM_DIR
-$(BUILD)lsm_driver.o: $(PHYS)lsm_driver.f90 $(BUILD)lsm_FSMdrv.o
-
 # J added 
 $(BUILD)lsm_FSMdrv.o: $(PHYS)lsm_FSMdrv.f90 $(BUILD)data_structures.o \
                                                 $(BUILD)lsm_noahdrv.o $(BUILD)lsm_noahlsm.o \
                                                 $(BUILD)lsm_noahmpdrv.o $(BUILD)lsm_noahmplsm.o \
                                                 $(BUILD)water_simple.o $(BUILD)icar_constants.o \
-						$(BUILD)wrf_constants.o $(BUILD)io_routines.o                   \
-                                                $(BUILD)domain_h.o $(BUILD)options_h.o                  \
+												$(BUILD)wrf_constants.o $(BUILD)io_routines.o   \
+                                                $(BUILD)domain_h.o $(BUILD)options_h.o          \
                                                 $(BUILD)atm_utilities.o $(BUILD)ra_simple.o
-endif
+else
+$(BUILD)lsm_driver.o: $(PHYS)lsm_driver.f90 $(BUILD)data_structures.o	\
+						$(BUILD)lsm_noahdrv.o $(BUILD)lsm_noahlsm.o		\
+						$(BUILD)lsm_noahmpdrv.o $(BUILD)lsm_noahmplsm.o \
+						$(BUILD)water_simple.o $(BUILD)water_lake.o		\
+						$(BUILD)domain_h.o $(BUILD)options_h.o			\
+						$(BUILD)atm_utilities.o $(BUILD)ra_simple.o	\
+						$(BUILD)opt_types.o	$(BUILD)icar_constants.o
 
-# $(BUILD)lsm_basic.o $(BUILD)lsm_simple.o
+endif
 
 $(BUILD)water_simple.o: $(PHYS)water_simple.f90 $(BUILD)options_h.o $(BUILD)data_structures.o
 
@@ -988,10 +908,6 @@ ifdef PETSC_DIR
 $(BUILD)wind_iterative.o:$(PHYS)wind_iterative.f90  $(BUILD)domain_h.o $(BUILD)array_utilities.o $(BUILD)io_routines.o
 $(BUILD)wind_iterative_old.o:$(PHYS)wind_iterative_old.f90  $(BUILD)domain_h.o $(BUILD)io_routines.o
 endif
-
-#########################
-# ${F90} ${FFLAGS} $(PHYS)wind.f90 -o $(BUILD)wind.o
-#########################
 
 $(BUILD)linear_winds.o:$(PHYS)linear_winds.f90 $(BUILD)io_routines.o $(BUILD)data_structures.o 	\
 	 				   $(BUILD)fftshift.o $(BUILD)string.o $(BUILD)fftw.o						\
