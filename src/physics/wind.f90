@@ -98,69 +98,103 @@ contains
 
 
 
-    !>------------------------------------------------------------
-    !! Forces u,v, and w fields to balance
-    !!       du/dx + dv/dy = dw/dz
-    !!
-    !! Starts by setting w out of the ground=0 then works through layers
-    !!
-    !!------------------------------------------------------------
-
-    subroutine balance_uvw(domain,options,update_in)
+        !------------------------------------------------------------------------------
+        ! subroutine balance_uvw
+        !
+        ! Purpose:
+        !   This subroutine balances the u, v, and w wind components in the domain
+        !   by calculating the divergence of the wind field and adjusting the
+        !   w component to ensure mass conservation.
+        !
+        ! Input:
+        !   domain   - Derived data type containing the domain information
+        !   options  - Derived data type containing various options
+        !   update_in (optional) - Logical variable indicating which variable data array to update
+        !
+        ! Output:
+        !   domain   - Derived data type with updated w component
+        !
+        ! Method:
+        !   1. Calculate the divergence of the wind field
+        !   2. Adjust the w component to balance the divergence
+        !   3. (Optional) Perform the same for the convective wind field
+        !
+        ! Note:
+        !   The convective wind field balancing is currently commented out.
+        !
+        !------------------------------------------------------------------------------    
+        subroutine balance_uvw(domain, options, update_in)
+        ! This subroutine balances the u, v, and w wind components in the domain
+        
         implicit none
+        
+        ! domain: a derived data type containing the domain information
         type(domain_t), intent(inout) :: domain
-        type(options_t),intent(in)    :: options
+        
+        ! options: a derived data type containing various options
+        type(options_t), intent(in) :: options
+        
+        ! update_in: an optional logical variable indicating whether to update the wind components
         logical, optional, intent(in) :: update_in
         
-        real, dimension(ims:ime,kms:kme,jms:jme) :: divergence
+        ! divergence: a 3D array to store the divergence of the wind field
+        real, dimension(ims:ime, kms:kme, jms:jme) :: divergence
+        
+        ! update: a logical variable to control whether to update the wind components
         logical :: update
         
+        ! Associate various variables from the domain data structure for easier access
+        associate(dx => domain%dx, &
+                    rho => domain%density%data_3d, &
+                    dz => domain%advection_dz, &
+                    jaco_u => domain%jacobian_u, &
+                    jaco_v => domain%jacobian_v, &
+                    jaco_w => domain%jacobian_w)
         
-        associate(dx         => domain%dx,                         &
-                  rho        => domain%density%data_3d,            &
-                  dz         => domain%advection_dz,               &
-                  jaco_u     => domain%jacobian_u,                 &
-                  jaco_v     => domain%jacobian_v,                 &
-                  jaco_w     => domain%jacobian_w)
-                
+        ! Set the update flag to false initially
         update = .False.
-        if(present(update_in)) update=update_in
+        ! If update_in is present, set update flag based on its value
+        if (present(update_in)) update = update_in
         
+        ! If update is true, calculate the divergence and w component from the dqdt_3d arrays
         if (update) then
-            call calc_divergence(divergence,domain%u%dqdt_3d,domain%v%dqdt_3d,domain%w%dqdt_3d, &
-                                 jaco_u,jaco_v,jaco_w,dz,dx,rho,options,horz_only=.True.)
-            call calc_w(domain%w%dqdt_3d,divergence,dz,jaco_w,rho,&
+            call calc_divergence(divergence, domain%u%dqdt_3d, domain%v%dqdt_3d, domain%w%dqdt_3d, &
+                                    jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only=.True.)
+            call calc_w(domain%w%dqdt_3d, divergence, dz, jaco_w, rho, &
                         options%parameters%advect_density)
+        
+        ! If update is false, calculate the divergence and w component from the data_3d arrays
         else
-            call calc_divergence(divergence,domain%u%data_3d,domain%v%data_3d,domain%w%data_3d, &
-                                 jaco_u,jaco_v,jaco_w,dz,dx,rho,options,horz_only=.True.)
-            call calc_w(domain%w%data_3d,divergence,dz,jaco_w,rho,options%parameters%advect_density)
+            call calc_divergence(divergence, domain%u%data_3d, domain%v%data_3d, domain%w%data_3d, &
+                                    jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only=.True.)
+            call calc_w(domain%w%data_3d, divergence, dz, jaco_w, rho, options%parameters%advect_density)
+        
         endif
-            
+        
         end associate
-
+        
         !call domain%w%exchange(update)
         
-            !------------------------------------------------------------
-            ! Now do the same for the convective wind field if needed
-            !------------------------------------------------------------
-            ! if (options%physics%convection > 0) then
-            !     ! calculate horizontal divergence
-            !     dv = domain%v_cu(2:nx-1,i,3:ny) - domain%v_cu(2:nx-1,i,2:ny-1)
-            !     du = domain%u_cu(3:nx,i,2:ny-1) - domain%u_cu(2:nx-1,i,2:ny-1)
-            !     divergence = du + dv
-            !     ! Then calculate w to balance
-            !     if (i==1) then
-            !         ! if this is the first model level start from 0 at the ground
-            !         domain%w_cu(2:nx-1,i,2:ny-1) = 0 - divergence
-            !     else
-            !         ! else calculate w as a change from w at the level below
-            !         domain%w_cu(2:nx-1,i,2:ny-1) = domain%w_cu(2:nx-1,i-1,2:ny-1) - divergence
-            !     endif
-            ! endif
-
+        !------------------------------------------------------------
+        ! Now do the same for the convective wind field if needed
+        !------------------------------------------------------------
         
-    end subroutine balance_uvw
+        ! if (options%physics%convection > 0) then
+        ! ! calculate horizontal divergence
+        ! dv = domain%v_cu(2:nx-1,i,3:ny) - domain%v_cu(2:nx-1,i,2:ny-1)
+        ! du = domain%u_cu(3:nx,i,2:ny-1) - domain%u_cu(2:nx-1,i,2:ny-1)
+        ! divergence = du + dv
+        ! ! Then calculate w to balance
+        ! if (i==1) then
+        ! ! if this is the first model level start from 0 at the ground
+        ! domain%w_cu(2:nx-1,i,2:ny-1) = 0 - divergence
+        ! else
+        ! ! else calculate w as a change from w at the level below
+        ! domain%w_cu(2:nx-1,i,2:ny-1) = domain%w_cu(2:nx-1,i-1,2:ny-1) - divergence
+        ! endif
+        ! endif
+        
+        end subroutine balance_uvw
 
     subroutine calc_w(w,div,dz,jaco_w,rho,adv_den)
         real,    intent(inout)                                   :: w(ims:ime,kms:kme,jms:jme)
