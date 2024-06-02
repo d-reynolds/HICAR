@@ -18,3 +18,4 @@ docs/doxygen_sqlite3.db
 *.stamp
 */.ipynb_checkpoints/*
 */build/*
+build/*

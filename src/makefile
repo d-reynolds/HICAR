@@ -146,6 +146,8 @@ endif
 ifdef PETSC_DIR
 	PETSC=$(PETSC_DIR)
 	include $(PETSC)/lib/petsc/conf/variables
+else
+	PETSC_DIR=/usr/local
 endif
 
 USE_ASSERTIONS:=.false.
