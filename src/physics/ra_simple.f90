@@ -45,45 +45,20 @@
 !!----------------------------------------------------------
 module module_ra_simple
     use time_object,        only : Time_type
-    use mod_atm_utilities,  only : relative_humidity
+    use mod_atm_utilities,  only : relative_humidity, calc_solar_elevation
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
     use data_structures
+    use mod_wrf_constants,  only : piconst, DEGRAD, STBOLT
     ! use time
-    use iso_fortran_env, only: real128 !!MJ added
     
     implicit none
 
-    real, allocatable, dimension(:,:) :: cos_lat_m,sin_lat_m
-    integer :: nrad_layers
+    integer :: nrad_layers = 5
     real, parameter :: So = 1367.0  ! Solar "constant" W/m^2
     real, parameter :: qcmin = 1e-6 ! Minimum "cloud" water content to affect radiation
-    real    :: tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
+
 contains
-
-    subroutine ra_simple_init(domain,options)
-        implicit none
-        type(domain_t), intent(in) :: domain
-        type(options_t),intent(in)    :: options
-
-        associate(ims => domain%grid%ims,   &
-                  ime => domain%grid%ime,   &
-                  jms => domain%grid%jms,   &
-                  jme => domain%grid%jme)
-
-        allocate(cos_lat_m(ims:ime, jms:jme))
-        allocate(sin_lat_m(ims:ime, jms:jme))
-
-        cos_lat_m = cos(domain%latitude%data_2d / 360.0 * 2*pi)
-        sin_lat_m = sin(domain%latitude%data_2d / 360.0 * 2*pi)
-
-        nrad_layers = 5
-
-        end associate
-        
-        tzone=options%rad_options%tzone  !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
-    end subroutine ra_simple_init
-
 
     function shortwave(day_frac, cloud_cover, solar_elevation, ims,ime, its,ite)
         ! compute shortwave down at the surface based on solar elevation, fractional day of the year, and cloud fraction
@@ -99,7 +74,7 @@ contains
 
         sin_solar_elev = sin(solar_elevation(its:ite))
 
-        shortwave(its:ite) = So * (1 + 0.035 * cos(day_frac(its:ite) * 2*pi)) * sin_solar_elev * (0.48 + 0.29 * sin_solar_elev)
+        shortwave(its:ite) = So * (1 + 0.035 * cos(day_frac(its:ite) * 2*piconst)) * sin_solar_elev * (0.48 + 0.29 * sin_solar_elev)
 
         ! note it is cloud_cover**3.4 in Reiff, but this makes almost no difference and integer powers are fast so could use **3
         shortwave(its:ite) = shortwave(its:ite) * (1 - (0.75 * (cloud_cover(its:ite)**3.4)) )
@@ -117,7 +92,7 @@ contains
 
         effective_emissivity = 1 - 0.261 * exp((-7.77e-4) * (273.16-T_air(its:ite))**2)
 
-        longwave(its:ite) = effective_emissivity * stefan_boltzmann * T_air(its:ite)**4
+        longwave(its:ite) = effective_emissivity * STBOLT * T_air(its:ite)**4
 
         longwave(its:ite) = min(longwave(its:ite) * (1 + 0.2 * cloud_cover(its:ite)), 600.0)
 
@@ -149,232 +124,6 @@ contains
 
     end function
 
-    !! MJ corrected, as calc_solar_elevation has largley understimated the zenith angle in Switzerland
-    !! MJ added: this is Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
-    !! MJ: note that this works everywhere and may be checked by https://gml.noaa.gov/grad/solcalc/index.html
-    !! MJ: the only parameter needs to be given is https://gml.noaa.gov/grad/solcalc/index.html UTC Offset here referred to tzone=1 for centeral Erupe. HACK: this should be given by use in the namelist file
-    !! MJ: Julian_day is a large value, we need to use the real128 format when applying TJ scheme in HICAR.
-    function calc_solar_elevation_corr(date, lon, j, ims,ime, jms,jme, its,ite, day_frac, solar_azimuth)
-        implicit none
-        real                       :: calc_solar_elevation_corr(ims:ime)
-        type(Time_type),intent(in) :: date
-        real,           intent(in) :: lon(ims:ime, jms:jme)
-        integer,        intent(in) :: j
-        integer,        intent(in) :: ims, ime, jms, jme
-        integer,        intent(in) :: its, ite
-        real,           intent(out):: day_frac(ims:ime)
-        real, optional, intent(inout):: solar_azimuth(ims:ime)
-        
-        integer :: i
-        real, dimension(ims:ime) :: declination, day_of_year, hour_angle
-        integer :: year, month, day, hour, minute, second
-        real(real128) :: timeofday, julian_day, julian_century!, tzone
-        real(real128) :: geom_mean_long_sun_deg, geom_mean_anom_sun_deg, eccent_earth_orbit
-        real(real128) :: sun_eq_of_ctr, sun_true_long_deg, sun_app_long_deg
-        real(real128):: mean_obliq_ecliptic_deg, obliq_corr_deg, sun_declin_deg, var_y, eq_of_time_minutes, true_solar_time_min
-        real(real128) :: hour_angle_deg, solar_zenith_angle_deg, solar_elev_angle_deg
-        real(real128) :: lat_hr, lon_hr
-        real(real128) :: approx_atm_refrac_deg, solar_elev_corr_atm_ref_deg, solar_azimuth_angle
-
-        !!
-        do i = its, ite
-            day_of_year(i) = date%day_of_year(lon=lon(i,j))
-
-            ! hour angle is 0 at noon
-            hour_angle(i) = 2*pi* mod(day_of_year(i)+0.5, 1.0)
-
-            day_frac(i) = date%year_fraction(lon=lon(i,j))
-        end do
-    
-        !!
-        year=date%year
-        month=date%month
-        day=date%day
-        hour=date%hour
-        minute=date%minute
-        second=date%second
-        !tzone=1.
-        !if (this_image()==2) write(*,*),"tzone ", tzone
-        !year=2016
-        !month=3
-        !day=3
-        !hour=12
-        !minute=0
-        !second=0
-        !tzone=-5.
-
-        !lon_hr=-71.05
-        !lat_hr=42.35        
-        !!
-        calc_solar_elevation_corr = 0
-        if(present(solar_azimuth)) solar_azimuth = 0
-
-
-        !!       
-        timeofday        = real(hour)/24.+real(minute)/60./24.+real(second)/3600./24.
-        julian_day       = date%date_to_jd(year,month,day,hour,minute,second)-tzone/24.
-        julian_century   = (julian_day - 2451545) / 36525
-        !!
-        geom_mean_long_sun_deg = mod(280.46646 + julian_century * (36000.76983 + julian_century * 0.0003032),360.)
-        geom_mean_anom_sun_deg = 357.52911 + julian_century * (35999.05029 - 0.0001537 * julian_century)
-        eccent_earth_orbit = 0.016708634 - julian_century * (0.000042037 + 0.0000001267 * julian_century)
-        !!
-        sun_eq_of_ctr = sin(pi/180 *(geom_mean_anom_sun_deg)) * (1.914602 - julian_century * (0.004817 + 0.000014 * julian_century)) + sin(pi/180 *(2  * geom_mean_anom_sun_deg)) * ( 0.019993 - 0.000101 * julian_century) + sin(pi/180 *(3 * geom_mean_anom_sun_deg)) * 0.000289
-        sun_true_long_deg = sun_eq_of_ctr + geom_mean_long_sun_deg
-        sun_app_long_deg = sun_true_long_deg - 0.00569 - 0.00478 * sin(pi/180 *(125.04 - 1934.136 * julian_century))
-        !!
-        mean_obliq_ecliptic_deg = 23 + (26 + ((21.448 - julian_century * (46.815 + julian_century * (0.00059 - julian_century * 0.001813)))) / 60) / 60
-        obliq_corr_deg = mean_obliq_ecliptic_deg + 0.00256  * cos(pi/180 *(125.04 - 1934.136 * julian_century))
-        sun_declin_deg = 180./pi*(asin(sin(pi/180 *(obliq_corr_deg)) * sin(pi/180 *(sun_app_long_deg))))
-        var_y = tan(pi/180 *(obliq_corr_deg / 2)) * tan(pi/180 *(obliq_corr_deg / 2))
-        eq_of_time_minutes = 4 * 180./pi*(var_y  * sin(2 * pi/180. *(geom_mean_long_sun_deg)) - 2 * eccent_earth_orbit * sin(pi/180. *(geom_mean_anom_sun_deg)) + 4 * eccent_earth_orbit * var_y * sin(pi/180. *(geom_mean_anom_sun_deg)) * cos(2  * pi/180. *(geom_mean_long_sun_deg)) - 0.5 * var_y * var_y * sin(4 * pi/180. *(geom_mean_long_sun_deg)) - 1.25 * eccent_earth_orbit * eccent_earth_orbit * sin(2 * pi/180. *(geom_mean_anom_sun_deg)))
-        !!
-        do i = its, ite           
-            !!
-            lon_hr=lon(i,j)
-            lat_hr=180./pi*asin(sin_lat_m(i,j))                   
-            true_solar_time_min = mod(timeofday * 1440 + eq_of_time_minutes + 4 * lon_hr - 60. * tzone,1440.);
-            !!
-            if (true_solar_time_min /4 < 0) then
-                hour_angle_deg=true_solar_time_min /4 + 180
-            elseif (true_solar_time_min /4 >= 0) then 
-                hour_angle_deg=true_solar_time_min /4 - 180
-            endif
-            !!
-            solar_zenith_angle_deg = 180./pi*(acos(sin(pi/180. *(lat_hr)) * sin(pi/180. *(sun_declin_deg)) + cos(pi/180. *(lat_hr)) * cos(pi/180. *(sun_declin_deg)) * cos(pi/180. *(hour_angle_deg))))
-            solar_elev_angle_deg = 90 - solar_zenith_angle_deg;
-
-            !! calculate atmospheric diffraction dependent on solar elevation angle
-            if (solar_elev_angle_deg > 85) then
-               approx_atm_refrac_deg=0. 
-            elseif (solar_elev_angle_deg > 5 .and. solar_elev_angle_deg <= 85) then
-                approx_atm_refrac_deg = (58.1 / tan(pi/180. *(solar_elev_angle_deg)) - 0.07 / (tan(pi/180. *(solar_elev_angle_deg)))**3. + 0.000086 / (tan(pi/180. *(solar_elev_angle_deg)))**5.) / 3600 
-            elseif (solar_elev_angle_deg > -0.757 .and. solar_elev_angle_deg <= 5) then 
-                approx_atm_refrac_deg = (1735 + solar_elev_angle_deg * (-518.2 + solar_elev_angle_deg * (103.4 + solar_elev_angle_deg * (-12.79 + solar_elev_angle_deg * 0.711)))) / 3600
-            elseif (solar_elev_angle_deg <= -0.757) then 
-                approx_atm_refrac_deg = (-20.772 / tan(pi/180. *(solar_elev_angle_deg))) / 3600
-            endif                       
-            solar_elev_corr_atm_ref_deg = solar_elev_angle_deg + approx_atm_refrac_deg
-            
-            !! calculate solar azimuth angle depending on hour angle
-            if (hour_angle_deg > 0) then
-                solar_azimuth_angle = mod(floor((180./pi*(acos(((sin(pi/180.*(lat_hr)) * cos(pi/180.*(solar_zenith_angle_deg))) - sin(pi/180.*(sun_declin_deg))) / (cos(pi/180.*(lat_hr)) * sin(pi/180.*(solar_zenith_angle_deg))))) + 180)*100000)/100000,360);
-            elseif (hour_angle_deg <= 0) then
-                solar_azimuth_angle = mod(floor((540 - 180./pi*(acos(((sin(pi/180.*(lat_hr)) * cos(pi/180.*(solar_zenith_angle_deg))) - sin(pi/180.*(sun_declin_deg))) / (cos(pi/180.*(lat_hr)) * sin(pi/180.*(solar_zenith_angle_deg))))))*100000)/100000,360);      
-            endif                       
-            
-            calc_solar_elevation_corr(i)=solar_elev_corr_atm_ref_deg*pi/180.
-            if(present(solar_azimuth)) solar_azimuth(i)=solar_azimuth_angle*pi/180.
-        end do
-
-        where(calc_solar_elevation_corr<0.0) calc_solar_elevation_corr=0.0
-        where(calc_solar_elevation_corr>90.0) calc_solar_elevation_corr=90.0
-
-!       if (this_image()==2 .and. j==jms+1) then
-!           write(*,*), trim(date%as_string()),solar_elev_corr_atm_ref_deg, solar_azimuth_angle
-!       endif
-!       if (this_image()==2 .and. j==jms+1) then
-!           write(*,*), trim(date%as_string()), julian_day
-!       endif
-!       if (this_image()==2) write(*,*),"julian_day ", trim(date%as_string()), julian_day
-!       if (this_image()==2) write(*,*),"julian_century ", julian_century
-!       if (this_image()==2) write(*,*),"geom_mean_long_sun_deg ", geom_mean_long_sun_deg
-!       if (this_image()==2) write(*,*),"eccent_earth_orbit ", eccent_earth_orbit
-!       if (this_image()==2) write(*,*),"elev ", calc_solar_elevation_corr(its)
-!       stop
-    end function calc_solar_elevation_corr
-
-    function calc_solar_elevation(date, lon, j, ims,ime, jms,jme, its,ite, day_frac)
-        implicit none
-        real                       :: calc_solar_elevation(ims:ime)
-        type(Time_type),intent(in) :: date
-        real,           intent(in) :: lon(ims:ime, jms:jme)
-        integer,        intent(in) :: j
-        integer,        intent(in) :: ims, ime, jms, jme
-        integer,        intent(in) :: its, ite
-        real,           intent(out):: day_frac(ims:ime)
-
-        integer :: i
-        real, dimension(ims:ime) :: declination, day_of_year, hour_angle
-
-        calc_solar_elevation = 0
-
-        do i = its, ite
-            day_of_year(i) = date%day_of_year(lon=lon(i,j))
-
-            ! hour angle is 0 at noon
-            hour_angle(i) = 2*pi* mod(day_of_year(i)+0.5, 1.0)
-
-            day_frac(i) = date%year_fraction(lon=lon(i,j))
-        end do
-
-        ! fast approximation see : http://en.wikipedia.org/wiki/Position_of_the_Sun
-        declination = (-0.4091) * cos(2.0*pi/365.0*(day_of_year+10))
-
-        calc_solar_elevation(its:ite) = sin_lat_m(its:ite,j) * sin(declination(its:ite)) + &
-                               cos_lat_m(its:ite,j) * cos(declination(its:ite)) * cos(hour_angle(its:ite))
-
-        ! due to float precision errors, it is possible to exceed (-1 - 1) in which case asin will break
-        where(calc_solar_elevation < -1)
-            calc_solar_elevation = -1
-        elsewhere(calc_solar_elevation > 1)
-            calc_solar_elevation = 1
-        endwhere
-
-        calc_solar_elevation = asin(calc_solar_elevation)
-
-        ! if the sun is below the horizon just set elevation to 0
-        where(calc_solar_elevation<0) calc_solar_elevation=0
-    end function calc_solar_elevation
-
-
-    !! MJ added: based on https://solarsena.com/solar-azimuth-angle-calculator-solar-panels/
-    function calc_solar_azimuth(date, lon, j, ims,ime, jms,jme, its,ite, day_frac, solar_elevation)
-        implicit none
-        real                       :: calc_solar_azimuth(ims:ime)
-        type(Time_type),intent(in) :: date
-        real,           intent(in) :: lon(ims:ime, jms:jme)
-        integer,        intent(in) :: j
-        integer,        intent(in) :: ims, ime, jms, jme
-        integer,        intent(in) :: its, ite
-        real,           intent(out):: day_frac(ims:ime)
-        real,           intent(in):: solar_elevation(ims:ime)
-
-        integer :: i
-        real, dimension(ims:ime) :: declination, day_of_year, hour_angle
-
-        calc_solar_azimuth = 0
-
-        do i = its, ite
-            day_of_year(i) = date%day_of_year(lon=lon(i,j))
-
-            ! hour angle is 0 at noon
-            hour_angle(i) = 2*pi* mod(day_of_year(i)+0.5, 1.0)
-
-            day_frac(i) = date%year_fraction(lon=lon(i,j))
-        end do
-
-        ! fast approximation see : http://en.wikipedia.org/wiki/Position_of_the_Sun
-        declination = (-0.4091) * cos(2.0*pi/365.0*(day_of_year+10))
-
-        calc_solar_azimuth(its:ite) = ( cos_lat_m(its:ite,j) * sin(declination(its:ite)) - &
-                               sin_lat_m(its:ite,j) * cos(declination(its:ite)) * cos(hour_angle(its:ite)) )/(1.e-16+cos(solar_elevation(its:ite)))
-
-        ! due to float precision errors, it is possible to exceed (-1 - 1) in which case asin will break
-        where(calc_solar_azimuth < -1)
-            calc_solar_azimuth = -1
-        elsewhere(calc_solar_azimuth > 1)
-            calc_solar_azimuth = 1
-        endwhere
-
-        ! partitioning the answer based on the hour angle:
-        where(hour_angle > pi)
-            calc_solar_azimuth = acos(calc_solar_azimuth)
-        elsewhere(calc_solar_azimuth <= pi)
-            calc_solar_azimuth = 2*pi - acos(calc_solar_azimuth)
-        endwhere
-        
-    end function calc_solar_azimuth
     
     subroutine ra_simple(theta, pii, qv, qc, qs, qr, p, swdown, lwdown, cloud_cover, lat, lon, date, options, dt, &
                 ims, ime, jms, jme, kms, kme, &
@@ -402,7 +151,7 @@ contains
 
         logical :: runlw
         real :: coolingrate
-        integer :: j, k
+        integer :: i, j, k
         real, allocatable, dimension(:) :: rh, T_air, solar_elevation, hydrometeors, day_frac
 
 
@@ -420,7 +169,7 @@ contains
         allocate(day_frac       (ims:ime))
 
         ! 1.5K/day radiative cooling rate (300 = W/m^2 at 270K)
-        coolingrate = 1.5 * (dt / 86400.0) * stefan_boltzmann / 300.0
+        coolingrate = 1.5 * (dt / 86400.0) * STBOLT / 300.0
 
         !$omp do
         do j = jts, jte
@@ -441,9 +190,12 @@ contains
             end do
             where(hydrometeors<0) hydrometeors = 0
 
-            !solar_elevation  = calc_solar_elevation(date, lon, j, ims,ime, jms,jme, its,ite, day_frac) !! MJ: it does not work in Erupoe
-            solar_elevation  = calc_solar_elevation_corr(date, lon, j, ims,ime, jms,jme, its,ite, day_frac=day_frac)
+            solar_elevation  = calc_solar_elevation(date, options%rad_options%tzone, lon, lat, j, ims,ime, jms,jme, its,ite)
 
+            do i = its, ite
+                day_frac(i) = date%year_fraction(lon=lon(i,j))
+            end do
+    
             cloud_cover(:,j) = cloudfrac(rh, hydrometeors, ims,ime, its,ite)
             swdown(:,j)      = shortwave(day_frac, cloud_cover(:,j), solar_elevation, ims,ime, its,ite)
             if (runlw) then

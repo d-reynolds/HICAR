@@ -43,9 +43,7 @@
 !+---+-----------------------------------------------------------------+
 !
       MODULE module_mp_thompson_aer
-
-          use co_util,     only : broadcast
-
+         use icar_constants, only : STD_OUT_PE
 !       USE module_wrf_error
 !       USE module_mp_radar
 ! #if ( defined( DM_PARALLEL ) && ( ! defined( STUBMPI ) ) )
@@ -3622,9 +3620,10 @@
       DOUBLE PRECISION:: massg, massr, dvg, dvr, t1, t2, z1, z2, y1, y2
       LOGICAL force_read_thompson, write_thompson_tables
       LOGICAL lexist,lopen
-      INTEGER, allocatable :: good[:]
+      !INTEGER, allocatable :: good[:]
+      integer :: good
     !   LOGICAL, EXTERNAL :: wrf_dm_on_monitor
-      allocate(good[*])
+      !allocate(good[*])
 
 !+---+
 
@@ -3632,10 +3631,10 @@
     !   CALL nl_get_write_thompson_tables(1,write_thompson_tables)
 
       good = 0
-      ! if (this_image()==1) then
+      ! if (STD_OUT_PE) then
           INQUIRE(FILE="qr_acr_qg.dat",EXIST=lexist)
           IF ( lexist ) THEN
-            if (this_image()==1) print *, "ThompMP: read qr_acr_qg.dat instead of computing"
+            if (STD_OUT_PE) print *, "ThompMP: read qr_acr_qg.dat instead of computing"
             OPEN(63,file="qr_acr_qg.dat",form="unformatted",err=1234)
             READ(63,err=1234) tcg_racg
             READ(63,err=1234) tmr_racg
@@ -3674,7 +3673,7 @@
       ! endif
 
       IF ( good .NE. 1 ) THEN
-        if (this_image()==1) print *, "ThompMP: computing qr_acr_qg"
+        if (STD_OUT_PE) print *, "ThompMP: computing qr_acr_qg"
         do n2 = 1, nbr
 !        vr(n2) = av_r*Dr(n2)**bv_r * DEXP(-fv_r*Dr(n2))
          vr(n2) = -0.1021 + 4.932E3*Dr(n2) - 0.9551E6*Dr(n2)*Dr(n2)     &
@@ -3766,7 +3765,7 @@
 !         CALL wrf_dm_gatherv(tnr_gacr, ntb_g*ntb_g1, km_s, km_e, R8SIZE)
 ! #endif
 
-        IF ( this_image()==1 ) THEN
+        IF ( STD_OUT_PE ) THEN
           print *, "Writing qr_acr_qg.dat in Thompson MP init"
           OPEN(63,file="qr_acr_qg.dat",form="unformatted",err=9234)
           WRITE(63,err=9234) tcg_racg
@@ -3805,9 +3804,10 @@
       DOUBLE PRECISION:: y1, y2, y3, y4
       LOGICAL force_read_thompson, write_thompson_tables
       LOGICAL lexist,lopen
-      INTEGER, allocatable :: good[:]
+      !INTEGER, allocatable :: good[:]
+      integer :: good
     !   LOGICAL, EXTERNAL :: wrf_dm_on_monitor
-      allocate(good[*])
+      !allocate(good[*])
 
 !+---+
 
@@ -3815,10 +3815,10 @@
     !   CALL nl_get_write_thompson_tables(1,write_thompson_tables)
 
       good = 0
-      ! IF ( this_image() == 1 ) THEN
+      ! IF ( STD_OUT_PE ) THEN
         INQUIRE(FILE="qr_acr_qs.dat",EXIST=lexist)
         IF ( lexist ) THEN
-          IF ( this_image() == 1 ) print *, "ThompMP: read qr_acr_qs.dat instead of computing"
+          IF ( STD_OUT_PE ) print *, "ThompMP: read qr_acr_qs.dat instead of computing"
           OPEN(63,file="qr_acr_qs.dat",form="unformatted",err=1234)
           READ(63,err=1234)tcs_racs1
           READ(63,err=1234)tmr_racs1
@@ -3873,7 +3873,7 @@
       ! endif
 
       IF ( good .NE. 1 ) THEN
-        if (this_image()==1) print *, "ThompMP: computing qr_acr_qs"
+        if (STD_OUT_PE) print *, "ThompMP: computing qr_acr_qs"
         do n2 = 1, nbr
 !        vr(n2) = av_r*Dr(n2)**bv_r * DEXP(-fv_r*Dr(n2))
          vr(n2) = -0.1021 + 4.932E3*Dr(n2) - 0.9551E6*Dr(n2)*Dr(n2)     &
@@ -4041,7 +4041,7 @@
 !         CALL wrf_dm_gatherv(tnr_sacr2, ntb_s*ntb_t, km_s, km_e, R8SIZE)
 ! #endif
 
-        IF ( this_image()==1 ) THEN
+        IF ( STD_OUT_PE ) THEN
           print *, "Writing qr_acr_qs.dat in Thompson MP init"
           OPEN(63,file="qr_acr_qs.dat",form="unformatted",err=9234)
           WRITE(63,err=9234)tcs_racs1
@@ -4087,19 +4087,20 @@
       REAL:: T_adjust
       LOGICAL force_read_thompson, write_thompson_tables
       LOGICAL lexist,lopen
-      INTEGER, allocatable :: good[:]
+      !INTEGER, allocatable :: good[:]
+      integer :: good
     !   LOGICAL, EXTERNAL :: wrf_dm_on_monitor
-      allocate(good[*])
+      !allocate(good[*])
 
 !+---+
     !   CALL nl_get_force_read_thompson(1,force_read_thompson)
     !   CALL nl_get_write_thompson_tables(1,write_thompson_tables)
 
       good = 0
-      ! IF ( this_image() == 1 ) THEN
+      ! IF ( STD_OUT_PE ) THEN
         INQUIRE(FILE="freezeH2O.dat",EXIST=lexist)
         IF ( lexist ) THEN
-          IF ( this_image() == 1 ) print *, "ThompMP: read freezeH2O.dat instead of computing"
+          IF ( STD_OUT_PE ) print *, "ThompMP: read freezeH2O.dat instead of computing"
           OPEN(63,file="freezeH2O.dat",form="unformatted",err=1234)
           READ(63,err=1234)tpi_qrfz
           READ(63,err=1234)tni_qrfz
@@ -4137,7 +4138,7 @@
 
 
       IF ( good .NE. 1 ) THEN
-        if (this_image()==1) print *, "ThompMP: computing freezeH2O"
+        if (STD_OUT_PE) print *, "ThompMP: computing freezeH2O"
 
         orho_w = 1./rho_w
 
@@ -4205,7 +4206,7 @@
         enddo
         enddo
 
-        IF ( this_image() == 1 ) THEN
+        IF ( STD_OUT_PE ) THEN
           print *, "Writing freezeH2O.dat in Thompson MP init"
           OPEN(63,file="freezeH2O.dat",form="unformatted",err=9234)
           WRITE(63,err=9234)tpi_qrfz

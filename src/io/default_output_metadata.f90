@@ -2,7 +2,6 @@ module output_metadata
 
     use icar_constants
     use variable_interface,     only : variable_t
-    use exchangeable_interface, only : exchangeable_t
     use meta_data_interface,    only : attribute_t
     implicit none
 
@@ -12,7 +11,7 @@ module output_metadata
     !! Generic interface to the netcdf read routines
     !!------------------------------------------------------------
     interface get_metadata
-        module procedure get_metadata_2d, get_metadata_2dd, get_metadata_3d, get_metadata_nod, get_metadata_var, get_metadata_exch
+        module procedure get_metadata_2d, get_metadata_2dd, get_metadata_3d, get_metadata_nod, get_metadata_var
     end interface
 
 
@@ -40,53 +39,6 @@ contains
         !meta_data%two_d     = .False.
         !meta_data%three_d   = .False.
     end function get_metadata_nod
-
-    !>------------------------------------------------------------
-    !! Get generic metadata for an exchangeable object
-    !!
-    !! Sets the internal data pointer to point to the input data provided
-    !!------------------------------------------------------------
-    function get_metadata_exch(var_idx, input_var) result(meta_data)
-        implicit none
-        integer, intent(in)              :: var_idx
-        type(exchangeable_t),intent(in)  :: input_var
-
-        type(variable_t) :: meta_data       ! function result
-        !integer          :: local_shape(2)  ! store the shape of the input data array
-
-        if (var_idx>kMAX_STORAGE_VARS) then
-            stop "Invalid variable metadata requested"
-        endif
-
-        if (.not.allocated(var_meta)) call init_var_meta()
-
-        meta_data = var_meta(var_idx)
-
-        meta_data%two_d     = input_var%meta_data%two_d
-        meta_data%three_d   = input_var%meta_data%three_d
-        meta_data%grid      = input_var%meta_data%grid
-        if(meta_data%two_d) then
-            if (allocated(input_var%meta_data%dim_len)) allocate(meta_data%dim_len,source=input_var%meta_data%dim_len)
-            if (allocated(input_var%meta_data%global_dim_len)) allocate(meta_data%global_dim_len,source=input_var%meta_data%global_dim_len)
-
-            meta_data%data_2d => input_var%meta_data%data_2d
-        else
-            if (allocated(input_var%meta_data%dim_len)) then
-                allocate(meta_data%dim_len(3))
-                meta_data%dim_len(1) = input_var%meta_data%dim_len(1)
-                meta_data%dim_len(2) = input_var%meta_data%dim_len(3)
-                meta_data%dim_len(3) = input_var%meta_data%dim_len(2)
-            endif
-            if (allocated(input_var%meta_data%global_dim_len)) then
-                allocate(meta_data%global_dim_len(3))
-                meta_data%global_dim_len(1) = input_var%meta_data%global_dim_len(1)
-                meta_data%global_dim_len(2) = input_var%meta_data%global_dim_len(3)
-                meta_data%global_dim_len(3) = input_var%meta_data%global_dim_len(2)
-            endif
-            meta_data%data_3d => input_var%meta_data%data_3d
-        endif
-
-    end function get_metadata_exch
 
     !>------------------------------------------------------------
     !! Get generic metadata for a variable
@@ -876,7 +828,7 @@ contains
             var%name        = "dz_i"
             var%three_d     = .True.
             var%two_d       = .False.
-            var%dimensions  = three_d_interface_dimensions
+            var%dimensions  = three_d_dimensions
             var%attributes  = [attribute_t("non_standard_name", "layer_thickness"),                 &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -966,6 +918,21 @@ contains
         end associate
 
         !>------------------------------------------------------------
+        !!  Mass-weighted fall speed of ice1 category
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%ice1_vmi))
+            var%name        = "ice1_FS"
+            var%three_d     = .True.
+            var%two_d       = .False.
+            var%dimensions  = three_d_t_dimensions
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "planar-nucleated mass-weighted fall speeds (m s^-1)"), &
+                               attribute_t("units",         "-"),                                                 &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+
+
+        !>------------------------------------------------------------
         !!  Mass-weighted effective density of ice2 category
         !!------------------------------------------------------------
         associate(var=>var_meta(kVARS%ice2_rho))
@@ -994,6 +961,20 @@ contains
         end associate
 
         !>------------------------------------------------------------
+        !!  Mass-weighted fall speed of ice2 category
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%ice2_vmi))
+            var%name        = "ice2_FS"
+            var%three_d     = .True.
+            var%two_d       = .False.
+            var%dimensions  = three_d_t_dimensions
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "columnar-nucleated mass-weighted fall speeds (m s^-1)"), &
+                               attribute_t("units",         "-"),                                                 &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+
+        !>------------------------------------------------------------
         !!  Mass-weighted effective density of ice3 category
         !!------------------------------------------------------------
         associate(var=>var_meta(kVARS%ice3_rho))
@@ -1017,6 +998,63 @@ contains
             var%dimensions  = three_d_t_dimensions
             var%unlimited_dim=.True.
             var%attributes  = [attribute_t("non_standard_name", "number-weighted_aspect_ratio_of_ice3_category"), &
+                               attribute_t("units",         "-"),                                                 &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+
+        !>------------------------------------------------------------
+        !!  Mass-weighted fall speed of ice3 category
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%ice3_vmi))
+            var%name        = "ice3_FS"
+            var%three_d     = .True.
+            var%two_d       = .False.
+            var%dimensions  = three_d_t_dimensions
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "aggregates mass-weighted fall speeds (m s^-1)"), &
+                               attribute_t("units",         "-"),                                                 &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+
+
+        !>------------------------------------------------------------
+        !!  Alpha weighting factor in variational wind solver
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%wind_alpha))
+            var%name        = "wind_alpha"
+            var%three_d     = .True.
+            var%two_d       = .False.
+            var%dimensions  = three_d_t_dimensions
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "Alpha weighting factor in variational wind solver"), &
+                               attribute_t("units",         "-"),                                                 &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+
+        !>------------------------------------------------------------
+        !!  Number-weighted aspect ratio of ice3 category
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%froude))
+            var%name        = "froude"
+            var%three_d     = .True.
+            var%two_d       = .False.
+            var%dimensions  = three_d_t_dimensions
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "Froude number used to calculate wind_alpha"), &
+                               attribute_t("units",         "-"),                                                 &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+
+        !>------------------------------------------------------------
+        !!  Number-weighted aspect ratio of ice3 category
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%blk_ri))
+            var%name        = "blk_ri"
+            var%three_d     = .True.
+            var%two_d       = .False.
+            var%dimensions  = three_d_t_dimensions
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "Bulk richardson number used to calculate Sx sheltering"), &
                                attribute_t("units",         "-"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         end associate
@@ -2167,6 +2205,20 @@ contains
                                attribute_t("coordinates",   "lat lon")]
         end associate
         !>------------------------------------------------------------
+        !!  Soil water content, of liquid water
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%soil_water_content_liq))
+            var%name        = "soil_water_content_liq"
+            var%dimensions  = three_d_t_soil_dimensions
+            var%three_d     = .True.
+            var%two_d       = .False.
+            var%unlimited_dim=.True.
+            var%dim_len(3)  = kSOIL_GRID_Z
+            var%attributes  = [attribute_t("standard_name", "liquid_moisture_content_of_soil_layer"),      &
+                               attribute_t("units",         "m3 m-3"),                              &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+        !>------------------------------------------------------------
         !!  Equilibrium Volumetric Soil Moisture
         !!------------------------------------------------------------
         associate(var=>var_meta(kVARS%eq_soil_moisture))
@@ -2851,7 +2903,7 @@ contains
         !>------------------------------------------------------------
         !!  Sensible Heat Exchange Coefficient
         !!------------------------------------------------------------
-        associate(var=>var_meta(kVARS%coeff_heat_exchange))
+        associate(var=>var_meta(kVARS%chs))
             var%name        = "coeff_heat_exchange"
             var%dimensions  = two_d_t_dimensions
             var%three_d     = .False.
@@ -2861,6 +2913,33 @@ contains
                                attribute_t("units",         "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         end associate
+        !>------------------------------------------------------------
+        !!  Sensible Heat Exchange Coefficient, 2m
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%chs2))
+            var%name        = "coeff_heat_exchange"
+            var%dimensions  = two_d_t_dimensions
+            var%three_d     = .False.
+            var%two_d       = .True.
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "sensible_heat_exchange_coefficient"), &
+                               attribute_t("units",         "1"),                                      &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+        !>------------------------------------------------------------
+        !!  Latent Heat Exchange Coefficient, 2m
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%cqs2))
+            var%name        = "coeff_moisture_exchange"
+            var%dimensions  = two_d_t_dimensions
+            var%three_d     = .False.
+            var%two_d       = .True.
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "latent_heat_exchange_coefficient"), &
+                               attribute_t("units",         "1"),                                      &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+
         !>------------------------------------------------------------
         !!  Sensible Heat Exchange Coefficient 3d
         !!------------------------------------------------------------
@@ -2874,6 +2953,46 @@ contains
                                attribute_t("units",         "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         end associate
+        !>------------------------------------------------------------
+        !!  Momentum Exchange Coefficient 3d
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%coeff_momentum_exchange_3d))
+            var%name        = "coeff_momentum_exchange_3d"
+            var%dimensions  = three_d_t_dimensions
+            var%three_d     = .True.
+            var%two_d       = .False.
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "momentum_exchange_coefficient_3d"), &
+                               attribute_t("units",         "1"),                                      &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+        !>------------------------------------------------------------
+        !!  Sensible Heat Exchange Coefficient
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%br))
+            var%name        = "sfc_Ri"
+            var%dimensions  = two_d_t_dimensions
+            var%three_d     = .False.
+            var%two_d       = .True.
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "bulk_richardson_num_from_SFC_scheme"), &
+                               attribute_t("units",         "1"),                                      &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+        !>------------------------------------------------------------
+        !!  Sensible Heat Exchange Coefficient
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%QFX))
+            var%name        = "moisture_flux"
+            var%dimensions  = two_d_t_dimensions
+            var%three_d     = .False.
+            var%two_d       = .True.
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "moisture_flux_from_surface"), &
+                               attribute_t("units",         "kg/m²/s"),                                      &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+
         !>------------------------------------------------------------
         !!  PBL height
         !!------------------------------------------------------------
@@ -3187,6 +3306,18 @@ contains
                                attribute_t("coordinates",   "lat lon")]
         end associate
         !>------------------------------------------------------------
+        !!  Grid cell fractional sea ice lakemask
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%xice))
+            var%name        = "xice"
+            var%dimensions  = two_d_dimensions
+            var%three_d     = .False.
+            var%two_d       = .True.
+            var%attributes  = [attribute_t("standard_name", "xice"),     &
+                               attribute_t("units",         ""),                               &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+        !>------------------------------------------------------------
         !!  Lake lakedepth2d
         !!------------------------------------------------------------
         associate(var=>var_meta(kVARS%lakedepth2d))
@@ -3396,19 +3527,6 @@ contains
 
         !! MJ added for needed new vars for FSM
         !>------------------------------------------------------------
-        !!  snowdepth from FSM
-        !!------------------------------------------------------------
-        associate(var=>var_meta(kVARS%snowdepth))
-            var%name        = "hsnt"
-            var%dimensions  = two_d_t_dimensions
-            var%three_d     = .False.
-            var%two_d       = .True.
-            var%unlimited_dim=.True.
-            var%attributes  = [attribute_t("standard_name", "snowdepth"),   &
-                               attribute_t("units",         "m"),                        &
-                               attribute_t("coordinates",   "lat lon")]
-        end associate
-        !>------------------------------------------------------------
         !!  Snow Temperature
         !!------------------------------------------------------------
         associate(var=>var_meta(kVARS%Tsnow))
@@ -3417,6 +3535,7 @@ contains
             var%three_d     = .True.
             var%two_d       = .False.
             var%unlimited_dim=.True.
+            var%dim_len(3)  = kSNOW_GRID_Z
             var%attributes  = [attribute_t("standard_name", "snow_temperature"),                    &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -3430,6 +3549,7 @@ contains
             var%three_d     = .True.
             var%two_d       = .False.
             var%unlimited_dim=.True.
+            var%dim_len(3)  = kSNOW_GRID_Z
             var%attributes  = [attribute_t("standard_name", "snow_ice_content"),                    &
                                attribute_t("units",         "kg m-2"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -3443,23 +3563,11 @@ contains
             var%three_d     = .True.
             var%two_d       = .False.
             var%unlimited_dim=.True.
+            var%dim_len(3)  = kSNOW_GRID_Z
             var%attributes  = [attribute_t("standard_name", "snow_water_content"),                    &
                                attribute_t("units",         "kg m-2"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         end associate        		
-        !>------------------------------------------------------------
-        !!  albs from FSM
-        !!------------------------------------------------------------
-        associate(var=>var_meta(kVARS%albs))
-            var%name        = "albs"
-            var%dimensions  = two_d_t_dimensions
-            var%three_d     = .False.
-            var%two_d       = .True.
-            var%unlimited_dim=.True.
-            var%attributes  = [attribute_t("standard_name", "albedo"),   &
-                               attribute_t("units",         "-"),                        &
-                               attribute_t("coordinates",   "lat lon")]
-        end associate	
         !>------------------------------------------------------------
         !!  snow layer thicknes 
         !!------------------------------------------------------------
@@ -3469,6 +3577,7 @@ contains
             var%three_d     = .True.
             var%two_d       = .False.
             var%unlimited_dim=.True.
+            var%dim_len(3)  = kSNOW_GRID_Z
             var%attributes  = [attribute_t("standard_name", "snow_layer_thickness"),                    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -3499,32 +3608,6 @@ contains
                                attribute_t("units",         "-"),                        &
                                attribute_t("coordinates",   "lat lon")]
         end associate
-        !>------------------------------------------------------------
-        !!  snowfall aggregated per output interval
-        !!------------------------------------------------------------
-        associate(var=>var_meta(kVARS%snowfall_tstep))
-            var%name        = "snfx"
-            var%dimensions  = two_d_t_dimensions
-            var%unlimited_dim=.True.
-            var%three_d     = .False.
-            var%two_d       = .True.
-            var%attributes  = [attribute_t("standard_name", "snowfall, aggregated per output interval during t-1->t"),                     &
-                               attribute_t("units",         "kg m-2"),                              &
-                               attribute_t("coordinates",   "lat lon")]
-        end associate                        
-        !>------------------------------------------------------------
-        !!  snowfall aggregated per output interval
-        !!------------------------------------------------------------
-        associate(var=>var_meta(kVARS%rainfall_tstep))
-            var%name        = "rnfx"
-            var%dimensions  = two_d_t_dimensions
-            var%unlimited_dim=.True.
-            var%three_d     = .False.
-            var%two_d       = .True.
-            var%attributes  = [attribute_t("standard_name", "rainfall, aggregated per output interval during t-1->t"),                     &
-                               attribute_t("units",         "kg m-2"),                              &
-                               attribute_t("coordinates",   "lat lon")]
-        end associate  
         !>------------------------------------------------------------
         !!  runoff_tstep from FSM
         !!------------------------------------------------------------
@@ -3564,7 +3647,59 @@ contains
                                attribute_t("units",         "kg m-2"),                        &
                                attribute_t("coordinates",   "lat lon")]
         end associate  
-                              
+        !>------------------------------------------------------------
+        !!  saltation flux from FSM
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%dm_salt))
+            var%name        = "salt"
+            var%dimensions  = two_d_t_dimensions
+            var%three_d     = .False.
+            var%two_d       = .True.
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("standard_name", "saltation flux"),   &
+                               attribute_t("units",         "kg m-2 t-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate  
+        !>------------------------------------------------------------
+        !!  suspension flux from FSM
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%dm_susp))
+            var%name        = "susp"
+            var%dimensions  = two_d_t_dimensions
+            var%three_d     = .False.
+            var%two_d       = .True.
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("standard_name", "suspension flux"),   &
+                               attribute_t("units",         "kg m-2 t-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate  
+        !>------------------------------------------------------------
+        !!  blowing snow sublimation from FSM
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%dm_subl))
+            var%name        = "blow_subl"
+            var%dimensions  = two_d_t_dimensions
+            var%three_d     = .False.
+            var%two_d       = .True.
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("standard_name", "blowing-snow sublimation"),   &
+                               attribute_t("units",         "kg m-2 t-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate  
+        !>------------------------------------------------------------
+        !!  sliding snow transport from FSM
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%dm_slide))
+            var%name        = "slide"
+            var%dimensions  = two_d_t_dimensions
+            var%three_d     = .False.
+            var%two_d       = .True.
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("standard_name", "sliding snow transport"),   &
+                               attribute_t("units",         "kg m-2 t-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate  
+
         ! loop through entire array setting n_dimensions and n_attrs based on the data that were supplied
         do i=1,size(var_meta)
             var_meta(i)%n_dimensions = size(var_meta(i)%dimensions)

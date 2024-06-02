@@ -11,12 +11,9 @@
 #			doc: 		make doxygen documentation in docs/html (requires doxygen)
 #
 # Optional setting:
-#	MODE =	fast:		Enables additional optimizations that are likely to break something
-# 			profile:	Enables profileing
+#	MODE =	profile:	Enables profileing
 # 			debug:		Minimal debug options enabled, still optimized
-# 			debugomp:	same as debug, but OpenMP is enabled
 # 			debugslow:	Optimization curtailed, highly instrumented for debugging
-# 			debugompslow: same as debugslow by OpenMP is enabled
 #
 # Note: adding -jn will parallelize the compile itself over n processors
 #
@@ -24,18 +21,24 @@
 #	make clean; make install MODE=debugompslow -j4
 #
 ###################################################################
-# Variables that need to be set by the user:
+# Variables that need to be set by the user, if not already set in the environment:
+# If running on a HPC cluster, check if any of the dependencies are available as modules first
 #
+# FC         : fortran compiler to use, default = gfortran
 # INSTALLDIR : default = ~/bin/
 # FFTW       : location of fftw installation    default = $home/usr/local
 # LIBNETCDF	 : location of netdcdf libraries	default = compiler/machine dependant /usr/local/lib
 # INCNETCDF	 : location of netcdf headers		default = compiler/machine dependant /usr/local/include
+# PETSC_DIR	 : location of PETSc installation	default = $home/usr/local
 #
+
 # Dependencies: fftw (v3), netcdf (v4)
 #	FFTW is available here: http://www.fftw.org/
 #		FFTW is a C library with fortran headers
 #	netcdf is available here: http://www.unidata.ucar.edu/software/netcdf/
 #		NB Requires the same compiler be used to compile the Fortran interface as is used to compile ICAR
+#	PETSc is available here: https://petsc.org/release/install/
+#		PETSc is a scientific library that is used for solving matrix equations
 
 ###################################################################
 #  Specify where you want the resulting executable installed
@@ -55,6 +58,11 @@ CONST=constants/
 OBJECTS=objects/
 TESTS=tests/
 
+NODENAME := $(shell uname -n)
+
+# get GIT version info
+GIT_VERSION := $(shell git describe --long --dirty --all --always | sed -e's/heads\///')
+
 ###################################################################
 #	Various compiler specific flags, may need to edit
 ###################################################################
@@ -73,18 +81,42 @@ CP=/bin/cp
 # doxygen only required to enable "make doc"
 DOXYGEN=doxygen
 
-ifndef FC
-	FC=gfortran
-endif
-ifndef F90
-	F90=${FC}
+#ifndef FC
+#	FC=gfortran
+#endif
+
+ifeq ($(PE_ENV),GNU)
+	COMPILER=gnu
 endif
 
 ifeq ($(PE_ENV),CRAY)
 	FC=ftn
-	F90=ftn
+	COMPILER=cray
 	ECHO_MOVE=/bin/mv
 endif
+
+LINKER=$(FC)
+
+########################################################################################
+# Try to guess the compiler options suite if not set
+########################################################################################
+ifndef COMPILER
+	find_gfortran=$(findstring gfortran, $(filter gfortran%,$(FC)))
+	ifeq (gfortran, $(find_gfortran))
+			COMPILER=gnu
+	endif
+	ifeq ($(FC),ifort)
+		COMPILER=intel
+	endif
+	ifeq ($(FC),ftn)
+		COMPILER=cray
+	endif
+endif
+
+########################################################################################
+# Now we will try to guess where some dependencies might be located,
+# if they are not found in the environment variables
+########################################################################################
 
 ifndef FFTW
 		FFTW=/usr/local
@@ -106,15 +138,14 @@ endif
 NCDF_PATH = ${NETCDF}
 LIBNETCDF = -L$(NCDF_PATH)/lib -lnetcdff -lnetcdf
 INCNETCDF = -I$(NCDF_PATH)/include
+ifdef NETCDFF
+       LIBNETCDF += -L$(NETCDFF)/lib
+       INCNETCDF += -I$(NETCDFF)/include
+endif
 
 ifdef PETSC_DIR
 	PETSC=$(PETSC_DIR)
 	include $(PETSC)/lib/petsc/conf/variables
-endif
-
-ifdef NETCDFF
-       LIBNETCDF += -L$(NETCDFF)/lib
-       INCNETCDF += -I$(NETCDFF)/include
 endif
 
 USE_ASSERTIONS:=.false.
@@ -123,45 +154,18 @@ ifeq ($(ASSERTIONS),)
   USE_ASSERTIONS:=.true.
 endif
 
-
-
-
-##################################
-ifndef FSM
-	FSM=${HOME}
-	ifdef FSM_DIR
-		FSM=${FSM_DIR}
-    endif
+LIBFSM=
+INFSM=
+ifdef FSM_DIR
+	LIBFSM= -L$(FSM_DIR)/lib/FSM_interface -lFSM_interface
+	INFSM=-I$(FSM_DIR)/include/FSM_interface/build
 endif
-FSM_PATH = ${FSM}
-LIBFSM= -L$(FSM_PATH)/lib/FSM_interface -lFSM_interface
-INFSM=-I$(FSM_PATH)/include/FSM_interface/build
 ##################################
 
 #MJ added:
 #IN_MPI_FFF=-I/usr/lib/x86_64-linux-gnu/openmpi/include -pthread -I/usr/lib/x86_64-linux-gnu/openmpi/lib
 #LIB_MPI_FFF=-L/usr/lib/x86_64-linux-gnu/openmpi/lib -lmpi_usempif08 -lmpi_usempi_ignore_tkr -lmpi_mpifh -lmpi
 
-########################################################################################
-# Try to find the machine information
-########################################################################################
-NODENAME := $(shell uname -n)
-
-ifndef COMPILER
-        find_gfortran=$(findstring gfortran, $(filter gfortran%,$(F90)))
-        ifeq (gfortran, $(find_gfortran))
-                COMPILER=gnu
-        endif
-	ifeq ($(F90),ifort)
-		COMPILER=intel
-	endif
-	ifeq ($(F90),ftn)
-		COMPILER=cray
-	endif
-endif
-
-# get GIT version info
-GIT_VERSION := $(shell git describe --long --dirty --all --always | sed -e's/heads\///')
 
 ########################################################################################
 #
@@ -172,35 +176,11 @@ GIT_VERSION := $(shell git describe --long --dirty --all --always | sed -e's/hea
 
 # GNU fortran
 ifeq ($(COMPILER), gnu)
-	# to enable OpenMP use this line... OpenMP seems to hang with more than 1 thread, probably an OpenCoarrays (v1.9.1) issue with not supporting threading
-	# COMP=-fopenmp -lgomp -O2 -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens # -ffast-math #-flto #
-	# LINK=-fopenmp -lgomp
-	COMP= -fopenmp -lgomp -O2 -mfma -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens # -ffast-math #-flto #
+	COMP= -fopenmp -lgomp -O2 -mfma -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens #-fcheck=all -Wall  # -ffast-math #-flto #
 	LINK= -fopenmp -lgomp
 	PREPROC=-cpp
 	MODOUTPUT=-J $(BUILD)
 endif
-
-# GNU fortran using OpenSHMEM instead of MPI... experimental
-# Currently works with gcc 6.3 MPT 2.15f and a special version of opencoarrays 1.8.5 compiled in the library directory below
-ifeq ($(COMPILER),oshfort)
-  F90=oshfort
-  FC=$F90
-  # link := $(compile)
-  OSH_FLAGS := -fcoarray=lib -L/glade/u/home/gutmann/usr/local/opencoarrays/openshmem/ -lcaf_openshmem
-  COMP= -O2 -mfma -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens $(OSH_FLAGS) # -ffast-math #-flto #
-  LINK= $(OSH_FLAGS)
-  PREPROC=-cpp
-  MODOUTPUT=-J $(BUILD)
-  # opt := -fcheck=all -Wall -fbacktrace -g -cpp -DUSE_ASSERTIONS=$(USE_ASSERTIONS) -DDEBUG_OUTPUT=$(DEBUG_OUTPUT) -J $(BUILD)/ $(OSH_FLAGS)
-  # link_flags := -fcheck=all -Wall -fbacktrace -g $(OSH_FLAGS)
-  ifeq ($(MODE),debug)
-	COMP= -g -c -ffree-line-length-none -fimplicit-none -fcheck=all -Wall -fbacktrace $(OSH_FLAGS) # -ffast-math #-flto #
-	#   opt := -Ofast -cpp -DUSE_ASSERTIONS=$(USE_ASSERTIONS) -DDEBUG_OUTPUT=$(DEBUG_OUTPUT) -J $(BUILD)/ $(OSH_FLAGS)
-	#   link_flags := -Ofast $(OSH_FLAGS)
-  endif
-endif
-
 
 # Intel fortran
 ifeq ($(COMPILER), intel)
@@ -212,9 +192,9 @@ endif
 
 # Cray fortran
 ifeq ($(COMPILER), cray)
-	COMP= -h omp -O3 -c -hfp2 -eI
+	COMP= -h noomp -hfp3 -O2 -c -eI
 	LINK= -fopenmp
-	PREPROC= -eZ
+	PREPROC= -eT
 	MODOUTPUT= -J $(BUILD) -em
 endif
 
@@ -226,16 +206,17 @@ ifeq ($(MODE), debugslow)
 		LINK=
 	endif
 	ifeq ($(COMPILER), gnu)
-		COMP= -c -g -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion
+		COMP= -c -g -ffree-line-length-none -Wconversion #-fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion
 		LINK=
 	endif
 	ifeq ($(COMPILER), cray)
-		COMP=-h noomp -c -g -h develop -m 0 -R bcsp -M 399 -hfp0
+		COMP= -c -h noomp -eI -m 2 -O0 -hpl=my_program_debug.pl -g -R bcs 
 		LINK=-h noomp
 		PREPROC=-eZ
 		MODOUTPUT=-e m -J $(BUILD)
 	endif
 endif
+
 ifeq ($(MODE), debug)
 	ifeq ($(COMPILER), intel)
 		COMP= -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost
@@ -246,42 +227,8 @@ ifeq ($(MODE), debug)
 		LINK=
 	endif
 	ifeq ($(COMPILER), cray)
-		COMP=-O2 -h noomp -c -g -hfp0
+		COMP=-h noomp -c  -g #-R cpbs
 		LINK=-h noomp
-		PREPROC=-eZ
-		MODOUTPUT=-e m -J $(BUILD)
-	endif
-endif
-ifeq ($(MODE), debugompslow)
-	ifeq ($(COMPILER), intel)
-		# COMP= -openmp -liomp5 -debug -debug-parameters all -traceback -ftrapuv -g -fpe0 -c -u -check all -check noarg_temp_created -CB
-		COMP= -qopenmp -liomp5 -debug -c -u	 -ftz -fpe0 -traceback -check all -check noarg_temp_created -fp-stack-check
-		LINK= -qopenmp -liomp5
-	endif
-	ifeq ($(COMPILER), gnu)
-		COMP= -fopenmp -lgomp -c -g -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -ffpe-trap=invalid -Wconversion
-		LINK= -fopenmp -lgomp
-	endif
-	ifeq ($(COMPILER), cray)
-		COMP=-c -g -m 0 -h develop -R bcsp -M 399 -hfp0
-		LINK=
-		PREPROC=-eZ
-		MODOUTPUT=-e m -J $(BUILD)
-	endif
-endif
-ifeq ($(MODE), debugomp)
-	ifeq ($(COMPILER), intel)
-		COMP= -qopenmp -liomp5 -debug -c -O3 -u -traceback -fpe0 -ftz -xHost # -fast-transcendentals -check all -check noarg_temp_created -fpe0
-		LINK= -qopenmp -liomp5
-	endif
-	ifeq ($(COMPILER), gnu)
-		COMP= -fopenmp -lgomp -c -O2 -g -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -fimplicit-none -Wconversion # -ftree-vectorize -funroll-loops -march=native  -fno-protect-parens
-		LINK= -fopenmp -lgomp
-		 # -Wall -Wno-unused-variable -Wno-unused-dummy-argument
-	endif
-	ifeq ($(COMPILER), cray)
-		COMP=-O1 -c -g -hfp0
-		LINK=
 		PREPROC=-eZ
 		MODOUTPUT=-e m -J $(BUILD)
 	endif
@@ -297,46 +244,17 @@ ifeq ($(MODE), profile)
 		PROF=-g -p
 	endif
 endif
-ifeq ($(MODE), fast) # WARNING -ipo (included in -fast) takes forever for very little gain, and this may be unstable
-	ifeq ($(F90), ifort)
-		COMP=-c -u -openmp -liomp5 -fast -ftz #-fast-transcendentals # not available in ifort <13: -align array64byte
-	endif
-endif
-
-
-LINKER=$(F90)
-ifeq ($(COMPILER), gnu)
-	ifeq ($(CAF_MODE), single)
-		CAF_FLAG=-fcoarray=single
-	else
-		ifeq ($(F90), caf)
-			CAF_FLAG=-fcoarray=lib
-		else
-			ifndef CAF_DIR
-				CAF_DIR=${HOME}/usr/local/lib
-			endif
-			CAF_FLAG=-fcoarray=lib
-			CAF_LINK=-L${CAF_DIR} -lcaf_mpi
-			ifneq ($(F90), ftn)
-				LINKER=mpif90
-			endif
-		endif
-	endif
-endif
-# Intel fortran
-ifeq ($(COMPILER), intel)
-	ifeq ($(CAF_MODE), single)
-		CAF_FLAG=-coarray=single
-	else
-		CAF_FLAG=-coarray=distributed
-		CAF_LINK=-L${CAF_DIR}
-		ifneq ($(F90), ftn)
-			LINKER=mpif90
-		endif
-	endif
-endif
 
 ASSERT=-DUSE_ASSERTIONS=$(USE_ASSERTIONS)
+
+ifeq ($(COMPILER), cray)
+	ifneq ($(CAF),)
+    	COMP += -DCRAY_PE
+	endif
+endif
+ifdef FSM_DIR
+    COMP += -DFSM
+endif
 
 ###################################################################
 ###################################################################
@@ -347,8 +265,8 @@ ASSERT=-DUSE_ASSERTIONS=$(USE_ASSERTIONS)
 ###################################################################
 # copy required libraries into a directory accessible on compute nodes and set LD_RUN_PATH e.g.
 # export LD_RUN_PATH=$LD_RUN_PATH:/path/to/netcdf/libraries/lib:/path/to/fftw/libraries/lib
-LFLAGS=$(LINK) $(PROF) $(CAF_FLAG) $(CAF_LINK) $(LIBNETCDF) $(LIBFFT) $(PETSC_LIB) # $(LIBFSM) 
-FFLAGS=$(COMP) $(PROF) $(CAF_FLAG) $(PREPROC) -DVERSION=\"$(GIT_VERSION)\" $(INCNETCDF) $(INCFFT) $(PETSC_FC_INCLUDES)  $(MODOUTPUT) $(ASSERT) # $(INFSM)
+LFLAGS=$(LINK) $(PROF) $(CAF_FLAG) $(CAF_LINK) $(LIBNETCDF) $(LIBFFT) $(PETSC_LIB) $(LIBFSM) 
+FFLAGS=$(COMP) $(PROF) $(CAF_FLAG) $(PREPROC) -DVERSION=\"$(GIT_VERSION)\" $(INCNETCDF) $(INCFFT) $(PETSC_FC_INCLUDES)  $(MODOUTPUT) $(ASSERT) $(INFSM)
 
 # Cray -O3 optimization can break NoahMP LSM, so create separate compiler flags for NoahMP here if -O3 is used
 ifeq ($(COMPILER), cray)
@@ -362,14 +280,16 @@ ifeq ($(COMPILER), cray)
 endif
 
 $(info $$NODENAME    = ${NODENAME})
-$(info $$FC          = ${F90})
+$(info $$FC          = ${FC})
 $(info $$FFTW_PATH   = ${FFTW_PATH})
 $(info $$NCDF_PATH   = ${NCDF_PATH})
 $(info $$GIT_VERSION = ${GIT_VERSION})
 $(info $$COMP        = ${COMP})
 $(info $$LINK        = ${LINK})
 $(info $$MODE        = ${MODE})
+ifdef FSM_DIR
 $(info $$FSM_PATH   = ${FSM_DIR})
+endif
 $(info $$LFLAGS   = ${LFLAGS})
 $(info $$FFLAGS   = ${FFLAGS})
 
@@ -400,8 +320,8 @@ OBJS=	\
 		$(BUILD)variable_dict_obj.o	\
 		$(BUILD)grid_h.o			\
 		$(BUILD)grid_obj.o			\
-		$(BUILD)exchangeable_h.o	\
-		$(BUILD)exchangeable_obj.o	\
+		$(BUILD)halo_h.o	\
+		$(BUILD)halo_obj.o	\
 		$(BUILD)domain_h.o			\
 		$(BUILD)domain_obj.o		\
 		$(BUILD)boundary_h.o		\
@@ -409,7 +329,6 @@ OBJS=	\
 		$(BUILD)assertions.o		\
 		$(BUILD)atm_utilities.o		\
 		$(BUILD)pbl_utilities.o		\
-		$(BUILD)co_utilities.o		\
 		$(BUILD)default_output_metadata.o\
 		$(BUILD)ioserver_h.o                      \
 		$(BUILD)ioserver_obj.o                      \
@@ -421,6 +340,7 @@ OBJS=	\
 		$(BUILD)output_obj.o		\
 		$(BUILD)wind.o				\
 		$(BUILD)wind_iterative.o        \
+		$(BUILD)wind_iterative_old.o        \
 		$(BUILD)wind_surf.o		\
 		$(BUILD)wind_thermal.o          \
 		$(BUILD)linear_winds.o		\
@@ -448,10 +368,12 @@ OBJS=	\
 		$(BUILD)cu_tiedtke.o		\
 		$(BUILD)cu_nsas.o			\
 		$(BUILD)cu_bmj.o			\
-                $(BUILD)adv_fluxcorr.o      \
+        $(BUILD)adv_fluxcorr.o      \
 		$(BUILD)advection_driver.o	\
 		$(BUILD)advect.o			\
 		$(BUILD)adv_mpdata.o        \
+        $(BUILD)sfc_driver.o            \
+        $(BUILD)sfc_sfclayrev.o            \
 		$(BUILD)lsm_driver.o		\
 		$(BUILD)lsm_noahdrv.o		\
 		$(BUILD)lsm_noahlsm.o		\
@@ -467,10 +389,13 @@ OBJS=	\
 		$(BUILD)vinterp.o			\
 		$(BUILD)array_utilities.o
 
+ifdef FSM_DIR
+	OBJS += $(BUILD)lsm_FSMdrv.o
+endif
+
 CAF_TEST_EXECUTABLES = 	caf_options_test 				\
 						caf_init_test 					\
 						caf_domain_init_test			\
-						caf_bcast_test					\
 						caf_write_domain_test			\
 						caf_options_test				\
 						caf_boundary_test				\
@@ -489,10 +414,6 @@ TEST_EXECUTABLES= 	fftshift_test			\
 					caf_threads_test		\
 					time_obj_test			\
 					$(CAF_TEST_EXECUTABLES)
-
-# Pre-Coarray Tests that we may want to re-implement
-# mpdata_test			\	(should be easy)
-# blocking_test			\	(may be easy once linear winds is re-implemented)
 
 
 ###################################################################
@@ -520,7 +441,7 @@ allclean:cleanall
 cleanall:clean
 	${RM} icar $(TEST_EXECUTABLES) 2>/dev/null ||:
 
-test: $(TEST_EXECUTABLES) move_i
+#test: $(TEST_EXECUTABLES) move_i
 
 caf_tests:	$(CAF_TEST_EXECUTABLES)
 
@@ -536,10 +457,10 @@ fftw_test: $(BUILD)test_fftw.o $(OBJS)
 fftshift_test: $(BUILD)test_fftshift.o $(OBJS)
 	${LINKER} $^ -o $@ ${LFLAGS}
 
-time_obj_test: $(BUILD)test_time_obj.o $(BUILD)time_obj.o $(BUILD)time_h.o $(BUILD)time_delta_obj.o $(BUILD)co_utilities.o
+time_obj_test: $(BUILD)test_time_obj.o $(BUILD)time_obj.o $(BUILD)time_h.o $(BUILD)time_delta_obj.o
 	${LINKER} $^ -o $@ ${LFLAGS}
 
-calendar_test: $(BUILD)test_calendar.o $(BUILD)time_obj.o $(BUILD)time_h.o $(BUILD)time_delta_obj.o $(BUILD)co_utilities.o
+calendar_test: $(BUILD)test_calendar.o $(BUILD)time_obj.o $(BUILD)time_h.o $(BUILD)time_delta_obj.o
 	${LINKER} $^ -o $@ ${LFLAGS}
 
 mpdata_test: $(BUILD)test_mpdata.o $(BUILD)adv_mpdata.o
@@ -556,7 +477,7 @@ blocking_test: $(BUILD)test_blocking.o $(BUILD)io_routines.o $(BUILD)winds_block
 array_util_test: $(BUILD)test_array_utilities.o $(OBJS)
 	${LINKER} $^ -o $@ ${LFLAGS}
 
-variable_dict_test: $(BUILD)test_variable_dict.o $(BUILD)co_utilities.o	 	\
+variable_dict_test: $(BUILD)test_variable_dict.o 	\
 					$(BUILD)variable_dict_h.o	$(BUILD)variable_dict_obj.o	\
 					$(BUILD)variable_h.o		$(BUILD)variable_obj.o		\
 					$(BUILD)grid_h.o			$(BUILD)grid_obj.o			\
@@ -593,11 +514,10 @@ caf_no_forcing_test: $(BUILD)test_caf_no_forcing.o							\
 					$(BUILD)variable_dict_h.o $(BUILD)variable_dict_obj.o	\
 					$(BUILD)time_delta_obj.o $(BUILD)time_obj.o    		\
 					$(BUILD)time_h.o	\
-					$(BUILD)exchangeable_h.o $(BUILD)exchangeable_obj.o \
 					$(BUILD)icar_constants.o $(BUILD)io_routines.o		\
 					$(BUILD)model_tracking.o $(BUILD)string.o           \
 					$(BUILD)assertions.o	 $(BUILD)atm_utilities.o    \ $(BUILD)pbl_utilities.o		\
-					$(BUILD)co_utilities.o   $(BUILD)default_output_metadata.o \
+					$(BUILD)default_output_metadata.o \
 					$(BUILD)ra_driver.o      $(BUILD)ra_simple.o		\
 					$(BUILD)pbl_driver.o     $(BUILD)pbl_simple.o		\
 					$(BUILD)pbl_diagnostic.o     $(BUILD)pbl_ysu.o           \
@@ -609,11 +529,15 @@ caf_no_forcing_test: $(BUILD)test_caf_no_forcing.o							\
 					$(BUILD)advect.o		 $(BUILD)data_structures.o	\
 					$(BUILD)vinterp.o		 $(BUILD)array_utilities.o	\
 					$(BUILD)lsm_driver.o	\
-					$(BUILD)lsm_FSMdrv.o	\
 					$(BUILD)lsm_noahdrv.o 	 $(BUILD)lsm_noahlsm.o \
 					$(BUILD)lsm_noahmpdrv.o  $(BUILD)lsm_noahmplsm.o \
 					$(BUILD)water_simple.o   $(BUILD)water_lake.o
 	${LINKER} $^ -o $@ ${LFLAGS}
+
+ifdef FSM_DIR
+	caf_no_forcing_test: $(BUILD)test_caf_no_forcing.o  $(BUILD)lsm_FSMdrv.o
+		${LINKER} $^ -o $@ ${LFLAGS}
+endif
 
 caf_domain_init_test: $(BUILD)test_caf_domain_init.o $(OBJS)
 	${LINKER} $^ -o $@ ${LFLAGS}
@@ -622,10 +546,6 @@ caf_init_test: $(BUILD)test_caf_init.o $(OBJS)
 	${LINKER} $^ -o $@ ${LFLAGS}
 
 caf_init-write_test: $(BUILD)test_caf_init-write.o $(OBJS)
-	${LINKER} $^ -o $@ ${LFLAGS}
-
-caf_bcast_test: $(BUILD)test_caf_bcast.o	\
-				$(BUILD)co_utilities.o $(BUILD)icar_constants.o
 	${LINKER} $^ -o $@ ${LFLAGS}
 
 caf_boundary_test: $(BUILD)test_caf_boundary.o $(OBJS)
@@ -655,38 +575,38 @@ caf_threads_test: $(BUILD)test_caf_threads.o
 ###################################################################
 
 $(BUILD)%.o: $(UTIL)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 $(BUILD)%.o: $(CONST)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 $(BUILD)%.o: $(IO)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 $(BUILD)%.o: $(OBJECTS)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 ifeq ($(COMPILER), cray)
-        $(BUILD)%.o: $(NOAHMP)%.f90
-		${F90} ${NMP_FFLAGS} $< -o $@
-        $(BUILD)%.o: $(PHYS)%.f90
-		${F90} ${PHYS_FFLAGS} $< -o $@
+$(BUILD)%.o: $(NOAHMP)%.f90
+		${FC} ${NMP_FFLAGS} $< -o $@
+$(BUILD)%.o: $(PHYS)%.f90
+		${FC} ${PHYS_FFLAGS} $< -o $@
 else
-	$(BUILD)%.o: $(NOAHMP)%.f90
-		${F90} ${FFLAGS} $< -o $@
-	$(BUILD)%.o: $(PHYS)%.f90
-		${F90} ${FFLAGS} $< -o $@
+$(BUILD)%.o: $(NOAHMP)%.f90
+		${FC} ${FFLAGS} $< -o $@
+$(BUILD)%.o: $(PHYS)%.f90
+		${FC} ${FFLAGS} $< -o $@
 endif
 
 $(BUILD)%.o: $(TESTS)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 $(BUILD)%.o: $(MAIN)%.f90
-	${F90} ${FFLAGS} $< -o $@
+	${FC} ${FFLAGS} $< -o $@
 
 
 ###################################################################
-#	driver code for original version of ICAR
+#	driver code
 ###################################################################
 
 $(BUILD)driver.o:$(MAIN)driver.f90 $(BUILD)time_step.o $(BUILD)domain_h.o $(BUILD)timer_h.o \
@@ -704,7 +624,7 @@ $(BUILD)options_obj.o: $(OBJECTS)options_obj.f90 $(BUILD)options_h.o $(BUILD)tim
 						$(BUILD)time_delta_obj.o $(BUILD)io_routines.o $(BUILD)opt_types.o	\
 						$(BUILD)time_io.o $(BUILD)string.o $(BUILD)model_tracking.o			\
 						$(BUILD)mp_driver.o $(BUILD)advection_driver.o $(BUILD)ra_driver.o	\
-						$(BUILD)lsm_driver.o $(BUILD)pbl_driver.o $(BUILD)cu_driver.o 		\
+						$(BUILD)lsm_driver.o $(BUILD)pbl_driver.o $(BUILD)cu_driver.o $(BUILD)sfc_driver.o 	\
 						$(BUILD)wind.o $(BUILD)default_output_metadata.o
 
 ###################################################################
@@ -715,23 +635,19 @@ $(BUILD)meta_data_obj.o: $(OBJECTS)meta_data_obj.f90 $(BUILD)meta_data_h.o
 
 $(BUILD)meta_data_h.o: $(OBJECTS)meta_data_h.f90 $(BUILD)icar_constants.o
 
-$(BUILD)variable_obj.o: $(OBJECTS)variable_obj.f90 $(BUILD)variable_h.o $(BUILD)co_utilities.o
+$(BUILD)variable_obj.o: $(OBJECTS)variable_obj.f90 $(BUILD)variable_h.o
 
 $(BUILD)variable_h.o: $(OBJECTS)variable_h.f90 $(BUILD)meta_data_h.o $(BUILD)icar_constants.o $(BUILD)grid_h.o
 
-$(BUILD)variable_dict_h.o: $(OBJECTS)variable_dict_h.f90 $(BUILD)variable_h.o $(BUILD)icar_constants.o
+$(BUILD)variable_dict_h.o: $(OBJECTS)variable_dict_h.f90 $(BUILD)variable_h.o $(BUILD)default_output_metadata.o $(BUILD)icar_constants.o
 
 $(BUILD)variable_dict_obj.o: $(OBJECTS)variable_dict_obj.f90 $(BUILD)variable_dict_h.o
 
 $(BUILD)grid_obj.o: $(OBJECTS)grid_obj.f90 $(BUILD)grid_h.o $(BUILD)assertions.o
 
-$(BUILD)grid_h.o: $(OBJECTS)grid_h.f90 $(BUILD)icar_constants.o
+$(BUILD)grid_h.o: $(OBJECTS)grid_h.f90 $(BUILD)icar_constants.o $(BUILD)wrf_constants.o $(BUILD)io_routines.o
 
-$(BUILD)exchangeable_obj.o: $(OBJECTS)exchangeable_obj.f90 $(BUILD)exchangeable_h.o $(BUILD)assertions.o
-
-$(BUILD)exchangeable_h.o: $(OBJECTS)exchangeable_h.f90 $(BUILD)grid_h.o $(BUILD)variable_h.o $(BUILD)assertions.o
-
-$(BUILD)default_output_metadata.o: $(IO)default_output_metadata.f90 $(BUILD)icar_constants.o $(BUILD)variable_h.o $(BUILD)exchangeable_h.o $(BUILD)meta_data_h.o
+$(BUILD)default_output_metadata.o: $(IO)default_output_metadata.f90 $(BUILD)icar_constants.o $(BUILD)variable_h.o $(BUILD)meta_data_h.o
 
 $(BUILD)ioserver_h.o: $(IO)ioserver_h.f90 $(BUILD)icar_constants.o $(BUILD)time_h.o $(BUILD)output_h.o $(BUILD)options_h.o $(BUILD)reader_h.o $(BUILD)variable_h.o $(BUILD)boundary_h.o $(BUILD)domain_h.o
 $(BUILD)ioserver_obj.o: $(IO)ioserver_obj.f90 $(BUILD)ioserver_h.o $(BUILD)debug_utils.o $(BUILD)timer_h.o
@@ -748,22 +664,26 @@ $(BUILD)output_obj.o: $(IO)output_obj.f90 $(BUILD)output_h.o $(BUILD)default_out
 
 $(BUILD)boundary_h.o: $(OBJECTS)boundary_h.f90 $(BUILD)options_h.o				\
 					$(BUILD)grid_h.o $(BUILD)meta_data_h.o $(BUILD)time_h.o 	\
-					$(BUILD)data_structures.o $(BUILD)time_delta_obj.o
+					$(BUILD)data_structures.o $(BUILD)time_delta_obj.o $(BUILD)variable_dict_obj.o
 
 $(BUILD)boundary_obj.o: $(OBJECTS)boundary_obj.f90 $(BUILD)boundary_h.o					\
 					$(BUILD)string.o $(BUILD)atm_utilities.o $(BUILD)time_io.o			\
-					$(BUILD)io_routines.o $(BUILD)co_utilities.o $(BUILD)geo_reader.o	\
+					$(BUILD)io_routines.o $(BUILD)geo_reader.o	\
 					$(BUILD)vinterp.o $(BUILD)array_utilities.o $(BUILD)icar_constants.o $(BUILD)debug_utils.o
 
+$(BUILD)halo_obj.o: $(OBJECTS)halo_obj.f90 $(BUILD)halo_h.o $(BUILD)assertions.o
 
-$(BUILD)domain_h.o: $(OBJECTS)domain_h.f90 $(BUILD)options_h.o $(BUILD)exchangeable_h.o \
+$(BUILD)halo_h.o: $(OBJECTS)halo_h.f90 $(BUILD)variable_dict_h.o $(BUILD)grid_h.o $(BUILD)variable_h.o $(BUILD)assertions.o
+
+
+$(BUILD)domain_h.o: $(OBJECTS)domain_h.f90 $(BUILD)options_h.o  $(BUILD)halo_h.o\
 					$(BUILD)grid_h.o 	$(BUILD)meta_data_h.o $(BUILD)data_structures.o	\
 					$(BUILD)time_h.o 	$(BUILD)boundary_h.o	 						\
 					$(BUILD)time_io.o 	$(BUILD)io_routines.o
 
 $(BUILD)domain_obj.o: $(OBJECTS)domain_obj.f90 $(BUILD)domain_h.o $(BUILD)options_h.o $(BUILD)grid_h.o 	\
 					$(BUILD)string.o $(BUILD)assertions.o $(BUILD)geo_reader.o $(BUILD)meta_data_h.o	\
-					$(BUILD)atm_utilities.o $(BUILD)io_routines.o $(BUILD)co_utilities.o 				\
+					$(BUILD)atm_utilities.o $(BUILD)io_routines.o				\
 					$(BUILD)array_utilities.o $(BUILD)vinterp.o $(BUILD)wind_surf.o
 
 ###################################################################
@@ -771,20 +691,18 @@ $(BUILD)domain_obj.o: $(OBJECTS)domain_obj.f90 $(BUILD)domain_h.o $(BUILD)option
 ###################################################################
 
 $(BUILD)init.o:$(MAIN)init.f90 $(BUILD)data_structures.o $(BUILD)options_h.o $(BUILD)domain_h.o $(BUILD)boundary_h.o $(BUILD)icar_constants.o\
-	 				$(BUILD)mp_driver.o $(BUILD)advection_driver.o $(BUILD)atm_utilities.o $(BUILD)wind.o $(BUILD)ra_driver.o \
-					$(BUILD)pbl_driver.o $(BUILD)cu_driver.o $(BUILD)lsm_driver.o $(BUILD)io_routines.o $(BUILD)wind_iterative.o
+	 				$(BUILD)mp_driver.o $(BUILD)time_step.o $(BUILD)advection_driver.o $(BUILD)atm_utilities.o $(BUILD)wind.o $(BUILD)ra_driver.o \
+					$(BUILD)pbl_driver.o $(BUILD)cu_driver.o $(BUILD)lsm_driver.o $(BUILD)sfc_driver.o $(BUILD)io_routines.o
 
 $(BUILD)time_step.o:$(MAIN)time_step.f90 $(BUILD)data_structures.o $(BUILD)wind.o $(BUILD)string.o 	\
 					$(BUILD)advection_driver.o $(BUILD)mp_driver.o $(BUILD)domain_h.o $(BUILD)boundary_h.o \
 					$(BUILD)options_h.o $(BUILD)atm_utilities.o $(BUILD)ra_driver.o $(BUILD)lsm_driver.o \
-					$(BUILD)debug_utils.o $(BUILD)pbl_driver.o $(BUILD)cu_driver.o $(BUILD)timer_h.o
+					$(BUILD)debug_utils.o $(BUILD)pbl_driver.o $(BUILD)cu_driver.o $(BUILD)sfc_driver.o $(BUILD)timer_h.o
 
 
 ###################################################################
 #	Utility Routines
 ###################################################################
-
-$(BUILD)co_utilities.o:$(UTIL)co_utilities.f90 $(BUILD)icar_constants.o
 
 $(BUILD)time_delta_obj.o:$(UTIL)time_delta_obj.f90 $(BUILD)icar_constants.o
 
@@ -794,7 +712,7 @@ $(BUILD)timer_obj.o:$(UTIL)time_obj.f90 $(BUILD)timer_h.o
 
 $(BUILD)time_h.o:$(UTIL)time_h.f90 $(BUILD)time_delta_obj.o
 
-$(BUILD)time_obj.o:$(UTIL)time_obj.f90 $(BUILD)time_h.o $(BUILD)co_utilities.o
+$(BUILD)time_obj.o:$(UTIL)time_obj.f90 $(BUILD)time_h.o
 
 $(BUILD)time_io.o:$(UTIL)time_io.f90 $(BUILD)time_h.o $(BUILD)data_structures.o \
 					$(BUILD)icar_constants.o $(BUILD)string.o $(BUILD)io_routines.o
@@ -803,7 +721,7 @@ $(BUILD)string.o:$(UTIL)string.f90
 
 $(BUILD)array_utilities.o:$(UTIL)array_utilities.f90
 
-$(BUILD)atm_utilities.o:$(UTIL)atm_utilities.f90 $(BUILD)icar_constants.o 	\
+$(BUILD)atm_utilities.o:$(UTIL)atm_utilities.f90 $(BUILD)wrf_constants.o $(BUILD)time_h.o	\
 					$(BUILD)data_structures.o $(BUILD)options_h.o $(BUILD)mp_thompson.o \
 					$(BUILD)opt_types.o
 
@@ -847,7 +765,7 @@ $(BUILD)mp_wsm6.o:$(PHYS)mp_wsm6.f90 $(BUILD)wrf_constants.o
 
 $(BUILD)mp_thompson.o:$(PHYS)mp_thompson.f90 $(BUILD)opt_types.o
 
-$(BUILD)mp_thompson_aer.o:$(PHYS)mp_thompson_aer.f90 $(BUILD)co_utilities.o
+$(BUILD)mp_thompson_aer.o:$(PHYS)mp_thompson_aer.f90 $(BUILD)icar_constants.o
 
 $(BUILD)mp_simple.o:$(PHYS)mp_simple.f90 $(BUILD)data_structures.o $(BUILD)options_h.o
 
@@ -855,7 +773,7 @@ $(BUILD)mp_simple.o:$(PHYS)mp_simple.f90 $(BUILD)data_structures.o $(BUILD)optio
 #	Convection code
 ###################################################################
 $(BUILD)cu_driver.o:$(PHYS)cu_driver.f90 $(BUILD)cu_tiedtke.o $(BUILD)cu_nsas.o $(BUILD)cu_bmj.o  \
-					$(BUILD)data_structures.o $(BUILD)icar_constants.o $(BUILD)domain_h.o $(BUILD)options_h.o
+					$(BUILD)data_structures.o $(BUILD)wrf_constants.o $(BUILD)domain_h.o $(BUILD)options_h.o
 
 $(BUILD)cu_tiedtke.o:$(PHYS)cu_tiedtke.f90
 
@@ -879,11 +797,20 @@ $(BUILD)ra_rrtmg_sw.o:$(PHYS)ra_rrtmg_sw.f90 $(BUILD)ra_clWRF_support.o $(BUILD)
 
 $(BUILD)ra_clWRF_support.o:$(PHYS)ra_clWRF_support.f90 $(BUILD)io_routines.o
 
-$(BUILD)ra_simple.o:$(PHYS)ra_simple.f90 $(BUILD)data_structures.o $(BUILD)atm_utilities.o $(BUILD)options_h.o $(BUILD)domain_h.o
+$(BUILD)ra_simple.o:$(PHYS)ra_simple.f90 $(BUILD)data_structures.o $(BUILD)atm_utilities.o $(BUILD)wrf_constants.o $(BUILD)options_h.o $(BUILD)domain_h.o
 
 ###################################################################
 #	Surface code
 ###################################################################
+$(BUILD)sfc_driver.o: $(PHYS)sfc_driver.f90 $(BUILD)data_structures.o   \
+                                                $(BUILD)sfc_sfclayrev.o             \
+                                                $(BUILD)domain_h.o $(BUILD)options_h.o                  \
+                                                $(BUILD)wrf_constants.o
+
+$(BUILD)sfc_sfclayrev.o: $(PHYS)sfc_sfclayrev.f90 $(BUILD)data_structures.o
+
+
+ifdef FSM_DIR
 $(BUILD)lsm_driver.o: $(PHYS)lsm_driver.f90 $(BUILD)data_structures.o	\
 						$(BUILD)lsm_noahdrv.o $(BUILD)lsm_noahlsm.o		\
 						$(BUILD)lsm_noahmpdrv.o $(BUILD)lsm_noahmplsm.o \
@@ -892,7 +819,24 @@ $(BUILD)lsm_driver.o: $(PHYS)lsm_driver.f90 $(BUILD)data_structures.o	\
 						$(BUILD)atm_utilities.o $(BUILD)ra_simple.o	\
 						$(BUILD)opt_types.o	$(BUILD)icar_constants.o
 
-# $(BUILD)lsm_basic.o $(BUILD)lsm_simple.o
+# J added 
+$(BUILD)lsm_FSMdrv.o: $(PHYS)lsm_FSMdrv.f90 $(BUILD)data_structures.o \
+                                                $(BUILD)lsm_noahdrv.o $(BUILD)lsm_noahlsm.o \
+                                                $(BUILD)lsm_noahmpdrv.o $(BUILD)lsm_noahmplsm.o \
+                                                $(BUILD)water_simple.o $(BUILD)icar_constants.o \
+												$(BUILD)wrf_constants.o $(BUILD)io_routines.o   \
+                                                $(BUILD)domain_h.o $(BUILD)options_h.o          \
+                                                $(BUILD)atm_utilities.o $(BUILD)ra_simple.o
+else
+$(BUILD)lsm_driver.o: $(PHYS)lsm_driver.f90 $(BUILD)data_structures.o	\
+						$(BUILD)lsm_noahdrv.o $(BUILD)lsm_noahlsm.o		\
+						$(BUILD)lsm_noahmpdrv.o $(BUILD)lsm_noahmplsm.o \
+						$(BUILD)water_simple.o $(BUILD)water_lake.o		\
+						$(BUILD)domain_h.o $(BUILD)options_h.o			\
+						$(BUILD)atm_utilities.o $(BUILD)ra_simple.o	\
+						$(BUILD)opt_types.o	$(BUILD)icar_constants.o
+
+endif
 
 $(BUILD)water_simple.o: $(PHYS)water_simple.f90 $(BUILD)options_h.o $(BUILD)data_structures.o
 
@@ -914,11 +858,12 @@ $(BUILD)lsm_noahmpdrv.o: $(NOAHMP)lsm_noahmpdrv.f90 $(BUILD)lsm_noahmplsm.o \
 	          $(BUILD)lsm_noahmp_gecros.o $(BUILD)lsm_noahmp_glacier.o
 
 $(BUILD)lsm_noahmplsm.o: $(NOAHMP)lsm_noahmplsm.f90 $(BUILD)lsm_noahmp_gecros.o \
-	          $(BUILD)lsm_noahmp_glacier.o
+	          $(BUILD)lsm_noahmp_glacier.o $(BUILD)sfc_sfclayrev.o $(BUILD)wrf_constants.o
 
 $(BUILD)lsm_noahmp_gecros.o: $(NOAHMP)lsm_noahmp_gecros.f90
 
 $(BUILD)lsm_noahmp_glacier.o: $(NOAHMP)lsm_noahmp_glacier.f90
+
 
 ###################################################################
 #	Planetary Boundary Layer code
@@ -951,21 +896,18 @@ $(BUILD)adv_mpdata.o:$(PHYS)adv_mpdata.f90 $(PHYS)adv_mpdata_FCT_core.f90 $(BUIL
 ###################################################################
 #	Wind related code
 ###################################################################
-$(BUILD)wind.o:$(PHYS)wind.f90  $(BUILD)atm_utilities.o $(BUILD)data_structures.o $(BUILD)exchangeable_h.o \
-				$(BUILD)domain_h.o $(BUILD)wind_iterative.o $(BUILD)options_h.o $(BUILD)linear_winds.o \
-				$(BUILD)wind_surf.o $(BUILD)wind_thermal.o
+$(BUILD)wind.o:$(PHYS)wind.f90  $(BUILD)atm_utilities.o $(BUILD)data_structures.o $(BUILD)boundary_h.o \
+				$(BUILD)domain_h.o $(BUILD)variable_h.o $(BUILD)wind_iterative.o $(BUILD)options_h.o $(BUILD)linear_winds.o \
+				$(BUILD)wind_surf.o $(BUILD)wind_thermal.o $(BUILD)wind_iterative_old.o
 
 $(BUILD)wind_surf.o:$(PHYS)wind_surf.f90 $(BUILD)data_structures.o $(BUILD)atm_utilities.o $(BUILD)domain_h.o $(BUILD)options_h.o $(BUILD)io_routines.o
 
 $(BUILD)wind_thermal.o:$(PHYS)wind_thermal.f90 $(BUILD)data_structures.o $(BUILD)atm_utilities.o $(BUILD)wrf_constants.o $(BUILD)domain_h.o $(BUILD)options_h.o $(BUILD)io_routines.o
 
 ifdef PETSC_DIR
-$(BUILD)wind_iterative.o:$(PHYS)wind_iterative.f90  $(BUILD)domain_h.o $(BUILD)io_routines.o
+$(BUILD)wind_iterative.o:$(PHYS)wind_iterative.f90  $(BUILD)domain_h.o $(BUILD)array_utilities.o $(BUILD)io_routines.o
+$(BUILD)wind_iterative_old.o:$(PHYS)wind_iterative_old.f90  $(BUILD)domain_h.o $(BUILD)io_routines.o
 endif
-
-#########################
-# ${F90} ${FFLAGS} $(PHYS)wind.f90 -o $(BUILD)wind.o
-#########################
 
 $(BUILD)linear_winds.o:$(PHYS)linear_winds.f90 $(BUILD)io_routines.o $(BUILD)data_structures.o 	\
 	 				   $(BUILD)fftshift.o $(BUILD)string.o $(BUILD)fftw.o						\
@@ -1027,8 +969,6 @@ $(BUILD)test_caf_no_forcing.o: $(TESTS)test_caf_no_forcing.f90 $(BUILD)domain_h.
 
 $(BUILD)test_caf_output.o: $(TESTS)test_caf_output.f90 $(BUILD)output_h.o $(BUILD)variable_h.o  \
 							$(BUILD)default_output_metadata.o $(BUILD)icar_constants.o
-
-$(BUILD)test_caf_bcast.o: $(TESTS)test_caf_bcast.f90 $(BUILD)co_utilities.o
 
 $(BUILD)test_variable_dict.o: $(TESTS)test_variable_dict.f90 $(BUILD)grid_h.o \
 						$(BUILD)variable_h.o $(BUILD)variable_dict_h.o

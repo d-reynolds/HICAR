@@ -12,7 +12,7 @@
 !!
 !!----------------------------------------------------------
 module reader_interface
-  use mpi
+  use mpi_f08
   use netcdf
   use icar_constants
   use options_interface,  only : options_t
@@ -39,9 +39,9 @@ module reader_interface
       ! Note n_variables may be smaller then size(variables) so that it doesn't
       ! have to keep reallocating variables whenever something is added or removed
       integer, public :: n_vars = 0
-      
+      logical, public :: eof      
       type(var_dict_t)    :: variables      ! a dictionary with all forcing data
-      
+      type(Time_type) :: model_end_time
       ! list of input files
       character (len=kMAX_FILE_LENGTH), allocatable :: file_list(:)
       character (len=kMAX_NAME_LENGTH)   :: time_var
@@ -74,7 +74,7 @@ module reader_interface
           implicit none
           class(reader_t), intent(inout)   :: this
           real, allocatable, intent(inout) :: buffer(:,:,:,:)
-          integer, intent(in)              :: par_comms
+          type(MPI_Comm), intent(in)              :: par_comms
     end subroutine
 
     module subroutine close_file(this)

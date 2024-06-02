@@ -37,6 +37,7 @@
 module linear_theory_winds
     use iso_c_binding
     use iso_fortran_env
+    use mpi_f08
     use fft,                        only: fftw_execute_dft,                    &
                                           fftw_alloc_complex, fftw_free,       &
                                           fftw_plan_dft_2d, fftw_destroy_plan, &
@@ -51,10 +52,11 @@ module linear_theory_winds
     use linear_theory_lut_disk_io,  only: read_LUT, write_LUT
     use mod_atm_utilities,         only : calc_stability, calc_u, calc_v, &
                                           calc_speed, calc_direction,     &
-                                          blocking_fraction, options_t
+                                          options_t
     use array_utilities,            only: smooth_array, calc_weight, &
                                           linear_space
     use icar_constants,             only: kMAX_FILE_LENGTH, DOM_IMG_INDX, kNUM_SERVERS, kNUM_COMPUTE, kNUM_PROC_PER_NODE
+    use mod_wrf_constants,          only: piconst
 
     implicit none
 
@@ -65,7 +67,6 @@ module linear_theory_winds
     logical :: module_initialized = .False.
     logical :: variable_N
     logical :: smooth_nsq
-    logical :: using_blocked_flow
     real    :: N_squared
 
     logical :: debug_print = .false.
@@ -91,7 +92,7 @@ module linear_theory_winds
     !! Linear wind look up table values and tables
     real, allocatable,          dimension(:)           :: dir_values, nsq_values, spd_values
     ! Look Up Tables for linear perturbation are nspd x n_dir_values x n_nsq_values x nx x nz x ny
-    real, allocatable,          dimension(:,:,:,:,:,:) :: hi_u_LUT[:], hi_v_LUT[:] !, rev_u_LUT, rev_v_LUT
+    real, allocatable,          dimension(:,:,:,:,:,:) :: hi_u_LUT, hi_v_LUT !, rev_u_LUT, rev_v_LUT
     ! real, pointer,              dimension(:,:,:,:,:,:) :: u_LUT, v_LUT
     real, allocatable,          dimension(:,:)         :: linear_mask, nsq_calibration
 
@@ -316,7 +317,8 @@ contains
 
         step_size = min(minimum_step, minval(z_top - z_bottom))
         if (step_size < 5) then
-            if (this_image()==1) write(*,*) "WARNING: Very small vertical step size in linear winds, check layer thicknesses in output"
+            write(*,*) "WARNING: Very small vertical step size in linear winds. z_top min: ",minval(z_top)," z_top max: ",maxval(z_top)
+            flush(output_unit)
         endif
 
         current_z = start_z + step_size/2 ! we want the value in the middle of each theoretical layer
@@ -326,7 +328,6 @@ contains
         lt_data%v_accumulator = 0
 
         do while (current_z < end_z)
-
             call linear_perturbation_at_height(U,V,Nsq,current_z, fourier_terrain, lt_data)
 
             layer_fraction = max(0.0,                                                                                       &
@@ -446,7 +447,7 @@ contains
         allocate(lt_data%ineta(nx,ny))
 
         ! Compute 2D k and l wavenumber fields
-        offset = pi / dx
+        offset = piconst / dx
         gain = 2 * offset / (nx-1)
 
         ! compute k wave numbers for the first row
@@ -560,29 +561,60 @@ contains
         ny = size(terrain, 2)
 
         do i=1,kNUM_COMPUTE
-            call u_grids(i)%set_grid_dimensions(nx, ny, nz, adv_order=halo_size*2, nx_extra=1, for_image=i)
-            call v_grids(i)%set_grid_dimensions(nx, ny, nz, adv_order=halo_size*2, ny_extra=1, for_image=i)
+            call u_grids(i)%set_grid_dimensions(nx, ny, nz, image=i, adv_order=halo_size*2, nx_extra=1)
+            call v_grids(i)%set_grid_dimensions(nx, ny, nz, image=i, adv_order=halo_size*2, ny_extra=1)
         enddo
 
     end subroutine setup_remote_grids
 
-    subroutine copy_data_to_remote(wind, grids, LUT, i,j,k, z)
+    subroutine copy_data_to_remote(wind, grids, LUT_win, i, j, k, z, LUT_nx, LUT_nz, LUT_ny)
         implicit none
-        real,              intent(in)   :: wind(:,:)
-        type(grid_t),      intent(in)   :: grids(:)
-        real, allocatable, intent(inout):: LUT(:,:,:,:,:,:)[:]
-        integer,           intent(in)   :: i,j,k, z
+        real,           intent(in)  :: wind(:,:)
+        type(grid_t),   intent(in)  :: grids(:)
+        !real,           intent(inout):: LUT(:,:,:,:,:,:)
+        type(MPI_Win),  intent(in)  :: LUT_win
+        integer,        intent(in)  :: i, j, k, z, LUT_nx, LUT_nz, LUT_ny
 
-        integer :: img
+        integer :: img, msg_size, wind_nx, wind_ny
+        INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+        type(MPI_Datatype) :: LUT_type, send_type
 
+
+        msg_size = 1
+        disp = 0
+
+        wind_nx = size(wind,1)
+        wind_ny = size(wind,2)
+        
         do img = 1, kNUM_COMPUTE
             associate(ims => grids(img)%ims, &
-                      ime => grids(img)%ime, &
                       jms => grids(img)%jms, &
-                      jme => grids(img)%jme  &
+                      nx  => grids(img)%nx,  &
+                      ny  => grids(img)%ny   &
                 )
+
             !$omp critical
-            LUT(k,i,j, 1:ime-ims+1, z, 1:jme-jms+1)[DOM_IMG_INDX(img)] = wind(ims:ime,jms:jme)
+       
+
+            !Create the subarray types, which describe how to traverse the two arrays in memory to extract the values wanted
+            call MPI_Type_create_subarray(6, [n_spd_values, n_dir_values, n_nsq_values, LUT_nx, LUT_nz, LUT_ny], [1, 1, 1, nx, 1, ny], &
+                [(k-1),(i-1),(j-1),0,(z-1),0], MPI_ORDER_FORTRAN, MPI_REAL, LUT_type)
+
+            call MPI_Type_create_subarray(2, [wind_nx, wind_ny], [nx, ny], &
+                [0,0], MPI_ORDER_FORTRAN, MPI_REAL, send_type)
+
+            ! Commit the types so that they can be used
+            call MPI_Type_commit(send_type)
+            call MPI_Type_commit(LUT_type)
+            !Perform the put
+            call MPI_Put(wind(ims,jms), msg_size, send_type, (img-1), disp, msg_size, LUT_type, LUT_win)
+ 
+            !Free the types
+            call MPI_Type_free(send_type)
+            call MPI_Type_free(LUT_type)
+
+            !this can be done as some kind of collective (is a 2D broadcast-y thing)
+            !LUT(k,i,j, 1:ime-ims+1, z, 1:jme-jms+1)[DOM_IMG_INDX(img)] = wind(ims:ime,jms:jme)
             !$omp end critical
 
             end associate
@@ -602,21 +634,33 @@ contains
 
         ! local variables used to calculate the LUT
         real :: u,v, layer_height, layer_height_bottom, layer_height_top
-        integer :: nx,ny,nz, nxu,nyv, i,j,k,z,ik, error
+        integer :: nx,ny,nz, nxu,nyv, i,j,k,z,ik, n, error
         integer :: fftnx, fftny
         integer, dimension(3,2) :: LUT_dims
         integer :: loops_completed ! this is just used to measure progress in the LUT creation
         integer :: total_LUT_entries, ijk, start_pos, stop_pos
-        integer :: ims, jms, this_n, my_index
+        integer :: ims, jms, this_n, my_index, num_PE
         real, allocatable :: temporary_u(:,:), temporary_v(:,:)
         character(len=kMAX_FILE_LENGTH) :: LUT_file
 
+        type(c_ptr) :: tmp_ptr
+        integer(KIND=MPI_ADDRESS_KIND) :: win_size
+
+        ! MPI windows
+        type(MPI_Win) :: U_LUT_win, V_LUT_win
+        ! MPI buffers
+        real, pointer, dimension(:,:,:,:,:,:) :: U_LUT_p, V_LUT_p
+
         type(grid_t), allocatable :: u_grids(:), v_grids(:)
 
+        ! append total number of images and the current image number to the LUT filename
+        call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
+
+        LUT_file = trim(options%lt_options%u_LUT_Filename) // "_" // trim(str(num_PE)) // "_" // trim(str(PE_RANK_GLOBAL)) // ".nc"
 
         ims = lbound(domain%z%data_3d,1)
         jms = lbound(domain%z%data_3d,3)
-        
+
         ! the domain to work over
         nz = size(domain%u%data_3d,  2)
 
@@ -642,48 +686,9 @@ contains
 
         total_LUT_entries = n_dir_values * n_spd_values * n_nsq_values
         
-        if (mod(this_image(),(num_images()/kNUM_SERVERS)) == 0) then
-            my_index = 1
-        else
-            my_index = FINDLOC(DOM_IMG_INDX,this_image(),dim=1)
-        endif
-        ! append total number of images and the current image number to the LUT filename
-        LUT_file = trim(options%lt_options%u_LUT_Filename) // "_" // trim(str(kNUM_COMPUTE)) // "_" // trim(str(my_index)) // ".nc"
-
-        ! Allocate the (LARGE) look up tables for both U and V
-        if (.not.options%lt_options%read_LUT) then
-            allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny)[*], source=0.0)
-            allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv)[*], source=0.0)
-            
-            ! If we are an IO image, we only need to stick around long enough to allocate the coarrays with everyone
-            ! This should be changed in the future once coarray teams are better supported accross compilers, such
-            ! that we can allocate the coarrays from within the compute team and do not have to worry about global barriers
-            if (mod(this_image(),(num_images()/kNUM_SERVERS)) == 0) return
-            
-            error=0
-        else
-            if (this_image()==1) write(*,*) "    Reading LUT from file: ", trim(LUT_file)
-            error=1
-            error = read_LUT(LUT_file, hi_u_LUT, hi_v_LUT, options%parameters%dz_levels(:nz), LUT_dims, options%lt_options)
-            
-            if (error/=0) then
-                if (this_image()==1) write(*,*) "WARNING: LUT on disk does not match that specified in the namelist or does not exist."
-                if (this_image()==1) write(*,*) "    LUT will be recreated"
-                if (allocated(hi_u_LUT)) deallocate(hi_u_LUT)
-                allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny)[*], source=0.0)
-                if (allocated(hi_v_LUT)) deallocate(hi_v_LUT)
-                allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv)[*], source=0.0)
-            endif
-            if (mod(this_image(),(num_images()/kNUM_SERVERS)) == 0) return
-        endif
-
-        
-        start_pos = nint((real(my_index-1) / kNUM_COMPUTE) * total_LUT_entries)
-        if (my_index==kNUM_COMPUTE) then
-            stop_pos = total_LUT_entries - 1
-        else
-            stop_pos  = nint((real(my_index) / kNUM_COMPUTE) * total_LUT_entries) - 1
-        endif
+        call MPI_Comm_rank(domain%compute_comms, my_index)
+        ! MPI returns rank, which is 0-indexed
+        my_index = my_index + 1
 
         ! create the array of spd, dir, and nsq values to create LUTs for
         ! generates the values for each look up table dimension
@@ -694,17 +699,57 @@ contains
         ! generate table of Brunt-Vaisalla frequencies (Nsq) to be used
         call linear_space(spd_values,spdmin,spdmax,n_spd_values)
 
+        ! Allocate the (LARGE) look up tables for both U and V
+        if (.not.options%lt_options%read_LUT) then
+            allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny), source=0.0)
+            allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv), source=0.0)
+            error=0
+        else
+            if (STD_OUT_PE) write(*,*) "    Reading LUT from file: ", trim(LUT_file)
+            error=1
+            error = read_LUT(LUT_file, hi_u_LUT, hi_v_LUT, options%parameters%dz_levels(:nz), LUT_dims, options%lt_options)
+            
+            if (error/=0) then
+                if (STD_OUT_PE) write(*,*) "WARNING: LUT on disk does not match that specified in the namelist or does not exist."
+                if (STD_OUT_PE) write(*,*) "    LUT will be recreated"
+                if (allocated(hi_u_LUT)) deallocate(hi_u_LUT)
+                allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny), source=0.0)
+                if (allocated(hi_v_LUT)) deallocate(hi_v_LUT)
+                allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv), source=0.0)
+            endif
+        endif
+
+        
+        start_pos = nint((real(my_index-1) / kNUM_COMPUTE) * total_LUT_entries)
+        if (my_index==kNUM_COMPUTE) then
+            stop_pos = total_LUT_entries - 1
+        else
+            stop_pos  = nint((real(my_index) / kNUM_COMPUTE) * total_LUT_entries) - 1
+        endif
+
         ! if (options%parameters%debug) then
-        if (this_image()==1) write(*,*) "Local Look up Table size:", 4*product(shape(hi_u_LUT))/real(2**20), "MB"
-        if (this_image()==1) write(*,*) "Wind Speeds:",spd_values
-        if (this_image()==1) write(*,*) "Directions:",360*dir_values/(2*pi)
-        if (this_image()==1) write(*,*) "Stabilities:",exp(nsq_values)
+        if (STD_OUT_PE) write(*,*) "Local Look up Table size:", 4*product(shape(hi_u_LUT))/real(2**20), "MB"
+        if (STD_OUT_PE) write(*,*) "Wind Speeds:",spd_values
+        if (STD_OUT_PE) write(*,*) "Directions:",360*dir_values/(2*piconst)
+        if (STD_OUT_PE) write(*,*) "Stabilities:",exp(nsq_values)
         ! endif
 
         if (reverse.or.(.not.((options%lt_options%read_LUT).and.(error==0)))) then
             ! loop over combinations of U, V, and Nsq values
             loops_completed = 0
-            if (this_image()==1) write(*,*) "    Initializing linear theory"
+            if (STD_OUT_PE) write(*,*) "    Initializing linear theory"
+            if (STD_OUT_PE) flush(output_unit)
+            ! Create MPI windows which will be used for one-sided communication of LUTs as they are being calculated
+            win_size = n_spd_values*n_dir_values*n_nsq_values*nxu*nz*ny
+            call MPI_WIN_ALLOCATE(win_size*kREAL, kREAL, MPI_INFO_NULL, domain%compute_comms, tmp_ptr, U_LUT_win)
+            call C_F_POINTER(tmp_ptr, U_LUT_p, [n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny])
+
+            win_size = n_spd_values*n_dir_values*n_nsq_values*nx*nz*nyv
+            call MPI_WIN_ALLOCATE(win_size*kREAL, kREAL, MPI_INFO_NULL, domain%compute_comms, tmp_ptr, V_LUT_win)
+            call C_F_POINTER(tmp_ptr, V_LUT_p, [n_spd_values, n_dir_values, n_nsq_values, nx, nz, nyv])
+            U_LUT_p = 1.0
+            V_LUT_p = 1.0
+
             ! $omp parallel default(shared) &
             ! $omp private(i,j,k,ik,ijk, z, u,v, layer_height, layer_height_bottom, layer_height_top, temporary_u, temporary_v) &
             ! $omp firstprivate(minimum_layer_size, n_dir_values, n_spd_values, n_nsq_values, nz,nx,ny,nxu,nyv,fftnx,fftny) &
@@ -718,7 +763,9 @@ contains
             allocate(temporary_v(fftnx - buffer*2,   fftny - buffer*2+1), source=0.0)
             this_n = stop_pos-start_pos+1
             ! $omp do
-
+        
+            !call MPI_Win_fence(0,U_LUT_win)
+            !call MPI_Win_fence(0,V_LUT_win)
             do ijk = start_pos, stop_pos
                 ! loop over the combined ijk space to improve parallelization (more granular parallelization)
                 ! because it is one combined loop, we have to calculate the i,k indicies from the combined ik variable
@@ -742,40 +789,22 @@ contains
                 if ((spd_values(k)==15).and.(abs(u-15) < 1).and.(j==15)) debug_print=.True.
                 ! calculate the linear wind field for the current u and v values
 
+
                 do z=1,nz
                     ! print the current status if this is being run "interactively"
                     if (options%parameters%interactive) then
                         !$omp critical (print_lock)
-                        if (this_image()==1) write(*,"(f5.1,A)") loops_completed/real(nz*(stop_pos-start_pos+1))*100," %"
+                        if (STD_OUT_PE) write(*,"(f5.1,A)") loops_completed/real(nz*(stop_pos-start_pos+1))*100," %"
+                        if (STD_OUT_PE) flush(output_unit)
                         !$omp end critical (print_lock)
                     endif
 
-                    if (options%parameters%space_varying_dz) then
+                    ! call update_irregular_grid(u,v, nsq_values(j), z, domain, minimum_layer_size)
+                    call linear_perturbation(u, v, exp(nsq_values(j)),                                                                      &
+                                             domain%global_z_interface(:,z,:) - domain%global_terrain,                                      &
+                                             domain%global_z_interface(:,z,:) - domain%global_terrain + domain%global_dz_interface(:,z,:),  &
+                                             minimum_layer_size, domain%terrain_frequency, lt_data_m)
 
-                        ! call update_irregular_grid(u,v, nsq_values(j), z, domain, minimum_layer_size)
-                        call linear_perturbation(u, v, exp(nsq_values(j)),                                                                      &
-                                                 domain%global_z_interface(:,z,:) - domain%global_terrain,                                      &
-                                                 domain%global_z_interface(:,z,:) - domain%global_terrain + domain%global_dz_interface(:,z,:),  &
-                                                 minimum_layer_size, domain%terrain_frequency, lt_data_m)
-
-                    else
-                        layer_height = domain%z%data_3d(ims,z,jms) - domain%terrain%data_2d(ims,jms)
-                        layer_height_bottom = layer_height - (options%parameters%dz_levels(z) / 2)
-                        layer_height_top    = layer_height + (options%parameters%dz_levels(z) / 2)
-
-                        if (z>1) then
-                            if (layer_height_bottom /= sum(options%parameters%dz_levels(1:z-1))) then
-                                print*, my_index, layer_height_bottom - sum(options%parameters%dz_levels(1:z-1)), "layer_height_bottom = ", layer_height_bottom, "sum(dz) = ", sum(options%parameters%dz_levels(1:z-1))
-                            endif
-                            if (layer_height_top /= sum(options%parameters%dz_levels(1:z))) then
-                                print*, my_index, layer_height_top - sum(options%parameters%dz_levels(1:z)), "layer_height_top = ", layer_height_top, "sum(dz) = ", sum(options%parameters%dz_levels(1:z))
-                            endif
-                        endif
-
-                        call linear_perturbation(u, v, exp(nsq_values(j)),                                  &
-                                                 layer_height_bottom, layer_height_top, minimum_layer_size, &
-                                                 domain%terrain_frequency, lt_data_m)
-                    endif
                     ! need to handle stagger (nxu /= nx) and the buffer around edges of the domain
                     if (nxu /= nx) then
                         temporary_u(:,:) = real( real(                                              &
@@ -785,9 +814,13 @@ contains
                         temporary_v(:,:) = real( real(                                              &
                                 ( lt_data_m%v_perturb(1+buffer:fftnx-buffer,     buffer:fftny-buffer)         &
                                 + lt_data_m%v_perturb(1+buffer:fftnx-buffer,     1+buffer:fftny-buffer+1)) )) / 2
+                        call MPI_Win_fence(0,U_LUT_win)
+                        call MPI_Win_fence(0,V_LUT_win)
+                        call copy_data_to_remote(temporary_u, u_grids, U_LUT_win, i,j,k, z, nxu, nz, ny)
+                        call copy_data_to_remote(temporary_v, v_grids, V_LUT_win, i,j,k, z, nx, nz, nyv)
+                        call MPI_Win_fence(0,U_LUT_win)
+                        call MPI_Win_fence(0,V_LUT_win)
 
-                        call copy_data_to_remote(temporary_u, u_grids, hi_u_LUT, i,j,k, z)
-                        call copy_data_to_remote(temporary_v, v_grids, hi_v_LUT, i,j,k, z)
                     else
                         stop "ERROR: linear wind LUT creation not set up for non-staggered grids yet"
                         ! hi_u_LUT(k,i,j,:,z,:) = real( real(                                                    &
@@ -801,13 +834,7 @@ contains
                     loops_completed = loops_completed+1
                     !$omp end critical (print_lock)
 
-                    ! for now sync images ([DOM_IMG_INDX]) has to be inside the z loop to conserve memory for large domains
-                    !$omp critical
-                    sync images ([DOM_IMG_INDX])
-                    !$omp end critical
-
                 enddo
-
             end do
             ! $omp end do
 
@@ -816,27 +843,36 @@ contains
             do i=1, (total_LUT_entries/kNUM_COMPUTE+1) - this_n
                 ! the syncs should be outside of the z loop, but this is a little more forgiving with memory requirements
                 do z=1,nz
-                    !$omp critical
-                    sync images ([DOM_IMG_INDX])
-                    !$omp end critical
+                    call MPI_Win_fence(0,U_LUT_win)
+                    call MPI_Win_fence(0,V_LUT_win)
+                    call MPI_Win_fence(0,U_LUT_win)
+                    call MPI_Win_fence(0,V_LUT_win)
                 enddo
             enddo
+
+            call MPI_Win_fence(0,U_LUT_win)
+            call MPI_Win_fence(0,V_LUT_win)
+       
+            hi_u_LUT = U_LUT_p(:,:,:,:,:,:)
+            hi_v_LUT = V_LUT_p(:,:,:,:,:,:)
+
+            call MPI_Win_free(U_LUT_win)
+            call MPI_Win_free(V_LUT_win)
 
             ! memory needs to be freed so this structure can be used again when removing linear winds
             call destroy_linear_theory_data(lt_data_m)
             ! $omp end parallel
-
-            sync images ([DOM_IMG_INDX])
-
-            if (this_image()==1) write(*,*) "All images: 100 % Complete"
-            if (this_image()==1) write(*,*) char(10),"--------  Linear wind look up table generation complete ---------"
+!
+            if (STD_OUT_PE) write(*,*) "All images: 100 % Complete"
+            if (STD_OUT_PE) write(*,*) char(10),"--------  Linear wind look up table generation complete ---------"
+            if (STD_OUT_PE) flush(output_unit)
         endif
 
         if ((options%lt_options%write_LUT).and.(.not.reverse)) then
             if ((options%lt_options%read_LUT) .and. (error == 0)) then
-                if (this_image()==1) write(*,*) "    Not writing Linear Theory LUT to file because LUT was read from file"
+                if (STD_OUT_PE) write(*,*) "    Not writing Linear Theory LUT to file because LUT was read from file"
             else
-                if (this_image()==1) write(*,*) "    Writing Linear Theory LUT to file: ", trim(LUT_file)
+                if (STD_OUT_PE) write(*,*) "    Writing Linear Theory LUT to file: ", trim(LUT_file)
                 error = write_LUT(LUT_file, hi_u_LUT, hi_v_LUT, options%parameters%dz_levels(:nz), options%lt_options)
             endif
         endif
@@ -868,15 +904,15 @@ contains
         real,allocatable :: u1d(:),v1d(:)
         integer :: ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme
         real :: dweight, nweight, sweight, curspd, curdir, curnsq, wind_first, wind_second
-        real :: blocked, hydrometeors
+        real :: hydrometeors
 
         ! pointers to the u/v data to be updated so they can point to different places depending on the update flag
         real, pointer :: u3d(:,:,:), v3d(:,:,:), nsquared(:,:,:)
 
 
         if (update) then
-            u3d => domain%u%meta_data%dqdt_3d
-            v3d => domain%v%meta_data%dqdt_3d
+            u3d => domain%u%dqdt_3d
+            v3d => domain%v%dqdt_3d
         else
             u3d => domain%u%data_3d
             v3d => domain%v%data_3d
@@ -996,9 +1032,9 @@ contains
         endif
 
         !$omp parallel firstprivate(ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme, nx,nxu,ny,nyv,nz), &
-        !$omp firstprivate(reverse, vsmooth, winsz, using_blocked_flow), default(none), &
+        !$omp firstprivate(reverse, vsmooth, winsz), default(none), &
         !$omp private(i,j,k,step, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
-        !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v, blocked), &
+        !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v), &
         !$omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
         !$omp shared(domain, u3d,v3d, nsquared, spd_values, dir_values, nsq_values, hi_u_LUT, hi_v_LUT, linear_mask), &
         !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution, nsq_calibration), &
@@ -1016,14 +1052,6 @@ contains
 
             do j=1, nz
                 do i=1, nxu
-
-                    ! if (using_blocked_flow) then
-                    !     blocked = blocking_fraction(domain%froude(min(i,nx),min(k,ny)))
-                    ! else
-                        blocked = 0
-                    ! endif
-                    if (blocked<1) then
-
                         uk = min(k,ny)
                         vi = min(i,nx)
 
@@ -1127,8 +1155,6 @@ contains
                                 v3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
                             ! endif
                         endif
-
-                    endif
                 end do
             end do
         end do
@@ -1169,8 +1195,6 @@ contains
         use_spatial_linear_fields = options%lt_options%spatial_linear_fields    ! use a spatially varying linear wind perturbation
         use_linear_mask           = options%lt_options%linear_mask              ! use a spatial mask for the linear wind field
         use_nsq_calibration       = options%lt_options%nsq_calibration          ! use a spatial mask to calibrate the nsquared (brunt vaisala frequency) field
-
-        using_blocked_flow        = options%block_options%block_flow
 
         ! Look up table generation parameters, range for each parameter, and number of steps to cover that range
         dirmax = options%lt_options%dirmax
@@ -1223,7 +1247,7 @@ contains
         nx = size(complex_terrain, 1)
         ny = size(complex_terrain, 2)
 
-        if (this_image()==1) write(*,*) "Initializing linear winds"
+        if (STD_OUT_PE) write(*,*) "Initializing linear winds"
         allocate(domain%terrain_frequency(nx,ny))
 
         ! calculate the fourier transform of the terrain for use in linear winds
@@ -1237,7 +1261,7 @@ contains
         call fftshift(domain%terrain_frequency)
 
         if (linear_contribution/=1) then
-            if (this_image()==1) write(*,*) "  Using a fraction of the linear perturbation:",linear_contribution
+            if (STD_OUT_PE) write(*,*) "  Using a fraction of the linear perturbation:",linear_contribution
         endif
 
         nx = size(domain%global_terrain, 1)
@@ -1252,9 +1276,9 @@ contains
             linear_mask = linear_contribution
 
             ! if (use_linear_mask) then
-            !     if (this_image()==1) write(*,*) "  Reading Linear Mask"
-            !     if (this_image()==1) write(*,*) "    from file: " // trim(options%linear_mask_file)
-            !     if (this_image()==1) write(*,*) "    with var: "  // trim(options%linear_mask_var)
+            !     if (STD_OUT_PE) write(*,*) "  Reading Linear Mask"
+            !     if (STD_OUT_PE) write(*,*) "    from file: " // trim(options%linear_mask_file)
+            !     if (STD_OUT_PE) write(*,*) "    with var: "  // trim(options%linear_mask_var)
             !     call io_read(options%linear_mask_file, options%linear_mask_var, domain%linear_mask)
             !
             !     linear_mask = domain%linear_mask * linear_contribution
@@ -1275,9 +1299,9 @@ contains
             nsq_calibration = 1
 
             ! if (use_nsq_calibration) then
-            !     if (this_image()==1) write(*,*) "  Reading Linear Mask"
-            !     if (this_image()==1) write(*,*) "    from file: " // trim(options%nsq_calibration_file)
-            !     if (this_image()==1) write(*,*) "    with var: "  // trim(options%nsq_calibration_var)
+            !     if (STD_OUT_PE) write(*,*) "  Reading Linear Mask"
+            !     if (STD_OUT_PE) write(*,*) "    from file: " // trim(options%nsq_calibration_file)
+            !     if (STD_OUT_PE) write(*,*) "    with var: "  // trim(options%nsq_calibration_var)
             !     call io_read(options%nsq_calibration_file, options%nsq_calibration_var, domain%nsq_calibration)
             !     nsq_calibration = domain%nsq_calibration
             !
@@ -1312,7 +1336,7 @@ contains
             ! if    ((.not.allocated(hi_u_LUT)  .and. (.not.reverse)) &
             !  .or.  (.not.allocated(rev_u_LUT) .and. reverse)) then
 
-                if (this_image()==1) write(*,*) "  Generating a spatially variable linear perturbation look up table"
+                if (STD_OUT_PE) write(*,*) "  Generating a spatially variable linear perturbation look up table"
                 call initialize_spatial_winds(domain, options, reverse)
 
             ! endif

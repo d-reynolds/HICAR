@@ -65,7 +65,7 @@ program test_caf_boundary
 
     sync all
 
-    if (this_image()==1) print*, "Done"
+    if (STD_OUT_PE) print*, "Done"
 
 
 end program

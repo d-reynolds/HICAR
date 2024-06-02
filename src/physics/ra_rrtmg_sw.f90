@@ -9909,7 +9909,7 @@
 MODULE module_ra_rrtmg_sw
 
 !use module_model_constants, only : cp
-use icar_constants, only : cp
+use mod_wrf_constants, only : cp
 !USE module_wrf_error
 !#if (HWRF == 1)
 !USE module_state_description, ONLY : FER_MP_HIRES, FER_MP_HIRES_ADVECT, ETAMP_HWRF 
@@ -9994,11 +9994,12 @@ CONTAINS
    REAL, DIMENSION( ims:ime, kms:kme, jms:jme )                 , &
          INTENT(IN   ) ::                                   dz8w, &
                                                              t3d, &
-                                                             t8w, &
                                                              p3d, &
-                                                             p8w, &
                                                             pi3d, &
                                                            rho3d
+   REAL, DIMENSION( ims:ime, kms:kme+1, jms:jme )                 , &
+         INTENT(IN   ) ::                                   p8w, &
+                                                             t8w
 
    REAL, DIMENSION( ims:ime, kms:kme, jms:jme )                 , &
          INTENT(INOUT)  ::                            RTHRATENSW
@@ -11235,14 +11236,12 @@ CONTAINS
             	swdnbcln(i,j)  = swdflxcln(1,1)
             end if
 !         endif
-         if (present(swddir)) then
-            swddir(i,j)    = swdkdir(1,1)          ! jararias 2013/08/10
-            swddni(i,j)    = swddir(i,j) / coszrs  ! jararias 2013/08/10
-            swddif(i,j)    = swdkdif(1,1)          ! jararias 2013/08/10
-            swdownc(i, j)  = swdflxc(1,1)          ! PAJ: clear-sky GHI
-            swddirc(i,j)   = swdkdirc(1,1)         ! PAJ: clear-sky direct normal irradiance
-            swddnic(i,j)   = swddirc(i,j) / coszrs ! PAJ: clear-sky direct normal irradiance
-         endif
+         if (present(swddir)) swddir(i,j)     = swdkdir(1,1)          ! jararias 2013/08/10
+         if (present(swddni)) swddni(i,j)     = swddir(i,j) / coszrs  ! jararias 2013/08/10
+         if (present(swddif)) swddif(i,j)     = swdkdif(1,1)          ! jararias 2013/08/10
+         if (present(swdownc)) swdownc(i, j)  = swdflxc(1,1)          ! PAJ: clear-sky GHI
+         if (present(swddirc)) swddirc(i,j)   = swdkdirc(1,1)         ! PAJ: clear-sky direct normal irradiance
+         if (present(swddnic)) swddnic(i,j)   = swddirc(i,j) / coszrs ! PAJ: clear-sky direct normal irradiance
 ! Output up and down layer fluxes for total and clear sky.
 ! Vertical ordering is from bottom to top in units of W m-2. 
          if ( present (swupflx) ) then
@@ -11283,15 +11282,13 @@ CONTAINS
 				swdnbcln(i,j)  = 0.
             end if
          endif
-         if (present(swddir)) then
-            swddir(i,j)    = 0.  ! jararias 2013/08/10
-            swddni(i,j)    = 0.  ! jararias 2013/08/10
-            swddif(i,j)    = 0.  ! jararias 2013/08/10
-            swdownc(i, j)  = 0.0 ! PAJ
-            swddnic(i,j)   = 0.0 ! PAJ
-            swddirc(i,j)   = 0.0 ! PAJ
-            swcf(i,j)      = 0.
-         endif
+         if (present(swddir)) swddir(i,j)     = 0.  ! jararias 2013/08/10
+         if (present(swddni)) swddni(i,j)     = 0.  ! jararias 2013/08/10
+         if (present(swddif)) swddif(i,j)     = 0.  ! jararias 2013/08/10
+         if (present(swdownc)) swdownc(i, j)  = 0.0 ! PAJ
+         if (present(swddnic)) swddnic(i,j)   = 0.0 ! PAJ
+         if (present(swddirc)) swddirc(i,j)   = 0.0 ! PAJ
+         swcf(i,j)         = 0.
       endif
 !
       end do i_loop

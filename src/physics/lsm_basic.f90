@@ -54,7 +54,7 @@ module module_lsm_basic
         real, intent(in) :: dt
 !       array subscripts, shouldn't be necessary in fortran90, but something is getting tripped up
         integer, intent(in) :: ids,ide, jds,jde, kds,kde
-        type(options_type),intent(in)::options
+        type(options_t),intent(in)::options
 !       internal loop counter
         integer :: i,j
 !       temporary variables internal to the loop and private to each thread
@@ -169,8 +169,8 @@ module module_lsm_basic
 
     subroutine lsm_basic(domain,options,dt)
         implicit none
-        type(domain_type),intent(inout)::domain
-        type(options_type),intent(in)::options
+        type(domain_t),intent(inout)::domain
+        type(options_t),intent(in)::options
         real,intent(in)::dt
         integer::nx,ny,nz,j
 

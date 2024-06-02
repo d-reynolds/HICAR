@@ -41,7 +41,7 @@ program other_image_grids
 
     sync all
 
-    if (this_image() == 1) then
+    if (STD_OUT_PE) then
         do i = 1, num_images()
             passed = passed .and. passed[i]
         enddo

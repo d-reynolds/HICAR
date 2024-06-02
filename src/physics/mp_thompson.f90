@@ -39,6 +39,7 @@
 !
       MODULE module_mp_thompson
         use options_types, only: mp_options_type
+        use icar_constants, only : STD_OUT_PE
 
 !       USE module_wrf_error
 ! 		USE module_mp_radar
@@ -2869,7 +2870,7 @@
 
       INQUIRE(FILE="qr_acr_qg_mpt.dat",EXIST=lexist)
       IF ( lexist ) THEN
-        if (this_image()==1) print *, "ThompMP: read qr_acr_qg_mpt.dat instead of computing"
+        if (STD_OUT_PE) print *, "ThompMP: read qr_acr_qg_mpt.dat instead of computing"
         OPEN(63,file="qr_acr_qg_mpt.dat",form="unformatted",err=1234)
         READ(63,err=1234) tcg_racg
         READ(63,err=1234) tmr_racg
@@ -2975,7 +2976,7 @@
           enddo
     	  !$omp end do
     	  !$omp end parallel
-          IF ( this_image()==1 ) THEN
+          IF ( STD_OUT_PE ) THEN
             print *, "Writing qr_acr_qg_mpt.dat in Thompson MP init"
             OPEN(63,file="qr_acr_qg_mpt.dat",form="unformatted",err=9234)
             WRITE(63,err=9234) tcg_racg
@@ -3036,7 +3037,7 @@
       good = 0
       INQUIRE(FILE="qr_acr_qs_mpt.dat",EXIST=lexist)
       IF ( lexist ) THEN
-        IF ( this_image() == 1 ) print *, "ThompMP: read qr_acr_qs_mpt.dat instead of computing"
+        IF ( STD_OUT_PE ) print *, "ThompMP: read qr_acr_qs_mpt.dat instead of computing"
         OPEN(63,file="qr_acr_qs_mpt.dat",form="unformatted",err=1234)
         READ(63,err=1234)tcs_racs1
         READ(63,err=1234)tmr_racs1
@@ -3059,7 +3060,7 @@
       ENDIF
 
       if (good .NE. 1) then
-          if (this_image()==1) print *, "ThompMP: computing qr_acr_qs"
+          if (STD_OUT_PE) print *, "ThompMP: computing qr_acr_qs"
     !+---+
           do n2 = 1, nbr
     !        vr(n2) = av_r*Dr(n2)**bv_r * DEXP(-fv_r*Dr(n2))
@@ -3221,7 +3222,7 @@
     	  !$omp end do
     	  !$omp end parallel
 
-          IF ( this_image()==1 ) THEN
+          IF ( STD_OUT_PE ) THEN
             print *, "Writing qr_acr_qs_mpt.dat in Thompson MP init"
             OPEN(63,file="qr_acr_qs_mpt.dat",form="unformatted",err=9234)
             WRITE(63,err=9234)tcs_racs1
@@ -3287,10 +3288,10 @@
 !+---+
 
       good = 0
-      ! IF ( this_image() == 1 ) THEN
+      ! IF ( STD_OUT_PE ) THEN
         INQUIRE(FILE="freezeH2O_mpt.dat",EXIST=lexist)
         IF ( lexist ) THEN
-          IF ( this_image() == 1 ) print *, "ThompMP: read freezeH2O_mpt.dat instead of computing"
+          IF ( STD_OUT_PE ) print *, "ThompMP: read freezeH2O_mpt.dat instead of computing"
           OPEN(63,file="freezeH2O_mpt.dat",form="unformatted",err=1234)
           READ(63,err=1234)tpi_qrfz
           READ(63,err=1234)tni_qrfz
@@ -3308,7 +3309,7 @@
 
 
       IF ( good .NE. 1 ) THEN
-        if (this_image()==1) print *, "ThompMP: computing freezeH2O"
+        if (STD_OUT_PE) print *, "ThompMP: computing freezeH2O"
     !+---+
           orho_w = 1./rho_w
 
@@ -3380,7 +3381,7 @@
              enddo
           enddo
 
-          IF ( this_image() == 1 ) THEN
+          IF ( STD_OUT_PE ) THEN
             print *, "Writing freezeH2O_mpt.dat in Thompson MP init"
             OPEN(63,file="freezeH2O_mpt.dat",form="unformatted",err=9234)
             WRITE(63,err=9234)tpi_qrfz

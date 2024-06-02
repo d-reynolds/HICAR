@@ -8,16 +8,18 @@
 !!
 !! ----------------------------------------------------------------------------
 module time_step
+    use iso_fortran_env
+    use mpi_f08
     use data_structures             ! *_type  types and kCONSTANTS
-    use icar_constants,             only : Rd, cp
     use microphysics,               only : mp
     use advection,                  only : advect
     use mod_atm_utilities,          only : exner_function, compute_ivt, compute_iq
     use convection,                 only : convect
-    use land_surface,               only : lsm
-    use planetary_boundary_layer,   only : pbl
-    use radiation,                  only : rad
-    use wind,                       only : balance_uvw
+    use land_surface,               only : lsm, lsm_apply_fluxes
+    use surface_layer,              only : sfc
+    use planetary_boundary_layer,   only : pbl, pbl_apply_tend
+    use radiation,                  only : rad, rad_apply_dtheta
+    use wind,                       only : balance_uvw, update_winds, update_wind_dqdt
     use domain_interface,           only : domain_t
     use boundary_interface,         only : boundary_t
     use options_interface,          only : options_t
@@ -27,10 +29,13 @@ module time_step
 
     implicit none
     private
-    public :: step, update_dt, dt_reduce
+    double precision, parameter  :: DT_BIG = 36000.0
+    double precision  :: future_dt_seconds = DT_BIG
+    integer :: max_i, max_j, max_k
+
+    public :: step
 
 contains
-
 
     !>------------------------------------------------------------
     !!  Calculate the maximum stable time step given some CFL criteria
@@ -61,6 +66,7 @@ contains
         
         ! output value
         real :: dt
+
         ! locals
         real :: three_d_cfl = 0.577350269 ! = sqrt(3)/3
         integer :: i, j, k, zoffset
@@ -70,6 +76,9 @@ contains
 
         maxwind1d = 0
         maxwind3d = 0
+        max_i = 0
+        max_j = 0
+        max_k = 0
 
         if (cfl_strictness==1) then
             ! to ensure we are stable for 1D advection:
@@ -121,6 +130,11 @@ contains
                                                ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
                                                ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(k) ))
                         endif
+                        if (current_wind > maxwind3d) then
+                            max_i = i
+                            max_j = j
+                            max_k = k
+                        endif
                         maxwind3d = max(maxwind3d, current_wind)
                     ENDDO
                 ENDDO
@@ -162,7 +176,7 @@ contains
             write(*,*) "Umax = ", maxval(abs(u))
             write(*,*) "Vmax = ", maxval(abs(v))
             write(*,*) "Wmax = ", maxval(abs(w))
-            stop "ERROR time step too small"
+            error stop "ERROR time step too small"
         endif
 
     end function compute_dt
@@ -210,72 +224,59 @@ contains
     !! @param end_time      the end of the current full time step (when step will return)
     !!
     !!------------------------------------------------------------
-    subroutine update_dt(dt, future_seconds, options, domain, update)
+    subroutine update_dt(dt, options, domain)
         implicit none
         type(time_delta_t), intent(inout) :: dt
-        double precision,   intent(inout) :: future_seconds
         type(options_t),    intent(in)    :: options
         type(domain_t),     intent(in)    :: domain
-        logical, optional,  intent(in)    :: update
-        
-        double precision                  :: seconds
+
+        double precision                  :: present_dt_seconds, seconds_out
         ! compute internal timestep dt to maintain stability
         ! courant condition for 3D advection. 
                 
-        !First, set dt to whatever the dt for the current time step was calculated to be
-        call dt%set(seconds=min(future_seconds,120.0D0))
-
-        if ((present(update)) .and. (update)) then
-            seconds = compute_dt(domain%dx, domain%u%meta_data%dqdt_3d, domain%v%meta_data%dqdt_3d, &
-                            domain%w%meta_data%dqdt_3d, domain%density%data_3d, options%parameters%dz_levels, &
-                            domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
-                            domain%its, domain%ite, domain%jts, domain%jte, &
-                            options%time_options%cfl_reduction_factor, &
-                            cfl_strictness=options%time_options%cfl_strictness, use_density=.false.)
-        else
-            seconds = compute_dt(domain%dx, domain%u%data_3d, domain%v%data_3d, &
+        ! If this is the first step (future_dt_seconds has not yet been set)
+        if (future_dt_seconds == DT_BIG) then
+            present_dt_seconds = compute_dt(domain%dx, domain%u%data_3d, domain%v%data_3d, &
                             domain%w%data_3d, domain%density%data_3d, options%parameters%dz_levels, &
                             domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                             domain%its, domain%ite, domain%jts, domain%jte, &
                             options%time_options%cfl_reduction_factor, &
                             cfl_strictness=options%time_options%cfl_strictness, use_density=.false.)
+        else
+            present_dt_seconds = future_dt_seconds
         endif
         
-        call dt_reduce(dt, future_seconds, seconds)
+        future_dt_seconds = compute_dt(domain%dx, domain%u%dqdt_3d, domain%v%dqdt_3d, &
+                        domain%w%dqdt_3d, domain%density%data_3d, options%parameters%dz_levels, &
+                        domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
+                        domain%its, domain%ite, domain%jts, domain%jte, &
+                        options%time_options%cfl_reduction_factor, &
+                        cfl_strictness=options%time_options%cfl_strictness, use_density=.false.)
+                
+        !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
+        call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_DOUBLE, MPI_MIN, domain%compute_comms)
+        
+        if (min(present_dt_seconds, future_dt_seconds)==seconds_out) then
+            write(*,*) 'time_step determining i:      ',max_i
+            write(*,*) 'time_step determining j:      ',max_j
+            write(*,*) 'time_step determining k:      ',max_k
+            if (present_dt_seconds<future_dt_seconds) then
+                write(*,*) 'time_step determining w_grid: ',domain%w%dqdt_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining u: ',domain%u%dqdt_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining v: ',domain%v%dqdt_3d(max_i,max_k,max_j)
+            else
+                write(*,*) 'time_step determining w_grid: ',domain%w%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining u: ',domain%u%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining v: ',domain%v%data_3d(max_i,max_k,max_j)
+            endif
+
+        endif
+        ! Set dt to the outcome of reduce
+        call dt%set(seconds=seconds_out)
+        if (STD_OUT_PE) write(*,*) 'time_step: ',dt%seconds()
 
     end subroutine update_dt
     
-    !Wrapper function to enable the I/O Processes to call CO_Min as well
-    subroutine dt_reduce(dt, future_seconds, seconds_in)
-        implicit none
-        type(time_delta_t), intent(inout) :: dt
-        double precision,   intent(inout) :: future_seconds
-        double precision,   intent(in)    :: seconds_in
-
-        double precision :: seconds
-        
-        seconds = seconds_in
-        
-        ! perform a reduction across all images to find the minimum time step required
-!#ifndef __INTEL_COMPILER
-!        call CO_MIN(seconds)
-!#endif
-!#ifdef __INTEL_COMPILER
-!         seconds = dx / 100
-!#endif
-        call CO_MIN(seconds)
-
-        future_seconds = seconds
-        ! set an upper bound on dt to keep microphysics and convection stable (?)
-        ! store this back in the dt time_delta data structure
-        
-        ! If we are faster than the next time step, then adjust to the slower of the two
-        if (dt%seconds() > future_seconds) call dt%set(seconds=min(future_seconds,120.0D0))
-        if (this_image()==1) write(*,*) 'time_step: ',dt%seconds()
-
-    end subroutine dt_reduce
-    
-
     !>------------------------------------------------------------
     !!  Step forward one IO time step.
     !!
@@ -290,31 +291,62 @@ contains
     !! @param next_output   Next time to write an output file (in "model_time")
     !!
     !!------------------------------------------------------------
-    subroutine step(domain, forcing, end_time, dt_in, options, mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer)
+    subroutine step(domain, forcing, end_time, options, mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer)
         implicit none
         type(domain_t),     intent(inout)   :: domain
-        type(boundary_t),   intent(in)      :: forcing
+        type(boundary_t),   intent(inout)   :: forcing
         type(Time_type),    intent(in)      :: end_time
-        type(time_delta_t), intent(in)      :: dt_in
         type(options_t),    intent(in)      :: options
-        type(timer_t),      intent(inout)   :: mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer
 
-        real :: last_print_time
-        type(time_delta_t) :: time_step_size, dt
+        type(timer_t),      intent(inout)   :: mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer
+
+        real            :: last_print_time
+        real, save      :: last_wind_update
+        logical         :: last_loop
+
+        type(time_delta_t) :: time_step_size, dt_saver
+        type(time_delta_t), save      :: dt
 
         last_print_time = 0.0
+        call dt_saver%set(seconds=0.0)
+        
         time_step_size = end_time - domain%model_time
+        
+        ! Initialize to just over update_dt to force an update on first loop
+        if (domain%model_time==options%parameters%start_time) last_wind_update = options%wind%update_dt%seconds() + 1
 
+        last_loop = .False.
         ! now just loop over internal timesteps computing all physics in order (operator splitting...)
-        dt = dt_in
-        do while (domain%model_time < end_time)
+        do while (domain%model_time < end_time .and. .not.(last_loop))
+            
+            !Determine dt
+            if (last_wind_update >= options%wind%update_dt%seconds()) then
 
+                call domain%diagnostic_update(options)
+
+                call wind_timer%start()
+                call update_winds(domain, forcing, options)
+                call wind_timer%stop()
+                !Now that new winds have been calculated, get new time step in seconds, and see if they require adapting the time step
+                ! Note that there will currently be some discrepancy between using the current density and whatever density will be at 
+                ! the next time step, but we assume that it is negligable
+                ! and that using a CFL criterion < 1.0 will cover this
+                call update_dt(dt, options, domain)
+                call update_wind_dqdt(domain, options)
+
+                last_wind_update = 0.0
+            endif
             !call update_dt(dt, options, domain, end_time)
             ! Make sure we don't over step the forcing or output period
             if ((domain%model_time + dt) > end_time) then
+                dt_saver = dt
                 dt = end_time - domain%model_time
-            endif
 
+                ! Sometimes, due to very small time differences, in the inequality controling the loop,
+                ! the physics loop can run again. Stop that from happening here
+                last_loop = .True.
+            endif
+            
             ! ! apply/update boundary conditions including internal wind and pressure changes.
             call forcing_timer%start()
             call domain%apply_forcing(forcing,options,real(dt%seconds()))
@@ -324,35 +356,52 @@ contains
             call domain%diagnostic_update(options)
             call diagnostic_timer%stop()
 
-            ! if using advect_density winds need to be balanced at each update
-            call wind_bal_timer%start()
-            if (options%parameters%advect_density) call balance_uvw(domain,options)
-            call wind_bal_timer%stop()
+            if (options%parameters%advect_density) then
+                ! if using advect_density winds need to be balanced at each update
+                call wind_bal_timer%start()
+                call balance_uvw(domain,options)
+                call wind_bal_timer%stop()
+            endif
 
             ! if an interactive run was requested than print status updates everytime at least 5% of the progress has been made
-            if (options%parameters%interactive .and. (this_image()==1)) then
+            if (options%parameters%interactive .and. (STD_OUT_PE)) then
                 call print_progress(domain%model_time, end_time, time_step_size, dt, last_print_time)
             endif
             ! this if is to avoid round off errors causing an additional physics call that won't really do anything
 
             if (real(dt%seconds()) > 1e-3) then
 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" init", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" init", fix=.True.)
 
-                ! first process the halo section of the domain (currently hard coded at 1 should come from domain?)
+                call send_timer%start()
+                call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call domain%halo%halo_2d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+
+                call send_timer%stop()
+    
                 call rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" rad(domain", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" rad(domain", fix=.True.)
                 call rad_timer%stop()
 
+
                 call lsm_timer%start()
+                call sfc(domain, options, real(dt%seconds()))!, halo=1)
                 call lsm(domain, options, real(dt%seconds()))!, halo=1)
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" lsm")
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" lsm")
                 call lsm_timer%stop()
 
                 call pbl_timer%start()
                 call pbl(domain, options, real(dt%seconds()))!, halo=1)
                 call pbl_timer%stop()
+
+                call ret_timer%start()
+                call domain%halo%halo_3d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call domain%halo%halo_2d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call integrate_physics_tendencies(domain, options, real(dt%seconds()))
+                !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call ret_timer%stop()
+
                 ! balance u/v and re-calculate dt after winds have been modified by pbl:
                 ! if (options%physics%boundarylayer==kPBL_YSU) then
                 !     call balance_uvw(   domain%u%data_3d,   domain%v%data_3d,   domain%w%data_3d,       &
@@ -365,48 +414,61 @@ contains
                 !         dt = end_time - domain%model_time
                 !     endif
                 ! endif
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" pbl")
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" pbl")
 
                 call convect(domain, options, real(dt%seconds()))!, halo=1)
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" convect")
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" convect")
 
                 
-                call exch_timer%start()
-                if (options%parameters%batched_exch) then
-                    call domain%halo_3d_exchange_batch(send_timer, ret_timer, wait_timer)
-                else
-                    call domain%halo_exchange(send_timer,ret_timer,wait_timer)
-                endif
-                call exch_timer%stop()
-
 
                 call adv_timer%start()
                 call advect(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" advect(domain", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" advect(domain", fix=.True.)
                 call adv_timer%stop()
+
+                
                                 
                 call mp_timer%start()
 
                 call mp(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" mp_halo", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" mp_halo", fix=.True.)
                 call mp_timer%stop()
                 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" domain%halo_send", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%halo_send", fix=.True.)
+
 
                 !If we are in the last ~10 updates of a time step and a variable drops below 0, we have probably over-shot a value of 0. Force back to 0
                 if ((end_time%seconds() - domain%model_time%seconds()) < (dt%seconds()*10)) then
-
                     call domain%enforce_limits()
                 endif
 
 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(this_image()))//" domain%apply_forcing", fix=.True.)
+                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%apply_forcing", fix=.True.)
 
             endif
             ! step model_time forward
             domain%model_time = domain%model_time + dt
             
+            last_wind_update = last_wind_update + dt%seconds()
         enddo
 
+        !If we overwrote dt to edge up to the next output/input step, revert here
+        if (dt_saver%seconds()>0.0) dt = dt_saver
+        
     end subroutine step
+
+
+    subroutine integrate_physics_tendencies(domain, options, dt)
+        implicit none
+        type(domain_t),     intent(inout)   :: domain
+        type(options_t),    intent(in)      :: options
+        real,               intent(in)      :: dt
+
+        call rad_apply_dtheta(domain, options, dt)
+        call lsm_apply_fluxes(domain,options,dt)
+        call pbl_apply_tend(domain,options,dt)
+
+    end subroutine integrate_physics_tendencies
+
+
 end module time_step

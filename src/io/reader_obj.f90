@@ -38,6 +38,8 @@ contains
 
         this%file_list = options%parameters%boundary_files
         this%time_var  = options%parameters%time_var
+        this%model_end_time = options%parameters%end_time
+
         this%ncfile_id = -1
         ! figure out while file and timestep contains the requested start_time
         call set_curfile_curstep(this, options%parameters%start_time, this%file_list, this%time_var)
@@ -72,7 +74,7 @@ contains
     module subroutine read_next_step(this, buffer, par_comms)
         class(reader_t), intent(inout) :: this
         real, allocatable, intent(inout) :: buffer(:,:,:,:)
-        integer, intent(in)              :: par_comms
+        type(MPI_Comm), intent(in)              :: par_comms
 
         real, allocatable :: data3d(:,:,:,:)
         type(variable_t)  :: var
@@ -84,7 +86,8 @@ contains
 
         !See if we must open the file
         if (this%ncfile_id < 0) then
-            err = nf90_open(this%file_list(this%curfile), IOR(nf90_nowrite,NF90_NETCDF4), this%ncfile_id, comm = par_comms, info = MPI_INFO_NULL)
+            err = nf90_open(this%file_list(this%curfile), IOR(nf90_nowrite,NF90_NETCDF4), this%ncfile_id, &
+                    comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL)
         endif
         
 
@@ -136,6 +139,7 @@ contains
         type(reader_t),   intent(inout) :: this
 
         integer :: steps_in_file
+        type(Time_type), allocatable :: times_in_file(:)
 
         this%curstep = this%curstep + 1 ! this may be all we have to do most of the time
         ! check that we haven't stepped passed the end of the current file
@@ -155,11 +159,21 @@ contains
 
             ! if we have run out of input files, stop with an error message
             if (this%curfile > size(this%file_list)) then
-                if (this_image()==kNUM_PROC_PER_NODE) write(*,*) 'End of file list'
-                !stop "Ran out of files to process while searching for matching time variable!"
+                this%eof = .True.
             endif
 
         endif
+
+        ! Check if the next file to read is beyond the model end time.
+        if (.not.(this%eof)) then
+            !Get time step of the next input step
+            call read_times(this%file_list(this%curfile), this%time_var, times_in_file)
+
+            if (times_in_file(this%curstep) > this%model_end_time) then
+                this%eof = .True.
+            endif
+        endif
+
     end subroutine
 
     !>------------------------------------------------------------
@@ -226,6 +240,7 @@ contains
             if (trim(file_list(n))==trim(filename)) this%curfile = n
         enddo
 
+        this%eof = .False.
     end subroutine
 
     !>------------------------------------------------------------
@@ -262,7 +277,7 @@ contains
             if (trim(master_var_list(i)) /= '') then
                 vars_to_read(curvar) = master_var_list(i)
                 var_dimensions(curvar) = master_dim_list(i)
-                ! if (this_image()==1) print *, "in variable list: ", vars_to_read(curvar)
+                ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)
                 curvar = curvar + 1
             endif
         enddo

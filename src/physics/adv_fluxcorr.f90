@@ -32,9 +32,9 @@ contains
         jte = domain%jte    
     end subroutine init_fluxcorr
 
-    subroutine WRF_flux_corr(q,u,v,w,flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up,jaco,dz,rho)
+    subroutine WRF_flux_corr(q,u,v,w,flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up,dz,denom)
         implicit none
-        real, dimension(ims:ime,  kms:kme,jms:jme),    intent(in) :: q, jaco, dz, rho
+        real, dimension(ims:ime,  kms:kme,jms:jme),    intent(in) :: q, dz, denom
         real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+1),  intent(in) :: w
         real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+1),  intent(in) :: u
         real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+2),  intent(in) :: v
@@ -55,7 +55,7 @@ contains
             enddo
         enddo
         ! Get upwind fluxes
-        call upwind_flux3(q,u,v,w,flux_x_up,flux_z_up,flux_y_up,jaco,dz,rho)
+        call upwind_flux3(q,u,v,w,flux_x_up,flux_z_up,flux_y_up,dz,denom)
 
 
         ! Next compute max and min possible fluxes
@@ -93,7 +93,7 @@ contains
 
                     !Store reused variables to minimize memory accesses
                     dz_t_i   = 1./dz(i,k,j)
-                    jaco_rho_t_i = 1./(jaco(i,k,j)*rho(i,k,j))
+                    jaco_rho_t_i = denom(i,k,j)
                     fx = flux_x(i,k,j)-flux_x_up(i,k,j); fx1 = flux_x(i+1,k,j)-flux_x_up(i+1,k,j)
                     fy = flux_y(i,k,j)-flux_y_up(i,k,j); fy1 = flux_y(i,k,j+1)-flux_y_up(i,k,j+1)
                     fz = flux_z(i,k,j)-flux_z_up(i,k,j); fz1 = flux_z(i,k+1,j)-flux_z_up(i,k+1,j)
@@ -184,9 +184,9 @@ contains
 
     end subroutine WRF_flux_corr
 
-    subroutine upwind_flux3(q,u,v,w,flux_x,flux_z,flux_y,jaco,dz,rho)
+    subroutine upwind_flux3(q,u,v,w,flux_x,flux_z,flux_y,dz,denom)
         implicit none
-        real, dimension(ims:ime,  kms:kme,jms:jme),    intent(in)      :: q, jaco, dz, rho
+        real, dimension(ims:ime,  kms:kme,jms:jme),    intent(in)      :: q, dz, denom
         real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+1),  intent(in)    :: u
         real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+2),  intent(in)    :: v
         real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+1),  intent(in) :: w
@@ -217,7 +217,7 @@ contains
                     dumb_q(i,k,j)  = q(i,k,j) - ((flux_x(i+1,k,j) - flux_x(i,k,j)) + &
                                                  (flux_y(i,k,j+1) - flux_y(i,k,j)) + &
                                                  (flux_z(i,k+1,j) - flux_z(i,k,j)) / &
-                                                 dz(i,k,j))/(jaco(i,k,j)*rho(i,k,j))
+                                                 dz(i,k,j))*denom(i,k,j)
                 enddo
             enddo
         enddo

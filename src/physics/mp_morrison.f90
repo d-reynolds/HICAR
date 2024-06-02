@@ -89,7 +89,7 @@ MODULE MODULE_MP_MORR_TWO_MOMENT
    ! USE module_mp_radar
 
 ! USE WRF PHYSICS CONSTANTS taken from ICAR data_structures module
-  use mod_wrf_constants, ONLY: CP=>wrf_cp, G=>wrf_gravity, R => r_d, RV => r_v, EP_2
+  use mod_wrf_constants, ONLY: CP=>cp, G=>gravity, R => r_d, RV => r_v, EP_2
 !  USE module_state_description
 
    IMPLICIT NONE
@@ -562,7 +562,9 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
                ,IDS,IDE, JDS,JDE, KDS,KDE               & ! domain dims
                ,IMS,IME, JMS,JME, KMS,KME               & ! memory dims
                ,ITS,ITE, JTS,JTE, KTS,KTE               & ! tile   dims            )
-!jdf		   ,C2PREC3D,CSED3D,ISED3D,SSED3D,GSED3D,RSED3D & ! HM ADD, WRF-CHEM
+!jdf		   ,C2PREC3D,CSED3D,
+		,ISED3D,SSED3D                                 &
+!               ,GSED3D,RSED3D & ! HM ADD, WRF-CHEM
 !               ,rainprod, evapprod                      &
 !		   ,QLSINK,PRECR,PRECI,PRECS,PRECG &        ! HM ADD, WRF-CHEM
                                             )
@@ -640,7 +642,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! Temporary changed from INOUT to IN
 
    REAL, DIMENSION(ims:ime, kms:kme, jms:jme), INTENT(INOUT):: &
-                          qv, qc, qr, qi, qs, qg, ni, ns, nr, TH, NG, EFFC, EFFI, EFFS
+                          qv, qc, qr, qi, qs, qg, ni, ns, nr, TH, NG, EFFC, EFFI, EFFS, SSED3D, ISED3D
 !jdf                      qndrop ! hm added, wrf-chem
    ! REAL, DIMENSION(ims:ime, kms:kme, jms:jme), optional,INTENT(INOUT):: qndrop
 !jdf  REAL, DIMENSION(ims:ime, kms:kme, jms:jme),INTENT(INOUT):: CSED3D, &
@@ -859,8 +861,9 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
           EFFI(i,k,j)      = EFFI1D(k)
           EFFS(i,k,j)      = EFFS1D(k)
           EFFR(i,k,j)      = EFFR1D(k)
-	  EFFG(I,K,j)      = EFFG1D(K)
-
+	  EFFG(i,k,j)      = EFFG1D(K)
+          ISED3D(i,k,j) = ISED(k)
+          SSED3D(i,k,j) = SSED(k)
 ! wrf-chem
         !   IF (flag_qndrop .AND. PRESENT( qndrop )) THEN
         !      qndrop(i,k,j) = nc1d(k)

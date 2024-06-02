@@ -11447,7 +11447,8 @@ contains
 !------------------------------------------------------------------
 MODULE module_ra_rrtmg_lw
 
-use icar_constants, only : cp
+use icar_constants,    only : STD_OUT_PE
+use mod_wrf_constants, only : cp
 !use module_wrf_error
 !#if (HWRF == 1)
 !   USE module_state_description, ONLY : FER_MP_HIRES, FER_MP_HIRES_ADVECT, ETAMP_HWRF
@@ -11545,11 +11546,14 @@ CONTAINS
    REAL, DIMENSION( ims:ime, kms:kme, jms:jme )                 , &
          INTENT(IN   ) ::                                   dz8w, &
                                                              t3d, &
-                                                             t8w, &
-                                                             p8w, &
                                                              p3d, &
                                                             pi3d, &
                                                            rho3d
+                                                           
+   REAL, DIMENSION( ims:ime, kms:kme+1, jms:jme )               , &
+         INTENT(IN   ) ::                                   t8w , &
+                                                             p8w
+
 
    REAL, DIMENSION( ims:ime, kms:kme, jms:jme )                 , &
          INTENT(INOUT)  ::                            RTHRATENLW
@@ -11910,7 +11914,7 @@ if (read_ghg) then
    CALL read_CAMgases(yr,julian,"RRTMG",co2,n2o,ch4,cfc11,cfc12)
 
 !   IF ( wrf_dm_on_monitor() ) THEN
-    IF (this_image()==1) THEN
+    IF (STD_OUT_PE) THEN
      WRITE(message,*)'CAM-CLWRF interpolated values______ year:',yr,' julian day:',julian
      !call wrf_debug( 100, message)
      ! write(*,*) message
@@ -12077,14 +12081,17 @@ endif
 !        IF ( mp_physics == FER_MP_HIRES .OR. &
 !             mp_physics == FER_MP_HIRES_ADVECT) THEN
 !#endif
-                  DO K=kts,kte
-                     qi1d(k) = qi3d(i,k,j)
-                     qs1d(k) = 0.0
-                     qc1d(k) = qc3d(i,k,j)
-                     qi1d(k) = max(0.,qi1d(k))
-                     qc1d(k) = max(0.,qc1d(k))
-                  ENDDO
+! ++ DR, following the lead of trude's comment in rrtmg_sw, also commenting this out in lw
+! ++ trude, remove this test, we will not use mp option 5 or 85. 
+!                  DO K=kts,kte
+!                     qi1d(k) = qi3d(i,k,j)
+!                     qs1d(k) = 0.0
+!                     qc1d(k) = qc3d(i,k,j)
+!                     qi1d(k) = max(0.,qi1d(k))
+!                     qc1d(k) = max(0.,qc1d(k))
+!                  ENDDO
 !        ENDIF
+!-- Trude
 
 !         EMISS0=EMISS(I,J)
 !         GLW0=0.
@@ -12459,7 +12466,7 @@ endif
                      snow_mass_factor = (130.0/resnow1d(ncol,k))*(130.0/resnow1d(ncol,k))
                      resnow1d(ncol,k)   = 130.0
                      !IF ( wrf_dm_on_monitor() ) THEN
-                     IF (this_image()==1) then
+                     IF (STD_OUT_PE) then
                        WRITE(message,*)'RRTMG:  reducing snow mass (cloud path) to ', &
                                        nint(snow_mass_factor*100.), ' percent of full value'
                        !call wrf_debug(150, message)

@@ -20,7 +20,7 @@ program test_caf_boundary
     call boundary%init(options)
 
     sync all
-    if (this_image()==1) print*, "Done"
+    if (STD_OUT_PE) print*, "Done"
 
     ! loop over images and variables printing out the values in one gridcell to make sure they are not junk (and that it doesn't crash with bounds checking on)
     ! do i=1,num_images()

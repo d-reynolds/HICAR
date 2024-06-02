@@ -32,8 +32,7 @@ module planetary_boundary_layer
     use pbl_diagnostic, only : diagnostic_pbl, finalize_diagnostic_pbl, init_diagnostic_pbl
     !use module_bl_ysu, only : ysuinit, ysu
     use module_bl_ysu, only : ysuinit, ysu
-    use mod_atm_utilities, only : calc_Richardson_nr
-    use mod_wrf_constants, only : EOMEG
+    use mod_wrf_constants, only : EOMEG, XLV, r_v, R_d, KARMAN, gravity, EP_1, EP_2, cp, rcp, rovg
     use icar_constants !, only : karman,stefan_boltzmann
     use mod_pbl_utilities, only : da_sfc_wtq
     use ieee_arithmetic ! for debugging
@@ -41,13 +40,13 @@ module planetary_boundary_layer
 
 
     implicit none
-    real,allocatable, dimension(:,:)    ::  windspd, Ri, z_atm, zol, hol, hpbl, psim, &
-                                            psih, u10d, v10d, t2d, q2d, gz1oz0, CHS, xland_real,regime
+    real,allocatable, dimension(:,:)    ::  windspd, hpbl, psim, &
+                                            psih, u10d, v10d, CHS, xland_real, regime
     ! integer, allocatable, dimension(:,:) :: kpbl2d
-    real, allocatable, dimension(:,:,:) :: tend_u_ugrid, tend_v_vgrid
+    real, allocatable, dimension(:,:,:) :: tend_u_ugrid, tend_v_vgrid, RTHRATEN
 
     private
-    public :: pbl_var_request, pbl_init, pbl, pbl_finalize
+    public :: pbl_var_request, pbl_init, pbl, pbl_finalize, pbl_apply_tend
 
     integer :: ids, ide, jds, jde, kds, kde,  &
                ims, ime, jms, jme, kms, kme,  &
@@ -84,10 +83,11 @@ contains
                          kVARS%skin_temperature, kVARS%terrain, kVARS%ground_surf_temperature,              &
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m,                  &
                          kVARS%humidity_2m, kVARS%surface_pressure, kVARS%ground_heat_flux,                 &
-                         kVARS%znu, kVARS%znw, kVARS%roughness_z0, kVARS%ustar, kVARS%cloud_ice,            &
+                         kVARS%roughness_z0, kVARS%ustar, kVARS%cloud_ice,                                  &
                          kVARS%tend_th_pbl, kVARS%tend_qc_pbl, kVARS%tend_qi_pbl,  kVARS%temperature_2m,    &
                          kVARS%tend_u, kVARS%tend_v, kVARS%tend_qv_pbl, kVARS%pressure, kVARS%kpbl,         &
-                         kVARS%land_mask, kVARS%cloud_water, kVARS%coeff_heat_exchange_3d, kVARS%hpbl ]) !kVARS%tend_qv_adv,kVARS%tend_qv, kVARS%tend_qs, kVARS%tend_qr,, kVARS%u_mass, kVARS%v_mass,
+                         kVARS%fm, kVARS%fh, kVARS%QFX, kVARS%br,                                          &
+                         kVARS%land_mask, kVARS%cloud_water, kVARS%coeff_heat_exchange_3d, kVARS%coeff_momentum_exchange_3d, kVARS%hpbl ]) !kVARS%tend_qv_adv,kVARS%tend_qv, kVARS%tend_qs, kVARS%tend_qr,, kVARS%u_mass, kVARS%v_mass,
 !           kVARS%coeff_momentum_drag, ??
              call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_ice, kVARS%cloud_water]) !??
 
@@ -97,10 +97,10 @@ contains
                         kVARS%skin_temperature, kVARS%terrain, kVARS%ground_surf_temperature,              &
                         kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m,                  &
                         kVARS%humidity_2m, kVARS%surface_pressure, kVARS%ground_heat_flux,                 &
-                        kVARS%roughness_z0, kVARS%cloud_ice,            &
+                        kVARS%roughness_z0, kVARS%cloud_ice, kVARS%QFX,       &
                         kVARS%temperature_2m,    &
                         kVARS%pressure,         &
-                        kVARS%cloud_water,kVARS%coeff_heat_exchange_3d, kVARS%hpbl  ]) !kVARS%u_mass, kVARS%v_mass,
+                        kVARS%cloud_water,kVARS%coeff_heat_exchange_3d, kVARS%coeff_momentum_exchange_3d, kVARS%hpbl  ]) !kVARS%u_mass, kVARS%v_mass,
         endif
     end subroutine pbl_var_request
 
@@ -120,28 +120,20 @@ contains
         if (.not.allocated(domain%tend%qv_pbl)) allocate(domain%tend%qv_pbl(ims:ime,kms:kme,jms:jme))
         domain%tend%qv_pbl=0
 
-        if (this_image()==1) write(*,*) "Initializing PBL Scheme"
+        if (STD_OUT_PE) write(*,*) "Initializing PBL Scheme"
 
         if (options%physics%boundarylayer==kPBL_SIMPLE) then
-            if (this_image()==1) write(*,*) "    Simple PBL"
+            if (STD_OUT_PE) write(*,*) "    Simple PBL"
             call init_simple_pbl(domain, options)
         else if (options%physics%boundarylayer==kPBL_DIAGNOSTIC) then
-            if (this_image()==1) write(*,*) "    Diagnostic PBL"
+            if (STD_OUT_PE) write(*,*) "    Diagnostic PBL"
             call init_diagnostic_pbl(domain, options)
         else if (options%physics%boundarylayer==kPBL_YSU) then
 
-            if (this_image()==1) write(*,*) "    YSU PBL"
+            if (STD_OUT_PE) write(*,*) "    YSU PBL"
 
             ! allocate local vars YSU:
             allocate(windspd(ims:ime, jms:jme))
-            allocate(Ri(ims:ime,jms:jme))
-            ! Ri = 0
-            allocate(z_atm(ims:ime,jms:jme))
-            z_atm = domain%z%data_3d(:,kts,:) - domain%terrain%data_2d ! defines the height of the middle of the first model level
-            allocate(zol(ims:ime, jms:jme)) ! zol		z/l height over monin-obukhov length - intent(inout) - but appears to not be used really?
-            zol = 10
-            allocate(hol(ims:ime, jms:jme)) ! hol		pbl height over monin-obukhov length - intent(inout)
-            hol = 1000.0
             ! allocate(hpbl(ims:ime, jms:jme))  ! this should go to domain object for convective modules!!
             allocate(psim(ims:ime, jms:jme))
             ! psim= 0.5
@@ -149,10 +141,6 @@ contains
             ! psih=0.5
             allocate(u10d(ims:ime, jms:jme))
             allocate(v10d(ims:ime, jms:jme))
-            allocate(t2d(ims:ime, jms:jme))
-            allocate(q2d(ims:ime, jms:jme))
-            allocate(gz1oz0(ims:ime, jms:jme))  !-- gz1oz0      log(z/z0) where z0 is roughness length
-            gz1oz0 = log(z_atm / domain%roughness_z0%data_2d)
             ! allocate(kpbl2d(ims:ime, jms:jme)) ! domain%kpbl now
             ! allocate(CHS(ims:ime,jms:jme))
             ! CHS = 0.01
@@ -161,7 +149,8 @@ contains
             allocate(regime(ims:ime,jms:jme))
             allocate(tend_u_ugrid(ims:ime+1, kms:kme, jms:jme)) ! to add the calculated u/v tendencies to the u/v grid
             allocate(tend_v_vgrid(ims:ime, kms:kme, jms:jme+1))
-
+            allocate(RTHRATEN(ims:ime, kms:kme, jms:jme)) !initialize radiative heating tendencies and set to 0 in case user turns on ysu radiative heating w/o radiations scheme
+            RTHRATEN = 0.0
             ! initialize tendencies (this is done in ysu init but only for tiles, not mem (ie its vs ims))
             ! BK: check if this actually matters ???
             if(.not.restart)then
@@ -229,37 +218,22 @@ contains
         endif
         if (options%physics%boundarylayer==kPBL_YSU) then
 
+            ! Reset tendencies before the next pbl call. (not sure if necessary)
+            domain%tend%qv_pbl    = 0
+            domain%tend%th_pbl    = 0
+            domain%tend%qc_pbl    = 0
+            domain%tend%qi_pbl    = 0
+            domain%tend%u         = 0
+            domain%tend%v         = 0
+
             ! windspd=sqrt(  domain%u_mass%data_3d(ims:ime, 1, jms:jme)**2 +     &
             !             domain%v_mass%data_3d(ims:ime, 1, jms:jme)**2   )
             windspd = sqrt(domain%u_10m%data_2d**2 + domain%v_10m%data_2d**2) ! as it is done in lsm_driver.
             where(windspd==0) windspd=1e-5
 
-            ! Richardson number
-            call calc_Richardson_nr(Ri,domain%temperature%data_3d, domain%skin_temperature%data_2d, z_atm, windspd)
-
-            ! Copied from WRF, to calc psim and psih. ( Not 100% sure this is the way to go)
-            call da_sfc_wtq ( psfc=domain%surface_pressure%data_2d           &
-                            , tg=domain%ground_surf_temperature%data_2d     & !?
-                            , ps=domain%pressure%data_3d(:,1,:)             &
-                            , ts=domain%temperature%data_3d(:,1,:)                  &
-                            , qs=domain%cloud_water_mass%data_3d(:,1,:)     &
-                            , us=domain%u_mass%data_3d(:,1,:)               &
-                            , vs=domain%v_mass%data_3d(:,1,:)               &
-                            , hs=z_atm                                      & !: height at the lowest half sigma level
-                            , roughness=domain%roughness_z0%data_2d &  !s(ims:ime, jms:jme)         &
-                            , xland=xland_real                & ! real(domain%land_mask)
-                            , dx=domain%dx                                  &
-                            , u10=u10d, v10=v10d, t2=t2d, q2=q2d            & ! output only so can be dummies for now
-                            , regime=regime                                 &
-                            , psim=psim                                     & ! these we want
-                            , psih=psih                                     &
-                            , has_lsm=.true.                                & !if(options%physics%landsurface>1)
-                            , ust_wrf=domain%ustar                          &
-                            ! , regime_wrf, qsfc_wrf, znt_wrf, , mol_wrf, hfx, qfx, pblh  & ! optional
-                            ,hfx=domain%sensible_heat%data_2d               &
-                            ,qfx=domain%latent_heat%data_2d/LH_vaporization &
-                            ,ims=ims, ime=ime, jms=jms, jme=jme)
-
+            if (options%physics%radiation==kRA_RRTMG) then
+                RTHRATEN = domain%tend%th_lwrad + domain%tend%th_swrad
+            endif
 
             call ysu(u3d=domain%u_mass%data_3d                           & !-- u3d         3d u-velocity interpolated to theta points (m/s)
                     ,v3d=domain%v_mass%data_3d                           & !-- v3d         3d v-velocity interpolated to theta points (m/s)
@@ -277,48 +251,38 @@ contains
                     ,rqvblten=domain%tend%qv_pbl            & ! i/o
                     ,rqcblten=domain%tend%qc_pbl            & ! i/o
                     ,rqiblten=domain%tend%qi_pbl            & ! i/o
-                    ,flag_qi=.false.                        & ! not used in ysu code, so can be whatever?
+                    ,flag_qi=.True.                         &
                     ,cp=cp                                  &
                     ,g=gravity                              &
-                    ,rovcp=rovcp                            & ! rovcp = Rd/cp
-                    ,rd=Rd                                 &  ! J/(kg K) specific gas constant for dry air
+                    ,rovcp=rcp                            & ! rovcp = Rd/cp
+                    ,rd=R_d                                 &  ! J/(kg K) specific gas constant for dry air
                     ,rovg=rovg                              &
                     ,dz8w=domain%dz_interface%data_3d       & !-- dz8w        dz between full levels (m)
-                    ,z=domain%z%data_3d                     & !-- z		height above sea level (m)
-                    ,xlv=LH_vaporization                    & !-- xlv         latent heat of vaporization (j/kg)
-                    ,rv=Rw                                  &  ! J/(kg K) specific gas constant for wet/moist air
+                    ,xlv=XLV                    & !-- xlv         latent heat of vaporization (j/kg)
+                    ,rv=r_v                                  &  ! J/(kg K) specific gas constant for wet/moist air
                     ,psfc=domain%surface_pressure%data_2d   &
-                    ,znu=domain%znu                         & ! znu and znw are only used if mut is provided.
-                    ,znw=domain%znw                         &
-                !   ,mut=""  & ! optional - mass in a cell?
-                !   ,p_top=""  & !,                                           && optional - only if mut is supplied
                     ,znt=domain%roughness_z0%data_2d       &  ! i/o -- znt		roughness length (m) (input only)
                     ,ust=domain%ustar                       & ! i/o -- ust		u* in similarity theory (m/s)
-                    ,zol=zol                                & ! i/o -- zol		z/l height over monin-obukhov length - intent(inout) - but appears to not be used really?
-                    ,hol=hol                                & ! i/o -- hol		pbl height over monin-obukhov length - intent(inout)
                     ,hpbl=domain%hpbl%data_2d               & ! i/o -- hpbl	pbl height (m) - intent(inout)
-                    ,psim=psim                              & !-- psim        similarity stability function for momentum - intent(in)
-                    ,psih=psih                              & !-- psih        similarity stability function for heat- intent(in)
+                    ,psim=domain%psim%data_2d               & !-- psim        similarity stability function for momentum - intent(in)
+                    ,psih=domain%psih%data_2d               & !-- psih        similarity stability function for heat- intent(in)
                     ,xland=real(domain%land_mask)                               &
                     ,hfx=domain%sensible_heat%data_2d                     & !  HFX  - net upward heat flux at the surface (W/m^2)
-                    ,qfx=domain%latent_heat%data_2d/LH_vaporization       & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
-                    ,tsk=domain%skin_temperature%data_2d                    &
-                    ,gz1oz0=gz1oz0                          & !-- gz1oz0      log(z/z0) where z0 is roughness length
+                    ,qfx=domain%qfx%data_2d           & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
+                    !,UOCE=uoce,VOCE=voce                                  & !ocean currents -- not currently used
+                    !,CTOPO=ctopo,CTOPO2=ctopo2                            & !optional, only applied to momentum tendencies, not currently used
+                    ,YSU_TOPDOWN_PBLMIX=options%pbl_options%ysu_topdown_pblmix                &
                     ,wspd=windspd                           & ! i/o -- wspd        wind speed at lowest model level (m/s)
-                    ,br=Ri                                  & !-- br          bulk richardson number in surface layer
+                    ,br=domain%br%data_2d                   & !-- br          bulk richardson number in surface layer
                     ,dt=dt_in                               & !-- dt		time step (s)
-                    ,dtmin=dt_in/60.                        & !-- dtmin	time step (minute)
                     ,kpbl2d=domain%kpbl                          & ! o --     ?? k layer of pbl top??
-                    ,svp1=SVP1                              & !-- svp1        constant for saturation vapor pressure (kpa)
-                    ,svp2=SVP2                              & !-- svp2        constant for saturation vapor pressure (dimensionless)
-                    ,svp3=SVP3                              & !-- svp3        constant for saturation vapor pressure (k)
-                    ,svpt0=SVPT0                            & !-- svpt0       constant for saturation vapor pressure (k)
-                    ,ep1=EP1                                & !-- ep1         constant for virtual temperature (r_v/r_d - 1) (dimensionless)
-                    ,ep2=EP2                                & !-- ep2         constant for specific humidity calculation
+                    ,ep1=EP_1                                & !-- ep1         constant for virtual temperature (r_v/r_d - 1) (dimensionless)
+                    ,ep2=EP_2                                & !-- ep2         constant for specific humidity calculation
                     ,karman=karman                          & !-- karman      von karman constant
-                    ,eomeg=EOMEG                            & !-- eomeg       angular velocity of earths rotation (rad/s)
-                    ,stbolt=stefan_boltzmann                & !-- stbolt      stefan-boltzmann constant (w/m^2/k^4)
-                ,exch_h=domain%coeff_heat_exchange_3d%data_3d  & ! i/o -- exch_h ! exchange coefficient for heat, K m/s , but 3d??
+                    ,RTHRATEN=RTHRATEN                                    &
+!                    ,WSTAR=wstar,DELTA=delta                              &  !Output variables of YSU which we currently dont use
+                    ,exch_h=domain%coeff_heat_exchange_3d%data_3d  & ! i/o -- exch_h ! exchange coefficient for heat, K m/s , but 3d??
+                    ,exch_m=domain%coeff_momentum_exchange_3d%data_3d  & ! i/o -- exch_h ! exchange coefficient for heat, K m/s , but 3d??
                     ,u10=domain%u_10m%data_2d               &
                     ,v10=domain%v_10m%data_2d               &
                     ,ids=ids, ide=ide, jds=jds, jde=jde     &
@@ -329,36 +293,8 @@ contains
                 !optional
                     ,regime=regime                          )!  i/o -- regime	flag indicating pbl regime (stable, unstable, etc.) - not used?
 
-                    ! if(this_image()==1 .and. options%parameters%debug) write(*,*) "  pbl height/lev is:", maxval(domain%hpbl%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
+                    ! if(STD_OUT_PE .and. options%parameters%debug) write(*,*) "  pbl height/lev is:", maxval(domain%hpbl%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
 
-            !> ------------  add tendency terms  ------------
-            !
-            ! Here the tendency terms that were calculated by the ysu routine are added to the domain-wide fields.
-            ! For u and v, we need to re-balance the uvw fields and re-compute dt after we change them. This is done in the
-            ! step routine in time_step.f90, after the pbl call.
-            !
-            !> -----------------------------------------------
-
-            ! Offset u/v tendencies to u and v grid, then add
-            ! call array_offset_x_3d(domain%tend%u , tend_u_ugrid)
-            ! call array_offset_y_3d(domain%tend%v , tend_v_vgrid)
-
-            ! domain%u%data_3d   =  domain%u%data_3d  +  tend_u_ugrid  * dt_in
-            ! domain%v%data_3d   =  domain%v%data_3d  +  tend_v_vgrid  * dt_in
-
-            ! add mass grid tendencies
-            domain%water_vapor%data_3d            =  domain%water_vapor%data_3d            + domain%tend%qv_pbl  * dt_in
-            domain%cloud_water_mass%data_3d       =  domain%cloud_water_mass%data_3d       + domain%tend%qc_pbl  * dt_in
-            domain%potential_temperature%data_3d  =  domain%potential_temperature%data_3d  + domain%tend%th_pbl  * dt_in
-            domain%cloud_ice_mass%data_3d         =  domain%cloud_ice_mass%data_3d         + domain%tend%qi_pbl  * dt_in
-
-            ! Reset tendencies before the next pbl call. (not sure if necessary)
-            domain%tend%qv_pbl    = 0
-            domain%tend%th_pbl    = 0
-            domain%tend%qc_pbl    = 0
-            domain%tend%qi_pbl    = 0
-            domain%tend%u         = 0
-            domain%tend%v         = 0
 
 
 
@@ -389,6 +325,37 @@ contains
         endif ! End YSU call
 
     end subroutine pbl
+
+    subroutine pbl_apply_tend(domain,options,dt)
+        implicit none
+        type(domain_t),  intent(inout)  :: domain
+        type(options_t), intent(in)     :: options
+        real,            intent(in)     :: dt
+
+        if (options%physics%boundarylayer==kPBL_YSU) then
+            !> ------------  add tendency terms  ------------
+            !
+            ! Here the tendency terms that were calculated by the ysu routine are added to the domain-wide fields.
+            ! For u and v, we need to re-balance the uvw fields and re-compute dt after we change them. This is done in the
+            ! step routine in time_step.f90, after the pbl call.
+            !
+            !> -----------------------------------------------
+
+            ! Offset u/v tendencies to u and v grid, then add
+            ! call array_offset_x_3d(domain%tend%u , tend_u_ugrid)
+            ! call array_offset_y_3d(domain%tend%v , tend_v_vgrid)
+
+            ! domain%u%data_3d   =  domain%u%data_3d  +  tend_u_ugrid  * dt_in
+            ! domain%v%data_3d   =  domain%v%data_3d  +  tend_v_vgrid  * dt_in
+
+            ! add mass grid tendencies
+            domain%water_vapor%data_3d            =  domain%water_vapor%data_3d            + domain%tend%qv_pbl  * dt
+            domain%cloud_water_mass%data_3d       =  domain%cloud_water_mass%data_3d       + domain%tend%qc_pbl  * dt
+            domain%potential_temperature%data_3d  =  domain%potential_temperature%data_3d  + domain%tend%th_pbl  * dt
+            domain%cloud_ice_mass%data_3d         =  domain%cloud_ice_mass%data_3d         + domain%tend%qi_pbl  * dt
+        endif
+    end subroutine pbl_apply_tend
+
 
     subroutine pbl_finalize(options)
         implicit none

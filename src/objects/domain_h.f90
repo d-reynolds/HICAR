@@ -1,8 +1,8 @@
 module domain_interface
   use iso_c_binding
+  use mpi_f08
   use options_interface,        only : options_t
   use boundary_interface,       only : boundary_t
-  use exchangeable_interface,   only : exchangeable_t
   use grid_interface,           only : grid_t
   use variable_interface,       only : variable_t
   use variable_dict_interface,  only : var_dict_t
@@ -10,6 +10,7 @@ module domain_interface
   use time_object,              only : Time_type
   use time_delta_object,        only : time_delta_t
   use data_structures,          only : interpolable_type, tendencies_type
+  use halo_interface,           only : halo_t
   use timer_interface,          only : timer_t
 
   implicit none
@@ -18,15 +19,14 @@ module domain_interface
   public :: domain_t
 
   type domain_t
-    type(meta_data_t)    :: info
-    type(grid_t)         :: grid,   u_grid,   v_grid
+    type(grid_t)         :: grid,   grid8w,  u_grid,   v_grid
     type(grid_t)         :: grid2d, u_grid2d, v_grid2d
-    type(grid_t)         :: u_grid2d_ext, v_grid2d_ext!, grid2d_ext ! extended grids for u and v fields pre smoothing (grid_2d_ext is for SLEVE topography smoothing)
     type(grid_t)         :: grid_monthly, grid_soil
     type(grid_t)         :: grid_snow, grid_snowsoil
     type(grid_t)         :: grid_soilcomp, grid_gecros, grid_croptype
     type(grid_t)         :: grid_hlm !! MJ added
     type(grid_t)         :: grid_lake , grid_lake_soisno, grid_lake_soi, grid_lake_soisno_1
+    type(halo_t)         :: halo
 
     type(Time_type) :: model_time
 
@@ -35,32 +35,32 @@ module domain_interface
     ! core model species to be advected
 
     ! wind field to control advection
-    type(exchangeable_t) :: u
-    type(exchangeable_t) :: v
-    type(exchangeable_t) :: w
+    type(variable_t) :: u
+    type(variable_t) :: v
+    type(variable_t) :: w
 
-    type(exchangeable_t) :: water_vapor
-    type(exchangeable_t) :: potential_temperature
-    type(exchangeable_t) :: cloud_water_mass
-    type(exchangeable_t) :: cloud_number
-    type(exchangeable_t) :: cloud_ice_mass
-    type(exchangeable_t) :: cloud_ice_number
-    type(exchangeable_t) :: rain_mass
-    type(exchangeable_t) :: rain_number
-    type(exchangeable_t) :: snow_mass
-    type(exchangeable_t) :: snow_number
-    type(exchangeable_t) :: graupel_mass
-    type(exchangeable_t) :: graupel_number
-    type(exchangeable_t) :: ice1_a
-    type(exchangeable_t) :: ice1_c
-    type(exchangeable_t) :: ice2_mass
-    type(exchangeable_t) :: ice2_number
-    type(exchangeable_t) :: ice2_a
-    type(exchangeable_t) :: ice2_c
-    type(exchangeable_t) :: ice3_mass
-    type(exchangeable_t) :: ice3_number
-    type(exchangeable_t) :: ice3_a
-    type(exchangeable_t) :: ice3_c
+    type(variable_t) :: water_vapor
+    type(variable_t) :: potential_temperature
+    type(variable_t) :: cloud_water_mass
+    type(variable_t) :: cloud_number
+    type(variable_t) :: cloud_ice_mass
+    type(variable_t) :: cloud_ice_number
+    type(variable_t) :: rain_mass
+    type(variable_t) :: rain_number
+    type(variable_t) :: snow_mass
+    type(variable_t) :: snow_number
+    type(variable_t) :: graupel_mass
+    type(variable_t) :: graupel_number
+    type(variable_t) :: ice1_a
+    type(variable_t) :: ice1_c
+    type(variable_t) :: ice2_mass
+    type(variable_t) :: ice2_number
+    type(variable_t) :: ice2_a
+    type(variable_t) :: ice2_c
+    type(variable_t) :: ice3_mass
+    type(variable_t) :: ice3_number
+    type(variable_t) :: ice3_a
+    type(variable_t) :: ice3_c
 
     ! other model variables (not advected)
     type(variable_t) :: exner
@@ -84,7 +84,6 @@ module domain_interface
     type(variable_t) :: snowfall_ground
     type(variable_t) :: rainfall_ground
     integer,allocatable :: snowfall_bucket(:,:)
-    type(variable_t) :: external_precipitation
     type(variable_t) :: cloud_fraction
     type(variable_t) :: longwave
     type(variable_t) :: shortwave
@@ -99,7 +98,16 @@ module domain_interface
     type(variable_t) :: v_10m
     type(variable_t) :: windspd_10m
     type(variable_t) :: coeff_momentum_drag
-    type(variable_t) :: coeff_heat_exchange
+    type(variable_t) :: chs
+    type(variable_t) :: chs2
+    type(variable_t) :: cqs2
+    type(variable_t) :: br
+    type(variable_t) :: qfx
+    type(variable_t) :: psim
+    type(variable_t) :: psih
+    type(variable_t) :: fm
+    type(variable_t) :: fh
+    type(variable_t) :: coeff_momentum_exchange_3d ! used in YSU pbl
     type(variable_t) :: coeff_heat_exchange_3d ! used in YSU pbl
     integer,allocatable :: kpbl(:,:)  ! used in YSU pbl / BMJ cu
     type(variable_t) :: hpbl          ! used in YSU pbl /NSAS cu
@@ -192,7 +200,7 @@ module domain_interface
     type(variable_t) :: snow_layer_liquid_water
     type(variable_t) :: snow_age_factor
     type(variable_t) :: snow_height
-    integer,allocatable :: snow_nlayers(:,:)
+    type(variable_t) :: snow_nlayers
     type(variable_t) :: skin_temperature
     type(variable_t) :: sst
     type(variable_t) :: soil_water_content
@@ -225,6 +233,7 @@ module domain_interface
     type(variable_t) :: net_longwave_bare
     type(variable_t) :: net_longwave_canopy
     type(variable_t) :: soil_totalmoisture
+    type(variable_t) :: soil_water_content_liq
     type(variable_t) :: soil_deep_temperature
     type(variable_t) :: water_table_depth
     type(variable_t) :: water_aquifer
@@ -248,6 +257,7 @@ module domain_interface
     type(variable_t) :: csol3d
     type(variable_t) :: tkmg3d
     type(variable_t) :: lakemask
+    type(variable_t) :: xice
     type(variable_t) :: tksatu3d
     type(variable_t) :: tkdry3d
     type(variable_t) :: zi3d
@@ -267,10 +277,13 @@ module domain_interface
     ! ice hydrometeor properties diagnosted by ISHMAEL
     type(variable_t) :: ice1_rho
     type(variable_t) :: ice1_phi
+    type(variable_t) :: ice1_vmi
     type(variable_t) :: ice2_rho
     type(variable_t) :: ice2_phi
+    type(variable_t) :: ice2_vmi
     type(variable_t) :: ice3_rho
     type(variable_t) :: ice3_phi
+    type(variable_t) :: ice3_vmi
 
     type(variable_t) :: out_longwave_rad
     type(variable_t) :: longwave_cloud_forcing
@@ -293,6 +306,11 @@ module domain_interface
     type(variable_t) :: w_real
     type(variable_t) :: u_mass
     type(variable_t) :: v_mass
+
+    type(variable_t) :: alpha  !wind-alpha
+    type(variable_t) :: froude !Froude number
+    type(variable_t) :: Ri     !Bulk richardson number
+
 
     type(tendencies_type) :: tend
 
@@ -317,29 +335,17 @@ module domain_interface
     real,                       allocatable :: relax_filter_2d(:,:)
     real,                       allocatable :: relax_filter_3d(:,:,:)
     real,                       allocatable :: advection_dz(:,:,:)
-    real,                       allocatable :: rain_fraction(:,:,:) ! monthly varying fraction to multiple precipitation  [-]
     ! store the ratio between the average dz and each grid cells topographically modified dz (for space varying dz only)
     real,                       allocatable :: jacobian(:,:,:)
     real,                       allocatable :: jacobian_u(:,:,:)
     real,                       allocatable :: jacobian_v(:,:,:)
     real,                       allocatable :: jacobian_w(:,:,:)
-    real,                       allocatable :: zr_u(:,:,:)
-    real,                       allocatable :: zr_v(:,:,:)
     real,                       allocatable :: dzdx(:,:,:) ! change in height with change in x/y position (used to calculate w_real vertical motions)
     real,                       allocatable :: dzdy(:,:,:) ! change in height with change in x/y position (used to calculate w_real vertical motions)
     real,                       allocatable :: dzdx_u(:,:,:) ! change in height with change in x/y position on u-grid
     real,                       allocatable :: dzdy_v(:,:,:) ! change in height with change in x/y position on v-grid
     ! BK 2020/05
-    real,                       allocatable :: delta_dzdx(:,:,:) ! change in height difference (between hi and lo-res data) with change in x/y position (used to calculate w_real vertical motions)
-    real,                       allocatable :: delta_dzdy(:,:,:) ! change in height difference (between hi and lo-res data) with change in x/y position (used to calculate w_real vertical motions)
-    real,                       allocatable :: zfr_u(:,:,:)     ! ratio between z levels (on grid)
-    real,                       allocatable :: zfr_v(:,:,:)
     real,                       allocatable :: froude_terrain(:,:,:,:) ! Terrain length-scale to use at each point for Froude Number calculation
-    real,                       allocatable :: terrain_u(:,:)
-    real,                       allocatable :: terrain_v(:,:)
-    real,                       allocatable :: forcing_terrain_u(:,:)
-    real,                       allocatable :: forcing_terrain_v(:,:)
-    real,                       allocatable :: forc(:,:)
     real,                       allocatable :: h1(:,:)     ! the large-scale terrain (h1) for the SLEVE coordinate (achieved by smoothin the org terrain)
     real,                       allocatable :: h2(:,:)     ! the small-scale terrain (h2) for the SLEVE coordinate (difference org and h1 terrain)
     real,                       allocatable :: h1_u(:,:)     ! the large-scale terrain (h1) on the u grid
@@ -349,19 +355,17 @@ module domain_interface
     real,                       allocatable :: dz_scl(:)  ! the scaled dz levels, required for delta terrain calculation    
     real,                       allocatable :: Sx(:,:,:,:)
     real,                       allocatable :: TPI(:,:)
-    real,                       allocatable :: global_TPI(:,:)
+    real,                       allocatable :: neighbor_TPI(:,:)
     real,                       allocatable :: ustar(:,:)
     real,                       allocatable :: znu(:)
     real,                       allocatable :: znw(:)
-    real,                       allocatable :: froude(:,:,:) !Froude number
-    real,                       allocatable :: Ri(:,:,:)     !Bulk richardson number
     
     ! these data are stored on the domain wide grid even if this process is only looking at a subgrid
     ! these variables are necessary with linear winds, especially with spatially variable dz, to compute the LUT
     real,                       allocatable :: global_terrain(:,:)
+    real,                       allocatable :: neighbor_terrain(:,:)
     real,                       allocatable :: global_z_interface(:,:,:)
     real,                       allocatable :: global_dz_interface(:,:,:)
-    real,                       allocatable :: global_jacobian(:,:,:)
 
 
     ! these coarrays are used to send all data to/from a master image for IO... ?
@@ -369,37 +373,12 @@ module domain_interface
     ! real, allocatable :: transfer_3d(:,:,:)[:]
     ! real, allocatable :: transfer_2d(:,:)[:]
     
-    ! Neighboring images of this image
-    integer, allocatable :: neighbors(:)
-
-    real, allocatable :: south_in_3d(:,:,:,:)[:]
-    real, allocatable :: north_in_3d(:,:,:,:)[:]
-    real, allocatable :: west_in_3d(:,:,:,:)[:]
-    real, allocatable :: east_in_3d(:,:,:,:)[:]
-
-    real, allocatable :: north_buffer_3d(:,:,:,:)
-    real, allocatable :: south_buffer_3d(:,:,:,:)
-    real, allocatable :: east_buffer_3d(:,:,:,:)
-    real, allocatable :: west_buffer_3d(:,:,:,:)
-
-    real, allocatable :: south_in_2d(:,:,:)[:]
-    real, allocatable :: north_in_2d(:,:,:)[:]
-    real, allocatable :: west_in_2d(:,:,:)[:]
-    real, allocatable :: east_in_2d(:,:,:)[:]
-
-    real, allocatable :: north_buffer_2d(:,:,:)
-    real, allocatable :: south_buffer_2d(:,:,:)
-    real, allocatable :: east_buffer_2d(:,:,:)
-    real, allocatable :: west_buffer_2d(:,:,:)
-
     ! MPI communicator object for doing parallel communications among domain objects
-    integer, public :: IO_comms
+    type(MPI_Comm), public :: compute_comms
 
     ! contains the size of the domain (or the local tile?)
     integer :: nx, ny, nz, nx_global, ny_global
     integer :: ximg, ximages, yimg, yimages
-    integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor
-
 
     logical :: north_boundary = .True.
     logical :: south_boundary = .True.
@@ -409,18 +388,23 @@ module domain_interface
     ! store the start (s) and end (e) for the i,j,k dimensions
     integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
                 ims,ime, jms,jme, kms,kme, & ! for the memory in these arrays (m)
-                its,ite, jts,jte, kts,kte    ! for the data tile to process   (t)
-                
+                its,ite, jts,jte, kts,kte, & ! for the data tile to process   (t)
+                ihs,ihe, jhs,jhe, khs,khe    ! for the neighborhood arrays for non-local calculations (h)
+
+    integer :: neighborhood_max ! The maximum neighborhood radius in indices
+    
     !! MJ added new vars needed for FSM
     !real,allocatable :: FSM_slopemu(:,:)
     type(variable_t) :: runoff_tstep 
-    type(variable_t) :: snowdepth
     type(variable_t) :: Tsnow
     type(variable_t) :: Sice
     type(variable_t) :: Sliq
-    type(variable_t) :: albs
     type(variable_t) :: Ds
     type(variable_t) :: fsnow
+    type(variable_t) :: dm_salt
+    type(variable_t) :: dm_susp
+    type(variable_t) :: dm_subl
+    type(variable_t) :: dm_slide
     type(variable_t) :: Nsnow
     type(variable_t) :: rainfall_tstep
     type(variable_t) :: snowfall_tstep
@@ -429,36 +413,22 @@ module domain_interface
     type(variable_t) :: slope_angle
     type(variable_t) :: aspect_angle
     type(variable_t) :: svf
+    type(variable_t) :: factor_p
     type(variable_t) :: Sliq_out
     type(variable_t) :: hlm
-    type(variable_t) :: ridge_dist
-    type(variable_t) :: valley_dist
-    type(variable_t) :: ridge_drop
+    type(variable_t) :: shd
 
 
   contains
     procedure :: init
-    procedure :: var_request
     
-    procedure :: halo_send
-    procedure :: halo_retrieve
-    procedure :: halo_exchange
-    procedure :: halo_3d_send_batch
-    procedure :: halo_3d_retrieve_batch
-    procedure :: halo_3d_exchange_batch
-    procedure :: halo_2d_send_batch
-    procedure :: halo_2d_retrieve_batch
-    procedure :: halo_2d_exchange_batch
     procedure :: enforce_limits
 
     procedure :: get_initial_conditions
     procedure :: diagnostic_update
     procedure :: interpolate_forcing
-    procedure :: interpolate_external
     procedure :: update_delta_fields
     procedure :: apply_forcing
-
-    procedure :: calculate_delta_terrain
 
   end type
 
@@ -474,24 +444,16 @@ module domain_interface
     end subroutine
     
     ! read initial atmospheric conditions from forcing data
-    module subroutine get_initial_conditions(this, forcing, options, external_conditions)
+    module subroutine get_initial_conditions(this, forcing, options)
         implicit none
         class(domain_t),  intent(inout) :: this
         type(boundary_t), intent(inout) :: forcing
-        type(boundary_t), intent(inout), optional :: external_conditions  ! external data such as SWE
         type(options_t),  intent(in)    :: options
     end subroutine
 
     module subroutine diagnostic_update(this,options)
         implicit none
         class(domain_t),  intent(inout) :: this
-        type(options_t),  intent(in)    :: options
-    end subroutine
-
-    module subroutine interpolate_external(this, external_conditions, options)
-        implicit none
-        class(domain_t),  intent(inout) :: this
-        type(boundary_t), intent(in)    :: external_conditions
         type(options_t),  intent(in)    :: options
     end subroutine
 
@@ -502,63 +464,12 @@ module domain_interface
         logical,          intent(in),   optional :: update
     end subroutine
 
-    module subroutine var_request(this, options)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        type(options_t), intent(inout)  :: options
-    end subroutine
-
-    module subroutine halo_send(this)
-        implicit none
-        class(domain_t), intent(inout) :: this
-    end subroutine
-
-    module subroutine halo_retrieve(this, wait_timer)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        type(timer_t),   intent(inout) :: wait_timer
-    end subroutine
-
     ! Exchange subdomain boundary information
-    module subroutine halo_exchange(this, send_timer, ret_timer, wait_timer)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        type(timer_t),   intent(inout) :: send_timer, ret_timer, wait_timer
-    end subroutine
-
-    module subroutine halo_3d_send_batch(this)
-        implicit none
-        class(domain_t), intent(inout) :: this
-    end subroutine
-
-    module subroutine halo_3d_retrieve_batch(this, wait_timer)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        type(timer_t),   intent(inout) :: wait_timer
-    end subroutine
-
-    ! Exchange subdomain boundary information as a batched exchange
-    module subroutine halo_3d_exchange_batch(this, send_timer, ret_timer, wait_timer)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        type(timer_t),   intent(inout) :: send_timer, ret_timer, wait_timer
-    end subroutine
-
-    module subroutine halo_2d_send_batch(this)
-        implicit none
-        class(domain_t), intent(inout) :: this
-    end subroutine
-
-    module subroutine halo_2d_retrieve_batch(this)
-        implicit none
-        class(domain_t), intent(inout) :: this
-    end subroutine
-
-    ! Exchange subdomain boundary information as a batched exchange
-    module subroutine halo_2d_exchange_batch(this)
-        implicit none
-        class(domain_t), intent(inout) :: this
-    end subroutine
+    !module subroutine halo_exchange(this, two_d, exch_only)
+    !    implicit none
+    !    class(domain_t), intent(inout) :: this
+    !    logical, optional,   intent(in) :: two_d, exch_only
+    !end subroutine
 
     ! Make sure no hydrometeors are getting below 0
     module subroutine enforce_limits(this,update_in)
@@ -576,16 +487,9 @@ module domain_interface
     module subroutine apply_forcing(this, forcing, options, dt)
         implicit none
         class(domain_t),    intent(inout) :: this
-        class(boundary_t),  intent(in)    :: forcing
+        class(boundary_t),  intent(inout) :: forcing
         type(options_t), intent(in)       :: options
         real, intent(in)                  :: dt
-    end subroutine
-
-    module subroutine calculate_delta_terrain(this, forcing, options)
-        implicit none
-        class(domain_t), intent(inout) :: this
-        type(boundary_t), intent(in)    :: forcing
-        type(options_t), intent(in) :: options
     end subroutine
 
   end interface

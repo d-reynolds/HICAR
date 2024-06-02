@@ -17,7 +17,7 @@ contains
     subroutine init_hires(filename,domain)
         implicit none
         character(len=*) ,intent(in):: filename
-        type(domain_type),intent(inout)::domain
+        type(domain_t),intent(inout)::domain
         real, dimension(:,:),allocatable::tempdata
         integer::nx,ny,nz
 
@@ -35,7 +35,7 @@ contains
     subroutine init_lowres(filename,bc)
         implicit none
         character(len=*), intent(in) :: filename
-        type(bc_type),intent(inout)::bc
+        type(boundary_t),intent(inout)::bc
         integer::nx,ny,nz,i,j
 
         call io_read2d(filename,"XLAT",bc%lat)
@@ -62,8 +62,8 @@ program test_geo
     character(len=100)::lo_res_file="lo.nc"
     character(len=100)::hi_res_file="hi.nc"
     character(len=100)::output_file="out.nc"
-    type(domain_type)::domain
-    type(bc_type)::bc
+    type(domain_t)::domain
+    type(boundary_t)::bc
 
     call init_hires(hi_res_file,domain)
     call init_lowres(lo_res_file,bc)

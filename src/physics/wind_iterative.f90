@@ -20,18 +20,19 @@ module wind_iterative
 #include <petsc/finclude/petscksp.h>
 #include <petsc/finclude/petscdm.h>
 #include <petsc/finclude/petscdmda.h>
+    use icar_constants,    only : STD_OUT_PE
 
-    !use exchangeable_interface,   only : exchangeable_t
     use domain_interface,  only : domain_t
     !use options_interface, only : options_t
     !use grid_interface,    only : grid_t
     use petscksp
     use petscdm
     use petscdmda
-    
+    use iso_fortran_env
+
     implicit none
     private
-    public:: init_iter_winds, calc_iter_winds, finalize_iter_winds
+    public:: init_petsc_comms, init_iter_winds, calc_iter_winds, finalize_iter_winds
     real, parameter::deg2rad=0.017453293 !2*pi/360
     real, parameter :: rad2deg=57.2957779371
     real, allocatable, dimension(:,:,:) :: A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, H_coef, I_coef, &
@@ -67,6 +68,7 @@ contains
         
         PetscErrorCode ierr
         KSP            ksp
+        PC             pc
         DM             da
         Vec            x, localX
         PetscInt       one, x_size
@@ -88,13 +90,16 @@ contains
             call update_coefs(domain)
         endif
                                                                 
-        call KSPCreate(domain%IO_comms,ksp,ierr)
+        call KSPCreate(domain%compute_comms%MPI_VAL,ksp,ierr)
         conv_tol = 1e-4
 
         !call KSPSetTolerances(ksp,conv_tol,PETSC_DEFAULT_REAL,PETSC_DEFAULT_REAL,PETSC_DEFAULT_INTEGER,ierr)
-        call KSPSetType(ksp,KSPBCGS,ierr);
-        
-        call DMDACreate3d(domain%IO_comms,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
+        call KSPSetType(ksp,KSPIBCGS,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
+                                              ! KSPPIPEBCGS <--- Could be faster, but needs to be tested...
+        !call KSPGetPC(ksp,pc, ierr)
+        !call PCSetType(pc,PCSOR, ierr)
+
+        call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
                           xl, PETSC_NULL_INTEGER,yl,da,ierr)
         
@@ -111,7 +116,7 @@ contains
         call KSPSolve(ksp,PETSC_NULL_VEC,PETSC_NULL_VEC,ierr)
         
         call KSPGetSolution(ksp,x,ierr)
-        if(this_image()==1) write(*,*) 'Solved PETSc'
+        if(STD_OUT_PE) write(*,*) 'Solved PETSc'
         
         !Subset global solution x to local grid so that we can access ghost-points
         call DMGlobalToLocalBegin(da,x,INSERT_VALUES,localX,ierr)
@@ -122,9 +127,9 @@ contains
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
 
         !Exchange u and v, since the outer points are not updated in above function
-        call domain%u%exchange_x(update)
-        call domain%v%exchange_y(update)
-        
+        call domain%halo%exch_var(domain%u,do_dqdt=update)
+        call domain%halo%exch_var(domain%v,do_dqdt=update)
+ 
         call VecDestroy(localX,ierr)
         call DMDestroy(da,ierr)
         call KSPDestroy(ksp,ierr)
@@ -228,23 +233,15 @@ contains
             v_dlambdz(:,k,:) = v_dlambdz(:,k,:)/(dz_if(i_s,k+1,j_s)*(sigma(i_s,k,j_s)+sigma(i_s,k,j_s)**2))
         enddo
         
-        u_dlambdz(:,k_s,:) = -(u_temp(:,k_s+2,:)*sigma(i_s,k_s+1,j_s)**2) + &
-                            u_temp(:,k_s+1,:)*(sigma(i_s,k_s+1,j_s)+1)**2 - u_temp(:,k_s,:)*(2*sigma(i_s,k_s+1,j_s)+1)
-        v_dlambdz(:,k_s,:) = -(v_temp(:,k_s+2,:)*sigma(i_s,k_s+1,j_s)**2) + &
-                            v_temp(:,k_s+1,:)*(sigma(i_s,k_s+1,j_s)+1)**2 - v_temp(:,k_s,:)*(2*sigma(i_s,k_s+1,j_s)+1)
-        
-        u_dlambdz(:,k_s,:) = u_dlambdz(:,k_s,:)/(dz_if(i_s,k_s+1,j_s)*(sigma(i_s,k_s+1,j_s)+1))
-        v_dlambdz(:,k_s,:) = v_dlambdz(:,k_s,:)/(dz_if(i_s,k_s+1,j_s)*(sigma(i_s,k_s+1,j_s)+1))
-        
         !PETSc arrays are zero-indexed
         
         if (update) then
-            domain%u%meta_data%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%u%meta_data%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
+            domain%u%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%u%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
                                                             0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
                                                             lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
             (1/domain%jacobian_u(i_start:i_end,:,j_s:j_e))*domain%dzdx_u(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/rho_u(i_start:i_end,:,j_s:j_e)
             
-            domain%v%meta_data%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%v%meta_data%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
+            domain%v%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%v%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
                                                             0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
                                                             lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
             (1/domain%jacobian_v(i_s:i_e,:,j_start:j_end))*domain%dzdy_v(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/rho_v(i_s:i_e,:,j_start:j_end)
@@ -365,13 +362,26 @@ contains
                 row(MatStencil_i) = i
                 row(MatStencil_j) = k
                 row(MatStencil_k) = j
-                if (i.eq.0 .or. j.eq.0 .or.k.eq.mz-1 .or. &
+                if (i.eq.0 .or. j.eq.0 .or. &
                     i.eq.mx-1 .or. j.eq.my-1) then
                     v(1) = 1.0
                     call MatSetValuesStencil(arr_B,i1,row,i1,row,v,INSERT_VALUES, ierr)
+                else if (k.eq.mz-1) then
+                    !k
+                    v(1) = 1/dz_if(i,k,j)
+                    top_col(MatStencil_i,1) = i
+                    top_col(MatStencil_j,1) = k
+                    top_col(MatStencil_k,1) = j
+                    !k - 1
+                    v(2) = -1/dz_if(i,k,j)
+                    top_col(MatStencil_i,2) = i
+                    top_col(MatStencil_j,2) = k-1
+                    top_col(MatStencil_k,2) = j
+                    call MatSetValuesStencil(arr_B,i1,row,i2,top_col,v,INSERT_VALUES, ierr)
+
                 else if (k.eq.0) then
                                 
-                    denom = 2*(1./alpha(i,1,j)**2 + dzdx(i,1,j)**2 + &
+                    denom = 2*(alpha(i,1,j)**2 + dzdx(i,1,j)**2 + &
                                           dzdy(i,1,j)**2)/(jaco(i,1,j))
                     !k
                     v(1) = - 1
@@ -615,8 +625,8 @@ contains
         N_coef(:,k_s+1:k_e,j_s:j_e-1) = &
                 (dzdy(:,k_s:k_e-1,j_s:j_e-1)+domain%dzdy_v(i_s:i_e,k_s+1:k_e,j_s+1:j_e))/mixed_denom(:,k_s+1:k_e,j_s:j_e-1)
         O_coef(:,k_s+1:k_e,j_s+1:j_e) = &
-                -(dzdy(:,k_s:k_e-1,j_s+1:j_e)+domain%dzdy_v(i_s:i_e,k_s+1:k_e,j_s+1:j_e))/&
-                mixed_denom(:,k_s+1:k_e,j_s+1:j_e)
+                -(dzdy(:,k_s:k_e-1,j_s+1:j_e)+domain%dzdy_v(i_s:i_e,k_s+1:k_e,j_s+1:j_e))&
+                /mixed_denom(:,k_s+1:k_e,j_s+1:j_e)
 
         J_coef(i_s:i_e-1,k_s,:) = (dzdx(i_s:i_e-1,k_s,:)+domain%dzdx_u(i_s+1:i_e,k_s,j_s:j_e))&
                                     /mixed_denom(i_s:i_e-1,k_s,:)
@@ -659,22 +669,22 @@ contains
 
 
         B_coef(:,k_s:k_e-1,:) = sigma(:,k_s:k_e-1,:) * &
-                              ( (1./alpha(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + dzdy(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + &
+                              ( (alpha(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + dzdy(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + &
                               dzdx(i_s:i_e,k_s:k_e-1,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s:k_e-1,j_s:j_e)) + &
-                              (1./alpha(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + dzdy(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + &
+                              (alpha(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + dzdy(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + &
                               dzdx(i_s:i_e,k_s+1:k_e,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s+1:k_e,j_s:j_e))) / &
                           ((sigma(:,k_s:k_e-1,:)+sigma(:,k_s:k_e-1,:)**2)*dz_if(:,k_s+1:k_e,:)**2)
                           
                           
-        C_coef(:,k_s+1:k_e,:) = ( (1./alpha(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + dzdy(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + &
+        C_coef(:,k_s+1:k_e,:) = ( (alpha(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + dzdy(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + &
                               dzdx(i_s:i_e,k_s:k_e-1,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s:k_e-1,j_s:j_e)) + &
-                              (1./alpha(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + dzdy(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + &
+                              (alpha(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + dzdy(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + &
                               dzdx(i_s:i_e,k_s+1:k_e,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s+1:k_e,j_s:j_e))) / &
                           ((sigma(:,k_s+1:k_e,:)+sigma(:,k_s+1:k_e,:)**2)*dz_if(:,k_s+2:k_e+1,:)**2)
                 
-        C_coef(:,k_s,:) = ( (1./alpha(i_s:i_e,k_s,j_s:j_e)**2 + dzdy(i_s:i_e,k_s,j_s:j_e)**2 + &
+        C_coef(:,k_s,:) = ( (alpha(i_s:i_e,k_s,j_s:j_e)**2 + dzdy(i_s:i_e,k_s,j_s:j_e)**2 + &
                               dzdx(i_s:i_e,k_s,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s,j_s:j_e)) + &
-                              (1./alpha(i_s:i_e,k_s,j_s:j_e)**2 + dzdy(i_s:i_e,k_s,j_s:j_e)**2 + &
+                              (alpha(i_s:i_e,k_s,j_s:j_e)**2 + dzdy(i_s:i_e,k_s,j_s:j_e)**2 + &
                               dzdx(i_s:i_e,k_s,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s,j_s:j_e))) / &
                           ((sigma(:,k_s,:)+sigma(:,k_s,:)**2)*dz_if(:,k_s+1,:)**2)
                           
@@ -725,24 +735,33 @@ contains
         call PetscFinalize(ierr)
     end subroutine
 
-    subroutine init_iter_winds(domain)
+    subroutine init_petsc_comms(domain)
         implicit none
         type(domain_t), intent(in) :: domain
         PetscErrorCode ierr
 
-        
+        PETSC_COMM_WORLD = domain%compute_comms%MPI_VAL
         call PetscInitialize(PETSC_NULL_CHARACTER, ierr)
         if (ierr .ne. 0) then
             print*,'Unable to initialize PETSc'
             stop
-        endif 
+        endif
+
+    end subroutine
+
+    subroutine init_iter_winds(domain)
+        implicit none
+        type(domain_t), intent(in) :: domain
+        call init_petsc_comms(domain)
         call init_module_vars(domain)
-        if(this_image()==1) write(*,*) 'Initialized PETSc'
+        if(STD_OUT_PE) write(*,*) 'Initialized PETSc'
     end subroutine
     
     subroutine init_module_vars(domain)
         implicit none
         type(domain_t), intent(in) :: domain
+
+        integer :: ierr
 
         i_s = domain%its-1
         i_e = domain%ite+1
@@ -777,7 +796,7 @@ contains
             allocate( yl( 1:domain%grid%yimages ))
             xl = 0
             yl = 0
-            
+
             dx = domain%dx
             dzdx = domain%dzdx(i_s:i_e,k_s:k_e,j_s:j_e) 
             dzdy = domain%dzdy(i_s:i_e,k_s:k_e,j_s:j_e)
@@ -796,9 +815,9 @@ contains
             if (domain%grid%ximg == 1) yl(domain%grid%yimg) = domain%grid%ny-hs*2
         
             !Wait for all images to contribute their dimension            
-            call CO_MAX(xl)
-            call CO_MAX(yl)
-            
+            call MPI_Allreduce(MPI_IN_PLACE,xl,domain%grid%ximages,MPI_INT,MPI_MAX,domain%compute_comms, ierr)
+            call MPI_Allreduce(MPI_IN_PLACE,yl,domain%grid%yimages,MPI_INT,MPI_MAX,domain%compute_comms, ierr)
+
             !Add points to xy-edges to accomodate ghost-points of DMDA grid
             !cells at boundaries have 1 extra for ghost-point, and should also be corrected
             !to have the hs which was falsely removed added back on

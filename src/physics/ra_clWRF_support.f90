@@ -12,6 +12,7 @@
 MODULE module_ra_clWRF_support
 
   !USE module_wrf_error
+   use icar_constants,    only : STD_OUT_PE
 
   IMPLICIT NONE
   PRIVATE
@@ -161,7 +162,7 @@ CONTAINS
                             ' year:', yrdata(idata), ' co2: ',co2r(idata), ' n2o: ',&
                             n2or(idata),' ch4:',ch4r(idata)
                             !call wrf_debug( 0, message)
-                        if (this_image()==1) write(*,*) trim(message)
+                        if (STD_OUT_PE) write(*,*) trim(message)
                     endif
                     ! ENDIF
                     mondata(idata) = 6
@@ -169,7 +170,7 @@ CONTAINS
                     idata=idata+1
                 endif
              END DO
-             if (this_image()==1) print*,"CLWRF read:",idata-1, " lines"
+             if (STD_OUT_PE) print*,"CLWRF read:",idata-1, " lines"
 
              IF (istatus /= -1) THEN
                 PRINT *,'CLWRF -- clwrf -- CLWRF ALERT!'

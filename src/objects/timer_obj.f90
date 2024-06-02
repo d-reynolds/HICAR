@@ -121,8 +121,7 @@ contains
 
         character(len=25) :: time ! return value
 
-        real :: temporary_time, current_time
-        integer :: count_end
+        real :: temporary_time
 
         ! if (this%is_running) then
         !     if (this%use_cpu_time) then

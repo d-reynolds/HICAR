@@ -19,7 +19,7 @@ module timer_interface
         real    :: end_time   = 0
         real    :: total_time = 0
         integer :: counter    = 0
-        integer :: count_max  = 32767
+        integer :: count_max  = 86000
         integer :: count_rate = 1
         logical :: use_cpu_time = .False.
         logical :: is_running = .False.

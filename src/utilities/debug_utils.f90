@@ -3,6 +3,7 @@ module debug_module
     use domain_interface, only  : domain_t
     use string,           only  : str
     use ieee_arithmetic
+    use icar_constants,    only : PE_RANK_GLOBAL
 
     implicit none
 contains
@@ -167,7 +168,7 @@ contains
                     enddo
                 enddo
             else
-                print*, "Too many NaNs, stopping on image:", this_image()
+                print*, "Too many NaNs, stopping on image:", PE_RANK_GLOBAL+1
                 error stop
             endif
 

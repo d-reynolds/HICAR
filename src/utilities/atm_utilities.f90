@@ -3,24 +3,24 @@
 !!
 !!  Utilities exist to convert u, v into speed and direction (and vice versa)
 !!  Compute the dry and moist lapse rates and Brunt Vaisalla stabilities
-!!  Compute the terrain blocking froude number (U / (terrain_height * brunt_vaisalla_frequency ))
-!!  Compute the fraction of flow that is blocked (linear interpolation between froude_max and froude_min)
 !!
 !!  @author
 !!  Ethan Gutmann (gutmann@ucar.edu)
 !!
 !!----------------------------------------------------------
 module mod_atm_utilities
-
-    use icar_constants,           only : pi, gravity, Rd, Rw, cp, LH_vaporization
+    use mod_wrf_constants,   only : piconst, DEGRAD, gravity, R_d, R_v, cp, XLV
     ! use data_structures
-    use options_interface,        only : options_t
+    use options_interface,  only : options_t
+    use time_object,        only : Time_type
+    use iso_fortran_env,     only: real128 !!MJ added
 
     implicit none
 
     real,     private :: N_squared  = 1e-5
     logical,  private :: variable_N = .True.
     real,     private :: max_froude, min_froude, froude_gain
+    real,   parameter :: RADDEG = 1./DEGRAD
 
 contains
 
@@ -158,7 +158,7 @@ contains
         real, intent(in),       dimension(:,:)   :: qv      ! water vapor in layer between p_out and p [kg/kg]
 
         dz_out = &
-            Rd / gravity * ( t * ( 1 + 0.608 * qv ) ) * &
+            R_d / gravity * ( t * ( 1 + 0.608 * qv ) ) * &
             LOG ( p_ratio )
 
         ! WRF formulate to compute height from pressure
@@ -224,7 +224,7 @@ contains
         real, intent(in),       dimension(:,:)   :: t       ! temperature in layer between p_out and p [K]
         real, intent(in),       dimension(:,:)   :: qv      ! water vapor in layer between p_out and p [kg/kg]
 
-        p_out = p * exp( -dz / (Rd / gravity * ( t * ( 1 + 0.608 * qv ) )))
+        p_out = p * exp( -dz / (R_d / gravity * ( t * ( 1 + 0.608 * qv ) )))
 
         ! note: derived from WRF formulate to compute height from pressure
         ! z(k) = z(k-1) - &
@@ -254,7 +254,7 @@ contains
     !     real, intent(in),       dimension(:,:)   :: qv      !
     !
     !     z_out = z - &
-    !             Rd / gravity * ( t * ( 1 + 0.608 * qv ) ) * &
+    !             R_d / gravity * ( t * ( 1 + 0.608 * qv ) ) * &
     !             LOG ( p1 / p0 )
     !
     !     ! note: WRF formulate to compute height from pressure
@@ -337,18 +337,18 @@ contains
         real :: direction
 
         if (v<0) then
-            direction = atan(u/v) + pi
+            direction = atan(u/v) + piconst
         elseif (v==0) then
             if (u>0) then
-                direction=pi/2.0
+                direction=piconst/2.0
             else
-                direction=pi*1.5
+                direction=piconst*1.5
             endif
         else
             if (u>=0) then
                 direction = atan(u/v)
             else
-                direction = atan(u/v) + (2*pi)
+                direction = atan(u/v) + (2*piconst)
             endif
         endif
 
@@ -404,9 +404,9 @@ contains
         real :: L
         real :: sat_lapse
 
-        L=LH_vaporization ! short cut for imported parameter
-        sat_lapse = gravity*((1 + (L*mr) / (Rd*T))          &
-                    / (cp + (L*L*mr*(Rd/Rw)) / (Rd*T*T) ))
+        L=XLV ! short cut for imported parameter
+        sat_lapse = gravity*((1 + (L*mr) / (R_d*T))          &
+                    / (cp + (L*L*mr*(R_d/R_v)) / (R_d*T*T) ))
     end function calc_sat_lapse_rate
 
     !>----------------------------------------------------------
@@ -426,20 +426,25 @@ contains
         sat_lapse = calc_sat_lapse_rate(t,qv)
 
         BV_freq = (gravity/t) * ((t_top-t_bot)/dz + sat_lapse) * &
-                  (1 + (LH_vaporization*qv)/(Rd*t)) - (gravity/(1+qv+qc) * (qv_top-qv_bot)/dz)
+                  (1 + (XLV*qv)/(R_d*t)) - (gravity/(1+qv+qc) * (qv_top-qv_bot)/dz)
     end function calc_moist_stability
 
     !>----------------------------------------------------------
     !! Calculate the dry brunt vaisala frequency (Nd^2)
     !!
     !!----------------------------------------------------------
-    pure elemental function calc_dry_stability(th_top, th_bot, z_top, z_bot) result(BV_freq)
+    pure elemental function calc_dry_stability(th_top, th_bot, z_top, z_bot, th_surf) result(BV_freq)
         implicit none
         real, intent(in) :: th_top, th_bot, z_top, z_bot
+        real, optional, intent(in) :: th_surf
         real :: BV_freq
 
         !BV_freq = gravity * (log(th_top)-log(th_bot)) / (z_top - z_bot)
-        BV_freq = gravity * (th_top - th_bot) / ((z_top - z_bot) * (th_top+th_bot)/2)
+        if (present(th_surf)) then
+            BV_freq = gravity * (th_top - th_bot) / ((z_top - z_bot) * (th_surf))
+        else
+            BV_freq = gravity * (th_top - th_bot) / ((z_top - z_bot) * (th_top+th_bot)/2)
+        endif
     end function calc_dry_stability
 
     !>----------------------------------------------------------
@@ -511,20 +516,6 @@ contains
 
     end function calc_Ri
 
-    !>----------------------------------------------------------
-    !! Compute the fraction of blocking winds to apply
-    !!
-    !!----------------------------------------------------------
-    function blocking_fraction(froude) result(fraction)
-        implicit none
-        real, intent(in) :: froude
-        real :: fraction
-
-        fraction = (max_froude-froude) * froude_gain
-        fraction = min(max( fraction, 0.), 1.)
-
-    end function blocking_fraction
-    
     
     pure function calc_thresh_ang(Ri,WS) result(theta)
         implicit none
@@ -674,7 +665,7 @@ contains
 
                     ! Actual pressure adjustment
                     ! slp= ps*np.exp(((g/R)*Hp) / (ts - a*Hp/2.0 + e*Ch))
-                    pressure(:,i,j) = pressure(:,i,j) * exp( ((gravity/Rd) * dz) / tmean )   !&
+                    pressure(:,i,j) = pressure(:,i,j) * exp( ((gravity/R_d) * dz) / tmean )   !&
                     !                     (tmean + (e * 0.12) ) ) ! alternative
 
                     ! alternative formulation M=0.029, R=8.314?
@@ -720,8 +711,8 @@ contains
         real, intent(in) :: pressure
         real :: exner
 
-        associate(po=>100000) !, Rd=>287.058, cp=>1003.5)
-            exner = (pressure / po) ** (Rd/cp)
+        associate(po=>100000) !, R_d=>287.058, cp=>1003.5)
+            exner = (pressure / po) ** (R_d/cp)
 
         end associate
     end function
@@ -739,8 +730,6 @@ contains
         N_squared   = options%lt_options%N_squared
         variable_N  = options%lt_options%variable_N
 
-        max_froude  = options%block_options%block_fr_max
-        min_froude  = options%block_options%block_fr_min
         froude_gain = 1 / max(max_froude-min_froude, 0.001)
 
     end subroutine init_atm_utilities
@@ -813,14 +802,17 @@ contains
         DO k = kts,kte
 
             delz = MAX(100., dz(k))
-            RH_00L = 0.65 + SQRT(1./(25.0+gridkm*gridkm*delz*0.01))
-            RH_00O = 0.81 + SQRT(1./(50.0+gridkm*gridkm*delz*0.01))
+            RH_00L = 0.77 + MIN(0.22,SQRT(1./(50.0+gridkm*gridkm*delz*0.01)))
+            RH_00O = 0.85 + MIN(0.14,SQRT(1./(50.0+gridkm*gridkm*delz*0.01)))
             RHUM = rh(k)
 
-            if (qc(k).gt.1.E-7 .or. qi(k).ge.1.E-7                         &
+            if (qc(k).gt.1.E-6 .or. qi(k).ge.1.E-7                         &
         &                    .or. (qs(k).gt.1.E-6 .and. t(k).lt.273.)) then
                CLDFRA(K) = 1.0
                qvs(k) = qv(k)
+            else if (((qc(k)+qi(k)).gt.1.E-10) .and.                        &
+     &                                    ((qc(k)+qi(k)).lt.1.E-6)) then
+               CLDFRA(K) = MIN(0.99, 0.1*(11.0 + log10(qc(k)+qi(k))))
             else
 
                 IF ((XLAND-1.5).GT.0.) THEN                                  !--- Ocean
@@ -832,32 +824,32 @@ contains
                 tc = t(k) - 273.15
                 if (tc .lt. -12.0) RH_00 = RH_00L
 
-                if (tc .ge. 20.0) then
+                if (tc .ge. 25.0) then
                     CLDFRA(K) = 0.0
                 elseif (tc .ge. -12.0) then
                     RHUM = MIN(rh(k), 1.0)
-                    CLDFRA(K) = MAX(0., 1.0-SQRT((1.005-RHUM)/(1.005-RH_00)))
+                    CLDFRA(K) = MAX(0., 1.0-SQRT((1.001-RHUM)/(1.001-RH_00)))
                 else
                     if (max_relh.gt.1.12 .or. (.NOT.(modify_qvapor)) ) then
    !..For HRRR model, the following look OK.
                         RHUM = MIN(rh(k), 1.45)
-                        RH_00 = RH_00 + (1.45-RH_00)*(-12.0-tc)/(-12.0+100.)
+                        RH_00 = RH_00 + (1.45-RH_00)*(-12.0-tc)/(-12.0+85.)
                         if (RH_00 .ge. 1.5) then
                             WRITE (*,*) ' FATAL: RH_00 too large (1.5): ', RH_00, RH_00L, tc
                         endif
                         RH_00 = min(RH_00, 1.45)
-                        CLDFRA(K) = MAX(0., 1.0-SQRT((1.5-RHUM)/(1.5-RH_00)))
+                        CLDFRA(K) = MAX(0., 1.0-SQRT((1.46-RHUM)/(1.46-RH_00)))
                     else
    !..but for the GFS model, RH is way lower.
                         RHUM = MIN(rh(k), 1.05)
-                        RH_00 = RH_00 + (1.05-RH_00)*(-12.0-tc)/(-12.0+100.)
+                        RH_00 = RH_00 + (1.05-RH_00)*(-12.0-tc)/(-12.0+85.)
                         if (RH_00 .ge. 1.05) then
                             WRITE (*,*) ' FATAL: RH_00 too large (1.05): ', RH_00, RH_00L, tc
                         endif
-                        CLDFRA(K) = MAX(0., 1.0-SQRT((1.05-RHUM)/(1.05-RH_00)))
+                        CLDFRA(K) = MAX(0., 1.0-SQRT((1.06-RHUM)/(1.06-RH_00)))
                     endif
                 endif
-                if (CLDFRA(K).gt.0.) CLDFRA(K) = MAX(0.01, MIN(CLDFRA(K),0.9))
+                if (CLDFRA(K).gt.0.) CLDFRA(K) = MAX(0.01, MIN(CLDFRA(K),0.99))
             endif
         ENDDO
 
@@ -1054,12 +1046,15 @@ contains
         do k = k1, k2
             tdz = tdz + dz(k)
         enddo
-        max_iwc = ABS(qvs(k2)-qvs(k1))
+        
+        !     max_iwc = ABS(qvs(k2)-qvs(k1))
+        max_iwc = MAX(0.0, qvs(k1)-qvs(k2))
+        !     print*, ' max_iwc = ', max_iwc, ' over DZ=',tdz
 
         do k = k1, k2
             max_iwc = MAX(1.E-6, max_iwc - (qi(k)+qs(k)))
         enddo
-        max_iwc = MIN(1.E-3, max_iwc)
+        max_iwc = MIN(1.E-4, max_iwc)
 
         this_dz = 0.0
         do k = k1, k2
@@ -1094,12 +1089,15 @@ contains
         do k = k1, k2
             tdz = tdz + dz(k)
         enddo
-        max_lwc = ABS(qvs(k2)-qvs(k1))
-
+        
+        !     max_lwc = ABS(qvs(k2)-qvs(k1))
+        max_lwc = MAX(0.0, qvs(k1)-qvs(k2))
+        !     print*, ' max_lwc = ', max_lwc, ' over DZ=',tdz  
+        
         do k = k1, k2
             max_lwc = MAX(1.E-6, max_lwc - qc(k))
         enddo
-        max_lwc = MIN(1.E-3, max_lwc)
+        max_lwc = MIN(1.E-4, max_lwc)
         this_dz = 0.0
         do k = k1, k2
             if (k.eq.k1) then
@@ -1109,7 +1107,7 @@ contains
             endif
             this_lwc = max_lwc*this_dz/tdz
             lwc = MAX(1.E-6, this_lwc*(1.-entr))
-            if (cfr(k).gt.0.0.and.cfr(k).lt.1.0.and.T(k).ge.253.16) then
+            if (cfr(k).gt.0.0.and.cfr(k).lt.1.0.and.T(k).ge.258.16) then
                 qc(k) = qc(k) + cfr(k)*cfr(k)*lwc
             endif
         enddo
@@ -1140,8 +1138,8 @@ contains
             endif
         enddo
 
-        if (lwp .gt. 1.5) then
-            xfac = 1.5/lwp
+        if (lwp .gt. 1.0) then
+            xfac = 1.0/lwp
             do k = kts, kte
                 if (cfr(k).gt.0.0 .and. cfr(k).lt.1.0) then
                     qc(k) = qc(k)*xfac
@@ -1149,8 +1147,8 @@ contains
             enddo
         endif
 
-        if (iwp .gt. 1.5) then
-            xfac = 1.5/iwp
+        if (iwp .gt. 1.0) then
+            xfac = 1.0/iwp
                 do k = kts, kte
                     if (cfr(k).gt.0.0 .and. cfr(k).lt.1.0) then
                         qi(k) = qi(k)*xfac
@@ -1174,6 +1172,164 @@ contains
         ! where(wind_2d==0) wind_2d=1e-5
         Ri = gravity/airt_3d(:,1,:) * (airt_3d(:,1,:)-tskin)*z_atm/(wind_2d**2)
     end subroutine calc_Richardson_nr
+
+
+
+    !! MJ corrected, as calc_solar_elevation has largley understimated the zenith angle in Switzerland
+    !! MJ added: this is Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
+    !! MJ: note that this works everywhere and may be checked by https://gml.noaa.gov/grad/solcalc/index.html
+    !! MJ: the only parameter needs to be given is https://gml.noaa.gov/grad/solcalc/index.html UTC Offset here referred to tzone=1 for centeral Erupe. HACK: this should be given by use in the namelist file
+    !! MJ: Julian_day is a large value, we need to use the real128 format when applying TJ scheme in HICAR.
+    function calc_solar_elevation(date, tzone, lon, lat, j, ims,ime, jms,jme, its,ite, solar_azimuth)
+        implicit none
+        real                       :: calc_solar_elevation(ims:ime)
+        type(Time_type),intent(in) :: date
+        real,           intent(in) :: tzone
+        real, dimension(ims:ime, jms:jme), intent(in) :: lon, lat
+        integer,        intent(in) :: j
+        integer,        intent(in) :: ims, ime, jms, jme
+        integer,        intent(in) :: its, ite
+        real, optional, intent(inout):: solar_azimuth(ims:ime)
+        
+        integer :: i
+        real, dimension(ims:ime) :: declination
+        real(real128) :: julian_day, julian_century!, tzone
+        real(real128) :: geom_mean_long_sun_deg, geom_mean_anom_sun_deg, eccent_earth_orbit
+        real(real128) :: sun_eq_of_ctr, sun_true_long_deg, sun_app_long_deg
+        real(real128) :: mean_obliq_ecliptic_deg, obliq_corr_deg, var_y, true_solar_time_min
+        real :: hour_angle_deg, solar_zenith_angle_deg, solar_elev_angle_deg
+        real :: lat_hr, lon_hr
+        real :: approx_atm_refrac_deg, solar_elev_corr_atm_ref_deg, solar_azimuth_angle
+
+        !These variables may only be updated some of the time
+        real, save :: sun_declin_deg, eq_of_time_minutes, timeofday
+        real(real128), save :: last_sun_declin = -3600.0   !Date since last calculating the sun declination in seconds
+        real(real128), save :: last_date = -3600.0 !Date of last calculation of time-of-day in seconds
+    
+        !!
+        calc_solar_elevation = 0
+        if(present(solar_azimuth)) solar_azimuth = 0
+
+        if (.not.(date%seconds()==last_date)) then
+            timeofday        = (real(date%hour)+real(date%minute)/60.+real(date%second)/3600.)/24.
+            last_date = date%seconds()
+        endif
+
+        !If it has been more than an hour since the last calculation, recalculate the solar orbital position
+        if ((date%seconds()-last_sun_declin)>=3600) then
+            julian_day       = date%date_to_jd(date%year,date%month,date%day,date%hour,date%minute,date%second)-tzone/24.
+            julian_century   = (julian_day - 2451545) / 36525.
+            !!
+            geom_mean_long_sun_deg = mod(280.46646 + julian_century * (36000.76983 + julian_century * 0.0003032),360.)
+            geom_mean_anom_sun_deg = 357.52911 + julian_century * (35999.05029 - 0.0001537 * julian_century)
+            eccent_earth_orbit = 0.016708634 - julian_century * (0.000042037 + 0.0000001267 * julian_century)
+            !!
+            sun_eq_of_ctr = sin(DEGRAD *(geom_mean_anom_sun_deg)) * (1.914602 - julian_century * (0.004817 + 0.000014 * julian_century)) + sin(DEGRAD *(2  * geom_mean_anom_sun_deg)) * ( 0.019993 - 0.000101 * julian_century) + sin(DEGRAD *(3 * geom_mean_anom_sun_deg)) * 0.000289
+            sun_true_long_deg = sun_eq_of_ctr + geom_mean_long_sun_deg
+            sun_app_long_deg = sun_true_long_deg - 0.00569 - 0.00478 * sin(DEGRAD *(125.04 - 1934.136 * julian_century))
+            !!
+            mean_obliq_ecliptic_deg = 23 + (26 + ((21.448 - julian_century * (46.815 + julian_century * (0.00059 - julian_century * 0.001813)))) / 60) / 60
+            obliq_corr_deg = mean_obliq_ecliptic_deg + 0.00256  * cos(DEGRAD *(125.04 - 1934.136 * julian_century))
+            sun_declin_deg = RADDEG*(asin(sin(DEGRAD *(obliq_corr_deg)) * sin(DEGRAD *(sun_app_long_deg))))
+            var_y = tan(DEGRAD *(obliq_corr_deg / 2)) * tan(DEGRAD *(obliq_corr_deg / 2))
+            eq_of_time_minutes = 4 * RADDEG*(var_y  * sin(2 * DEGRAD *(geom_mean_long_sun_deg)) - 2 * eccent_earth_orbit * sin(DEGRAD *(geom_mean_anom_sun_deg)) + 4 * eccent_earth_orbit * var_y * sin(DEGRAD *(geom_mean_anom_sun_deg)) * cos(2  * DEGRAD *(geom_mean_long_sun_deg)) - 0.5 * var_y * var_y * sin(4 * DEGRAD *(geom_mean_long_sun_deg)) - 1.25 * eccent_earth_orbit * eccent_earth_orbit * sin(2 * DEGRAD *(geom_mean_anom_sun_deg)))
+
+            last_sun_declin = date%seconds()
+            !!
+        endif
+
+        !!       
+        do i = its, ite           
+            !!
+            lon_hr=lon(i,j)
+            lat_hr=RADDEG*asin(sin(lat(i,j)*DEGRAD))                
+            true_solar_time_min = mod(timeofday * 1440 + eq_of_time_minutes + 4 * lon_hr - 60. * tzone,1440.);
+            !!
+            if (true_solar_time_min /4 < 0) then
+                hour_angle_deg=true_solar_time_min /4 + 180
+            elseif (true_solar_time_min /4 >= 0) then 
+                hour_angle_deg=true_solar_time_min /4 - 180
+            endif
+            !!
+            solar_zenith_angle_deg = RADDEG*(acos(sin(DEGRAD *(lat_hr)) * sin(DEGRAD *(sun_declin_deg)) + cos(DEGRAD *(lat_hr)) * cos(DEGRAD *(sun_declin_deg)) * cos(DEGRAD *(hour_angle_deg))))
+            solar_elev_angle_deg = 90 - solar_zenith_angle_deg;
+
+            !! calculate atmospheric diffraction dependent on solar elevation angle
+            if (solar_elev_angle_deg > 85) then
+               approx_atm_refrac_deg=0. 
+            elseif (solar_elev_angle_deg > 5 .and. solar_elev_angle_deg <= 85) then
+                approx_atm_refrac_deg = (58.1 / tan(DEGRAD *(solar_elev_angle_deg)) - 0.07 / (tan(DEGRAD *(solar_elev_angle_deg)))**3. + 0.000086 / (tan(DEGRAD *(solar_elev_angle_deg)))**5.) / 3600 
+            elseif (solar_elev_angle_deg > -0.757 .and. solar_elev_angle_deg <= 5) then 
+                approx_atm_refrac_deg = (1735 + solar_elev_angle_deg * (-518.2 + solar_elev_angle_deg * (103.4 + solar_elev_angle_deg * (-12.79 + solar_elev_angle_deg * 0.711)))) / 3600
+            elseif (solar_elev_angle_deg <= -0.757) then 
+                approx_atm_refrac_deg = (-20.772 / tan(DEGRAD *(solar_elev_angle_deg))) / 3600
+            endif                       
+            solar_elev_corr_atm_ref_deg = solar_elev_angle_deg + approx_atm_refrac_deg
+            
+            !! calculate solar azimuth angle depending on hour angle
+            if (hour_angle_deg > 0) then
+                solar_azimuth_angle = mod(floor((RADDEG*(acos(((sin(DEGRAD*(lat_hr)) * cos(DEGRAD*(solar_zenith_angle_deg))) - sin(DEGRAD*(sun_declin_deg))) / (cos(DEGRAD*(lat_hr)) * sin(DEGRAD*(solar_zenith_angle_deg))))) + 180)*100000)/100000,360);
+            elseif (hour_angle_deg <= 0) then
+                solar_azimuth_angle = mod(floor((540 - RADDEG*(acos(((sin(DEGRAD*(lat_hr)) * cos(DEGRAD*(solar_zenith_angle_deg))) - sin(DEGRAD*(sun_declin_deg))) / (cos(DEGRAD*(lat_hr)) * sin(DEGRAD*(solar_zenith_angle_deg))))))*100000)/100000,360);      
+            endif                       
+            
+            calc_solar_elevation(i)=solar_elev_corr_atm_ref_deg*DEGRAD
+            if(present(solar_azimuth)) solar_azimuth(i)=solar_azimuth_angle*DEGRAD
+        end do
+
+        where(calc_solar_elevation<0.0) calc_solar_elevation=0.0
+        where(calc_solar_elevation>90.0) calc_solar_elevation=90.0
+
+    end function calc_solar_elevation
+
+
+    !! MJ added: based on https://solarsena.com/solar-azimuth-angle-calculator-solar-panels/
+    function calc_solar_azimuth(date, lon, lat, j, ims,ime, jms,jme, its,ite, day_frac, solar_elevation)
+        implicit none
+        real                       :: calc_solar_azimuth(ims:ime)
+        type(Time_type),intent(in) :: date
+        real, dimension(ims:ime, jms:jme), intent(in) :: lon, lat
+        integer,        intent(in) :: j
+        integer,        intent(in) :: ims, ime, jms, jme
+        integer,        intent(in) :: its, ite
+        real,           intent(out):: day_frac(ims:ime)
+        real,           intent(in):: solar_elevation(ims:ime)
+
+        integer :: i
+        real, dimension(ims:ime) :: declination, day_of_year, hour_angle
+
+        calc_solar_azimuth = 0
+
+        do i = its, ite
+            day_of_year(i) = date%day_of_year(lon=lon(i,j))
+
+            ! hour angle is 0 at noon
+            hour_angle(i) = 2*piconst* mod(day_of_year(i)+0.5, 1.0)
+
+            day_frac(i) = date%year_fraction(lon=lon(i,j))
+        end do
+
+        ! fast approximation see : http://en.wikipedia.org/wiki/Position_of_the_Sun
+        declination = (-0.4091) * cos(2.0*piconst/365.0*(day_of_year+10))
+
+        calc_solar_azimuth(its:ite) = ( cos(lat(its:ite,j)*DEGRAD) * sin(declination(its:ite)) - &
+            sin(lat(its:ite,j)*DEGRAD) * cos(declination(its:ite)) * cos(hour_angle(its:ite)) )/(1.e-16+cos(solar_elevation(its:ite)))
+
+        ! due to float precision errors, it is possible to exceed (-1 - 1) in which case asin will break
+        where(calc_solar_azimuth < -1)
+            calc_solar_azimuth = -1
+        elsewhere(calc_solar_azimuth > 1)
+            calc_solar_azimuth = 1
+        endwhere
+
+        ! partitioning the answer based on the hour angle:
+        where(hour_angle > piconst)
+            calc_solar_azimuth = acos(calc_solar_azimuth)
+        elsewhere(calc_solar_azimuth <= piconst)
+            calc_solar_azimuth = 2*piconst - acos(calc_solar_azimuth)
+        endwhere
+        
+    end function calc_solar_azimuth
 
 
 end module mod_atm_utilities

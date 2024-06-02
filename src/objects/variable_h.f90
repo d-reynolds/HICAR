@@ -1,5 +1,5 @@
 module variable_interface
-    use icar_constants,          only : kMAX_DIM_LENGTH, kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, kREAL, kDOUBLE
+    use icar_constants,          only : kMAX_DIM_LENGTH, kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, kINTEGER, kREAL, kDOUBLE
     use grid_interface,          only : grid_t
     use meta_data_interface,     only : meta_data_t
     use iso_fortran_env,         only : real64
@@ -13,7 +13,7 @@ module variable_interface
         real, pointer :: data_3d(:,:,:) => null()
         real, pointer :: data_2d(:,:)   => null()
         real(kind=real64), pointer :: data_2dd(:,:) => null()
-
+        integer, pointer ::           data_2di(:,:) => null()
         real, pointer :: dqdt_3d(:,:,:) => null()   ! Note these have to be pointers so they get referenced when variable_t is passed around(?)
         real, pointer :: dqdt_2d(:,:)   => null()   ! Note these have to be pointers so they get referenced when variable_t is passed around(?)
 
@@ -37,10 +37,8 @@ module variable_interface
         integer :: xstag = 0
         integer :: ystag = 0
     contains
-        procedure, public  :: bcast_var
         procedure, public  :: init_grid
         procedure, public  :: init_dims
-        generic,   public  :: broadcast  => bcast_var
         generic,   public  :: initialize => init_grid
         generic,   public  :: initialize => init_dims
 
@@ -50,14 +48,6 @@ module variable_interface
     end type
 
     interface
-
-        module subroutine bcast_var(this, source, start_img, end_img)
-            implicit none
-            class(variable_t),  intent(inout) :: this
-            integer,            intent(in)    :: source
-            integer,            intent(in),   optional :: start_img, end_img
-        end subroutine
-
 
         module subroutine init_grid(this, grid, forcing_var, force_boundaries, dtype)
             implicit none

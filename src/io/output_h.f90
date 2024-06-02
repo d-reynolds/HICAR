@@ -12,11 +12,10 @@
 !!
 !!----------------------------------------------------------
 module output_interface
-  use mpi
+  use mpi_f08
   use netcdf
   use icar_constants
   use variable_interface,       only : variable_t
-  use domain_interface,         only : domain_t
   use meta_data_interface,      only : meta_data_t
   use time_object,              only : Time_type, THREESIXTY, GREGORIAN, NOCALENDAR, NOLEAP
   use options_interface,        only : options_t
@@ -103,12 +102,11 @@ module output_interface
       !! Initialize the object (e.g. allocate the variables array)
       !!
       !!----------------------------------------------------------
-      module subroutine init(this, domain, options, its, ite, kts, kte, jts, jte)
+      module subroutine init(this, options, its, ite, kts, kte, jts, jte, ide, kde, jde)
         implicit none
         class(output_t),  intent(inout)  :: this
-        type(domain_t),   intent(inout)  :: domain
         type(options_t),  intent(in)     :: options
-        integer,          intent(in)     :: its, ite, kts, kte, jts, jte
+        integer,          intent(in)     :: its, ite, kts, kte, jts, jte, ide, kde, jde
 
       end subroutine
 
@@ -120,7 +118,8 @@ module output_interface
         implicit none
         class(output_t),  intent(inout)  :: this
         type(options_t),  intent(in)     :: options
-        integer,          intent(in)     :: par_comms, out_var_indices(:)
+        type(MPI_Comm),   intent(in)     :: par_comms
+        integer,          intent(in)     :: out_var_indices(:)
       end subroutine
 
       !>----------------------------------------------------------
@@ -136,10 +135,10 @@ module output_interface
       !! Set the domain data structure to be used when writing
       !!
       !!----------------------------------------------------------
-      module subroutine set_attrs(this, domain)
+      module subroutine set_attrs(this, options)
           implicit none
           class(output_t),  intent(inout)  :: this
-          type(domain_t),   intent(in)     :: domain
+          type(options_t),  intent(in)     :: options
       end subroutine
 
       !>----------------------------------------------------------
@@ -158,8 +157,8 @@ module output_interface
       !!----------------------------------------------------------
       module subroutine add_variables(this, vars_to_out)
           class(output_t),  intent(inout)  :: this
-          type(var_dict_t), intent(inout)  :: vars_to_out
-      end subroutine
+          integer, dimension(:), intent(in):: vars_to_out
+        end subroutine
       !>----------------------------------------------------------
       !! Save a new timestep (time) to the output file 
       !!
@@ -168,7 +167,7 @@ module output_interface
           implicit none
           class(output_t),  intent(inout) :: this
           type(Time_type),  intent(in)    :: time
-          integer,          intent(in)    :: par_comms
+          type(MPI_Comm),   intent(in)    :: par_comms
           integer,          intent(in)    :: out_var_indices(:), rst_var_indices(:)
       end subroutine
       

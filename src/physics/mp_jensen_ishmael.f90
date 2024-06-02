@@ -24,7 +24,8 @@ module module_mp_jensen_ishmael
   !------------------------------------------------------------------------------------------------------!
 
 !  use module_wrf_error   
-   
+   use icar_constants,    only : STD_OUT_PE
+
   implicit none !.. You are welcome
 
   !.. Constants
@@ -152,7 +153,7 @@ contains
     
   !.. Call to build the aggregation lookup table (JYH)
     call mkcoltb(ndn,ncat,coltab,coltabn,ipair,gnu,tablo,tabhi,cfmas,pwmas,cfvt,pwvt)
-    if (this_image()==1) write(*,*) 'Jensen_ISHMAEL aggregation lookup table built'
+    if (STD_OUT_PE) write(*,*) 'Jensen_ISHMAEL aggregation lookup table built'
 
   !.. Check that tables are allocated (Thanks to JYH and Shaofeng)
     if(.not.allocated(itab)) allocate(itab(51,51,51,11,2))
@@ -177,11 +178,11 @@ contains
        RAINNC, RAINNCV, SNOWNC, SNOWNCV,                 &
        diag_effc3d, diag_effi3d,                         &
        !diag_dbz3d,             &
-       !diag_vmi3d_1, diag_di3d_1, 
+       diag_vmi3d_1, & !diag_di3d_1, 
        diag_rhopo3d_1, diag_phii3d_1, &
-       !diag_vmi3d_2, diag_di3d_2, 
+       diag_vmi3d_2, & !diag_di3d_2, 
        diag_rhopo3d_2, diag_phii3d_2, &
-       !diag_vmi3d_3, diag_di3d_3, 
+       diag_vmi3d_3, & !diag_di3d_3, 
        diag_rhopo3d_3, diag_phii3d_3 &
        !diag_itype_1,diag_itype_2,diag_itype_3                    &
        )
@@ -257,9 +258,9 @@ contains
     real, dimension(ims:ime, kms:kme, jms:jme), intent(inout) ::     &
          th, qv, qc, qr, nr, qi1, ni1, ai1, ci1, qi2, ni2, ai2, ci2, &
          qi3, ni3, ai3, ci3, diag_effc3d, diag_effi3d,               &
-         diag_rhopo3d_1, diag_phii3d_1,                              &
-         diag_rhopo3d_2, diag_phii3d_2,                              &
-         diag_rhopo3d_3, diag_phii3d_3                         
+         diag_rhopo3d_1, diag_phii3d_1, diag_vmi3d_1,                &
+         diag_rhopo3d_2, diag_phii3d_2, diag_vmi3d_2,                &
+         diag_rhopo3d_3, diag_phii3d_3, diag_vmi3d_3           
   !.. 2D variables
     real, dimension(ims:ime, jms:jme), intent(inout) ::              &
          rainnc, rainncv, snownc, snowncv
@@ -286,9 +287,9 @@ contains
          
     real, dimension(ims:ime, kms:kme, jms:jme) ::  &
                   diag_dbz3d,              &
-         diag_vmi3d_1, diag_di3d_1,        &
-         diag_vmi3d_2, diag_di3d_2,        &
-         diag_vmi3d_3, diag_di3d_3,        &
+         diag_di3d_1,        &
+         diag_di3d_2,        &
+         diag_di3d_3,        &
          diag_itype_1, diag_itype_2, diag_itype_3                                    
 
 
@@ -489,7 +490,7 @@ contains
     integer :: gi2, gi3   !.. Index for the Gamma(NU) lookup
     integer :: numice     !.. Number of ice species currently with ice
     integer :: current_index  !.. Used to determine number of ice species wi th mass > QSMALL
-    real, allocatable, dimension(:) :: icearray !.. Array with size of number
+    integer, dimension(cat) :: icearray !.. Array with size of number
                                                 !.. of ice species with mass > QSMALL
     real :: wetg          !.. wet growth check
     real :: gamma_arg     !.. Gamma argument: Gamma(gamma_arg)
@@ -677,8 +678,8 @@ contains
   !..  If condensate or supersaturation wrt liquid, do microphysics
        if(domicro) then
           
-          if(allocated(icearray)) deallocate(icearray)
-          
+          !if(allocated(icearray)) deallocate(icearray)
+          icearray = 1
           numice = 0     !.. Number of species with ice
           do cc = 1, cat !.. Loop over all ice species
              has_ice(cc) = .false.
@@ -692,8 +693,8 @@ contains
 
   !.. Determine the number of ice species to loop over
   !.. For vapor growth/riming, etc
-          if(numice.gt.0.and..not.allocated(icearray)) then 
-             allocate(icearray(numice))
+          if(numice.gt.0) then 
+             !allocate(icearray(numice))
              current_index = 1
              do cc = 1, cat
                 if(has_ice(cc)) then
@@ -3962,8 +3963,8 @@ contains
        r(k,4) =  max(qdum2,0.)
        
        qr(k,3) = 0.0 !.. internal energy... not needed so pass in zero                                        
-       qq(k,3) = t(k,3)
        t(k,3) = tk(k) - 273.15
+       qq(k,3) = t(k,3)
        qr(k,4) = 0.0 !.. internal energy... not needed so pass in zero                               
        qq(k,4) = t(k,3)
        t(k,4) = t(k,3)

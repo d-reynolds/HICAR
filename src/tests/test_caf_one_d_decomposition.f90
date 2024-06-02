@@ -28,7 +28,7 @@ program caf_one_d_decomposition_test
 
     sync all
 
-    if (this_image() == 1) then
+    if (STD_OUT_PE) then
 
         passed = passed .and. ((start_pos[1]==1) .and. (stop_pos[num_images()]==total))
 

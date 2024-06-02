@@ -11,7 +11,7 @@
 !!
 !!----------------------------------------------------------
 module ioclient_interface
-  use mpi
+  use mpi_f08
   use netcdf
   use icar_constants
   use variable_interface, only : variable_t
@@ -38,7 +38,9 @@ module ioclient_interface
       ! Store the variables to be written
       ! Note n_variables may be smaller then size(variables) so that it doesn't
       ! have to keep reallocating variables whenever something is added or removed
-      integer, public :: n_input_variables, n_output_variables, IO_comms
+      integer, public :: n_input_variables, n_output_variables
+      
+      type(MPI_Comm), public :: parent_comms
 
       type(variable_t), public, allocatable :: variables(:)
       ! time variable , publicis stored outside of the variable list... probably need to think about that some
@@ -48,15 +50,17 @@ module ioclient_interface
             
       integer, public :: server
       
-      integer, public ::  i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, n_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_r
+      integer, public ::  i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, n_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_r, ide, kde, jde
       integer :: restart_counter = 0
       integer :: output_counter = 0
       integer :: frames_per_outfile, restart_count
 
-      !the indices of the output buffer corresponding to the restart vars
-      integer, public, allocatable :: out_var_indices(:), rst_var_indices(:)
-      !the names of the restart vars, indexed the same as the above array
-      character(len=kMAX_NAME_LENGTH), public, allocatable :: rst_var_names(:)
+      logical :: written = .False.
+
+      real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer_3d
+      real, dimension(:,:,:),   pointer :: write_buffer_2d
+      type(MPI_Win) :: write_win_3d, write_win_2d, read_win
+      type(MPI_Group) :: parent_group
 
   contains
 
@@ -85,33 +89,32 @@ module ioclient_interface
       !! Push output data to IO buffer
       !!
       !!----------------------------------------------------------
-      module subroutine push(this, domain, write_buffer)
+      module subroutine push(this, domain)
           implicit none
           class(ioclient_t),   intent(inout) :: this
           type(domain_t),   intent(inout)    :: domain
-          real, intent(inout), allocatable   :: write_buffer(:,:,:,:)[:]
       end subroutine
 
       !>----------------------------------------------------------
       !! Receive input data
       !!
       !!----------------------------------------------------------
-      module subroutine receive(this, forcing, read_buffer)
+      module subroutine receive(this, forcing)
           implicit none
           class(ioclient_t), intent(inout) :: this
           type(boundary_t), intent(inout)  :: forcing
-          real, intent(in), allocatable    :: read_buffer(:,:,:,:)[:]
       end subroutine
 
       !>----------------------------------------------------------
       !! Receive restart data
       !!
       !!----------------------------------------------------------
-      module subroutine receive_rst(this, domain, write_buffer)
+      module subroutine receive_rst(this, domain, options)
           implicit none
           class(ioclient_t), intent(inout) :: this
           type(domain_t),   intent(inout)  :: domain
-          real, intent(in), allocatable    :: write_buffer(:,:,:,:)[:]
+          type(options_t),  intent(in)     :: options
+
       end subroutine
 
 

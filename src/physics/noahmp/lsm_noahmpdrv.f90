@@ -28,7 +28,8 @@ CONTAINS
                 SMSTOT,SFCRUNOFF, UDRUNOFF,    ALBEDO,    SNOWC,     SMOIS, & ! IN/OUT LSM eqv
 		  SH2O,     TSLB,     SNOW,     SNOWH,   CANWAT,    ACSNOM, & ! IN/OUT LSM eqv
 		ACSNOW,    EMISS,     QSFC,                                 & ! IN/OUT LSM eqv
- 		    Z0,      ZNT,                                           & ! IN/OUT LSM eqv
+ 		    Z0,      ZNT, PBLH,                                     & ! IN/OUT LSM eqv
+            
                IRNUMSI,  IRNUMMI,  IRNUMFI,   IRWATSI,  IRWATMI,   IRWATFI, & ! IN/OUT Noah MP only
                IRELOSS,  IRSIVOL,  IRMIVOL,   IRFIVOL,  IRRSPLH,  LLANDUSE, & ! IN/OUT Noah MP only
                ISNOWXY,     TVXY,     TGXY,  CANICEXY, CANLIQXY,     EAHXY, & ! IN/OUT Noah MP only
@@ -130,6 +131,7 @@ CONTAINS
     REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN   ) ::  P8W3D     ! 3D pressure, valid at interface [Pa]
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  PRECIP_IN ! total input precipitation [mm]
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  SR        ! frozen precipitation ratio [-]
+    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  PBLH      ! PBL height 
 
 !Optional Detailed Precipitation Partitioning Inputs
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ), OPTIONAL ::  MP_RAINC  ! convective precipitation entering land model [mm] ! MB/AN : v3.7
@@ -203,6 +205,7 @@ CONTAINS
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  QSFC      ! bulk surface specific humidity
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  Z0        ! combined z0 sent to coupled model
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  ZNT       ! combined z0 sent to coupled model
+
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  RS        ! Total stomatal resistance (s/m)
 
     INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  ISNOWXY   ! actual no. of snow layers
@@ -344,7 +347,10 @@ CONTAINS
     REAL                                :: Q_ML         ! water vapor mixing ratio [kg/kg_dry]
     REAL                                :: U_ML         ! U wind component [m/s]
     REAL                                :: V_ML         ! V wind component [m/s]
+    REAL                                :: PBLH_ML      ! PBL height [m]
     REAL                                :: SWDN         ! solar down at surface [W m-2]
+    REAL                                :: SWDIR        ! solar direct down at surface [W m-2]
+    REAL                                :: SWDIF        ! solar diffuse down at surface [W m-2]
     REAL                                :: LWDN         ! longwave down at surface [W m-2]
     REAL                                :: P_ML         ! pressure, valid at interface [Pa]
     REAL                                :: PSFC         ! surface pressure [Pa]
@@ -493,7 +499,6 @@ CONTAINS
     REAL                                :: FOLN         ! nitrogen saturation [%]
 
     REAL                                :: QC           ! cloud specific humidity for MYJ [not used]
-    REAL                                :: PBLH         ! PBL height for MYJ [not used]
     REAL                                :: DZ8W1D       ! model level heights for MYJ [not used]
 
     INTEGER                             :: I
@@ -617,12 +622,15 @@ CONTAINS
        U_ML   = U_PHY(I,1,J)                          ! u-wind at interface [m/s]
        V_ML   = V_PHY(I,1,J)                          ! v-wind at interface [m/s]
        SWDN   = SWDOWN(I,J)                           ! shortwave down from SW scheme [W/m2]
+       SWDIR  = SWDDIR(I,J)                           ! shortwave direct down from SW scheme [W/m2]
+       SWDIF  = SWDDIF(I,J)                           ! shortwave diffuse down from SW scheme [W/m2]
        LWDN   = GLW(I,J)                              ! total longwave down from LW scheme [W/m2]
        P_ML   =(P8W3D(I,KTS+1,J)+P8W3D(I,KTS,J))*0.5  ! surface pressure defined at intermediate level [Pa]
 	                                              !    consistent with temperature, mixing ratio
        PSFC   = P8W3D(I,1,J)                          ! surface pressure defined a full levels [Pa]
        PRCP   = PRECIP_IN (I,J) / DT                  ! timestep total precip rate (glacier) [mm/s]! MB: v3.7
-
+       PBLH_ML= PBLH(I,J)                             ! PBL height used by REVMM5 surface scheme
+       
        CROPTYPE = 0
        IF (IOPT_CROP > 0 .AND. VEGTYP == ISCROP_TABLE) CROPTYPE = DEFAULT_CROP_TABLE ! default croptype is generic dynamic vegetation crop
        IF (IOPT_CROP > 0 .AND. CROPCAT(I,J) > 0) THEN
@@ -858,7 +866,6 @@ CONTAINS
        O2PP   = O2_TABLE  * P_ML                      ! partial pressure  o2 [Pa]
        FOLN   = 1.0                                   ! for now, set to nitrogen saturation
        QC     = undefined_value                       ! test dummy value
-       PBLH   = undefined_value                       ! test dummy value ! PBL height
        DZ8W1D = DZ8W (I,1,J)                          ! thickness of atmospheric layers
 
        IF(VEGTYP == 25) FVEG = 0.0                  ! Set playa, lava, sand to bare
@@ -961,10 +968,11 @@ CONTAINS
             DT      , DX      , DZ8W1D  , NSOIL   , ZSOIL   , NSNOW   , & ! IN : Model configuration
             FVEG    , FVGMAX  , VEGTYP  , ICE     , IST     , CROPTYPE, & ! IN : Vegetation/Soil characteristics
             SMCEQ   ,                                                   & ! IN : Vegetation/Soil characteristics
+            IZ0TLND ,                                                   & ! IN : User options
             T_ML    , P_ML    , PSFC    , U_ML    , V_ML    , Q_ML    , & ! IN : Forcing
-            QC      , SWDN    , LWDN    ,                               & ! IN : Forcing
+            QC      , SWDN    , SWDIR   , SWDIF   , LWDN    ,           & ! IN : Forcing
 	    PRCPCONV, PRCPNONC, PRCPSHCV, PRCPSNOW, PRCPGRPL, PRCPHAIL, & ! IN : Forcing
-            TBOT    , CO2PP   , O2PP    , FOLN    , FICEOLD , Z_ML    , & ! IN : Forcing
+            TBOT    , CO2PP   , O2PP    , FOLN    , FICEOLD , PBLH_ML, Z_ML , & ! IN : Forcing
             IRRFRA  , SIFAC   , MIFAC   , FIFAC   , LLANDUSE,           & ! IN : Irrigation: fractions
             ALBOLD  , SNEQVO  ,                                         & ! IN/OUT :
             STC     , SMH2O   , SMC     , TAH     , EAH     , FWET    , & ! IN/OUT :
@@ -1728,7 +1736,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
        IF(.NOT.FNDSNOWH)THEN
           ! If no SNOWH do the following
         !  CALL wrf_message( 'SNOW HEIGHT NOT FOUND - VALUE DEFINED IN LSMINIT' )
-          if (this_image()==1) WRITE(*,*) 'SNOW HEIGHT NOT FOUND - VALUE DEFINED IN LSMINIT'
+          if (STD_OUT_PE) WRITE(*,*) 'SNOW HEIGHT NOT FOUND - VALUE DEFINED IN LSMINIT'
           DO J = jts,jtf
              DO I = its,itf
                 SNOWH(I,J)=SNOW(I,J)*0.005               ! SNOW in mm and SNOWH in m
@@ -1742,7 +1750,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
        DO J = jts,jtf
           DO I = its,itf
              IF ( SNOW(i,j) > 0. .AND. SNOWH(i,j) == 0. .OR. SNOWH(i,j) > 0. .AND. SNOW(i,j) == 0.) THEN
-               IF (this_image()==1) THEN
+               IF (STD_OUT_PE) THEN
                  WRITE(err_message,*)"problem with initial snow fields: snow/snowh>0 while snowh/snow=0 at i,j" &
                                      ,i,j,snow(i,j),snowh(i,j)
                ENDIF
@@ -1760,7 +1768,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
           DO i = its,itf
              IF ( ISLTYP( i,j ) .LT. 1 ) THEN
                 errflag = 1
-                IF (this_image()==1) THEN
+                IF (STD_OUT_PE) THEN
                   WRITE(err_message,*)"module_sf_noahlsm.F: lsminit: out of range ISLTYP ",i,j,ISLTYP( i,j )
                 ENDIF
     !            CALL wrf_message(err_message)

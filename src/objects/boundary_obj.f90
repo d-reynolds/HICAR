@@ -15,6 +15,7 @@ submodule(boundary_interface) boundary_implementation
     use vertical_interpolation, only : vLUT, vinterp
     use timer_interface,    only : timer_t
     use debug_module,           only : check_ncdf
+    use mod_wrf_constants,      only : gravity
     implicit none
 contains
 
@@ -44,7 +45,7 @@ contains
         ! needs to read each one to find the grid information for it
         ! then create grid and initialize a variable...
         ! also need to explicitly save lat and lon data
-        ! if (this_image() == 1) then
+        ! if (STD_OUT_PE) then
             call this%init_local(options,                           &
                                  options%parameters%boundary_files, &
                                  vars_to_read, var_dimensions,      &
@@ -62,139 +63,6 @@ contains
 
 
         call setup_boundary_geo(this, options%parameters%longitude_system)
-
-    end subroutine
-
-    !>-----------------------------------------------------------
-    !! initialize structure for additional external files (i.e. SWE, snowheight etc)
-    !!
-    !>-----------------------------------------------------------
-    module subroutine init_external(this, options)
-        class(boundary_t), intent(inout) :: this  ! the additional starting conditions
-        type(options_t),   intent(inout) :: options
-
-        character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
-        integer,                         allocatable :: var_dimensions(:)
-        character(len=kMAX_NAME_LENGTH)  :: lat_ext
-        character(len=kMAX_NAME_LENGTH)  :: start_file(1)
-
-        character(len=kMAX_NAME_LENGTH)  :: lon_ext
-        character(len=kMAX_NAME_LENGTH)  :: zvar_ext
-        ! character(len=kMAX_NAME_LENGTH), allocatable :: ext_list(:)
-        ! integer, allocatable :: dim_list(:)
-
-        ! allocate(this%file_list(1))
-        ! allocate(ext_list(1))
-        ! allocate(dim_list(1))
-
-        start_file(1) = options%parameters%external_files
-
-        call setup_variable_lists(options%parameters%ext_var_list, options%parameters%ext_dim_list, vars_to_read, var_dimensions)  ! this simply copies o%p%ext_vars to vars_to_read and same for dims (+some checks)
-
-
-        if ( trim(options%parameters%z_ext) /= "") zvar_ext = options%parameters%z_ext
-
-        call this%init_local2(options,                          &
-                             start_file,                    &
-                             vars_to_read, var_dimensions,      &
-                             start_time = options%parameters%start_time,     &
-                             lat_ext = options%parameters%lat_ext,        &  !lat_ext,
-                             lon_ext = options%parameters%lon_ext,        &  !lon_ext      &
-                             !zvar_ext = options%parameters%zvar_ext,      &  !,- include if statement for this??
-                             time_ext = options%parameters%time_ext &
-                             )
-
-        call setup_boundary_geo(this, options%parameters%longitude_system)
-
-
-    end subroutine
-
-
-    !>------------------------------------------------------------
-    !! Set default component values
-    !! Reads initial conditions from the external file
-    !!
-    !!   For now this is only available for static data (no time component)
-    !!
-    !!------------------------------------------------------------
-    module subroutine init_local2(this, options, file_list, var_list, dim_list, start_time, &
-                                 lat_ext, lon_ext, zvar_ext, time_ext)!, swe_ext, tsnow_ext)
-        class(boundary_t),               intent(inout)          :: this
-        type(options_t),                 intent(inout)          :: options
-        character(len=kMAX_NAME_LENGTH), intent(in)             :: file_list(:)
-        character(len=kMAX_NAME_LENGTH), intent(in)             :: var_list (:)
-        integer,                         intent(in)             :: dim_list (:)
-        type(Time_type),                 intent(in), optional   :: start_time
-        character(len=kMAX_NAME_LENGTH), intent(in)             :: lat_ext
-        character(len=kMAX_NAME_LENGTH), intent(in)             :: lon_ext
-        character(len=kMAX_NAME_LENGTH), intent(in), optional   :: zvar_ext
-        character(len=kMAX_NAME_LENGTH), intent(in), optional   :: time_ext
-
-        real, allocatable :: temp_z(:,:,:)
-
-        integer :: i, nx, ny, nz
-
-        if (present(time_ext) .and. (trim(time_ext)/="") ) then
-            ! figure out while file and timestep contains the requested start_time
-            ! if (this_image()==1) print * ," looking for time_ext"
-            call set_firstfile_firststep(this, start_time, file_list, time_ext)
-            ! call read_bc_time(this%current_time, file_list(this%curfile), time_ext, this%curstep)
-        else
-            this%firststep=1 !?
-            this%firstfile=file_list(1) !?
-        endif
-
-
-        !  read in latitude and longitude coordinate data
-        call io_read(this%firstfile, lat_ext, this%lat, this%firststep)
-        call io_read(this%firstfile, lon_ext, this%lon, this%firststep)
-
-
-        ! if ( (size(this%lat,2)==1) .and. (size(this%lon,2)==1) ) then  !(size(this%lat,1)/=size(this%lon,1)) (shape(this%lat) /= shape(this%lon)) .and.
-        !     this%lat = reshape(this%lat, (/size(this%lat,1), size(this%lon,1)/), pad=this%lat)
-        !     this%lon = reshape(this%lon, (/size(this%lat,1), size(this%lon,1)/), pad=this%lon)
-        ! endif
-
-        ! read in the height coordinate of the input data
-        ! if (present(zvar_ext) .and. (trim(zvar_ext)/="") ) then
-        !     if (this_image()==1)  print *, " zvar_ext ", trim(zvar_ext)
-        !     if (.not. options%parameters%compute_z ) then ! .and. present(zvar_ext)
-        !         ! call io_read(file_list(this%curfile), z_var,   temp_z,   this%curstep)
-        !         call io_read(file_list(1), zvar_ext,   temp_z,   1)
-        !         nx = size(temp_z,1)
-        !         ny = size(temp_z,2)
-        !         nz = size(temp_z,3)
-        !         if (allocated(this%z)) deallocate(this%z)
-        !         allocate(this%z(nx,nz,ny))
-        !         this%z = reshape(temp_z, shape=[nx,nz,ny], order=[1,3,2])
-        !     else
-        !         call io_read(file_list(this%curfile), file_list(1),   temp_z,   this%curstep)
-        !         nx = size(temp_z,1)
-        !         ny = size(temp_z,2)
-        !         ! nz = size(temp_z,3)
-        !         if (allocated(this%z)) deallocate(this%z)
-        !         allocate(this%z(nx,nz,ny))
-        !     endif
-        ! else
-            ! print *, "  ext var = 2D"
-            if ( (size(this%lat,2)==1) .and. (size(this%lon,2)==1) ) then
-                if (this_image()==1) write(*,*) "  external conditions provided on regular 1D grid"
-                nx = size(this%lon,1)
-                ny = size(this%lat,1)
-                nz = 0
-            else
-                nx = size(this%lat,1)
-                ny = size(this%lat,2)
-                nz = 0
-            endif
-
-        ! endif
-
-        ! ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
-
-        do i=1, size(var_list)
-            call add_var_to_dict(this, var_list(i), dim_list(i), [nx, nz, ny])
-        end do
 
     end subroutine
 
@@ -257,13 +125,12 @@ contains
             nx = size(temp_z,1)
             ny = size(temp_z,2)
             nz = size(temp_z,3)
-
             if (allocated(this%z)) deallocate(this%z)
             allocate(this%z((this%ite-this%ite+1),nz,(this%jte-this%jts+1)))
-            allocate(temp_z_trans(nx,nz,ny))
+            allocate(temp_z_trans(1:nx,1:nz,1:ny))
             
-            temp_z_trans = reshape(temp_z, shape=[nx,nz,ny], order=[1,3,2])
-            this%z = temp_z_trans(this%its:this%ite,:,this%jts:this%jte)
+            temp_z_trans(1:nx,1:nz,1:ny) = reshape(temp_z, shape=[nx,nz,ny], order=[1,3,2])
+            this%z = temp_z_trans(this%its:this%ite,1:nz,this%jts:this%jte)
         else
             call io_read(this%firstfile, p_var,   temp_z,   this%firststep)
             nx = size(temp_z,1)
@@ -278,9 +145,9 @@ contains
         this%kts = 1
         this%kte = nz
 
-        if (this%ite < this%its) write(*,*) 'image: ',this_image(),'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        if (this%kte < this%kts) write(*,*) 'image: ',this_image(),'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        if (this%jte < this%jts) write(*,*) 'image: ',this_image(),'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%ite < this%its) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%kte < this%kts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
 
         ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
         do i=1, size(var_list)
@@ -330,7 +197,8 @@ contains
         real, dimension(:,:), intent(in)  :: temp_lat, temp_lon, domain_lat, domain_lon
         
         real, allocatable, dimension(:,:) ::  LL_d, UR_d
-        real :: LLlat, LLlon, URlat, URlon, lat_corners(4), lon_corners(4)
+        real :: LLlat, LLlon, URlat, URlon
+        real, dimension(4) :: lat_corners, lon_corners
         integer, dimension(2) :: temp_inds
         integer :: nx, ny, d_ims, d_ime, d_jms, d_jme
         
@@ -361,7 +229,6 @@ contains
         URlat = maxval(lat_corners)
         URlon = maxval(lon_corners)
 
-
         ! calculate distance from LL/UR lat/lon for boundary lat/lons
         LL_d = ((temp_lat-LLlat)**2+(temp_lon-LLlon)**2)
         UR_d = ((temp_lat-URlat)**2+(temp_lon-URlon)**2)
@@ -373,16 +240,17 @@ contains
         this%ite = temp_inds(1); this%jte = temp_inds(2)
 
         ! increase boundary image indices by 5 as buffer to allow for interpolation
-        
         this%its = max(this%its - 8,1)
         this%ite = min(this%ite + 8,nx)
         this%jts = max(this%jts - 8,1)
         this%jte = min(this%jte + 8,ny)
 
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',this_image(),'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',this_image(),'  d_ims: ',d_ims,'  d_ime: ',d_ime,'  d_jms: ',d_jms,'  d_jme: ',d_jme
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',this_image(),'  LLlat: ',LLlat,'  LLlon: ',LLlon,'  URlat: ',URlat,'  URlon: ',URlon
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',this_image(),'  min_loc: ',minloc(LL_d),'  max_loc: ',minloc(UR_d)
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  d_ims: ',d_ims,'  d_ime: ',d_ime,'  d_jms: ',d_jms,'  d_jme: ',d_jme
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  LLlat: ',LLlat,'  LLlon: ',LLlon,'  URlat: ',URlat,'  URlon: ',URlon
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  min_loc: ',minloc(LL_d),'  max_loc: ',minloc(UR_d)
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  min_lat: ',minval(domain_lat),'  max_lat: ',maxval(domain_lat)
+        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  lat_corners: ',lat_corners,'  lon_corners: ',lon_corners
         if (this%ite < this%its .or. this%jte < this%jts) call io_write('domain_lat.nc',"domain_lat",domain_lat)
         if (this%ite < this%its .or. this%jte < this%jts) call io_write('domain_lon.nc',"domain_lon",domain_lon)
         if (this%ite < this%its .or. this%jte < this%jts) call io_write('boundary_lat.nc',"lat",temp_lat)
@@ -603,6 +471,12 @@ contains
 
         end associate
 
+        ! if the vertical levels of the forcing data change over time, they need to be interpolated to the original levels here.
+        if (options%parameters%time_varying_z) then
+            call this%interpolate_original_levels(options)
+        endif
+
+
     end subroutine update_computed_vars
 
 
@@ -821,7 +695,7 @@ contains
             if (trim(master_var_list(i)) /= '') then
                 vars_to_read(curvar) = master_var_list(i)
                 var_dimensions(curvar) = master_dim_list(i)
-                ! if (this_image()==1) print *, "in variable list: ", vars_to_read(curvar)
+                ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)
                 curvar = curvar + 1
             endif
         enddo
