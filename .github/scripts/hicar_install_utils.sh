@@ -102,11 +102,12 @@ function hicar_dependencies {
 function hicar_install {
     echo hicar_install
     cd ${GITHUB_WORKSPACE}
-
+    mkdir src/build
     export NETCDF=${INSTALLDIR}
     export FFTW=/usr
     export JN=-j4
 
+    
     # test build
     make -C src clean; VERBOSE=1 make -C src ${JN} MODE=debugslow
 
