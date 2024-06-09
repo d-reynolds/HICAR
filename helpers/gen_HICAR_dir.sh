@@ -4,8 +4,8 @@
 # i.e. :
 #./gen_HICAR_dir.sh ./Model_runs/ /home/user/HICAR/
 
-parent_dir=$1
-HICAR_dir=$2
+parent_dir=$(realpath $1)
+HICAR_dir=$(realpath $2)
 
 echo
 echo '#######################################################'
