@@ -109,8 +109,9 @@ contains
 
         type(c_ptr) :: tmp_ptr
         integer(KIND=MPI_ADDRESS_KIND) :: win_size
-        integer :: ierr
-        real :: realnum
+        integer :: ierr, real_size
+
+        CALL MPI_Type_size(MPI_REAL, real_size)
 
         ! +1 added to handle variables on staggered grids
         this%nx_w = maxval(this%iewc-this%iswc+1)+1
@@ -136,13 +137,13 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,this%n_r,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
 
         win_size = this%n_w_3d*this%nx_w*this%nz_w*this%ny_w
-        call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_3d)
+        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_3d)
 
         win_size = this%n_w_2d*this%nx_w*this%ny_w
-        call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_2d)
+        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_2d)
 
         win_size = this%n_r*this%nx_r*this%nz_r*this%ny_r
-        call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, this%client_comms, tmp_ptr, this%read_win)
+        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%read_win)
     
     end subroutine setup_MPI_windows
 
