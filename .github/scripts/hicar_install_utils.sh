@@ -115,6 +115,7 @@ function hicar_install {
     #export FFTW=/usr
     #export JN=-j4
 
+    
     # test build
     # make -C src clean; VERBOSE=1 make -C src ${JN} MODE=debugslow
 
