@@ -15,6 +15,7 @@
 submodule(ioclient_interface) ioclient_implementation
   use debug_module,             only : check_ncdf
   use iso_fortran_env
+  use iso_c_binding
   use output_metadata,          only : get_varindx
 
 
@@ -111,9 +112,9 @@ contains
         type(c_ptr) :: tmp_ptr
         integer(KIND=MPI_ADDRESS_KIND) :: win_size
         integer :: nx_w, nz_w, ny_w, n_w_2d, n_w_3d, ierr
-        integer :: nx_r, nz_r, ny_r, n_r
+        integer :: nx_r, nz_r, ny_r, n_r, real_size
 
-        real :: realnum
+        CALL MPI_Type_size(MPI_REAL, real_size)
 
         nx_w = 0
         nz_w = 0
@@ -141,18 +142,18 @@ contains
 
         ! +1 added to handle variables on staggered grids
         win_size = n_w_3d*nx_w*nz_w*ny_w
-        call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_3d)
+        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_3d)
         call C_F_POINTER(tmp_ptr, this%write_buffer_3d, [n_w_3d, nx_w, nz_w, ny_w])
         this%write_buffer_3d = kEMPT_BUFF
 
         ! +1 added to handle variables on staggered grids
         win_size = n_w_2d*nx_w*ny_w
-        call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_2d)
+        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_2d)
         call C_F_POINTER(tmp_ptr, this%write_buffer_2d, [n_w_2d, nx_w, ny_w])
         this%write_buffer_2d = kEMPT_BUFF
 
         win_size = n_r*nx_r*nz_r*ny_r
-        call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%read_win)
+        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%read_win)
         call C_F_POINTER(tmp_ptr, this%read_buffer, [n_r, nx_r, nz_r, ny_r])
         this%read_buffer = kEMPT_BUFF
 

@@ -10,6 +10,7 @@
 submodule(halo_interface) halo_implementation
 use icar_constants
 use iso_fortran_env
+use iso_c_binding
 
 implicit none
 
@@ -31,8 +32,10 @@ module subroutine init(this, exch_vars, adv_vars, grid, comms)
     type(c_ptr) :: tmp_ptr
     integer(KIND=MPI_ADDRESS_KIND) :: win_size
     integer :: current, my_index, n_neighbors, nx, nz, ny, ierr
-    integer :: i,j,k
-    real    :: real_num
+    integer :: i,j,k, real_size
+
+    CALL MPI_Type_size(MPI_REAL, real_size)
+
     !Some stuff we can just copy right over
     this%grid = grid
     this%halo_size = grid%halo_size
@@ -174,11 +177,11 @@ if (.not.(comms == MPI_COMM_NULL)) then
     nz = this%grid%halo_nz
     ny = this%halo_size+1
     win_size = nx*nz*ny
-    call MPI_WIN_ALLOCATE(win_size*sizeof(real_num), sizeof(real_num), MPI_INFO_NULL, comms, tmp_ptr, this%south_in_win)
+    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%south_in_win)
     call C_F_POINTER(tmp_ptr, this%south_in_3d, [nx, nz, ny])
     this%south_in_3d = 1
     
-    call MPI_WIN_ALLOCATE(win_size*sizeof(real_num), sizeof(real_num), MPI_INFO_NULL, comms, tmp_ptr, this%north_in_win)
+    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%north_in_win)
     call C_F_POINTER(tmp_ptr, this%north_in_3d, [nx, nz, ny])
     this%north_in_3d = 1
 
@@ -186,11 +189,11 @@ if (.not.(comms == MPI_COMM_NULL)) then
     nz = this%grid%halo_nz
     ny = this%grid%ew_halo_ny+this%halo_size*2
     win_size = nx*nz*ny
-    call MPI_WIN_ALLOCATE(win_size*sizeof(real_num), sizeof(real_num), MPI_INFO_NULL, comms, tmp_ptr, this%east_in_win)
+    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%east_in_win)
     call C_F_POINTER(tmp_ptr, this%east_in_3d, [nx, nz, ny])
     this%east_in_3d = 2
 
-    call MPI_WIN_ALLOCATE(win_size*sizeof(real_num), sizeof(real_num), MPI_INFO_NULL, comms, tmp_ptr, this%west_in_win)
+    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%west_in_win)
     call C_F_POINTER(tmp_ptr, this%west_in_3d, [nx, nz, ny])
     this%west_in_3d = 1
 endif
@@ -366,10 +369,12 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
 
     integer :: nx, ny, nz, n_2d, n_3d = 0
     type(c_ptr) :: tmp_ptr
-    integer(KIND=MPI_ADDRESS_KIND) :: win_size
-    real :: realnum
-    integer :: ierr, i
+    integer(KIND=MPI_ADDRESS_KIND) :: win_size, tmp_ptr2
+    integer :: ierr, i, real_size
     type(MPI_Info) :: info_in 
+
+    CALL MPI_Type_size(MPI_REAL, real_size)
+
     ! Loop over all adv_vars and count how many are 3D
     call adv_vars%reset_iterator()
     
@@ -417,12 +422,12 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
 
             call MPI_Type_contiguous(nx*nz*ny*n_3d, MPI_REAL, this%N_3d_win_halo_type)
             call MPI_Type_commit(this%N_3d_win_halo_type)
-            call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), info_in, comms, tmp_ptr,this%north_3d_win)
+            call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%north_3d_win, ierr)
             call C_F_POINTER(tmp_ptr, this%north_batch_in_3d, [n_3d, nx, nz, ny])
 
             call MPI_Type_contiguous(nx*nz*ny*n_3d, MPI_REAL, this%S_3d_win_halo_type)
             call MPI_Type_commit(this%S_3d_win_halo_type)
-            call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), info_in, comms, tmp_ptr, this%south_3d_win)
+            call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%south_3d_win)
             call C_F_POINTER(tmp_ptr, this%south_batch_in_3d, [n_3d, nx, nz, ny])
 
             !Then do EW
@@ -433,11 +438,11 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             call MPI_Type_contiguous(nx*nz*ny*n_3d, MPI_REAL, this%EW_3d_win_halo_type)
             call MPI_Type_commit(this%EW_3d_win_halo_type)
 
-            call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), info_in, comms, tmp_ptr, this%east_3d_win)
+            call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%east_3d_win)
             call C_F_POINTER(tmp_ptr, this%east_batch_in_3d, [n_3d, nx, nz, ny])
             this%east_batch_in_3d = 1
 
-            call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), info_in, comms, tmp_ptr, this%west_3d_win)
+            call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%west_3d_win)
             call C_F_POINTER(tmp_ptr, this%west_batch_in_3d, [n_3d, nx, nz, ny])
             this%west_batch_in_3d = 1
 
@@ -474,11 +479,11 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             call MPI_Type_contiguous(nx*ny*n_2d, MPI_REAL, this%NS_2d_win_halo_type)
             call MPI_Type_commit(this%NS_2d_win_halo_type)
 
-            call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, comms, tmp_ptr, this%north_2d_win)
+            call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%north_2d_win)
             call C_F_POINTER(tmp_ptr, this%north_batch_in_2d, [n_2d, nx, ny])
             this%north_batch_in_2d = 1
 
-            call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, comms, tmp_ptr, this%south_2d_win)
+            call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%south_2d_win)
             call C_F_POINTER(tmp_ptr, this%south_batch_in_2d, [n_2d, nx, ny])
             this%south_batch_in_2d = 1
 
@@ -488,11 +493,11 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             call MPI_Type_contiguous(nx*ny*n_2d, MPI_REAL, this%EW_2d_win_halo_type)
             call MPI_Type_commit(this%EW_2d_win_halo_type)
 
-            call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, comms, tmp_ptr, this%east_2d_win)
+            call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%east_2d_win)
             call C_F_POINTER(tmp_ptr, this%east_batch_in_2d, [n_2d, nx, ny])
             this%east_batch_in_2d = 1
 
-            call MPI_WIN_ALLOCATE(win_size*sizeof(realnum), sizeof(realnum), MPI_INFO_NULL, comms, tmp_ptr, this%west_2d_win)
+            call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%west_2d_win)
             call C_F_POINTER(tmp_ptr, this%west_batch_in_2d, [n_2d, nx, ny])
             this%west_batch_in_2d = 1
 

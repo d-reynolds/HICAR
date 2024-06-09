@@ -17,7 +17,7 @@
 !!
 !!-----------------------------------------
 program icar
-    use, intrinsic iso_fortran_env
+    use iso_fortran_env
     use mpi_f08
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
@@ -29,7 +29,7 @@ program icar
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
     use icar_constants
-    use wind_iterative,     only : init_petsc_comms, finalize_iter_winds
+    use wind_iterative,     only : finalize_iter_winds
     use ioserver_interface, only : ioserver_t
     use ioclient_interface, only : ioclient_t
     use io_routines,        only : io_write
