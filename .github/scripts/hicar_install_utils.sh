@@ -72,18 +72,20 @@ function hicar_dependencies {
     echo hicar_dependencies
 
     sudo apt-get update
+    sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
     sudo apt-get install netcdf-bin
     sudo apt-get install libnetcdff-dev
+    sudo apt-get install libnetcdf-mpi-dev
+    sudo apt-get install libhdf5-mpi-dev
     sudo apt-get install petsc-dev
-    sudo apt-get install mpich
 
     # Installing HDF5 currently not working for NetCDF
     # sudo apt-get install libhdf5-dev libhdf5-openmpi-dev
 
-    export CPPFLAGS="$CPPFLAGS -I${INSTALLDIR}/include"
-    export LDFLAGS="$LDFLAGS -L${INSTALLDIR}/lib"
+    # export CPPFLAGS="$CPPFLAGS -I${INSTALLDIR}/include"
+    # export LDFLAGS="$LDFLAGS -L${INSTALLDIR}/lib"
 
     # # Install szip (used by hdf5)
     # install_szip
@@ -101,14 +103,20 @@ function hicar_dependencies {
 
 function hicar_install {
     echo hicar_install
+    pwd
     cd ${GITHUB_WORKSPACE}
-
+    mkdir build
+    cd build
+    cmake ../ -DFSM=OFF
+    make ${JN}
+    make install
+    
     export NETCDF=${INSTALLDIR}
-    export FFTW=/usr
-    export JN=-j4
+    #export FFTW=/usr
+    #export JN=-j4
 
     # test build
-    make -C src clean; VERBOSE=1 make -C src ${JN} MODE=debugslow
+    # make -C src clean; VERBOSE=1 make -C src ${JN} MODE=debugslow
 
     echo "hicar install succeeded"
 
@@ -133,22 +141,19 @@ function hicar_script {
 }
 
 function gen_test_run_data {
-    cd ${GITHUB_WORKSPACE}/tests
-    python --version
-    python -m pip install --upgrade pip
-    pip install setuptools numpy pandas netCDF4 xarray
-    python gen_ideal_test.py
-}
+    cd ${GITHUB_WORKSPACE}/helpers
+    echo "y y" | ./gen_HICAR_dir.sh ~/ ${GITHUB_WORKSPACE}
+    }
 
 function execute_test_run {
-    cp ${GITHUB_WORKSPACE}/src/icar ${GITHUB_WORKSPACE}/tests/
-    cd ${GITHUB_WORKSPACE}/tests
-    echo "Starting ICAR run"
-    ./icar icar_options.nml
-    time_dim=$(ncdump -v time icar_out_000001_2020-12-01_00-00-00.nc | grep "time = UNLIMITED" | sed 's/[^0-9]*//g')
+    cd ~/HICAR/input
+
+    echo "Starting HICAR run"
+    ./bin/HICAR HICAR_Test_Case.nml
+    time_dim=$(ncdump -v ../output/*.nc | grep "time = UNLIMITED" | sed 's/[^0-9]*//g')
 
     if [[ ${time_dim} == "1" ]]; then
-	echo "FAILURE: ICAR output time dimension should not be equal to one, it was ${time_dim}"
+	echo "FAILURE: HICAR output time dimension should not be equal to one, it was ${time_dim}"
 	exit 1
     else
 	echo "SUCCESS: time dimension is equal to ${time_dim}"
