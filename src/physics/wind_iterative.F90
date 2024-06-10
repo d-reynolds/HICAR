@@ -20,6 +20,7 @@ module wind_iterative
 #include <petsc/finclude/petscksp.h>
 #include <petsc/finclude/petscdm.h>
 #include <petsc/finclude/petscdmda.h>
+
     use icar_constants,    only : STD_OUT_PE
 
     use domain_interface,  only : domain_t
@@ -28,8 +29,8 @@ module wind_iterative
     use petscksp
     use petscdm
     use petscdmda
-    use iso_fortran_env
 
+    use iso_fortran_env
     implicit none
     private
     public:: init_petsc_comms, init_iter_winds, calc_iter_winds, finalize_iter_winds
@@ -815,8 +816,8 @@ contains
             if (domain%grid%ximg == 1) yl(domain%grid%yimg) = domain%grid%ny-hs*2
         
             !Wait for all images to contribute their dimension            
-            call MPI_Allreduce(MPI_IN_PLACE,xl,domain%grid%ximages,MPI_INT,MPI_MAX,domain%compute_comms, ierr)
-            call MPI_Allreduce(MPI_IN_PLACE,yl,domain%grid%yimages,MPI_INT,MPI_MAX,domain%compute_comms, ierr)
+            call MPI_Allreduce(MPI_IN_PLACE,xl,domain%grid%ximages,MPI_INT,MPI_MAX,domain%compute_comms%MPI_VAL, ierr)
+            call MPI_Allreduce(MPI_IN_PLACE,yl,domain%grid%yimages,MPI_INT,MPI_MAX,domain%compute_comms%MPI_VAL, ierr)
 
             !Add points to xy-edges to accomodate ghost-points of DMDA grid
             !cells at boundaries have 1 extra for ghost-point, and should also be corrected
