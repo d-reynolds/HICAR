@@ -38,13 +38,12 @@ function install_hdf5 {
     tar -xzf hdf5-1.10.7.tar.gz
     cd hdf5-1.10.7
     # FCFLAGS="-DH5_USE_110_API" ./configure --prefix=$INSTALLDIR &> config.log
-    CC=mpicc ./configure --prefix=$INSTALLDIR --enable-parallel #&> config.log
+    CC=mpicc ./configure --prefix=$INSTALLDIR --enable-parallel --with-zlib=$INSTALLDIR #&> config.log
     make -j 4
     # CFLAGS=-DH5_USE_110_API make
     # (CFLAGS=-DH5_USE_110_API make | awk 'NR%100 == 0')
-    make install
-    export LIBDIR=${INSTALLDIR}/lib
-}
+    export HDF5=$INSTALLDIR
+    export LD_LIBRARY_PATH=$INSTALLDIR/lib:$LD_LIBRARY_PATH}
 
 function install_netcdf_c {
     echo install_netcdf_c
@@ -59,9 +58,7 @@ function install_netcdf_c {
 
 function install_netcdf_fortran {
     export SRCNCDF=${GITHUB_WORKSPACE}/srcNETCDF
-    export INSNCDF=${GITHUB_WORKSPACE}/NETCDF_INST
     mkdir $SRCNCDF
-    mkdir $INSNCDF
     cd $SRCNCDF
 
     wget --no-check-certificate -q https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.9.2.tar.gz
@@ -71,16 +68,19 @@ function install_netcdf_fortran {
     tar -xzf v4.6.1.tar.gz
 
     cd netcdf-c-4.9.2
-    cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSNCDF}"
+    export CPPFLAGS=-I$INSTALLDIR/include 
+    export LDFLAGS=-L$INSTALLDIR/lib
+    cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSTALLDIR}"
     make all check install
 
+    export PATH=$INSTALLDIR/bin:$PATH
+    export NETCDF=$INSTALLDIR
+
     cd ../netcdf-fortran-4.6.1
-    export NCDIR=${INSNCDF}
-    export NFDIR=${INSNCDF}
-    export CPPFLAGS=$CPPFLAGS" -I${NCDIR}/include"
-    export LDFLAGS=$LDFLAGS" -L${NCDIR}/lib"
-    export LD_LIBRARY_PATH=${NCDIR}/lib:${LD_LIBRARY_PATH}
-    cmake ./—prefix=${NFDIR}
+    export CPPFLAGS=$CPPFLAGS" -I${INSTALLDIR}/include"
+    export LDFLAGS=$LDFLAGS" -L${INSTALLDIR}/lib"
+    export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
+    cmake ./—prefix=${INSTALLDIR}
     make check
     Make install
 }
@@ -160,11 +160,12 @@ function hicar_script {
 
 function gen_test_run_data {
     cd ${GITHUB_WORKSPACE}/helpers
-    echo "y y" | ./gen_HICAR_dir.sh ~/ ${GITHUB_WORKSPACE}
+    mkdir ${GITHUB_WORKSPACE}/Model_runs/
+    echo "y y" | ./gen_HICAR_dir.sh ${GITHUB_WORKSPACE}/Model_runs/ ${GITHUB_WORKSPACE}
     }
 
 function execute_test_run {
-    cd ~/HICAR/input
+    cd ${GITHUB_WORKSPACE}/Model_runs/input
 
     echo "Starting HICAR run"
     ./bin/HICAR HICAR_Test_Case.nml
