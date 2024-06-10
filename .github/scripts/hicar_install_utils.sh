@@ -31,6 +31,17 @@ function install_szip {
     make install
 }
 
+function install_zlib {
+    echo install_zlib
+    cd $WORKDIR
+    wget --no-check-certificate -q https://www.zlib.net/zlib-1.3.1.tar.gz
+    tar -xvzf zlib-1.3.1.tar.gz
+    cd zlib-1.3.1/
+    ./configure --prefix=$INSTALLDIR &> config.log
+    make -j 4 &> make.log
+    make install
+}
+
 function install_hdf5 {
     echo install_hdf5
     cd $WORKDIR
@@ -95,7 +106,7 @@ function hicar_dependencies {
     sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
-    install_szip
+    install_zlib
     install_hdf5
     install_netcdf_fortran
     sudo apt-get install petsc-dev
