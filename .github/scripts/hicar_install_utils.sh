@@ -39,6 +39,7 @@ function install_zlib {
     cd zlib-1.3.1/
     ./configure --prefix=$INSTALLDIR &> config.log
     make -j 4 &> make.log
+    make check
     make install
 }
 
@@ -106,8 +107,9 @@ function hicar_dependencies {
     sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
-    install_zlib
-    install_hdf5
+    # install_zlib
+    # install_hdf5
+    sudo apt-get install libhdf5-mpi-dev
     install_netcdf_fortran
     sudo apt-get install petsc-dev
 
