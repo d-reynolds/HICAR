@@ -28,7 +28,7 @@ function install_szip {
     cd szip-2.1.1
     ./configure --prefix=$INSTALLDIR &> config.log
     make &> make.log
-    make install ${JN}
+    make install -j 4
 }
 
 function install_hdf5 {
@@ -38,11 +38,11 @@ function install_hdf5 {
     tar -xzf hdf5-1.10.7.tar.gz
     cd hdf5-1.10.7
     # FCFLAGS="-DH5_USE_110_API" ./configure --prefix=$INSTALLDIR &> config.log
-    ./configure --prefix=$INSTALLDIR #&> config.log
+    CC=mpicc ./configure --prefix=$INSTALLDIR --enable-parallel #&> config.log
     make
     # CFLAGS=-DH5_USE_110_API make
     # (CFLAGS=-DH5_USE_110_API make | awk 'NR%100 == 0')
-    make install ${JN}
+    make install -j 4
     export LIBDIR=${INSTALLDIR}/lib
 }
 
@@ -67,8 +67,8 @@ function install_netcdf_fortran {
     wget --no-check-certificate -q https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.9.2.tar.gz
     wget --no-check-certificate -q https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.6.1.tar.gz
 
-    tar -xzf netcdf-c-4.9.2.tar.gz
-    tar -xzf netcdf-fortran-4.6.1.tar.gz
+    tar -xzf v4.9.2.tar.gz
+    tar -xzf v4.6.1.tar.gz
 
     cd netcdf-c-4.9.2
     cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSNCDF}"
