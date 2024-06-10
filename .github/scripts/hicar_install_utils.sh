@@ -75,13 +75,13 @@ function install_netcdf_fortran {
     mkdir $SRCNCDF
     cd $SRCNCDF
 
-    wget --no-check-certificate -q https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.8.0.tar.gz
+    wget --no-check-certificate -q https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.9.2.tar.gz
     wget --no-check-certificate -q https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.6.1.tar.gz
 
-    tar -xzf v4.8.0.tar.gz
+    tar -xzf v4.9.2.tar.gz
     tar -xzf v4.6.1.tar.gz
 
-    cd netcdf-c-4.8.0
+    cd netcdf-c-4.9.2
     export CPPFLAGS=-I$INSTALLDIR/include 
     export LDFLAGS=-L$INSTALLDIR/lib
     cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSTALLDIR}"
