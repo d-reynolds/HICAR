@@ -224,7 +224,6 @@ elseif(MODE STREQUAL "release")
 	endif()
 endif()
 
-
 #set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${FFLAGS}")
 #set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LFLAGS}")
 
@@ -364,16 +363,15 @@ message(STATUS "...done searching for dependencies")
 
 #######################################################
 ############## Print User Information #################
+get_target_property(MAIN_CFLAGS HICAR COMPILE_OPTIONS)
+string(REGEX REPLACE ";" " " MAIN_CFLAGS "${MAIN_CFLAGS}")
+
 message(STATUS "")
 message(STATUS "--------------------------------------------------------------------------------------------------------------------")
 message(STATUS "")
 message(STATUS "The fortran compiler ${CMAKE_Fortran_COMPILER} will be used to compile HICAR with the following flags:")
 message(STATUS "")
-message(STATUS "  ${CMAKE_Fortran_COMPILER} ${CMAKE_Fortran_FLAGS}")
-message(STATUS "")
-message(STATUS "The following libraries will be linked:")
-message(STATUS "")
-message(STATUS "  ${CMAKE_EXE_LINKER_FLAGS}")
+message(STATUS "  ${CMAKE_Fortran_COMPILER} ${MAIN_CFLAGS}")
 message(STATUS "")
 message(STATUS "Libraries were searched for in the following directories:")
 message(STATUS "  NetCDF: ${NETCDF_DIR}")

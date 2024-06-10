@@ -8,6 +8,11 @@ on:
 jobs:
   build_and_test_HICAR:
     runs-on: ubuntu-latest
+    # make sure these permissions are set so that
+    # VS Code can connect to the machine
+    permissions:
+      actions: read
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@master
@@ -23,3 +28,6 @@ jobs:
         run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
       - name: Execute Test Run
         run: bash .github/scripts/hicar_install_utils.sh execute_test_run
+      - name: Debug Build
+        uses: stateful/vscode-server-action@v1
+        if: failure()

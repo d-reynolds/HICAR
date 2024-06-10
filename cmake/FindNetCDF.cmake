@@ -1,5 +1,5 @@
 ####
-# This function, in its entirety and without modification, is taken from the
+# This function is taken from the
 # VTK github project. It is licensed under the BSD 3-Clause License.
 ##/*=========================================================================
 ##
@@ -32,7 +32,7 @@ function(FindNetCDF_get_is_parallel_aware include_dir)
 endfunction()
 
 # Try to find a CMake-built NetCDF.
-find_package(netCDF CONFIG QUIET)
+find_package(netCDF CONFIG QUIET COMPONENTS F90)
 if (netCDF_FOUND)
   # Forward the variables in a consistent way.
   set(NetCDF_FOUND "${netCDF_FOUND}")
