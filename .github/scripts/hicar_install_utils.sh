@@ -27,8 +27,8 @@ function install_szip {
     tar -xzf szip-2.1.1.tar.gz
     cd szip-2.1.1
     ./configure --prefix=$INSTALLDIR &> config.log
-    make &> make.log
-    make install -j 4
+    make -j 4 &> make.log
+    make install
 }
 
 function install_hdf5 {
@@ -39,10 +39,10 @@ function install_hdf5 {
     cd hdf5-1.10.7
     # FCFLAGS="-DH5_USE_110_API" ./configure --prefix=$INSTALLDIR &> config.log
     CC=mpicc ./configure --prefix=$INSTALLDIR --enable-parallel #&> config.log
-    make
+    make -j 4
     # CFLAGS=-DH5_USE_110_API make
     # (CFLAGS=-DH5_USE_110_API make | awk 'NR%100 == 0')
-    make install -j 4
+    make install
     export LIBDIR=${INSTALLDIR}/lib
 }
 
