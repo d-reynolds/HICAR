@@ -20,4 +20,5 @@ docs/doxygen_sqlite3.db
 */build/*
 */.vscode/*
 build/*
+bin/*
 *code-workspace

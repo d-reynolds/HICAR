@@ -12,29 +12,29 @@ enable_language (Fortran)
 ####### Set up the user variables #######
 set(MODE "release" CACHE STRING "Set compilation mode, useful for debugging")
 set(FC "" CACHE STRING "Set the fortran compiler to use (can be auto-detected for most cases)")
-if (PETSC_DIR STREQUAL "")
+if (NOT DEFINED PETSC_DIR OR PETSC_DIR STREQUAL "")
 	set(PETSC_DIR $ENV{PETSC_DIR} CACHE PATH "Path to PETSC installation")
 endif()
-if (PETSC_ARCH STREQUAL "")
+if (NOT DEFINED PETSC_ARCH OR PETSC_ARCH STREQUAL "")
 	set(PETSC_ARCH $ENV{PETSC_ARCH} CACHE PATH "System architecture for PETSC installation")
 endif()
-if (FFTW_DIR STREQUAL "")
+if (NOT DEFINED FFTW_DIR OR FFTW_DIR STREQUAL "")
 	set(FFTW_DIR $ENV{FFTW_DIR} CACHE PATH "Path to FFTW installation")
 endif()
-if (NETCDF_DIR STREQUAL "")
+if (NOT DEFINED NETCDF_DIR OR NETCDF_DIR STREQUAL "")
 	set(NETCDF_DIR $ENV{NETCDF_DIR} CACHE PATH "Path to NETCDF installation")
 endif()
-if (HDF5_DIR STREQUAL "")
+if (NOT DEFINED HDF5_DIR OR HDF5_DIR STREQUAL "")
 	set(HDF5_DIR $ENV{HDF5_DIR} CACHE PATH "Path to HDF5 installation (optional)")
 endif()
-if (MPI_DIR STREQUAL "")
+if (NOT DEFINED MPI_DIR OR MPI_DIR STREQUAL "")
 	set(MPI_DIR $ENV{MPICH_DIR} CACHE PATH "Path to MPI installation")
 endif()
-if (FSM_DIR STREQUAL "")
+if (NOT DEFINED FSM_DIR OR FSM_DIR STREQUAL "")
 	set(FSM_DIR ${PROJECT_SOURCE_DIR}/FSM2trans CACHE PATH "Path to the compiled FSM installation (root directory of the lib and build directories)")
 endif()
 
-if (MPI_DIR STREQUAL "" AND DEFINED $ENV{MPICH_DIR})
+if (NOT DEFINED MPICH_DIR AND DEFINED $ENV{MPICH_DIR})
 	set(MPI_DIR FORCE CACHE $ENV{MPICH_DIR})
 endif()
 
@@ -250,7 +250,7 @@ set(ENV{PKG_CONFIG_PATH} "$ENV{PKG_CONFIG_PATH}:${PETSC}/lib/pkgconfig")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${PETSC} ${FFTW_DIR} ${NETCDF_DIR} ${HDF5_DIR} ${MPI_DIR} ${FSM_DIR})
 set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${PETSC}/lib/pkgconfig/" ${FFTW_DIR} ${NETCDF_DIR} ${HDF5_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR})
 
-find_package(PkgConfig)
+find_package(PkgConfig REQUIRED)
 
 # 1. Check if not already included via Cray Module and ftn
 # 2. If not included via Cray module, link to the package libraries manually
@@ -273,68 +273,69 @@ find_package(NetCDF REQUIRED)
 # other libraries, which is not what we want. So we manually link to the petsc library
 # dependencies here.
 message(STATUS "Looking for PETSc...")
+list(APPEND CMAKE_MESSAGE_INDENT "  ")
 
 #First, try to find Petsc with just find_package
-if(NOT (DEFINED ENV{CRAYPE_VERSION} AND (PETSC MATCHES ".*cray.*")) AND PKG_CONFIG_FOUND)
+if(PKG_CONFIG_FOUND)
 	message(STATUS "1. Trying to find PETSc with pkg-config...")
 
-	pkg_search_module(PETSC REQUIRED IMPORTED_TARGET PETSc)
+	pkg_search_module(PETSC IMPORTED_TARGET PETSc)
 
 	if(PETSC_FOUND)
 		message(STATUS "PETSc found with pkg-config")
 		target_link_libraries(HICAR PUBLIC PkgConfig::PETSC)
+	elseif (EXISTS "${PETSC}/lib/petsc/conf/petscvariables")
+		message(STATUS "2. Trying to find PETSc by mimicking the cray-petsc makefile setup...")
+
+		# try to find PETSc by mimicking the makefile setup
+		# this is recommended on the PETSc site for makefiles:
+		# https://petsc.org/main/manual/getting_started/#writing-c-c-or-fortran-applications
+		# and the cray_PE currently does not robustly support using CMake for PETSc
+		# issue: (https://lists.mcs.anl.gov/pipermail/petsc-users/2020-March/040491.html)
+		file(READ "${PETSC}/lib/petsc/conf/petscvariables" MAKEFILE_CONTENTS)
+
+		# Convert the MAKEFILE_CONTENTS to a list of lines
+		string(REGEX REPLACE ";\\ ?" ";" MAKEFILE_CONTENTS "${MAKEFILE_CONTENTS}")
+		string(REPLACE "\n" ";" MAKEFILE_CONTENTS "${MAKEFILE_CONTENTS}")
+		list(REMOVE_DUPLICATES MAKEFILE_CONTENTS)
+		
+		# Initialize the PETSC_WITH_EXTERNAL_LIB variable
+		set(PETSC_WITH_EXTERNAL_LIB "")
+		
+		# Iterate through the list of lines
+		foreach(LINE ${MAKEFILE_CONTENTS})
+			# Try to match the PETSC_WITH_EXTERNAL_LIB definition
+			string(REGEX MATCH "PETSC_WITH_EXTERNAL_LIB = (.+)" MATCH_RESULT "${LINE}")
+		
+			# If a match is found, extract the value and break out of the loop
+			if(MATCH_RESULT)
+				string(REGEX REPLACE "PETSC_WITH_EXTERNAL_LIB = " "" PETSC_WITH_EXTERNAL_LIB "${MATCH_RESULT}")
+				message(STATUS "PETSC_WITH_EXTERNAL_LIB: ${PETSC_WITH_EXTERNAL_LIB}")
+				target_link_libraries(HICAR  PUBLIC ${PETSC_WITH_EXTERNAL_LIB})
+				break()
+			endif()
+		endforeach()
+
+		#If this doesn't work, and pkg-config was found, then just force linking to static libraries
+		if(PETSC_WITH_EXTERNAL_LIB STREQUAL "" AND PKG_CONFIG_FOUND)
+			message(WARNING "Failed to extract PETSC_WITH_EXTERNAL_LIB from Makefile")
+			message(STATUS "3. Trying to find PETSc by linking to static libraries...")
+			pkg_search_module(PETSC REQUIRED IMPORTED_TARGET PETSc)
+			if(PETSC_FOUND)
+				# Remove the petsc library from the list of libraries to link to
+				# the ftn wrapper will automatically link to the correct petsc library
+				list(REMOVE_ITEM PETSC_STATIC_LDFLAGS "-lpetsc")
+				# Link to the petsc library static dependencies
+				target_link_libraries(HICAR  PUBLIC ${PETSC_STATIC_LDFLAGS})
+			else()
+				message(FATAL_ERROR "PETSc not found")
+			endif()
+		endif()
 	else()
                 message(FATAL_ERROR "PETSc not found")
 	endif()
-#else, if this is a cray_PE, then we need to manually link to the petsc library dependencies
-else()
-	message(STATUS "1. Trying to find PETSc by mimicking the cray-petsc makefile setup...")
-
-	# try to find PETSc by mimicking the makefile setup
-	# this is recommended on the PETSc site for makefiles:
-	# https://petsc.org/main/manual/getting_started/#writing-c-c-or-fortran-applications
-	# and the cray_PE currently does not robustly support using CMake for PETSc
-	# issue: (https://lists.mcs.anl.gov/pipermail/petsc-users/2020-March/040491.html)
-	file(READ "${PETSC}/lib/petsc/conf/petscvariables" MAKEFILE_CONTENTS)
-
-	# Convert the MAKEFILE_CONTENTS to a list of lines
-	string(REGEX REPLACE ";\\ ?" ";" MAKEFILE_CONTENTS "${MAKEFILE_CONTENTS}")
-	string(REPLACE "\n" ";" MAKEFILE_CONTENTS "${MAKEFILE_CONTENTS}")
-	list(REMOVE_DUPLICATES MAKEFILE_CONTENTS)
-	
-	# Initialize the PETSC_WITH_EXTERNAL_LIB variable
-	set(PETSC_WITH_EXTERNAL_LIB "")
-	
-	# Iterate through the list of lines
-	foreach(LINE ${MAKEFILE_CONTENTS})
-		# Try to match the PETSC_WITH_EXTERNAL_LIB definition
-		string(REGEX MATCH "PETSC_WITH_EXTERNAL_LIB = (.+)" MATCH_RESULT "${LINE}")
-	
-		# If a match is found, extract the value and break out of the loop
-		if(MATCH_RESULT)
-			string(REGEX REPLACE "PETSC_WITH_EXTERNAL_LIB = " "" PETSC_WITH_EXTERNAL_LIB "${MATCH_RESULT}")
-			message(STATUS "PETSC_WITH_EXTERNAL_LIB: ${PETSC_WITH_EXTERNAL_LIB}")
-			target_link_libraries(HICAR  PUBLIC ${PETSC_WITH_EXTERNAL_LIB})
-			break()
-		endif()
-	endforeach()
-
-	#If this doesn't work, and pkg-config was found, then just force linking to static libraries
-	if(PETSC_WITH_EXTERNAL_LIB STREQUAL "" AND PKG_CONFIG_FOUND)
-		message(WARNING "Failed to extract PETSC_WITH_EXTERNAL_LIB from Makefile")
-		message(STATUS "2. Trying to find PETSc by linking to static libraries...")
-		pkg_search_module(PETSC REQUIRED IMPORTED_TARGET PETSc)
-		if(PETSC_FOUND)
-			# Remove the petsc library from the list of libraries to link to
-			# the ftn wrapper will automatically link to the correct petsc library
-			list(REMOVE_ITEM PETSC_STATIC_LDFLAGS "-lpetsc")
-			# Link to the petsc library static dependencies
-			target_link_libraries(HICAR  PUBLIC ${PETSC_STATIC_LDFLAGS})
-		else()
-			message(FATAL_ERROR "PETSc not found")
-		endif()
-	endif()
 endif()
+list(POP_BACK CMAKE_MESSAGE_INDENT)
 
 target_link_libraries(HICAR PUBLIC NetCDF::NetCDF)
 target_link_libraries(HICAR PUBLIC MPI::MPI_Fortran)
