@@ -91,9 +91,9 @@ function hicar_dependencies {
     sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
-    install_szip;;
-    install_hdf5;;
-    install_netcdf_fortran;;
+    install_szip
+    install_hdf5
+    install_netcdf_fortran
     sudo apt-get install petsc-dev
 
     # Installing HDF5 currently not working for NetCDF
