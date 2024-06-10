@@ -86,8 +86,8 @@ function install_netcdf_fortran {
 
 function hicar_dependencies {
     echo hicar_dependencies
-
     sudo apt-get update
+    sudo apt-get install git-all
     sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
