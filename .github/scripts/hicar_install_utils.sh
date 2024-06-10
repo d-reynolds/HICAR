@@ -43,7 +43,9 @@ function install_hdf5 {
     # CFLAGS=-DH5_USE_110_API make
     # (CFLAGS=-DH5_USE_110_API make | awk 'NR%100 == 0')
     export HDF5=$INSTALLDIR
-    export LD_LIBRARY_PATH=$INSTALLDIR/lib:$LD_LIBRARY_PATH}
+    export LD_LIBRARY_PATH=$INSTALLDIR/lib:$LD_LIBRARY_PATH
+    
+}
 
 function install_netcdf_c {
     echo install_netcdf_c
