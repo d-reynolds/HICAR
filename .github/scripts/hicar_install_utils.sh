@@ -40,11 +40,11 @@ function install_hdf5 {
     # FCFLAGS="-DH5_USE_110_API" ./configure --prefix=$INSTALLDIR &> config.log
     CC=mpicc ./configure --prefix=$INSTALLDIR --enable-parallel --with-zlib=$INSTALLDIR #&> config.log
     make -j 4
+    make install
     # CFLAGS=-DH5_USE_110_API make
     # (CFLAGS=-DH5_USE_110_API make | awk 'NR%100 == 0')
     export HDF5=$INSTALLDIR
     export LD_LIBRARY_PATH=$INSTALLDIR/lib:$LD_LIBRARY_PATH
-    
 }
 
 function install_netcdf_c {
