@@ -64,14 +64,17 @@ function install_netcdf_fortran {
     mkdir $INSNCDF
     cd $SRCNCDF
 
-    Git clone https://github.com/Unidata/netcdf-c.git
-    Git clone https://github.com/Unidata/netcdf-fortran.git
+    wget --no-check-certificate -q https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.9.2.tar.gz
+    wget --no-check-certificate -q https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.6.1.tar.gz
 
-    cd netcdf-c/
+    tar -xzf netcdf-c-4.9.2.tar.gz
+    tar -xzf netcdf-fortran-4.6.1.tar.gz
+
+    cd netcdf-c-4.9.2
     cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSNCDF}"
     make all check install
 
-    cd ../netcdf-fortran
+    cd ../netcdf-fortran-4.6.1
     export NCDIR=${INSNCDF}
     export NFDIR=${INSNCDF}
     export CPPFLAGS=$CPPFLAGS" -I${NCDIR}/include"
@@ -87,7 +90,6 @@ function install_netcdf_fortran {
 function hicar_dependencies {
     echo hicar_dependencies
     sudo apt-get update
-    sudo apt-get install git-all
     sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
