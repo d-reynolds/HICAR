@@ -58,15 +58,31 @@ function install_netcdf_c {
 }
 
 function install_netcdf_fortran {
-    echo install_netcdf_fortran
-    cd $WORKDIR
-    wget --no-check-certificate -q ftp://ftp.unidata.ucar.edu/pub/netcdf/netcdf-fortran-4.5.3.tar.gz
-    tar -xzf netcdf-fortran-4.5.3.tar.gz
-    cd netcdf-fortran-4.5.3
-    ./configure --prefix=$INSTALLDIR #&> config.log
-    make #&> make.log
-    make install
+    export SRCNCDF=${GITHUB_WORKSPACE}/srcNETCDF
+    export INSNCDF=${GITHUB_WORKSPACE}/NETCDF_INST
+    mkdir $SRCNCDF
+    mkdir $INSNCDF
+    cd $SRCNCDF
+
+    Git clone https://github.com/Unidata/netcdf-c.git
+    Git clone https://github.com/Unidata/netcdf-fortran.git
+
+    cd netcdf-c/
+    cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSNCDF}"
+    make all check install
+
+    cd ../netcdf-fortran
+    export NCDIR=${INSNCDF}
+    export NFDIR=${INSNCDF}
+    export CPPFLAGS=$CPPFLAGS" -I${NCDIR}/include"
+    export LDFLAGS=$LDFLAGS" -L${NCDIR}/lib"
+    export LD_LIBRARY_PATH=${NCDIR}/lib:${LD_LIBRARY_PATH}
+    cmake ./—prefix=${NFDIR}
+    make check
+    Make install
 }
+
+
 
 function hicar_dependencies {
     echo hicar_dependencies
@@ -75,10 +91,9 @@ function hicar_dependencies {
     sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
-    sudo apt-get install netcdf-bin
-    sudo apt-get install libnetcdff-dev
-    sudo apt-get install libnetcdf-mpi-dev
-    sudo apt-get install libhdf5-mpi-dev
+    install_szip;;
+    install_hdf5;;
+    install_netcdf_fortran;;
     sudo apt-get install petsc-dev
 
     # Installing HDF5 currently not working for NetCDF
