@@ -46,7 +46,7 @@ function install_zlib {
 function install_hdf5 {
     echo install_hdf5
     cd $WORKDIR
-    wget --no-check-certificate -q https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.14/hdf5-1.14.0/src/CMake-hdf5-1.14.0.tar.gz
+    wget --no-check-certificate -q https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.14/hdf5-1.14.0/src/hdf5-1.14.0.tar.gz
     tar -xzf hdf5-1.14.0.tar.gz
     cd hdf5-1.14.0
     # FCFLAGS="-DH5_USE_110_API" ./configure --prefix=$INSTALLDIR &> config.log
