@@ -215,9 +215,9 @@ elseif(MODE STREQUAL "release")
 	set(CMAKE_BUILD_TYPE Release)
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -fopenmp -lgomp -O2 -mfma -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
+		target_compile_options(HICAR PUBLIC -O2 -mfma -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
 	elseif (COMPILER STREQUAL "intel")
-		target_compile_options(HICAR PUBLIC -c -u -qopenmp -liomp5 -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
+		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
 		target_compile_options(HICAR PUBLIC -h noomp -hfp3 -O2 -c -eI)
 		set(LINK "-h noomp")
@@ -281,7 +281,7 @@ if(PKG_CONFIG_FOUND)
 
 	pkg_search_module(PETSC IMPORTED_TARGET PETSc)
 
-	if(PETSC_FOUND)
+	if(PETSC_FOUND AND NOT (DEFINED ENV{CRAYPE_VERSION} AND (PETSC MATCHES ".*cray.*")))
 		message(STATUS "PETSc found with pkg-config")
 		target_link_libraries(HICAR PUBLIC PkgConfig::PETSC)
 	elseif (EXISTS "${PETSC}/lib/petsc/conf/petscvariables")
