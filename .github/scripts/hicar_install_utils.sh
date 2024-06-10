@@ -46,9 +46,9 @@ function install_zlib {
 function install_hdf5 {
     echo install_hdf5
     cd $WORKDIR
-    wget --no-check-certificate -q https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-1.10.7/src/hdf5-1.10.7.tar.gz
-    tar -xzf hdf5-1.10.7.tar.gz
-    cd hdf5-1.10.7
+    wget --no-check-certificate -q https://github.com/HDFGroup/hdf5/releases/download/hdf5-1_14_2/hdf5-1_14_2.tar.gz
+    tar -xzf hdf5-1_14_2.tar.gz
+    cd hdf5-1_14_2
     # FCFLAGS="-DH5_USE_110_API" ./configure --prefix=$INSTALLDIR &> config.log
     CC=mpicc ./configure --prefix=$INSTALLDIR --enable-parallel --with-zlib=$INSTALLDIR #&> config.log
     make -j 4
@@ -107,9 +107,7 @@ function hicar_dependencies {
     sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
-    # install_zlib
-    # install_hdf5
-    sudo apt-get install libhdf5-mpi-dev
+    install_hdf5
     install_netcdf_fortran
     sudo apt-get install petsc-dev
 
