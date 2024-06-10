@@ -48,7 +48,7 @@ function install_hdf5 {
     cd $WORKDIR
     wget --no-check-certificate -q https://github.com/HDFGroup/hdf5/releases/download/hdf5-1_14_2/hdf5-1_14_2.tar.gz
     tar -xzf hdf5-1_14_2.tar.gz
-    cd hdf5-1_14_2
+    cd hdfsrc
     # FCFLAGS="-DH5_USE_110_API" ./configure --prefix=$INSTALLDIR &> config.log
     CC=mpicc ./configure --prefix=$INSTALLDIR --enable-parallel --with-zlib=$INSTALLDIR #&> config.log
     make -j 4
