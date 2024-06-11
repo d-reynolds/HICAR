@@ -90,7 +90,7 @@ function install_netcdf_fortran {
     export LDFLAGS=-L$INSTALLDIR/lib
     export CC=mpicc
     export LIBS=-ldl
-    ./configure --prefix=${INSTALLDIR} --disable-shared --enable-parallel-tests
+    ./configure --prefix=${INSTALLDIR} --enable-shared --enable-parallel-tests
     # cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSTALLDIR}"
     make -j 4
     make install
@@ -99,8 +99,8 @@ function install_netcdf_fortran {
     export NETCDF=$INSTALLDIR
 
     cd ../netcdf-fortran-4.6.1
-    export CPPFLAGS=$CPPFLAGS" -I${INSTALLDIR}/include"
-    export LDFLAGS=$LDFLAGS" -L${INSTALLDIR}/lib"
+    export CPPFLAGS=-I${INSTALLDIR}/include
+    export LDFLAGS=-L${INSTALLDIR}/lib
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     ./configure --prefix=${INSTALLDIR}
     make check
