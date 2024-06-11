@@ -90,7 +90,7 @@ function install_netcdf_fortran {
     export LDFLAGS=-L$INSTALLDIR/lib
     export CC=mpicc
     export LIBS=-ldl
-    ./configure --prefix=${INSTALLDIR} --enable-shared --enable-parallel-tests
+    ./configure --prefix=${INSTALLDIR} --disable-shared --enable-parallel-tests
     # cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSTALLDIR}"
     make -j 4
     make install
@@ -148,6 +148,9 @@ function hicar_install {
     cd ${GITHUB_WORKSPACE}
     mkdir build
     cd build
+    export NETCDF_DIR=${INSTALLDIR}
+    export FFTW_DIR=/usr
+    export PETSC_DIR=/usr
     cmake ../ -DFSM=OFF
     make ${JN}
     make install
@@ -192,7 +195,7 @@ function execute_test_run {
     cd ${GITHUB_WORKSPACE}/Model_runs/HICAR/input
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     echo "Starting HICAR run"
-    ${GITHUB_WORKSPACE}/bin/HICAR HICAR_Test_Case.nml
+    mpiexec -n 2 ${GITHUB_WORKSPACE}/bin/HICAR HICAR_Test_Case.nml
     time_dim=$(ncdump -v ../output/*.nc | grep "time = UNLIMITED" | sed 's/[^0-9]*//g')
 
     if [[ ${time_dim} == "1" ]]; then
