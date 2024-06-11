@@ -73,6 +73,15 @@ function install_netcdf_c {
     make #&> make.log
     make install
 }
+function install_petsc {
+    wget --no-check-certificate -q https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.21.2.tar.gz
+    tar -xzf petsc-3.21.2.tar.gz
+    cd petsc-3.21.2/
+    ./configure --prefix=$INSTALLDIR #&> config.log
+    make -j 4
+    make install
+}
+
 
 function install_netcdf_fortran {
     export SRCNCDF=${GITHUB_WORKSPACE}/srcNETCDF
@@ -102,7 +111,8 @@ function install_netcdf_fortran {
     export CPPFLAGS=-I${INSTALLDIR}/include
     export LDFLAGS=-L${INSTALLDIR}/lib
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
-    ./configure --prefix=${INSTALLDIR}
+    export LIBS=$(nc-config --libs)
+    ./configure --prefix=${INSTALLDIR} --disable-shared
     make -j 4
     make install
     #make check install
@@ -116,11 +126,12 @@ function hicar_dependencies {
     sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
+    sudo apt-get install petsc-dev
+
     install_zlib
     install_hdf5
     #sudo apt-get install libhdf5-openmpi-dev
     install_netcdf_fortran
-    sudo apt-get install petsc-dev
 
     # Installing HDF5 currently not working for NetCDF
     # sudo apt-get install libhdf5-dev libhdf5-openmpi-dev
@@ -150,7 +161,7 @@ function hicar_install {
     cd build
     export NETCDF_DIR=${INSTALLDIR}
     export FFTW_DIR=/usr
-    export PETSC_DIR=/usr
+    export PETSC_DIR=/usr #${INSTALLDIR}
     cmake ../ -DFSM=OFF
     make ${JN}
     make install
