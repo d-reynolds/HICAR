@@ -103,8 +103,9 @@ function install_netcdf_fortran {
     export LDFLAGS=-L${INSTALLDIR}/lib
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     ./configure --prefix=${INSTALLDIR}
-    make check
-    Make install
+    make -j 4
+    make install
+    #make check install
 }
 
 
@@ -184,14 +185,14 @@ function hicar_script {
 function gen_test_run_data {
     cd ${GITHUB_WORKSPACE}/helpers
     mkdir ${GITHUB_WORKSPACE}/Model_runs/
-    echo "y y" | ./gen_HICAR_dir.sh ${GITHUB_WORKSPACE}/Model_runs/ ${GITHUB_WORKSPACE}
-    }
+    printf 'y\ny\n' | ./gen_HICAR_dir.sh ${GITHUB_WORKSPACE}/Model_runs/ ${GITHUB_WORKSPACE}
+}
 
 function execute_test_run {
-    cd ${GITHUB_WORKSPACE}/Model_runs/input
-
+    cd ${GITHUB_WORKSPACE}/Model_runs/HICAR/input
+    export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     echo "Starting HICAR run"
-    ./bin/HICAR HICAR_Test_Case.nml
+    ${GITHUB_WORKSPACE}/bin/HICAR HICAR_Test_Case.nml
     time_dim=$(ncdump -v ../output/*.nc | grep "time = UNLIMITED" | sed 's/[^0-9]*//g')
 
     if [[ ${time_dim} == "1" ]]; then

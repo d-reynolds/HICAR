@@ -260,7 +260,7 @@ find_package(PkgConfig REQUIRED)
 # 5. Enforce requirement, check that package was found/installed
 
 # 6. Link to the package libraries
-
+set (NETCDF_F90 "YES")
 find_package(MPI REQUIRED)
 find_package(FFTW REQUIRED)
 find_package(NetCDF REQUIRED)
@@ -336,7 +336,7 @@ if(PKG_CONFIG_FOUND)
 endif()
 list(POP_BACK CMAKE_MESSAGE_INDENT)
 
-target_link_libraries(HICAR PUBLIC NetCDF::NetCDF)
+target_link_libraries(HICAR PUBLIC ${NETCDF_LIBRARIES})
 target_link_libraries(HICAR PUBLIC MPI::MPI_Fortran)
 target_link_libraries(HICAR PUBLIC ${FFTW_LIBRARIES})
 
@@ -348,6 +348,9 @@ if (FSM)
 endif()
 
 target_include_directories(HICAR PUBLIC ${MPI_INCLUDE_DIR})
+target_include_directories(HICAR PUBLIC ${FFTW_INCLUDES})
+target_include_directories(HICAR PUBLIC ${NETCDF_INCLUDES})
+
 # Add the include directory to the compiler flags
 target_include_directories(HICAR PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
