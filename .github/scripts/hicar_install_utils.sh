@@ -90,10 +90,11 @@ function install_netcdf_fortran {
     export LDFLAGS=-L$INSTALLDIR/lib
     export CC=mpicc
     export LIBS=-ldl
-    ./configure --disable-shared --enable-parallel-tests
+    ./configure --disable-shared --enable-parallel-tests -—prefix=${INSTALLDIR}
     # cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSTALLDIR}"
-    make all check install
-
+    make -j 4
+    make install
+    #make all check install
     export PATH=$INSTALLDIR/bin:$PATH
     export NETCDF=$INSTALLDIR
 
@@ -114,8 +115,9 @@ function hicar_dependencies {
     sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
-    install_zlib
-    install_hdf5
+    #install_zlib
+    #install_hdf5
+    sudo apt-get install libhdf5-openmpi-dev
     install_netcdf_fortran
     sudo apt-get install petsc-dev
 
