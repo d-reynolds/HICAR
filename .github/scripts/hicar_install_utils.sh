@@ -52,8 +52,8 @@ function install_hdf5 {
     # FCFLAGS="-DH5_USE_110_API" ./configure --prefix=$INSTALLDIR &> config.log
     export CPPFLAGS=-I$INSTALLDIR/include 
     export LDFLAGS=-L$INSTALLDIR/lib
-
-    CC=mpicc ./configure --prefix=$INSTALLDIR --enable-parallel --with-zlib=$INSTALLDIR #&> config.log
+    export CC=mpicc
+    ./configure --prefix=$INSTALLDIR --enable-parallel --with-zlib=$INSTALLDIR #&> config.log
     make -j 4
     make install
     # CFLAGS=-DH5_USE_110_API make
@@ -84,9 +84,7 @@ function install_petsc {
 
 
 function install_netcdf_fortran {
-    export SRCNCDF=${GITHUB_WORKSPACE}/srcNETCDF
-    mkdir $SRCNCDF
-    cd $SRCNCDF
+    cd $WORKDIR
 
     wget --no-check-certificate -q https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.9.2.tar.gz
     wget --no-check-certificate -q https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.6.1.tar.gz
@@ -162,18 +160,12 @@ function hicar_install {
     export NETCDF_DIR=${INSTALLDIR}
     export FFTW_DIR=/usr
     export PETSC_DIR=/usr #${INSTALLDIR}
+    export PATH=${INSTALLDIR}/bin:$PATH
+    export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     cmake ../ -DFSM=OFF
     make ${JN}
     make install
     
-    export NETCDF=${INSTALLDIR}
-    #export FFTW=/usr
-    #export JN=-j4
-
-    
-    # test build
-    # make -C src clean; VERBOSE=1 make -C src ${JN} MODE=debugslow
-
     echo "hicar install succeeded"
 
 }
@@ -206,7 +198,7 @@ function execute_test_run {
     cd ${GITHUB_WORKSPACE}/Model_runs/HICAR/input
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     echo "Starting HICAR run"
-    mpiexec -n 2 ${GITHUB_WORKSPACE}/bin/HICAR HICAR_Test_Case.nml
+    mpirun -np 2 ${GITHUB_WORKSPACE}/bin/HICAR HICAR_Test_Case.nml
     time_dim=$(ncdump -v ../output/*.nc | grep "time = UNLIMITED" | sed 's/[^0-9]*//g')
 
     if [[ ${time_dim} == "1" ]]; then
