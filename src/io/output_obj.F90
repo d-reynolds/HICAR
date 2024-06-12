@@ -393,7 +393,7 @@ contains
         integer :: err
         
         ! open file
-        err = nf90_open(filename, NF90_WRITE, this%active_nc_id, &
+        err = nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), this%active_nc_id, &
                 comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL)
         if (err /= NF90_NOERR) then
             call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id, &

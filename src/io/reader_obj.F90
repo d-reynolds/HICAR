@@ -86,7 +86,7 @@ contains
 
         !See if we must open the file
         if (this%ncfile_id < 0) then
-            call check_ncdf( nf90_open(this%file_list(this%curfile), NF90_NOWRITE, this%ncfile_id, &
+            call check_ncdf( nf90_open(this%file_list(this%curfile), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id, &
                     comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL), " Opening file "//trim(this%file_list(this%curfile)))
         endif
         
