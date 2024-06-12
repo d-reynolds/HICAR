@@ -140,6 +140,15 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,n_w_2d,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
+        write(*,*) 'n_w_3d ', n_w_3d
+        write(*,*) 'n_w_2d ', n_w_2d
+        write(*,*) 'n_r ', n_r
+        write(*,*) 'nx_w ', nx_w
+        write(*,*) 'ny_w ', ny_w
+        write(*,*) 'nz_w ', nz_w
+        write(*,*) 'nx_r ', nx_r
+        write(*,*) 'ny_r ', ny_r
+        write(*,*) 'nz_r ', nz_r
         ! +1 added to handle variables on staggered grids
         win_size = n_w_3d*nx_w*nz_w*ny_w
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_3d)

@@ -336,9 +336,11 @@ if(PKG_CONFIG_FOUND)
 endif()
 list(POP_BACK CMAKE_MESSAGE_INDENT)
 
-target_link_libraries(HICAR PUBLIC ${NETCDF_LIBRARIES})
+target_link_libraries(HICAR PUBLIC ${NETCDF_LIBRARIES_F90})
 target_link_libraries(HICAR PUBLIC MPI::MPI_Fortran)
 target_link_libraries(HICAR PUBLIC ${FFTW_LIBRARIES})
+execute_process(COMMAND nf-config --flibs OUTPUT_VARIABLE NETCDF_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+target_link_libraries(HICAR PUBLIC ${NETCDF_FLAGS})
 
 
 if (FSM)

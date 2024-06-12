@@ -121,6 +121,7 @@ contains
         this%nx_r = maxval(this%ierc-this%isrc+1)+1
         this%nz_r = maxval(this%kerc-this%ksrc+1)
         this%ny_r = maxval(this%jerc-this%jsrc+1)+1
+        write(*,*) 'I am a server'
 
        ! Setup MPI windows for inter-process communication        
         call MPI_Allreduce(MPI_IN_PLACE,this%nx_w,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
