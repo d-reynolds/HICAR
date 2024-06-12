@@ -249,14 +249,19 @@ contains
             !If the user wants to use the restart file later, this is necesarry 
             !For writing to the output file again
             
-            call check_ncdf(nf90_close(this%out_ncfile_id), "Closing output file ")
-            this%out_ncfile_id = -1
+            !call check_ncdf(nf90_close(this%out_ncfile_id), "Closing output file ")
+            !this%out_ncfile_id = -1
 
             call save_rst_file(this, time, par_comms, rst_var_indices)   
             this%restart_counter = 1
         endif
         this%restart_counter = this%restart_counter+ 1
         this%output_counter  = this%output_counter + 1
+
+        if (this%out_ncfile_id > 0) then
+            call check_ncdf(nf90_close(this%out_ncfile_id), "Closing output file ")
+            this%out_ncfile_id = -1
+        endif
 
     end subroutine
     

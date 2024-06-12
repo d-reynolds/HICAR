@@ -45,19 +45,6 @@ contains
         this%i_s_w = domain%its; this%i_e_w = domain%ite
         this%k_s_w = domain%kts; this%k_e_w = domain%kte+1
         this%j_s_w = domain%jts; this%j_e_w = domain%jte
-        write(*,*) "this%i_s_w ", this%i_s_w
-        write(*,*) "this%i_e_w ", this%i_e_w
-        write(*,*) "this%j_s_w ", this%j_s_w
-        write(*,*) "this%j_e_w ", this%j_e_w
-        write(*,*) "this%k_s_w ", this%k_s_w
-        write(*,*) "this%k_e_w ", this%k_e_w
-        write(*,*) "this%i_s_r ", this%i_s_r
-        write(*,*) "this%i_e_r ", this%i_e_r
-        write(*,*) "this%j_s_r ", this%j_s_r
-        write(*,*) "this%j_e_r ", this%j_e_r
-        write(*,*) "this%k_s_r ", this%k_s_r
-        write(*,*) "this%k_e_r ", this%k_e_r
-
         this%ide = domain%ide; this%kde = domain%kde; this%jde = domain%jde
 
         if (domain%ims == domain%ids) this%i_s_w = domain%ids
@@ -153,15 +140,6 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,n_w_2d,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
-        write(*,*) 'n_w_3d ', n_w_3d
-        write(*,*) 'n_w_2d ', n_w_2d
-        write(*,*) 'n_r ', n_r
-        write(*,*) 'nx_w ', nx_w
-        write(*,*) 'ny_w ', ny_w
-        write(*,*) 'nz_w ', nz_w
-        write(*,*) 'nx_r ', nx_r
-        write(*,*) 'ny_r ', ny_r
-        write(*,*) 'nz_r ', nz_r
         ! +1 added to handle variables on staggered grids
         win_size = n_w_3d*nx_w*nz_w*ny_w
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_3d)

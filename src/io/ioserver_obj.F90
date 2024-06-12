@@ -121,19 +121,6 @@ contains
         this%nx_r = maxval(this%ierc-this%isrc+1)+1
         this%nz_r = maxval(this%kerc-this%ksrc+1)
         this%ny_r = maxval(this%jerc-this%jsrc+1)+1
-        write(*,*) 'I am a server'
-        write(*,*) 'this%iewc ', this%iewc
-        write(*,*) 'this%iswc ', this%iswc
-        write(*,*) 'this%kewc ', this%kewc
-        write(*,*) 'this%kswc ', this%kswc
-        write(*,*) 'this%jewc ', this%jewc
-        write(*,*) 'this%jswc ', this%jswc
-        write(*,*) 'this%ierc ', this%ierc
-        write(*,*) 'this%isrc ', this%isrc
-        write(*,*) 'this%kerc ', this%kerc
-        write(*,*) 'this%ksrc ', this%ksrc
-        write(*,*) 'this%jerc ', this%jerc
-        write(*,*) 'this%jsrc ', this%jsrc
 
        ! Setup MPI windows for inter-process communication        
         call MPI_Allreduce(MPI_IN_PLACE,this%nx_w,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
@@ -181,7 +168,7 @@ contains
             call MPI_Type_create_subarray(3, [this%n_w_2d, (this%i_e_w-this%i_s_w+2), (this%j_e_w-this%j_s_w+2)], &
                 [this%n_w_2d, (this%iewc(i)-this%iswc(i)+2), (this%jewc(i)-this%jswc(i)+2)], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%get_types_2d(i))
-            
+
             call MPI_Type_create_subarray(4, [this%n_r, (this%i_e_r-this%i_s_r+1), (this%k_e_r-this%k_s_r+1), (this%j_e_r-this%j_s_r+1)], &
                 [this%n_r, (this%ierc(i)-this%isrc(i)+1), (this%kerc(i)-this%ksrc(i)+1), (this%jerc(i)-this%jsrc(i)+1)], &
                 [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%put_types(i))
@@ -307,21 +294,25 @@ contains
         this%parent_write_buffer_3d = kEMPT_BUFF
         this%parent_write_buffer_2d = kEMPT_BUFF
 
-            ! Do MPI_Win_Start on write_win to initiate get
+        ! Do MPI_Win_Start on write_win to initiate get
         call MPI_Win_Start(this%children_group,0,this%write_win_3d)
         call MPI_Win_Start(this%children_group,0,this%write_win_2d)
 
         ! Loop through child images and send chunks of buffer array to each one
         do i=1,this%n_children
-            call MPI_Get(this%parent_write_buffer_3d(:,this%iswc(i),:,this%jswc(i)), msg_size, &
+            call MPI_Get(this%parent_write_buffer_3d(1,this%iswc(i),1,this%jswc(i)), msg_size, &
                 this%get_types_3d(i), this%children_ranks(i), disp, msg_size, this%child_get_types_3d(i), this%write_win_3d)
 
-            call MPI_Get(this%parent_write_buffer_2d(:,this%iswc(i),this%jswc(i)), msg_size, &
+            call MPI_Get(this%parent_write_buffer_2d(1,this%iswc(i),this%jswc(i)), msg_size, &
                 this%get_types_2d(i), this%children_ranks(i), disp, msg_size, this%child_get_types_2d(i), this%write_win_2d)
         enddo
-            ! Do MPI_Win_Complete on write_win to end get
+        ! Do MPI_Win_Complete on write_win to end get
         call MPI_Win_Complete(this%write_win_3d)
         call MPI_Win_Complete(this%write_win_2d)
+
+        if (ALL(this%parent_write_buffer_3d==kEMPT_BUFF) .or. ALL(this%parent_write_buffer_2d==kEMPT_BUFF))then
+            stop 'Error, all of write buffer used for output was still set to empty buffer flag at time of writing.'
+        endif
 
         call this%outputer%save_out_file(time,this%IO_comms,this%out_var_indices,this%rst_var_indices)        
 
@@ -349,7 +340,7 @@ contains
 
         ! Loop through child images and send chunks of buffer array to each one
         do i=1,this%n_children
-            call MPI_Put(parent_read_buffer(:,this%isrc(i),:,this%jsrc(i)), msg_size, &
+            call MPI_Put(parent_read_buffer(1,this%isrc(i),1,this%jsrc(i)), msg_size, &
                 this%put_types(i), this%children_ranks(i), disp, msg_size, this%child_put_types(i), this%read_win)
         enddo
         ! Do MPI_Win_Complete on read_win to end put
@@ -427,10 +418,10 @@ contains
         ! Loop through child images and send chunks of buffer array to each one
         do i=1,this%n_children
             !Note that the MPI datatypes here are reversed since we are working with the write window
-            call MPI_Put(this%parent_write_buffer_3d(:,this%iswc(i),:,this%jswc(i)), msg_size, &
+            call MPI_Put(this%parent_write_buffer_3d(1,this%iswc(i),1,this%jswc(i)), msg_size, &
                 this%get_types_3d(i), this%children_ranks(i), disp, msg_size, this%child_get_types_3d(i), this%write_win_3d)
 
-            call MPI_Put(this%parent_write_buffer_2d(:,this%iswc(i),this%jswc(i)), msg_size, &
+            call MPI_Put(this%parent_write_buffer_2d(1,this%iswc(i),this%jswc(i)), msg_size, &
                 this%get_types_2d(i), this%children_ranks(i), disp, msg_size, this%child_get_types_2d(i), this%write_win_2d)
         enddo
         call MPI_Win_fence(0,this%write_win_3d)
