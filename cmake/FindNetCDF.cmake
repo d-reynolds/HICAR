@@ -30,10 +30,22 @@ if (NETCDF_INCLUDES AND NETCDF_LIBRARIES)
   set (NETCDF_FIND_QUIETLY TRUE)
 endif (NETCDF_INCLUDES AND NETCDF_LIBRARIES)
 
+#First try to find includes at exactly the path specified by NETCDF_DIR
 find_path (NETCDF_INCLUDES netcdf.h
-  HINTS NETCDF_DIR ENV NETCDF_DIR)
+  HINTS "${NETCDF_DIR}/include" ENV "${NETCDF_DIR}/include" NO_DEFAULT_PATH)
+#...if that didn't work, then search more generally
+if (NOT NETCDF_INCLUDES)
+  find_path (NETCDF_INCLUDES netcdf.h
+    HINTS NETCDF_DIR ENV NETCDF_DIR)
+endif()
 
-find_library (NETCDF_LIBRARIES_C       NAMES netcdf)
+#First try to find libs at exactly the path specified by NETCDF_DIR
+find_library (NETCDF_LIBRARIES_C       NAMES netcdf HINTS "${NETCDF_DIR}/lib" NO_DEFAULT_PATH)
+#...if that didn't work, then search more generally
+if (NOT NETCDF_LIBRARIES_C)
+  find_library (NETCDF_LIBRARIES_C       NAMES netcdf)
+endif()
+
 mark_as_advanced(NETCDF_LIBRARIES_C)
 
 set (NetCDF_has_interfaces "YES") # will be set to NO if we're missing any interfaces

@@ -336,11 +336,20 @@ if(PKG_CONFIG_FOUND)
 endif()
 list(POP_BACK CMAKE_MESSAGE_INDENT)
 
-target_link_libraries(HICAR PUBLIC ${NETCDF_LIBRARIES_F90})
 target_link_libraries(HICAR PUBLIC MPI::MPI_Fortran)
 target_link_libraries(HICAR PUBLIC ${FFTW_LIBRARIES})
-execute_process(COMMAND nf-config --flibs OUTPUT_VARIABLE NETCDF_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
-target_link_libraries(HICAR PUBLIC ${NETCDF_FLAGS})
+
+if (NETCDF_FOUND)
+	#This is the most robust way to find the NetCDF flags -- covering both custom installs, static or shared, and cray PEs
+	execute_process(COMMAND nf-config --flibs OUTPUT_VARIABLE NETCDF_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+	#if the nf-config method worked...
+	if(${NETCDF_FLAGS} MATCHES "-lnetcdff")
+		target_link_libraries(HICAR PUBLIC ${NETCDF_FLAGS})
+	else()
+	#else hope that the library flags as found by find_package are enough (should be as long as netCDF is a shared library)
+		target_link_libraries(HICAR PUBLIC ${NETCDF_LIBRARIES})
+	endif()
+endif()
 
 
 if (FSM)

@@ -28,8 +28,3 @@ jobs:
         run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
       - name: Execute Test Run
         run: bash .github/scripts/hicar_install_utils.sh execute_test_run
-      - name: Debug Build
-        uses: stateful/vscode-server-action@v1
-        if: failure()
-        with:
-          timeout: '300000'       # optional, default: 30000

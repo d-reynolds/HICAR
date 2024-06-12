@@ -3,7 +3,7 @@
 set -e
 set -x
 
-export FC=gfortran-9
+#export FC=gfortran-9
 # see link for size of runner
 # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
 export JN=-j4
@@ -63,14 +63,33 @@ function install_hdf5 {
     export LD_LIBRARY_PATH=$INSTALLDIR/lib:$LD_LIBRARY_PATH
 }
 
+function install_pnetcdf {
+    echo install_PnetCDF
+    cd $WORKDIR
+    wget --no-check-certificate -q https://parallel-netcdf.github.io/Release/pnetcdf-1.13.0.tar.gz
+    tar -xzf pnetcdf-1.13.0.tar.gz
+    cd pnetcdf-1.13.0
+    export CPPFLAGS=-I$INSTALLDIR/include 
+    export LDFLAGS=-L$INSTALLDIR/lib
+    ./configure --prefix=${INSTALLDIR}
+    # cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSTALLDIR}"
+    make -j 4
+    make install
+}
+
 function install_netcdf_c {
     echo install_netcdf_c
     cd $WORKDIR
-    wget --no-check-certificate -q ftp://ftp.unidata.ucar.edu/pub/netcdf/netcdf-c-4.8.0.tar.gz
-    tar -xzf netcdf-c-4.8.0.tar.gz
-    cd netcdf-c-4.8.0
-    ./configure --prefix=$INSTALLDIR #&> config.log
-    make #&> make.log
+    wget --no-check-certificate -q https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.9.2.tar.gz
+    tar -xzf v4.9.2.tar.gz
+    cd netcdf-c-4.9.2
+    export CPPFLAGS=-I$INSTALLDIR/include 
+    export LDFLAGS=-L$INSTALLDIR/lib
+    export CC=mpicc
+    export LIBS=-ldl
+    ./configure --prefix=${INSTALLDIR} --disable-shared --enable-pnetcdf --enable-parallel-tests
+    # cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSTALLDIR}"
+    make -j 4
     make install
 }
 function install_petsc {
@@ -86,31 +105,18 @@ function install_petsc {
 function install_netcdf_fortran {
     cd $WORKDIR
 
-    wget --no-check-certificate -q https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.9.2.tar.gz
     wget --no-check-certificate -q https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.6.1.tar.gz
 
-    tar -xzf v4.9.2.tar.gz
     tar -xzf v4.6.1.tar.gz
 
-    cd netcdf-c-4.9.2
+    cd netcdf-fortran-4.6.1
     export CPPFLAGS=-I$INSTALLDIR/include 
     export LDFLAGS=-L$INSTALLDIR/lib
-    export CC=mpicc
-    export LIBS=-ldl
-    ./configure --prefix=${INSTALLDIR} --disable-shared --enable-parallel-tests
-    # cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSTALLDIR}"
-    make -j 4
-    make install
-    #make all check install
     export PATH=$INSTALLDIR/bin:$PATH
-    export NETCDF=$INSTALLDIR
 
-    cd ../netcdf-fortran-4.6.1
-    export CPPFLAGS=-I${INSTALLDIR}/include
-    export LDFLAGS=-L${INSTALLDIR}/lib
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     export LIBS=$(nc-config --libs)
-    ./configure --prefix=${INSTALLDIR} --disable-shared
+    CC=mpicc FC=mpif90 F77=mpif77 ./configure --prefix=${INSTALLDIR} --disable-shared
     make -j 4
     make install
     #make check install
@@ -125,10 +131,11 @@ function hicar_dependencies {
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
     sudo apt-get install petsc-dev
-
+    #sudo apt-get install libhdf5-openmpi-dev
     install_zlib
     install_hdf5
-    #sudo apt-get install libhdf5-openmpi-dev
+    install_pnetcdf
+    install_netcdf_c
     install_netcdf_fortran
 
     # Installing HDF5 currently not working for NetCDF
