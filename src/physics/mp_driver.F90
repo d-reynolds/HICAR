@@ -685,6 +685,8 @@ contains
         integer ::ims,ime,jms,jme,kms,kme
         integer ::its,ite,jts,jte,kts,kte, nx,ny,nz
 
+        if(options%physics%microphysics==0) return
+        
         ids = domain%grid%ids;   ims = domain%grid%ims;   its = domain%grid%its
         ide = domain%grid%ide;   ime = domain%grid%ime;   ite = domain%grid%ite
         nx  = domain%grid%nx

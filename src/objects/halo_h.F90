@@ -13,7 +13,7 @@ module halo_interface
 
     type halo_t
 
-        integer           :: halo_size
+        integer           :: halo_size, n_2d, n_3d
 
         type(grid_t)      :: grid
 
