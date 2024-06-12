@@ -122,6 +122,18 @@ contains
         this%nz_r = maxval(this%kerc-this%ksrc+1)
         this%ny_r = maxval(this%jerc-this%jsrc+1)+1
         write(*,*) 'I am a server'
+        write(*,*) 'this%iewc ', this%iewc
+        write(*,*) 'this%iswc ', this%iswc
+        write(*,*) 'this%kewc ', this%kewc
+        write(*,*) 'this%kswc ', this%kswc
+        write(*,*) 'this%jewc ', this%jewc
+        write(*,*) 'this%jswc ', this%jswc
+        write(*,*) 'this%ierc ', this%ierc
+        write(*,*) 'this%isrc ', this%isrc
+        write(*,*) 'this%kerc ', this%kerc
+        write(*,*) 'this%ksrc ', this%ksrc
+        write(*,*) 'this%jerc ', this%jerc
+        write(*,*) 'this%jsrc ', this%jsrc
 
        ! Setup MPI windows for inter-process communication        
         call MPI_Allreduce(MPI_IN_PLACE,this%nx_w,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
@@ -197,7 +209,8 @@ contains
 
     subroutine init_with_clients(this)
         class(ioserver_t),   intent(inout)  :: this
-        integer :: n, comm_size, ierr
+        integer :: n, comm_size, ierr, i
+        integer, allocatable, dimension(:) :: cnts, disps
                         
         type(MPI_Group) :: family_group
 
@@ -221,18 +234,27 @@ contains
         allocate(this%jsrc(this%n_children))
         allocate(this%jerc(this%n_children))
 
-        call MPI_Gather(n, 0, MPI_INTEGER, this%iswc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
-        call MPI_Gather(n, 0, MPI_INTEGER, this%iewc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
-        call MPI_Gather(n, 0, MPI_INTEGER, this%kswc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
-        call MPI_Gather(n, 0, MPI_INTEGER, this%kewc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
-        call MPI_Gather(n, 0, MPI_INTEGER, this%jswc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
-        call MPI_Gather(n, 0, MPI_INTEGER, this%jewc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
-        call MPI_Gather(n, 0, MPI_INTEGER, this%isrc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
-        call MPI_Gather(n, 0, MPI_INTEGER, this%ierc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
-        call MPI_Gather(n, 0, MPI_INTEGER, this%ksrc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
-        call MPI_Gather(n, 0, MPI_INTEGER, this%kerc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
-        call MPI_Gather(n, 0, MPI_INTEGER, this%jsrc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
-        call MPI_Gather(n, 0, MPI_INTEGER, this%jerc, 1, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        allocate(cnts(this%n_children+1))
+        allocate(disps(this%n_children+1))
+
+        cnts = 1
+        cnts(this%n_children+1) = 0
+
+        disps = (/(i, i=0,this%n_children, 1)/)
+        disps(this%n_children+1) = disps(this%n_children+1)-1
+
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%iswc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%iewc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%kswc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%kewc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jswc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jewc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%isrc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%ierc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%ksrc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%kerc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jsrc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jerc, cnts, disps, MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%client_comms)
 
         this%ide = 0
         this%kde = 0

@@ -45,6 +45,19 @@ contains
         this%i_s_w = domain%its; this%i_e_w = domain%ite
         this%k_s_w = domain%kts; this%k_e_w = domain%kte+1
         this%j_s_w = domain%jts; this%j_e_w = domain%jte
+        write(*,*) "this%i_s_w ", this%i_s_w
+        write(*,*) "this%i_e_w ", this%i_e_w
+        write(*,*) "this%j_s_w ", this%j_s_w
+        write(*,*) "this%j_e_w ", this%j_e_w
+        write(*,*) "this%k_s_w ", this%k_s_w
+        write(*,*) "this%k_e_w ", this%k_e_w
+        write(*,*) "this%i_s_r ", this%i_s_r
+        write(*,*) "this%i_e_r ", this%i_e_r
+        write(*,*) "this%j_s_r ", this%j_s_r
+        write(*,*) "this%j_e_r ", this%j_e_r
+        write(*,*) "this%k_s_r ", this%k_s_r
+        write(*,*) "this%k_e_r ", this%k_e_r
+
         this%ide = domain%ide; this%kde = domain%kde; this%jde = domain%jde
 
         if (domain%ims == domain%ids) this%i_s_w = domain%ids
@@ -74,29 +87,29 @@ contains
 
         integer :: ierr
 
-        call MPI_Gather(this%i_s_w, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%i_s_w, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
-        call MPI_Gather(this%i_e_w, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%i_e_w, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
-        call MPI_Gather(this%k_s_w, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%k_s_w, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
-        call MPI_Gather(this%k_e_w, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%k_e_w, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
-        call MPI_Gather(this%j_s_w, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%j_s_w, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
-        call MPI_Gather(this%j_e_w, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%j_e_w, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
-        call MPI_Gather(this%i_s_r, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%i_s_r, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
-        call MPI_Gather(this%i_e_r, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%i_e_r, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
-        call MPI_Gather(this%k_s_r, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%k_s_r, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
-        call MPI_Gather(this%k_e_r, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%k_e_r, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
-        call MPI_Gather(this%j_s_r, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%j_s_r, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
-        call MPI_Gather(this%j_e_r, 1, MPI_INTEGER, 0, 0, &
+        call MPI_Gatherv(this%j_e_r, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
 
         call MPI_Allreduce(MPI_IN_PLACE,this%ide,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
