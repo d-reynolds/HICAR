@@ -7,6 +7,18 @@ HICAR is a variant of the Intermediate Complexity Atmospheric Research (ICAR) mo
 
 More information about the model features enabling this can be found in Reynolds et al., 2023.
 
+## Getting Started
+
+To start working with the model, follow the instructions under docs/compiling to compile the model. 
+
+Once the model has been compiled, a working directory file structure, supporting files, and test case can be setup and downloaded with the following script:
+
+```bash
+./helpers/gen_HICAR_dir.sh /path/to/working/directory /path/to/HICAR/repo
+```
+
+This script will prompt you about which files you would like to install.
+
 #### Compilation Requirements
 While being fast to run compared to traditional weather models, HICAR has still been developed and intended for use on High Performance Computing (HPC) machines, although it can also be run on a local machine. HICAR thus uses a few package requirements which are common to HPC environments. They are:
 
@@ -57,7 +69,7 @@ For an outline of the basic code structure see the [ICAR code overview](docs/ica
 For reference working with the model code and git, see the [ICAR and Git workflow](docs/howto/icar_and_git_howto.md).
 
 
-####Generating Static Data
+#### Generating Static Data
 
 HICAR relies on pre-computed static data to speed up some of it’s online calculations. To generate a HICAR domain file, an existing netCDF file with lat, lon, DEM, and landuse categories is needed. The lat and lon variables must be named **lat** and **lon**, and the terrain variable must be named **topo**. Additionally, a larger extent DEM of the same resolution is needed to generate parameters for terrain-shading of radiation. I.e., if you have a 50m resolution domain, a larger DEM with an extent ~20km beyond the boundaries of the target domain is also needed.
 

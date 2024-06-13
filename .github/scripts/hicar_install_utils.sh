@@ -3,7 +3,6 @@
 set -e
 set -x
 
-#export FC=gfortran-9
 # see link for size of runner
 # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
 export JN=-j4
@@ -63,7 +62,7 @@ function install_hdf5 {
     export LD_LIBRARY_PATH=$INSTALLDIR/lib:$LD_LIBRARY_PATH
 }
 
-function install_pnetcdf {
+function install_PnetCDF {
     echo install_PnetCDF
     cd $WORKDIR
     wget --no-check-certificate -q https://parallel-netcdf.github.io/Release/pnetcdf-1.13.0.tar.gz
@@ -88,7 +87,6 @@ function install_netcdf_c {
     export CC=mpicc
     export LIBS=-ldl
     ./configure --prefix=${INSTALLDIR} --disable-shared --enable-pnetcdf --enable-parallel-tests
-    # cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSTALLDIR}"
     make -j 4
     make install
 }
@@ -119,9 +117,7 @@ function install_netcdf_fortran {
     CC=mpicc FC=mpif90 F77=mpif77 ./configure --prefix=${INSTALLDIR} --disable-shared
     make -j 4
     make install
-    #make check install
 }
-
 
 
 function hicar_dependencies {
@@ -131,28 +127,12 @@ function hicar_dependencies {
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
     sudo apt-get install petsc-dev
-    #sudo apt-get install libhdf5-openmpi-dev
+
     install_zlib
     install_hdf5
-    install_pnetcdf
+    install_PnetCDF
     install_netcdf_c
     install_netcdf_fortran
-
-    # Installing HDF5 currently not working for NetCDF
-    # sudo apt-get install libhdf5-dev libhdf5-openmpi-dev
-
-    # export CPPFLAGS="$CPPFLAGS -I${INSTALLDIR}/include"
-    # export LDFLAGS="$LDFLAGS -L${INSTALLDIR}/lib"
-
-    # # Install szip (used by hdf5)
-    # install_szip
-    # # Install HDF5
-    # install_hdf5
-
-    # # Install NetCDF-C
-    # install_netcdf_c
-    # # Install NetCDF fortran
-    # install_netcdf_fortran
 
     # put installed bin directory in PATH
     export PATH=${INSTALLDIR}/bin:$PATH
@@ -177,24 +157,6 @@ function hicar_install {
 
 }
 
-function hicar_script {
-
-    cd ${GITHUB_WORKSPACE}
-    cd ./src
-
-    cp ../run/complete_icar_options.nml ./icar_options.nml
-    export OMP_NUM_THREADS=2
-
-    mpiexec -n 4 ./icar
-    # for i in *_test; do
-    #     echo $i
-    #     ./${i}
-    # done
-
-    echo "hicar script succeeded"
-    cd ..
-}
-
 function gen_test_run_data {
     cd ${GITHUB_WORKSPACE}/helpers
     mkdir ${GITHUB_WORKSPACE}/Model_runs/
@@ -206,6 +168,7 @@ function execute_test_run {
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     echo "Starting HICAR run"
     mpirun -np 2 ${GITHUB_WORKSPACE}/bin/HICAR HICAR_Test_Case.nml
+
     time_dim=$(ncdump -v ../output/*.nc | grep "time = UNLIMITED" | sed 's/[^0-9]*//g')
 
     if [[ ${time_dim} == "1" ]]; then
@@ -217,16 +180,6 @@ function execute_test_run {
     fi
 }
 
-function icar_after_success {
-  echo icar_after_success
-  echo "icar build succeeded"
-}
-
-function icar_after_failure {
-  echo icar_after_failure
-  echo "icar build failed"
-}
-
 for func in "$@"
 do
     case $func in
@@ -234,12 +187,20 @@ do
             hicar_dependencies;;
         hicar_install)
             hicar_install;;
-	hicar_script)
-	    hicar_script;;
-	gen_test_run_data)
-	    gen_test_run_data;;
-	execute_test_run)
-	    execute_test_run;;
+        gen_test_run_data)
+            gen_test_run_data;;
+        install_zlib)
+            install_zlib;;
+        install_hdf5)
+            install_hdf5;;
+        install_PnetCDF)
+            install_PnetCDF;;
+        install_netcdf_c)
+            install_netcdf_c;;
+        install_netcdf_fortran)
+            install_netcdf_fortran;;
+        execute_test_run)
+            execute_test_run;;
         *)
             echo "$func unknown"
     esac
