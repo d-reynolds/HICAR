@@ -44,8 +44,8 @@ contains
         jte = domain%jte
         
         !set order of advection
-        horder = options%adv_options%h_order
-        vorder = options%adv_options%v_order
+        horder = options%adv%h_order
+        vorder = options%adv%v_order
         
         !Define bounds of advection computation. If using monotonic flux-limiter, it is necesarry to increase
         !advection bounds by 1. The necesarry extension of the halo is handeled in domain_object
@@ -54,7 +54,7 @@ contains
         j_s = jts
         j_e = jte
         
-        if (options%adv_options%flux_corr==kFLUXCOR_MONO) then
+        if (options%adv%flux_corr==kFLUXCOR_MONO) then
             i_s = its - 1
             i_e = ite + 1
             j_s = jts - 1
@@ -591,7 +591,7 @@ contains
         
         dx = domain%dx
         
-        if (options%parameters%advect_density) then
+        if (options%adv%advect_density) then
             do i = ims,ime
                 do j = jms,jme
                     do k = kms,kme
@@ -658,7 +658,7 @@ contains
         endif
 
         do i=kms,kme
-            domain%advection_dz(:,i,:) = options%parameters%dz_levels(i)
+            domain%advection_dz(:,i,:) = options%domain%dz_levels(i)
         enddo
 
     end subroutine setup_advection_dz

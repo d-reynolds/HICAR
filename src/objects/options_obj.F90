@@ -38,7 +38,6 @@ contains
     !> -------------------------------
     !! Initialize an options object
     !!
-    !! Allocated coarray options types, reads namelists on image 1, and distributes data to all images
     !!
     !! -------------------------------
     module subroutine init(this)
@@ -53,36 +52,40 @@ contains
         options_filename = get_options_file()
         if (STD_OUT_PE) write(*,*) "Using options file = ", trim(options_filename)
 
-        call version_check(         options_filename,   this%parameters)
-        call parameters_namelist(   options_filename,   this%parameters)
+        call version_check(         options_filename,   this%general)
+        call general_namelist(      options_filename,   this%general)
+        call domain_namelist(       options_filename,   this%domain)
+        call forcing_namelist(      options_filename,   this%forcing)
+
         call physics_namelist(      options_filename,   this)
-        call var_namelist(          options_filename,   this%parameters)
-        call model_levels_namelist( options_filename,   this%parameters)
-
         call time_parameters_namelist(         options_filename,   this)
-        call lt_parameters_namelist(    this%parameters%lt_options_filename,    this)
-        call mp_parameters_namelist(    this%parameters%mp_options_filename,    this)
-        call adv_parameters_namelist(   this%parameters%adv_options_filename,   this)
-        call lsm_parameters_namelist(   this%parameters%lsm_options_filename,   this)
-        call cu_parameters_namelist(    this%parameters%cu_options_filename,    this)
-        call rad_parameters_namelist(   this%parameters%rad_options_filename,   this)
-        call pbl_parameters_namelist(   this%parameters%pbl_options_filename,   this)
-        call sfc_parameters_namelist(   this%parameters%sfc_options_filename,   this)
+        call lt_parameters_namelist(    this%general%lt_options_filename,    this)
+        call mp_parameters_namelist(    this%general%mp_options_filename,    this)
+        call adv_parameters_namelist(   this%general%adv_options_filename,   this)
+        call lsm_parameters_namelist(   this%general%lsm_options_filename,   this)
+        call cu_parameters_namelist(    this%general%cu_options_filename,    this)
+        call rad_parameters_namelist(   this%general%rad_options_filename,   this)
+        call pbl_parameters_namelist(   this%general%pbl_options_filename,   this)
+        call sfc_parameters_namelist(   this%general%sfc_options_filename,   this)
         
-        call io_namelist(           options_filename,   this)
         call wind_namelist(         options_filename,   this)
+        call output_namelist(       options_filename,   this)
+        call restart_namelist(      options_filename,   this)
 
-        if (this%parameters%phys_suite /= '') call set_phys_suite(this)
+        if (this%general%phys_suite /= '') call set_phys_suite(this)
         
-        if (this%parameters%restart) this%parameters%start_time = this%io_options%restart_time
-
-        call filename_namelist(options_filename, this%parameters)
+        if (this%restart%restart) this%general%start_time = this%restart%restart_time
 
         call collect_var_requests(this)
 
         ! check for any inconsistencies in the options requested
         call options_check(this)
 
+        if (is_namelist_check()) then
+
+            if (STD_OUT_PE) write(*,*) 'Namelist options check complete.'
+            stop
+        endif
     end subroutine init
 
     subroutine collect_var_requests(options)
@@ -334,6 +337,29 @@ contains
         endif
     end function
 
+    !> ----------------------------------------------------------------------------
+    !!  See if the user has provided the command line flag '--test-nml', in which case we
+    !!  stop the program after initializing the namelist
+    !!
+    !> ----------------------------------------------------------------------------
+
+    function is_namelist_check() result(is_check)
+        implicit none
+
+        logical :: is_check
+        character(len=MAXFILELENGTH) :: flag_2
+        integer :: error
+
+        is_check = .False.
+        ! if a second commandline argument was supplied, see if it is '--test-nml'
+        if (command_argument_count()>1) then
+            ! read the commandline argument
+            call get_command_argument(2, flag_2, status=error)
+
+            if (trim(flag_2) == '--test-nml' .and. error==0) is_check = .True.
+        endif
+
+    end function
 
 
     !> -------------------------------
@@ -345,12 +371,12 @@ contains
     !! -------------------------------
     subroutine version_check(filename,options)
         character(len=*),            intent(in)     :: filename
-        type(parameter_options_type),intent(inout)  :: options
+        type(general_options_type),intent(inout)  :: options
 
         character(len=MAXVARLENGTH) :: version, comment, phys_suite
         integer                     :: name_unit
 
-        namelist /model_version/ version, comment, phys_suite
+        namelist /general/ version, comment, phys_suite
 
 
         !default comment:
@@ -358,7 +384,7 @@ contains
         phys_suite = ''
         ! read namelists
         open(io_newunit(name_unit), file=filename)
-        read(name_unit,nml=model_version)
+        read(name_unit,nml=general)
         close(name_unit)
 
         if (version.ne.kVERSION_STRING) then
@@ -388,98 +414,63 @@ contains
         type(options_t), intent(inout)::options
         integer :: i
 
-        if (options%parameters%t_offset.eq.(-9999)) then
-            ! if (options%parameters%warning_level>0) then
-            !     if (STD_OUT_PE) write(*,*) "WARNING, WARNING, WARNING"
-            !     if (STD_OUT_PE) write(*,*) "WARNING, Using default t_offset=0"
-            !     if (STD_OUT_PE) write(*,*) "WARNING, WARNING, WARNING"
-            ! endif
-            options%parameters%t_offset = 0
-        endif
-
         if (STD_OUT_PE) then
-            if (options%io_options%frames_per_outfile<2) then
-                print*,"Frames per output file should be 2 or more. Currently: ", options%io_options%frames_per_outfile
+            if (options%output%frames_per_outfile<2) then
+                print*,"Frames per output file should be 2 or more. Currently: ", options%output%frames_per_outfile
             else
-                print*,"Frames per output file= ", options%io_options%frames_per_outfile
+                print*,"Frames per output file= ", options%output%frames_per_outfile
             end if
         endif
 
         !clean output var list
-        do i=1, size(options%io_options%vars_for_output)
-            if ((options%io_options%vars_for_output(i)+options%vars_for_restart(i) > 0) .and. (options%vars_to_allocate(i) <= 0)) then
+        do i=1, size(options%output%vars_for_output)
+            if ((options%output%vars_for_output(i)+options%vars_for_restart(i) > 0) .and. (options%vars_to_allocate(i) <= 0)) then
                 !if (STD_OUT_PE) write(*,*) 'variable ',trim(get_varname(options%vars_to_allocate(i))),' requested for output/restart, but was not allocated by one of the modules'
-                if (options%io_options%vars_for_output(i) > 0) options%io_options%vars_for_output(i) = 0
+                if (options%output%vars_for_output(i) > 0) options%output%vars_for_output(i) = 0
                 if (options%vars_for_restart(i) > 0) options%vars_for_restart(i) = 0
 
             endif
         enddo
 
         ! convection can modify wind field, and ideal doesn't rebalance winds every timestep
-        if ((options%physics%convection.ne.0).and.(options%parameters%ideal)) then
-            if (options%parameters%warning_level>3) then
-                if (STD_OUT_PE) write(*,*) ""
-                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
-                if (STD_OUT_PE) write(*,*) "WARNING, Running convection in ideal mode may be bad..."
-                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
-            endif
-            if (options%parameters%warning_level==10) then
-                if (STD_OUT_PE) write(*,*) "Set warning_level<10 to continue"
-                stop
-            endif
+        if ((options%physics%convection.ne.0).and.(options%general%ideal)) then
+            if (STD_OUT_PE) write(*,*) ""
+            if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
+            if (STD_OUT_PE) write(*,*) "WARNING, Running convection in ideal mode may be bad..."
+            if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
         endif
 
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
         if ((options%physics%landsurface>1).and.(options%physics%boundarylayer==0)) then
-            if (options%parameters%warning_level>2) then
-                if (STD_OUT_PE) write(*,*) ""
-                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
-                if (STD_OUT_PE) write(*,*) "WARNING, Running LSM without PBL may overheat the surface and CRASH the model. "
-                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
-            endif
-            if (options%parameters%warning_level>=7) then
-                if (STD_OUT_PE) write(*,*) "Set warning_level<7 to continue"
-                stop
-            endif
+            if (STD_OUT_PE) write(*,*) ""
+            if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
+            if (STD_OUT_PE) write(*,*) "WARNING, Running LSM without PBL may overheat the surface and CRASH the model. "
+            if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
         endif
         ! if using perscribed LSM fluxes, no feedbacks are present, so the surface layer is likely to overheat.
         if ((options%physics%landsurface==1).and.(options%physics%boundarylayer==0)) then
-            if (options%parameters%warning_level>0) then
-                if (STD_OUT_PE) write(*,*) ""
-                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
-                if (STD_OUT_PE) write(*,*) "WARNING, Prescribed LSM fluxes without a PBL may overheat the surface and CRASH. "
-                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
-            endif
-            if (options%parameters%warning_level>=5) then
-                if (STD_OUT_PE) write(*,*) "Set warning_level<5 to continue"
-                stop
-            endif
+            if (STD_OUT_PE) write(*,*) ""
+            if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
+            if (STD_OUT_PE) write(*,*) "WARNING, Prescribed LSM fluxes without a PBL may overheat the surface and CRASH. "
+            if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
         endif
 
         ! prior to v 0.9.3 this was assumed, so throw a warning now just in case.
-        if ((options%parameters%z_is_geopotential .eqv. .False.).and. &
-            (options%parameters%zvar=="PH")) then
-            if (options%parameters%warning_level>1) then
-                if (STD_OUT_PE) write(*,*) ""
-                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
-                if (STD_OUT_PE) write(*,*) "WARNING z variable is not assumed to be geopotential height when it is 'PH'."
-                if (STD_OUT_PE) write(*,*) "WARNING If z is geopotential, set z_is_geopotential=True in the namelist."
-                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
-            endif
-            if (options%parameters%warning_level>=7) then
-                if (STD_OUT_PE) write(*,*) "Set warning_level<7 to continue"
-                stop
-            endif
+        if ((options%forcing%z_is_geopotential .eqv. .False.).and. &
+            (options%forcing%zvar=="PH")) then
+            if (STD_OUT_PE) write(*,*) ""
+            if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
+            if (STD_OUT_PE) write(*,*) "WARNING z variable is not assumed to be geopotential height when it is 'PH'."
+            if (STD_OUT_PE) write(*,*) "WARNING If z is geopotential, set z_is_geopotential=True in the namelist."
+            if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
         endif
-        if ((options%parameters%z_is_geopotential .eqv. .True.).and. &
-            (options%parameters%z_is_on_interface .eqv. .False.)) then
-            if (options%parameters%warning_level>1) then
-                if (STD_OUT_PE) write(*,*) ""
-                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
-                if (STD_OUT_PE) write(*,*) "WARNING geopotential height is no longer assumed to be on model interface levels."
-                if (STD_OUT_PE) write(*,*) "WARNING To interpolate geopotential, set z_is_on_interface=True in the namelist. "
-                if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
-            endif
+        if ((options%forcing%z_is_geopotential .eqv. .True.).and. &
+            (options%forcing%z_is_on_interface .eqv. .False.)) then
+            if (STD_OUT_PE) write(*,*) ""
+            if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
+            if (STD_OUT_PE) write(*,*) "WARNING geopotential height is no longer assumed to be on model interface levels."
+            if (STD_OUT_PE) write(*,*) "WARNING To interpolate geopotential, set z_is_on_interface=True in the namelist. "
+            if (STD_OUT_PE) write(*,*) "WARNING WARNING WARNING"
         endif
         
         !! MJ added
@@ -491,11 +482,11 @@ contains
             stop
         endif
         
-        if (options%time_options%RK3) then
-            if (max(options%adv_options%h_order,options%adv_options%v_order)==5) then
-                options%time_options%cfl_reduction_factor = min(1.4,options%time_options%cfl_reduction_factor)
-            elseif (max(options%adv_options%h_order,options%adv_options%v_order)==3) then
-                options%time_options%cfl_reduction_factor = min(1.6,options%time_options%cfl_reduction_factor)
+        if (options%time%RK3) then
+            if (max(options%adv%h_order,options%adv%v_order)==5) then
+                options%time%cfl_reduction_factor = min(1.4,options%time%cfl_reduction_factor)
+            elseif (max(options%adv%h_order,options%adv%v_order)==3) then
+                options%time%cfl_reduction_factor = min(1.6,options%time%cfl_reduction_factor)
             endif
         endif
         
@@ -511,13 +502,32 @@ contains
         
         
         if (options%physics%landsurface>0) then
-            options%sfc_options%isfflx = 1
-            options%sfc_options%scm_force_flux = 1
+            options%sfc%isfflx = 1
+            options%sfc%scm_force_flux = 1
         endif
         
         if (options%physics%snowmodel>0) then
-            options%lsm_options%nmp_opt_snf = 4
+            options%lsm%nmp_opt_snf = 4
         endif
+
+
+        ! Check if supporting files exist, if they are needed by physics modules
+        if (options%physics%landsurface==kLSM_NOAHMP) then
+            if (STD_OUT_PE) write(*,*) '  NoahMP LSM turned on, checking for supporting files...'
+            call check_file_exists('GENPARM.TBL', message='GENPARM.TBL file does not exist. This should be in the same directory as the namelist.')
+            call check_file_exists('MPTABLE.TBL', message='MPTABLE.TBL file does not exist. This should be in the same directory as the namelist.')
+            call check_file_exists('SOILPARM.TBL', message='SOILPARM.TBL file does not exist. This should be in the same directory as the namelist.')
+            call check_file_exists('VEGPARM.TBL', message='VEGPARM.TBL file does not exist. This should be in the same directory as the namelist.')
+        endif
+        if (options%physics%radiation==kRA_RRTMG) then
+            if (STD_OUT_PE) write(*,*) '  RRTMG radiation turned on, checking for supporting files...'
+            call check_file_exists('rrtmg_support/forrefo_1.nc', message='At least one of the RRTMG supporting files does not exist. These files should be in a folder "rrtmg_support" placed in the same directory as the namelist.')
+        endif
+        if (options%physics%microphysics==kMP_ISHMAEL) then
+            if (STD_OUT_PE) write(*,*) '  ISHMAEL microphysics turned on, checking for supporting files...'
+            call check_file_exists('mp_support/ishmael_gamma_tab.nc', message='At least one of the ISHMAEL supporting files does not exist. These files should be in a folder "mp_support" placed in the same directory as the namelist.')
+        endif
+
     end subroutine options_check
 
 
@@ -632,97 +642,95 @@ contains
     !> -------------------------------
     !! Initialize the variable names to be written to standard output
     !!
-    !! Reads the io_list namelist
+    !! Reads the output_list namelist
     !!
     !! -------------------------------
-    subroutine io_namelist(filename, options)
+    subroutine output_namelist(filename, options)
         implicit none
         character(len=*),             intent(in)    :: filename
         type(options_t),              intent(inout) :: options
 
         integer :: name_unit, i, j, status, frames_per_outfile
-        real    :: outputinterval, restartinterval, inputinterval
+        real    :: outputinterval
+        logical :: file_exists
 
         ! Local variables
-        character(len=kMAX_FILE_LENGTH) :: output_file, restart_out_file, restart_in_file
+        character(len=kMAX_FILE_LENGTH) :: output_file
         character(len=kMAX_NAME_LENGTH) :: names(kMAX_STORAGE_VARS)
-        character (len=MAXFILELENGTH) :: output_file_frequency
         
-        integer :: restart_step                         ! time step relative to the start of the restart file
-        integer :: restart_date(6)                      ! date to restart
-        type(Time_type) :: restart_time, time_at_step   ! restart date as a modified julian day        
-        real :: input_steps_per_day                     ! number of input time steps per day (for calculating restart_time)
 
-        namelist /io_list/ names, outputinterval, restartinterval, inputinterval, frames_per_outfile, &
-                               output_file, restart_out_file, restart_in_file, output_file_frequency, restart_step, restart_date
-
-        restart_date=[-999,-999,-999,-999,-999,-999]
-        restart_step=-999
+        namelist /output_list/ names, outputinterval, frames_per_outfile, output_file
 
         output_file         = "icar_out_"
-        restart_out_file    = "icar_rst_"
-        restart_in_file     = "icar_rst_"
-        restart_step        = 1
         
         names(:)            = ""
-        inputinterval       =  3600
         outputinterval      =  3600
-        output_file_frequency = ""
         frames_per_outfile  =  24
-        restartinterval     =  24 ! in units of outputintervals
 
         open(io_newunit(name_unit), file=filename)
-        read(name_unit, nml=io_list)
+        read(name_unit, nml=output_list)
         close(name_unit)
 
         do j=1, kMAX_STORAGE_VARS
             if (trim(names(j)) /= "") then
                 do i=1, kMAX_STORAGE_VARS
                     if (trim(get_varname(i)) == trim(names(j))) then
-                        call add_to_varlist(options%io_options%vars_for_output, [i])
+                        call add_to_varlist(options%output%vars_for_output, [i])
                     endif
                 enddo
             endif
-        enddo
+        enddo        
 
-        if (trim(output_file_frequency) /= "") then
-            options%io_options%output_file_frequency = output_file_frequency
-        else
-            ! if outputing at half-day or longer intervals, create monthly files
-            if (outputinterval>=43200) then
-                options%io_options%output_file_frequency="monthly"
-            ! if outputing at half-hour or longer intervals, create daily files
-            else if (outputinterval>=1800) then
-                options%io_options%output_file_frequency="daily"
-            ! otherwise create a new output file every timestep
-            else
-                options%io_options%output_file_frequency="every step"
-            endif
-        endif
+        call options%output%output_dt%set(seconds=outputinterval)
+        options%output%frames_per_outfile = frames_per_outfile
+        options%output%output_file = output_file
+
+    end subroutine output_namelist
+
+    !> -------------------------------
+    !! Initialize the variable names to be written to standard output
+    !!
+    !! Reads the restart_list namelist
+    !!
+    !! -------------------------------
+    subroutine restart_namelist(filename, options)
+        implicit none
+        character(len=*),             intent(in)    :: filename
+        type(options_t),              intent(inout) :: options
+
+        integer :: name_unit
+        real    :: restartinterval
+        logical :: file_exists, restart
+
+        ! Local variables
+        character(len=kMAX_FILE_LENGTH) :: restart_out_file, restart_in_file
         
+        integer :: restart_step                         ! time step relative to the start of the restart file
+        integer :: restart_date(6)                      ! date to restart
+        type(Time_type) :: restart_time, time_at_step   ! restart date as a modified julian day        
 
-        options%io_options%in_dt      = inputinterval
-        call options%io_options%input_dt%set(seconds=inputinterval)
+        namelist /output_list/  restartinterval, restart_out_file, restart_in_file, restart_date, restart
 
-        options%io_options%out_dt     = outputinterval
-        call options%io_options%output_dt%set(seconds=outputinterval)
+        restart_date=[-999,-999,-999,-999,-999,-999]
 
-        options%io_options%rst_dt = outputinterval * restartinterval
-        call options%io_options%restart_dt%set(seconds=options%io_options%rst_dt)
+        restart_out_file    = "icar_rst_"
+        restart_in_file     = "icar_rst_"
+        restart_step        = 1
+        restart             = .False.
 
-        !if (restartinterval>0) then
-        options%io_options%restart_count = restartinterval
-        !else
-        !    options%io_options%restart_count = max(24, nint(restartinterval))
-        !endif
-        
-        options%io_options%frames_per_outfile = frames_per_outfile
+        restartinterval     =  24 ! in units of outputintervals
 
-        options%io_options%output_file = output_file
-        options%io_options%restart_out_file = restart_out_file
+        open(io_newunit(name_unit), file=filename)
+        read(name_unit, nml=output_list)
+        close(name_unit)
+    
+
+        options%restart%restart_count = restartinterval
+        options%restart%restart_out_file = restart_out_file
+        options%restart%restart         = restart
 
         !If the user did not ask for a restart run, leave the function now
-        if (.not.(options%parameters%restart)) return
+        if (.not.(options%restart%restart)) return
         
         if (minval(restart_date)<0) then
             if (STD_OUT_PE) write(*,*) "------ Invalid restart_date ERROR ------"
@@ -730,19 +738,21 @@ contains
         endif
 
         ! calculate the modified julian day for th restart date given
-        call restart_time%init(options%parameters%calendar)
+        call restart_time%init(options%general%calendar)
         call restart_time%set(restart_date(1), restart_date(2), restart_date(3), &
                               restart_date(4), restart_date(5), restart_date(6))
                               
-        write(options%io_options%restart_in_file, '(A,A,".nc")')    &
+        write(options%restart%restart_in_file, '(A,A,".nc")')    &
                 trim(restart_in_file),   &
                 trim(restart_time%as_string('(I4,"-",I0.2,"-",I0.2,"_",I0.2,"-",I0.2,"-",I0.2)'))
 
+        call check_file_exists(options%restart%restart_in_file, message='Restart file does not exist.')
+
         ! find the time step that most closely matches the requested restart time (<=)
-        restart_step = find_timestep_in_file(options%io_options%restart_in_file, 'time', restart_time, time_at_step)
+        restart_step = find_timestep_in_file(options%restart%restart_in_file, 'time', restart_time, time_at_step)
 
         ! check to see if we actually udpated the restart date and print if in a more verbose mode
-        if (options%parameters%debug) then
+        if (options%general%debug) then
             if (restart_time /= time_at_step) then
                 if (STD_OUT_PE) write(*,*) " updated restart date: ", trim(time_at_step%as_string())
             endif
@@ -751,23 +761,23 @@ contains
         restart_time = time_at_step
 
         ! save the parameters in the master options structure
-        options%io_options%restart_step_in_file = restart_step
-        options%io_options%restart_date         = restart_date
-        options%io_options%restart_time         = restart_time
+        options%restart%restart_step_in_file = restart_step
+        options%restart%restart_date         = restart_date
+        options%restart%restart_time         = restart_time
 
 
-        if (options%parameters%debug) then
+        if (options%general%debug) then
             if (STD_OUT_PE) write(*,*) " ------------------ "
             if (STD_OUT_PE) write(*,*) "RESTART INFORMATION"
-            if (STD_OUT_PE) write(*,*) "mjd",         options%io_options%restart_time%mjd()
-            if (STD_OUT_PE) write(*,*) "date:",       trim(options%io_options%restart_time%as_string())
-            if (STD_OUT_PE) write(*,*) "date",        options%io_options%restart_date
-            if (STD_OUT_PE) write(*,*) "file:",   trim(options%io_options%restart_in_file)
-            if (STD_OUT_PE) write(*,*) "forcing step",options%io_options%restart_step_in_file
+            if (STD_OUT_PE) write(*,*) "mjd",         options%restart%restart_time%mjd()
+            if (STD_OUT_PE) write(*,*) "date:",       trim(options%restart%restart_time%as_string())
+            if (STD_OUT_PE) write(*,*) "date",        options%restart%restart_date
+            if (STD_OUT_PE) write(*,*) "file:",   trim(options%restart%restart_in_file)
+            if (STD_OUT_PE) write(*,*) "forcing step",options%restart%restart_step_in_file
             if (STD_OUT_PE) write(*,*) " ------------------ "
         endif
 
-    end subroutine io_namelist
+    end subroutine restart_namelist
 
     !> -------------------------------
     !! Initialize the variable names to be read
@@ -775,34 +785,47 @@ contains
     !! Reads the var_list namelist
     !!
     !! -------------------------------
-    subroutine var_namelist(filename,options)
+    subroutine forcing_namelist(filename,options)
         implicit none
         character(len=*),             intent(in)    :: filename
-        type(parameter_options_type), intent(inout) :: options
-        integer :: name_unit, i, j
-        character(len=MAXVARLENGTH) :: landvar,lakedepthvar,latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar,zvar,zbvar,  &
-                                        hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
+        type(forcing_options_type), intent(inout) :: options
+        integer :: name_unit, i, j, nfiles
+        logical :: compute_p
+        logical :: limit_rh, z_is_geopotential, z_is_on_interface,&
+                   time_varying_z, t_is_potential, qv_is_spec_humidity, &
+                   qv_is_relative_humidity
+        real    :: t_offset, inputinterval
+
+        character(len=MAXFILELENGTH) :: forcing_file_list
+        character(len=MAXFILELENGTH), allocatable :: boundary_files(:)
+
+        character(len=MAXVARLENGTH) :: latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar,zvar,zbvar,  &
                                         pvar,pbvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,            &
                                         qncvar,qnivar,qnrvar,qngvar,qnsvar,hgtvar,shvar,lhvar,pblhvar,  &
                                         i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
-                                        psvar, pslvar, snowh_var, &
-                                        soiltype_var, soil_t_var,soil_vwc_var,swe_var, soil_deept_var,           &
-                                        vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var, linear_mask_var, nsq_calibration_var,  &
-                                        swdown_var, lwdown_var, sst_var, rain_var, time_var, sinalpha_var, cosalpha_var
+                                        psvar, pslvar, swdown_var, lwdown_var, sst_var, time_var
 
-
-        character(len=MAXVARLENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, factor_p_var  !!MJ added
-
-        namelist /var_list/ pvar,pbvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,qncvar,qnivar,qnrvar,qngvar,qnsvar,&
+        namelist /forcing_list/ forcing_file_list, inputinterval, t_offset, limit_rh, z_is_geopotential, z_is_on_interface, time_varying_z, &
+                            t_is_potential, qv_is_relative_humidity, qv_is_spec_humidity, &
+                            pvar,pbvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,qncvar,qnivar,qnrvar,qngvar,qnsvar,&
                             i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
                             hgtvar,shvar,lhvar,pblhvar,   &
-                            landvar,lakedepthvar,latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar,zvar,zbvar, &
-                            psvar, pslvar, snowh_var, &
-                            hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
-                            soiltype_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
-                            vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var, linear_mask_var, nsq_calibration_var,  &
-                            swdown_var, lwdown_var, sst_var, rain_var, time_var, sinalpha_var, cosalpha_var, &
-                            svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, factor_p_var !! MJ added
+                            latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar,zvar,zbvar, &
+                            psvar, pslvar, swdown_var, lwdown_var, sst_var, time_var
+
+        ! Default values for forcing options
+        allocate(boundary_files(MAX_NUMBER_FILES))
+        forcing_file_list="MISSING"
+                    
+        t_offset            = 0
+        inputinterval       = 3600
+        limit_rh            = .False.      
+        t_is_potential      = .True.
+        qv_is_spec_humidity = .False.
+        qv_is_relative_humidity=.False.
+        z_is_geopotential   = .False.
+        z_is_on_interface   = .False.
+        time_varying_z      = .False.
 
         ! no default values supplied for variable names
         hgtvar=""
@@ -853,57 +876,46 @@ contains
         lwdown_var=""
         sst_var=""
         pblhvar=""
-        hgt_hi=""
-        landvar=""
-        lakedepthvar=""
-        lat_hi=""
-        lon_hi=""
-        ulat_hi=""
-        ulon_hi=""
-        vlat_hi=""
-        vlon_hi=""
-        soiltype_var=""
-        soil_t_var=""
-        soil_vwc_var=""
-        swe_var=""
-        snowh_var=""
-        soil_deept_var=""
-        vegtype_var=""
-        vegfrac_var=""
-        vegfracmax_var=""
-        albedo_var=""
-        lai_var=""
-        canwat_var=""
-        linear_mask_var=""
-        nsq_calibration_var=""
-        rain_var=""
-        sinalpha_var=""
-        cosalpha_var=""
-        shd_var = ""
-
-        !! MJ added
-        svf_var = ""
-        hlm_var = ""
-        slope_var = ""
-        slope_angle_var = ""
-        aspect_angle_var = ""
-        factor_p_var = ""
-
 
         open(io_newunit(name_unit), file=filename)
-        read(name_unit,nml=var_list)
+        read(name_unit,nml=forcing_list)
         close(name_unit)
 
         call require_var(lonvar, "Longitude")
         call require_var(latvar, "Latitude")
-        call require_var(lat_hi, "High-res Lat")
-        call require_var(lon_hi, "High-res Lon")
-        call require_var(hgt_hi, "High-res HGT")
+        call require_var(uvar, "U winds")
+        call require_var(vvar, "V winds")
+        call require_var(tvar, "Temperature")
+        call require_var(qvvar, "Water Vapor Mixing Ratio")
         call require_var(time_var, "Time")
 
-        options%compute_p = .False.
-        if ((pvar=="") .and. ((pslvar/="") .or. (psvar/=""))) options%compute_p = .True.
-        if (options%compute_p) then
+        call check_file_exists(forcing_file_list, message="Forcing file list does not exist.")
+
+        nfiles = read_forcing_file_names(forcing_file_list, boundary_files)
+
+        if (nfiles==0) then
+            stop "No boundary conditions files specified."
+        endif
+
+        allocate(options%boundary_files(nfiles))
+        options%boundary_files(1:nfiles) = boundary_files(1:nfiles)
+        deallocate(boundary_files)
+
+        options%t_offset=t_offset
+        options%limit_rh=limit_rh
+
+        options%qv_is_relative_humidity = qv_is_relative_humidity
+        options%qv_is_spec_humidity= qv_is_spec_humidity
+        options%t_is_potential   = t_is_potential
+        options%z_is_geopotential= z_is_geopotential
+        options%z_is_on_interface= z_is_on_interface
+        options%time_varying_z= time_varying_z
+
+        call options%input_dt%set(seconds=inputinterval)
+
+        compute_p = .False.
+        if ((pvar=="") .and. ((pslvar/="") .or. (psvar/=""))) compute_p = .True.
+        if (compute_p) then
             if ((pslvar == "").and.(hgtvar == "")) then
                 write(*,*) "ERROR: if surface pressure is used to compute air pressure, then surface height must be specified"
                 error stop
@@ -918,7 +930,6 @@ contains
                 error stop
             endif
         endif
-
 
         options%vars_to_read(:) = ""
         i=1
@@ -945,7 +956,7 @@ contains
         ! Primary model variable names
         options%wvar        = wvar      ; options%vars_to_read(i) = wvar;       options%dim_list(i) = 3;    i = i + 1
         options%pbvar       = pbvar     ; options%vars_to_read(i) = pbvar;      options%dim_list(i) = 3;    i = i + 1
-        if (options%compute_p) then
+        if (compute_p) then
             pvar = "air_pressure_computed"
             options%pvar        = pvar  ; options%vars_to_read(i) = pvar;       options%dim_list(i) = -3;   i = i + 1
         else
@@ -1001,7 +1012,275 @@ contains
 
         ! Sea surface temperature
         options%sst_var     = sst_var   ; options%vars_to_read(i) = sst_var;    options%dim_list(i) = 2;    i = i + 1
-        options%rain_var    = rain_var  ; options%vars_to_read(i) = rain_var;   options%dim_list(i) = 2;    i = i + 1
+
+    end subroutine forcing_namelist
+
+
+    !> -------------------------------
+    !! Initialize the main parameter options
+    !!
+    !! Reads parameters for the ICAR simulation
+    !! These include setting flags that request other namelists be read
+    !!
+    !! -------------------------------
+    subroutine general_namelist(filename,options)
+        implicit none
+        character(len=*),             intent(in)    :: filename
+        type(general_options_type), intent(inout) :: options
+
+        integer :: name_unit
+
+        ! parameters to read
+        logical :: ideal, interactive, debug, &
+                   use_mp_options, use_lt_options, use_adv_options, use_lsm_options, &
+                   use_cu_options, use_rad_options, use_pbl_options, use_sfc_options
+
+        character(len=MAXFILELENGTH) :: calendar, start_date, end_date
+
+        character(len=MAXFILELENGTH) :: mp_options_filename, lt_options_filename, &
+                                        adv_options_filename, lsm_options_filename, &
+                                        cu_options_filename, rad_options_filename, pbl_options_filename, sfc_options_filename
+
+
+        namelist /general/    ideal, debug, interactive, calendar,          &
+                              start_date, end_date,         &
+                              mp_options_filename,      use_mp_options,     &
+                              lt_options_filename,      use_lt_options,     &
+                              lsm_options_filename,     use_lsm_options,    &
+                              adv_options_filename,     use_adv_options,    &
+                              cu_options_filename,      use_cu_options,     &
+                              rad_options_filename,     use_rad_options,    &
+                              sfc_options_filename,     use_sfc_options,    &
+                              pbl_options_filename,     use_pbl_options
+
+        !default parameters
+        ideal               = .False.
+        debug               = .False.
+        interactive         = .False.
+        calendar            = "gregorian"
+        start_date          = ""
+        end_date            = ""
+        
+        ! flag set to read specific parameterization options
+        use_mp_options=.False.
+        mp_options_filename = filename
+
+        use_lt_options=.False.
+        lt_options_filename = filename
+
+        use_adv_options=.False.
+        adv_options_filename = filename
+
+        use_cu_options=.False.
+        cu_options_filename = filename
+
+        use_lsm_options=.False.
+        lsm_options_filename = filename
+
+        use_rad_options=.False.
+        rad_options_filename = filename
+
+        use_pbl_options=.False.
+        pbl_options_filename = filename
+        
+        use_sfc_options=.False.
+        sfc_options_filename = filename
+
+        open(io_newunit(name_unit), file=filename)
+        read(name_unit,nml=general)
+        close(name_unit)
+
+        if (ideal) then
+            if (STD_OUT_PE) write(*,*) " Running Idealized simulation "
+        endif
+
+        options%calendar=calendar
+
+        if (trim(start_date)/="") then
+            call options%start_time%init(calendar)
+            call options%start_time%set(start_date)
+        else
+            stop 'start date must be supplied in namelist'
+        endif
+        if (trim(end_date)/="") then
+            call options%end_time%init(calendar)
+            call options%end_time%set(end_date)
+        else
+            stop 'end date must be supplied in namelist'
+        endif
+
+        options%ideal            = ideal
+        options%debug            = debug
+        options%interactive      = interactive
+
+        options%use_mp_options      = use_mp_options
+        options%mp_options_filename = mp_options_filename
+
+        options%use_lt_options      = use_lt_options
+        options%lt_options_filename = lt_options_filename
+
+        options%use_cu_options      = use_cu_options
+        options%cu_options_filename = cu_options_filename
+
+        options%use_adv_options     = use_adv_options
+        options%adv_options_filename= adv_options_filename
+
+        options%use_lsm_options     = use_lsm_options
+        options%lsm_options_filename= lsm_options_filename
+
+        options%use_rad_options     = use_rad_options
+        options%rad_options_filename= rad_options_filename
+
+        options%use_pbl_options     = use_pbl_options
+        options%pbl_options_filename= pbl_options_filename
+
+        options%use_sfc_options     = use_sfc_options
+        options%sfc_options_filename= sfc_options_filename
+
+        ! options are updated when complete
+    end subroutine general_namelist
+
+
+    !> -------------------------------
+    !! Set up model levels, either read from a namelist, or from a default set of values
+    !!
+    !! Reads the z_info namelist or sets default values
+    !!
+    !! -------------------------------
+    subroutine domain_namelist(filename,options)
+        implicit none
+        character(len=*),             intent(in)    :: filename
+        type(domain_options_type), intent(inout) :: options
+
+        integer :: name_unit, this_level
+
+        real, allocatable, dimension(:) :: dz_levels
+        logical :: sleve, use_agl_height
+
+        real :: dx, flat_z_height, decay_rate_L_topo, decay_rate_S_topo, sleve_n, agl_cap
+        integer :: nz, longitude_system, terrain_smooth_windowsize, terrain_smooth_cycles
+
+        character(len=MAXFILELENGTH) :: init_conditions_file
+
+        character(len=MAXVARLENGTH) :: landvar,lakedepthvar,hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
+                                        snowh_var, soiltype_var, soil_t_var,soil_vwc_var,swe_var, soil_deept_var,           &
+                                        vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var, linear_mask_var, nsq_calibration_var,  &
+                                        sinalpha_var, cosalpha_var
+
+
+        character(len=MAXVARLENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var  !!MJ added
+
+        namelist /domain_list/ dx, nz, longitude_system, init_conditions_file, &
+                            landvar,lakedepthvar, snowh_var, &
+                            hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
+                            soiltype_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
+                            vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var, linear_mask_var, nsq_calibration_var,  &
+                            sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, & !! MJ added
+                            dz_levels, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n
+
+
+        dx = 0
+        longitude_system    = kMAINTAIN_LON
+
+        nz                  =  MAXLEVELS
+        this_level=1
+        flat_z_height = -1
+        sleve = .False.
+        terrain_smooth_windowsize = 3
+        terrain_smooth_cycles = 5
+        decay_rate_L_topo = 2.
+        decay_rate_S_topo = 6.
+        sleve_n = 1.2
+        use_agl_height      = .True.
+        agl_cap             = 800
+
+        allocate(dz_levels(MAXLEVELS))
+        dz_levels=-999
+
+        hgt_hi=""
+        landvar=""
+        lakedepthvar=""
+        lat_hi=""
+        lon_hi=""
+        ulat_hi=""
+        ulon_hi=""
+        vlat_hi=""
+        vlon_hi=""
+        soiltype_var=""
+        soil_t_var=""
+        soil_vwc_var=""
+        swe_var=""
+        snowh_var=""
+        soil_deept_var=""
+        vegtype_var=""
+        vegfrac_var=""
+        vegfracmax_var=""
+        albedo_var=""
+        lai_var=""
+        canwat_var=""
+        linear_mask_var=""
+        nsq_calibration_var=""
+        sinalpha_var=""
+        cosalpha_var=""
+        shd_var = ""
+
+        !! MJ added
+        svf_var = ""
+        hlm_var = ""
+        slope_var = ""
+        slope_angle_var = ""
+        aspect_angle_var = ""
+
+        open(io_newunit(name_unit), file=filename)
+        read(name_unit,nml=domain_list)
+        close(name_unit)
+
+        call require_var(lat_hi, "High-res Lat")
+        call require_var(lon_hi, "High-res Lon")
+        call require_var(hgt_hi, "High-res HGT")
+
+        options%init_conditions_file=init_conditions_file
+        call check_file_exists(init_conditions_file, message='Restart file does not exist.')
+
+        options%nz = nz
+
+        ! if nz wasn't specified in the namelist, we assume a HUGE number of levels
+        ! so now we have to figure out what the actual number of levels read was
+        if (options%nz==MAXLEVELS) then
+            do this_level=1,MAXLEVELS-1
+                if (dz_levels(this_level+1)<=0) then
+                    options%nz=this_level
+                    exit
+                endif
+            end do
+            options%nz=this_level
+        endif
+
+        ! allocate(options%dz_levels(options%nz))
+        if (minval(dz_levels(1:options%nz)) < 0) then
+            if (STD_OUT_PE) write(*,*) "WARNING: dz seems to be less than 0, this is not physical and is probably an error in the namelist"
+            if (STD_OUT_PE) write(*,*) "Note that the gfortran compiler will not read dz_levels spread across multiple lines. "
+            error stop
+        endif
+
+        options%dx               = dx
+        options%longitude_system = longitude_system
+
+        options%dz_levels = -1
+        options%dz_levels(1:options%nz)=dz_levels(1:options%nz)
+        deallocate(dz_levels)
+
+        options%flat_z_height = flat_z_height
+        options%sleve = sleve
+        options%terrain_smooth_windowsize = terrain_smooth_windowsize
+        options%terrain_smooth_cycles = terrain_smooth_cycles
+        options%decay_rate_L_topo = decay_rate_L_topo  ! decay_rate_large_scale_topography
+        options%decay_rate_S_topo = decay_rate_S_topo ! decay_rate_small_scale_topography !
+        options%sleve_n = sleve_n
+
+        options%use_agl_height   = use_agl_height
+        options%agl_cap          = agl_cap
+
 
         !------------------------------------------------------
         ! these variables are read explicitly so not added to vars_to_read list
@@ -1044,264 +1323,10 @@ contains
         options%slope_var             = slope_var
         options%slope_angle_var       = slope_angle_var
         options%aspect_angle_var      = aspect_angle_var
-        options%factor_p_var          = factor_p_var
         options%shd_var               = shd_var
 
-    end subroutine var_namelist
+    end subroutine domain_namelist
 
-
-    !> -------------------------------
-    !! Initialize the main parameter options
-    !!
-    !! Reads parameters for the ICAR simulation
-    !! These include setting flags that request other namelists be read
-    !!
-    !! -------------------------------
-    subroutine parameters_namelist(filename,options)
-        implicit none
-        character(len=*),             intent(in)    :: filename
-        type(parameter_options_type), intent(inout) :: options
-
-        integer :: name_unit
-        type(time_delta_t) :: dt
-        ! parameters to read
-
-        real    :: dx, dxlow, t_offset, rh_limit, sst_min_limit, cp_limit, smooth_wind_distance, agl_cap
-        integer :: ntimesteps, wind_iterations
-        integer :: longitude_system
-        integer :: nz, warning_level
-        logical :: ideal, readz, readdz, interactive, debug, surface_io_only, &
-                   restart, advect_density, z_is_geopotential, z_is_on_interface,&
-                   use_agl_height, time_varying_z, t_is_potential, qv_is_spec_humidity, &
-                   qv_is_relative_humidity, &
-                   use_mp_options, use_lt_options, use_adv_options, use_lsm_options, &
-                   use_cu_options, use_rad_options, use_pbl_options, use_sfc_options, batched_exch
-
-        character(len=MAXFILELENGTH) :: date, calendar, start_date, forcing_start_date, end_date
-        integer :: year, month, day, hour, minute, second
-        character(len=MAXFILELENGTH) :: mp_options_filename, lt_options_filename, &
-                                        adv_options_filename, lsm_options_filename, &
-                                        cu_options_filename, rad_options_filename, pbl_options_filename, sfc_options_filename
-
-
-        namelist /parameters/ ntimesteps, wind_iterations, surface_io_only,                &
-                              dx, dxlow, ideal, readz, readdz, nz, t_offset, rh_limit, sst_min_limit, cp_limit, &
-                              debug, warning_level, interactive, restart,                                &
-                              advect_density, smooth_wind_distance,                              &
-                              z_is_geopotential, z_is_on_interface,             &
-                              date, calendar, t_is_potential,                       &
-                              qv_is_relative_humidity, qv_is_spec_humidity,                              &
-                              use_agl_height, agl_cap, start_date, forcing_start_date, end_date,         &
-                              time_varying_z,  longitude_system, batched_exch,            &
-                              mp_options_filename,      use_mp_options,     &
-                              lt_options_filename,      use_lt_options,     &
-                              lsm_options_filename,     use_lsm_options,    &
-                              adv_options_filename,     use_adv_options,    &
-                              cu_options_filename,      use_cu_options,     &
-                              rad_options_filename,     use_rad_options,    &
-                              sfc_options_filename,     use_sfc_options,    &
-                              pbl_options_filename,     use_pbl_options
-
-        !default parameters
-        surface_io_only     = .False.
-        t_offset            = (-9999)
-        rh_limit            = -1
-        sst_min_limit       = 273.15
-        cp_limit            = 500
-        advect_density      = .True.
-        t_is_potential      = .True.
-        qv_is_spec_humidity = .False.
-        qv_is_relative_humidity=.False.
-        z_is_geopotential   = .False.
-        z_is_on_interface   = .False.
-        wind_iterations     = 800
-        dxlow               = 100000
-        restart             = .False.
-        ideal               = .False.
-        debug               = .False.
-        interactive         = .False.
-        warning_level       = -9999
-        readz               = .False.
-        readdz              = .True.
-        nz                  =  MAXLEVELS
-        smooth_wind_distance= -9999
-        calendar            = "gregorian"
-        use_agl_height      = .True.
-        agl_cap             = 800
-        date                = ""
-        start_date          = ""
-        forcing_start_date  = ""
-        end_date            = ""
-        time_varying_z      = .False.
-        longitude_system    = kMAINTAIN_LON
-        batched_exch        = .True.
-        
-        ! flag set to read specific parameterization options
-        use_mp_options=.False.
-        mp_options_filename = filename
-
-        use_lt_options=.False.
-        lt_options_filename = filename
-
-        use_adv_options=.False.
-        adv_options_filename = filename
-
-        use_cu_options=.False.
-        cu_options_filename = filename
-
-        use_lsm_options=.False.
-        lsm_options_filename = filename
-
-        use_rad_options=.False.
-        rad_options_filename = filename
-
-        use_pbl_options=.False.
-        pbl_options_filename = filename
-        
-        use_sfc_options=.False.
-        sfc_options_filename = filename
-
-        open(io_newunit(name_unit), file=filename)
-        read(name_unit,nml=parameters)
-        close(name_unit)
-
-        if (ideal) then
-            if (STD_OUT_PE) write(*,*) " Running Idealized simulation "
-        endif
-
-        if ((trim(date)=="").and.(trim(start_date)/="")) date = start_date
-
-        if (trim(forcing_start_date)=="") then
-            if (trim(date)/="") then
-                forcing_start_date=date
-            endif
-        else
-            date=forcing_start_date
-        endif
-        if (warning_level==-9999) then
-            if (debug) then
-                warning_level=2
-            else
-                warning_level=5
-            endif
-        endif
-
-
-        if (smooth_wind_distance.eq.(-9999)) then
-            smooth_wind_distance=dxlow*2
-            if (STD_OUT_PE) write(*,*) " Default smoothing distance = lowdx*2 = ", smooth_wind_distance
-        endif
-
-        options%t_offset=t_offset
-
-        if (rh_limit > 5) then
-            write(*,*) "RH limit >5 specified, assuming it is in %"
-            rh_limit = rh_limit/100
-        endif
-        options%rh_limit=rh_limit
-
-        options%sst_min_limit = sst_min_limit
-
-        options%cp_limit = cp_limit / 3600.0 ! convert from mm/hr to mm/s
-
-        if (smooth_wind_distance<0) then
-            write(*,*) " Wind smoothing must be a positive number"
-            write(*,*) " smooth_wind_distance = ",smooth_wind_distance
-            if (warning_level>4) then
-                stop
-            else
-                smooth_wind_distance = dxlow*2
-            endif
-        endif
-        options%smooth_wind_distance = smooth_wind_distance
-        options%longitude_system = longitude_system
-
-        ! if outputing at half-day or longer intervals, create monthly files
-        ! if (outputinterval>=43200) then
-        !     options%output_file_frequency="monthly"
-        ! ! if outputing at half-hour or longer intervals, create daily files
-        ! else if (outputinterval>=1800) then
-        !     options%output_file_frequency="daily"
-        ! ! otherwise create a new output file every timestep
-        ! else
-        !     options%output_file_frequency="every step"
-        ! endif
-
-        ! options%paramters%frames_per_outfile : this may cause trouble with the above, but a nicer way
-
-        ! options%surface_io_only = surface_io_only
-
-
-        options%calendar=calendar
-
-        call options%initial_time%init(calendar)
-        call options%initial_time%set(date)
-        if (start_date=="") then
-            options%start_time = options%initial_time
-        else
-            call options%start_time%init(calendar)
-            call options%start_time%set(start_date)
-        endif
-        if (trim(end_date)/="") then
-            call options%end_time%init(calendar)
-            call options%end_time%set(end_date)
-        else
-            stop 'end data must be supplied in namelist'
-        !    call dt%set(seconds=ntimesteps * inputinterval)
-        !    options%end_time = options%start_time + dt
-        endif
-
-        options%dx               = dx
-        options%dxlow            = dxlow
-        options%ideal            = ideal
-        options%readz            = readz
-        options%readdz           = readdz
-        options%advect_density   = advect_density
-        options%debug            = debug
-        options%interactive      = interactive
-        options%warning_level    = warning_level
-        options%use_agl_height   = use_agl_height
-        options%agl_cap          = agl_cap
-        options%batched_exch     = batched_exch
-
-        options%qv_is_relative_humidity = qv_is_relative_humidity
-        options%qv_is_spec_humidity= qv_is_spec_humidity
-        options%t_is_potential   = t_is_potential
-        options%z_is_geopotential= z_is_geopotential
-        options%z_is_on_interface= z_is_on_interface
-
-        options%restart = restart
-
-        options%nz = nz
-        options%wind_iterations = wind_iterations
-        options%time_varying_z = time_varying_z
-
-        options%use_mp_options      = use_mp_options
-        options%mp_options_filename = mp_options_filename
-
-        options%use_lt_options      = use_lt_options
-        options%lt_options_filename = lt_options_filename
-
-        options%use_cu_options      = use_cu_options
-        options%cu_options_filename = cu_options_filename
-
-        options%use_adv_options     = use_adv_options
-        options%adv_options_filename= adv_options_filename
-
-        options%use_lsm_options     = use_lsm_options
-        options%lsm_options_filename= lsm_options_filename
-
-        options%use_rad_options     = use_rad_options
-        options%rad_options_filename= rad_options_filename
-
-        options%use_pbl_options     = use_pbl_options
-        options%pbl_options_filename= pbl_options_filename
-
-        options%use_sfc_options     = use_sfc_options
-        options%sfc_options_filename= sfc_options_filename
-
-        ! options are updated when complete
-    end subroutine parameters_namelist
 
     !> -------------------------------
     !! Initialize the microphysics options
@@ -1328,9 +1353,9 @@ contains
                                 top_mp_level, update_interval
 
         ! because mp_options could be in a separate file (should probably set all namelists up to have this option)
-        if (options%parameters%use_mp_options) then
+        if (options%general%use_mp_options) then
             if (trim(mp_filename)/=trim(get_options_file())) then
-                call version_check(mp_filename, options%parameters)
+                call version_check(mp_filename, options%general)
             endif
         endif
 
@@ -1362,38 +1387,38 @@ contains
         top_mp_level          = 0 ! if <=0 just use the actual model top
 
         ! read in the namelist
-        if (options%parameters%use_mp_options) then
+        if (options%general%use_mp_options) then
             open(io_newunit(name_unit), file=mp_filename)
             read(name_unit, nml=mp_parameters)
             close(name_unit)
         endif
 
         ! store the data back into the mp_options datastructure
-        options%mp_options%Nt_c     = Nt_c
-        options%mp_options%TNO      = TNO
-        options%mp_options%am_s     = am_s
-        options%mp_options%rho_g    = rho_g
-        options%mp_options%av_s     = av_s
-        options%mp_options%bv_s     = bv_s
-        options%mp_options%fv_s     = fv_s
-        options%mp_options%av_g     = av_g
-        options%mp_options%bv_g     = bv_g
-        options%mp_options%av_i     = av_i
-        options%mp_options%Ef_si    = Ef_si
-        options%mp_options%Ef_rs    = Ef_rs
-        options%mp_options%Ef_rg    = Ef_rg
-        options%mp_options%Ef_ri    = Ef_ri
-        options%mp_options%mu_r     = mu_r
-        options%mp_options%t_adjust = t_adjust
-        options%mp_options%C_cubes  = C_cubes
-        options%mp_options%C_sqrd   = C_sqrd
-        options%mp_options%Ef_rw_l  = Ef_rw_l
-        options%mp_options%Ef_sw_l  = Ef_sw_l
+        options%mp%Nt_c     = Nt_c
+        options%mp%TNO      = TNO
+        options%mp%am_s     = am_s
+        options%mp%rho_g    = rho_g
+        options%mp%av_s     = av_s
+        options%mp%bv_s     = bv_s
+        options%mp%fv_s     = fv_s
+        options%mp%av_g     = av_g
+        options%mp%bv_g     = bv_g
+        options%mp%av_i     = av_i
+        options%mp%Ef_si    = Ef_si
+        options%mp%Ef_rs    = Ef_rs
+        options%mp%Ef_rg    = Ef_rg
+        options%mp%Ef_ri    = Ef_ri
+        options%mp%mu_r     = mu_r
+        options%mp%t_adjust = t_adjust
+        options%mp%C_cubes  = C_cubes
+        options%mp%C_sqrd   = C_sqrd
+        options%mp%Ef_rw_l  = Ef_rw_l
+        options%mp%Ef_sw_l  = Ef_sw_l
 
-        if (top_mp_level < 0) top_mp_level = options%parameters%nz + top_mp_level
+        if (top_mp_level < 0) top_mp_level = options%domain%nz + top_mp_level
 
-        options%mp_options%update_interval      = update_interval
-        options%mp_options%top_mp_level         = top_mp_level
+        options%mp%update_interval      = update_interval
+        options%mp%top_mp_level         = top_mp_level
 
     end subroutine mp_parameters_namelist
 
@@ -1452,9 +1477,9 @@ contains
                                  read_LUT, write_LUT, u_LUT_Filename, v_LUT_Filename, overwrite_lt_lut, LUT_Filename
 
          ! because lt_options could be in a separate file
-         if (options%parameters%use_lt_options) then
+         if (options%general%use_lt_options) then
              if (trim(filename)/=trim(get_options_file())) then
-                 call version_check(filename,options%parameters)
+                 call version_check(filename,options%general)
              endif
          endif
 
@@ -1499,14 +1524,14 @@ contains
         overwrite_lt_lut = .True.
 
         ! read the namelist options
-        if (options%parameters%use_lt_options) then
+        if (options%general%use_lt_options) then
             open(io_newunit(name_unit), file=filename)
             read(name_unit,nml=lt_parameters)
             close(name_unit)
         endif
 
         ! store everything in the lt_options structure
-        associate(opt => options%lt_options )
+        associate(opt => options%lt )
             opt%buffer = buffer
             opt%stability_window_size = stability_window_size
             opt%max_stability = max_stability
@@ -1573,24 +1598,25 @@ contains
         type(adv_options_type)::adv_options
         integer :: name_unit
 
-        logical :: boundary_buffer          ! apply some smoothing to the x and y boundaries in MPDATA
+        logical :: boundary_buffer, advect_density   ! apply some smoothing to the x and y boundaries in MPDATA
         logical :: MPDATA_FCT ! use the flux corrected transport option in MPDATA
         ! MPDATA order of correction (e.g. 1st=upwind, 2nd=classic, 3rd=better)
         integer :: mpdata_order, flux_corr, h_order, v_order
         
         ! define the namelist
-        namelist /adv_parameters/ boundary_buffer, MPDATA_FCT, mpdata_order, flux_corr, h_order, v_order
+        namelist /adv_parameters/ boundary_buffer, MPDATA_FCT, mpdata_order, flux_corr, h_order, v_order, advect_density
 
          ! because adv_options could be in a separate file
-         if (options%parameters%use_adv_options) then
+         if (options%general%use_adv_options) then
              if (trim(filename)/=trim(get_options_file())) then
-                 call version_check(filename,options%parameters)
+                 call version_check(filename,options%general)
              endif
          endif
 
 
         ! set default values
         boundary_buffer = .False.
+        advect_density  = .True.
         MPDATA_FCT = .True.
         mpdata_order = 2
         flux_corr    = 0
@@ -1599,7 +1625,7 @@ contains
 
 
         ! read the namelist options
-        if (options%parameters%use_adv_options) then
+        if (options%general%use_adv_options) then
             open(io_newunit(name_unit), file=filename)
             read(name_unit,nml=adv_parameters)
             close(name_unit)
@@ -1612,9 +1638,10 @@ contains
         adv_options%flux_corr = flux_corr
         adv_options%h_order = h_order
         adv_options%v_order = v_order
+        adv_options%advect_density = advect_density
 
         ! copy the data back into the global options data structure
-        options%adv_options = adv_options
+        options%adv = adv_options
     end subroutine adv_parameters_namelist
 
 
@@ -1638,9 +1665,9 @@ contains
         namelist /pbl_parameters/ ysu_topdown_pblmix
 
          ! because pbl_options could be in a separate file
-         if (options%parameters%use_pbl_options) then
+         if (options%general%use_pbl_options) then
              if (trim(filename)/=trim(get_options_file())) then
-                 call version_check(filename,options%parameters)
+                 call version_check(filename,options%general)
              endif
          endif
 
@@ -1649,7 +1676,7 @@ contains
         ysu_topdown_pblmix = 0
 
         ! read the namelist options
-        if (options%parameters%use_pbl_options) then
+        if (options%general%use_pbl_options) then
             open(io_newunit(name_unit), file=filename)
             read(name_unit,nml=pbl_parameters)
             close(name_unit)
@@ -1660,7 +1687,7 @@ contains
         pbl_options%ysu_topdown_pblmix = ysu_topdown_pblmix
 
         ! copy the data back into the global options data structure
-        options%pbl_options = pbl_options
+        options%pbl = pbl_options
     end subroutine pbl_parameters_namelist
 
     !> -------------------------------
@@ -1681,9 +1708,9 @@ contains
         namelist /sfc_parameters/ isfflx, scm_force_flux, iz0tlnd, sbrlim
 
          ! because sfc_options could be in a separate file
-         if (options%parameters%use_sfc_options) then
+         if (options%general%use_sfc_options) then
              if (trim(filename)/=trim(get_options_file())) then
-                 call version_check(filename,options%parameters)
+                 call version_check(filename,options%general)
              endif
          endif
          
@@ -1696,7 +1723,7 @@ contains
                          ! modeling in complex terrain (Mott et al., 2023, Lafaysse 2017). 
                          ! Default value remains that used in SFCMM5REV
         ! read the namelist options
-        if (options%parameters%use_sfc_options) then
+        if (options%general%use_sfc_options) then
             open(io_newunit(name_unit), file=filename)
             read(name_unit,nml=sfc_parameters)
             close(name_unit)
@@ -1710,7 +1737,7 @@ contains
         sfc_options%sbrlim = sbrlim
 
         ! copy the data back into the global options data structure
-        options%sfc_options = sfc_options
+        options%sfc = sfc_options
     end subroutine sfc_parameters_namelist
 
 
@@ -1737,9 +1764,9 @@ contains
                                  stochastic_cu
 
         ! because adv_options could be in a separate file
-        if (options%parameters%use_cu_options) then
+        if (options%general%use_cu_options) then
             if (trim(filename)/=trim(get_options_file())) then
-                call version_check(filename,options%parameters)
+                call version_check(filename,options%general)
             endif
         endif
 
@@ -1753,7 +1780,7 @@ contains
         tend_qi_fraction    = -1.0
 
         ! read the namelist options
-        if (options%parameters%use_cu_options) then
+        if (options%general%use_cu_options) then
             open(io_newunit(name_unit), file=filename)
             read(name_unit,nml=cu_parameters)
             close(name_unit)
@@ -1774,63 +1801,8 @@ contains
         cu_options%tend_qi_fraction     = tend_qi_fraction
 
         ! copy the data back into the global options data structure
-        options%cu_options = cu_options
+        options%cu = cu_options
     end subroutine cu_parameters_namelist
-
-
-
-    !> -------------------------------
-    !! Sets the default value for each of three land use categories depending on the LU_Categories input
-    !!
-    !! -------------------------------
-    subroutine set_default_LU_categories(options, urban_category, ice_category, water_category, LU_Categories, lake_category)
-        ! if various LU categories were not defined in the namelist (i.e. they == -1) then attempt
-        ! to define default values for them based on the LU_Categories variable supplied.
-        implicit none
-        type(options_t),    intent(inout)::options
-        integer, intent(inout) :: urban_category, ice_category, water_category, lake_category
-        character(len=MAXVARLENGTH), intent(in) :: LU_Categories
-
-        if (trim(LU_Categories)=="MODIFIED_IGBP_MODIS_NOAH") then
-            if (urban_category==-1) urban_category = 13
-            if (ice_category==-1)   ice_category = 15
-            if (water_category==-1) water_category = 17
-            if (lake_category==-1) lake_category = 21
-
-        elseif (trim(LU_Categories)=="USGS") then
-            if (urban_category==-1) urban_category = 1
-            if (ice_category==-1)   ice_category = -1
-            if (water_category==-1) water_category = 16
-            ! if (lake_category==-1) lake_category = 16  ! No separate lake category!
-            if((options%physics%watersurface==kWATER_LAKE) .AND. (STD_OUT_PE)) then
-                write(*,*) "WARNING: Lake model selected (water=3), but USGS LU-categories has no lake category"
-            endif
-
-        elseif (trim(LU_Categories)=="USGS-RUC") then
-            if (urban_category==-1) urban_category = 1
-            if (ice_category==-1)   ice_category = 24
-            if (water_category==-1) water_category = 16
-            if (lake_category==-1) lake_category = 28
-            ! also note, lakes_category = 28
-            ! write(*,*) "WARNING: not handling lake category (28)"
-
-        elseif (trim(LU_Categories)=="MODI-RUC") then
-            if (urban_category==-1) urban_category = 13
-            if (ice_category==-1)   ice_category = 15
-            if (water_category==-1) water_category = 17
-            if (lake_category==-1) lake_category = 21
-            ! also note, lakes_category = 21
-            ! write(*,*) "WARNING: not handling lake category (21)"
-
-        elseif (trim(LU_Categories)=="NLCD40") then
-            if (urban_category==-1) urban_category = 13
-            if (ice_category==-1)   ice_category = 15 ! and 22?
-            ! if (water_category==-1) water_category = 17 ! and 21 'Open Water'
-            if(options%physics%watersurface==kWATER_LAKE) write(*,*) "WARNING: Lake model selected (water=3), but NLCD40 LU-categories has no lake category"
-            write(*,*) "WARNING: not handling all varients of categories (e.g. permanent_snow=15 is, but permanent_snow_ice=22 is not)"
-        endif
-
-    end subroutine set_default_LU_categories
 
 
     !> -------------------------------
@@ -1876,9 +1848,9 @@ contains
 
 
          ! because adv_options could be in a separate file
-         if (options%parameters%use_lsm_options) then
+         if (options%general%use_lsm_options) then
              if (trim(filename)/=trim(get_options_file())) then
-                 call version_check(filename,options%parameters)
+                 call version_check(filename,options%general)
              endif
          endif
 
@@ -1928,7 +1900,7 @@ contains
         fsm_nsnow_max = 6
 
         ! read the namelist options
-        if (options%parameters%use_lsm_options) then
+        if (options%general%use_lsm_options) then
             open(io_newunit(name_unit), file=filename)
             read(name_unit,nml=lsm_parameters)
             close(name_unit)
@@ -1988,12 +1960,12 @@ contains
         lsm_options%noahmp_output        = noahmp_output
         
         ! copy the data back into the global options data structure
-        options%lsm_options = lsm_options
+        options%lsm = lsm_options
 
         ! Change z length of snow arrays here, since we need to change their size for the output arrays, which are set in
-        ! io_options_namelist
+        ! output_options_namelist
         if (options%physics%snowmodel==kSM_FSM) then
-                kSNOW_GRID_Z = options%lsm_options%fsm_nsnow_max
+                kSNOW_GRID_Z = options%lsm%fsm_nsnow_max
                 kSNOWSOIL_GRID_Z = kSNOW_GRID_Z+kSOIL_GRID_Z
         endif
 
@@ -2023,9 +1995,9 @@ contains
 
 
          ! because adv_options could be in a separate file
-         if (options%parameters%use_rad_options) then
+         if (options%general%use_rad_options) then
              if (trim(filename)/=trim(get_options_file())) then
-                 call version_check(filename,options%parameters)
+                 call version_check(filename,options%general)
              endif
          endif
 
@@ -2038,7 +2010,7 @@ contains
         tzone=0. !! MJ added
 
         ! read the namelist options
-        if (options%parameters%use_rad_options) then
+        if (options%general%use_rad_options) then
             open(io_newunit(name_unit), file=filename)
             read(name_unit,nml=rad_parameters)
             close(name_unit)
@@ -2052,208 +2024,10 @@ contains
         rad_options%tzone                 = tzone
 
         ! copy the data back into the global options data structure
-        options%rad_options = rad_options
+        options%rad = rad_options
         
          !if (STD_OUT_PE) write(*,*) " tzone, update_interval_rrtmg ", rad_options%tzone, rad_options%update_interval_rrtmg
     end subroutine rad_parameters_namelist
-
-
-
-    !> -------------------------------
-    !! Set up model levels, either read from a namelist, or from a default set of values
-    !!
-    !! Reads the z_info namelist or sets default values
-    !!
-    !! -------------------------------
-    subroutine model_levels_namelist(filename,options)
-        implicit none
-        character(len=*),             intent(in)    :: filename
-        type(parameter_options_type), intent(inout) :: options
-
-        integer :: name_unit, this_level
-        real, allocatable, dimension(:) :: dz_levels
-        real, dimension(45) :: fulldz
-        logical :: sleve
-
-        real :: flat_z_height, decay_rate_L_topo, decay_rate_S_topo, sleve_n
-        integer :: terrain_smooth_windowsize, terrain_smooth_cycles
-
-        namelist /z_info/ dz_levels, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n
-
-        this_level=1
-        flat_z_height = -1
-        sleve = .False.
-        terrain_smooth_windowsize = 3
-        terrain_smooth_cycles = 5
-        decay_rate_L_topo = 2.
-        decay_rate_S_topo = 6.
-        sleve_n = 1.2
-
-        ! read the z_info namelist if requested
-        if (options%readdz) then
-            allocate(dz_levels(MAXLEVELS))
-            dz_levels=-999
-
-            open(io_newunit(name_unit), file=filename)
-            read(name_unit,nml=z_info)
-            close(name_unit)
-
-            ! if nz wasn't specified in the namelist, we assume a HUGE number of levels
-            ! so now we have to figure out what the actual number of levels read was
-            if (options%nz==MAXLEVELS) then
-                do this_level=1,MAXLEVELS-1
-                    if (dz_levels(this_level+1)<=0) then
-                        options%nz=this_level
-                        exit
-                    endif
-                end do
-                options%nz=this_level
-            endif
-
-            ! allocate(options%dz_levels(options%nz))
-            if (minval(dz_levels(1:options%nz)) < 0) then
-                if (STD_OUT_PE) write(*,*) "WARNING: dz seems to be less than 0, this is not physical and is probably an error in the namelist"
-                if (STD_OUT_PE) write(*,*) "Note that the gfortran compiler will not read dz_levels spread across multiple lines. "
-                error stop
-            endif
-
-            options%dz_levels = -1
-            options%dz_levels(1:options%nz)=dz_levels(1:options%nz)
-            deallocate(dz_levels)
-        else
-        ! if we are not reading dz from the namelist, use default values from a WRF run
-        ! default mean layer thicknesses from a 36km WRF run over the "CO-headwaters" domain
-            fulldz=[36.,   51.,   58.,   73.,   74.,  111.,  113.,  152.,  155.,  157.,  160.,  245., &
-                   251.,  258.,  265.,  365.,  379.,  395.,  413.,  432.,  453.,  476.,  503.,  533., &
-                   422.,  443.,  467.,  326.,  339.,  353.,  369.,  386.,  405.,  426.,  450.,  477., &
-                   455.,  429.,  396.,  357.,  311.,  325.,  340.,  356.,  356.]
-           if (options%nz>45) then
-               options%nz=45
-           endif
-            ! allocate(options%dz_levels(options%nz))
-            options%dz_levels = -1
-            options%dz_levels(1:options%nz) = fulldz(1:options%nz)
-        endif
-
-        options%flat_z_height = flat_z_height
-        options%sleve = sleve
-        options%terrain_smooth_windowsize = terrain_smooth_windowsize
-        options%terrain_smooth_cycles = terrain_smooth_cycles
-        options%decay_rate_L_topo = decay_rate_L_topo  ! decay_rate_large_scale_topography
-        options%decay_rate_S_topo = decay_rate_S_topo ! decay_rate_small_scale_topography !
-        options%sleve_n = sleve_n
-
-    end subroutine model_levels_namelist
-
-    !> ----------------------------------------------------------------------------
-    !!  Read in the name of the boundary condition files from a text file
-    !!
-    !!  @param      filename        The name of the text file to read
-    !!  @param[out] forcing_files   An array to store the filenames in
-    !!  @retval     nfiles          The number of files read.
-    !!
-    !! ----------------------------------------------------------------------------
-    function read_forcing_file_names(filename, forcing_files) result(nfiles)
-        implicit none
-        character(len=*) :: filename
-        character(len=MAXFILELENGTH), dimension(MAX_NUMBER_FILES) :: forcing_files
-        integer :: nfiles
-        integer :: file_unit
-        integer :: i, error
-        character(len=MAXFILELENGTH) :: temporary_file
-
-        open(unit=io_newunit(file_unit), file=filename)
-        i=0
-        error=0
-        do while (error==0)
-            read(file_unit, *, iostat=error) temporary_file
-            if (error==0) then
-                i=i+1
-                forcing_files(i) = temporary_file
-            endif
-        enddo
-        close(file_unit)
-        nfiles = i
-        ! print out a summary
-        if (STD_OUT_PE) write(*,*) "  Boundary conditions files to be used:"
-        if (nfiles>10) then
-            if (STD_OUT_PE) write(*,*) "    nfiles=", trim(str(nfiles)), ", too many to print."
-            if (STD_OUT_PE) write(*,*) "    First file:", trim(forcing_files(1))
-            if (STD_OUT_PE) write(*,*) "    Last file: ", trim(forcing_files(nfiles))
-        else
-            do i=1,nfiles
-                if (STD_OUT_PE) write(*,*) "      ",trim(forcing_files(i))
-            enddo
-        endif
-
-    end function read_forcing_file_names
-
-    !> -------------------------------
-    !! Initialize the list of input files
-    !!
-    !! Reads the file_list namelist or sets default values
-    !!
-    !! -------------------------------
-    subroutine filename_namelist(filename, options)
-        ! read in filenames from up to two namelists
-        ! init_conditions_file = high res grid data
-        ! boundary_files       = list of files for boundary conditions (low-res)
-        ! linear_mask_file     = file to read a high-res fractional mask for the linear perturbation
-        implicit none
-        character(len=*),             intent(in)    :: filename
-        type(parameter_options_type), intent(inout) :: options
-
-        character(len=MAXFILELENGTH) :: init_conditions_file, output_file, forcing_file_list, &
-                                        linear_mask_file, nsq_calibration_file
-
-        character(len=MAXFILELENGTH), allocatable :: boundary_files(:)
-        integer :: name_unit, nfiles, i
-
-        ! set up namelist structures
-
-        namelist /files_list/ init_conditions_file, output_file, boundary_files, forcing_file_list, &
-                              linear_mask_file, nsq_calibration_file
-
-        linear_mask_file="MISSING"
-        nsq_calibration_file="MISSING"
-        allocate(boundary_files(MAX_NUMBER_FILES))
-        boundary_files="MISSING"
-        forcing_file_list="MISSING"
-
-        open(io_newunit(name_unit), file=filename)
-        read(name_unit,nml=files_list)
-        close(name_unit)
-
-        options%init_conditions_file=init_conditions_file
-
-        i=1
-        do while (trim(boundary_files(i))/=trim("MISSING"))
-            i=i+1
-        end do
-        nfiles=i-1
-
-        if ((nfiles==0).and.(trim(forcing_file_list)/="MISSING")) then
-            nfiles = read_forcing_file_names(forcing_file_list, boundary_files)
-        else
-            if (nfiles==0) then
-                stop "No boundary conditions files specified."
-            endif
-        endif
-
-        allocate(options%boundary_files(nfiles))
-        options%boundary_files(1:nfiles) = boundary_files(1:nfiles)
-        deallocate(boundary_files)
-
-        if (trim(linear_mask_file)=="MISSING") then
-            linear_mask_file = options%init_conditions_file
-        endif
-        options%linear_mask_file=linear_mask_file
-        if (trim(nsq_calibration_file)=="MISSING") then
-            nsq_calibration_file = options%init_conditions_file
-        endif
-        options%nsq_calibration_file=nsq_calibration_file
-
-    end subroutine filename_namelist
     
     
     subroutine wind_namelist(filename, options)
@@ -2263,16 +2037,19 @@ contains
         
         integer :: name_unit, update_frequency             ! logical unit number for namelist
         !Define parameters
-        integer :: roughness
+        integer :: roughness, wind_iterations
         logical :: Sx, wind_only, thermal
-        real    :: Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const
+        real    :: Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, smooth_wind_distance
         
         !Make name-list
-        namelist /wind/ Sx, thermal, wind_only, Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, roughness, alpha_const, update_frequency
+        namelist /wind/ Sx, thermal, wind_only, Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, roughness, alpha_const, &
+                        update_frequency, smooth_wind_distance, wind_iterations
         
         !Set defaults
         Sx = .False.
         thermal = .False.
+        smooth_wind_distance= -9999
+        wind_iterations = 800
         roughness = 0 ! No roughness correction, the only one implemented so far
         Sx_dmax = 300.0
         Sx_scale_ang = 30.0
@@ -2290,10 +2067,20 @@ contains
         close(name_unit)
         
         !Perform checks
-        
+        if (smooth_wind_distance.eq.(-9999)) then
+            smooth_wind_distance=options%domain%dx*2
+            if (STD_OUT_PE) write(*,*) " Default smoothing distance = dx*2 = ", smooth_wind_distance
+        elseif (smooth_wind_distance<0) then
+            write(*,*) " Wind smoothing must be a positive number"
+            write(*,*) " smooth_wind_distance = ",smooth_wind_distance
+            smooth_wind_distance = options%domain%dx*2
+        endif
+        options%wind%smooth_wind_distance = smooth_wind_distance
+
         
         !Store into options object
         options%wind%Sx = Sx
+        options%wind%wind_iterations = wind_iterations
         options%wind%thermal = thermal
         options%wind%Sx_dmax = Sx_dmax
         options%wind%TPI_dmax = TPI_dmax
@@ -2302,7 +2089,7 @@ contains
         options%wind%alpha_const = alpha_const
         options%wind%roughness = roughness
         options%wind%wind_only = wind_only
-        call options%wind%update_dt%set(seconds=options%io_options%input_dt%seconds()/update_frequency)
+        call options%wind%update_dt%set(seconds=options%forcing%input_dt%seconds()/update_frequency)
 
     end subroutine wind_namelist
 
@@ -2333,9 +2120,9 @@ contains
                 
         
         !Store into options object
-        options%time_options%cfl_strictness = cfl_strictness
-        options%time_options%cfl_reduction_factor = cfl_reduction_factor
-        options%time_options%RK3 = RK3
+        options%time%cfl_strictness = cfl_strictness
+        options%time%cfl_reduction_factor = cfl_reduction_factor
+        options%time%RK3 = RK3
     end subroutine time_parameters_namelist
     
     
@@ -2343,9 +2130,9 @@ contains
         implicit none
         type(options_t),    intent(inout) :: options
     
-        select case (options%parameters%phys_suite)
+        select case (options%general%phys_suite)
             case('HICAR')
-                if (options%parameters%dx >= 1000 .and. STD_OUT_PE) then
+                if (options%domain%dx >= 1000 .and. STD_OUT_PE) then
                     write(*,*) '------------------------------------------------'
                     write(*,*) 'WARNING: Setting HICAR namelist options'
                     write(*,*) 'When user has selected dx => 1000.'
@@ -2360,15 +2147,145 @@ contains
                 options%physics%windtype = 4
                 options%physics%convection = 0
                 options%wind%Sx = .True.
-                options%time_options%RK3 = .True.
-                options%time_options%cfl_strictness = 4
-                options%parameters%use_agl_height = .True.
-                options%parameters%agl_cap = 800
-                options%parameters%sleve = .True.
-                options%parameters%advect_density = .True.
+                options%time%RK3 = .True.
+                options%time%cfl_strictness = 4
+                options%domain%use_agl_height = .True.
+                options%domain%agl_cap = 800
+                options%domain%sleve = .True.
+                options%adv%advect_density = .True.
 
         end select
     
     end subroutine
     
+    !> ----------------------------------------------------------------------------
+    !!  Read in the name of the boundary condition files from a text file
+    !!
+    !!  @param      filename        The name of the text file to read
+    !!  @param[out] forcing_files   An array to store the filenames in
+    !!  @retval     nfiles          The number of files read.
+    !!
+    !! ----------------------------------------------------------------------------
+    function read_forcing_file_names(filename, forcing_files) result(nfiles)
+        implicit none
+        character(len=*) :: filename
+        character(len=MAXFILELENGTH), dimension(MAX_NUMBER_FILES) :: forcing_files
+        integer :: nfiles
+        integer :: file_unit
+        integer :: i, error
+        logical :: first_file_exists, last_file_exists
+        character(len=MAXFILELENGTH) :: temporary_file
+
+        open(unit=io_newunit(file_unit), file=filename)
+        i=0
+        error=0
+        do while (error==0)
+            read(file_unit, *, iostat=error) temporary_file
+            if (error==0) then
+                i=i+1
+                forcing_files(i) = temporary_file
+            endif
+        enddo
+        close(file_unit)
+        nfiles = i
+        ! print out a summary
+        if (STD_OUT_PE) write(*,*) "  Boundary conditions files to be used:"
+        if (nfiles>10) then
+            if (STD_OUT_PE) write(*,*) "    nfiles=", trim(str(nfiles)), ", too many to print."
+            if (STD_OUT_PE) write(*,*) "    First file:", trim(forcing_files(1))
+            if (STD_OUT_PE) write(*,*) "    Last file: ", trim(forcing_files(nfiles))
+        else
+            do i=1,nfiles
+                if (STD_OUT_PE) write(*,*) "      ",trim(forcing_files(i))
+            enddo
+        endif
+
+        ! Check that the options file actually exists
+        INQUIRE(file=trim(forcing_files(1)), exist=first_file_exists)
+        INQUIRE(file=trim(forcing_files(nfiles)), exist=last_file_exists)
+
+        ! if options file does not exist, print an error and quit
+        if (.not.first_file_exists .or. .not.last_file_exists) then
+            if (.not.first_file_exists .and. STD_OUT_PE) write(*,*) "The first forcing file does not exist = ", trim(forcing_files(1))
+            if (.not.last_file_exists .and. STD_OUT_PE) write(*,*) "The last forcing file does not exist = ", trim(forcing_files(nfiles))
+
+            stop "At least the first or last forcing file does not exist. Only the first and last file are checked, please check the rest."
+        endif
+
+
+    end function read_forcing_file_names
+
+
+    !> -------------------------------
+    !! Sets the default value for each of three land use categories depending on the LU_Categories input
+    !!
+    !! -------------------------------
+    subroutine set_default_LU_categories(options, urban_category, ice_category, water_category, LU_Categories, lake_category)
+        ! if various LU categories were not defined in the namelist (i.e. they == -1) then attempt
+        ! to define default values for them based on the LU_Categories variable supplied.
+        implicit none
+        type(options_t),    intent(inout)::options
+        integer, intent(inout) :: urban_category, ice_category, water_category, lake_category
+        character(len=MAXVARLENGTH), intent(in) :: LU_Categories
+
+        if (trim(LU_Categories)=="MODIFIED_IGBP_MODIS_NOAH") then
+            if (urban_category==-1) urban_category = 13
+            if (ice_category==-1)   ice_category = 15
+            if (water_category==-1) water_category = 17
+            if (lake_category==-1) lake_category = 21
+
+        elseif (trim(LU_Categories)=="USGS") then
+            if (urban_category==-1) urban_category = 1
+            if (ice_category==-1)   ice_category = -1
+            if (water_category==-1) water_category = 16
+            ! if (lake_category==-1) lake_category = 16  ! No separate lake category!
+            if((options%physics%watersurface==kWATER_LAKE) .AND. (STD_OUT_PE)) then
+                write(*,*) "WARNING: Lake model selected (water=3), but USGS LU-categories has no lake category"
+            endif
+
+        elseif (trim(LU_Categories)=="USGS-RUC") then
+            if (urban_category==-1) urban_category = 1
+            if (ice_category==-1)   ice_category = 24
+            if (water_category==-1) water_category = 16
+            if (lake_category==-1) lake_category = 28
+            ! also note, lakes_category = 28
+            ! write(*,*) "WARNING: not handling lake category (28)"
+
+        elseif (trim(LU_Categories)=="MODI-RUC") then
+            if (urban_category==-1) urban_category = 13
+            if (ice_category==-1)   ice_category = 15
+            if (water_category==-1) water_category = 17
+            if (lake_category==-1) lake_category = 21
+            ! also note, lakes_category = 21
+            ! write(*,*) "WARNING: not handling lake category (21)"
+
+        elseif (trim(LU_Categories)=="NLCD40") then
+            if (urban_category==-1) urban_category = 13
+            if (ice_category==-1)   ice_category = 15 ! and 22?
+            ! if (water_category==-1) water_category = 17 ! and 21 'Open Water'
+            if(options%physics%watersurface==kWATER_LAKE) write(*,*) "WARNING: Lake model selected (water=3), but NLCD40 LU-categories has no lake category"
+            write(*,*) "WARNING: not handling all varients of categories (e.g. permanent_snow=15 is, but permanent_snow_ice=22 is not)"
+        endif
+
+    end subroutine set_default_LU_categories
+
+
+    subroutine check_file_exists(filename, message)
+        implicit none
+        character(len=*), intent(IN) :: filename
+        character(len=*), intent(IN) :: message
+
+        logical :: file_exists
+
+        ! Check that the file actually exists
+        INQUIRE(file=trim(filename), exist=file_exists)
+
+        ! if  file does not exist, print an error and quit
+        if (.not.file_exists) then
+            if (STD_OUT_PE) write(*,*) "Using file = ", trim(filename)
+            stop trim(message)
+        endif
+
+    end subroutine check_file_exists
+
 end submodule

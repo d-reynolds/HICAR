@@ -34,7 +34,6 @@ module planetary_boundary_layer
     use module_bl_ysu, only : ysuinit, ysu
     use mod_wrf_constants, only : EOMEG, XLV, r_v, R_d, KARMAN, gravity, EP_1, EP_2, cp, rcp, rovg
     use icar_constants !, only : karman,stefan_boltzmann
-    use mod_pbl_utilities, only : da_sfc_wtq
     use ieee_arithmetic ! for debugging
     use array_utilities, only : array_offset_x_3d, array_offset_y_3d
 
@@ -271,7 +270,7 @@ contains
                     ,qfx=domain%qfx%data_2d           & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
                     !,UOCE=uoce,VOCE=voce                                  & !ocean currents -- not currently used
                     !,CTOPO=ctopo,CTOPO2=ctopo2                            & !optional, only applied to momentum tendencies, not currently used
-                    ,YSU_TOPDOWN_PBLMIX=options%pbl_options%ysu_topdown_pblmix                &
+                    ,YSU_TOPDOWN_PBLMIX=options%pbl%ysu_topdown_pblmix                &
                     ,wspd=windspd                           & ! i/o -- wspd        wind speed at lowest model level (m/s)
                     ,br=domain%br%data_2d                   & !-- br          bulk richardson number in surface layer
                     ,dt=dt_in                               & !-- dt		time step (s)
@@ -293,7 +292,7 @@ contains
                 !optional
                     ,regime=regime                          )!  i/o -- regime	flag indicating pbl regime (stable, unstable, etc.) - not used?
 
-                    ! if(STD_OUT_PE .and. options%parameters%debug) write(*,*) "  pbl height/lev is:", maxval(domain%hpbl%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
+                    ! if(STD_OUT_PE .and. options%general%debug) write(*,*) "  pbl height/lev is:", maxval(domain%hpbl%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
 
 
 

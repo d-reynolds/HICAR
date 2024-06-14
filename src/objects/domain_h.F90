@@ -413,7 +413,6 @@ module domain_interface
     type(variable_t) :: slope_angle
     type(variable_t) :: aspect_angle
     type(variable_t) :: svf
-    type(variable_t) :: factor_p
     type(variable_t) :: Sliq_out
     type(variable_t) :: hlm
     type(variable_t) :: shd

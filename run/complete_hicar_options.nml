@@ -192,23 +192,11 @@
     !   Calendar used by the forcing data "gregorian", "standard", "noleap", "365-day", "360-day"
     calendar = "standard",
 
-
-    !   Limit output data to near surface variables
-    !   WARNING if true it is impossible to restart the run (for now)
-    ! surface_io_only = False,
-
     !   The grid spacing of the high-resolution data
     dx = 4000.0,        ! [m]
 
     ! Specify the longitude coordinate system to use 0 = (default) don't change inputs, 1 = -180 to 180, 2 = 0 to 360, 3 = guess an appropriate value
     longitude_system = 0  ! [0,1,2,3]
-
-    !   The approximate grid spacing of the forcing data
-    !   only used in rm_linear_winds?
-    ! dxlow = 20000.0,    ! [m]
-
-    !   Read dz from the namelist file (below)
-    readdz = True,
 
     !   The number of vertical levels to run (suggest ~10-30 levels with a model top around 4-8km)
     !   this is now optional, if not supplied, ICAR will determine it from the number of levels specified
@@ -254,13 +242,8 @@
     !   Use density in the advection step (violates linear theory assumptions)
     advect_density = .True.,
 
-    ! batched_exch = .True.    ! Do halo_exchanges as a batched or piece-wise process. batched is generally faster,    
-                                ! but some compiler/compute combinations may be faster
-                                ! with piece-wise exchanges.
-
     !   Increases output print at runtime and tests domain wide values for realistic values throughout the simulation.
     debug = false,
-    warning_level = 4, ! 0-10 increases the level of errors it warns about and quits over (slightly)
 
     ! controls printing of % completed for longer processes.  Nice if it is running in a console, not nice in a log file.
     interactive=False

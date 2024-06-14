@@ -24,7 +24,7 @@ program icar
     use boundary_interface, only : boundary_t
     use output_interface,   only : output_t
     use time_step,          only : step                ! Advance the model forward in time
-    use initialization,     only : split_processes, init_options, init_model, init_physics, init_model_state
+    use initialization,     only : split_processes, welcome_message, init_options, init_model, init_physics, init_model_state
     use timer_interface,    only : timer_t
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
@@ -66,16 +66,22 @@ program icar
 
     call small_time_delta%set(1)
 
-    !Determine split of processes which will become I/O servers and which will be compute tasks
-    !Also sets constants for the program to keep track of this splitting
-    call split_processes(exec_team, domain, ioserver, ioclient)
-        
+    call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
+    STD_OUT_PE = (PE_RANK_GLOBAL==0)
+
+    if (STD_OUT_PE) call welcome_message()
+    if (STD_OUT_PE) flush(output_unit)
+
     !-----------------------------------------
     !  Model Initialization
     !
     ! Reads user supplied model options
     call init_options(options)
     if (STD_OUT_PE) flush(output_unit)
+
+    !Determine split of processes which will become I/O servers and which will be compute tasks
+    !Also sets constants for the program to keep track of this splitting
+    call split_processes(exec_team, domain, ioserver, ioclient)
 
     select case(exec_team)
     case(kCOMPUTE_TEAM)
@@ -91,13 +97,13 @@ program icar
 
         if (STD_OUT_PE) write(*,*) "Populating boundary object"
         if (STD_OUT_PE) flush(output_unit)
-        call boundary%update_computed_vars(options, update=options%parameters%time_varying_z)
+        call boundary%update_computed_vars(options, update=options%forcing%time_varying_z)
 
         if (STD_OUT_PE) write(*,*) "Inizializing model state"
         if (STD_OUT_PE) flush(output_unit)
         call init_model_state(options, domain, boundary) ! added boundary structure
 
-        if (options%parameters%restart) then
+        if (options%restart%restart) then
             if (STD_OUT_PE) write(*,*) "Reading restart data"
             call ioclient%receive_rst(domain, options)
         endif
@@ -114,11 +120,11 @@ program icar
         !  End Compute-Side Initialization
         !--------------------------------------------------------
 
-        next_output = options%parameters%start_time + options%io_options%output_dt
-        next_input = options%parameters%start_time
+        next_output = options%general%start_time + options%output%output_dt
+        next_input = options%general%start_time
 
         if (STD_OUT_PE) write(*,*) "Initialization complete, beginning physics integration."
-        do while (domain%model_time + small_time_delta < options%parameters%end_time)
+        do while (domain%model_time + small_time_delta < options%general%end_time)
             ! -----------------------------------------------------
             !
             !  Read input data if necessary
@@ -128,7 +134,7 @@ program icar
                 if (STD_OUT_PE) write(*,*) ""
                 if (STD_OUT_PE) write(*,*) " ----------------------------------------------------------------------"
                 if (STD_OUT_PE) write(*,*) "Updating Boundary conditions"
-                next_input = next_input + options%io_options%input_dt
+                next_input = next_input + options%forcing%input_dt
 
                 call input_timer%start()
 
@@ -153,7 +159,7 @@ program icar
             ! -----------------------------------------------------
             if (STD_OUT_PE) write(*,*) "Running Physics"
             if (STD_OUT_PE) write(*,*) "  Model time = ", trim(domain%model_time%as_string())
-            if (STD_OUT_PE) write(*,*) "   End  time = ", trim(options%parameters%end_time%as_string())
+            if (STD_OUT_PE) write(*,*) "   End  time = ", trim(options%general%end_time%as_string())
             if (STD_OUT_PE) write(*,*) "  Next Input = ", trim(next_input%as_string())
             if (STD_OUT_PE) write(*,*) "  Next Output= ", trim(next_output%as_string())
             if (STD_OUT_PE) flush(output_unit)
@@ -161,12 +167,12 @@ program icar
             ! this is the meat of the model physics, run all the physics for the current time step looping over internal timesteps
             if (.not.(options%wind%wind_only)) then
                 call physics_timer%start()
-                call step(domain, boundary, step_end(next_input, next_output, options%parameters%end_time), options,           &
+                call step(domain, boundary, step_end(next_input, next_output, options%general%end_time), options,           &
                                 mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, &
                                 send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer)
                 call physics_timer%stop()
             elseif (options%wind%wind_only) then
-                call domain%apply_forcing(boundary, options, real(options%io_options%output_dt%seconds()))
+                call domain%apply_forcing(boundary, options, real(options%output%output_dt%seconds()))
                 domain%model_time = next_output
             endif
 
@@ -177,7 +183,7 @@ program icar
                 if (STD_OUT_PE) write(*,*) "Writing output file"
                 call output_timer%start()
                 call ioclient%push(domain)
-                next_output = next_output + options%io_options%output_dt
+                next_output = next_output + options%output%output_dt
                 call output_timer%stop()
             endif
         end do
@@ -189,9 +195,9 @@ program icar
         if (STD_OUT_PE) then
             call MPI_Comm_Size(MPI_COMM_WORLD,i)
             write(*,*) ""
-            write(*,*) "Model run from : ",trim(options%parameters%start_time%as_string())
-            write(*,*) "           to  : ",trim(options%parameters%end_time%as_string())
-            write(*,*) "Domain : ",trim(options%parameters%init_conditions_file)
+            write(*,*) "Model run from : ",trim(options%general%start_time%as_string())
+            write(*,*) "           to  : ",trim(options%general%end_time%as_string())
+            write(*,*) "Domain : ",trim(options%domain%init_conditions_file)
             write(*,*) "Number of images:",i
             write(*,*) ""
             write(*,*) "Average timing across compute images:"
@@ -241,7 +247,7 @@ program icar
         !Get initial conditions
         call ioserver%read_file()
         
-        if (options%parameters%restart) then
+        if (options%restart%restart) then
             call ioserver%read_restart_file(options)
         endif
 
@@ -251,8 +257,8 @@ program icar
         !  End IO-Side Initialization
         !--------------------------------------------------------
 
-        next_output = options%parameters%start_time
-        next_input = options%parameters%start_time
+        next_output = options%general%start_time
+        next_input = options%general%start_time
 
         io_loop = .True.
 
@@ -260,9 +266,9 @@ program icar
             
             ! If we aren't yet done, then wait for an output
             ! If we are at an output step, do it now
-            if (ioserver%io_time+small_time_delta >= next_output .and. ioserver%io_time <= options%parameters%end_time) then
+            if (ioserver%io_time+small_time_delta >= next_output .and. ioserver%io_time <= options%general%end_time) then
                 call ioserver%write_file(ioserver%io_time)
-                next_output = next_output + options%io_options%output_dt
+                next_output = next_output + options%output%output_dt
             endif
 
             !See if we even have files to read
@@ -270,7 +276,7 @@ program icar
                 !See of it is time to read.
                 if (ioserver%io_time+small_time_delta >= next_input) then
                     call ioserver%read_file()
-                    next_input = next_input + options%io_options%input_dt
+                    next_input = next_input + options%forcing%input_dt
                 endif
 
                 !If we still have files to read, set io_time to be the soonest of either input or output time
@@ -280,7 +286,7 @@ program icar
                 ioserver%io_time = next_output
             endif
 
-            if (.not.(ioserver%files_to_read) .and. ioserver%io_time > options%parameters%end_time) io_loop = .False.
+            if (.not.(ioserver%files_to_read) .and. ioserver%io_time > options%general%end_time) io_loop = .False.
 
         enddo
         !If we are done with the program

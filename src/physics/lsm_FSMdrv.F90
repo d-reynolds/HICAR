@@ -117,7 +117,7 @@ contains
         Ny_HICAR=ite-its+1
         Nx_HICAR=jte-jts+1
         
-        last_output = options%parameters%start_time
+        last_output = options%general%start_time
         last_snowslide = 4000
 
         !!
@@ -144,7 +144,7 @@ contains
         
         z0_bare = 0.01
         dx_HICAR=domain%dx
-        NNsmax_HICAR=options%lsm_options%fsm_nsnow_max
+        NNsmax_HICAR=options%lsm%fsm_nsnow_max
 
         !!
         allocate(Esrf_(Nx_HICAR,Ny_HICAR)); Esrf_=0.
@@ -182,10 +182,10 @@ contains
 
         !!        
         !! MJ added this block to read in while we use restart file:
-        if (options%parameters%restart) then
+        if (options%restart%restart) then
             !! giving feedback to HICAR
             Tsrf = TRANSPOSE(domain%skin_temperature%data_2d(its:ite,jts:jte))
-            if (options%lsm_options%monthly_albedo) then
+            if (options%lsm%monthly_albedo) then
                 albs = TRANSPOSE(domain%albedo%data_3d(its:ite, domain%model_time%month, jts:jte))
             else
                 albs = TRANSPOSE(domain%albedo%data_3d(its:ite, 1, jts:jte))
@@ -212,7 +212,7 @@ contains
         !        if (.not.(fsnow(i,j)*SUM(Ds(:,i,j))==domain%snow_height%data_2d(j-1+domain%its,i-1+domain%jts))) then
         !            albs(i,j) = 0.75
         !            fsnow(i,j) = 1
-        !            Nsnow (i,j)= min(6,options%lsm_options%fsm_nsnow_max)
+        !            Nsnow (i,j)= min(6,options%lsm%fsm_nsnow_max)
         !            Tsnow(:,i,j) = 268
         !            Tsoil(:,i,j) = 273
         !            theta(:,i,j) = 0.2
@@ -285,14 +285,7 @@ contains
         Sdir=TRANSPOSE(domain%shortwave_direct%data_2d(its:ite,jts:jte))  !Sdir=domain%shortwave%data_2d(its:ite,jts:jte)
         Sdif=TRANSPOSE(domain%shortwave_diffuse%data_2d(its:ite,jts:jte)) !Sdif=0.0
         !!
-        if (options%parameters%factor_p_var == "") then 
-            !if (STD_OUT_PE) write(*,*) "facto_p is not read...FSM"
-            Sf=TRANSPOSE(current_snow(its:ite,jts:jte))
-        endif
-        if (options%parameters%factor_p_var /= "") then 
-            !if (STD_OUT_PE) write(*,*) "facto_p is read...FSM"
-            Sf=TRANSPOSE(current_snow(its:ite,jts:jte)*domain%factor_p%data_2d(its:ite,jts:jte))
-        endif
+        Sf=TRANSPOSE(current_snow(its:ite,jts:jte))
         !
         Sf24h=TRANSPOSE(domain%snowfall_tstep%data_2d(its:ite,jts:jte))
         !
@@ -317,7 +310,7 @@ contains
             domain%dm_salt%data_2d  = 0.
             domain%dm_susp%data_2d  = 0.
             domain%dm_subl%data_2d  = 0.
-            last_output = last_output + options%io_options%output_dt
+            last_output = last_output + options%output%output_dt
         endif
         
         SWE_pre = domain%snow_water_equivalent%data_2d(its:ite,jts:jte)
@@ -443,7 +436,7 @@ contains
                     domain%sensible_heat%data_2d(hi,hj)=H_(j,i)
                     domain%latent_heat%data_2d(hi,hj)=LE_(j,i)
                     domain%snow_water_equivalent%data_2d(hi,hj)=SWE_(j,i)
-                    if (options%lsm_options%monthly_albedo) then
+                    if (options%lsm%monthly_albedo) then
                         domain%albedo%data_3d(hi, domain%model_time%month, hj) = albs(j,i)
                     else
                         domain%albedo%data_3d(hi, 1, hj) = albs(j,i)
@@ -504,8 +497,8 @@ contains
         !meltflux_out_sum=meltflux_out_sum+meltflux_out_
         
 
-        !Delta_t=mod(domain%model_time%seconds(),options%io_options%out_dt)
-        !if ( abs(options%io_options%out_dt-(Delta_t+dt)) <= 1.e-3 ) then
+        !Delta_t=mod(domain%model_time%seconds(),options%output%out_dt)
+        !if ( abs(options%output%out_dt-(Delta_t+dt)) <= 1.e-3 ) then
         !    if (STD_OUT_PE) write(*,*) "resetting/aggregating vars e.g. runoff during t-1->t"!, Delta_t,Delta_t+dt
         !    !!
         !    domain%rainfall_tstep%data_2d(its:ite,jts:jte)=rainfall_sum

@@ -656,7 +656,7 @@ contains
         ! append total number of images and the current image number to the LUT filename
         call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
 
-        LUT_file = trim(options%lt_options%u_LUT_Filename) // "_" // trim(str(num_PE)) // "_" // trim(str(PE_RANK_GLOBAL)) // ".nc"
+        LUT_file = trim(options%lt%u_LUT_Filename) // "_" // trim(str(num_PE)) // "_" // trim(str(PE_RANK_GLOBAL)) // ".nc"
 
         ims = lbound(domain%z%data_3d,1)
         jms = lbound(domain%z%data_3d,3)
@@ -700,14 +700,14 @@ contains
         call linear_space(spd_values,spdmin,spdmax,n_spd_values)
 
         ! Allocate the (LARGE) look up tables for both U and V
-        if (.not.options%lt_options%read_LUT) then
+        if (.not.options%lt%read_LUT) then
             allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny), source=0.0)
             allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv), source=0.0)
             error=0
         else
             if (STD_OUT_PE) write(*,*) "    Reading LUT from file: ", trim(LUT_file)
             error=1
-            error = read_LUT(LUT_file, hi_u_LUT, hi_v_LUT, options%parameters%dz_levels(:nz), LUT_dims, options%lt_options)
+            error = read_LUT(LUT_file, hi_u_LUT, hi_v_LUT, options%domain%dz_levels(:nz), LUT_dims, options%lt)
             
             if (error/=0) then
                 if (STD_OUT_PE) write(*,*) "WARNING: LUT on disk does not match that specified in the namelist or does not exist."
@@ -727,14 +727,14 @@ contains
             stop_pos  = nint((real(my_index) / kNUM_COMPUTE) * total_LUT_entries) - 1
         endif
 
-        ! if (options%parameters%debug) then
+        ! if (options%general%debug) then
         if (STD_OUT_PE) write(*,*) "Local Look up Table size:", 4*product(shape(hi_u_LUT))/real(2**20), "MB"
         if (STD_OUT_PE) write(*,*) "Wind Speeds:",spd_values
         if (STD_OUT_PE) write(*,*) "Directions:",360*dir_values/(2*piconst)
         if (STD_OUT_PE) write(*,*) "Stabilities:",exp(nsq_values)
         ! endif
 
-        if (reverse.or.(.not.((options%lt_options%read_LUT).and.(error==0)))) then
+        if (reverse.or.(.not.((options%lt%read_LUT).and.(error==0)))) then
             ! loop over combinations of U, V, and Nsq values
             loops_completed = 0
             if (STD_OUT_PE) write(*,*) "    Initializing linear theory"
@@ -792,7 +792,7 @@ contains
 
                 do z=1,nz
                     ! print the current status if this is being run "interactively"
-                    if (options%parameters%interactive) then
+                    if (options%general%interactive) then
                         !$omp critical (print_lock)
                         if (STD_OUT_PE) write(*,"(f5.1,A)") loops_completed/real(nz*(stop_pos-start_pos+1))*100," %"
                         if (STD_OUT_PE) flush(output_unit)
@@ -868,12 +868,12 @@ contains
             if (STD_OUT_PE) flush(output_unit)
         endif
 
-        if ((options%lt_options%write_LUT).and.(.not.reverse)) then
-            if ((options%lt_options%read_LUT) .and. (error == 0)) then
+        if ((options%lt%write_LUT).and.(.not.reverse)) then
+            if ((options%lt%read_LUT) .and. (error == 0)) then
                 if (STD_OUT_PE) write(*,*) "    Not writing Linear Theory LUT to file because LUT was read from file"
             else
                 if (STD_OUT_PE) write(*,*) "    Writing Linear Theory LUT to file: ", trim(LUT_file)
-                error = write_LUT(LUT_file, hi_u_LUT, hi_v_LUT, options%parameters%dz_levels(:nz), options%lt_options)
+                error = write_LUT(LUT_file, hi_u_LUT, hi_v_LUT, options%domain%dz_levels(:nz), options%lt)
             endif
         endif
 
@@ -1175,38 +1175,38 @@ contains
         implicit none
         type(options_t), intent(in) :: options
 
-        original_buffer       = options%lt_options%buffer
-        variable_N            = options%lt_options%variable_N
-        smooth_nsq            = options%lt_options%smooth_nsq
+        original_buffer       = options%lt%buffer
+        variable_N            = options%lt%variable_N
+        smooth_nsq            = options%lt%smooth_nsq
 
-        stability_window_size = options%lt_options%stability_window_size        ! window to average nsq over
-        max_stability         = options%lt_options%max_stability                ! limits on the calculated Brunt Vaisala Frequency
-        min_stability         = options%lt_options%min_stability                ! these may need to be a little narrower.
-        linear_contribution   = options%lt_options%linear_contribution          ! multiplier on uhat,vhat before adding to u,v
+        stability_window_size = options%lt%stability_window_size        ! window to average nsq over
+        max_stability         = options%lt%max_stability                ! limits on the calculated Brunt Vaisala Frequency
+        min_stability         = options%lt%min_stability                ! these may need to be a little narrower.
+        linear_contribution   = options%lt%linear_contribution          ! multiplier on uhat,vhat before adding to u,v
                                                                                 ! =fractional contribution of linear perturbation to wind field
         ! these are defined per call to permit different values for low res and high res domains
-        ! N_squared              = options%lt_options%N_squared                 ! static Brunt Vaisala Frequency (N^2) to use
-        ! rm_N_squared           = options%lt_options%rm_N_squared              ! static BV Frequency (N^2) to use in removing linear wind field
-        ! rm_linear_contribution = options%lt_options%rm_linear_contribution    ! fractional contribution of linear perturbation to remove wind field
-        ! remove_lowres_linear   = options%lt_options%remove_lowres_linear      ! remove the linear mountain wave from low res forcing model
+        ! N_squared              = options%lt%N_squared                 ! static Brunt Vaisala Frequency (N^2) to use
+        ! rm_N_squared           = options%lt%rm_N_squared              ! static BV Frequency (N^2) to use in removing linear wind field
+        ! rm_linear_contribution = options%lt%rm_linear_contribution    ! fractional contribution of linear perturbation to remove wind field
+        ! remove_lowres_linear   = options%lt%remove_lowres_linear      ! remove the linear mountain wave from low res forcing model
 
-        linear_update_fraction    = options%lt_options%linear_update_fraction   ! controls the rate at which the linearfield updates
+        linear_update_fraction    = options%lt%linear_update_fraction   ! controls the rate at which the linearfield updates
                                                                                 ! =fraction of linear perturbation to add each time step
-        use_spatial_linear_fields = options%lt_options%spatial_linear_fields    ! use a spatially varying linear wind perturbation
-        use_linear_mask           = options%lt_options%linear_mask              ! use a spatial mask for the linear wind field
-        use_nsq_calibration       = options%lt_options%nsq_calibration          ! use a spatial mask to calibrate the nsquared (brunt vaisala frequency) field
+        use_spatial_linear_fields = options%lt%spatial_linear_fields    ! use a spatially varying linear wind perturbation
+        use_linear_mask           = options%lt%linear_mask              ! use a spatial mask for the linear wind field
+        use_nsq_calibration       = options%lt%nsq_calibration          ! use a spatial mask to calibrate the nsquared (brunt vaisala frequency) field
 
         ! Look up table generation parameters, range for each parameter, and number of steps to cover that range
-        dirmax = options%lt_options%dirmax
-        dirmin = options%lt_options%dirmin
-        spdmax = options%lt_options%spdmax
-        spdmin = options%lt_options%spdmin
-        nsqmax = options%lt_options%nsqmax
-        nsqmin = options%lt_options%nsqmin
-        n_dir_values = options%lt_options%n_dir_values
-        n_nsq_values = options%lt_options%n_nsq_values
-        n_spd_values = options%lt_options%n_spd_values
-        minimum_layer_size = options%lt_options%minimum_layer_size
+        dirmax = options%lt%dirmax
+        dirmin = options%lt%dirmin
+        spdmax = options%lt%spdmax
+        spdmin = options%lt%spdmin
+        nsqmax = options%lt%nsqmax
+        nsqmin = options%lt%nsqmin
+        n_dir_values = options%lt%n_dir_values
+        n_nsq_values = options%lt%n_nsq_values
+        n_spd_values = options%lt%n_spd_values
+        minimum_layer_size = options%lt%minimum_layer_size
 
     end subroutine set_module_options
 
@@ -1241,7 +1241,7 @@ contains
         call add_buffer_topo(domain%global_terrain, complex_terrain_firstpass, 5, buffer)
         buffer = 2
         ! then further add a small (~2) grid cell buffer where all cells have the same value
-        call add_buffer_topo(real(real(complex_terrain_firstpass)), complex_terrain, 0, buffer, debug=options%parameters%debug)
+        call add_buffer_topo(real(real(complex_terrain_firstpass)), complex_terrain, 0, buffer, debug=options%general%debug)
         buffer = buffer + original_buffer
 
         nx = size(complex_terrain, 1)
@@ -1277,9 +1277,9 @@ contains
 
             ! if (use_linear_mask) then
             !     if (STD_OUT_PE) write(*,*) "  Reading Linear Mask"
-            !     if (STD_OUT_PE) write(*,*) "    from file: " // trim(options%linear_mask_file)
+            !     if (STD_OUT_PE) write(*,*) "    from file: " // trim(options%init_conditions_file)
             !     if (STD_OUT_PE) write(*,*) "    with var: "  // trim(options%linear_mask_var)
-            !     call io_read(options%linear_mask_file, options%linear_mask_var, domain%linear_mask)
+            !     call io_read(options%init_conditions_file, options%linear_mask_var, domain%linear_mask)
             !
             !     linear_mask = domain%linear_mask * linear_contribution
             ! endif
@@ -1300,9 +1300,9 @@ contains
 
             ! if (use_nsq_calibration) then
             !     if (STD_OUT_PE) write(*,*) "  Reading Linear Mask"
-            !     if (STD_OUT_PE) write(*,*) "    from file: " // trim(options%nsq_calibration_file)
+            !     if (STD_OUT_PE) write(*,*) "    from file: " // trim(options%init_conditions_file)
             !     if (STD_OUT_PE) write(*,*) "    with var: "  // trim(options%nsq_calibration_var)
-            !     call io_read(options%nsq_calibration_file, options%nsq_calibration_var, domain%nsq_calibration)
+            !     call io_read(options%init_conditions_file, options%nsq_calibration_var, domain%nsq_calibration)
             !     nsq_calibration = domain%nsq_calibration
             !
             !     where(nsq_calibration<1) nsq_calibration = 1 + 1/( (1-1/nsq_calibration)/100 )
@@ -1375,11 +1375,11 @@ contains
 
         ! this is a little trickier, because it does have to be domain dependant... could at least be stored in the domain though...
         if (rev) then
-            linear_contribution = options%lt_options%rm_linear_contribution
-            N_squared = options%lt_options%rm_N_squared
+            linear_contribution = options%lt%rm_linear_contribution
+            N_squared = options%lt%rm_N_squared
         else
-            linear_contribution = options%lt_options%linear_contribution
-            N_squared = options%lt_options%N_squared
+            linear_contribution = options%lt%linear_contribution
+            N_squared = options%lt%N_squared
         endif
 
         ! add the spatially variable linear field

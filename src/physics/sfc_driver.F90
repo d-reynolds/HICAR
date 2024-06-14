@@ -120,7 +120,7 @@ contains
             
             call sfclayrevinit(ims,ime,jms,jme,                    &
                             its,ite,jts,jte,                       &
-                            options%sfc_options%sbrlim)!,          &
+                            options%sfc%sbrlim)!,          &
 !                            bathymetry_flag, shalwater_z0,      &
 !                            shalwater_depth, water_depth,       &
 !                            xland,LakeModel,lake_depth,lakemask )       
@@ -183,7 +183,7 @@ contains
                ,br=domain%br%data_2d                   &
                ,wspd=windspd                           & ! i/o -- wspd        wind speed at lowest model level (m/s)
                ,tsk=domain%skin_temperature%data_2d    &
-               ,isfflx=options%sfc_options%isfflx      &
+               ,isfflx=options%sfc%isfflx      &
                ,dx=domain%dx                           &
                ,svp1=SVP1                              & !-- svp1        constant for saturation vapor pressure (kpa)
                ,svp2=SVP2                              & !-- svp2        constant for saturation vapor pressure (dimensionless)
@@ -201,9 +201,9 @@ contains
                ,its=its, ite=ite, jts=jts, jte=jte     &
                ,kts=kts, kte=kte                       &
                ,shalwater_z0=0                         &
-               ,iz0tlnd=options%sfc_options%iz0tlnd    &
-               ,isftcflx=options%sfc_options%isftcflx  &
-               ,scm_force_flux=options%sfc_options%scm_force_flux)
+               ,iz0tlnd=options%sfc%iz0tlnd    &
+               ,isftcflx=options%sfc%isftcflx  &
+               ,scm_force_flux=options%sfc%scm_force_flux)
                                              
                 endif
     end subroutine sfc

@@ -231,7 +231,7 @@ contains
                          kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%snowfall, kVARS%albedo,                &
                          kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%Nsnow,   &
                          kVARS%rainfall_tstep, kVARS%shd, kVARS%snowfall_tstep, kVARS%meltflux_out_tstep, kVARS%Sliq_out, &
-                         kVARS%windspd_10m, kVARS%factor_p, kVARS%dm_salt, kVARS%dm_susp, kVARS%dm_subl, kVARS%dm_slide])
+                         kVARS%windspd_10m, kVARS%dm_salt, kVARS%dm_susp, kVARS%dm_subl, kVARS%dm_slide])
 
              call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
 
@@ -424,7 +424,7 @@ contains
                 else
                     ! over glacier we don't want to use the bare ground temperature though
                     if ((veg_type(i,j)/=ISICE)           &  ! was /=15  (15=snow/ice in MODIFIED_IGBP_MODIS_NOAH)
-                        .and.(veg_type(i,j)/=ISLAKE)     &  ! was /=21  (ISLAKE  = options%lsm_options%lake_category)   # 17 is water, 21 is lakes (in MODIFIED_IGBP_MODIS_NOAH ) MODIFY FOR GENERIC LU TYPES!!
+                        .and.(veg_type(i,j)/=ISLAKE)     &  ! was /=21  (ISLAKE  = options%lsm%lake_category)   # 17 is water, 21 is lakes (in MODIFIED_IGBP_MODIS_NOAH ) MODIFY FOR GENERIC LU TYPES!!
                         .and.(land_mask(i,j)==kLC_LAND)  &
                         .and.(associated(T2bare))) then
                         T2(i,j) = T2bare(i,j)
@@ -743,7 +743,7 @@ contains
             ! call lsm_simple_init(domain,options)
         endif
         
-        if(options%parameters%snowh_var /="" .or. options%parameters%swe_var /="") then 
+        if(options%domain%snowh_var /="" .or. options%domain%swe_var /="") then 
             FNDSNOWH= .True.
             if (STD_OUT_PE) write(*,*) "    Find snow height in file i.s.o. calculating them from SWE: FNDSNOWH=", FNDSNOWH
         else
@@ -762,15 +762,15 @@ contains
             FNDSOILW=.False. ! calculate SOILW (this parameter is ignored in LSM_NOAH_INIT)
             RDMAXALB=.False.
 
-            ISURBAN = options%lsm_options%urban_category
-            ISICE   = options%lsm_options%ice_category
-            ISWATER = options%lsm_options%water_category
-            MMINLU  = options%lsm_options%LU_Categories !"MODIFIED_IGBP_MODIS_NOAH"
-            ISLAKE  = options%lsm_options%lake_category
+            ISURBAN = options%lsm%urban_category
+            ISICE   = options%lsm%ice_category
+            ISWATER = options%lsm%water_category
+            MMINLU  = options%lsm%LU_Categories !"MODIFIED_IGBP_MODIS_NOAH"
+            ISLAKE  = options%lsm%lake_category
 
 
-            if (options%lsm_options%monthly_albedo) then
-                if (.not.options%lsm_options%monthly_vegfrac) Then
+            if (options%lsm%monthly_albedo) then
+                if (.not.options%lsm%monthly_vegfrac) Then
                     print*, "ERROR, monthly albedo requires monthly vegfrac"
                     error stop
                 endif
@@ -778,7 +778,7 @@ contains
             else
                 ALBEDO = domain%albedo%data_3d(:, 1, :)
             endif
-            if (options%lsm_options%monthly_vegfrac) then
+            if (options%lsm%monthly_vegfrac) then
                 VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%model_time%month, :)
             else
                 VEGFRAC = domain%vegetation_fraction%data_3d(:, 1, :)
@@ -834,14 +834,14 @@ contains
             FNDSOILW=.False. ! calculate SOILW (this parameter is ignored in LSM_NOAH_INIT)
             RDMAXALB=.False.
 
-            ISURBAN = options%lsm_options%urban_category
-            ISICE   = options%lsm_options%ice_category
-            ISWATER = options%lsm_options%water_category
-            MMINLU  = options%lsm_options%LU_Categories !"MODIFIED_IGBP_MODIS_NOAH"
-            ISLAKE  = options%lsm_options%lake_category
+            ISURBAN = options%lsm%urban_category
+            ISICE   = options%lsm%ice_category
+            ISWATER = options%lsm%water_category
+            MMINLU  = options%lsm%LU_Categories !"MODIFIED_IGBP_MODIS_NOAH"
+            ISLAKE  = options%lsm%lake_category
 
-            if (options%lsm_options%monthly_albedo) then
-                if (.not.options%lsm_options%monthly_vegfrac) Then
+            if (options%lsm%monthly_albedo) then
+                if (.not.options%lsm%monthly_vegfrac) Then
                     print*, "ERROR, monthly albedo requires monthly vegfrac"
                     error stop
                 endif
@@ -849,7 +849,7 @@ contains
             else
                 ALBEDO = domain%albedo%data_3d(:, 1, :)
             endif
-            if (options%lsm_options%monthly_vegfrac) then
+            if (options%lsm%monthly_vegfrac) then
                 VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%model_time%month, :)
             else
                 VEGFRAC = domain%vegetation_fraction%data_3d(:, 1, :)
@@ -862,31 +862,31 @@ contains
             where(domain%soil_temperature%data_3d<200) domain%soil_temperature%data_3d=200
             where(domain%soil_water_content%data_3d<0.0001) domain%soil_water_content%data_3d=0.0001
 
-            IDVEG = options%lsm_options%nmp_dveg
-            IOPT_CRS = options%lsm_options%nmp_opt_crs
-            IOPT_SFC = options%lsm_options%nmp_opt_sfc
-            IOPT_BTR = options%lsm_options%nmp_opt_btr
-            IOPT_RUN = options%lsm_options%nmp_opt_run
-            IOPT_INF = options%lsm_options%nmp_opt_inf
-            IOPT_FRZ = options%lsm_options%nmp_opt_frz
-            IOPT_INF = options%lsm_options%nmp_opt_inf
-            IOPT_RAD = options%lsm_options%nmp_opt_rad
-            IOPT_ALB = options%lsm_options%nmp_opt_alb
-            IOPT_SNF = options%lsm_options%nmp_opt_snf
-            IOPT_TBOT = options%lsm_options%nmp_opt_tbot
-            IOPT_STC = options%lsm_options%nmp_opt_stc
-            IOPT_GLA = options%lsm_options%nmp_opt_gla
-            IOPT_RSF = options%lsm_options%nmp_opt_rsf
-            IOPT_SOIL = options%lsm_options%nmp_opt_soil
-            IOPT_PEDO = options%lsm_options%nmp_opt_pedo
-            IOPT_CROP = options%lsm_options%nmp_opt_crop
-            IOPT_IRR = options%lsm_options%nmp_opt_irr
-            IOPT_IRRM = options%lsm_options%nmp_opt_irrm
-            IOPT_TDRN = options%lsm_options%nmp_opt_tdrn
-            IOPT_NMPOUTPUT = options%lsm_options%noahmp_output
-            IZ0TLND = options%sfc_options%iz0tlnd
-            NMP_SOILTSTEP = options%lsm_options%nmp_soiltstep
-            SF_URBAN_PHYSICS = options%lsm_options%sf_urban_phys
+            IDVEG = options%lsm%nmp_dveg
+            IOPT_CRS = options%lsm%nmp_opt_crs
+            IOPT_SFC = options%lsm%nmp_opt_sfc
+            IOPT_BTR = options%lsm%nmp_opt_btr
+            IOPT_RUN = options%lsm%nmp_opt_run
+            IOPT_INF = options%lsm%nmp_opt_inf
+            IOPT_FRZ = options%lsm%nmp_opt_frz
+            IOPT_INF = options%lsm%nmp_opt_inf
+            IOPT_RAD = options%lsm%nmp_opt_rad
+            IOPT_ALB = options%lsm%nmp_opt_alb
+            IOPT_SNF = options%lsm%nmp_opt_snf
+            IOPT_TBOT = options%lsm%nmp_opt_tbot
+            IOPT_STC = options%lsm%nmp_opt_stc
+            IOPT_GLA = options%lsm%nmp_opt_gla
+            IOPT_RSF = options%lsm%nmp_opt_rsf
+            IOPT_SOIL = options%lsm%nmp_opt_soil
+            IOPT_PEDO = options%lsm%nmp_opt_pedo
+            IOPT_CROP = options%lsm%nmp_opt_crop
+            IOPT_IRR = options%lsm%nmp_opt_irr
+            IOPT_IRRM = options%lsm%nmp_opt_irrm
+            IOPT_TDRN = options%lsm%nmp_opt_tdrn
+            IOPT_NMPOUTPUT = options%lsm%noahmp_output
+            IZ0TLND = options%sfc%iz0tlnd
+            NMP_SOILTSTEP = options%lsm%nmp_soiltstep
+            SF_URBAN_PHYSICS = options%lsm%sf_urban_phys
 
 
             if (options%physics%snowmodel==kSM_FSM) IOPT_SNF = 4 !This will turn off precipitation partitioning in NoahMP, letting us remove snow from NoahMP
@@ -959,7 +959,7 @@ contains
                                 domain%temperature_2m_bare%data_2d,     &
                                 chstarxy,                               &   !doesn't do anything -_-
                                 num_soil_layers,                        &
-                                options%parameters%restart,             &    !restart
+                                options%restart%restart,             &    !restart
                                 .True.,                                 &    !allowed_to_read
                                 IOPT_RUN,  IOPT_CROP, IOPT_IRR, IOPT_IRRM, &
                                 SF_URBAN_PHYSICS,                         &  ! urban scheme
@@ -998,11 +998,11 @@ contains
             allocate( lake_or_not(ims:ime, jms:jme))
             allocate( TH2( ims:ime, jms:jme ))
 
-            ! ISURBAN = options%lsm_options%urban_category
-            ISICE   = options%lsm_options%ice_category
-            ISWATER = options%lsm_options%water_category
-            ! MMINLU  = options%lsm_options%LU_Categories !"MODIFIED_IGBP_MODIS_NOAH"
-            ISLAKE  = options%lsm_options%lake_category
+            ! ISURBAN = options%lsm%urban_category
+            ISICE   = options%lsm%ice_category
+            ISWATER = options%lsm%water_category
+            ! MMINLU  = options%lsm%LU_Categories !"MODIFIED_IGBP_MODIS_NOAH"
+            ISLAKE  = options%lsm%lake_category
 
             ! allocate_noah_data already sets xice_threshold, so if we are using noah (mp/lsm) leave as is.
             if(.not.(options%physics%landsurface==kLSM_NOAHMP .OR. options%physics%landsurface==kLSM_NOAH)) then
@@ -1029,7 +1029,7 @@ contains
                     END DO
                 END DO
             endif
-            ! if(options%parameters%debug) write(*,*)"   ",lake_count, " lake cells in image ", this_image()
+            ! if(options%general%debug) write(*,*)"   ",lake_count, " lake cells in image ", this_image()
 
             ! setlake_depth_flag and use_lakedepth flag. (They seem to be redundant, but whatever):
             if( associated(domain%lake_depth%data_2d) ) then
@@ -1047,7 +1047,7 @@ contains
                 ,HT=domain%terrain%data_2d                      & ! terrain height [m] if ht(i,j)>=lake_min_elev -> lake  (grid%ht in WRF)
                 ,SNOW=domain%snow_water_equivalent%data_2d      & !i  ! SNOW in kg/m^2  (NoahLSM: SNOW liquid water-equivalent snow depth (m)
                 ,lake_min_elev=5.                               & ! minimum elevation of lakes. May be used to determine whether a water point is a lake in the absence of lake category. If the landuse type includes 'lake' (i.e. Modis_lake and USGS_LAKE), this variable is of no effects.
-                ,restart=options%parameters%restart             & ! if restart, this (lakeini) subroutine is simply skipped.
+                ,restart=options%restart%restart                & ! if restart, this (lakeini) subroutine is simply skipped.
                 ,lakedepth_default=50.                          & ! default lake depth (If there is no lake_depth information in the input data, then lake depth is assumed to be 50m)
                 ,lake_depth=domain%lake_depth%data_2d           & !INTENT(IN)
                 ,lakedepth2d=domain%lakedepth2d%data_2d         & !INTENT(OUT) (will be equal to lake_depth if lake_depth data is provided in hi-res input, otherwise lakedepth_default)
@@ -1110,7 +1110,7 @@ contains
         ! defines the height of the middle of the first model level
         z_atm = domain%z%data_3d(:,kts,:) - domain%terrain%data_2d
 
-        update_interval=options%lsm_options%update_interval
+        update_interval=options%lsm%update_interval
         last_model_time=-999
 
     end subroutine lsm_init
@@ -1309,12 +1309,12 @@ contains
                         endif
                     enddo
                 enddo
-                if (options%lsm_options%monthly_albedo) then
+                if (options%lsm%monthly_albedo) then
                     if (cur_vegmonth /= domain%model_time%month) then
                         ALBEDO = domain%albedo%data_3d(:, domain%model_time%month, :)
                     endif
                 endif
-                if (options%lsm_options%monthly_vegfrac) then
+                if (options%lsm%monthly_vegfrac) then
                     if (cur_vegmonth /= domain%model_time%month) then
                         VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%model_time%month, :)
                         cur_vegmonth = domain%model_time%month
@@ -1405,7 +1405,7 @@ contains
                             ims,ime, jms,jme, kms,kme,                    &
                             its,ite, jts,jte, kts,kte)
 
-                where(domain%snow_water_equivalent%data_2d > options%lsm_options%max_swe) domain%snow_water_equivalent%data_2d = options%lsm_options%max_swe
+                where(domain%snow_water_equivalent%data_2d > options%lsm%max_swe) domain%snow_water_equivalent%data_2d = options%lsm%max_swe
                 ! now that znt (roughness_z0) has been updated, we need to recalculate terms
             else if (options%physics%landsurface == kLSM_NOAHMP) then
             ! Call the Noah-MP Land Surface Model
@@ -1418,12 +1418,12 @@ contains
                         endif
                     enddo
                 enddo
-                if (options%lsm_options%monthly_albedo) then
+                if (options%lsm%monthly_albedo) then
                     ALBEDO = domain%albedo%data_3d(:, domain%model_time%month, :)
                 else
                     ALBEDO = domain%albedo%data_3d(:, 1, :)
                 endif
-                if (options%lsm_options%monthly_vegfrac) then
+                if (options%lsm%monthly_vegfrac) then
                     if (cur_vegmonth /= domain%model_time%month) then
                         VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%model_time%month, :)
                         cur_vegmonth = domain%model_time%month
@@ -1431,7 +1431,7 @@ contains
                 endif
 
                 !more parameters
-                landuse_name = options%lsm_options%LU_Categories            !test whether this works or if we need something separate
+                landuse_name = options%lsm%LU_Categories            !test whether this works or if we need something separate
 
                 ! if (STD_OUT_PE) write(*,*) "    lsm start: accumulated_precipitation max:", MAXVAL(domain%accumulated_precipitation%data_2d)
                 ! if (STD_OUT_PE) write(*,*) "    lsm start: RAINBL max:", MAXVAL(RAINBL)
@@ -1449,7 +1449,7 @@ contains
 
 
                 do j = jms,jme
-                    solar_elevation  = calc_solar_elevation(date=domain%model_time, tzone=options%rad_options%tzone, &
+                    solar_elevation  = calc_solar_elevation(date=domain%model_time, tzone=options%rad%tzone, &
                         lon=domain%longitude%data_2d, lat=domain%latitude%data_2d, j=j, &
                         ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite)
                     domain%cosine_zenith_angle%data_2d(ims:ime,j)=sin(solar_elevation(ims:ime))
@@ -1636,7 +1636,7 @@ contains
                              its,ite,  jts,jte,  kts,kte)
                              
                              
-                if (options%lsm_options%monthly_albedo) then
+                if (options%lsm%monthly_albedo) then
                     domain%albedo%data_3d(:, domain%model_time%month, :) = ALBEDO
                 else
                     domain%albedo%data_3d(:, 1, :) = ALBEDO
@@ -1651,7 +1651,7 @@ contains
 
     !         TLE: OMITTING OPTIONAL PRECIP INPUTS FOR NOW
     !                         MP_RAINC, MP_RAINNC, MP_SHCV, MP_SNOW, MP_GRAUP, MP_HAIL     )
-                where(domain%snow_water_equivalent%data_2d > options%lsm_options%max_swe) domain%snow_water_equivalent%data_2d = options%lsm_options%max_swe
+                where(domain%snow_water_equivalent%data_2d > options%lsm%max_swe) domain%snow_water_equivalent%data_2d = options%lsm%max_swe
             endif
 
             !! MJ added: this block is for FSM as sm.
@@ -1671,7 +1671,7 @@ contains
                 !   domain%soil_water_content_liq%data_3d(its:ite,i,jts:jte) =  domain%soil_water_content%data_3d(its:ite,i,jts:jte)    / (1000. * DZS(i))
                 !end do
                 
-                !if (.not. options%lsm_options%surface_diagnostics) then
+                !if (.not. options%lsm%surface_diagnostics) then
                 !    domain%temperature_2m%data_2d = domain%temperature%data_3d(:,kms,:)
                 !    domain%humidity_2m%data_2d = domain%water_vapor%data_3d(:,kms,:)
                 !endif

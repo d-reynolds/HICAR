@@ -1142,7 +1142,7 @@ contains
                 endif
             else
                 write(*,*) "Unknown longitude system of coordinates:", longitude_system
-                write(*,*) " Set options%parameters%longitude_system to either:"
+                write(*,*) " Set options%domain%longitude_system to either:"
                 write(*,*) " Prime meridian centered (0 to 360): ", kPRIME_CENTERED
                 write(*,*) " Dateline meridian centered (-180 to 180): ", kDATELINE_CENTERED
                 error stop

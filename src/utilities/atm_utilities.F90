@@ -727,8 +727,8 @@ contains
         implicit none
         type(options_t) :: options
 
-        N_squared   = options%lt_options%N_squared
-        variable_N  = options%lt_options%variable_N
+        N_squared   = options%lt%N_squared
+        variable_N  = options%lt%variable_N
 
         froude_gain = 1 / max(max_froude-min_froude, 0.001)
 

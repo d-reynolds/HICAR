@@ -237,21 +237,21 @@ contains
         ! If this is the first step (future_dt_seconds has not yet been set)
         if (future_dt_seconds == DT_BIG) then
             present_dt_seconds = compute_dt(domain%dx, domain%u%data_3d, domain%v%data_3d, &
-                            domain%w%data_3d, domain%density%data_3d, options%parameters%dz_levels, &
+                            domain%w%data_3d, domain%density%data_3d, options%domain%dz_levels, &
                             domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                             domain%its, domain%ite, domain%jts, domain%jte, &
-                            options%time_options%cfl_reduction_factor, &
-                            cfl_strictness=options%time_options%cfl_strictness, use_density=.false.)
+                            options%time%cfl_reduction_factor, &
+                            cfl_strictness=options%time%cfl_strictness, use_density=.false.)
         else
             present_dt_seconds = future_dt_seconds
         endif
         
         future_dt_seconds = compute_dt(domain%dx, domain%u%dqdt_3d, domain%v%dqdt_3d, &
-                        domain%w%dqdt_3d, domain%density%data_3d, options%parameters%dz_levels, &
+                        domain%w%dqdt_3d, domain%density%data_3d, options%domain%dz_levels, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
-                        options%time_options%cfl_reduction_factor, &
-                        cfl_strictness=options%time_options%cfl_strictness, use_density=.false.)
+                        options%time%cfl_reduction_factor, &
+                        cfl_strictness=options%time%cfl_strictness, use_density=.false.)
                 
         !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
         call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_DOUBLE, MPI_MIN, domain%compute_comms)
@@ -313,7 +313,7 @@ contains
         time_step_size = end_time - domain%model_time
         
         ! Initialize to just over update_dt to force an update on first loop
-        if (domain%model_time==options%parameters%start_time) last_wind_update = options%wind%update_dt%seconds() + 1
+        if (domain%model_time==options%general%start_time) last_wind_update = options%wind%update_dt%seconds() + 1
 
         last_loop = .False.
         ! now just loop over internal timesteps computing all physics in order (operator splitting...)
@@ -356,7 +356,7 @@ contains
             call domain%diagnostic_update(options)
             call diagnostic_timer%stop()
 
-            if (options%parameters%advect_density) then
+            if (options%adv%advect_density) then
                 ! if using advect_density winds need to be balanced at each update
                 call wind_bal_timer%start()
                 call balance_uvw(domain,options)
@@ -364,14 +364,14 @@ contains
             endif
 
             ! if an interactive run was requested than print status updates everytime at least 5% of the progress has been made
-            if (options%parameters%interactive .and. (STD_OUT_PE)) then
+            if (options%general%interactive .and. (STD_OUT_PE)) then
                 call print_progress(domain%model_time, end_time, time_step_size, dt, last_print_time)
             endif
             ! this if is to avoid round off errors causing an additional physics call that won't really do anything
 
             if (real(dt%seconds()) > 1e-3) then
 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" init", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" init", fix=.True.)
 
                 call send_timer%start()
                 call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
@@ -381,14 +381,14 @@ contains
     
                 call rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" rad(domain", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" rad(domain", fix=.True.)
                 call rad_timer%stop()
 
 
                 call lsm_timer%start()
                 call sfc(domain, options, real(dt%seconds()))!, halo=1)
                 call lsm(domain, options, real(dt%seconds()))!, halo=1)
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" lsm")
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" lsm")
                 call lsm_timer%stop()
 
                 call pbl_timer%start()
@@ -414,16 +414,16 @@ contains
                 !         dt = end_time - domain%model_time
                 !     endif
                 ! endif
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" pbl")
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" pbl")
 
                 call convect(domain, options, real(dt%seconds()))!, halo=1)
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" convect")
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" convect")
 
                 
 
                 call adv_timer%start()
                 call advect(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" advect(domain", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" advect(domain", fix=.True.)
                 call adv_timer%stop()
 
                 
@@ -431,10 +431,10 @@ contains
                 call mp_timer%start()
 
                 call mp(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" mp_halo", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" mp_halo", fix=.True.)
                 call mp_timer%stop()
                 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%halo_send", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%halo_send", fix=.True.)
 
 
                 !If we are in the last ~10 updates of a time step and a variable drops below 0, we have probably over-shot a value of 0. Force back to 0
@@ -443,7 +443,7 @@ contains
                 endif
 
 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%apply_forcing", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%apply_forcing", fix=.True.)
 
             endif
             ! step model_time forward

@@ -39,7 +39,7 @@ contains
 
         ! the parameters option type can't contain allocatable arrays because it is a coarray
         ! so we need to allocate the vars_to_read and var_dimensions outside of the options type
-        call setup_variable_lists(options%parameters%vars_to_read, options%parameters%dim_list, vars_to_read, var_dimensions)
+        call setup_variable_lists(options%forcing%vars_to_read, options%forcing%dim_list, vars_to_read, var_dimensions)
 
         ! Read through forcing variable names stored in "options"
         ! needs to read each one to find the grid information for it
@@ -47,22 +47,22 @@ contains
         ! also need to explicitly save lat and lon data
         ! if (STD_OUT_PE) then
             call this%init_local(options,                           &
-                                 options%parameters%boundary_files, &
+                                 options%forcing%boundary_files, &
                                  vars_to_read, var_dimensions,      &
-                                 options%parameters%start_time,     &
-                                 options%parameters%latvar,         &
-                                 options%parameters%lonvar,         &
-                                 options%parameters%zvar,           &
-                                 options%parameters%time_var,       &
-                                 options%parameters%pvar,           &
-                                 options%parameters%psvar,           &
+                                 options%general%start_time,     &
+                                 options%forcing%latvar,         &
+                                 options%forcing%lonvar,         &
+                                 options%forcing%zvar,           &
+                                 options%forcing%time_var,       &
+                                 options%forcing%pvar,           &
+                                 options%forcing%psvar,           &
                                  domain_lat, domain_lon, domain_vars)
 
         ! endif
         ! call this%distribute_initial_conditions()
 
 
-        call setup_boundary_geo(this, options%parameters%longitude_system)
+        call setup_boundary_geo(this, options%domain%longitude_system)
 
     end subroutine
 
@@ -119,7 +119,7 @@ contains
         this%lon = temp_lon(this%its:this%ite,this%jts:this%jte)
 
         ! read in the height coordinate of the input data
-        if (.not. options%parameters%compute_z) then
+        if (.not. options%forcing%compute_z) then
             ! call io_read(file_list(this%curfile), z_var,   temp_z,   this%curstep)
             call io_read(this%firstfile, z_var,   temp_z,   1)
             nx = size(temp_z,1)
@@ -358,13 +358,13 @@ contains
 
         associate(list => this%variables)
 
-        input_z = list%get_var(options%parameters%zvar)
+        input_z = list%get_var(options%forcing%zvar)
 
-        if (options%parameters%z_is_geopotential) then
+        if (options%forcing%z_is_geopotential) then
             input_z%data_3d = input_z%data_3d / gravity
         endif
 
-        ! if (options%parameters%z_is_on_interface) then
+        ! if (options%forcing%z_is_on_interface) then
         !     call interpolate_in_z(input_z%data_3d)
         ! endif
 
@@ -413,28 +413,28 @@ contains
 
         associate(list => this%variables)
 
-        if (options%parameters%qv_is_relative_humidity) then
+        if (options%forcing%qv_is_relative_humidity) then
             call compute_mixing_ratio_from_rh(list, options)
         endif
 
-        if (options%parameters%qv_is_spec_humidity) then
+        if (options%forcing%qv_is_spec_humidity) then
             call compute_mixing_ratio_from_sh(list, options)
         endif
 
         ! because z is not updated over time, we don't want to reapply this every time, only in the initialization
         if (.not. update_internal) then
-            if (options%parameters%z_is_geopotential) then
+            if (options%forcing%z_is_geopotential) then
                 this%z = this%z / gravity
             endif
 
-            if (options%parameters%z_is_on_interface) then
+            if (options%forcing%z_is_on_interface) then
                 call interpolate_in_z(this%z)
             endif
         endif
 
-        if (options%parameters%t_offset /= 0) then
-            tvar = list%get_var(options%parameters%tvar)
-            tvar%data_3d = tvar%data_3d + options%parameters%t_offset
+        if (options%forcing%t_offset /= 0) then
+            tvar = list%get_var(options%forcing%tvar)
+            tvar%data_3d = tvar%data_3d + options%forcing%t_offset
         endif
 
         ! loop through the list of variables that need to be read in
@@ -446,33 +446,33 @@ contains
 
             if (var%computed) then
 
-                if (trim(name) == trim(options%parameters%zvar)) then
+                if (trim(name) == trim(options%forcing%zvar)) then
                     call compute_z_update(this, list, options)
                 endif
 
-                if (trim(name) == trim(options%parameters%pvar)) then
+                if (trim(name) == trim(options%forcing%pvar)) then
                     call compute_p_update(this, list, options, var)
                 endif
 
             endif
         end do
 
-        if (.not.options%parameters%t_is_potential) then
+        if (.not.options%forcing%t_is_potential) then
 
-            tvar = list%get_var(options%parameters%tvar)
-            pvar = list%get_var(options%parameters%pvar)
+            tvar = list%get_var(options%forcing%tvar)
+            pvar = list%get_var(options%forcing%pvar)
 
             tvar%data_3d = tvar%data_3d / exner_function(pvar%data_3d)
         endif
 
-        call limit_rh(list, options)
-        call limit_2d_var(list, options%parameters%sst_var, min_val=options%parameters%sst_min_limit)
-        call limit_2d_var(list, options%parameters%rain_var, max_val=options%parameters%cp_limit)
+        if (options%forcing%limit_rh) call limit_rh(list, options)
+        !limit sea surface temperature to be >= 273.15 (i.e. cannot freeze)
+        call limit_2d_var(list, options%forcing%sst_var, min_val=273.15)
 
         end associate
 
         ! if the vertical levels of the forcing data change over time, they need to be interpolated to the original levels here.
-        if (options%parameters%time_varying_z) then
+        if (options%forcing%time_varying_z) then
             call this%interpolate_original_levels(options)
         endif
 
@@ -488,15 +488,15 @@ contains
         integer           :: err
         type(variable_t)  :: pvar, tvar, qvar
 
-        tvar = list%get_var(options%parameters%tvar)
-        pvar = list%get_var(options%parameters%pvar)
-        qvar = list%get_var(options%parameters%qvvar)
+        tvar = list%get_var(options%forcing%tvar)
+        pvar = list%get_var(options%forcing%pvar)
+        qvar = list%get_var(options%forcing%qvvar)
 
         if (maxval(qvar%data_3d) > 2) then
             qvar%data_3d = qvar%data_3d/100.0
         endif
 
-        if (options%parameters%t_is_potential) then
+        if (options%forcing%t_is_potential) then
             qvar%data_3d = rh_to_mr(qvar%data_3d, tvar%data_3d * exner_function(pvar%data_3d), pvar%data_3d)
         else
             qvar%data_3d = rh_to_mr(qvar%data_3d, tvar%data_3d, pvar%data_3d)
@@ -516,11 +516,9 @@ contains
         real :: rh, t
         integer :: i,j,k
 
-        if (options%parameters%rh_limit<0) return
-
-        tvar = list%get_var(options%parameters%tvar)
-        pvar = list%get_var(options%parameters%pvar)
-        qvar = list%get_var(options%parameters%qvvar)
+        tvar = list%get_var(options%forcing%tvar)
+        pvar = list%get_var(options%forcing%pvar)
+        qvar = list%get_var(options%forcing%qvvar)
 
         do j = lbound(tvar%data_3d, 3), ubound(tvar%data_3d, 3)
             do k = lbound(tvar%data_3d, 2), ubound(tvar%data_3d, 2)
@@ -530,8 +528,8 @@ contains
 
                     rh = relative_humidity(t, qvar%data_3d(i,k,j), pvar%data_3d(i,k,j))
 
-                    if (rh > options%parameters%rh_limit) then
-                        qvar%data_3d = rh_to_mr(options%parameters%rh_limit, t, pvar%data_3d(i,k,j))
+                    if (rh > 1.0) then
+                        qvar%data_3d = rh_to_mr(1.0, t, pvar%data_3d(i,k,j))
                     endif
 
                 enddo
@@ -572,7 +570,7 @@ contains
         integer           :: err
         type(variable_t)  :: qvar
 
-        qvar = list%get_var(options%parameters%qvvar)
+        qvar = list%get_var(options%forcing%qvvar)
 
         qvar%data_3d = qvar%data_3d / (1 - qvar%data_3d)
 
@@ -591,14 +589,14 @@ contains
 
         real, pointer :: t(:,:,:)
 
-        qvar = list%get_var(options%parameters%qvvar)
-        tvar = list%get_var(options%parameters%tvar)
-        zvar = list%get_var(options%parameters%hgtvar)
-        var = list%get_var(options%parameters%pvar, err)
+        qvar = list%get_var(options%forcing%qvvar)
+        tvar = list%get_var(options%forcing%tvar)
+        zvar = list%get_var(options%forcing%hgtvar)
+        var = list%get_var(options%forcing%pvar, err)
 
-        pvar = list%get_var(options%parameters%pslvar, err)
+        pvar = list%get_var(options%forcing%pslvar, err)
 
-        if (options%parameters%t_is_potential) then
+        if (options%forcing%t_is_potential) then
             ! stop "Need real air temperature to compute height"
             allocate(real_t, mold=tvar%data_3d)
             real_t = exner_function(var%data_3d) * tvar%data_3d
@@ -611,7 +609,7 @@ contains
             call compute_3d_z(var%data_3d, pvar%data_2d, this%z, t, qvar%data_3d)
 
         else
-            pvar = list%get_var(options%parameters%psvar, err)
+            pvar = list%get_var(options%forcing%psvar, err)
             if (err == 0) then
                 call compute_3d_z(var%data_3d, pvar%data_2d, this%z, t, qvar%data_3d, zvar%data_2d)
             else
@@ -619,7 +617,7 @@ contains
                 error stop
             endif
         endif
-        zvar = list%get_var(options%parameters%zvar)
+        zvar = list%get_var(options%forcing%zvar)
         zvar%data_3d = this%z
 
     end subroutine compute_z_update
@@ -634,19 +632,19 @@ contains
         integer           :: err
         type(variable_t)  :: pvar, zvar, tvar, qvar
 
-        if (options%parameters%t_is_potential) stop "Need real air temperature to compute pressure"
+        if (options%forcing%t_is_potential) stop "Need real air temperature to compute pressure"
 
-        qvar = list%get_var(options%parameters%qvvar)
-        tvar = list%get_var(options%parameters%tvar)
-        zvar = list%get_var(options%parameters%hgtvar)
+        qvar = list%get_var(options%forcing%qvvar)
+        tvar = list%get_var(options%forcing%tvar)
+        zvar = list%get_var(options%forcing%hgtvar)
 
-        pvar = list%get_var(options%parameters%pslvar, err)
+        pvar = list%get_var(options%forcing%pslvar, err)
 
         if (err == 0) then
             call compute_3d_p(pressure_var%data_3d, pvar%data_2d, this%z, tvar%data_3d, qvar%data_3d, zvar%data_2d)
 
         else
-            pvar = list%get_var(options%parameters%psvar, err)
+            pvar = list%get_var(options%forcing%psvar, err)
 
             if (err == 0) then
                 call compute_3d_p(pressure_var%data_3d, pvar%data_2d, this%z, tvar%data_3d, qvar%data_3d)
