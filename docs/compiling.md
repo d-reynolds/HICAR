@@ -136,7 +136,7 @@ This will then install the executable HICAR in the directory HICAR/bin/
 
 ## Options
 
-The following are options which can be passed to the cmake command using `-DOPTION`. For example, to generate a makefile for compiling HICAR as a debug run with the FSM snow model linked, you could run:
+The following are options which can be passed to the cmake command using `-DOPTION`. For example, to generate a makefile for compiling HICAR as a debug run without the FSM snow model linked, you could run:
 
 ```bash
 cmake ../ -DFSM=OFF -DMODE=debug
@@ -194,7 +194,7 @@ module show MODULE_NAME
 If the user wants to use the snowmodel [FSM2trans](https://egusphere.copernicus.org/preprints/2023/egusphere-2023-2071/), it must also be compiled prior to compiling HICAR. The process for compiling FSM2trans is simple, and similar to that for HICAR:
 
 ```bash
-cd HICAR/FSM2trans/build   # Navigate to the FSM2trans folder
+cd HICAR/FSM2trans         # Navigate to the FSM2trans folder
 mkdir build                # Make the build directory
 cd build
 cmake ../                  # Generate makefile
