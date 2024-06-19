@@ -51,7 +51,7 @@ On a linux system, the script HICAR/.github/scripts/hicar_install_utils.sh can b
 ```bash
 HICAR/.github/scripts/hicar_install_utils.sh install_zlib
 HICAR/.github/scripts/hicar_install_utils.sh install_hdf5
-HICAR/.github/scripts/hicar_install_utils.sh install_pnetcdf
+HICAR/.github/scripts/hicar_install_utils.sh install_PnetCDF
 HICAR/.github/scripts/hicar_install_utils.sh install_netcdf_c
 HICAR/.github/scripts/hicar_install_utils.sh install_netcdf_fortran
 ```
