@@ -161,6 +161,10 @@ function gen_test_run_data {
     cd ${GITHUB_WORKSPACE}/helpers
     mkdir ${GITHUB_WORKSPACE}/Model_runs/
     printf 'y\ny\n' | ./gen_HICAR_dir.sh ${GITHUB_WORKSPACE}/Model_runs/ ${GITHUB_WORKSPACE}
+    cd ${GITHUB_WORKSPACE}
+    ./bin/HICAR --gen-nml run/default.nml
+    cd ${GITHUB_WORKSPACE}/Model_runs/HICAR/input
+    ./gen_HICAR_nml.sh ${GITHUB_WORKSPACE}/run/default.nml HICAR_Test_Case.nml
 }
 
 function execute_test_run {

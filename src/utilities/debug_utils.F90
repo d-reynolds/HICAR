@@ -3,9 +3,10 @@ module debug_module
     use domain_interface, only  : domain_t
     use string,           only  : str
     use ieee_arithmetic
-    use icar_constants,    only : PE_RANK_GLOBAL
+    use icar_constants,    only : PE_RANK_GLOBAL, STD_OUT_PE
 
     implicit none
+
 contains
 
     subroutine domain_check(domain, error_msg, fix)
@@ -240,6 +241,5 @@ contains
             stop "Stopped"
         end if
     end subroutine check_ncdf
-
 
 end module debug_module

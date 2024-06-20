@@ -35,14 +35,12 @@
 module land_surface
     use module_sf_noahdrv,   only : lsm_noah, lsm_noah_init
     use module_sf_noahmpdrv, only : noahmplsm, noahmp_init
-    ! use module_lsm_basic,    only : lsm_basic
-    ! use module_lsm_simple,   only : lsm_simple, lsm_simple_init
     use module_water_simple, only : water_simple
     use module_water_lake,   only : lake, lakeini, nlevsoil, nlevsnow, nlevlake
     use mod_atm_utilities,   only : sat_mr, calc_Richardson_nr, calc_solar_elevation
     use time_object,         only : Time_type
     use data_structures
-    use icar_constants,      only : kVARS, kLSM_SIMPLE, kLSM_NOAH, kLSM_NOAHMP, kPBL_DIAGNOSTIC, kSM_FSM
+    use icar_constants,      only : kVARS, kLSM_NOAH, kLSM_NOAHMP, kSM_FSM
     use options_interface,   only : options_t
     use domain_interface,    only : domain_t
     use ieee_arithmetic
@@ -249,7 +247,7 @@ contains
                          kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%Nsnow  ])
         endif
 
-       if (options%physics%watersurface > 1) then
+       if (options%physics%watersurface > 0) then
             call options%alloc_vars( &
                          [kVARS%sst, kVARS%ustar, kVARS%surface_pressure, kVARS%water_vapor,            &
                          kVARS%temperature, kVARS%sensible_heat, kVARS%latent_heat, kVARS%land_mask,    &
@@ -736,12 +734,6 @@ contains
         ! initial guesses (not needed?)
         domain%temperature_2m%data_2d = domain%temperature%data_3d(:,kms,:)
         domain%humidity_2m%data_2d = domain%water_vapor%data_3d(:,kms,:)
-
-        if (options%physics%landsurface==kLSM_SIMPLE) then
-            write(*,*) "    Simple LSM (may not work?)"
-            stop "Simple LSM not settup, choose a different LSM options"
-            ! call lsm_simple_init(domain,options)
-        endif
         
         if(options%domain%snowh_var /="" .or. options%domain%swe_var /="") then 
             FNDSNOWH= .True.
@@ -1159,23 +1151,6 @@ contains
             endif
 
 
-            ! --------------------------------------------------
-            ! First handle the open water surface options
-            ! --------------------------------------------------
-            ! if (options%physics%watersurface==kWATER_BASIC) then
-                ! Note, do nothing because QFX and QSFC are only used for to calculate diagnostic
-                !    T2m and Q2m.  However, the fluxes and stability terms are not coordinated, so
-                !    This leads to problems in the current formulation and this has been removed.
-                ! do j=1,ny
-                !     do i=1,nx
-                !         if (domain%landmask(i,j)==kLC_WATER) then
-                !             QFX(i,j) = domain%latent_heat(i,j) / LH_vaporization
-                !             QSFC(i,j)=sat_mr(domain%T2m(i,j),domain%psfc(i,j))
-                !         endif
-                !     enddo
-                ! enddo
-            ! else
-
             if((options%physics%watersurface==kWATER_SIMPLE) .or.      &
                 (options%physics%watersurface==kWATER_LAKE) ) then
                     call water_simple(options,                              &
@@ -1273,32 +1248,7 @@ contains
             ! --------------------------------------------------
             ! Now handle the land surface options
             ! --------------------------------------------------
-            ! if (options%physics%landsurface==kLSM_BASIC) then
-                ! call lsm_basic(domain,options,lsm_dt)
-                ! Note, do nothing because QFX and QSFC are only used for to calculate diagnostic
-                !    T2m and Q2m.  However, the fluxes and stability terms are not coordinated, so
-                !    This leads to problems in the current formulation and this has been removed.
-                ! do j=1,ny
-                !     do i=1,nx
-                !         if (domain%landmask(i,j)==kLC_LAND) then
-                !             QFX(i,j) = domain%latent_heat(i,j) / LH_vaporization
-                !             QSFC(i,j)=max(domain%water_vapor%data_3d(i,1,j),0.5*sat_mr(domain%T2m(i,j),domain%psfc(i,j)))
-                !         endif
-                !     enddo
-                ! enddo
-
-
-            ! else
-            if (options%physics%landsurface == kLSM_SIMPLE) then
-                write(*,*) "--------------------------"
-                stop "Simple LSM not implemented yet"
-                ! call lsm_simple(domain%th,domain%pii,domain%qv,domain%current_rain, domain%current_snow,domain%p_inter, &
-                !                 domain%swdown,domain%lwdown, sqrt(domain%u10**2+domain%v10**2), &
-                !                 domain%sensible_heat%data_2d, domain%latent_heat, domain%ground_heat_flux, &
-                !                 domain%skin_t, domain%soil_t, domain%soil_vwc, domain%snow_swe, &
-                !                 options,lsm_dt)
-
-            else if (options%physics%landsurface == kLSM_NOAH) then
+            if (options%physics%landsurface == kLSM_NOAH) then
                 ! Call the Noah Land Surface Model
 
                 ! 2m saturated mixing ratio
@@ -1671,10 +1621,6 @@ contains
                 !   domain%soil_water_content_liq%data_3d(its:ite,i,jts:jte) =  domain%soil_water_content%data_3d(its:ite,i,jts:jte)    / (1000. * DZS(i))
                 !end do
                 
-                !if (.not. options%lsm%surface_diagnostics) then
-                !    domain%temperature_2m%data_2d = domain%temperature%data_3d(:,kms,:)
-                !    domain%humidity_2m%data_2d = domain%water_vapor%data_3d(:,kms,:)
-                !endif
             endif
             !!
             if (options%physics%landsurface > kLSM_BASIC) then

@@ -272,14 +272,7 @@ contains
             call mp_wsm6_var_request(options)
         elseif (options%physics%microphysics==kMP_WSM3) then
             call mp_wsm3_var_request(options)
-
-        ! For the ideal test case(s), we need to be able to advect qv, without initializing microphysics:
-        elseif (options%general%ideal) then
-                if (STD_OUT_PE) write(*,*) "    allocating water vapor for ideal test case."
-                call options%alloc_vars( [kVARS%water_vapor] )
-                call options%advect_vars( [kVARS%water_vapor] )
         endif
-
     end subroutine mp_var_request
 
 

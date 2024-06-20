@@ -17,7 +17,7 @@
 module io_routines
     use netcdf
     use iso_fortran_env, only: real64, real128
-
+    use icar_constants, only: STD_OUT_PE
     implicit none
     ! maximum number of dimensions for a netCDF file
     integer,parameter::io_maxDims=10
@@ -72,6 +72,19 @@ contains
         inquire(file=filename,exist=file_exists)
     end function file_exists
 
+    subroutine check_file_exists(filename, message)
+        implicit none
+        character(len=*), intent(IN) :: filename
+        character(len=*), intent(IN) :: message
+
+        ! if  file does not exist, print an error and quit
+        if (.not.file_exists(filename)) then
+            if (STD_OUT_PE) write(*,*) "Using file = ", trim(filename)
+            stop trim(message)
+        endif
+
+    end subroutine check_file_exists
+
     !>------------------------------------------------------------
     !! Tests to see if a variable is present in a netcdf file
     !! returns true of it is, false if it isn't
@@ -92,6 +105,15 @@ contains
 
         io_variable_is_present = (err==NF90_NOERR)
     end function io_variable_is_present
+
+    subroutine check_variable_present(filename,variable_name)
+        character(len=*), intent(in) :: filename
+        character(len=*), intent(in) :: variable_name
+        if (variable_name/="" .and. .not.io_variable_is_present(filename,variable_name)) then
+            if (STD_OUT_PE) write(*,*) "ERROR: requested variable: ",trim(variable_name), " does not exist in file: ",trim(filename)
+            stop
+        endif
+    end subroutine check_variable_present
 
     !>------------------------------------------------------------
     !! Finds the nearest time step in a file to a given MJD
@@ -138,13 +160,13 @@ contains
     !! @param   filename    Name of NetCDF file to look at
     !! @param   varname     Name of the NetCDF variable to find the dimensions of
     !! @param[out] dims     Allocated array to store output
-    !! @retval dims(:) dims[1]=ndims, dims[i+1]=length of dimension i for a given variable
+    !! @retval dims(:) dims[i]=length of dimension i for a given variable
     !!
     !!------------------------------------------------------------
     subroutine io_getdims(filename,varname,dims)
         implicit none
         character(len=*), intent(in) :: filename,varname
-        integer,intent(out) :: dims(:)
+        integer, allocatable, intent(out) :: dims(:)
 
         ! internal variables
         integer :: ncid,varid,numDims,dimlen,i
@@ -158,11 +180,13 @@ contains
         call check(nf90_inquire_variable(ncid, varid, ndims = numDims),varname)
         ! find the dimension IDs
         call check(nf90_inquire_variable(ncid, varid, dimids = dimIds(:numDims)),varname)
-        dims(1)=numDims
+        if (allocated(dims)) deallocate(dims)
+        allocate(dims(numDims))
         ! finally, find the length of each dimension
         do i=1,numDims
             call check(nf90_inquire_dimension(ncid, dimIds(i), len = dimlen))
-            dims(i+1)=dimlen
+            !assign in reverse order, since netcdf reverses the dimension order from what is in the file
+            dims(i)=dimlen
         end do
         ! Close the file, freeing all resources.
         call check( nf90_close(ncid),filename )
@@ -189,7 +213,7 @@ contains
         real, allocatable, intent(inout) :: data_in(:,:,:,:,:,:)
         integer, optional, intent(in)  :: extradim
 
-        integer, dimension(io_maxDims)  :: diminfo !will hold dimension lengths
+        integer, allocatable  :: diminfo(:) !will hold dimension lengths
         integer, dimension(io_maxDims)  :: dimstart
         ! This will be the netCDF ID for the file and data_in variable.
         integer :: ncid, varid,i
@@ -205,7 +229,7 @@ contains
         call io_getdims(filename,varname,diminfo)
 
         if (allocated(data_in)) deallocate(data_in)
-        allocate(data_in(diminfo(2),diminfo(3),diminfo(4),diminfo(5),diminfo(6),diminfo(7)))
+        allocate(data_in(diminfo(1),diminfo(2),diminfo(3),diminfo(4),diminfo(5),diminfo(6)))
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to the file.
         call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
@@ -214,12 +238,12 @@ contains
 
         ! Read the data_in. skip the slowest varying indices if there are more than 6 dimensions (typically this will be time)
         ! and good luck if you have more than 6 dimensions...
-        if (diminfo(1)>6) then
-            diminfo(8:diminfo(1)+1)=1 ! set count for extra dims to 1
+        if (size(diminfo)>6) then
+            diminfo(8:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
-                                    dimstart(1:diminfo(1)), &               ! start  = 1 or extradim
-                                    [ (diminfo(i+1), i=1,diminfo(1)) ],&    ! count=n or 1 created through an implied do loop
-                                    [ (1,            i=1,diminfo(1)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                    dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
+                                    [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
+                                    [ (1,            i=1,size(diminfo)) ]),&   ! for all dims, stride = 1     "  implied do loop
                                     trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
         else
             call check(nf90_get_var(ncid, varid, data_in),trim(filename)//":"//trim(varname))
@@ -249,7 +273,7 @@ contains
         character(len=*), intent(in) :: filename, varname
         real,intent(out),allocatable :: data_in(:,:,:,:,:)
         integer, intent(in),optional :: extradim
-        integer, dimension(io_maxDims)  :: diminfo !will hold dimension lengths
+        integer, allocatable  :: diminfo(:) !will hold dimension lengths
         integer, dimension(io_maxDims)  :: dimstart
         ! This will be the netCDF ID for the file and data_in variable.
         integer :: ncid, varid,i, err
@@ -266,7 +290,7 @@ contains
         call io_getdims(filename,varname,diminfo)
 
         if (allocated(data_in)) deallocate(data_in)
-        allocate(data_in(diminfo(2),diminfo(3),diminfo(4),diminfo(5),diminfo(6)))
+        allocate(data_in(diminfo(1),diminfo(2),diminfo(3),diminfo(4),diminfo(5)))
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
@@ -280,12 +304,12 @@ contains
 
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
-        if (diminfo(1)>5) then
-            diminfo(7:diminfo(1)+1)=1 ! set count for extra dims to 1
+        if (size(diminfo)>5) then
+            diminfo(7:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
-                                    dimstart(1:diminfo(1)), &               ! start  = 1 or extradim
-                                    [ (diminfo(i+1), i=1,diminfo(1)) ],&    ! count=n or 1 created through an implied do loop
-                                    [ (1,            i=1,diminfo(1)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                    dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
+                                    [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
+                                    [ (1,            i=1,size(diminfo)) ]),&   ! for all dims, stride = 1     "  implied do loop
                                     trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
         else
             call check(nf90_get_var(ncid, varid, data_in),trim(filename)//":"//trim(varname))
@@ -319,7 +343,7 @@ contains
         character(len=*), intent(in) :: filename, varname
         real,intent(out),allocatable :: data_in(:,:,:,:)
         integer, intent(in),optional :: extradim
-        integer, dimension(io_maxDims)  :: diminfo !will hold dimension lengths
+        integer, allocatable  :: diminfo(:) !will hold dimension lengths
         integer, dimension(io_maxDims)  :: dimstart
         ! This will be the netCDF ID for the file and data_in variable.
         integer :: ncid, varid,i, err
@@ -336,7 +360,7 @@ contains
         call io_getdims(filename,varname,diminfo)
 
         if (allocated(data_in)) deallocate(data_in)
-        allocate(data_in(diminfo(2),diminfo(3),diminfo(4),diminfo(5)))
+        allocate(data_in(diminfo(1),diminfo(2),diminfo(3),diminfo(4)))
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
@@ -350,12 +374,12 @@ contains
 
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
-        if (diminfo(1)>4) then
-            diminfo(6:diminfo(1)+1)=1 ! set count for extra dims to 1
+        if (size(diminfo)>4) then
+            diminfo(6:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
-                                    dimstart(1:diminfo(1)), &               ! start  = 1 or extradim
-                                    [ (diminfo(i+1), i=1,diminfo(1)) ],&    ! count=n or 1 created through an implied do loop
-                                    [ (1,            i=1,diminfo(1)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                    dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
+                                    [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
+                                    [ (1,            i=1,size(diminfo)) ]),&   ! for all dims, stride = 1     "  implied do loop
                                     trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
         else
             call check(nf90_get_var(ncid, varid, data_in),trim(filename)//":"//trim(varname))
@@ -388,7 +412,7 @@ contains
         character(len=*), intent(in) :: filename, varname
         real,intent(out),allocatable :: data_in(:,:,:)
         integer, intent(in),optional :: extradim
-        integer, dimension(io_maxDims)  :: diminfo !will hold dimension lengths
+        integer, allocatable  :: diminfo(:) !will hold dimension lengths
         integer, dimension(io_maxDims)  :: dimstart
         ! This will be the netCDF ID for the file and data_in variable.
         integer :: ncid, varid,i, err
@@ -405,7 +429,7 @@ contains
         call io_getdims(filename,varname,diminfo)
 
         if (allocated(data_in)) deallocate(data_in)
-        allocate(data_in(diminfo(2),diminfo(3),diminfo(4)))
+        allocate(data_in(diminfo(1),diminfo(2),diminfo(3)))
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
@@ -419,12 +443,12 @@ contains
 
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
-        if (diminfo(1)>3) then
-            diminfo(5:diminfo(1)+1)=1 ! set count for extra dims to 1
+        if (size(diminfo)>3) then
+            diminfo(5:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
-                                    dimstart(1:diminfo(1)), &               ! start  = 1 or extradim
-                                    [ (diminfo(i+1), i=1,diminfo(1)) ],&    ! count=n or 1 created through an implied do loop
-                                    [ (1,            i=1,diminfo(1)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                    dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
+                                    [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
+                                    [ (1,            i=1,size(diminfo)) ]),&   ! for all dims, stride = 1     "  implied do loop
                                     trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
         else
             call check(nf90_get_var(ncid, varid, data_in),trim(filename)//":"//trim(varname))
@@ -456,7 +480,7 @@ contains
         character(len=*), intent(in) :: filename, varname
         real,intent(out),allocatable :: data_in(:,:)
         integer, intent(in),optional :: extradim
-        integer, dimension(io_maxDims)  :: diminfo ! will hold dimension lengths
+        integer, allocatable  :: diminfo(:) ! will hold dimension lengths
         integer, dimension(io_maxDims)  :: dimstart
         ! This will be the netCDF ID for the file and data_in variable.
         integer :: ncid, varid,i, err
@@ -469,12 +493,11 @@ contains
             dimstart=1
         endif
 
-        diminfo = 1
         ! Read the dimension lengths
         call io_getdims(filename,varname,diminfo)
 
         if (allocated(data_in)) deallocate(data_in)
-        allocate(data_in(diminfo(2),diminfo(3)))
+        allocate(data_in(diminfo(1),diminfo(2)))
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
@@ -489,14 +512,14 @@ contains
 
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
-        if (diminfo(1)>2) then
-            diminfo(4:diminfo(1)+1)=1 ! set count for extra dims to 1
+        if (size(diminfo)>2) then
+            diminfo(4:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
-                                    dimstart(1:diminfo(1)), &               ! start  = 1 or extradim
-                                    [ (diminfo(i+1), i=1,diminfo(1)) ],&    ! count=n or 1 created through an implied do loop
-                                    [ (1,            i=1,diminfo(1)) ] ), & ! for all dims, stride = 1      " implied do loop
+                                    dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
+                                    [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
+                                    [ (1,            i=1,size(diminfo)) ] ), & ! for all dims, stride = 1      " implied do loop
                                     trim(filename)//":"//trim(varname)) !pass varname to check so it can give us more info
-        elseif (diminfo(1)==1) then
+        elseif (size(diminfo)==1) then
             call check(nf90_get_var(ncid, varid, data_in(:,1)),trim(filename)//":"//trim(varname))
         else
             call check(nf90_get_var(ncid, varid, data_in),trim(filename)//":"//trim(varname))
@@ -514,7 +537,7 @@ contains
         character(len=*), intent(in) :: filename, varname
         double precision,intent(out),allocatable :: data_in(:,:)
         integer, intent(in),optional :: extradim
-        integer, dimension(io_maxDims)  :: diminfo ! will hold dimension lengths
+        integer, allocatable  :: diminfo(:) ! will hold dimension lengths
         integer, dimension(io_maxDims)  :: dimstart
         ! This will be the netCDF ID for the file and data_in variable.
         integer :: ncid, varid,i, err
@@ -527,12 +550,11 @@ contains
             dimstart=1
         endif
 
-        diminfo = 1
         ! Read the dimension lengths
         call io_getdims(filename,varname,diminfo)
 
         if (allocated(data_in)) deallocate(data_in)
-        allocate(data_in(diminfo(2),diminfo(3)))
+        allocate(data_in(diminfo(1),diminfo(2)))
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
@@ -547,14 +569,14 @@ contains
 
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
-        if (diminfo(1)>2) then
-            diminfo(4:diminfo(1)+1)=1 ! set count for extra dims to 1
+        if (size(diminfo)>2) then
+            diminfo(4:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
-                                    dimstart(1:diminfo(1)), &               ! start  = 1 or extradim
-                                    [ (diminfo(i+1), i=1,diminfo(1)) ],&    ! count=n or 1 created through an implied do loop
-                                    [ (1,            i=1,diminfo(1)) ] ), & ! for all dims, stride = 1      " implied do loop
+                                    dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
+                                    [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
+                                    [ (1,            i=1,size(diminfo)) ] ), & ! for all dims, stride = 1      " implied do loop
                                     trim(filename)//":"//trim(varname)) !pass varname to check so it can give us more info
-        elseif (diminfo(1)==1) then
+        elseif (size(diminfo)==1) then
             call check(nf90_get_var(ncid, varid, data_in(:,1)),trim(filename)//":"//trim(varname))
         else
             call check(nf90_get_var(ncid, varid, data_in),trim(filename)//":"//trim(varname))
@@ -588,7 +610,7 @@ contains
         character(len=*), intent(in) :: filename, varname
         integer,intent(out),allocatable :: data_in(:,:)
         integer, intent(in),optional :: extradim
-        integer, dimension(io_maxDims)  :: diminfo ! will hold dimension lengths
+        integer, allocatable  :: diminfo(:) ! will hold dimension lengths
         integer, dimension(io_maxDims)  :: dimstart
         ! This will be the netCDF ID for the file and data_in variable.
         integer :: ncid, varid,i
@@ -604,7 +626,7 @@ contains
         call io_getdims(filename,varname,diminfo)
 
         if (allocated(data_in)) deallocate(data_in)
-        allocate(data_in(diminfo(2),diminfo(3)))
+        allocate(data_in(diminfo(1),diminfo(2)))
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
@@ -613,12 +635,12 @@ contains
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
-        if (diminfo(1)>2) then
-            diminfo(4:diminfo(1)+1)=1 ! set count for extra dims to 1
+        if (size(diminfo)>2) then
+            diminfo(4:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
-                                    dimstart(1:diminfo(1)), &               ! start  = 1 or extradim
-                                    [ (diminfo(i+1), i=1,diminfo(1)) ],&    ! count=n or 1 created through an implied do loop
-                                    [ (1,            i=1,diminfo(1)) ] ), & ! for all dims, stride = 1      " implied do loop
+                                    dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
+                                    [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
+                                    [ (1,            i=1,size(diminfo)) ] ), & ! for all dims, stride = 1      " implied do loop
                                     trim(filename)//":"//trim(varname)) !pass varname to check so it can give us more info
         else
             call check(nf90_get_var(ncid, varid, data_in),varname)
@@ -650,7 +672,7 @@ contains
         character(len=*), intent(in) :: filename, varname
         real,intent(out),allocatable :: data_in(:)
         integer, intent(in),optional :: extradim
-        integer, dimension(io_maxDims)  :: diminfo ! will hold dimension lengths
+        integer, allocatable  :: diminfo(:) ! will hold dimension lengths
         integer, dimension(io_maxDims)  :: dimstart
         ! This will be the netCDF ID for the file and data_in variable.
         integer :: ncid, varid,i
@@ -666,7 +688,7 @@ contains
         call io_getdims(filename,varname,diminfo)
 
         if (allocated(data_in)) deallocate(data_in)
-        allocate(data_in(diminfo(2)))
+        allocate(data_in(diminfo(1)))
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
@@ -675,12 +697,12 @@ contains
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
 
         ! Read the data_in. skip the slowest varying indices if there are more than 1 dimensions (typically this will be time)
-        if (diminfo(1)>1) then
-            diminfo(3:diminfo(1)+1)=1 ! set count for extra dims to 1
+        if (size(diminfo)>1) then
+            diminfo(3:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
-                                    dimstart(1:diminfo(1)), &               ! start  = 1 or extradim
-                                    [ (diminfo(i+1), i=1,diminfo(1)) ],&    ! count=n or 1 created through an implied do loop
-                                    [ (1,            i=1,diminfo(1)) ] ), & ! for all dims, stride = 1      " implied do loop
+                                    dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
+                                    [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
+                                    [ (1,            i=1,size(diminfo)) ] ), & ! for all dims, stride = 1      " implied do loop
                                     trim(filename)//":"//trim(varname)) !pass varname to check so it can give us more info
         else
             call check(nf90_get_var(ncid, varid, data_in),trim(filename)//":"//trim(varname))
@@ -712,7 +734,7 @@ contains
         character(len=*), intent(in) :: filename, varname
         real,intent(out) :: data_in
         integer, intent(in),optional :: extradim
-        integer, dimension(io_maxDims)  :: diminfo ! will hold dimension lengths
+        integer, allocatable  :: diminfo(:) ! will hold dimension lengths
         integer, dimension(io_maxDims)  :: dimstart
         ! This will be the netCDF ID for the file and data_in variable.
         integer :: ncid, varid,i
@@ -761,7 +783,7 @@ contains
         character(len=*), intent(in) :: filename, varname
         integer,intent(out) :: data_in
         integer, intent(in),optional :: extradim
-        integer, dimension(io_maxDims)  :: diminfo ! will hold dimension lengths
+        integer, allocatable  :: diminfo(:) ! will hold dimension lengths
         integer, dimension(io_maxDims)  :: dimstart
         ! This will be the netCDF ID for the file and data_in variable.
         integer :: ncid, varid,i
@@ -813,7 +835,7 @@ contains
         real(real64),intent(out),allocatable :: data_in(:)
         integer, intent(in),optional :: extradim
         integer, intent(in),optional :: curstep
-        integer, dimension(io_maxDims)  :: diminfo ! will hold dimension lengths
+        integer, allocatable  :: diminfo(:) ! will hold dimension lengths
         integer, dimension(io_maxDims)  :: dimstart
         ! This will be the netCDF ID for the file and data_in variable.
         integer :: ncid, varid,i
@@ -826,14 +848,13 @@ contains
         endif
 
         ! Read the dimension lengths
-        diminfo = 1
         call io_getdims(filename,varname,diminfo)
 
         if (allocated(data_in)) deallocate(data_in)
         if (present(curstep)) then
             allocate(data_in(1))
         else
-            allocate(data_in(diminfo(2)))
+            allocate(data_in(diminfo(1)))
         endif
 
 
@@ -844,12 +865,12 @@ contains
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
 
         ! Read the data_in. skip the slowest varying indices if there are more than 1 dimensions (typically this will be time)
-        if (diminfo(1)>1) then
-            diminfo(3:diminfo(1)+1)=1 ! set count for extra dims to 1
+        if (size(diminfo)>1) then
+            diminfo(3:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
-                                    dimstart(1:diminfo(1)), &               ! start  = 1 or extradim
-                                    [ (diminfo(i+1), i=1,diminfo(1)) ],&    ! count=n or 1 created through an implied do loop
-                                    [ (1,            i=1,diminfo(1)) ] ), & ! for all dims, stride = 1      " implied do loop
+                                    dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
+                                    [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
+                                    [ (1,            i=1,size(diminfo)) ] ), & ! for all dims, stride = 1      " implied do loop
                                     trim(filename)//":"//trim(varname)) !pass varname to check so it can give us more info
         else
             if (present(curstep)) then

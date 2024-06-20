@@ -73,9 +73,11 @@ module options_interface
 
 interface
 
-    module subroutine init(this)
+    module subroutine init(this, namelist_file, info_only, gen_nml, only_namelist_check)
         implicit none
         class(options_t),   intent(inout)  :: this
+        character(len=*),   intent(in)     :: namelist_file
+        logical,            intent(in)     :: info_only, gen_nml, only_namelist_check
     end subroutine
 
     module subroutine alloc_vars(this, input_vars, var_idx, error)

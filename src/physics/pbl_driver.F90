@@ -28,8 +28,8 @@ module planetary_boundary_layer
     use data_structures
     use domain_interface,   only : domain_t
     use options_interface,  only : options_t
-    use pbl_simple,    only : simple_pbl, finalize_simple_pbl, init_simple_pbl
-    use pbl_diagnostic, only : diagnostic_pbl, finalize_diagnostic_pbl, init_diagnostic_pbl
+    !use pbl_simple,    only : simple_pbl, finalize_simple_pbl, init_simple_pbl
+    !use pbl_diagnostic, only : diagnostic_pbl, finalize_diagnostic_pbl, init_diagnostic_pbl
     !use module_bl_ysu, only : ysuinit, ysu
     use module_bl_ysu, only : ysuinit, ysu
     use mod_wrf_constants, only : EOMEG, XLV, r_v, R_d, KARMAN, gravity, EP_1, EP_2, cp, rcp, rovg
@@ -59,21 +59,21 @@ contains
         implicit none
         type(options_t),intent(inout) :: options
 
-        if (options%physics%landsurface == kPBL_SIMPLE) then
-            call options%alloc_vars( &
-                         [kVARS%water_vapor, kVARS%potential_temperature, &
-                         kVARS%cloud_water, kVARS%cloud_ice,              &
-                         kVARS%rain_in_air, kVARS%snow_in_air,            &
-                         kVARS%exner, kVARS%dz_interface, kVARS%density,  &
-                         kVARS%u, kVARS%v, kVARS%land_mask])
-
-             call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
-
-             call options%restart_vars( &
-                         [kVARS%water_vapor, kVARS%potential_temperature, &
-                         kVARS%exner, kVARS%dz_interface, kVARS%density,  &
-                         kVARS%u, kVARS%v, kVARS%land_mask])
-        endif
+        !if (options%physics%landsurface == kPBL_SIMPLE) then
+        !    call options%alloc_vars( &
+        !                 [kVARS%water_vapor, kVARS%potential_temperature, &
+        !                 kVARS%cloud_water, kVARS%cloud_ice,              &
+        !                 kVARS%rain_in_air, kVARS%snow_in_air,            &
+        !                 kVARS%exner, kVARS%dz_interface, kVARS%density,  &
+        !                 kVARS%u, kVARS%v, kVARS%land_mask])
+!
+        !     call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
+!
+        !     call options%restart_vars( &
+        !                 [kVARS%water_vapor, kVARS%potential_temperature, &
+        !                 kVARS%exner, kVARS%dz_interface, kVARS%density,  &
+        !                 kVARS%u, kVARS%v, kVARS%land_mask])
+        !endif
         if (options%physics%boundarylayer==kPBL_YSU) then
 
             call options%alloc_vars( &
@@ -121,13 +121,13 @@ contains
 
         if (STD_OUT_PE) write(*,*) "Initializing PBL Scheme"
 
-        if (options%physics%boundarylayer==kPBL_SIMPLE) then
-            if (STD_OUT_PE) write(*,*) "    Simple PBL"
-            call init_simple_pbl(domain, options)
-        else if (options%physics%boundarylayer==kPBL_DIAGNOSTIC) then
-            if (STD_OUT_PE) write(*,*) "    Diagnostic PBL"
-            call init_diagnostic_pbl(domain, options)
-        else if (options%physics%boundarylayer==kPBL_YSU) then
+        !if (options%physics%boundarylayer==kPBL_SIMPLE) then
+        !    if (STD_OUT_PE) write(*,*) "    Simple PBL"
+        !    call init_simple_pbl(domain, options)
+        !else if (options%physics%boundarylayer==kPBL_DIAGNOSTIC) then
+        !    if (STD_OUT_PE) write(*,*) "    Diagnostic PBL"
+        !    call init_diagnostic_pbl(domain, options)
+        if (options%physics%boundarylayer==kPBL_YSU) then
 
             if (STD_OUT_PE) write(*,*) "    YSU PBL"
 
@@ -192,29 +192,29 @@ contains
         type(options_t), intent(in)     :: options
         real,            intent(in)     :: dt_in  !  =real(dt%seconds())
 
-        if (options%physics%boundarylayer==kPBL_SIMPLE) then
-            call simple_pbl(domain% potential_temperature %data_3d,     &
-                            domain% water_vapor           %data_3d,     &
-                            domain% cloud_water_mass      %data_3d,     &
-                            domain% cloud_ice_mass        %data_3d,     &
-                            domain% rain_mass             %data_3d,     &
-                            domain% snow_mass             %data_3d,     &
-                            domain% u_mass                %data_3d,     &
-                            domain% v_mass                %data_3d,     &
-                            domain% exner                 %data_3d,     &
-                            domain% density               %data_3d,     &
-                            domain% z                     %data_3d,     &
-                            domain% dz_mass               %data_3d,     &
-                            domain% terrain               %data_2d,     &
-                            domain% land_mask,                          &
-                            its, ite, jts, jte, kts, kte,               &
-                            dt_in)
-                            ! domain% qv_pbl_tendency     %data_3d)
-        endif
-        if (options%physics%boundarylayer==kPBL_DIAGNOSTIC) then
-            call diagnostic_pbl(domain,dt_in)
-                            ! domain% qv_pbl_tendency     %data_3d)
-        endif
+        ! if (options%physics%boundarylayer==kPBL_SIMPLE) then
+        !     call simple_pbl(domain% potential_temperature %data_3d,     &
+        !                     domain% water_vapor           %data_3d,     &
+        !                     domain% cloud_water_mass      %data_3d,     &
+        !                     domain% cloud_ice_mass        %data_3d,     &
+        !                     domain% rain_mass             %data_3d,     &
+        !                     domain% snow_mass             %data_3d,     &
+        !                     domain% u_mass                %data_3d,     &
+        !                     domain% v_mass                %data_3d,     &
+        !                     domain% exner                 %data_3d,     &
+        !                     domain% density               %data_3d,     &
+        !                     domain% z                     %data_3d,     &
+        !                     domain% dz_mass               %data_3d,     &
+        !                     domain% terrain               %data_2d,     &
+        !                     domain% land_mask,                          &
+        !                     its, ite, jts, jte, kts, kte,               &
+        !                     dt_in)
+        !                     ! domain% qv_pbl_tendency     %data_3d)
+        ! endif
+        ! if (options%physics%boundarylayer==kPBL_DIAGNOSTIC) then
+        !     call diagnostic_pbl(domain,dt_in)
+        !                     ! domain% qv_pbl_tendency     %data_3d)
+        ! endif
         if (options%physics%boundarylayer==kPBL_YSU) then
 
             ! Reset tendencies before the next pbl call. (not sure if necessary)
@@ -360,11 +360,11 @@ contains
         implicit none
         type(options_t), intent(in) :: options
 
-        if (options%physics%boundarylayer==kPBL_SIMPLE) then
-            call finalize_simple_pbl()
-        else if (options%physics%boundarylayer==kPBL_DIAGNOSTIC) then
-            call finalize_diagnostic_pbl()
-        endif
+        !if (options%physics%boundarylayer==kPBL_SIMPLE) then
+        !    call finalize_simple_pbl()
+        !else if (options%physics%boundarylayer==kPBL_DIAGNOSTIC) then
+        !    call finalize_diagnostic_pbl()
+        !endif
 
     end subroutine pbl_finalize
 end module planetary_boundary_layer

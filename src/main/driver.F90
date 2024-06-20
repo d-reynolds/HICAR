@@ -33,7 +33,7 @@ program icar
     use ioserver_interface, only : ioserver_t
     use ioclient_interface, only : ioclient_t
     use io_routines,        only : io_write
-
+    use namelist_utils,     only : get_nml_var_default
     use land_surface,               only : lsm_init
 
     implicit none
@@ -53,7 +53,8 @@ program icar
     
     integer :: i, ierr, exec_team
     real :: t_val
-    logical :: init_flag, io_loop
+    logical :: init_flag, io_loop, info_only, gen_nml, only_namelist_check
+    character(len=MAXFILELENGTH) :: namelist_file
 
 
     !Initialize MPI if needed
@@ -74,9 +75,12 @@ program icar
 
     !-----------------------------------------
     !  Model Initialization
-    !
+    
+    ! Read command line options to determine what kind of run this is
+    call read_co(namelist_file, info_only, gen_nml, only_namelist_check)
+
     ! Reads user supplied model options
-    call init_options(options)
+    call init_options(options, namelist_file, info_only=info_only, gen_nml=gen_nml, only_namelist_check=only_namelist_check)
     if (STD_OUT_PE) flush(output_unit)
 
     !Determine split of processes which will become I/O servers and which will be compute tasks
@@ -329,6 +333,81 @@ contains
         endif
     end function
     
+    subroutine read_co(nml_file, info, gen_nml, only_namelist_check)
+        implicit none
+        character(len=MAXFILELENGTH), intent(out) :: nml_file
+        logical, intent(out) :: info, gen_nml, only_namelist_check
+
+        integer :: cnt, p
+        character(len=MAXFILELENGTH) :: first_arg, arg, default
+        logical :: file_exists
+
+        nml_file = ""
+        info = .False.
+        gen_nml = .False.
+        only_namelist_check = .False.
+
+        cnt = command_argument_count()
+
+        ! If there are no command line arguments, throw error
+        if (cnt == 0) then
+            if (STD_OUT_PE) write(*,*) "ERROR: No command line arguments provided."
+            stop
+        endif
+
+        ! get first command line argument
+        call get_command_argument(1, first_arg)
+
+        ! test if argument is a '-v' type argument, indicating that we should print namelist info for this variable
+        if (first_arg == '-v') then
+            ! if there is no second argument, throw error
+            if (cnt >= 2) then
+                call get_command_argument(2, arg)
+                if (arg == '--all') then
+                    info = .True.
+                else
+                    do p = 2, cnt
+                        call get_command_argument(p, arg)
+                        default = get_nml_var_default(arg, info=.True.)
+                    end do
+                    stop
+                endif
+            elseif (cnt < 2) then
+                if (STD_OUT_PE) write(*,*) "ERROR: No variable name provided with -v flag."
+                stop
+            endif
+        elseif (first_arg == '--check-nml') then
+            only_namelist_check = .True.
+            if (cnt >= 2) then
+                call get_command_argument(2, nml_file)
+            elseif (cnt < 2) then
+                if (STD_OUT_PE) write(*,*) "ERROR: No namelist provided with the --check-nml flag."
+                stop
+            endif
+        elseif (first_arg == '--gen-nml') then
+            gen_nml = .True.
+            if (cnt >= 2) then
+                call get_command_argument(2, nml_file)
+            elseif (cnt < 2) then
+                if (STD_OUT_PE) write(*,*) "ERROR: No namelist provided with the --gen-nml flag."
+                stop
+            endif
+        else
+            nml_file = first_arg
+        endif
+
+        if (.not.first_arg=='-v' .and. .not.first_arg=='--gen-nml') then
+            ! Check that the options file actually exists
+            INQUIRE(file=trim(nml_file), exist=file_exists)
+
+            ! if options file does not exist, print an error and quit
+            if (.not.file_exists) then
+                if (STD_OUT_PE) write(*,*) "Using options file = ", trim(nml_file)
+                stop "Options file does not exist. "
+            endif
+        endif
+    end subroutine
+
 end program
 
 ! This is the Doxygen mainpage documentation.  This should be moved to another file at some point.

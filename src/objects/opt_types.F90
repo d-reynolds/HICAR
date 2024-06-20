@@ -49,7 +49,6 @@ module options_types
     type time_options_type
         logical :: RK3  !Logical of whether ot use RK3 time stepping for advection terms
         real :: cfl_reduction_factor    ! amount to multiple CFL by to improve stability (typically 1)
-        integer :: cfl_strictness       ! CFL method 1=3D from 1D*sqrt(3), 2=ave.3D wind*sqrt(3), 3=sum.3D wind, 4=opt3 * sqrt(3), 5 = sum(max.3d)
     end type time_options_type
     
     ! ------------------------------------------------
@@ -68,7 +67,7 @@ module options_types
         real    :: t_adjust
         logical :: Ef_rw_l, EF_sw_l
 
-        integer :: update_interval  ! maximum number of seconds between updates
+        real :: update_interval  ! maximum number of seconds between updates
         integer :: top_mp_level     ! top model level to process in the microphysics
     end type mp_options_type
 
@@ -165,7 +164,7 @@ module options_types
         real :: snow_den_const                          ! variable for converting snow height into SWE or visa versa when input data is incomplete 
         integer :: fsm_nsnow_max                        ! maximum number of snow layers for FSM2 to use. Set here, since it will
                                                         ! change the size of arrays elsewhere in domain_obj        
-        integer :: update_interval                      ! minimum time to let pass before recomputing LSM ~300s (it may be longer)  [s]
+        real :: update_interval                         ! minimum time to let pass before recomputing LSM ~300s (it may be longer)  [s]
         ! the following categories will be set by default if an known LU_Category is used
         integer :: urban_category                       ! LU index value that equals "urban"
         integer :: ice_category
@@ -174,7 +173,6 @@ module options_types
         ! integer :: snow_category ! = ice cat
         ! use monthly vegetation fraction data, not just a single value
         logical :: monthly_vegfrac
-        logical :: surface_diagnostics !! MJ added
         logical :: monthly_albedo
         integer :: sf_urban_phys
         
@@ -208,7 +206,7 @@ module options_types
     ! store Radiation options
     ! ------------------------------------------------
     type rad_options_type
-       integer :: update_interval_rrtmg                ! how ofen to update the radiation in seconds.
+       real    :: update_interval_rrtmg                ! how ofen to update the radiation in seconds.
                                                        ! RRTMG scheme is expensive. Default is 1800s (30 minutes)
        integer :: icloud                               ! How RRTMG interact with clouds
        integer :: cldovrlp                             ! how RRTMG considers cloud overlapping (1 = random, 2 = maximum-random, 3 = maximum, 4 = exponential, 5 = exponential-random)
@@ -248,7 +246,6 @@ module options_types
 
         ! restart information
         type(Time_type) :: restart_time ! Date of the restart time step
-        integer :: restart_date(6)      ! date to initialize from (y,m,d, h,m,s)
         integer :: restart_step_in_file ! step in restart file to initialize from
 
     end type restart_options_type
@@ -280,15 +277,9 @@ module options_types
         logical :: use_rad_options
         logical :: use_pbl_options
         logical :: use_sfc_options
-
-        ! Filenames for files to read various physics options from
-        character(len=MAXFILELENGTH) :: mp_options_filename, lt_options_filename, adv_options_filename, &
-                                        lsm_options_filename, &
-                                        cu_options_filename, rad_options_filename, pbl_options_filename, sfc_options_filename
-
+        logical :: use_wind_options
 
     end type general_options_type
-
 
 
     ! ------------------------------------------------
@@ -311,11 +302,11 @@ module options_types
 
         ! variable names from init/BC/wind/... files
         character (len=MAXVARLENGTH) :: latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar, &
-                                        pvar,pbvar,tvar,qvvar,qcvar,qivar,qrvar,qsvar,qgvar,i2mvar,i3mvar,&
+                                        pvar,tvar,qvvar,qcvar,qivar,qrvar,qsvar,qgvar,i2mvar,i3mvar,&
                                         qncvar,qnivar,qnrvar,qnsvar,qngvar,i2nvar,i3nvar,&
                                         i1avar,i1cvar,i2avar,i2cvar,i3avar,i3cvar,hgtvar, &
                                         pslvar, psvar, sst_var, pblhvar, &
-                                        shvar,lhvar,zvar,zbvar, &
+                                        shvar,lhvar,zvar, &
                                         swdown_var, lwdown_var, &
                                         time_var
 

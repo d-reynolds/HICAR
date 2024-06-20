@@ -53,7 +53,7 @@ contains
     !! @return dt [ scalar ]        Maximum stable time step    [s]
     !!
     !!------------------------------------------------------------
-    function compute_dt(dx, u, v, w, rho, dz, ims, ime, kms, kme, jms, jme, its, ite, jts, jte, CFL, cfl_strictness, use_density) result(dt)
+    function compute_dt(dx, u, v, w, rho, dz, ims, ime, kms, kme, jms, jme, its, ite, jts, jte, CFL, use_density) result(dt)
         real,       intent(in)                   :: dx
         real,       intent(in), dimension(ims:ime+1,kms:kme,jms:jme) :: u 
         real,       intent(in), dimension(ims:ime,kms:kme,jms:jme+1) :: v
@@ -61,7 +61,6 @@ contains
         real,       intent(in), dimension(kms:kme)     :: dz
         integer,    intent(in)                   :: ims, ime, kms, kme, jms, jme, its, ite, jts, jte
         real,       intent(in)                   :: CFL
-        integer,    intent(in)                   :: cfl_strictness
         logical,    intent(in)                   :: use_density
         
         ! output value
@@ -80,89 +79,45 @@ contains
         max_j = 0
         max_k = 0
 
-        if (cfl_strictness==1) then
-            ! to ensure we are stable for 1D advection:
-            if (use_density) then
-                !maxwind1d = max( maxval(abs(u(2:,:,:) / (rho*dz*dx) )), maxval(abs(v(:,:,2:) / (rho*dz*dx))) )
-                !maxwind1d = max( maxwind1d, maxval(abs(w/(rho*dz*dx))) )
-            else
-                maxwind1d = max( maxval(abs(u)), maxval(abs(v)))
-                maxwind1d = max( maxwind1d, maxval(abs(w)))
-            endif
+        ! to ensure we are stable for 3D advection we'll use the average "max" wind speed
+        ! but that average has to be divided by sqrt(3) for stability in 3 dimensional advection
+        do j=jts,jte
+            do k=kms,kme
+                if (k==kms) then
+                    zoffset = 0
+                else
+                    zoffset = -1
+                endif
 
-            maxwind3d = maxwind1d * sqrt3
-        else if (cfl_strictness==5) then
-
-            if (use_density) then
-                !maxwind1d = maxval(abs(u(2:,:,:) / (rho*dz*dx) )) &
-                !          + maxval(abs(v(:,:,2:) / (rho*dz*dx) )) &
-                !          + maxval(abs(w(:,:, :) / (rho*dz*dx) ))
-            else
-                maxwind3d = maxval(abs(u)) + maxval(abs(v)) + maxval(abs(w))
-            endif
-
-        else
-            ! to ensure we are stable for 3D advection we'll use the average "max" wind speed
-            ! but that average has to be divided by sqrt(3) for stability in 3 dimensional advection
-            do j=jts,jte
-                do k=kms,kme
-                    if (k==kms) then
-                        zoffset = 0
+                do i=its,ite
+                    ! just compute the sum of the wind speeds, but take the max over the two
+                    ! faces of the grid cell (e.g. east and west sides)
+                    ! this will be divided by 3 later by three_d_cfl
+                    if (use_density) then
+                        !current_wind = (max(abs(u(i,k,j)), abs(u(i+1,k,j))) &
+                        !              + max(abs(v(i,k,j)), abs(v(i,k,j+1))) &
+                        !              + max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) ) &
+                        !              / (rho(i,k,j) * dz(i,k,j) * dx)
                     else
-                        zoffset = -1
+                        !current_wind = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
+                        !              +max(abs(v(i,k,j)), abs(v(i,k,j+1))) / dx &
+                        !              +max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) / dz(k)
+                                        
+                        current_wind = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
+                                            ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
+                                            ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(k) ))
                     endif
-
-                    do i=its,ite
-                        ! just compute the sum of the wind speeds, but take the max over the two
-                        ! faces of the grid cell (e.g. east and west sides)
-                        ! this will be divided by 3 later by three_d_cfl
-                        if (use_density) then
-                            !current_wind = (max(abs(u(i,k,j)), abs(u(i+1,k,j))) &
-                            !              + max(abs(v(i,k,j)), abs(v(i,k,j+1))) &
-                            !              + max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) ) &
-                            !              / (rho(i,k,j) * dz(i,k,j) * dx)
-                        else
-                            !current_wind = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
-                            !              +max(abs(v(i,k,j)), abs(v(i,k,j+1))) / dx &
-                            !              +max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) / dz(k)
-                                          
-                            current_wind = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
-                                               ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
-                                               ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(k) ))
-                        endif
-                        if (current_wind > maxwind3d) then
-                            max_i = i
-                            max_j = j
-                            max_k = k
-                        endif
-                        maxwind3d = max(maxwind3d, current_wind)
-                    ENDDO
+                    if (current_wind > maxwind3d) then
+                        max_i = i
+                        max_j = j
+                        max_k = k
+                    endif
+                    maxwind3d = max(maxwind3d, current_wind)
                 ENDDO
             ENDDO
-
-            if (cfl_strictness==2) then
-                ! effectively divides by 3 to take the mean and multiplies by the sqrt(3) for the 3D advection limit
-                maxwind3d = maxwind3d * three_d_cfl
-
-                ! to ensure we are stable for 1D advection:
-                if (use_density) then
-                    !maxwind1d = max( maxval(abs(u(2:,:,:) / (rho*dz*dx) )), maxval(abs(v(:,:,2:) / (rho*dz*dx))) )
-                    !maxwind1d = max( maxwind1d, maxval(abs(w/(rho*dz*dx))) )
-                else
-                    maxwind1d = max( maxval(abs(u)), maxval(abs(v)))
-                    maxwind1d = max( maxwind1d, maxval(abs(w)))
-                endif
-                ! also insure stability for 1D advection
-                maxwind3d = max(maxwind1d,maxwind3d)
-
-            ! else if (cfl_strictness==3) then
-            !   leave maxwind3d as the sum of the max winds
-            ! This should be the default, does it need to be multiplied by sqrt(3)?
-            elseif (cfl_strictness==4) then
-                maxwind3d = maxwind3d * sqrt3
-            endif
-
-        endif
+        ENDDO
+                
+        maxwind3d = maxwind3d * sqrt3
 
         !TESTING: Do we need to multiply maxwind3d by sqrt3 as the comment above suggests?
         ! maxwind3d = maxwind3d * sqrt3
@@ -241,7 +196,7 @@ contains
                             domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                             domain%its, domain%ite, domain%jts, domain%jte, &
                             options%time%cfl_reduction_factor, &
-                            cfl_strictness=options%time%cfl_strictness, use_density=.false.)
+                            use_density=.false.)
         else
             present_dt_seconds = future_dt_seconds
         endif
@@ -251,7 +206,7 @@ contains
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
-                        cfl_strictness=options%time%cfl_strictness, use_density=.false.)
+                        use_density=.false.)
                 
         !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
         call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_DOUBLE, MPI_MIN, domain%compute_comms)

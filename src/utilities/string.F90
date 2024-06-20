@@ -81,7 +81,7 @@ contains
             write(output_string,*) value
         endif
 
-        output_string=adjustl(output_string)
+        output_string=trim(adjustl(output_string))
     end function str_d
 
     !>------------------------------
@@ -102,7 +102,7 @@ contains
             write(output_string,*) value
         endif
 
-        output_string=adjustl(output_string)
+        output_string=trim(adjustl(output_string))
     end function str_r
 
     !>------------------------------
@@ -123,7 +123,7 @@ contains
             write(output_string,*) value
         endif
 
-        output_string=adjustl(output_string)
+        output_string=trim(adjustl(output_string))
     end function str_i
 
 end module string

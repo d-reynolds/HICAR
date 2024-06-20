@@ -78,7 +78,7 @@ contains
         call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
 
         if (STD_OUT_PE) then
-            write(*,*) "  Number of coarray image:",num_PE
+            write(*,*) "  Number of processing elements:",num_PE
             write(*,*) "  Max number of OpenMP Threads:",num_threads
         endif
     
@@ -163,14 +163,16 @@ contains
 
     end subroutine split_processes
 
-    subroutine init_options(options)
+    subroutine init_options(options, namelist_file, info_only, gen_nml, only_namelist_check)
         implicit none
         type(options_t), intent(inout) :: options
+        character(len=*), intent(in) :: namelist_file
+        logical, optional, intent(in) :: info_only, gen_nml, only_namelist_check
 
         ! read in options file
         if (STD_OUT_PE) write(*,*) "Initializing Options"
         if (STD_OUT_PE) flush(output_unit)
-        call options%init()
+        call options%init(namelist_file, info_only=info_only, gen_nml=gen_nml, only_namelist_check=only_namelist_check)
 
     end subroutine init_options
 

@@ -78,7 +78,7 @@ module boundary_interface
     end subroutine
 
     module subroutine init_local(this, options, file_list, var_list, dim_list, start_time, &
-                                 lat_var, lon_var, z_var, time_var, p_var, ps_var, domain_lat, domain_lon, domain_vars)
+                                 lat_var, lon_var, z_var, time_var, p_var, domain_lat, domain_lon, domain_vars)
         implicit none
         class(boundary_t),               intent(inout)  :: this
         type(options_t),                 intent(inout)  :: options
@@ -91,7 +91,6 @@ module boundary_interface
         character(len=kMAX_NAME_LENGTH), intent(in)     :: z_var
         character(len=kMAX_NAME_LENGTH), intent(in)     :: time_var
         character(len=kMAX_NAME_LENGTH), intent(in)     :: p_var
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: ps_var
         real, dimension(:,:), intent(in)                :: domain_lat
         real, dimension(:,:), intent(in)                :: domain_lon
         type(var_dict_t),     intent(inout)             :: domain_vars
