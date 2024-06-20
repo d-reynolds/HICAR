@@ -170,8 +170,6 @@ contains
         logical, optional, intent(in) :: info_only, gen_nml, only_namelist_check
 
         ! read in options file
-        if (STD_OUT_PE) write(*,*) "Initializing Options"
-        if (STD_OUT_PE) flush(output_unit)
         call options%init(namelist_file, info_only=info_only, gen_nml=gen_nml, only_namelist_check=only_namelist_check)
 
     end subroutine init_options

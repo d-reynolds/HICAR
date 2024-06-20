@@ -70,15 +70,17 @@ program icar
     call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
     STD_OUT_PE = (PE_RANK_GLOBAL==0)
 
-    if (STD_OUT_PE) call welcome_message()
-    if (STD_OUT_PE) flush(output_unit)
-
     !-----------------------------------------
     !  Model Initialization
     
     ! Read command line options to determine what kind of run this is
     call read_co(namelist_file, info_only, gen_nml, only_namelist_check)
 
+    if (STD_OUT_PE .and. .not.(gen_nml .or. only_namelist_check .or. info_only)) then
+        call welcome_message()
+        flush(output_unit)
+        if (STD_OUT_PE) write(*,*) "Initializing Options"
+    endif
     ! Reads user supplied model options
     call init_options(options, namelist_file, info_only=info_only, gen_nml=gen_nml, only_namelist_check=only_namelist_check)
     if (STD_OUT_PE) flush(output_unit)
@@ -350,8 +352,22 @@ contains
         cnt = command_argument_count()
 
         ! If there are no command line arguments, throw error
-        if (cnt == 0) then
-            if (STD_OUT_PE) write(*,*) "ERROR: No command line arguments provided."
+        if (cnt == 0 .and. STD_OUT_PE) then
+            write(*,*) "Usage: ./HICAR [-v [variable_name ...|--all]] [--check-nml] [--gen-nml] namelist_file"
+            write(*,*) "    -v [variable_name ...|--all]: Print information about the namelist variable(s) variable_name, ... "
+            write(*,*) "                                  --all prints out information for all namelist variables."
+            write(*,*) "    --check-nml:                  Check the namelist file for errors without running the model."
+            write(*,*) "    --gen-nml:                    Generate a namelist file with default values."
+            write(*,*) "    namelist_file:                The name of the namelist file to use."
+            write(*,*)
+            write(*,*) "    Example to check namelist:                           ./HICAR --check-nml namelist_file.nml"
+            write(*,*) "    Example to run model:                                ./HICAR namelist_file.nml"
+            write(*,*) "    Example to check namelist variable:                  ./HICAR -v mp"
+            write(*,*) "    Example to generate namelist variable documentation: ./HICAR -v --all > namelist_doc.txt"
+
+            write(*,*)
+
+
             stop
         endif
 

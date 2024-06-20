@@ -1486,8 +1486,8 @@ contains
                 description = "Planetary boundary layer scheme to use: "//achar(10)//BLNK_CHR_N// &
                                                                        "0 = no PBL,"//achar(10)//BLNK_CHR_N// &
                                                                        "1 = YSU PBL"
-                allocate(values(4))
-                values = [0, 1, 2, 3]
+                allocate(values(2))
+                values = [0, 1]
                 default = "0"
                 group = "Physics"
             case ("lsm")
@@ -1497,8 +1497,8 @@ contains
                                                         "2 = Noah LSM"//achar(10)//BLNK_CHR_N// &
                                                         "3 = Noah MP"
 
-                allocate(values(5))
-                values = [0, 1, 2, 3, 4]
+                allocate(values(4))
+                values = [0, 1, 2, 3]
                 default = "0"
                 group = "Physics"
             case ("rad")
@@ -1518,8 +1518,8 @@ contains
                                                      "1 = Tiedke scheme"//achar(10)//BLNK_CHR_N// &
                                                      "2 = NSAS scheme"//achar(10)//BLNK_CHR_N// &
                                                      "3 = BMJ scheme"
-                allocate(values(3))
-                values = [0, 1, 2]
+                allocate(values(4))
+                values = [0, 1, 2, 3]
                 default = "0"
                 group = "Physics"
             case ("mp")
@@ -1532,8 +1532,8 @@ contains
                                                           "5 = Thompson Aerosol"//achar(10)//BLNK_CHR_N// &
                                                           "6 = WSM3"//achar(10)//BLNK_CHR_N// &
                                                           "7 = ISHMAEL"
-                allocate(values(5))
-                values = [0, 1, 2, 3, 4]
+                allocate(values(8))
+                values = [0, 1, 2, 3, 4, 5, 6, 7]
                 default = "0"
                 group = "Physics"
             case ("water")
@@ -1541,8 +1541,8 @@ contains
                                                    "0 = no open water fluxes,"//achar(10)//BLNK_CHR_N// &
                                                    "1 = Simple fluxes (needs SST in forcing data)"//achar(10)//BLNK_CHR_N// &
                                                    "2 = WRF's lake model (needs lake depth in hi-res data))"
-                allocate(values(4))
-                values = [0, 1, 2, 3]
+                allocate(values(3))
+                values = [0, 1, 2]
                 default = "0"
                 group = "Physics"
             case ("wind")
@@ -1553,8 +1553,8 @@ contains
                                                    "3 = Mass-conserving wind solver based on variational calculus technique, requires PETSc"//achar(10)//BLNK_CHR_N// &
                                                    "4 = Combination of options 1 & 2"//achar(10)//BLNK_CHR_N// &
                                                    "5 = Combination of options 1 & 3"
-                allocate(values(5))
-                values = [0, 1, 2, 3, 4]
+                allocate(values(6))
+                values = [0, 1, 2, 3, 4, 5]
                 default = "0"
                 group = "Physics"
             case ("radiation_downscaling")

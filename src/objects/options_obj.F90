@@ -50,7 +50,7 @@ contains
 !       options data structure
         integer :: i
 
-        if (STD_OUT_PE .and. (.not.info_only .or. .not.gen_nml)) write(*,*) "Using options file = ", trim(namelist_file)
+        if (STD_OUT_PE .and. .not.(info_only .or. gen_nml)) write(*,*) "Using options file = ", trim(namelist_file)
         if (gen_nml) call set_namelist(namelist_file)
 
         call general_namelist(      namelist_file,   this%general, info_only=info_only, gen_nml=gen_nml)
