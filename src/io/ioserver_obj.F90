@@ -30,7 +30,7 @@ contains
         integer ::  n, n_3d, n_2d, var_indx, out_i, rst_i
         
         
-        this%io_time = options%parameters%start_time
+        this%io_time = options%general%start_time
 
         ! Perform a series of MPI Gather/reduction to communicate the grid dimensions of the children clients to the parent server
         call init_with_clients(this)
@@ -51,7 +51,7 @@ contains
 
         this%n_w_3d = 0
         do n = 1,kMAX_STORAGE_VARS
-            if ((options%io_options%vars_for_output(n) + options%vars_for_restart(n))>0) then
+            if ((options%output%vars_for_output(n) + options%vars_for_restart(n))>0) then
                 var = get_metadata(n)
                 if (var%three_d) this%n_w_3d = this%n_w_3d+1
             endif
@@ -82,7 +82,7 @@ contains
         enddo
 
         !Setup arrays for information about accessing variables from write buffer
-        allocate(this%out_var_indices(count(options%io_options%vars_for_output > 0)))
+        allocate(this%out_var_indices(count(options%output%vars_for_output > 0)))
         allocate(this%rst_var_indices(count(options%vars_for_restart > 0)))
 
         out_i = 1
@@ -90,7 +90,7 @@ contains
         
         do n=1,this%outputer%n_vars
             var_indx = get_varindx(this%outputer%variables(n)%name)
-            if (options%io_options%vars_for_output(var_indx) > 0) then
+            if (options%output%vars_for_output(var_indx) > 0) then
                 this%out_var_indices(out_i) = n
                 out_i = out_i + 1
             endif
@@ -100,7 +100,7 @@ contains
             endif
         enddo
 
-        if (options%parameters%restart) call this%outputer%init_restart(options, this%IO_comms, this%out_var_indices)
+        if (options%restart%restart) call this%outputer%init_restart(options, this%IO_comms, this%out_var_indices)
 
     end subroutine
     
@@ -363,12 +363,12 @@ contains
         msg_size = 1
         disp = 0
 
-        err = nf90_open(options%io_options%restart_in_file, IOR(nf90_nowrite,NF90_NETCDF4), ncid, &
+        err = nf90_open(options%restart%restart_in_file, IOR(nf90_nowrite,NF90_NETCDF4), ncid, &
                 comm = this%IO_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL)
         
         ! setup start/count arrays accordingly
-        start_3d = (/ this%i_s_w,this%j_s_w,this%k_s_w,options%io_options%restart_step_in_file /)
-        start_2d = (/ this%i_s_w,this%j_s_w,options%io_options%restart_step_in_file /)
+        start_3d = (/ this%i_s_w,this%j_s_w,this%k_s_w,options%restart%restart_step_in_file /)
+        start_2d = (/ this%i_s_w,this%j_s_w,options%restart%restart_step_in_file /)
         cnt_3d = (/ (this%i_e_w-this%i_s_w+1),(this%j_e_w-this%j_s_w+1),(this%k_e_w-this%k_s_w+1),1 /)
         cnt_2d = (/ (this%i_e_w-this%i_s_w+1),(this%j_e_w-this%j_s_w+1),1 /)
 
@@ -408,7 +408,7 @@ contains
             endif
         end do
         
-        call check_ncdf(nf90_close(ncid), "Closing file "//trim(options%io_options%restart_in_file))
+        call check_ncdf(nf90_close(ncid), "Closing file "//trim(options%restart%restart_in_file))
         
         ! Because this is for reading restart data, performance is not critical, and 
         ! we use a simple MPI_fence syncronization

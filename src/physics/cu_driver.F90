@@ -244,9 +244,9 @@ contains
 
          endif
 
-         if ((options%cu_options%stochastic_cu /= kNO_STOCHASTIC) .and.  (STD_OUT_PE)) then
+         if ((options%cu%stochastic_cu /= kNO_STOCHASTIC) .and.  (STD_OUT_PE)) then
             write(*,*)"      stochastic W pertubation for convection triggering"  ! to check that it actually turns on/of
-         elseif ((options%cu_options%stochastic_cu == kNO_STOCHASTIC) .and.  (STD_OUT_PE)) then
+         elseif ((options%cu%stochastic_cu == kNO_STOCHASTIC) .and.  (STD_OUT_PE)) then
             write(*,*)"      No stochastic W pertubation for convection triggering"
          endif
 
@@ -284,7 +284,7 @@ subroutine convect(domain,options,dt_in)
     !$omp end parallel
 
     ! Stochastic disturbance for  vertical speeds:
-    if (options%cu_options%stochastic_cu /= kNO_STOCHASTIC) then
+    if (options%cu%stochastic_cu /= kNO_STOCHASTIC) then
         call random_number(w_stochastic)
         block
             integer :: i
@@ -292,7 +292,7 @@ subroutine convect(domain,options,dt_in)
                 w_stochastic(:,i,:) = domain%sensible_heat%data_2d/500 + w_stochastic(:,i,:)
             enddo
         end block
-        W0AVG = domain%w_real%data_3d+(w_stochastic * options%cu_options%stochastic_cu - options%cu_options%stochastic_cu*0.75) ! e.g. * 20 - 15)
+        W0AVG = domain%w_real%data_3d+(w_stochastic * options%cu%stochastic_cu - options%cu%stochastic_cu*0.75) ! e.g. * 20 - 15)
     else
         W0AVG = domain%w_real%data_3d
     endif
@@ -481,15 +481,15 @@ subroutine convect(domain,options,dt_in)
         ! $omp default(shared)
         ! $omp do schedule(static)
         do j=jts,jte
-            if (options%cu_options%tendency_fraction > 0) then
+            if (options%cu%tendency_fraction > 0) then
                 ! Here we adjust the tendencies calculated by the cumulus scheme based on the namelist setting tendency_fraction (cu_parameters)
                 !-- RTHCUTEN      Theta tendency due to cumulus scheme precipitation (K/s)  (domain%tend%qv)
                 !-- RQVCUTEN      Qv tendency due to cumulus scheme precipitation (kg/kg/s)  (domain%tend%th)
                 ! -- ...etc
-                if (options%cu_options%tend_qv_fraction > 0) domain%water_vapor%data_3d(:,:,j)           = domain%water_vapor%data_3d(:,:,j)           + domain%tend%qv(:,:,j)*internal_dt * options%cu_options%tend_qv_fraction
-                if (options%cu_options%tend_qc_fraction > 0) domain%cloud_water_mass%data_3d(:,:,j)      = domain%cloud_water_mass%data_3d(:,:,j)      + domain%tend%qc(:,:,j)*internal_dt * options%cu_options%tend_qc_fraction
-                if (options%cu_options%tend_th_fraction > 0) domain%potential_temperature%data_3d(:,:,j) = domain%potential_temperature%data_3d(:,:,j) + domain%tend%th(:,:,j)*internal_dt * options%cu_options%tend_th_fraction
-                if (options%cu_options%tend_qi_fraction > 0) domain%cloud_ice_mass%data_3d(:,:,j)        = domain%cloud_ice_mass%data_3d(:,:,j)        + domain%tend%qi(:,:,j)*internal_dt * options%cu_options%tend_qi_fraction
+                if (options%cu%tend_qv_fraction > 0) domain%water_vapor%data_3d(:,:,j)           = domain%water_vapor%data_3d(:,:,j)           + domain%tend%qv(:,:,j)*internal_dt * options%cu%tend_qv_fraction
+                if (options%cu%tend_qc_fraction > 0) domain%cloud_water_mass%data_3d(:,:,j)      = domain%cloud_water_mass%data_3d(:,:,j)      + domain%tend%qc(:,:,j)*internal_dt * options%cu%tend_qc_fraction
+                if (options%cu%tend_th_fraction > 0) domain%potential_temperature%data_3d(:,:,j) = domain%potential_temperature%data_3d(:,:,j) + domain%tend%th(:,:,j)*internal_dt * options%cu%tend_th_fraction
+                if (options%cu%tend_qi_fraction > 0) domain%cloud_ice_mass%data_3d(:,:,j)        = domain%cloud_ice_mass%data_3d(:,:,j)        + domain%tend%qi(:,:,j)*internal_dt * options%cu%tend_qi_fraction
             endif
             ! if (options%physics%convection==kCU_KAINFR) then
             !     domain%qsnow(:,:,j) =domain%qsnow(:,:,j) + domain%tend%Qs(:,:,j)*internal_dt

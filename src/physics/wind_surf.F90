@@ -119,7 +119,7 @@ contains
        
         if (Sx_k_max==0 .or. TPI_k_max==0) then
             do k = domain%grid%kms,domain%grid%kme
-                z_mean = SUM(options%parameters%dz_levels(1:k))
+                z_mean = SUM(options%domain%dz_levels(1:k))
                 if (z_mean > SX_Z_MAX .and. Sx_k_max==0) Sx_k_max = max(2,k-1)
                 if (z_mean > TPI_Z_MAX .and. TPI_k_max==0) TPI_k_max = max(2,k-1)
             enddo

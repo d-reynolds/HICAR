@@ -69,8 +69,8 @@ contains
 
         nloops=10
         print*, "CFL=",cfl
-        options%adv_options%MPDATA_FCT=FCT
-        options%adv_options%mpdata_order=2
+        options%adv%MPDATA_FCT=FCT
+        options%adv%mpdata_order=2
         dz=1
         rho=1
         err=0

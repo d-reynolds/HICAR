@@ -124,7 +124,7 @@ contains
                 domain%tend%th_swrad = 0
                 domain%tend%th_lwrad = 0
         endif
-        update_interval=options%rad_options%update_interval_rrtmg ! 30 min, 1800 s   600 ! 10 min (600 s)
+        update_interval=options%rad%update_interval_rrtmg ! 30 min, 1800 s   600 ! 10 min (600 s)
         last_model_time = domain%model_time%seconds()-update_interval
 
     end subroutine radiation_init
@@ -244,7 +244,7 @@ contains
             ((domain%model_time%seconds() - last_model_time) >= update_interval)) then
             do j = jms,jme
                !! MJ used corr version, as other does not work in Erupe
-                solar_elevation  = calc_solar_elevation(date=domain%model_time, tzone=options%rad_options%tzone, &
+                solar_elevation  = calc_solar_elevation(date=domain%model_time, tzone=options%rad%tzone, &
                     lon=domain%longitude%data_2d, lat=domain%latitude%data_2d, j=j, &
                     ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite, solar_azimuth=solar_azimuth)
                 domain%cosine_zenith_angle%data_2d(its:ite,j)=sin(solar_elevation(its:ite))
@@ -373,7 +373,7 @@ contains
 
             if (options%physics%radiation==kRA_RRTMG) then
 
-                if (options%lsm_options%monthly_albedo) then
+                if (options%lsm%monthly_albedo) then
                     ALBEDO = domain%albedo%data_3d(:, domain%model_time%month, :)
                 else
                     ALBEDO = domain%albedo%data_3d(:, 1, :)
@@ -382,7 +382,7 @@ contains
                 domain%tend%th_swrad = 0
                 domain%shortwave%data_2d = 0
                 ! Calculate cloud fraction
-                If (options%rad_options%icloud == 3) THEN
+                If (options%rad%icloud == 3) THEN
                     IF ( F_QC .AND. F_QI ) THEN
                         gridkm = domain%dx/1000
                         XLAND = domain%land_mask
@@ -450,9 +450,9 @@ contains
                     has_reqc=F_REC,                                           & ! use with icloud > 0
                     has_reqi=F_REI,                                           & ! use with icloud > 0
                     has_reqs=F_RES,                                           & ! use with icloud > 0 ! G. Thompson
-                    icloud = options%rad_options%icloud,                  & ! set to nonzero if effective radius is available from microphysics
+                    icloud = options%rad%icloud,                  & ! set to nonzero if effective radius is available from microphysics
                     warm_rain = .False.,                                  & ! when a dding WSM3scheme, add option for .True.
-                    cldovrlp=options%rad_options%cldovrlp,                & ! J. Henderson AER: cldovrlp namelist value
+                    cldovrlp=options%rad%cldovrlp,                & ! J. Henderson AER: cldovrlp namelist value
                     !f_ice_phy, f_rain_phy,                               &
                     xland=real(domain%land_mask),                         &
                     xice=real(domain%land_mask)*0,                        & ! should add a variable for sea ice fraction
@@ -530,10 +530,10 @@ contains
                             rho3d = domain%density%data_3d,                       &
                             r = R_d,                                               &
                             g = gravity,                                          &
-                            icloud = options%rad_options%icloud,                  & ! set to nonzero if effective radius is available from microphysics
+                            icloud = options%rad%icloud,                  & ! set to nonzero if effective radius is available from microphysics
                             warm_rain = .False.,                                  & ! when a dding WSM3scheme, add option for .True.
                             cldfra3d = cldfra,                                    &
-                            cldovrlp=options%rad_options%cldovrlp,                & ! J. Henderson AER: cldovrlp namelist value
+                            cldovrlp=options%rad%cldovrlp,                & ! J. Henderson AER: cldovrlp namelist value
 !                            lradius,iradius,                                     & !goes with CAMMGMP (Morrison Gettelman CAM mp)
                             is_cammgmp_used = .False.,                            & !goes with CAMMGMP (Morrison Gettelman CAM mp)
 !                            f_ice_phy, f_rain_phy,                               & !goes with MP option 5 (Ferrier)
@@ -573,7 +573,7 @@ contains
                             ims=ims, ime=ime, jms=jms, jme=jme, kms=kms, kme=kme,  &
                             its=its, ite=ite, jts=jts, jte=jte, kts=kts, kte=kte-1,  &
 !                           lwupflx, lwupflxc, lwdnflx, lwdnflxc,                  &
-                            read_ghg=options%rad_options%read_ghg                  &
+                            read_ghg=options%rad%read_ghg                  &
                             )
                             
                 ! If the user has provided sky view fraction, then apply this to the diffuse SW now, 

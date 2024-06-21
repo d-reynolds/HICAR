@@ -72,7 +72,7 @@ contains
         if (STD_OUT_PE) write(*,*) "Initializing Microphysics"
         if (options%physics%microphysics    == kMP_THOMPSON) then
             if (STD_OUT_PE) write(*,*) "    Thompson Microphysics"
-            call thompson_init(options%mp_options)
+            call thompson_init(options%mp)
         elseif (options%physics%microphysics    == kMP_THOMP_AER) then
             if (STD_OUT_PE) write(*,*) "    Thompson Eidhammer Microphysics"
             call thompson_aer_init()
@@ -92,7 +92,7 @@ contains
             call wsm3init(rhoair0,rhowater,rhosnow,cliq,cpv, allowed_to_read=.True.)
         endif
 
-        update_interval = options%mp_options%update_interval
+        update_interval = options%mp%update_interval
         last_model_time = -999
 
     end subroutine mp_init
@@ -272,14 +272,7 @@ contains
             call mp_wsm6_var_request(options)
         elseif (options%physics%microphysics==kMP_WSM3) then
             call mp_wsm3_var_request(options)
-
-        ! For the ideal test case(s), we need to be able to advect qv, without initializing microphysics:
-        elseif (options%parameters%ideal) then
-                if (STD_OUT_PE) write(*,*) "    allocating water vapor for ideal test case."
-                call options%alloc_vars( [kVARS%water_vapor] )
-                call options%advect_vars( [kVARS%water_vapor] )
         endif
-
     end subroutine mp_var_request
 
 
@@ -713,8 +706,8 @@ contains
 
 
             ! set the current tile to the top layer to process microphysics for
-            if (options%mp_options%top_mp_level>0) then
-                kte = min(kte, options%mp_options%top_mp_level)
+            if (options%mp%top_mp_level>0) then
+                kte = min(kte, options%mp%top_mp_level)
             endif
 
             ! reset the counter so we know that *this* is the last time we've run the microphysics

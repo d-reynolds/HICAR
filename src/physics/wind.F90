@@ -161,13 +161,13 @@ contains
             call calc_divergence(divergence, domain%u%dqdt_3d, domain%v%dqdt_3d, domain%w%dqdt_3d, &
                                     jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only=.True.)
             call calc_w(domain%w%dqdt_3d, divergence, dz, jaco_w, rho, &
-                        options%parameters%advect_density)
+                        options%adv%advect_density)
         
         ! If update is false, calculate the divergence and w component from the data_3d arrays
         else
             call calc_divergence(divergence, domain%u%data_3d, domain%v%data_3d, domain%w%data_3d, &
                                     jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only=.True.)
-            call calc_w(domain%w%data_3d, divergence, dz, jaco_w, rho, options%parameters%advect_density)
+            call calc_w(domain%w%data_3d, divergence, dz, jaco_w, rho, options%adv%advect_density)
         
         endif
         
@@ -256,7 +256,7 @@ contains
         !Multiplication of U/V by metric terms, converting jacobian to staggered-grid where possible, otherwise making assumption of
         !Constant jacobian at edges
         
-        if (options%parameters%advect_density) then
+        if (options%adv%advect_density) then
             u_met(ims+1:ime,:,:) = u(ims+1:ime,:,:) * jaco_u(ims+1:ime,:,:) * (rho(ims:ime-1,:,:) + rho(ims+1:ime,:,:))/2
             u_met(ims,:,:) = u(ims,:,:) * jaco_u(ims,:,:) * (1.5*rho(ims,:,:) - 0.5*rho(ims+1,:,:))
             u_met(ime+1,:,:) = u(ime+1,:,:) * jaco_u(ime+1,:,:) * (1.5*rho(ime,:,:) - 0.5*rho(ime-1,:,:))
@@ -277,7 +277,7 @@ contains
         div(ims:ime,kms:kme,jms:jme) = (diff_U+diff_V) /(dx)
 
         if (.NOT.(horz)) then
-            if (options%parameters%advect_density) then
+            if (options%adv%advect_density) then
                 w_met(:,kme,:) = w(:,kme,:) * jaco_w(:,kme,:) * rho(:,kme,:)
                 w_met(:,kms:kme-1,:) = w(:,kms:kme-1,:) * jaco_w(:,kms:kme-1,:) * rho_i
             else
@@ -358,7 +358,7 @@ contains
         
         if (first_wind) then            
             !Compute the forcing wind field at the current step
-            forcing_var = forcing%variables_hi%get_var(options%parameters%uvar)
+            forcing_var = forcing%variables_hi%get_var(options%forcing%uvar)
             do i = ims,ime+1
                 do k = kms, kme
                     do j = jms, jme
@@ -367,7 +367,7 @@ contains
                 enddo
             enddo
             
-            forcing_var = forcing%variables_hi%get_var(options%parameters%vvar)
+            forcing_var = forcing%variables_hi%get_var(options%forcing%vvar)
             do i = ims,ime
                 do k = kms, kme
                     do j = jms, jme+1
@@ -376,8 +376,8 @@ contains
                 enddo
             enddo
             
-            if (.not.(options%parameters%wvar=="")) then
-                forcing_var = forcing%variables_hi%get_var(options%parameters%wvar)
+            if (.not.(options%forcing%wvar=="")) then
+                forcing_var = forcing%variables_hi%get_var(options%forcing%wvar)
                 do i = ims,ime
                     do k = kms, kme
                         do j = jms, jme
@@ -388,7 +388,7 @@ contains
             endif
         else
             !Compute the forcing wind field at the next update step, assuming a linear interpolation through time
-            forcing_var = forcing%variables_hi%get_var(options%parameters%uvar)
+            forcing_var = forcing%variables_hi%get_var(options%forcing%uvar)
             do i = ims,ime+1
                 do k = kms, kme
                     do j = jms, jme
@@ -397,7 +397,7 @@ contains
                 enddo
             enddo
             
-            forcing_var = forcing%variables_hi%get_var(options%parameters%vvar)
+            forcing_var = forcing%variables_hi%get_var(options%forcing%vvar)
             do i = ims,ime
                 do k = kms, kme
                     do j = jms, jme+1
@@ -406,8 +406,8 @@ contains
                 enddo
             enddo
             
-            if (.not.(options%parameters%wvar=="")) then
-                forcing_var = forcing%variables_hi%get_var(options%parameters%wvar)
+            if (.not.(options%forcing%wvar=="")) then
+                forcing_var = forcing%variables_hi%get_var(options%forcing%wvar)
                 do i = ims,ime
                     do k = kms, kme
                         do j = jms, jme
@@ -460,7 +460,7 @@ contains
         ! linear winds
         if (options%physics%windtype==kWIND_LINEAR .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS) then
             if (options%physics%windtype==kWIND_LINEAR .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
-                call linear_perturb(domain,options,options%lt_options%vert_smooth,.False.,options%parameters%advect_density, update=.True.)
+                call linear_perturb(domain,options,options%lt%vert_smooth,.False.,options%adv%advect_density, update=.True.)
             endif
             
             if (options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS) then
@@ -489,7 +489,7 @@ contains
 
 
                 !If we have not read in W_real from forcing, set target w_real to 0.0. This minimizes vertical motion in solution
-                if (options%parameters%wvar=="") then
+                if (options%forcing%wvar=="") then
                     domain%w%dqdt_3d = -domain%w%dqdt_3d
                 else
                     domain%w%dqdt_3d = (domain%w_real%dqdt_3d-domain%w%dqdt_3d)
@@ -510,14 +510,14 @@ contains
                                 domain%jacobian_u, domain%jacobian_v,domain%jacobian_w,domain%advection_dz,domain%dx, &
                                 domain%density%data_3d,options,horz_only=.False.)
 
-                call calc_iter_winds(domain,domain%alpha%data_3d,div,options%parameters%advect_density,update_in=.True.)
+                call calc_iter_winds(domain,domain%alpha%data_3d,div,options%adv%advect_density,update_in=.True.)
 
-                !call calc_iter_winds_old(domain,domain%alpha%data_3d,div,options%parameters%advect_density,update_in=.True.)
+                !call calc_iter_winds_old(domain,domain%alpha%data_3d,div,options%adv%advect_density,update_in=.True.)
             endif
         elseif (options%physics%windtype==kOBRIEN_WINDS) then
             call Obrien_winds(domain, options, update_in=.True.)
         elseif (options%physics%windtype==kLINEAR_OBRIEN_WINDS) then
-            call linear_perturb(domain,options,options%lt_options%vert_smooth,.False.,options%parameters%advect_density, update=.True.)
+            call linear_perturb(domain,options,options%lt%vert_smooth,.False.,options%adv%advect_density, update=.True.)
             call Obrien_winds(domain, options, update_in=.True.)
         endif
         
@@ -558,7 +558,7 @@ contains
             enddo
         endif
         
-        if (.not.(options%parameters%wvar=="")) then
+        if (.not.(options%forcing%wvar=="")) then
             !Reset to 0.0, this was only used as a placeholder variable
             do i = ims,ime
                 do k = kms, kme
@@ -582,7 +582,7 @@ contains
         domain%v%dqdt_3d = (domain%v%dqdt_3d-domain%v%data_3d)/options%wind%update_dt%seconds()
         
         !If we are not using advect density, then balance_uvw will not be called every physics step, so compute a tendancy here
-        if (.not.(options%parameters%advect_density)) then
+        if (.not.(options%adv%advect_density)) then
             domain%w%dqdt_3d = (domain%w%dqdt_3d-domain%w%data_3d)/options%wind%update_dt%seconds()
         endif
 
@@ -725,7 +725,7 @@ contains
         V_cor = 0.5
 
         ! Now, fixing w-winds, iterate over U/V to reduce divergence with new w-winds
-        do it = 0,options%parameters%wind_iterations
+        do it = 0,options%wind%wind_iterations
             !Compute divergence in new wind field
             call calc_divergence(div, domain%u%data_3d, domain%v%data_3d, domain%w%data_3d, &
                                 domain%jacobian_u, domain%jacobian_v, domain%jacobian_w,    &
@@ -791,13 +791,13 @@ contains
         call allocate_winds(domain)
 
         do i=kms,kme
-            domain%advection_dz(:,i,:) = options%parameters%dz_levels(i)
+            domain%advection_dz(:,i,:) = options%domain%dz_levels(i)
         enddo
 
         if (options%physics%windtype==kWIND_LINEAR .or. &
                  options%physics%windtype==kLINEAR_OBRIEN_WINDS .or. &
                  options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
-            call setup_linwinds(domain, options, .False., options%parameters%advect_density)
+            call setup_linwinds(domain, options, .False., options%adv%advect_density)
         endif
         if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
             !call init_iter_winds_old(domain)

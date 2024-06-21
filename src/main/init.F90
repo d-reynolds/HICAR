@@ -50,7 +50,7 @@ module initialization
 
     implicit none
     private
-    public::split_processes, init_options, init_model, init_physics, init_model_state
+    public::split_processes, welcome_message, init_options, init_model, init_physics, init_model_state
 
 contains
 
@@ -63,32 +63,25 @@ contains
         type(ioclient_t), intent(inout) :: ioclient
 
         integer :: n, k, name_len, color, ierr, node_name_i, num_PE
-        integer :: omp_get_max_threads, num_threads
+        integer :: num_threads
 
         character(len=MPI_MAX_PROCESSOR_NAME) :: node_name
         integer, allocatable :: node_names(:) 
-
         type(MPI_Comm) :: globalComm, splitComm
 
 #if defined(_OPENMP)
         num_threads = omp_get_max_threads()
 #else
         num_threads = 1
-#endif
-
-        call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
-        STD_OUT_PE = (PE_RANK_GLOBAL==0)
+#endif    
 
         call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
 
-        if (STD_OUT_PE) call welcome_message()
-        if (STD_OUT_PE) flush(output_unit)
-
         if (STD_OUT_PE) then
-            write(*,*) "  Number of coarray image:",num_PE
+            write(*,*) "  Number of processing elements:",num_PE
             write(*,*) "  Max number of OpenMP Threads:",num_threads
         endif
-
+    
         allocate(node_names(num_PE))
 
         node_names = 0
@@ -170,14 +163,14 @@ contains
 
     end subroutine split_processes
 
-    subroutine init_options(options)
+    subroutine init_options(options, namelist_file, info_only, gen_nml, only_namelist_check)
         implicit none
         type(options_t), intent(inout) :: options
+        character(len=*), intent(in) :: namelist_file
+        logical, optional, intent(in) :: info_only, gen_nml, only_namelist_check
 
         ! read in options file
-        if (STD_OUT_PE) write(*,*) "Initializing Options"
-        if (STD_OUT_PE) flush(output_unit)
-        call options%init()
+        call options%init(namelist_file, info_only=info_only, gen_nml=gen_nml, only_namelist_check=only_namelist_check)
 
     end subroutine init_options
 

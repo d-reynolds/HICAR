@@ -104,8 +104,8 @@ contains
                     )                                                                       &
                     .OR.                                                                    &
                     ( (options%physics%watersurface==kWATER_LAKE) .AND.                     &    ! if lake model is selected, and
-                      (vegtype(i,j).eq.options%lsm_options%water_category) .AND.            &    !   gridcell is water,
-                      (vegtype(i,j).ne.options%lsm_options%lake_category)                   &    !   but not lake (i.e ocean)
+                      (vegtype(i,j).eq.options%lsm%water_category) .AND.            &    !   gridcell is water,
+                      (vegtype(i,j).ne.options%lsm%lake_category)                   &    !   but not lake (i.e ocean)
                     )                                                                         &
                 )then
                     qv_surf(i,j) = 0.98 * sat_mr(sst(i,j),psfc(i,j)) ! multiply by 0.98 to account for salinity

@@ -1,0 +1,911 @@
+ ! ---------------------------------------------------------------------------------------------------
+ !   General model and run meta-data
+ ! ---------------------------------------------------------------------------------------------------
+ &general
+
+    version = 'v2.1'                               ! Version of the model
+
+    comment = ''                                   ! Comment for the run, to be added to the output
+                                                   ! file metadata
+
+    debug = .False.                                ! Debugging flag (T/F)
+
+    interactive = .False.                          ! Interactive flag, prints out model progress
+                                                   ! during physics timesteps (T/F)
+
+    calendar = 'gregorian'                         ! Calendar type for start/end date, values:
+                                                   ! (gregorian, noleap, 360_day)
+
+    start_date = ''                                ! Start date for simulation, format: 'YYYY-MM-DD
+                                                   ! HH:MM:SS'
+
+    end_date = ''                                  ! End date for simulation, format: 'YYYY-MM-DD
+                                                   ! HH:MM:SS'
+
+    phys_suite = ''                                ! Physics suite to use, current options: (HICAR)
+
+    use_mp_options = .True.                        ! Read the microphysics namelist section to set
+                                                   ! options relevant for the Thompson MP schemes
+                                                   ! (T/F)
+
+    use_lt_options = .True.                        ! Read the linear theory namelist section to set
+                                                   ! options relevant for the linear-theory wind
+                                                   ! solver (T/F)
+
+    use_adv_options = .True.                       ! Read the advection namelist section to set
+                                                   ! options relevant for the advection scheme (T/F)
+
+    use_cu_options = .True.                        ! Read the cumulus namelist section to set
+                                                   ! options relevant for the cumulus scheme (T/F)
+
+    use_lsm_options = .True.                       ! Read the LSM namelist section to set options
+                                                   ! relevant for the LSM model (T/F)
+
+    use_rad_options = .True.                       ! Read the radiation namelist section to set
+                                                   ! options relevant for the radiation model (T/F)
+
+    use_pbl_options = .True.                       ! Read the PBL namelist section to set options
+                                                   ! relevant for the PBL model (T/F)
+
+    use_sfc_options = .True.                       ! Read the surface namelist section to set
+                                                   ! options relevant for the surface model (T/F)
+
+    use_wind_options = .True.                      ! Read the wind namelist section to set options
+                                                   ! relevant for the wind solver (T/F)
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Information about the modeling domain, including domain file name,
+ !   vertical grid structure, and variables to read from domain file
+ ! ---------------------------------------------------------------------------------------------------
+ &domain
+
+    init_conditions_file = ''                      ! Path to file containing initial conditions
+
+    dx = 0.0                                       ! Horizontal grid spacing
+
+    longitude_system = 0                           ! Longitude system, values: (0=Maintain
+                                                   ! Logitude, 1=Prime Centered, 2=Dateline
+                                                   ! Centered, 3=Guess Lon)
+
+    nz = 500                                       ! Number of vertical levels
+
+    flat_z_height = -1.                            ! Height at which terrain following coordinates are flat.
+                                                   ! Either height in meters above ground,
+                                                   ! positive integer representing the index of the height level,
+                                                   ! or negative integer representing number of levels below model top.
+
+    sleve = .False.                                ! flag for using SLEVE vertical coordinates
+                                                   ! (Schär et al. 2002) (T/F)
+
+    terrain_smooth_windowsize = 3                  ! Size of the smoothing window used to split large and small scale terrain variations
+                                                   ! for calculation of the SLEVE coordinate.
+
+    terrain_smooth_cycles = 5                      ! Number of smoothing cycles used to split large and small scale terrain variations
+                                                   ! for calculation of the SLEVE coordinate.
+
+    decay_rate_L_topo = 2                          ! Decay rate for the large scale topography in
+                                                   ! the SLEVE coordinate
+
+    decay_rate_S_topo = 6                          ! Decay rate for the small scale topography in
+                                                   ! the SLEVE coordinate
+
+    sleve_n = 1.2                                  ! Expotent 'n' in SLEVE coordinate equation (see
+                                                   ! Schär et al. 2002)
+
+    use_agl_height = .True.                        ! Use height above ground level, instead of above sea level, 
+                                                   ! for interpolating forcing data to domain grid in lower atmosphere (T/F)
+
+    agl_cap = 800.0                                ! Height above ground level at which interpolation of forcing data switches 
+                                                   ! to using height above sea level. Used if 'use_agl_height' is true.
+
+    hgt_hi = ''                                    ! Name of the high resolution terrain variable
+                                                   ! in domain file (REQUIRED)
+
+    landvar = ''                                   ! Name of the land mask variable in domain file
+
+    lakedepthvar = ''                              ! Name of the lake depth variable in domain file
+
+    lat_hi = ''                                    ! Name of the latitude variable in domain file
+                                                   ! (REQUIRED)
+
+    lon_hi = ''                                    ! Name of the longitude variable in domain file
+                                                   ! (REQUIRED)
+
+    ulat_hi = ''                                   ! Name of the latitude variable on the staggered
+                                                   ! U-grid in domain file
+
+    ulon_hi = ''                                   ! Name of the longitude variable on the
+                                                   ! staggered U-grid in domain file
+
+    vlat_hi = ''                                   ! Name of the latitude variable on the staggered
+                                                   ! V-grid in domain file
+
+    vlon_hi = ''                                   ! Name of the longitude variable on the
+                                                   ! staggered V-grid in domain file
+
+    soiltype_var = ''                              ! Name of the soil type variable in domain file
+
+    soil_t_var = ''                                ! Name of the soil temperature variable in
+                                                   ! domain file
+
+    soil_vwc_var = ''                              ! Name of the soil volumetric water content
+                                                   ! variable in domain file
+
+    swe_var = ''                                   ! Name of the snow water equivalent variable in
+                                                   ! domain file
+
+    snowh_var = ''                                 ! Name of the snow depth variable in domain file
+
+    soil_deept_var = ''                            ! Name of the deep soil temperature variable in
+                                                   ! domain file
+
+    vegtype_var = ''                               ! Name of the vegetation type variable in domain
+                                                   ! file
+
+    vegfrac_var = ''                               ! Name of the vegetation fraction variable in
+                                                   ! domain file
+
+    vegfracmax_var = ''                            ! Name of the maximum vegetation fraction
+                                                   ! variable in domain file
+
+    albedo_var = ''                                ! Name of the albedo variable in domain file
+
+    lai_var = ''                                   ! Name of the leaf area index variable in domain
+                                                   ! file
+
+    canwat_var = ''                                ! Name of the canopy water variable in domain
+                                                   ! file
+
+    linear_mask_var = ''                           ! Name of the linear mask variable in domain file
+
+    nsq_calibration_var = ''                       ! Name of the NSQ calibration variable in domain
+                                                   ! file
+
+    sinalpha_var = ''                              ! Name of the sine of the slope angle variable
+                                                   ! in domain file
+
+    cosalpha_var = ''                              ! Name of the cosine of the slope angle variable
+                                                   ! in domain file
+
+    svf_var = ''                                   ! Name of the sky view factor variable in domain
+                                                   ! file, used for radiation_downscaling=1
+
+    hlm_var = ''                                   ! Name of the horizon line matrix variable in
+                                                   ! domain file, used for radiation_downscaling=1
+
+    slope_var = ''                                 ! Name of the slope variable (0-1) in domain file
+
+    slope_angle_var = ''                           ! Name of the slope angle variable in domain file
+
+    aspect_angle_var = ''                          ! Name of the aspect angle variable in domain
+                                                   ! file
+
+    shd_var = ''                                   ! Name of the snow holding depth variable in
+                                                   ! domain file, used for SLIDE=1 when running
+                                                   ! FSM2trans
+
+    dz_levels = 0.0                                ! Array of vertical grid spacing in meters,
+                                                   ! length 'nz'. Default of 0.0 is a placeholder
+                                                   ! to be replaced by the user.
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Information about the forcing data, including file list,
+ !   conventions for the data, and names of variables to read
+ ! ---------------------------------------------------------------------------------------------------
+ &forcing
+
+    forcing_file_list = ''                         ! Path to file containing list of forcing files.
+                                                   ! Can be generated using
+                                                   ! helpers/filelist_script.sh
+
+    t_offset = 0.0                                 ! Offset to apply to temperature forcing data
+
+    inputinterval = 3600                           ! Interval between forcing data inputs in seconds
+
+    limit_rh = .False.                             ! Limit forcing relative humidity to 100% (T/F)
+
+    z_is_geopotential = .False.                    ! Forcing Z variable is geopotential height (T/F)
+
+    z_is_on_interface = .False.                    ! Forcing Z variable is on interface levels (T/F)
+
+    time_varying_z = .False.                       ! Forcing Z variable is time varying (T/F)
+
+    t_is_potential = .True.                        ! Forcing temperature variable is potential
+                                                   ! temperature (T/F)
+
+    qv_is_relative_humidity = .False.              ! Forcing QV variable is relative humidity (T/F)
+
+    qv_is_spec_humidity = .False.                  ! Forcing QV variable is specific humidity (T/F)
+
+    latvar = ''                                    ! Name of the latitude variable in forcing file
+                                                   ! (REQUIRED)
+
+    lonvar = ''                                    ! Name of the longitude variable in forcing file
+                                                   ! (REQUIRED)
+
+    hgtvar = ''                                    ! Name of the terrain height variable in forcing
+                                                   ! file (REQUIRED)
+
+    zvar = ''                                      ! Name of the vertical height variable in
+                                                   ! forcing file (REQUIRED)
+
+    uvar = ''                                      ! Name of the U wind variable in forcing file
+                                                   ! (REQUIRED)
+
+    ulat = ''                                      ! Name of the latitude variable on the staggered
+                                                   ! U-grid in forcing file
+
+    ulon = ''                                      ! Name of the longitude variable on the
+                                                   ! staggered U-grid in forcing file
+
+    vvar = ''                                      ! Name of the V wind variable in forcing file
+                                                   ! (REQUIRED)
+
+    vlat = ''                                      ! Name of the latitude variable on the staggered
+                                                   ! V-grid in forcing file
+
+    vlon = ''                                      ! Name of the longitude variable on the
+                                                   ! staggered V-grid in forcing file
+
+    wvar = ''                                      ! Name of the W wind variable in forcing file
+
+    pslvar = ''                                    ! Name of the sea level pressure variable in
+                                                   ! forcing file
+
+    psvar = ''                                     ! Name of the surface pressure variable in
+                                                   ! forcing file
+
+    pvar = ''                                      ! Name of the pressure variable in forcing file
+
+    tvar = ''                                      ! Name of the temperature variable in forcing
+                                                   ! file (REQUIRED)
+
+    qvvar = ''                                     ! Name of the water vapor mixing ration variable
+                                                   ! in forcing file (REQUIRED)
+
+    qcvar = ''                                     ! Name of the cloud water mixing ratio variable
+                                                   ! in forcing file
+
+    qivar = ''                                     ! Name of the ice water mixing ratio variable in
+                                                   ! forcing file
+
+    qrvar = ''                                     ! Name of the rain water mixing ratio variable
+                                                   ! in forcing file
+
+    qsvar = ''                                     ! Name of the snow mixing ratio variable in
+                                                   ! forcing file
+
+    qgvar = ''                                     ! Name of the graupel mixing ratio variable in
+                                                   ! forcing file
+
+    i2mvar = ''                                    ! Name of the ice2 mixing ration variable in
+                                                   ! forcing file
+
+    i3mvar = ''                                    ! Name of the ice3 mixing ration variable in
+                                                   ! forcing file
+
+    qncvar = ''                                    ! Name of the cloud number concentration
+                                                   ! variable in forcing file
+
+    qnivar = ''                                    ! Name of the ice number concentration variable
+                                                   ! in forcing file
+
+    qnrvar = ''                                    ! Name of the rain number concentration variable
+                                                   ! in forcing file
+
+    qnsvar = ''                                    ! Name of the snow number concentration variable
+                                                   ! in forcing file
+
+    qngvar = ''                                    ! Name of the graupel number concentration
+                                                   ! variable in forcing file
+
+    i2nvar = ''                                    ! Name of the ice2 number concentration variable
+                                                   ! in forcing file
+
+    i3nvar = ''                                    ! Name of the ice3 number concentration variable
+                                                   ! in forcing file
+
+    i1avar = ''                                    ! Name of the ice1 volume mixing ratio variable
+                                                   ! in forcing file
+
+    i2avar = ''                                    ! Name of the ice2 volume mixing ratio variable
+                                                   ! in forcing file
+
+    i3avar = ''                                    ! Name of the ice3 volume mixing ratio variable
+                                                   ! in forcing file
+
+    i1cvar = ''                                    ! Name of the ice1 volume x aspect ratio mixing
+                                                   ! ratio variable in forcing file
+
+    i2cvar = ''                                    ! Name of the ice2 volume x aspect ratio mixing
+                                                   ! ratio variable in forcing file
+
+    i3cvar = ''                                    ! Name of the ice3 volume x aspect ratio mixing
+                                                   ! ratio variable in forcing file
+
+    shvar = ''                                     ! Name of the sensible heat flux variable in
+                                                   ! forcing file
+
+    lhvar = ''                                     ! Name of the latent heat flux variable in
+                                                   ! forcing file
+
+    swdown_var = ''                                ! Name of the shortwave downwelling radiation
+                                                   ! variable in forcing file
+
+    lwdown_var = ''                                ! Name of the longwave downwelling radiation
+                                                   ! variable in forcing file
+
+    sst_var = ''                                   ! Name of the sea surface temperature variable
+                                                   ! in forcing file
+
+    pblhvar = ''                                   ! Name of the planetary boundary layer height
+                                                   ! variable in forcing file
+
+    time_var = ''                                  ! Name of the time variable in forcing file
+                                                   ! (REQUIRED)
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Specify physics options to use for the model run
+ ! ---------------------------------------------------------------------------------------------------
+ &physics
+
+    pbl = 0                                        ! Planetary boundary layer scheme to use: 
+                                                   ! 0 = no PBL,
+                                                   ! 1 = YSU PBL
+
+    lsm = 0                                        ! Land surface model to use:
+                                                   ! 0 = no LSM,
+                                                   ! 1 = Fluxes from forcing data,
+                                                   ! 2 = Noah LSM
+                                                   ! 3 = Noah MP
+
+    sfc = 0                                        ! Surface model to use: 
+                                                   ! 0 = no surface layer
+                                                   ! 1 = Revised MM5 Monin-Obukhov scheme
+
+    sm = 0                                         ! Snow model to use: 
+                                                   ! 0 = no snow model
+                                                   ! 1 = FSM2trans snow model (must be compiled, see docs/compiling.md)
+
+    water = 0                                      ! Water model to use:  
+                                                   ! 0 = no open water fluxes,
+                                                   ! 1 = Simple fluxes (needs SST in forcing data)
+                                                   ! 2 = WRF's lake model (needs lake depth in hi-res data))
+
+    mp = 0                                         ! Microphysics scheme to use: 
+                                                   ! 0 = no MP,
+                                                   ! 1 = Thompson et al (2008),
+                                                   ! 2 = 'Linear' microphysics
+                                                   ! 3 = Morrison
+                                                   ! 4 = WSM6
+                                                   ! 5 = Thompson Aerosol
+                                                   ! 6 = WSM3
+                                                   ! 7 = ISHMAEL
+
+    rad = 0                                        ! Radiation scheme to use: 
+                                                   ! 0 = no RAD,
+                                                   ! 1 = Surface fluxes from forcing data
+                                                   ! 2 = cloud fraction based radiation + radiative cooling
+                                                   ! 3 = RRTMG
+
+    conv = 0                                       ! Cumulus scheme to use: 
+                                                   ! 0 = no CONV,
+                                                   ! 1 = Tiedke scheme
+                                                   ! 2 = NSAS scheme
+                                                   ! 3 = BMJ scheme
+
+    adv = 0                                        ! Advection scheme to use:  
+                                                   ! 0 = no ADV,
+                                                   ! 1 = standard advection scheme
+                                                   ! 2 = MPDATA
+
+    wind = 0                                       ! Wind solver to use: 
+                                                   ! 0 = no LT,
+                                                   ! 1 = linear theory wind perturbations
+                                                   ! 2 = Adjustment to horizontal winds to reduce divergence, based on technique from O'brien et al., 1970
+                                                   ! 3 = Mass-conserving wind solver based on variational calculus technique, requires PETSc
+                                                   ! 4 = Combination of options 1 & 2
+                                                   ! 5 = Combination of options 1 & 3
+
+    radiation_downscaling = 0                      ! 0 = no downcaling
+                                                   ! 1 = terrain shading effect is considered in the radiation calculation
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Specify options for time-stepping
+ ! ---------------------------------------------------------------------------------------------------
+ &time_parameters
+
+    cfl_reduction_factor = 0.9                     ! Multiplication factor for the CFL time step.
+                                                   ! If < 1, the time step will be reduced by this factor.
+                                                   ! If > 1, the time step will be increased by this factor, only to be used with RK3=.True.
+
+    RK3 = .False.                                  ! Use the third-order Runge-Kutta time stepping
+                                                   ! scheme for the advection scheme (T/F)
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Optionally specified Linear Theory parameters
+ ! ---------------------------------------------------------------------------------------------------
+ &lt_parameters
+
+    variable_N = .True.                            ! Compute the Brunt Vaisala Frequency (N^2)
+                                                   ! every time step (T/F)
+
+    smooth_nsq = .True.                            ! Smooth the Brunt-Vaisala frequency over
+                                                   ! vert_smooth vertical levels (T/F)
+
+    buffer = 50                                    ! Number of vertical levels to buffer around the
+                                                   ! domain MUST be >=1
+
+    stability_window_size = 10                     ! window to average nsq over
+
+    max_stability = 6e-4                           ! max limit on the calculated Brunt Vaisala
+                                                   ! Frequency
+
+    min_stability = 1e-7                           ! min limit on the calculated Brunt Vaisala
+                                                   ! Frequency
+
+    vert_smooth = 10                               ! Number of vertical levels over which to smooth
+                                                   ! the Brunt-Vaisala frequency
+
+    N_squared = 3e-5                               ! static Brunt Vaisala Frequency (N^2) to use
+
+    linear_contribution = 1.0                      ! fractional contribution of linear perturbation
+                                                   ! to wind field (e.g. u_hat multiplied by this)
+
+    remove_lowres_linear = .False.                 ! attempt to remove the linear mountain wave
+                                                   ! from the forcing low res model (T/F)
+
+    rm_N_squared = 3e-5                            ! static Brunt Vaisala Frequency (N^2) to use in
+                                                   ! removing linear wind field
+
+    rm_linear_contribution = 1.0                   ! fractional contribution of linear perturbation
+                                                   ! to wind field to remove from the low-res field
+
+    linear_update_fraction = 0.2                   ! fraction of linear perturbation to add each
+                                                   ! time step
+
+    spatial_linear_fields = .False.                ! use a spatially varying linear wind
+                                                   ! perturbation (T/F)
+
+    linear_mask = .False.                          ! use a spatial mask for the linear wind field
+                                                   ! (T/F)
+
+    nsq_calibration = .False.                      ! use a spatial mask to calibrate the nsquared
+                                                   ! (brunt vaisala frequency) field (T/F)
+
+    dirmax = 6.283                                 ! maximum direction of the wind perturbation
+                                                   ! look up table
+
+    dirmin = 0.0                                   ! minimum direction of the wind perturbation
+                                                   ! look up table
+
+    spdmax = 30.0                                  ! maximum speed of the wind perturbation look up
+                                                   ! table
+
+    spdmin = 0.0                                   ! minimum speed of the wind perturbation look up
+                                                   ! table
+
+    nsqmax = -3.2218487496                         ! maximum Brunt Vaisala Frequency (N^2) of the
+                                                   ! wind perturbation look up table
+
+    nsqmin = -7                                    ! minimum Brunt Vaisala Frequency (N^2) of the
+                                                   ! wind perturbation look up table
+
+    n_dir_values = 24                              ! number of direction values in the wind
+                                                   ! perturbation look up table
+
+    n_nsq_values = 5                               ! number of Brunt Vaisala Frequency (N^2) values
+                                                   ! in the wind perturbation look up table
+
+    n_spd_values = 6                               ! number of speed values in the wind
+                                                   ! perturbation look up table
+
+    minimum_layer_size = 100                       ! minimum layer size for the linear wind
+                                                   ! perturbation
+
+    read_LUT = .False.                             ! read in a look up table for the linear wind
+                                                   ! perturbation (T/F)
+
+    write_LUT = .True.                             ! write out a look up table for the linear wind
+                                                   ! perturbation (T/F)
+
+    u_LUT_Filename = ''                            ! filename for the u component of the wind
+                                                   ! perturbation look up table
+
+    v_LUT_Filename = ''                            ! filename for the v component of the wind
+                                                   ! perturbation look up table
+
+    LUT_Filename = ''                              ! filename for the wind perturbation look up
+                                                   ! table
+
+    overwrite_lt_lut = .True.                      ! overwrite the linear theory look up table (T/F)
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Optionally specified Microphysics parameters (mostly for Thompson)
+ ! ---------------------------------------------------------------------------------------------------
+ &mp_parameters
+
+    Nt_c = 100.e6                                  ! Prescribed number of cloud droplets
+
+    TNO = 5.0                                      ! Constants in Cooper curve relation for cloud
+                                                   ! ice number
+
+    am_s = 0.069                                   ! Mass power law relation parameter for snow
+
+    rho_g = 500.0                                  ! Density of graupel
+
+    av_s = 40.                                     ! Fallspeed power law parameter for snow
+
+    bv_s = 0.55                                    ! Fallspeed power law parameter for snow
+
+    fv_s = 100.                                    ! Fallspeed power law parameter for snow
+
+    av_g = 442.                                    ! Fallspeed power law parameter for graupel
+
+    bv_g = 0.89                                    ! Fallspeed power law parameter for graupel
+
+    av_i = 1847.5                                  ! Fallspeed power law parameter for ice
+
+    Ef_si = 0.05                                   ! Collection efficiency snow/ice
+
+    Ef_rs = 0.95                                   ! Collection efficiency rain/snow
+
+    Ef_rg = 0.75                                   ! Collection efficiency rain/graupel
+
+    Ef_ri = 0.95                                   ! Collection efficiency rain/ice
+
+    C_cubes = 0.5                                  ! Capacitance of sphere and plates/aggregates
+                                                   ! D**3
+
+    C_sqrd = 0.3                                   ! Capacitance of sphere and plates/aggregates
+                                                   ! D**2
+
+    mu_r = 0.0                                     ! Generalized gamma distribution parameter for
+                                                   ! rain
+
+    t_adjust = 0.0                                 ! trude, add tadjust, so to chane temperature for where Bigg freezing starts.
+                                                   ! Follow approach in WRFV3.6 with IN
+
+    Ef_rw_l = .False.                              ! True sets ef_rw = 1
+
+    Ef_sw_l = .False.                              ! True sets ef_sw = 1
+
+    top_mp_level = 0                               ! Highest model level, measured from the ground up, up to which microphysics should be run.
+                                                   ! If <= 0, run microphysics on all levels.
+
+    update_interval_mp = 0.0                       ! Time interval for updating the microphysics.
+                                                   ! If = 0, update every time step. = 0 is
+                                                   ! recommended.
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Optionally specified advection parameters
+ ! ---------------------------------------------------------------------------------------------------
+ &adv_parameters
+
+    boundary_buffer = .False.                      ! apply some smoothing to the x and y boundaries
+                                                   ! in MPDATA (T/F)
+
+    advect_density = .True.                        ! use air density in the advection equations
+                                                   ! (T/F)
+
+    MPDATA_FCT = .True.                            ! use the flux corrected transport scheme in
+                                                   ! MPDATA (T/F)
+
+    mpdata_order = 2                               ! order of the MPDATA scheme
+
+    flux_corr = 0                                  ! flux correction scheme to use for standard advection. Recommended use with RK3=.True.
+                                                   ! 0=None, 1=WRF positive definite monotonic flux correction
+
+    h_order = 1                                    ! order of the horizontal advection scheme
+
+    v_order = 1                                    ! order of the vertical advection scheme
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Optionally specified land surface model parameters (mostly for NoahMP)
+ ! ---------------------------------------------------------------------------------------------------
+ &lsm_parameters
+
+    LU_Categories = 'MODIFIED_IGBP_MODIS_NOAH'     ! Land use category clasification to use in the LSM scheme.
+                                                   ! Values: MODIFIED_IGBP_MODIS_NOAH, USGS, USGS-RUC, MODI-RUC, NLCD40
+
+    update_interval_lsm = 300.0                    ! Time interval for updating the LSM. If = 0,
+                                                   ! update every time step.
+
+    monthly_vegfrac = .False.                      ! Use monthly vegetation fraction data (T/F)
+
+    monthly_albedo = .False.                       ! Use monthly albedo data (T/F)
+
+    urban_category = -1                            ! Land use category corresponding to urban classification.
+                                                   ! Setting to -1 uses default value for the given land use classification given in 'LU_Categories'.
+
+    ice_category = -1                              ! Land use category corresponding to ice classification.
+                                                   ! Setting to -1 uses default value for the given land use classification given in 'LU_Categories'.
+
+    water_category = -1                            ! Land use category corresponding to open water classification.
+                                                   ! Setting to -1 uses default value for the given land use classification given in 'LU_Categories'.
+
+    lake_category = -1                             ! Land use category corresponding to lake classification.
+                                                   ! Setting to -1 uses default value for the given land use classification given in 'LU_Categories'.
+
+    snow_den_const = 100.                          ! Snow density constant for back-calculating SWE or snow height
+                                                   ! If only one given as domain input variable.
+
+    max_swe = 1e10                                 ! Maximum snow water equivalent (SWE) for snow
+                                                   ! cover fraction
+
+    sf_urban_phys = 1                              ! Urban physics parameterization to use for Noah
+                                                   ! LSM (not enabled in code).
+
+    nmp_dveg = 3                                   ! Dynamic vegetation type for Noah MP of vegetation types in the LSM.
+                                                   ! 1 = Off (LAI from table; FVEG = shdfac)
+                                                   ! 2 = On  (LAI predicted;  FVEG calculated)
+                                                   ! 3 = Off (LAI from table; FVEG calculated)
+                                                   ! 4 = Off (LAI from table; FVEG = maximum veg. fraction)
+                                                   ! 5 = On  (LAI predicted;  FVEG = maximum veg. fraction)
+                                                   ! 6 = On  (use FVEG = SHDFAC from input)
+                                                   ! 7 = Off (use input LAI; use FVEG = SHDFAC from input)
+                                                   ! 8 = Off (use input LAI; calculate FVEG)
+                                                   ! 9 = Off (use input LAI; use maximum vegetation fraction)
+
+    nmp_opt_crs = 1                                ! Noah-MP Stomatal Resistance option:
+                                                   ! 1 = Ball-Berry
+                                                   ! 2 = Jarvis
+
+    nmp_opt_sfc = -1                               ! Noah-MP surface layer drag coefficient calculation
+                                                   ! 1 = Monin-Obukhov
+                                                   ! 2 = original Noah (Chen97)
+                                                   ! 3 = YSU consistent
+
+    nmp_opt_btr = 2                                ! Noah-MP Soil Moisture Factor for Stomatal Resistance
+                                                   ! 1 = Noah (soil moisture)
+                                                   ! 2 = CLM (matric potential)
+                                                   ! 3 = SSiB (matric potential)
+
+    nmp_opt_run = 1                                ! Noah-MP Runoff and Groundwater option
+                                                   ! 1 = TOPMODEL with groundwater
+                                                   ! 2 = TOPMODEL with equilibrium water table
+                                                   ! 3 = original surface and subsurface runoff (free drainage)
+                                                   ! 4 = BATS surface and subsurface runoff (free drainage)
+                                                   ! 5 = Miguez-Macho&Fan groundwater scheme (Miguez-Macho et al. 2007 JGR; Fan et al. 2007 JGR)
+
+    nmp_opt_frz = 1                                ! Noah-MP Supercooled Liquid Water option
+                                                   ! 1 = No iteration
+                                                   ! 2 = Koren's iteration
+
+    nmp_opt_inf = 1                                ! Noah-MP Soil Permeability option
+                                                   ! 1 = Linear effects, more permeable
+                                                   ! 2 = Non-linear effects, less permeable
+
+    nmp_opt_rad = 3                                ! Noah-MP Radiative Transfer option
+                                                   ! 1 = Modified two-stream (known to cause problems when vegetation fraction is small)
+                                                   ! 2 = Two-stream applied to grid-cell
+                                                   ! 3 = Two-stream applied to vegetated fraction
+
+    nmp_opt_alb = 2                                ! Noah-MP Ground Surface Albedo option
+                                                   ! 1 = BATS
+                                                   ! 2 = CLASS
+
+    nmp_opt_snf = 4                                ! Noah-MP Precipitation Partitioning between snow and rain
+                                                   ! 1 = Jordan (1991)
+                                                   ! 2 = BATS:  Snow when SFCTMP < TFRZ+2.2
+                                                   ! 3 = Snow when SFCTMP < TFRZ
+                                                   ! 4 = Use WRF precipitation partitioning
+
+    nmp_opt_tbot = 2                               ! Noah-MP Soil Temperature Lower Boundary Condition
+                                                   ! 1 = Zero heat flux
+                                                   ! 2 = TBOT at 8 m from input file
+
+    nmp_opt_stc = 1                                ! Noah-MP Snow/Soil temperature time scheme
+                                                   ! 1 = semi-implicit
+                                                   ! 2 = full-implicit
+                                                   ! 3 = semi-implicit where Ts uses snow cover fraction
+
+    nmp_opt_gla = 1                                ! Noah-MP glacier treatment option
+                                                   ! 1 = includes phase change
+                                                   ! 2 = slab ice (Noah)
+
+    nmp_opt_rsf = 1                                ! Noah-MP surface evaporation resistance option
+                                                   ! 1 = Sakaguchi and Zeng, 2009
+                                                   ! 2 = Sellers (1992)
+                                                   ! 3 = adjusted Sellers to decrease RSURF for wet soil
+                                                   ! 4 = option 1 for non-snow; rsurf = rsurf_snow for snow (set in MPTABLE)
+
+    nmp_opt_soil = 1                               ! Noah-MP options for defining soil properties
+                                                   ! 1 = use input dominant soil texture
+                                                   ! 2 = use input soil texture that varies with depth
+
+    nmp_opt_pedo = 1                               ! Noah-MP options for pedotransfer functions
+                                                   ! (used when OPT_SOIL = 3; not implemented in
+                                                   ! code)
+
+    nmp_opt_crop = 0                               ! options for crop model
+                                                   ! 0 = No crop model, will run default dynamic vegetation
+                                                   ! 1 = Liu, et al. 2016
+                                                   ! 2 = Gecros (Genotype-by-Environment interaction on CROp growth Simulator) Yin and van Laar, 2005
+
+    nmp_opt_irr = 0                                ! options for irrigation scheme
+                                                   ! 0 = No irrigation
+                                                   ! 1 = Irrigation ON
+                                                   ! 2 = irrigation trigger based on crop season Planting and harvesting dates
+                                                   ! 3 = irrigation trigger based on LAI threshold
+
+    nmp_opt_irrm = 0                               ! options for irrigation method (only if opt_irr > 0)
+                                                   ! 0 = method based on geo_em fractions (all three methods are ON)
+                                                   ! 1 = sprinkler method
+                                                   ! 2 = micro/drip irrigation
+                                                   ! 3 = surface flooding
+
+    nmp_opt_tdrn = 0                               ! Noah-MP tile drainage option (currently only tested and works with opt_run=3)
+                                                   ! 0 = No tile drainage
+                                                   ! 1 = Simple drainage
+                                                   ! 2 = Hooghoudt's equation based tile drainage
+
+    nmp_soiltstep = 0                              ! Noah-MP soil process timestep (seconds) for solving soil water and temperature
+                                                   ! 0 = default, the same as main NoahMP model timestep
+
+    noahmp_output = 1                              ! Noah-MP output levels
+                                                   ! 1 = standard output
+                                                   ! 3 = standard output with additional water and energy budget term output
+
+    fsm_nsnow_max = 6                              ! Maximum number of snow layers to allow for a
+                                                   ! FSM simulation
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Optionally specified convection parameters
+ ! ---------------------------------------------------------------------------------------------------
+ &cu_parameters
+
+    stochastic_cu = -9999                          ! disturbes the W field (randomly; higher value=more disturbance). Triggers convection.
+                                                   ! If set to -9999, no convective perturbation is applied.
+
+    tendency_fraction = 1.0                        ! fraction of the tendency to use in the cumulus
+                                                   ! scheme
+
+    tend_qv_fraction = -1.0                        ! fraction of the tendency to use in the cumulus scheme for water vapor.
+                                                   ! If < 0, use the value of 'tendency_fraction'
+
+    tend_qc_fraction = -1.0                        ! fraction of the tendency to use in the cumulus scheme for cloud water.
+                                                   ! If < 0, use the value of 'tendency_fraction'
+
+    tend_th_fraction = -1.0                        ! fraction of the tendency to use in the cumulus scheme for potential temperature.
+                                                   ! If < 0, use the value of 'tendency_fraction'
+
+    tend_qi_fraction = -1.0                        ! fraction of the tendency to use in the cumulus scheme for ice.
+                                                   ! If < 0, use the value of 'tendency_fraction'
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Optionally specified radiation parameters
+ ! ---------------------------------------------------------------------------------------------------
+ &rad_parameters
+
+    update_interval_rrtmg = 600.0                  ! Time interval for updating the radiation. If =
+                                                   ! 0, update every time step.
+
+    icloud = 3                                     ! Cloud fraction scheme for radiation
+
+    cldovrlp = 2                                   ! cloud overlap flag for radiation
+                                                   ! (1 = random, 2 = maximum-random, 3 = maximum, 4 = exponential, 5 = exponential-random)
+
+    read_ghg = .False.                             ! read in greenhouse gas data for radiation (T/F)
+
+    tzone = 0                                      ! time zone offset for radiation. Radiation code
+                                                   ! uses UTC, so if forcing time is not in UTC,
+                                                   ! give this offset here.
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Optionally specified PBL parameters
+ ! ---------------------------------------------------------------------------------------------------
+ &pbl_parameters
+
+    ysu_topdown_pblmix = 0                         ! use the YSU PBL scheme with radiative,
+                                                   ! top-down mixing scheme. 0=off, 1=on
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Optionally specified surface layer scheme parameters
+ ! ---------------------------------------------------------------------------------------------------
+ &sfc_parameters
+
+    isfflx = 1                                     ! Use surface fluxes calculated by LSM scheme.
+                                                   ! If lsm is turned on, this will be changed to 1. 0=off, 1=on
+
+    scm_force_flux = 0                             ! If lsm is turned on, this will be changed to
+                                                   ! 1. 0=on, 1=off
+
+    iz0tlnd = 1                                    ! thermal roughness length for sfclay. (0 = old,
+                                                   ! 1 = veg dependent Chen-Zhang Czil)
+
+    isftcflx = 0                                   ! not sure what this does, controls roughness
+                                                   ! length over water I think?
+
+    sbrlim = 250.                                  ! parameter to limit the bulk richardson number
+                                                   ! under stable conditions
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Specify wind solver and options for downscaling
+ ! ---------------------------------------------------------------------------------------------------
+ &wind
+
+    Sx = .False.                                   ! Use Sx-terrain sheltering to modify wind field
+                                                   ! (T/F)
+
+    thermal = .False.                              ! Use thermal wind parameterization from
+                                                   ! Reynolds et al., 2024a to modify wind field
+                                                   ! (T/F)
+
+    wind_only = .False.                            ! Flag for if this is a 'wind-only' run, i.e.
+                                                   ! only the wind solver should be run
+
+    Sx_dmax = 300.0                                ! Maximum lateral distance over which to
+                                                   ! calculate the Sx parameter
+
+    Sx_scale_ang = 30.0                            ! Angle over which to scale the Sx parameter.
+                                                   ! See Reynolds et al., 2023 for details
+
+    TPI_scale = 400.0                              ! Scale factor for the TPI parameter. See
+                                                   ! Reynolds et al., 2023 for details
+
+    TPI_dmax = 1000.0                              ! Maximum lateral distance over which to
+                                                   ! calculate the TPI parameter
+
+    alpha_const = -1.0                             ! Option for setting the alpha parameter in the wind=3 euqtions to a constant
+                                                   ! (between 0.1 and 1). Default of -1.0 allows for dynamic alpha. For more information, see Reynolds et al., 2023.
+
+    smooth_wind_distance = -9999                   ! Distance over which to smooth the wind field.
+                                                   ! If -9999, use default of dx*2
+
+    wind_iterations = 800                          ! Number of iterations to use for the O'Brien
+                                                   ! iterative wind solver (wind=2)
+
+    update_frequency = 1                           ! Number of times to update the wind field per
+                                                   ! input time step.
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !    Specify output files and variables
+ ! ---------------------------------------------------------------------------------------------------
+ &output
+
+    outputinterval = 3600                          ! Frequency of writing output files in seconds
+
+    frames_per_outfile = 24                        ! Number of frames to write to each output file
+
+    output_file = '../output/hicar_out_'           ! Path to output file, including file prefix
+
+    output_vars = ''                               ! List of variables to output. See
+                                                   ! src/io/default_output_vars.f90 for available
+                                                   ! variables
+ /
+
+ ! ---------------------------------------------------------------------------------------------------
+ !   Specify if a restart run, and restart files
+ ! ---------------------------------------------------------------------------------------------------
+ &restart
+
+    restartinterval = 24                           ! Frequency of writing restart files in number
+                                                   ! of output steps
+
+    restart_out_file = '../restart/hicar_rst_'     ! Path to output restart files, including file
+                                                   ! prefix
+
+    restart_in_file = '../restart/hicar_rst_'      ! Path to input restart files, including file
+                                                   ! prefix
+
+    restart_date = ''                              ! Date to restart from, format: 'YYYY-MM-DD
+                                                   ! HH:MM:SS'
+
+    restart_run = .False.                          ! Flag to control if this is a restart run or
+                                                   ! not (T/F)
+ /

@@ -41,12 +41,14 @@ module options_types
         integer :: roughness
         logical :: wind_only
         type(time_delta_t) :: update_dt  ! how often winds are updated
+        integer :: wind_iterations      ! number of time to iterate for wind=3 option
+        real :: smooth_wind_distance    ! distance over which to smooth the forcing wind field (m)
+
     end type wind_type
     
     type time_options_type
         logical :: RK3  !Logical of whether ot use RK3 time stepping for advection terms
         real :: cfl_reduction_factor    ! amount to multiple CFL by to improve stability (typically 1)
-        integer :: cfl_strictness       ! CFL method 1=3D from 1D*sqrt(3), 2=ave.3D wind*sqrt(3), 3=sum.3D wind, 4=opt3 * sqrt(3), 5 = sum(max.3d)
     end type time_options_type
     
     ! ------------------------------------------------
@@ -65,7 +67,7 @@ module options_types
         real    :: t_adjust
         logical :: Ef_rw_l, EF_sw_l
 
-        integer :: update_interval  ! maximum number of seconds between updates
+        real :: update_interval  ! maximum number of seconds between updates
         integer :: top_mp_level     ! top model level to process in the microphysics
     end type mp_options_type
 
@@ -117,6 +119,8 @@ module options_types
         integer :: flux_corr                ! Designates which flux-correction scheme to use
         integer :: h_order                  ! Designates which order the horizontal advection should be
         integer :: v_order                  ! Designates which order the vertical advection should be
+        logical :: advect_density       ! properly incorporate density into the advection calculations.
+                                        ! Doesn't play nice with linear winds
 
     end type adv_options_type
 
@@ -160,7 +164,7 @@ module options_types
         real :: snow_den_const                          ! variable for converting snow height into SWE or visa versa when input data is incomplete 
         integer :: fsm_nsnow_max                        ! maximum number of snow layers for FSM2 to use. Set here, since it will
                                                         ! change the size of arrays elsewhere in domain_obj        
-        integer :: update_interval                      ! minimum time to let pass before recomputing LSM ~300s (it may be longer)  [s]
+        real :: update_interval                         ! minimum time to let pass before recomputing LSM ~300s (it may be longer)  [s]
         ! the following categories will be set by default if an known LU_Category is used
         integer :: urban_category                       ! LU index value that equals "urban"
         integer :: ice_category
@@ -169,7 +173,6 @@ module options_types
         ! integer :: snow_category ! = ice cat
         ! use monthly vegetation fraction data, not just a single value
         logical :: monthly_vegfrac
-        logical :: surface_diagnostics !! MJ added
         logical :: monthly_albedo
         integer :: sf_urban_phys
         
@@ -203,7 +206,7 @@ module options_types
     ! store Radiation options
     ! ------------------------------------------------
     type rad_options_type
-       integer :: update_interval_rrtmg                ! how ofen to update the radiation in seconds.
+       real    :: update_interval_rrtmg                ! how ofen to update the radiation in seconds.
                                                        ! RRTMG scheme is expensive. Default is 1800s (30 minutes)
        integer :: icloud                               ! How RRTMG interact with clouds
        integer :: cldovrlp                             ! how RRTMG considers cloud overlapping (1 = random, 2 = maximum-random, 3 = maximum, 4 = exponential, 5 = exponential-random)
@@ -212,144 +215,57 @@ module options_types
     end type rad_options_type
 
     ! ------------------------------------------------
-    ! store I/O related options
+    ! store output related options
     ! ------------------------------------------------
-    type io_options_type
+    type output_options_type
 
         ! file names
-        character (len=MAXFILELENGTH) :: output_file, restart_out_file, restart_in_file
-        character (len=MAXFILELENGTH) :: output_file_frequency
-        
+        character (len=MAXFILELENGTH) :: output_file        
 
-        real :: in_dt                   ! time step between forcing inputs [s]
-        type(time_delta_t) :: input_dt  ! store in_dt as a time delta object
-
-        real :: out_dt                  ! time step between output [s]
-        type(time_delta_t) :: output_dt ! store out_dt as a time delta object
-        
-        real :: rst_dt                  ! time step between writing restart data [s]
-        type(time_delta_t) :: restart_dt! rst_dt as a time delta object
-        integer :: restart_count
-        
+        real :: outputinterval          ! time between output [s]
         integer :: frames_per_outfile      ! frames (outputintervals) per out file
-
-        real :: outputinterval          ! time steps per output
-        real :: inputinterval           ! time steps per input
 
         ! these are the variables that need to be written and read from disk as primary output
         integer :: vars_for_output( kMAX_STORAGE_VARS ) = 0
 
-        ! restart information
-        type(Time_type) :: restart_time ! Date of the restart time step
-        ! integer :: restart_step         ! step in forcing data to begin running
-        integer :: restart_date(6)      ! date to initialize from (y,m,d, h,m,s)
-        integer :: restart_step_in_file ! step in restart file to initialize from
+        ! The following are NOT read from the namelist -- instead they are set/calculated from other options which ARE read from the namelist
+        type(time_delta_t) :: output_dt ! store out_dt as a time delta object
 
-    end type io_options_type
-
+    end type output_options_type
 
     ! ------------------------------------------------
-    ! store all model options
+    ! store restart related options
     ! ------------------------------------------------
-    type parameter_options_type
-        character (len=MAXVARLENGTH) :: version, comment, phys_suite
+    type restart_options_type
+
+        logical :: restart              ! this is a restart run, read model conditions from a restart file
+        integer :: restart_count        ! the frequency, in number of output timesteps, that we write out a restart file
 
         ! file names
-        character (len=MAXFILELENGTH) :: init_conditions_file, linear_mask_file, nsq_calibration_file
+        character (len=MAXFILELENGTH) :: restart_out_file, restart_in_file
 
-        character (len=MAXFILELENGTH), dimension(:), allocatable :: boundary_files
+        ! restart information
+        type(Time_type) :: restart_time ! Date of the restart time step
+        integer :: restart_step_in_file ! step in restart file to initialize from
 
-        ! variable names from init/BC/wind/... files
-        character (len=MAXVARLENGTH) :: landvar,lakedepthvar,latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar, &
-                                        hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi, &
-                                        pvar,pbvar,tvar,qvvar,qcvar,qivar,qrvar,qsvar,qgvar,i2mvar,i3mvar,&
-                                        qncvar,qnivar,qnrvar,qnsvar,qngvar,i2nvar,i3nvar,&
-                                        i1avar,i1cvar,i2avar,i2cvar,i3avar,i3cvar,hgtvar, &
-                                        pslvar, psvar, snowh_var, &
-                                        shvar,lhvar,pblhvar,zvar,zbvar, &
-                                        soiltype_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var, &
-                                        vegtype_var,vegfrac_var, albedo_var, vegfracmax_var, lai_var, canwat_var, &
-                                        linear_mask_var, nsq_calibration_var, &
-                                        swdown_var, lwdown_var, &
-                                        sst_var, rain_var, time_var, sinalpha_var, cosalpha_var
-
-        character(len=MAXVARLENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, factor_p_var !!MJ added
-                                        
-
-        character(len=MAXVARLENGTH) :: vars_to_read(kMAX_STORAGE_VARS)
-        integer                     :: dim_list(    kMAX_STORAGE_VARS)
-
-        character(len=MAXVARLENGTH) :: ext_var_list(kMAX_STORAGE_VARS)
-        integer                     :: ext_dim_list(    kMAX_STORAGE_VARS)
-
-        ! Filenames for files to read various physics options from
-        character(len=MAXFILELENGTH) :: mp_options_filename, lt_options_filename, adv_options_filename, &
-                                        lsm_options_filename, &
-                                        cu_options_filename, rad_options_filename, pbl_options_filename, sfc_options_filename
-        character(len=MAXFILELENGTH) :: calendar
+    end type restart_options_type
 
 
-        ! various boolean options
+    ! ------------------------------------------------
+    ! store general simulation options
+    ! ------------------------------------------------
+    type general_options_type
+
+        character (len=MAXVARLENGTH) :: version, comment, phys_suite
+
         logical :: debug                ! outputs a little more information at runtime (not much at present)
         logical :: interactive          ! set to true if running at the commandline to see %complete printed
         logical :: ideal                ! this is an ideal simulation, forcing will be held constant
-        logical :: compute_p            ! flag that we need to compute p from z this is determined from the vars specified (not read)
-        logical :: compute_z            ! flag that we need to compute z from p this is determined from the vars specified (not read)
-        logical :: readz                ! read atmospheric grid elevations from file
-        logical :: readdz               ! read atm model layer thicknesses from namelist
-        logical :: restart              ! this is a restart run, read model conditions from a restart file
-        logical :: qv_is_relative_humidity! if true the input water vapor is assumed to be relative humidity instead of mixing ratio
-        logical :: qv_is_spec_humidity  ! if true the input water vapor is assumed to be specific humidity instead of mixing ratio
-        logical :: t_is_potential       ! if true the input temperature is interpreted as potential temperature
-        logical :: z_is_geopotential    ! if true the z variable is interpreted as geopotential height
-        logical :: z_is_on_interface    ! if true the z variable is interpreted as residing at model level interfaces
-        logical :: advect_density       ! properly incorporate density into the advection calculations.
-                                        ! Doesn't play nice with linear winds
-        logical :: batched_exch         ! Whether or not do do halo_exchanges with a batched approached or singular
-        
-        ! various integer parameters/options
-        integer :: ntimesteps           ! total number of time steps to be simulated (from the first forcing data)
-        integer :: nz                   ! number of model vertical levels
-        integer :: wind_iterations      ! number of time to iterate for wind=3 option
-
-        ! various real parameters/options
-        real :: dx                      ! grid cell width [m]
-        real :: dxlow                   ! forcing model grid cell width [m]
-
-        real :: smooth_wind_distance    ! distance over which to smooth the forcing wind field (m)
-        logical :: time_varying_z       ! read in a new z coordinate every time step and interpolate accordingly
-
-        integer :: longitude_system     ! specify center for longitude system
-                                        ! 0 = kPRIME_CENTERED    (-180 - 180)
-                                        ! 1 = kDATELINE_CENTERED (0 - 360)
 
         ! date/time parameters
-        type(Time_type) :: initial_time ! Date of the first forcing time step
         type(Time_type) :: start_time   ! Date to start running the model
         type(Time_type) :: end_time     ! End point for the model simulation
-        
-        real :: t_offset                ! offset to temperature because WRF outputs potential temperature-300
-        real :: rh_limit                ! limit to impose on relative humidity in the forcing data
-        real :: cp_limit      ! [ mm/hr ] limit to impose on externally supplied convective precipitation in the forcing data in case bad values (e.g. 1e10 mm) are present
-        real :: sst_min_limit   ! [ K ]   limit to impose on minimum SST in the forcing data in case any non-sensical values (e.g. 200 K) are present
-
-
-        ! note this can't be allocatable because gfortran does not support allocatable components inside derived type coarrays...
-        real, dimension(MAXLEVELS)::dz_levels ! model layer thicknesses to be read from namelist
-        real    :: flat_z_height        ! height above mean ground level [m] above which z levels are flat in space
-        logical :: use_agl_height       ! interpolate from forcing to model layers using Z above ground level, not sea level
-        logical :: sleve                ! Using a sleve space_varying_dz offers control over the decay of terrain features in the vertical grid structure. See Schär et al 2002, Leuenberger et al 2009
-        integer :: terrain_smooth_windowsize
-        integer :: terrain_smooth_cycles
-        real    :: decay_rate_L_topo    !
-        real    :: decay_rate_S_topo    !
-
-        ! real    :: sleve_decay_factor   ! The ratio H/s (model top or flat_z_height over decay height s). Schär: "the single scale parameter s plays the role of a scale height; that is, the underlying terrain features ap- proximately decay by a factor 1/e over a depth s. With s=H, the resulting coordinate structure is qualitatively comparable to sigma coordinates. With s < H, a hybridlike setting is obtained"
-        real    :: sleve_n              ! Additional parameter introduced by Leuenberger 2009.
-
-        ! logical :: nudging   ! constrain the solution of certain variables (QV,QS,QC,QI,QR,QG) to be close (nudge_factor) to the forcing data
-
-        real    :: agl_cap              ! height up to which AGL height is used for vertical interpolation
+        character(len=MAXFILELENGTH) :: calendar
 
 
         ! physics parameterization options
@@ -361,16 +277,93 @@ module options_types
         logical :: use_rad_options
         logical :: use_pbl_options
         logical :: use_sfc_options
+        logical :: use_wind_options
 
-        integer :: warning_level        ! level of warnings to issue when checking options settings 0-10.
-                                        ! 0  = Don't print anything
-                                        ! 1  = print serious warnings
-        ! (DEFAULT if debug=True)       ! 2  = print all warnings
-                                        ! 3-4 ... nothing specified equivalent to 2
-        ! (DEFAULT if debug=False)      ! 5  = Stop for options that are likely to break the model (print all warnings)
-                                        ! 6-8... nothing specified equivalent to 5
-                                        ! 9  = stop on serious warnings only
-                                        ! 10 = stop on all warnings
-    end type parameter_options_type
+    end type general_options_type
+
+
+    ! ------------------------------------------------
+    ! store forcing related options
+    ! ------------------------------------------------
+    type forcing_options_type
+
+        logical :: qv_is_relative_humidity! if true the input water vapor is assumed to be relative humidity instead of mixing ratio
+        logical :: qv_is_spec_humidity  ! if true the input water vapor is assumed to be specific humidity instead of mixing ratio
+        logical :: t_is_potential       ! if true the input temperature is interpreted as potential temperature
+        logical :: z_is_geopotential    ! if true the z variable is interpreted as geopotential height
+        logical :: z_is_on_interface    ! if true the z variable is interpreted as residing at model level interfaces
+        logical :: time_varying_z       ! read in a new z coordinate every time step and interpolate accordingly
+
+        real :: t_offset                ! offset to temperature because WRF outputs potential temperature-300
+        logical :: limit_rh                ! impose a limit on relative humidity in the forcing data to be <=1
+
+        real :: inputinterval           ! time between forcing steps [s]
+
+
+        ! variable names from init/BC/wind/... files
+        character (len=MAXVARLENGTH) :: latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar, &
+                                        pvar,tvar,qvvar,qcvar,qivar,qrvar,qsvar,qgvar,i2mvar,i3mvar,&
+                                        qncvar,qnivar,qnrvar,qnsvar,qngvar,i2nvar,i3nvar,&
+                                        i1avar,i1cvar,i2avar,i2cvar,i3avar,i3cvar,hgtvar, &
+                                        pslvar, psvar, sst_var, pblhvar, &
+                                        shvar,lhvar,zvar, &
+                                        swdown_var, lwdown_var, &
+                                        time_var
+
+        ! The following are NOT read from the namelist -- instead they are set/calculated from other options which ARE read from the namelist
+        character(len=MAXVARLENGTH) :: vars_to_read(kMAX_STORAGE_VARS)
+        integer                     :: dim_list(    kMAX_STORAGE_VARS)
+
+        character (len=MAXFILELENGTH), dimension(:), allocatable :: boundary_files
+        type(time_delta_t) :: input_dt  ! store in_dt as a time delta object
+        logical :: compute_z            ! flag that we need to compute z from p, this is determined from the vars specified (not read)
+
+    end type forcing_options_type
+
+
+    ! ------------------------------------------------
+    ! store all model options
+    ! ------------------------------------------------
+    type domain_options_type
+
+        ! file names
+        character (len=MAXFILELENGTH) :: init_conditions_file                                        
+
+        
+        ! various real parameters/options
+        real :: dx                      ! grid cell width [m]
+
+        integer :: longitude_system     ! specify center for longitude system
+                                        ! 0 = kPRIME_CENTERED    (-180 - 180)
+                                        ! 1 = kDATELINE_CENTERED (0 - 360)        
+
+        integer :: nz                   ! number of model vertical levels
+
+        ! note this can't be allocatable because gfortran does not support allocatable components inside derived type coarrays...
+        real, dimension(MAXLEVELS)::dz_levels ! model layer thicknesses to be read from namelist
+        real    :: flat_z_height        ! height above mean ground level [m] above which z levels are flat in space
+        
+        logical :: sleve                ! Using a sleve space_varying_dz offers control over the decay of terrain features in the vertical grid structure. See Schär et al 2002, Leuenberger et al 2009
+        integer :: terrain_smooth_windowsize
+        integer :: terrain_smooth_cycles
+        real    :: decay_rate_L_topo    !
+        real    :: decay_rate_S_topo    !
+        real    :: sleve_n              ! Additional parameter introduced by Leuenberger 2009.
+
+
+        logical :: use_agl_height       ! interpolate from forcing to model layers using Z above ground level, not sea level
+        real    :: agl_cap              ! height up to which AGL height is used for vertical interpolation
+
+        ! variable names from init/BC/wind/... files
+        character (len=MAXVARLENGTH) :: hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,landvar,lakedepthvar, &
+                                        snowh_var, soiltype_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var, &
+                                        vegtype_var,vegfrac_var, albedo_var, vegfracmax_var, lai_var, canwat_var, &
+                                        linear_mask_var, nsq_calibration_var, &
+                                        sinalpha_var, cosalpha_var
+
+        character(len=MAXVARLENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var !!MJ added
+
+
+    end type domain_options_type
 
 end module options_types

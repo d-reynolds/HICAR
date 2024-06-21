@@ -141,8 +141,9 @@ if [ "$ans" = "y" ];then
 	echo 'Copying domain file (Gaudergrat_250m.nc) to ./domains'
 	cp HICAR_Test_Data/static_data/Gaudergrat_250m.nc $parent_dir/HICAR/domains
 	
-	echo 'Copying namelist (HICAR_Test_Case.nml) to ./input'
-	cp HICAR_Test_Data/HICAR_Test_Case.nml $parent_dir/HICAR/input
+	echo 'Generating namelist (HICAR_Test_Case.nml) to ./input'
+	$HICAR_dir/bin/HICAR --gen-nml $HICAR_dir/run/default.nml
+	./HICAR_Test_Data/gen_TestCase.sh $HICAR_dir/run/default.nml $parent_dir/HICAR/input/HICAR_Test_Case.nml
 
 	echo 'Copying forcing data to ./forcing/COSMO_2017'
 	cp HICAR_Test_Data/input_data/laf*.nc $parent_dir/HICAR/forcing/COSMO_2017

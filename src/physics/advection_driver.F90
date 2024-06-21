@@ -43,9 +43,9 @@ contains
         kms = domain%kms; kme = domain%kme
         jms = domain%jms; jme = domain%jme
         
-        if (options%adv_options%flux_corr > 0) call init_fluxcorr(domain)
+        if (options%adv%flux_corr > 0) call init_fluxcorr(domain)
         !Allocate storage variable for temp-quantities
-        if (options%time_options%RK3) then
+        if (options%time%RK3) then
             allocate(temp(ims:ime,kms:kme,jms:jme))
         endif
 
@@ -121,7 +121,7 @@ contains
         
         integer :: j, k
 
-        if (options%time_options%RK3) then
+        if (options%time%RK3) then
             if (options%physics%advection==kADV_STD) then
 
                 !Initial advection-tendency calculations

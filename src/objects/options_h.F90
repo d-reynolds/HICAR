@@ -1,9 +1,11 @@
 module options_interface
 
     use icar_constants,             only : kMAX_STRING_LENGTH, kMAX_STORAGE_VARS
-    use options_types,              only : parameter_options_type, physics_type, mp_options_type, lt_options_type, sfc_options_type, &
+    use options_types,              only : general_options_type, output_options_type, domain_options_type, &
+                                           forcing_options_type, restart_options_type,                     &
+                                           physics_type, mp_options_type, lt_options_type, sfc_options_type, &
                                            adv_options_type, lsm_options_type, pbl_options_type, &
-                                           cu_options_type, io_options_type, rad_options_type, wind_type, time_options_type
+                                           cu_options_type, rad_options_type, wind_type, time_options_type
 
     implicit none
 
@@ -25,33 +27,39 @@ module options_interface
         integer :: vars_for_restart( kMAX_STORAGE_VARS ) = 0
 
 
-        type(parameter_options_type)    :: parameters
+        type(general_options_type)      :: general
+
+        type(domain_options_type)       :: domain
+
+        type(forcing_options_type)      :: forcing
+
+        type(restart_options_type)      :: restart
+
+        type(output_options_type)       :: output
 
         ! defines which physics package to be used.
         type(physics_type)              :: physics
 
         type(wind_type)                 :: wind
         
-        type(time_options_type)         :: time_options
+        type(time_options_type)         :: time
 
         ! physics parameterization options
-        type(mp_options_type)           :: mp_options
+        type(mp_options_type)           :: mp
 
-        type(lt_options_type)           :: lt_options
+        type(lt_options_type)           :: lt
 
-        type(io_options_type)           :: io_options
+        type(adv_options_type)          :: adv
 
-        type(adv_options_type)          :: adv_options
+        type(lsm_options_type)          :: lsm
 
-        type(lsm_options_type)          :: lsm_options
+        type(cu_options_type)           :: cu
 
-        type(cu_options_type)           :: cu_options
-
-        type(rad_options_type)          :: rad_options
+        type(rad_options_type)          :: rad
         
-        type(pbl_options_type)          :: pbl_options
+        type(pbl_options_type)          :: pbl
 
-        type(sfc_options_type)          :: sfc_options
+        type(sfc_options_type)          :: sfc
 
     contains
 
@@ -65,9 +73,11 @@ module options_interface
 
 interface
 
-    module subroutine init(this)
+    module subroutine init(this, namelist_file, info_only, gen_nml, only_namelist_check)
         implicit none
         class(options_t),   intent(inout)  :: this
+        character(len=*),   intent(in)     :: namelist_file
+        logical,            intent(in)     :: info_only, gen_nml, only_namelist_check
     end subroutine
 
     module subroutine alloc_vars(this, input_vars, var_idx, error)

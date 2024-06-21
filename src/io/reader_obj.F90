@@ -36,13 +36,13 @@ contains
         integer :: i, dims(3)
         
 
-        this%file_list = options%parameters%boundary_files
-        this%time_var  = options%parameters%time_var
-        this%model_end_time = options%parameters%end_time
+        this%file_list = options%forcing%boundary_files
+        this%time_var  = options%forcing%time_var
+        this%model_end_time = options%general%end_time
 
         this%ncfile_id = -1
         ! figure out while file and timestep contains the requested start_time
-        call set_curfile_curstep(this, options%parameters%start_time, this%file_list, this%time_var)
+        call set_curfile_curstep(this, options%general%start_time, this%file_list, this%time_var)
         !Now setup dimensions of reader_object so we know what part of input file that we should read
         this%its = its; this%ite = ite
         this%kts = kts; this%kte = kte
@@ -51,7 +51,7 @@ contains
 
         ! the parameters option type can't contain allocatable arrays because it is a coarray
         ! so we need to allocate the vars_to_read and var_dimensions outside of the options type
-        call setup_variable_lists(options%parameters%vars_to_read, options%parameters%dim_list, vars_to_read, var_dimensions)
+        call setup_variable_lists(options%forcing%vars_to_read, options%forcing%dim_list, vars_to_read, var_dimensions)
 
         this%n_vars = size(vars_to_read)
 

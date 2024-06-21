@@ -94,7 +94,7 @@ contains
         !Max flow height
         if (therm_k_max==0) then
             do k = kms,kme
-                z_mean = SUM(options%parameters%dz_levels(1:k))
+                z_mean = SUM(options%domain%dz_levels(1:k))
                 if (z_mean > Max_flow_height .and. therm_k_max==0) therm_k_max = max(2,k-1)
             enddo
             

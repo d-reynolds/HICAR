@@ -200,7 +200,7 @@ contains
         implicit none
         character(len=*), intent(in) :: filename
         integer, dimension(3,2), intent(in) :: dimensions
-        integer, dimension(io_maxDims) :: dims
+        integer, allocatable :: dims(:)
         logical :: dims_match
         integer :: i
 
@@ -210,8 +210,8 @@ contains
         call io_getdims(filename,"uLUT",dims)
         ! check all three spatial dimensions (nx, nz, ny)
         do i=1,3
-            ! note dims(i+4) because dims(1)=ndims, dims(2,3,4)=nspd,ndir,nnsq
-            if (dimensions(i,1)/=dims(i+4)) then
+            ! note dims(i+3) because dims(1,2,3)=nspd,ndir,nnsq
+            if (dimensions(i,1)/=dims(i+3)) then
                 dims_match=.False.
                 return
             endif
@@ -220,7 +220,7 @@ contains
         ! next perform the same check for the vLUT
         call io_getdims(filename,"vLUT",dims)
         do i=1,3
-            if (dimensions(i,2)/=dims(i+4)) then
+            if (dimensions(i,2)/=dims(i+3)) then
                 dims_match=.False.
                 return
             endif

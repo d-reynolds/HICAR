@@ -73,7 +73,7 @@
 !---------------------------------------------------------
 &parameters
     !   Set this to the starting date of the first low-resolution forcing file
-    forcing_start_date =  '2017-02-14 00:00:00',
+    start_date =  '2017-02-14 00:00:00',
     !   Set this to the date to stop running the model
     end_date =  "2017-02-14 02:00:00",
 
@@ -228,8 +228,6 @@
     Ef_sw_l = .False.   ! True sets ef_rw = 1, insted of max 0.95
 
     top_mp_level = 0    ! if <=0 stop that many levels below the model top
-    local_precip_fraction = 1.0 ! Fraction of micrphysics derived precipitation to deposit in the local grid cell
-                                ! the remaining precip is distributed to the surrounding grid cells.
 /
 
 !---------------------------------------------------------
@@ -278,9 +276,6 @@
 !   If compiled with gfortran put all levels on one line.
 !---------------------------------------------------------
 &z_info
-    ! use dz_levels as a guide but allow dz to vary in space so that z is
-    !   constant in space at flat_z_height
-    space_varying = .True.
     
     ! height at which the z coordinate value should be constant in space (if
     !   space_varying=True), if < 0 make the model top flat (computed as

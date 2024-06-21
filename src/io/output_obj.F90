@@ -31,16 +31,16 @@ contains
 
         call set_attrs(this, options)
         
-        this%base_out_file_name = options%io_options%output_file
-        this%output_count = options%io_options%frames_per_outfile
-        this%base_rst_file_name = options%io_options%restart_out_file
-        this%restart_count = options%io_options%restart_count
+        this%base_out_file_name = options%output%output_file
+        this%output_count = options%output%frames_per_outfile
+        this%base_rst_file_name = options%restart%restart_out_file
+        this%restart_count = options%restart%restart_count
         
         write(this%output_fn, '(A,A,".nc")')    &
                 trim(this%base_out_file_name),   &
-                trim(options%parameters%start_time%as_string(this%file_date_format))
+                trim(options%general%start_time%as_string(this%file_date_format))
 
-        call this%add_variables(options%io_options%vars_for_output + options%vars_for_restart)
+        call this%add_variables(options%output%vars_for_output + options%vars_for_restart)
         
     end subroutine init
     
@@ -63,18 +63,18 @@ contains
         
         if (size(file_list) > 0) then
             !Find output file and step in output filelist
-            this%output_counter = find_timestep_in_filelist(file_list, 'time', options%parameters%start_time,this%output_fn,error=error)
+            this%output_counter = find_timestep_in_filelist(file_list, 'time', options%general%start_time,this%output_fn,error=error)
         endif
         
         if (error == 0) then
             !Open output file, setting out_ncfile_id
-            call open_file(this, this%output_fn, options%parameters%start_time, par_comms, out_var_indices)
+            call open_file(this, this%output_fn, options%general%start_time, par_comms, out_var_indices)
             this%out_ncfile_id = this%active_nc_id
         else
             this%output_counter = 1
             write(this%output_fn, '(A,A,".nc")')    &
                 trim(this%base_out_file_name),   &
-                trim(options%parameters%start_time%as_string(this%file_date_format))
+                trim(options%general%start_time%as_string(this%file_date_format))
         endif
 
     end subroutine init_restart
@@ -126,22 +126,22 @@ contains
         type(options_t), intent(in)    :: options
         character*60 :: a_string
 
-        call this%add_attribute("comment",options%parameters%comment)
-        call this%add_attribute("source","ICAR version:"//trim(options%parameters%version))
+        call this%add_attribute("comment",options%general%comment)
+        call this%add_attribute("source","ICAR version:"//trim(options%general%version))
 
         ! Add info on grid setting:
-        write(a_string,*) options%parameters%sleve
+        write(a_string,*) options%domain%sleve
         call this%add_attribute("sleve",a_string)
-        if (options%parameters%sleve) then
-          write(a_string,*) options%parameters%terrain_smooth_windowsize
+        if (options%domain%sleve) then
+          write(a_string,*) options%domain%terrain_smooth_windowsize
           call this%add_attribute("terrain_smooth_windowsize",a_string )
-          write(a_string,*) options%parameters%terrain_smooth_cycles
+          write(a_string,*) options%domain%terrain_smooth_cycles
           call this%add_attribute("terrain_smooth_cycles",a_string )
-          write(a_string,*) options%parameters%decay_rate_L_topo
+          write(a_string,*) options%domain%decay_rate_L_topo
           call this%add_attribute("decay_rate_L_topo",a_string )
-          write(a_string,*) options%parameters%decay_rate_s_topo
+          write(a_string,*) options%domain%decay_rate_s_topo
           call this%add_attribute("decay_rate_S_topo",a_string )
-          write(a_string,*) options%parameters%sleve_n
+          write(a_string,*) options%domain%sleve_n
           call this%add_attribute("sleve_n",a_string )
         endif
         ! Add some more info on physics settings:

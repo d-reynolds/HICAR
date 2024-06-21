@@ -6,7 +6,7 @@ module icar_constants
 
     implicit none
 
-    character(len=5) :: kVERSION_STRING = "2.1"
+    character(len=5) :: kVERSION_STRING = "v2.1"
     
     ! Define process info and team info
     integer, parameter :: kCOMPUTE_TEAM = 1
@@ -18,7 +18,6 @@ module icar_constants
     integer :: kNUM_SERVERS = 0
     integer :: kNUM_COMPUTE = 0
     integer :: kNUM_PROC_PER_NODE = 0
-    integer :: kTIMEOUT = 600 !timeout timer in seconds
     
     !Flag-value to indicate a part of a read-write buffer which was never filled
     real, parameter :: kEMPT_BUFF = -123456789.0
@@ -299,7 +298,6 @@ module icar_constants
         integer :: slope_angle        !! MJ added
         integer :: aspect_angle       !! MJ added
         integer :: svf                !! MJ added
-        integer :: factor_p                !! MJ added, precipitaion factor, it is a temporary var
         integer :: shd                !! DR added
         integer :: Sliq_out           !! MJ added
         integer :: hlm                !! MJ added
@@ -364,7 +362,7 @@ module icar_constants
                                                             251, 252, 253, 254, 255, 256, 257, 258, 259, 260,  &
                                                             261, 262, 263, 264, 265, 266, 267, 268, 269, 270,  &
                                                             271, 272, 273, 274, 275, 276, 277, 278, 279, 280,  &
-                                                            281, 282, 283, 284, 285, 286, 287, 288, 289, 290)
+                                                            281, 282, 283, 284, 285, 286, 287, 288, 289)
 
     integer, parameter :: kINTEGER_BITS     = storage_size(kINTEGER_BITS)
     integer, parameter :: kMAX_STORAGE_VARS = storage_size(kVARS) / kINTEGER_BITS
@@ -416,10 +414,8 @@ module icar_constants
 ! ------------------------------------------------
     integer, parameter :: kNO_STOCHASTIC = -9999
     integer, parameter :: kCU_TIEDTKE    = 1
-    integer, parameter :: kCU_SIMPLE     = 2
-    integer, parameter :: kCU_KAINFR     = 3
-    integer, parameter :: kCU_NSAS       = 4
-    integer, parameter :: kCU_BMJ        = 5
+    integer, parameter :: kCU_NSAS       = 2
+    integer, parameter :: kCU_BMJ        = 3
 
     integer, parameter :: kMP_THOMPSON   = 1
     integer, parameter :: kMP_SB04       = 2
@@ -429,21 +425,16 @@ module icar_constants
     integer, parameter :: kMP_WSM3       = 6
     integer, parameter :: kMP_ISHMAEL    = 7
  
-    integer, parameter :: kPBL_BASIC       = 1
-    integer, parameter :: kPBL_SIMPLE      = 2
-    integer, parameter :: kPBL_YSU         = 3
-    integer, parameter :: kPBL_DIAGNOSTIC  = 4
+    integer, parameter :: kPBL_YSU         = 1
 
-    integer, parameter :: kWATER_BASIC   = 1
-    integer, parameter :: kWATER_SIMPLE  = 2
-    integer, parameter :: kWATER_LAKE    = 3
+    integer, parameter :: kWATER_SIMPLE  = 1
+    integer, parameter :: kWATER_LAKE    = 2
 
     integer, parameter :: kSFC_MM5REV    = 1
 
     integer, parameter :: kLSM_BASIC     = 1
-    integer, parameter :: kLSM_SIMPLE    = 2
-    integer, parameter :: kLSM_NOAH      = 3
-    integer, parameter :: kLSM_NOAHMP    = 4
+    integer, parameter :: kLSM_NOAH      = 2
+    integer, parameter :: kLSM_NOAHMP    = 3
     
     integer, parameter :: kSM_FSM        = 1 !! MJ added
 

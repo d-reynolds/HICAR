@@ -53,7 +53,7 @@ contains
     !! @return dt [ scalar ]        Maximum stable time step    [s]
     !!
     !!------------------------------------------------------------
-    function compute_dt(dx, u, v, w, rho, dz, ims, ime, kms, kme, jms, jme, its, ite, jts, jte, CFL, cfl_strictness, use_density) result(dt)
+    function compute_dt(dx, u, v, w, rho, dz, ims, ime, kms, kme, jms, jme, its, ite, jts, jte, CFL, use_density) result(dt)
         real,       intent(in)                   :: dx
         real,       intent(in), dimension(ims:ime+1,kms:kme,jms:jme) :: u 
         real,       intent(in), dimension(ims:ime,kms:kme,jms:jme+1) :: v
@@ -61,7 +61,6 @@ contains
         real,       intent(in), dimension(kms:kme)     :: dz
         integer,    intent(in)                   :: ims, ime, kms, kme, jms, jme, its, ite, jts, jte
         real,       intent(in)                   :: CFL
-        integer,    intent(in)                   :: cfl_strictness
         logical,    intent(in)                   :: use_density
         
         ! output value
@@ -80,89 +79,45 @@ contains
         max_j = 0
         max_k = 0
 
-        if (cfl_strictness==1) then
-            ! to ensure we are stable for 1D advection:
-            if (use_density) then
-                !maxwind1d = max( maxval(abs(u(2:,:,:) / (rho*dz*dx) )), maxval(abs(v(:,:,2:) / (rho*dz*dx))) )
-                !maxwind1d = max( maxwind1d, maxval(abs(w/(rho*dz*dx))) )
-            else
-                maxwind1d = max( maxval(abs(u)), maxval(abs(v)))
-                maxwind1d = max( maxwind1d, maxval(abs(w)))
-            endif
+        ! to ensure we are stable for 3D advection we'll use the average "max" wind speed
+        ! but that average has to be divided by sqrt(3) for stability in 3 dimensional advection
+        do j=jts,jte
+            do k=kms,kme
+                if (k==kms) then
+                    zoffset = 0
+                else
+                    zoffset = -1
+                endif
 
-            maxwind3d = maxwind1d * sqrt3
-        else if (cfl_strictness==5) then
-
-            if (use_density) then
-                !maxwind1d = maxval(abs(u(2:,:,:) / (rho*dz*dx) )) &
-                !          + maxval(abs(v(:,:,2:) / (rho*dz*dx) )) &
-                !          + maxval(abs(w(:,:, :) / (rho*dz*dx) ))
-            else
-                maxwind3d = maxval(abs(u)) + maxval(abs(v)) + maxval(abs(w))
-            endif
-
-        else
-            ! to ensure we are stable for 3D advection we'll use the average "max" wind speed
-            ! but that average has to be divided by sqrt(3) for stability in 3 dimensional advection
-            do j=jts,jte
-                do k=kms,kme
-                    if (k==kms) then
-                        zoffset = 0
+                do i=its,ite
+                    ! just compute the sum of the wind speeds, but take the max over the two
+                    ! faces of the grid cell (e.g. east and west sides)
+                    ! this will be divided by 3 later by three_d_cfl
+                    if (use_density) then
+                        !current_wind = (max(abs(u(i,k,j)), abs(u(i+1,k,j))) &
+                        !              + max(abs(v(i,k,j)), abs(v(i,k,j+1))) &
+                        !              + max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) ) &
+                        !              / (rho(i,k,j) * dz(i,k,j) * dx)
                     else
-                        zoffset = -1
+                        !current_wind = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
+                        !              +max(abs(v(i,k,j)), abs(v(i,k,j+1))) / dx &
+                        !              +max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) / dz(k)
+                                        
+                        current_wind = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
+                                            ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
+                                            ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(k) ))
                     endif
-
-                    do i=its,ite
-                        ! just compute the sum of the wind speeds, but take the max over the two
-                        ! faces of the grid cell (e.g. east and west sides)
-                        ! this will be divided by 3 later by three_d_cfl
-                        if (use_density) then
-                            !current_wind = (max(abs(u(i,k,j)), abs(u(i+1,k,j))) &
-                            !              + max(abs(v(i,k,j)), abs(v(i,k,j+1))) &
-                            !              + max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) ) &
-                            !              / (rho(i,k,j) * dz(i,k,j) * dx)
-                        else
-                            !current_wind = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
-                            !              +max(abs(v(i,k,j)), abs(v(i,k,j+1))) / dx &
-                            !              +max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) / dz(k)
-                                          
-                            current_wind = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
-                                               ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
-                                               ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(k) ))
-                        endif
-                        if (current_wind > maxwind3d) then
-                            max_i = i
-                            max_j = j
-                            max_k = k
-                        endif
-                        maxwind3d = max(maxwind3d, current_wind)
-                    ENDDO
+                    if (current_wind > maxwind3d) then
+                        max_i = i
+                        max_j = j
+                        max_k = k
+                    endif
+                    maxwind3d = max(maxwind3d, current_wind)
                 ENDDO
             ENDDO
-
-            if (cfl_strictness==2) then
-                ! effectively divides by 3 to take the mean and multiplies by the sqrt(3) for the 3D advection limit
-                maxwind3d = maxwind3d * three_d_cfl
-
-                ! to ensure we are stable for 1D advection:
-                if (use_density) then
-                    !maxwind1d = max( maxval(abs(u(2:,:,:) / (rho*dz*dx) )), maxval(abs(v(:,:,2:) / (rho*dz*dx))) )
-                    !maxwind1d = max( maxwind1d, maxval(abs(w/(rho*dz*dx))) )
-                else
-                    maxwind1d = max( maxval(abs(u)), maxval(abs(v)))
-                    maxwind1d = max( maxwind1d, maxval(abs(w)))
-                endif
-                ! also insure stability for 1D advection
-                maxwind3d = max(maxwind1d,maxwind3d)
-
-            ! else if (cfl_strictness==3) then
-            !   leave maxwind3d as the sum of the max winds
-            ! This should be the default, does it need to be multiplied by sqrt(3)?
-            elseif (cfl_strictness==4) then
-                maxwind3d = maxwind3d * sqrt3
-            endif
-
-        endif
+        ENDDO
+                
+        maxwind3d = maxwind3d * sqrt3
 
         !TESTING: Do we need to multiply maxwind3d by sqrt3 as the comment above suggests?
         ! maxwind3d = maxwind3d * sqrt3
@@ -237,21 +192,21 @@ contains
         ! If this is the first step (future_dt_seconds has not yet been set)
         if (future_dt_seconds == DT_BIG) then
             present_dt_seconds = compute_dt(domain%dx, domain%u%data_3d, domain%v%data_3d, &
-                            domain%w%data_3d, domain%density%data_3d, options%parameters%dz_levels, &
+                            domain%w%data_3d, domain%density%data_3d, options%domain%dz_levels, &
                             domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                             domain%its, domain%ite, domain%jts, domain%jte, &
-                            options%time_options%cfl_reduction_factor, &
-                            cfl_strictness=options%time_options%cfl_strictness, use_density=.false.)
+                            options%time%cfl_reduction_factor, &
+                            use_density=.false.)
         else
             present_dt_seconds = future_dt_seconds
         endif
         
         future_dt_seconds = compute_dt(domain%dx, domain%u%dqdt_3d, domain%v%dqdt_3d, &
-                        domain%w%dqdt_3d, domain%density%data_3d, options%parameters%dz_levels, &
+                        domain%w%dqdt_3d, domain%density%data_3d, options%domain%dz_levels, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
-                        options%time_options%cfl_reduction_factor, &
-                        cfl_strictness=options%time_options%cfl_strictness, use_density=.false.)
+                        options%time%cfl_reduction_factor, &
+                        use_density=.false.)
                 
         !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
         call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_DOUBLE, MPI_MIN, domain%compute_comms)
@@ -313,7 +268,7 @@ contains
         time_step_size = end_time - domain%model_time
         
         ! Initialize to just over update_dt to force an update on first loop
-        if (domain%model_time==options%parameters%start_time) last_wind_update = options%wind%update_dt%seconds() + 1
+        if (domain%model_time==options%general%start_time) last_wind_update = options%wind%update_dt%seconds() + 1
 
         last_loop = .False.
         ! now just loop over internal timesteps computing all physics in order (operator splitting...)
@@ -356,7 +311,7 @@ contains
             call domain%diagnostic_update(options)
             call diagnostic_timer%stop()
 
-            if (options%parameters%advect_density) then
+            if (options%adv%advect_density) then
                 ! if using advect_density winds need to be balanced at each update
                 call wind_bal_timer%start()
                 call balance_uvw(domain,options)
@@ -364,14 +319,14 @@ contains
             endif
 
             ! if an interactive run was requested than print status updates everytime at least 5% of the progress has been made
-            if (options%parameters%interactive .and. (STD_OUT_PE)) then
+            if (options%general%interactive .and. (STD_OUT_PE)) then
                 call print_progress(domain%model_time, end_time, time_step_size, dt, last_print_time)
             endif
             ! this if is to avoid round off errors causing an additional physics call that won't really do anything
 
             if (real(dt%seconds()) > 1e-3) then
 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" init", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" init", fix=.True.)
 
                 call send_timer%start()
                 call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
@@ -381,14 +336,14 @@ contains
     
                 call rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" rad(domain", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" rad(domain", fix=.True.)
                 call rad_timer%stop()
 
 
                 call lsm_timer%start()
                 call sfc(domain, options, real(dt%seconds()))!, halo=1)
                 call lsm(domain, options, real(dt%seconds()))!, halo=1)
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" lsm")
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" lsm")
                 call lsm_timer%stop()
 
                 call pbl_timer%start()
@@ -414,16 +369,16 @@ contains
                 !         dt = end_time - domain%model_time
                 !     endif
                 ! endif
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" pbl")
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" pbl")
 
                 call convect(domain, options, real(dt%seconds()))!, halo=1)
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" convect")
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" convect")
 
                 
 
                 call adv_timer%start()
                 call advect(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" advect(domain", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" advect(domain", fix=.True.)
                 call adv_timer%stop()
 
                 
@@ -431,10 +386,10 @@ contains
                 call mp_timer%start()
 
                 call mp(domain, options, real(dt%seconds()))
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" mp_halo", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" mp_halo", fix=.True.)
                 call mp_timer%stop()
                 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%halo_send", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%halo_send", fix=.True.)
 
 
                 !If we are in the last ~10 updates of a time step and a variable drops below 0, we have probably over-shot a value of 0. Force back to 0
@@ -443,7 +398,7 @@ contains
                 endif
 
 
-                if (options%parameters%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%apply_forcing", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%apply_forcing", fix=.True.)
 
             endif
             ! step model_time forward

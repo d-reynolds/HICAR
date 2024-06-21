@@ -190,7 +190,7 @@ contains
             end do
             where(hydrometeors<0) hydrometeors = 0
 
-            solar_elevation  = calc_solar_elevation(date, options%rad_options%tzone, lon, lat, j, ims,ime, jms,jme, its,ite)
+            solar_elevation  = calc_solar_elevation(date, options%rad%tzone, lon, lat, j, ims,ime, jms,jme, its,ite)
 
             do i = its, ite
                 day_frac(i) = date%year_fraction(lon=lon(i,j))

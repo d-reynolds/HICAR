@@ -364,7 +364,7 @@ contains
         
         integer :: iord, i
                 
-        do iord=1,options%adv_options%mpdata_order
+        do iord=1,options%adv%mpdata_order
             if (iord==1) then
                 call upwind_advection(q, U_m, V_m, W_m, rho, q2,dz,jaco)
             else
@@ -378,14 +378,14 @@ contains
                 u2 = u2*0.5
                 v2 = v2*0.5
                 w2 = w2*0.5*dz
-                if (options%adv_options%MPDATA_FCT) then
+                if (options%adv%MPDATA_FCT) then
                     call flux_limiter(q, q2, u2,v2,w2)
                 endif
                 call upwind_advection(q2, u2,v2,w2, rho, q,dz,jaco)
             endif
             
             !  
-            if (iord/=options%adv_options%mpdata_order) then
+            if (iord/=options%adv%mpdata_order) then
                 if (iord>1) then
                     ! !$omp parallel shared(q,q2) firstprivate(ny) private(i)
                     ! !$omp do schedule(static)
@@ -487,7 +487,7 @@ contains
 
 
         rho = 1
-        if (options%parameters%advect_density) rho = domain%density%data_3d
+        if (options%adv%advect_density) rho = domain%density%data_3d
         
         U_m = domain%u%data_3d(ims+1:ime,:,:) * dt * (rho(ims+1:ime,:,:)+rho(ims:ime-1,:,:))*0.5 * &
                     domain%jacobian_u(ims+1:ime,:,:) / dx
@@ -497,7 +497,7 @@ contains
                     (rho(:,kms+1:kme,:)+rho(:,kms:kme-1,:)) * 0.5
         W_m(:,kme,:) = domain%w%data_3d(:,kme,:) * dt * domain%jacobian_w(:,kme,:) * rho(:,kme,:)
 
-        if (options%parameters%debug) then
+        if (options%general%debug) then
             call test_divergence(domain%advection_dz)
         endif
     
