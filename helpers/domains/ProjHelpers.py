@@ -3,6 +3,8 @@ import numpy as np
 import pyproj
 #import ESMF
 import xarray as xr
+import os
+
 
 #ESMF.Manager(debug=True)
 #######################################################
@@ -52,7 +54,7 @@ def get_latlon_b(ds,lon_str,lat_str,lon_dim,lat_dim):
    # if (len(ds[lon_str].shape) == 3):
    #     lon_b_append = np.tile(lon_b_append,ds[lon_str].shape[0])
    #     lat_b_append = np.tile(lat_b_append,ds[lat_str].shape[0])
-        
+
     grid_with_bounds = {'lon': ds[lon_str].values,
                                'lat': ds[lat_str].values,
                                'lon_b': lon_b_append,
@@ -259,25 +261,49 @@ def regridToDs(ds_in,to_ds,ds_in_crs=None,ds_in_xvar='lon',ds_in_yvar='lat',ds_i
         ds_in[ds_in_xvar] = temp_lat
         ds_in[ds_in_yvar] = temp_lon
         
-    ds_in_grid_with_bounds, to_ds_grid_with_bounds = \
+    in_grid_with_bounds, to_grid_with_bounds = \
 prepGridsForRegridder(ds_in,to_ds,ds_in_crs,ds_in_xvar,ds_in_yvar,ds_in_xdim,\
                       ds_in_ydim,to_ds_xvar,to_ds_yvar,to_ds_xdim,to_ds_ydim)
-                
+
+    if (method=='conservative_normed'):
+        ds_in_grid_with_bounds = in_grid_with_bounds
+        ds_to_grid_with_bounds = to_grid_with_bounds
+        parallel=False
+    
+    else:
+        ds_in_grid_with_bounds = xr.Dataset(coords=dict(
+            lon=(["y", "x"], in_grid_with_bounds['lon']),\
+            lat=(["y", "x"], in_grid_with_bounds['lat'])))#,\
+            #lon_b=(["y_b", "x_b"], in_grid_with_bounds['lon_b']),\
+            #lat_b=(["y_b", "x_b"], in_grid_with_bounds['lat_b'])))
+        ds_to_grid_with_bounds = xr.Dataset(coords=dict(
+            lon=(["y", "x"], to_grid_with_bounds['lon']),\
+            lat=(["y", "x"], to_grid_with_bounds['lat'])))#,\
+            #lon_b=(["y_b", "x_b"], to_grid_with_bounds['lon_b']),\
+            #lat_b=(["y_b", "x_b"], to_grid_with_bounds['lat_b'])))
+        
+        ds_in_grid_with_bounds = ds_in_grid_with_bounds.chunk({"y": 100, "x": 100})#, "y_b": 100, "x_b": 100})
+        ds_to_grid_with_bounds = ds_to_grid_with_bounds.chunk({"y": 100, "x": 100})#, "y_b": 100, "x_b": 100})
+        parallel=True
     reuse = False
     if (weights_fn): reuse=True
     # input grid, grid you want to resample to, method
     if reuse:
-        regridder = xe.Regridder(ds_in_grid_with_bounds, to_ds_grid_with_bounds, \
+        regridder = xe.Regridder(ds_in_grid_with_bounds, ds_to_grid_with_bounds, \
                              method=method,extrap_method=extrap,filename=weights_fn,reuse_weights=reuse)
-        disc_regridder = xe.Regridder(ds_in_grid_with_bounds, to_ds_grid_with_bounds, \
-                             method=method,extrap_method=extrap,filename=weights_fn,reuse_weights=reuse)
+        disc_regridder = xe.Regridder(ds_in_grid_with_bounds, ds_to_grid_with_bounds, \
+                             method='nearest_s2d',extrap_method=extrap,filename=weights_fn,reuse_weights=reuse)
 
     else:
-        regridder = xe.Regridder(ds_in_grid_with_bounds, to_ds_grid_with_bounds, \
-                             method=method,extrap_method=extrap,reuse_weights=reuse)
-        disc_regridder = xe.Regridder(ds_in_grid_with_bounds, to_ds_grid_with_bounds, \
-                             method='nearest_s2d',extrap_method=extrap,reuse_weights=reuse)
-        
+        # at the moment, parallel doesn't seem to work, so just disable for all cases
+        parallel = False
+        regridder = xe.Regridder(ds_in_grid_with_bounds, ds_to_grid_with_bounds, \
+                             method=method,extrap_method=extrap,reuse_weights=reuse,parallel=parallel)
+        print('Finished with smooth regridder')
+        disc_regridder = xe.Regridder(ds_in_grid_with_bounds, ds_to_grid_with_bounds, \
+                             method='nearest_s2d',extrap_method=extrap,reuse_weights=reuse,parallel=parallel)
+    print('Finished making regridders')
+    
     ds_out = regridder(ds_in)
     ds_out_disc = disc_regridder(ds_in)
     
@@ -290,6 +316,107 @@ prepGridsForRegridder(ds_in,to_ds,ds_in_crs,ds_in_xvar,ds_in_yvar,ds_in_xdim,\
             ds_out[field].values = ds_out_disc[field].values
     
     return ds_out, regridder
+
+def cutDomain(Swiss_ds,to_ds):
+    WGS64_crs = pyproj.CRS('EPSG:4326')
+    
+    #Swiss_ds = Swiss_ds.drop(['Times'])
+    #Swiss_ds = Swiss_ds.drop_dims(['land_cat','south_north_stag','west_east_stag'])
+    #Swiss_ds = Swiss_ds.squeeze()
+    
+    
+
+    Swiss_ds_cut = Swiss_ds.where((Swiss_ds.lon < np.amax(to_ds.lon.values)+0.1) & \
+                                (Swiss_ds.lon > np.amin(to_ds.lon.values)-0.1) & \
+                                (Swiss_ds.lat < np.amax(to_ds.lat.values)+0.1) & \
+                                (Swiss_ds.lat > np.amin(to_ds.lat.values)-0.1),drop=True)
+    print('starting regridding')
+    print(Swiss_ds_cut)
+    ds_out, _ = regridToDs(Swiss_ds_cut,to_ds,WGS64_crs,ds_in_xvar='lon',ds_in_yvar='lat',\
+                        ds_in_xdim='x',ds_in_ydim='y',to_ds_xvar='lon',to_ds_yvar='lat',\
+                        to_ds_xdim='x',to_ds_ydim='y',method='bilinear')
+
+    #For whatever reason, using WGS gives us a file where everything is flipped
+    #if (src_crs == wgs_crs):
+    #    print('Flipping!!')
+    #    for data_var in ds_out[0].data_vars:
+    #        ds_out[0][data_var].values = np.flipud(ds_out[0][data_var].values)
+    #    ds_out[0]['lat'].values = np.flipud(ds_out[0]['lat'].values)
+    #    ds_out[0]['lon'].values = np.flipud(ds_out[0]['lon'].values)
+    
+    return ds_out
+
+
+def ASCIItoNCDF(filename, src_crs="EPSG:2056"):
+
+    #This function opens an ASCII file from the file "filename"
+    #and converts it to a NetCDF file with the same name.
+
+    #The ascii file has a header containing information about the
+    #number of rows and columns in the data, the x and y coordinates
+    #of the lower left corner of the grid, the cell size, and the
+    #no data value. The data follows the header.
+
+    # The x and y coordinates from the ASCII file are in the CRS EPSG:2056
+    # The NetCDF file will have the CRS EPSG:4326.
+
+    #The NetCDF file will have the same name as the ASCII file, but with
+    #the extension ".nc".
+
+    #The function returns the name of the NetCDF file.
+
+    #Open the ASCII file
+    with open(filename) as f:
+        #Read the header
+        ncols = int(f.readline().split()[1])
+        nrows = int(f.readline().split()[1])
+        xllcorner = float(f.readline().split()[1])
+        yllcorner = float(f.readline().split()[1])
+        cellsize = float(f.readline().split()[1])
+        nodata_value = float(f.readline().split()[1])
+
+        #Read the data
+        data = np.flipud(np.loadtxt(f))
+
+    #Create the x and y coordinates
+    x = np.arange(xllcorner, xllcorner + ncols * cellsize, cellsize)
+    y = np.arange(yllcorner, yllcorner + nrows * cellsize, cellsize)
+
+    # convert x and y coordinates from 1-D to 2-D
+    x, y = np.meshgrid(x, y)
+    
+    # reproject x and y from EPSG:2056 to EPSG:4326
+    #Create the transformer
+    transformer = pyproj.Transformer.from_crs(src_crs, "EPSG:4326")
+
+    #Transform the x and y coordinates
+    lat, lon = transformer.transform(x, y)
+
+    #Create the xarray dataset
+    ds = xr.Dataset(
+        {
+            "data": (["y", "x"], data)
+        },
+        coords={
+            "lat": (["y", "x"], lat),
+            "lon": (["y", "x"], lon)
+        }
+    )
+
+    #Add the attributes
+    ds.attrs["crs"] = "EPSG:4326"
+    ds.attrs["nodata_value"] = nodata_value
+
+    #Get the name of the NetCDF file
+    nc_filename = os.path.splitext(filename)[0] + ".nc"
+
+    #Save the dataset to a NetCDF file
+    ds.to_netcdf(nc_filename)
+
+    return ds
+
+    
+
 
 def unstaggerICAR(ICAR):
         

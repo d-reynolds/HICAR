@@ -24,11 +24,16 @@ WGS64_crs = pyproj.CRS('EPSG:4326')
 def wholeShebang(ds_in,ds_in_rad,res=50,terr_filter=10,TPI_thresh=100,valley_thresh=1500,LL_border=0.05):
     
     ds_in = addHorayzonParms(ds_in,ds_in_rad)
-    ds_in = addRidgeValleyDists(ds_in,ds_in_rad,res=res,terr_filter=terr_filter,TPI_thresh=TPI_thresh,\
-                                valley_thresh=valley_thresh,LL_border=LL_border)
+    #ds_in = addRidgeValleyDists(ds_in,ds_in_rad,res=res,terr_filter=terr_filter,TPI_thresh=TPI_thresh,\
+    #                            valley_thresh=valley_thresh,LL_border=LL_border)
     
     ds_in = addSlopeAspect(ds_in,res)
     ds_in = addSnowHoldingDepth(ds_in)
+
+    if (not('landmask' in ds_in.variables)): 
+        ds_in['landmask'] = ds_in['landuse'].copy()
+        ds_in['landmask'].values = np.where(ds_in.landuse.values==16,2,1)
+
     
     return ds_in
 
@@ -103,14 +108,13 @@ def addHorayzonParms(ds_in,ds_in_rad):
     vert_grid = hray.auxiliary.rearrange_pad_buffer(x_enu, y_enu, z_enu)
 
     # Compute horizon
-    hray.horizon.horizon_gridded(vert_grid, dem_dim_0, dem_dim_1,
+    hori, azim = hray.horizon.horizon_gridded(vert_grid, dem_dim_0, dem_dim_1,
                                  vec_norm_enu, vec_north_enu,
                                  offset_0, offset_1,
-                                 file_out=file_hori_temp,
-                                 x_axis_val=lon[slice_in[1]].astype(np.float32),
-                                 y_axis_val=lat[slice_in[0]].astype(np.float32),
-                                 x_axis_name="lon", y_axis_name="lat",
-                                 units="degree", dist_search=dist_search,
+                                 #x_axis_val=lon[slice_in[1]].astype(np.float32),
+                                 #y_axis_val=lat[slice_in[0]].astype(np.float32),
+                                 #x_axis_name="lon", y_axis_name="lat",
+                                 dist_search=dist_search,
                                  azim_num=azim_num)
 
 
@@ -131,22 +135,18 @@ def addHorayzonParms(ds_in,ds_in_rad):
     del x_enu, y_enu, z_enu
 
     # Load horizon data
-    ds = xr.open_dataset(file_hori_temp)
-    hori = ds["horizon"]
-    azim = ds["azim"]
     lon_2d, lat_2d = np.meshgrid(lon[slice_in[1]],lat[slice_in[0]])
 
     # Compute Sky View Factor
-    svf = hray.topo_param.sky_view_factor(azim.values, hori.values, vec_tilt)
-    
+    svf = hray.topo_param.sky_view_factor(azim, hori, vec_tilt)
     rad_ds = xr.Dataset(data_vars=dict(
-            hlm=(["azim", "y", "x"], 90.0 - np.maximum(0.0,np.rad2deg(hori.transpose("azim", "lat", "lon").values))),
+            hlm=(["azim", "y", "x"], 90.0 - np.maximum(0.0,np.rad2deg(np.transpose(hori,[2,0,1])))),
             svf=(["y", "x"], svf),
         ),
         coords=dict(
             lon=(["y", "x"], lon_2d),
             lat=(["y", "x"], lat_2d),
-            azim=(["azim"],np.maximum(0.0,np.rad2deg(ds.azim.values)))))
+            azim=(["azim"],np.maximum(0.0,np.rad2deg(azim)))))
     
     rad_ds.hlm.attrs['units'] = "degrees"
     rad_ds.azim.attrs['units'] = "degrees"
@@ -163,9 +163,6 @@ def addHorayzonParms(ds_in,ds_in_rad):
     
     ds_in["hlm"]=(("a", "y", "x"), hlm_ds.hlm.values)
     ds_in["svf"]=(("y", "x"), hlm_ds.svf.values)
-    
-    ds.close()
-    os.remove(file_hori_temp)
     
     return ds_in
 
@@ -428,7 +425,7 @@ def addSnowHoldingDepth(ds_in):
 def get_length_of_degree(latitude):
     #Courtesy of CHAT-GPT!!!
     # Constants for the WGS-84 ellipsoid
-    a = 6378137
+    a = 6378137.0
     b = 6356752.3142
     e_squared = 0.006694379990197
 
@@ -445,3 +442,57 @@ def get_length_of_degree(latitude):
 
     return lat_length, lon_length
 
+
+# this function takes in a xarray dataset ds with coordinates lat and lon, and a larger
+# xarray dataset large_dom with coordinates lat and lon. It also takes in the resolution of
+# the large_dom dataset and the ds dataset, as well as the window size in km.
+# it first finds the inndices in large_dom for the lower left and upper right corners of the ds dataset
+# it then extracts the data from large_dom corresponding to a window 15 km larger than the ds dataset
+# it returns the extracted data in a new xarray dataset
+
+def extract_rad_window(ds, large_dom, large_dom_res=50, window_km=15):
+
+    # get the coordinates of the ds dataset
+    lat_min = ds.lat.min().values
+    lat_max = ds.lat.max().values
+    lon_min = ds.lon.min().values
+    lon_max = ds.lon.max().values
+
+    # get the coordinates of the swiss_dom dataset
+    lat_min_large = large_dom.lat.min().values
+    lat_max_large = large_dom.lat.max().values
+    lon_min_large = large_dom.lon.min().values
+    lon_max_large = large_dom.lon.max().values
+
+    mean_lat = (lat_min+lat_max)/2.0
+    LoLat, LoLon = get_length_of_degree(mean_lat)
+
+    # calculate the indices of the lower left and upper right corners of the ds dataset
+    distances = np.sqrt((large_dom.lat - lat_min)**2 + 
+                        (large_dom.lon - lon_min)**2)
+    
+    # Step 3: Find the index of the minimum distance
+    closest_index = distances.argmin()
+    
+    # Step 4: Convert the 1D index to 2D coordinates
+    j_min, i_min = np.unravel_index(closest_index, distances.shape)   
+    
+    distances = np.sqrt((large_dom.lat - lat_max)**2 + 
+                        (large_dom.lon - lon_max)**2)
+    
+    # Step 3: Find the index of the minimum distance
+    closest_index = distances.argmin()
+    
+    # Step 4: Convert the 1D index to 2D coordinates
+    j_max, i_max = np.unravel_index(closest_index, distances.shape)  
+
+    # calculate the indices of the lower left and upper right corners of the window
+    i_min_window = i_min - int(window_km*1000 / large_dom_res)
+    i_max_window = i_max + int(window_km*1000 / large_dom_res)
+    j_min_window = j_min - int(window_km*1000 / large_dom_res)
+    j_max_window = j_max + int(window_km*1000 / large_dom_res)
+
+    # extract the data from the swiss_dom dataset
+    dom_window = large_dom.isel(x=slice(i_min_window, i_max_window), y=slice(j_min_window, j_max_window))
+
+    return dom_window
