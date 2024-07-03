@@ -75,7 +75,9 @@ contains
             call thompson_init(options%mp)
         elseif (options%physics%microphysics    == kMP_THOMP_AER) then
             if (STD_OUT_PE) write(*,*) "    Thompson Eidhammer Microphysics"
-            call thompson_aer_init()
+            if (STD_OUT_PE) write(*,*) "    ERROR: not yet implemented (init function needs arguments), exiting..."
+            stop
+!            call thompson_aer_init()
         elseif (options%physics%microphysics == kMP_SB04) then
             if (STD_OUT_PE) write(*,*) "    Simple Microphysics"
         elseif (options%physics%microphysics==kMP_MORRISON) then

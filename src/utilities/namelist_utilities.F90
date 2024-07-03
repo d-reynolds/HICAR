@@ -37,7 +37,7 @@ contains
         nml_file = namelist_file
 
         ! Open the namelist file
-        open(UNIT=io_newunit(nml_unit), FILE=nml_file, ACCESS='APPEND', STATUS='NEW', ACTION='WRITE')
+        open(UNIT=io_newunit(nml_unit), FILE=nml_file, STATUS='NEW', ACTION='WRITE')
 
     end subroutine set_namelist
 
@@ -715,9 +715,9 @@ contains
     subroutine write_nml_var_info(name, group, description, default, min, max, values, units, dimensions)
         implicit none
         character(len=*), intent(in) :: name
-        character(len=*), intent(out) :: group, description, default, units
-        character(len=*), intent(out) :: dimensions(:)
-        real,    intent(out) :: min, max
+        character(len=*), intent(in) :: group, description, default, units
+        character(len=*), intent(in) :: dimensions(:)
+        real,    intent(in) :: min, max
         integer, allocatable, intent(in) :: values(:)
 
         logical :: is_minmax, is_values, is_units, is_dimensions
