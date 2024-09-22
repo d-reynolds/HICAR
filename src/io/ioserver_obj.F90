@@ -43,18 +43,15 @@ contains
 
         !Setup writing capability
         call this%outputer%init(options,this%i_s_w,this%i_e_w,this%k_s_w,this%k_e_w,this%j_s_w,this%j_e_w,this%ide,this%kde,this%jde)
-        
-        !determine if we need to increase our k index due to some very large soil field
-        do n = 1,this%outputer%n_vars
-            if(this%outputer%variables(n)%dim_len(3) > this%k_e_w) this%k_e_w = this%outputer%variables(n)%dim_len(3)
-        enddo
 
+        !determine if we need to increase our k index due to some very large soil field
         this%n_w_3d = 0
-        do n = 1,kMAX_STORAGE_VARS
-            if ((options%output%vars_for_output(n) + options%vars_for_restart(n))>0) then
-                var = get_metadata(n)
-                if (var%three_d) this%n_w_3d = this%n_w_3d+1
+
+        do n = 1,this%outputer%n_vars
+            if (this%outputer%variables(n)%three_d) then
+                this%n_w_3d = this%n_w_3d+1
             endif
+            if(this%outputer%variables(n)%dim_len(3) > this%k_e_w) this%k_e_w = this%outputer%variables(n)%dim_len(3)
         enddo
 
         this%n_w_2d = this%outputer%n_vars - this%n_w_3d
@@ -164,7 +161,7 @@ contains
             call MPI_Type_create_subarray(4, [this%n_w_3d, (this%i_e_w-this%i_s_w+2), (this%k_e_w-this%k_s_w+1), (this%j_e_w-this%j_s_w+2)], &
                 [this%n_w_3d, (this%iewc(i)-this%iswc(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jewc(i)-this%jswc(i)+2)], &
                 [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%get_types_3d(i))
-
+        
             call MPI_Type_create_subarray(3, [this%n_w_2d, (this%i_e_w-this%i_s_w+2), (this%j_e_w-this%j_s_w+2)], &
                 [this%n_w_2d, (this%iewc(i)-this%iswc(i)+2), (this%jewc(i)-this%jswc(i)+2)], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%get_types_2d(i))

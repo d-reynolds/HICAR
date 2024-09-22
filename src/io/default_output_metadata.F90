@@ -198,8 +198,6 @@ contains
         integer, intent(in)             :: var_idx
         character(len=kMAX_NAME_LENGTH) :: name       ! function result
 
-        type(variable_t) :: meta_data
-
         if (var_idx>kMAX_STORAGE_VARS) then
             stop "Invalid variable metadata requested"
         endif
@@ -207,9 +205,8 @@ contains
         ! initialize the module level constant data structure
         if (.not.allocated(var_meta)) call init_var_meta()
 
-        meta_data = var_meta(var_idx)
 
-        name = meta_data%name
+        name = var_meta(var_idx)%name
 
     end function get_varname
 

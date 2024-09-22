@@ -6,7 +6,8 @@
 !!
 !!------------------------------------------------
 submodule(variable_dict_interface) variable_dict_implementation
-
+    use output_metadata,        only : get_varname
+    
     implicit none
 
     ! note that this dictionary is stored fairly inefficiently (both speed and space!)
@@ -191,8 +192,8 @@ contains
         
         do i = 1,kMAX_STORAGE_VARS
             !Get the data for the variable name. Returns 1 if not found
-            var = this%get_var(get_varname(i),err=err)
-            if (err==0) call sorted%add_var(get_varname(i),var)
+            var = this%get_var(trim(get_varname(i)),err=err)
+            if (err==0) call sorted%add_var(trim(get_varname(i)),var)
         enddo
 
         this%var_list = sorted%var_list

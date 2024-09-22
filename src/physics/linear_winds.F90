@@ -35,7 +35,7 @@
 !!
 !!----------------------------------------------------------
 module linear_theory_winds
-    use iso_c_binding
+    use, intrinsic :: iso_c_binding
     use iso_fortran_env
     use mpi_f08
     use fft,                        only: fftw_execute_dft,                    &
@@ -181,7 +181,6 @@ contains
     !!
     !!----------------------------------------------------------
     subroutine linear_perturbation_at_height(U, V, Nsq, z, fourier_terrain, lt_data)
-        use, intrinsic :: iso_c_binding
         implicit none
         real,                     intent(in)    :: U, V ! U and V components of background wind
         real,                     intent(in)    :: Nsq  ! Brunt-Vaisalla frequency (N squared)
@@ -239,7 +238,6 @@ contains
     end subroutine linear_perturbation_at_height
 
     subroutine linear_perturbation_constz(U, V, Nsq, z_bottom, z_top, minimum_step, fourier_terrain, lt_data)
-        use, intrinsic :: iso_c_binding
         implicit none
         real,                     intent(in)    :: U, V             ! U and V components of background wind
         real,                     intent(in)    :: Nsq              ! Brunt-Vaisalla frequency (N squared)
@@ -280,7 +278,6 @@ contains
 
 
     subroutine linear_perturbation_varyingz(U, V, Nsq, z_bottom, z_top, minimum_step, fourier_terrain, lt_data)
-        use, intrinsic :: iso_c_binding
         implicit none
         real,                     intent(in)    :: U, V             ! U and V components of background wind
         real,                     intent(in)    :: Nsq              ! Brunt-Vaisalla frequency (N squared)
