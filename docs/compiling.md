@@ -1,7 +1,7 @@
 
 # Dependencies
 
-Before compiling HICAR, a few dependencies must first be installed on your system. **If you are using an HPC which supports modules, first check to see if the relevant dependencies are available on your system as modules (See section "Example (HPC systems)" below for details).** If certain dependencies are not available as modules, then proceed by installing  as described below.
+Before compiling HICAR, a few dependencies must first be installed on your system. **If you are using an HPC which supports modules, first check to see if the relevant dependencies are available on your system as modules (See section "Example (HPC systems)" below for details).** If certain dependencies are not available as modules, then proceed by installing the relevant libraries as described below.
 
 HICAR relies upon four external libraries:
 
@@ -40,7 +40,7 @@ While information on installing PETSc from source (or other packaged distributio
 
 When installing PETSc from source, be aware that the default installation option is to install the library in debug mode. Information on how to install optimized PETSc is found under the section <https://petsc.org/release/install/install/#compilers>
 
-After installing PETSc, either from source or as a package, read the information about setting the environment variables `PETSC_DIR` and `PETSC_ARCH` here: <https://petsc.org/release/install/multibuild/>
+**After installing PETSc, either from source or as a package, read the information about setting the environment variables `PETSC_DIR` and `PETSC_ARCH` here: <https://petsc.org/release/install/multibuild/>**
 
 ## NetCDF
 
