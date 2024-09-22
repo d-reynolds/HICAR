@@ -1,5 +1,5 @@
 module domain_interface
-  use iso_c_binding
+  use, intrinsic :: iso_c_binding
   use mpi_f08
   use options_interface,        only : options_t
   use boundary_interface,       only : boundary_t

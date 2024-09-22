@@ -10,7 +10,7 @@
 submodule(halo_interface) halo_implementation
 use icar_constants
 use iso_fortran_env
-use iso_c_binding
+use, intrinsic :: iso_c_binding
 
 implicit none
 
