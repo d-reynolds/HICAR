@@ -360,9 +360,10 @@ contains
             write(*,*) "    --gen-nml:                    Generate a namelist file with default values."
             write(*,*) "    namelist_file:                The name of the namelist file to use."
             write(*,*)
+            write(*,*) "    Example to generate a namelist with default values:  ./HICAR --gen-nml namelist_file.nml"
             write(*,*) "    Example to check namelist:                           ./HICAR --check-nml namelist_file.nml"
             write(*,*) "    Example to run model:                                ./HICAR namelist_file.nml"
-            write(*,*) "    Example to check namelist variable:                  ./HICAR -v mp"
+            write(*,*) "    Example to learn about a namelist variable:          ./HICAR -v mp"
             write(*,*) "    Example to generate namelist variable documentation: ./HICAR -v --all > namelist_doc.txt"
 
             write(*,*)

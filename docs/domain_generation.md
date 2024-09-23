@@ -29,3 +29,7 @@ Now run:
 ```bash
 python gen_HICAR_dom.py
 ```
+
+## netCDF data type
+
+Please ensure that the netCDF library which HICAR was compiled with supports parallel I/O for the netCDF file type which you are using. Parallel netCDF built on HDF5 only supports the netCDF-4 data type, while PnetCDF can only read classic netCDF data types.

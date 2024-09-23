@@ -12,7 +12,6 @@
 !!----------------------------------------------------------
 module ioclient_interface
   use mpi_f08
-  use netcdf
   use icar_constants
   use variable_interface, only : variable_t
   use boundary_interface, only : boundary_t
