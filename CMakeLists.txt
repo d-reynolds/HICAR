@@ -187,7 +187,7 @@ if(MODE STREQUAL "debug")
 	set(CMAKE_BUILD_TYPE Debug)
 
     if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -c -O2 -g -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion)
+		target_compile_options(HICAR PUBLIC -c -O0 -g -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion)
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
 	elseif (COMPILER STREQUAL "cray")

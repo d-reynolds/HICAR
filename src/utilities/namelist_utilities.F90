@@ -509,10 +509,13 @@ contains
 
         call get_nml_var_metadata(name,group,description,default,min,max,values,units,dimensions)
 
-        if (present(info) .and. info) call write_nml_var_info(name,group,description,default,min,max,values,units,dimensions)
-
-        if (present(gen_nml) .and. gen_nml) call write_nml_entry(name, default, description, dimensions, group)
-
+        if (present(info)) then
+            if (info) call write_nml_var_info(name,group,description,default,min,max,values,units,dimensions)
+        endif
+        if (present(gen_nml)) then
+            if (gen_nml) call write_nml_entry(name, default, description, dimensions, group)
+        endif
+        
     end function get_nml_var_default
 
     subroutine write_nml_entry(name, default, description, dimensions, group)

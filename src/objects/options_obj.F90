@@ -250,8 +250,6 @@ contains
             endif
         endif
 
-
-
         ! Check if supporting files exist, if they are needed by physics modules
         if (options%physics%landsurface==kLSM_NOAHMP) then
             if (STD_OUT_PE) write(*,*) '  NoahMP LSM turned on, checking for supporting files...'
@@ -268,6 +266,21 @@ contains
             if (STD_OUT_PE) write(*,*) '  ISHMAEL microphysics turned on, checking for supporting files...'
             call check_file_exists('mp_support/ishmael_gamma_tab.nc', message='At least one of the ISHMAEL supporting files does not exist. These files should be in a folder "mp_support" placed in the same directory as the namelist.')
         endif
+
+        ! check that input variables are specified when relevant physics options are chosen
+        if (options%physics%landsurface > kLSM_BASIC) then
+            call require_var(options%forcing%latvar, 'latvar', 'This variable is required when running with this LSM option')
+            !call require_var(options%forcing%sst_var, 'sst_var')
+            !call require_var(options%forcing%time_var, 'time_var')
+        endif
+
+        if (options%physics%snowmodel == kSM_FSM) then
+            !call require_var(options%forcing%qcvar, 'qcvar', 'This variable is required when running with the FSM snowmodel option')
+            !call require_var(options%forcing%qngvar, 'qngvar')
+            !call require_var(options%forcing%qnsvar, 'qnsvar')
+        endif
+
+        !if ()
 
     end subroutine options_check
 
@@ -344,13 +357,15 @@ contains
     !! If not present, halt the program
     !!
     !! -------------------------------
-    subroutine require_var(inputvar, var_name)
+    subroutine require_var(inputvar, var_name, message)
         implicit none
         character(len=*), intent(in) :: inputvar
         character(len=*), intent(in) :: var_name
+        character(len=*), optional, intent(in) :: message
 
         if (trim(inputvar)=="") then
             if (STD_OUT_PE) write(*,*) "Variable: ",trim(var_name), " is required."
+            if (STD_OUT_PE .and. present(message)) write(*,*) "Variable: ",trim(var_name), " ",trim(message)
             stop
         endif
 

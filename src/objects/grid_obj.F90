@@ -1,6 +1,6 @@
 submodule(grid_interface) grid_implementation
     use assertions_mod, only : assert, assertions
-
+    use iso_fortran_env
     implicit none
 
 contains
@@ -178,6 +178,15 @@ contains
       this%nx         = my_n(nx, this%ximg, this%ximages) ! local grid size
       this%ny         = my_n(ny, this%yimg, this%yimages) ! local grid size
 
+      if (this%nx <= halo_size .or. this%ny <= halo_size) then
+          write(*,*) 'ERROR: tile size too small for halo size'
+          write(*,*) 'ERROR: this usually results from an unfavorable domain decomposition'
+          write(*,*) 'ERROR: number of images in x direction: ',this%ximages
+          write(*,*) 'ERROR: number of images in y direction: ',this%yimages
+          write(*,*) 'ERROR: try changing the number of processes used in combination with this domain'
+          stop
+        endif
+
       ! define the bounds needed for memory to store the data local to this image
       this%ims        = my_start(nx, this%ximg, this%ximages)
       this%ime        = this%ims + this%nx + this%nx_e - 1
@@ -213,24 +222,26 @@ contains
       !this%ns_halo_nx = this%nx_global / this%ximages + 1 + this%nx_e  ! number of grid cells in x in the ns halo
       !this%ew_halo_ny = this%ny_global / this%yimages + 1 + this%ny_e  ! number of grid cells in y in the ew halo
 
-      if (present(comms) .and. .not.(comms==MPI_COMM_NULL)) then
-        call MPI_Allreduce(this%nx,this%ns_halo_nx,1,MPI_INT,MPI_MAX,comms,ierr)
-        !this%ns_halo_nx = this%ns_halo_nx !+ this%nx_e  ! number of grid cells in x in the ns halo
+      if (present(comms)) then
+        if (.not.(comms==MPI_COMM_NULL)) then
+            call MPI_Allreduce(this%nx,this%ns_halo_nx,1,MPI_INT,MPI_MAX,comms,ierr)
+            !this%ns_halo_nx = this%ns_halo_nx !+ this%nx_e  ! number of grid cells in x in the ns halo
 
-        call MPI_Allreduce(this%ny,this%ew_halo_ny,1,MPI_INT,MPI_MAX,comms,ierr)
-        !this%ew_halo_ny = this%ew_halo_ny !+ this%ny_e  ! number of grid cells in y in the ew halo
+            call MPI_Allreduce(this%ny,this%ew_halo_ny,1,MPI_INT,MPI_MAX,comms,ierr)
+            !this%ew_halo_ny = this%ew_halo_ny !+ this%ny_e  ! number of grid cells in y in the ew halo
 
-        !If we have been passed the global_nz, it means that this grid is not the global, 3D grid. Thus, pass the global_nz to
-        !create_MPI_types so that the window nz is set correctly in accordance with what is done in halo_obj.f90. If this 3D grid's nz
-        !is larger than the global_nz, however, we have a problem, and should not try to make an MPI type for communication. There are
-        !only a few 3D grids with nz's larger than 8, none of which should need to be exchanged, and the model should almost always be 
-        !run with more than 8 z levels. So this should not be an issue.
-        if (present(global_nz)) then
-            if (this%nz <= global_nz) then
-            call create_MPI_types(this, win_nz=global_nz)
+            !If we have been passed the global_nz, it means that this grid is not the global, 3D grid. Thus, pass the global_nz to
+            !create_MPI_types so that the window nz is set correctly in accordance with what is done in halo_obj.f90. If this 3D grid's nz
+            !is larger than the global_nz, however, we have a problem, and should not try to make an MPI type for communication. There are
+            !only a few 3D grids with nz's larger than 8, none of which should need to be exchanged, and the model should almost always be 
+            !run with more than 8 z levels. So this should not be an issue.
+            if (present(global_nz)) then
+                if (this%nz <= global_nz) then
+                call create_MPI_types(this, win_nz=global_nz)
+                endif
+            else
+                call create_MPI_types(this)
             endif
-        else
-            call create_MPI_types(this)
         endif
       else
         this%ns_halo_nx = this%nx_global / this%ximages + 1 + this%nx_e  ! number of grid cells in x in the ns halo
