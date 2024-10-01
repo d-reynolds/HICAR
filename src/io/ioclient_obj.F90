@@ -75,29 +75,29 @@ contains
         integer :: ierr
 
         call MPI_Gatherv(this%i_s_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
         call MPI_Gatherv(this%i_e_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
         call MPI_Gatherv(this%k_s_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
         call MPI_Gatherv(this%k_e_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
         call MPI_Gatherv(this%j_s_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
         call MPI_Gatherv(this%j_e_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
         call MPI_Gatherv(this%i_s_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
         call MPI_Gatherv(this%i_e_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
         call MPI_Gatherv(this%k_s_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
         call MPI_Gatherv(this%k_e_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
         call MPI_Gatherv(this%j_s_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
         call MPI_Gatherv(this%j_e_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, kNUM_PROC_PER_NODE-1, this%parent_comms)
+            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
 
         call MPI_Allreduce(MPI_IN_PLACE,this%ide,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,this%kde,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
@@ -142,18 +142,18 @@ contains
 
         ! +1 added to handle variables on staggered grids
         win_size = n_w_3d*nx_w*nz_w*ny_w
-        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_3d)
+        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_3d)
         call C_F_POINTER(tmp_ptr, this%write_buffer_3d, [n_w_3d, nx_w, nz_w, ny_w])
         this%write_buffer_3d = kEMPT_BUFF
 
         ! +1 added to handle variables on staggered grids
         win_size = n_w_2d*nx_w*ny_w
-        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_2d)
+        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_2d)
         call C_F_POINTER(tmp_ptr, this%write_buffer_2d, [n_w_2d, nx_w, ny_w])
         this%write_buffer_2d = kEMPT_BUFF
 
         win_size = n_r*nx_r*nz_r*ny_r
-        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%read_win)
+        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%read_win)
         call C_F_POINTER(tmp_ptr, this%read_buffer, [n_r, nx_r, nz_r, ny_r])
         this%read_buffer = kEMPT_BUFF
 

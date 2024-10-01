@@ -18,6 +18,7 @@ module icar_constants
     integer :: kNUM_SERVERS = 0
     integer :: kNUM_COMPUTE = 0
     integer :: kNUM_PROC_PER_NODE = 0
+    integer :: kNUM_IO_PER_NODE = 1
     
     !Flag-value to indicate a part of a read-write buffer which was never filled
     real, parameter :: kEMPT_BUFF = -123456789.0

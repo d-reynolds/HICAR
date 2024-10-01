@@ -63,9 +63,9 @@ contains
         type(ioclient_t), intent(inout) :: ioclient
 
         integer :: n, k, name_len, color, ierr, node_name_i, num_PE
-        integer :: num_threads
+        integer :: num_threads, found
 
-        character(len=MPI_MAX_PROCESSOR_NAME) :: node_name
+        character(len=MPI_MAX_PROCESSOR_NAME) :: node_name, ENV_IO_PER_NODE
         integer, allocatable :: node_names(:) 
         type(MPI_Comm) :: globalComm, splitComm
 
@@ -75,12 +75,19 @@ contains
         num_threads = 1
 #endif    
 
-        call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
+        ! See if the environment variable HICAR_IO_PER_NODE is set
+        ! If it is, then we will use that to determine the number of IO processes per node
+        call get_environment_variable('HICAR_IO_PER_NODE',ENV_IO_PER_NODE,found)
 
-        if (STD_OUT_PE) then
-            write(*,*) "  Number of processing elements:",num_PE
-            write(*,*) "  Max number of OpenMP Threads:",num_threads
+        ! If the environment variable is not set, then we will use 1
+        if (found == 0) then
+            kNUM_IO_PER_NODE = 1
+        else
+            ! If the number of IO processes per node is set, then we will use that
+            read(ENV_IO_PER_NODE,*) kNUM_IO_PER_NODE
         endif
+
+        call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
     
         allocate(node_names(num_PE))
 
@@ -102,7 +109,7 @@ contains
         kNUM_PROC_PER_NODE = count(node_names==node_names(1))
 
         !Assign one io process per node, this results in best co-array transfer times
-        kNUM_SERVERS = ceiling(num_PE*1.0/kNUM_PROC_PER_NODE)
+        kNUM_SERVERS = ceiling(num_PE*kNUM_IO_PER_NODE*1.0/kNUM_PROC_PER_NODE)
         kNUM_COMPUTE = num_PE-kNUM_SERVERS
         
         if ((mod(kNUM_COMPUTE,2) /= 0) .and. STD_OUT_PE) then
@@ -148,9 +155,13 @@ contains
         !-----------------------------------------
         ! Group server and client processes
         !-----------------------------------------
+
+        ! Assign IO clients to the same communicator as their related server process
+        color = (PE_RANK_GLOBAL) / (num_PE/kNUM_SERVERS)
+
         CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
         ! Group IO clients with their related server process. This is basically just grouping processes by node
-        CALL MPI_Comm_split( globalComm, node_names(PE_RANK_GLOBAL+1), PE_RANK_GLOBAL, splitComm, ierr )
+        CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, splitComm, ierr )
 
         select case (exec_team)
         case (kCOMPUTE_TEAM)
@@ -160,6 +171,19 @@ contains
             CALL MPI_Comm_dup( splitComm, ioserver%client_comms, ierr )
             ioclient%parent_comms = MPI_COMM_NULL
         end select
+
+        if (STD_OUT_PE) then
+            write(*,*) "  Number of processing elements:",num_PE
+            write(*,*) "  Number of compute elements:",kNUM_COMPUTE
+            write(*,*) "  Number of IO elements:",kNUM_SERVERS
+            write(*,*) "  Number of processing elements per node:",kNUM_PROC_PER_NODE
+            write(*,*) "  Number of IO processes per node:",kNUM_IO_PER_NODE
+
+#if defined(_OPENMP)
+            write(*,*) "  Max number of OpenMP Threads:",num_threads
+#endif
+        endif
+
 
     end subroutine split_processes
 
