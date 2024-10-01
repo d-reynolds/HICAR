@@ -11,7 +11,6 @@ module boundary_interface
     use time_delta_object,        only : time_delta_t
     use data_structures,          only : interpolable_type
     use grid_interface,           only : grid_t
-    use icar_constants
 
     implicit none
 
