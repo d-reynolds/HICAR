@@ -31,7 +31,7 @@ module initialization
     use io_routines,                only : io_read, io_write
     use mod_atm_utilities,          only : init_atm_utilities
     use wind,                       only : update_winds, init_winds
-
+    use omp_lib,                    only : omp_get_max_threads
     use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
     use ioserver_interface,         only : ioserver_t
     use ioclient_interface,         only : ioclient_t

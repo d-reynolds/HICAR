@@ -187,7 +187,7 @@ if(MODE STREQUAL "debug")
 	set(CMAKE_BUILD_TYPE Debug)
 
     if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -c -O0 -g -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion)
+		target_compile_options(HICAR PUBLIC -c -O0 -g -fopenmp -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion)
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
 	elseif (COMPILER STREQUAL "cray")
@@ -217,7 +217,7 @@ elseif(MODE STREQUAL "release")
 	set(CMAKE_BUILD_TYPE Release)
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -O2 -mfma -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
+		target_compile_options(HICAR PUBLIC -O3 -mfma -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
@@ -264,6 +264,11 @@ find_package(PkgConfig REQUIRED)
 # 6. Link to the package libraries
 set (NETCDF_F90 "YES")
 find_package(MPI REQUIRED)
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(HICAR PUBLIC OpenMP::OpenMP_CXX)
+endif()
+
 find_package(FFTW REQUIRED)
 find_package(NetCDF REQUIRED)
 
