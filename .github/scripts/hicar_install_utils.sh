@@ -113,6 +113,7 @@ function install_netcdf_fortran {
 function install_petsc {
     cd $WORKDIR
     git clone -b release https://gitlab.com/petsc/petsc.git petsc
+    cd petsc
     git pull # obtain new release fixes (since a prior clone or pull)
     ./configure --prefix=$INSTALLDIR #&> config.log
     make -j 8
