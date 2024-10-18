@@ -251,17 +251,13 @@ contains
         ! $omp private(i,j,k, j_block, k_block, bot, wes, sou, tmp, abs_tmp) &
         ! $omp firstprivate(its, ite, jts, jte, kms,kme, ims, ime, jms, jme)
         ! $omp do schedule(static) collapse(2)
-        do j_block = jts-1, jte+1, j_block_size
-            do k_block = kms, kme, k_block_size
-                do j = j_block, min(j_block+j_block_size-1, jte+1)
-                    do k = k_block, min(k_block+k_block_size-1, kme)
-                        do i = its-1, ite+1
-                            dumb_q(i,k,j)  = q(i,k,j) - ((flux_x(i+1,k,j) - flux_x(i,k,j)) + &
-                                                        (flux_y(i,k,j+1) - flux_y(i,k,j)) + &
-                                                        (flux_z(i,k+1,j) - flux_z(i,k,j)) / &
-                                                        dz(i,k,j))*denom(i,k,j)
-                        enddo
-                    enddo
+        do j = jts-1, jte+1
+            do k = kms, kme
+                do i = its-1, ite+1
+                    dumb_q(i,k,j)  = q(i,k,j) - ((flux_x(i+1,k,j) - flux_x(i,k,j)) + &
+                                                (flux_y(i,k,j+1) - flux_y(i,k,j)) + &
+                                                (flux_z(i,k+1,j) - flux_z(i,k,j)) / &
+                                                dz(i,k,j))*denom(i,k,j)
                 enddo
             enddo
         enddo
@@ -269,26 +265,22 @@ contains
 
         !Now compute upwind fluxes after second step
         ! $omp do collapse(2)
-        do j_block = jts-1, jte+2, j_block_size
-            do k_block = kms, kme, k_block_size
-                do j = j_block, min(j_block+j_block_size-1, jte+2)
-                    do k = k_block, min(k_block+k_block_size-1, kme)
-                        do i = its-1, ite+2
-                            bot = max(k-1,kms)
-                            wes = max(i-1,ims)
-                            sou = max(j-1,jms)
+        do j = jts-1, jte+2
+            do k = kms, kme
+                do i = its-1, ite+2
+                    bot = max(k-1,kms)
+                    wes = max(i-1,ims)
+                    sou = max(j-1,jms)
 
-                            tmp = u(i,k,j)
-                            abs_tmp = ABS(tmp)
-                            flux_x(i,k,j) = flux_x(i,k,j) + 0.5*((tmp + abs_tmp) * dumb_q(wes,k,j) + (tmp - abs_tmp) * dumb_q(i,k,j)) * 0.5
-                            tmp = v(i,k,j)
-                            abs_tmp = ABS(tmp)
-                            flux_y(i,k,j) = flux_y(i,k,j) + 0.5*((tmp + abs_tmp) * dumb_q(i,k,sou) + (tmp - abs_tmp) * dumb_q(i,k,j)) * 0.5
-                            tmp = w(i,bot,j)
-                            abs_tmp = ABS(tmp)
-                            flux_z(i,k,j) = flux_z(i,k,j) + 0.5*((tmp + abs_tmp) * dumb_q(i,bot,j) + (tmp - abs_tmp) * dumb_q(i,k,j)) * 0.5
-                        enddo
-                    enddo
+                    tmp = u(i,k,j)
+                    abs_tmp = ABS(tmp)
+                    flux_x(i,k,j) = flux_x(i,k,j) + 0.5*((tmp + abs_tmp) * dumb_q(wes,k,j) + (tmp - abs_tmp) * dumb_q(i,k,j)) * 0.5
+                    tmp = v(i,k,j)
+                    abs_tmp = ABS(tmp)
+                    flux_y(i,k,j) = flux_y(i,k,j) + 0.5*((tmp + abs_tmp) * dumb_q(i,k,sou) + (tmp - abs_tmp) * dumb_q(i,k,j)) * 0.5
+                    tmp = w(i,bot,j)
+                    abs_tmp = ABS(tmp)
+                    flux_z(i,k,j) = flux_z(i,k,j) + 0.5*((tmp + abs_tmp) * dumb_q(i,bot,j) + (tmp - abs_tmp) * dumb_q(i,k,j)) * 0.5
                 enddo
             enddo
         enddo
