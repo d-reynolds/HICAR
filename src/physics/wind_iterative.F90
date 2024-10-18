@@ -42,6 +42,11 @@ module wind_iterative
     real, allocatable, dimension(:,:,:)  :: div, dz_if, jaco, dzdx, dzdy, sigma, alpha
     integer, allocatable :: xl(:), yl(:)
     integer              :: hs, i_s, i_e, k_s, k_e, j_s, j_e
+
+    KSP            ksp
+    PC             pc
+    DM             da
+    Vec            localX
 contains
 
 
@@ -68,56 +73,47 @@ contains
         integer k !, i_s, i_e, k_s, k_e, j_s, j_e
         
         PetscErrorCode ierr
-        KSP            ksp
-        PC             pc
-        DM             da
-        Vec            x, localX
-        PetscInt       one, x_size
-        PetscReal      norm, conv_tol
+        Vec            x
+        PetscInt       iter
+        PetscBool isSymmetric
+        Mat A
 
         update=.False.
         if (present(update_in)) update=update_in
                 
-                
         !Initialize div to be the initial divergence of the input wind field
         div = div_in(i_s:i_e,k_s:k_e,j_s:j_e) 
-        one = 1
         
         alpha = alpha_in(i_s:i_e,k_s:k_e,j_s:j_e) 
         
         if (.not.(allocated(A_coef))) then
             call initialize_coefs(domain)
-        else
+            call KSPSetComputeOperators(ksp,ComputeMatrix,0,ierr)
+        elseif (.not.( ALL(alpha==minval(alpha)) )) then
             call update_coefs(domain)
+            call KSPSetComputeOperators(ksp,ComputeMatrix,0,ierr)
         endif
-                                                                
-        call KSPCreate(domain%compute_comms%MPI_VAL,ksp,ierr)
-        conv_tol = 1e-4
+                                        
+        ! call KSPGetOperators(ksp, A, PETSC_NULL_MAT, ierr) ! The second parameter is for the right-hand matrix, which can be NULL if not needed
+        ! call MatIsSymmetric(A, PETSC_SMALL, isSymmetric, ierr);
+        ! if (isSymmetric) then
+        !     if(STD_OUT_PE) write(*,*) 'Matrix is symmetric'
+        !     call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
+        ! else 
+        !     if(STD_OUT_PE) write(*,*) 'Matrix is not symmetric'
+        !     call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
+        ! endif
+        call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPPIPEFCG <-- this one tested to give fastest convergence...
+                         !KSPPIPEGCR <-- this one tested to give fastest convergence...
+                         !KSPGCR <-- this one tested to give fastest convergence...
 
-        !call KSPSetTolerances(ksp,conv_tol,PETSC_DEFAULT_REAL,PETSC_DEFAULT_REAL,PETSC_DEFAULT_INTEGER,ierr)
-        call KSPSetType(ksp,KSPIBCGS,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
-                                              ! KSPPIPEBCGS <--- Could be faster, but needs to be tested...
-        !call KSPGetPC(ksp,pc, ierr)
-        !call PCSetType(pc,PCSOR, ierr)
-
-        call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
-                          (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
-                          xl, PETSC_NULL_INTEGER,yl,da,ierr)
-        
-        call DMSetFromOptions(da,ierr)
-        call DMSetUp(da,ierr)
-        
-        call KSPSetDM(ksp,da,ierr)
-        call KSPSetComputeInitialGuess(ksp,ComputeInitialGuess,0,ierr)
         call KSPSetComputeRHS(ksp,ComputeRHS,0,ierr)
-        call KSPSetComputeOperators(ksp,ComputeMatrix,0,ierr)
 
-        call KSPSetFromOptions(ksp,ierr)
-        call DMCreateLocalVector(da,localX,ierr)
         call KSPSolve(ksp,PETSC_NULL_VEC,PETSC_NULL_VEC,ierr)
-        
+
         call KSPGetSolution(ksp,x,ierr)
-        if(STD_OUT_PE) write(*,*) 'Solved PETSc'
+        call KSPGetIterationNumber(ksp, iter, ierr)
+        if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iter,' iterations'
         
         !Subset global solution x to local grid so that we can access ghost-points
         call DMGlobalToLocalBegin(da,x,INSERT_VALUES,localX,ierr)
@@ -130,11 +126,7 @@ contains
         !Exchange u and v, since the outer points are not updated in above function
         call domain%halo%exch_var(domain%u,do_dqdt=update)
         call domain%halo%exch_var(domain%v,do_dqdt=update)
- 
-        call VecDestroy(localX,ierr)
-        call DMDestroy(da,ierr)
-        call KSPDestroy(ksp,ierr)
-        
+         
         !call finalize_iter_winds()
                 
     end subroutine calc_iter_winds
@@ -733,7 +725,12 @@ contains
 
         PetscErrorCode ierr
 
+
+        call VecDestroy(localX,ierr)
+        call DMDestroy(da,ierr)
+        call KSPDestroy(ksp,ierr)
         call PetscFinalize(ierr)
+
     end subroutine
 
     subroutine init_petsc_comms(domain)
@@ -753,8 +750,40 @@ contains
     subroutine init_iter_winds(domain)
         implicit none
         type(domain_t), intent(in) :: domain
+
+        PetscInt       one, iter
+        PetscReal      conv_tol
+        PetscErrorCode ierr
+
         call init_petsc_comms(domain)
         call init_module_vars(domain)
+
+        one = 1
+
+        call KSPCreate(domain%compute_comms%MPI_VAL,ksp,ierr)
+        conv_tol = 1e-4
+        call KSPSetFromOptions(ksp,ierr)
+
+        !call KSPSetTolerances(ksp,conv_tol,PETSC_DEFAULT_REAL,PETSC_DEFAULT_REAL,PETSC_DEFAULT_INTEGER,ierr)
+        call KSPSetType(ksp,KSPPIPEFCG,ierr) !KSPPIPEFCG <-- this one tested to give fastest convergence...
+                                              ! KSPPIPEBCGS <--- Could be faster, but needs to be tested...
+        !call KSPGetPC(ksp,pc, ierr)
+        !call PCSetType(pc,PCSOR, ierr)
+        ! call KSPSetLagNorm(ksp, PETSC_TRUE, ierr)
+        call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
+                          (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
+                          xl, PETSC_NULL_INTEGER_ARRAY ,yl,da,ierr)
+        
+        call DMSetFromOptions(da,ierr)
+        call DMSetUp(da,ierr)
+        call DMCreateLocalVector(da,localX,ierr)
+        
+        call KSPSetDMActive(ksp,PETSC_FALSE, ierr)
+        call KSPSetDM(ksp,da,ierr)
+
+        call KSPSetComputeInitialGuess(ksp,ComputeInitialGuess,0,ierr)
+        ! call KSPSetUp(ksp, ierr)
+
         if(STD_OUT_PE) write(*,*) 'Initialized PETSc'
     end subroutine
     
@@ -799,8 +828,8 @@ contains
             yl = 0
 
             dx = domain%dx
-            dzdx = domain%dzdx(i_s:i_e,k_s:k_e,j_s:j_e) 
-            dzdy = domain%dzdy(i_s:i_e,k_s:k_e,j_s:j_e)
+            dzdx = domain%dzdx%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) 
+            dzdy = domain%dzdy%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
             jaco = domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e)
             
             dz_if(:,k_s,:) = domain%advection_dz(i_s:i_e,k_s,j_s:j_e)

@@ -204,10 +204,11 @@ elseif(MODE STREQUAL "debugslow")
 		target_compile_options(HICAR PUBLIC -c -h noomp -eI -m 2 -O0 -g -R bcs)
 	endif()
 elseif(MODE STREQUAL "profile")
-	set(CMAKE_BUILD_TYPE Debug)
+	set(CMAKE_BUILD_TYPE Profile)
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -g -p)
+		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fopt-info-missed=opt_info.txt -mfma -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
+		target_link_options(HICAR PUBLIC -pg)
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -pg -debug inline-debug-info -shared-intel)
 	elseif (COMPILER STREQUAL "cray")
@@ -217,7 +218,7 @@ elseif(MODE STREQUAL "release")
 	set(CMAKE_BUILD_TYPE Release)
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -O3 -mfma -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
+		target_compile_options(HICAR PUBLIC -O3 -fopenmp -finline-limit=10000 -mfma -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")

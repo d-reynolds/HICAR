@@ -85,6 +85,8 @@ module icar_constants
         integer :: z_interface
         integer :: dz
         integer :: dz_interface
+        integer :: dzdx
+        integer :: dzdy
         integer :: cloud_fraction
         integer :: shortwave                !! MJ: in OSHD as 'sdra' referring to 'total shortwave radiation, above topography' wich will be used for partionining into direct and diffusive and then accounting for shading and slope effects 
         integer :: shortwave_direct         !! MJ: in OSHD as 'sdri' referring to 'direct shortwave radiation, per inclined surface area' accounted for shading and slope effects. Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
@@ -363,7 +365,8 @@ module icar_constants
                                                             251, 252, 253, 254, 255, 256, 257, 258, 259, 260,  &
                                                             261, 262, 263, 264, 265, 266, 267, 268, 269, 270,  &
                                                             271, 272, 273, 274, 275, 276, 277, 278, 279, 280,  &
-                                                            281, 282, 283, 284, 285, 286, 287, 288, 289)
+                                                            281, 282, 283, 284, 285, 286, 287, 288, 289, 290,  &
+                                                            291)
 
     integer, parameter :: kINTEGER_BITS     = storage_size(kINTEGER_BITS)
     integer, parameter :: kMAX_STORAGE_VARS = storage_size(kVARS) / kINTEGER_BITS

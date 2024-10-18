@@ -831,6 +831,31 @@ contains
                                attribute_t("coordinates",   "lat lon")]
         end associate
         !>------------------------------------------------------------
+        !!  Thickness of layers between interfaces
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%dzdx))
+            var%name        = "dzdx"
+            var%three_d     = .True.
+            var%two_d       = .False.
+            var%dimensions  = three_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "dzdx of domain mesh"),                 &
+                               attribute_t("units",         "-"),                                   &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+        !>------------------------------------------------------------
+        !!  Thickness of layers between interfaces
+        !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%dzdy))
+            var%name        = "dzdy"
+            var%three_d     = .True.
+            var%two_d       = .False.
+            var%dimensions  = three_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "dzdx of domain mesh"),                 &
+                               attribute_t("units",         "-"),                                   &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
+
+        !>------------------------------------------------------------
         !!  Cloud cover fraction
         !!------------------------------------------------------------
         associate(var=>var_meta(kVARS%cloud_fraction))

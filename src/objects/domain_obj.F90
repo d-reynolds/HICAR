@@ -138,6 +138,8 @@ contains
         if (0<var_list( kVARS%dz_interface) )               call this%vars_to_out%add_var( trim( get_varname( kVARS%dz_interface                 )), this%dz_interface)
         if (0<var_list( kVARS%z_interface) )                call this%vars_to_out%add_var( trim( get_varname( kVARS%z_interface                  )), this%z_interface)
         if (0<var_list( kVARS%dz) )                         call this%vars_to_out%add_var( trim( get_varname( kVARS%dz                           )), this%dz_mass)
+        if (0<var_list( kVARS%dzdx) )                       call this%vars_to_out%add_var( trim( get_varname( kVARS%dzdx                         )), this%dzdx)
+        if (0<var_list( kVARS%dzdy) )                       call this%vars_to_out%add_var( trim( get_varname( kVARS%dzdy                         )), this%dzdy)
         if (0<var_list( kVARS%density) )                    call this%vars_to_out%add_var( trim( get_varname( kVARS%density                      )), this%density)
         if (0<var_list( kVARS%pressure_interface) )         call this%vars_to_out%add_var( trim( get_varname( kVARS%pressure_interface           )), this%pressure_interface)
         if (0<var_list( kVARS%cloud_fraction) )             call this%vars_to_out%add_var( trim( get_varname( kVARS%cloud_fraction               )), this%cloud_fraction)
@@ -419,22 +421,18 @@ contains
 
         !Calculation of density
         if (associated(this%density%data_3d)) then
-            do j = jms,jme
-                do k = kms,kme
-                    do i = ims,ime
-                        qsum = qv(i,k,j)
-                        if(associated(this%cloud_water_mass%data_3d)) qsum = qsum + this%cloud_water_mass%data_3d(i,k,j)
-                        if(associated(this%cloud_ice_mass%data_3d)) qsum = qsum + this%cloud_ice_mass%data_3d(i,k,j)
-                        if(associated(this%ice2_mass%data_3d)) qsum = qsum + this%ice2_mass%data_3d(i,k,j)
-                        if(associated(this%ice3_mass%data_3d)) qsum = qsum + this%ice3_mass%data_3d(i,k,j)
-                        if(associated(this%rain_mass%data_3d)) qsum = qsum + this%rain_mass%data_3d(i,k,j)
-                        if(associated(this%snow_mass%data_3d)) qsum = qsum + this%snow_mass%data_3d(i,k,j)
-                        if(associated(this%graupel_mass%data_3d)) qsum = qsum + this%graupel_mass%data_3d(i,k,j)
-                        
-                        temperature(i,k,j) = potential_temperature(i,k,j) * exner(i,k,j)
-                        density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,j))) ! kg/m^3
-                    enddo
-                enddo
+            do concurrent (j = jms:jme, k = kms:kme, i = ims:ime)
+                ! qsum = qv(i,k,j)
+                ! if(associated(this%cloud_water_mass%data_3d)) qsum = qsum + this%cloud_water_mass%data_3d(i,k,j)
+                ! if(associated(this%cloud_ice_mass%data_3d)) qsum = qsum + this%cloud_ice_mass%data_3d(i,k,j)
+                ! if(associated(this%ice2_mass%data_3d)) qsum = qsum + this%ice2_mass%data_3d(i,k,j)
+                ! if(associated(this%ice3_mass%data_3d)) qsum = qsum + this%ice3_mass%data_3d(i,k,j)
+                ! if(associated(this%rain_mass%data_3d)) qsum = qsum + this%rain_mass%data_3d(i,k,j)
+                ! if(associated(this%snow_mass%data_3d)) qsum = qsum + this%snow_mass%data_3d(i,k,j)
+                ! if(associated(this%graupel_mass%data_3d)) qsum = qsum + this%graupel_mass%data_3d(i,k,j)
+                
+                temperature(i,k,j) = potential_temperature(i,k,j) * exner(i,k,j)
+                density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,j))) ! kg/m^3
             enddo
         endif
         
@@ -662,6 +660,8 @@ contains
         if (0<opt%vars_to_allocate( kVARS%dz_interface) )               call setup(this%dz_interface,             this%grid )
         if (0<opt%vars_to_allocate( kVARS%z_interface) )                call setup(this%z_interface,              this%grid8w )
         if (0<opt%vars_to_allocate( kVARS%dz) )                         call setup(this%dz_mass,                  this%grid )
+        if (0<opt%vars_to_allocate( kVARS%dzdx) )                       call setup(this%dzdx,                     this%grid )
+        if (0<opt%vars_to_allocate( kVARS%dzdy) )                       call setup(this%dzdy,                     this%grid )
         if (0<opt%vars_to_allocate( kVARS%density) )                    call setup(this%density,                  this%grid )
         if (0<opt%vars_to_allocate( kVARS%pressure_interface) )         call setup(this%pressure_interface,       this%grid8w )
         if (0<opt%vars_to_allocate( kVARS%graupel) )                    call setup(this%graupel,                  this%grid2d, dtype=kDOUBLE )
@@ -1195,15 +1195,7 @@ contains
         allocate(this%jacobian_w(this% ims : this% ime, &
                                     this% kms : this% kme, &
                                     this% jms : this% jme) )
-                                                                
-        allocate(this%dzdx(this% ims : this% ime, &
-                           this% kms : this% kme, &
-                           this% jms : this% jme) )
-
-        allocate(this%dzdy(this% ims : this% ime, &
-                           this% kms : this% kme, &
-                           this% jms : this% jme) )
-                           
+                                                                                           
         allocate(this%dzdx_u(this% ims : this% ime+1, &
                            this% kms : this% kme, &
                            this% jms : this% jme) )
@@ -1296,8 +1288,8 @@ contains
             jacobian_u            => this%jacobian_u,                     &
             jacobian_v            => this%jacobian_v,                     &
             jacobian_w            => this%jacobian_w,                     &
-            dzdx                  => this%dzdx,                           &
-            dzdy                  => this%dzdy,                           &
+            dzdx                  => this%dzdx%data_3d,                   &
+            dzdy                  => this%dzdy%data_3d,                   &
             dzdx_u                => this%dzdx_u,                         &
             dzdy_v                => this%dzdy_v,                         &
             jacobian              => this%jacobian,                       &
@@ -1367,10 +1359,10 @@ contains
             if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
                  (options%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
                  
-                allocate(temp(this%ids:this%ide, this%kds:this%kde, this%jds:this%jde))
+                allocate(temp(this%ids:this%ide, this%kds:this%kde+1, this%jds:this%jde))
                 temp(:,kms,:)   = this%global_terrain
             else
-                allocate(temp(this%ihs:this%ihe, this%khs:this%khe, this%jhs:this%jhe))
+                allocate(temp(this%ihs:this%ihe, this%khs:this%khe+1, this%jhs:this%jhe))
                 temp(:,kms,:)   = neighbor_terrain
             endif
             
@@ -1434,12 +1426,8 @@ contains
                         db2_mass = -n/(s2**n) * (sum(dz_scl(1:(i-1)))+dz_scl(i)/2)**(n-1) * COSH((smooth_height/s2)**n - &
                                 ((sum(dz_scl(1:(i-1)))+dz_scl(i)/2)/s2)**n ) / SINH((smooth_height/s2)**n)
 
-                        if (i==this%grid%kme) then  ! if we are at the model top i+1 is not defined
-                            global_dz_interface(:,i,:)  =  smooth_height - temp(:,i,:)
-                        else
-                            temp(:,i+1,:)  = sum(dz_scl(1:i)) + h1*b1_i + h2*b2_i 
-                            global_dz_interface(:,i,:)  =  temp(:,i+1,:) - temp(:,i,:)
-                        endif
+                        temp(:,i+1,:)  = sum(dz_scl(1:i)) + h1*b1_i + h2*b2_i 
+                        global_dz_interface(:,i,:)  =  temp(:,i+1,:) - temp(:,i,:)
 
                         global_z_interface(:,i,:)  = global_z_interface(:,i-1,:) + global_dz_interface(:,i-1,:)
 
@@ -1555,7 +1543,7 @@ contains
                     jacobian_u            => this%jacobian_u,                     &
                     jacobian_v            => this%jacobian_v,                     &
                     jacobian_w            => this%jacobian_w,                     &
-                    dzdy                  => this%dzdy,                           &
+                    dzdy                  => this%dzdy%data_3d,                           &
                     jacobian              => this%jacobian,                       &
                     smooth_height         => this%smooth_height,                  &
                     dz_scl                => this%dz_scl)
@@ -1867,15 +1855,15 @@ contains
         ! this%dzdx_u(:,:,:) = neighbor_dzdx(this%ims:this%ime+1,:,this%jms:this%jme)
         
         
-        this%dzdx(:,:,:) = (this%geo_u%z(this%ims+1:this%ime+1,:,:) - this%geo_u%z(this%ims:this%ime,:,:))/(this%dx)
+        this%dzdx%data_3d(:,:,:) = (this%geo_u%z(this%ims+1:this%ime+1,:,:) - this%geo_u%z(this%ims:this%ime,:,:))/(this%dx)
 
         neighbor_dzdx(this%ihs+1:this%ihe,:,:) = (neighbor_z(this%ihs+1:this%ihe,:,:) - neighbor_z(this%ihs:this%ihe-1,:,:))/this%dx
         neighbor_dzdx(this%ihs,:,:) = neighbor_dzdx(this%ihs+1,:,:) 
         neighbor_dzdx(this%ihe+1,:,:) = neighbor_dzdx(this%ihe,:,:)
         this%dzdx_u(this%ims+1:this%ime,:,:) = neighbor_dzdx(this%ims+1:this%ime,:,this%jms:this%jme)
         
-        this%dzdx_u(this%ims,:,:)   = this%dzdx(this%ims,:,:)*1.5 - this%dzdx(this%ims+1,:,:)*0.5
-        this%dzdx_u(this%ime+1,:,:) = this%dzdx(this%ime,:,:)*1.5 - this%dzdx(this%ime-1,:,:)*0.5
+        this%dzdx_u(this%ims,:,:)   = this%dzdx%data_3d(this%ims,:,:)*1.5 - this%dzdx%data_3d(this%ims+1,:,:)*0.5
+        this%dzdx_u(this%ime+1,:,:) = this%dzdx%data_3d(this%ime,:,:)*1.5 - this%dzdx%data_3d(this%ime-1,:,:)*0.5
         
         
         !For dzdy
@@ -1907,15 +1895,15 @@ contains
         !                                   4*this%geo_v%z(:,:,this%jme) + this%geo_v%z(:,:,this%jme-1)) / (2*this%dx)
         !  this%dzdy_v(:,:,:) = neighbor_dzdy(this%ims:this%ime,:,this%jms:this%jme+1)
 
-        this%dzdy(:,:,:) = (this%geo_v%z(:,:,this%jms+1:this%jme+1) - this%geo_v%z(:,:,this%jms:this%jme))/(this%dx)
+        this%dzdy%data_3d(:,:,:) = (this%geo_v%z(:,:,this%jms+1:this%jme+1) - this%geo_v%z(:,:,this%jms:this%jme))/(this%dx)
 
         neighbor_dzdy(:,:,this%jhs+1:this%jhe) = (neighbor_z(:,:,this%jhs+1:this%jhe) - neighbor_z(:,:,this%jhs:this%jhe-1))/this%dx
         neighbor_dzdy(:,:,this%jhs) = neighbor_dzdy(:,:,this%jhs+1) 
         neighbor_dzdy(:,:,this%jhe+1) = neighbor_dzdy(:,:,this%jhe)
                 
         this%dzdy_v(:,:,this%jms+1:this%jme) = neighbor_dzdy(this%ims:this%ime,:,this%jms+1:this%jme)
-        this%dzdy_v(:,:,this%jms)   = this%dzdy(:,:,this%jms)*1.5 - this%dzdy(:,:,this%jms+1)*0.5
-        this%dzdy_v(:,:,this%jme+1) = this%dzdy(:,:,this%jme)*1.5 - this%dzdy(:,:,this%jme-1)*0.5
+        this%dzdy_v(:,:,this%jms)   = this%dzdy%data_3d(:,:,this%jms)*1.5 - this%dzdy%data_3d(:,:,this%jms+1)*0.5
+        this%dzdy_v(:,:,this%jme+1) = this%dzdy%data_3d(:,:,this%jme)*1.5 - this%dzdy%data_3d(:,:,this%jme-1)*0.5
 
     end subroutine setup_dzdxy
 
@@ -3045,26 +3033,22 @@ contains
             if (var_to_update%two_d) then
                 ! apply forcing throughout the domain for 2D diagnosed variables (e.g. SST, SW)
                 if (.not.(var_to_update%force_boundaries)) then
-                    do j = jms,jme
-                        do i = ims,ime
-                            var_to_update%data_2d(i,j) = var_to_update%data_2d(i,j) + (var_to_update%dqdt_2d(i,j) * dt)
-                        enddo
+                    do concurrent (j = jms:jme, i = ims:ime)
+                        var_to_update%data_2d(i,j) = var_to_update%data_2d(i,j) + (var_to_update%dqdt_2d(i,j) * dt)
                     enddo
                 else if (any(this%relax_filter_2d > 0.0)) then
                     !Update forcing data to current time step
-                    do j = jms,jme
-                        do i = ims,ime
-                            if (this%relax_filter_2d(i,j) > 0.0) then
-                                forcing_hi%data_2d(i,j) = forcing_hi%data_2d(i,j) + (forcing_hi%dqdt_2d(i,j) * dt)
-                                if (this%relax_filter_2d(i,j) == 1.0) then
-                                    var_to_update%data_2d(i,j) = forcing_hi%data_2d(i,j)
-                                else
-                                    var_to_update%data_2d(i,j) = var_to_update%data_2d(i,j) + &
-                                                    (this%relax_filter_2d(i,j) * dt_h) * &
-                                                    (forcing_hi%data_2d(i,j) - var_to_update%data_2d(i,j))
-                                endif
+                    do concurrent (j = jms:jme, i = ims:ime)
+                        if (this%relax_filter_2d(i,j) > 0.0) then
+                            forcing_hi%data_2d(i,j) = forcing_hi%data_2d(i,j) + (forcing_hi%dqdt_2d(i,j) * dt)
+                            if (this%relax_filter_2d(i,j) == 1.0) then
+                                var_to_update%data_2d(i,j) = forcing_hi%data_2d(i,j)
+                            else
+                                var_to_update%data_2d(i,j) = var_to_update%data_2d(i,j) + &
+                                                (this%relax_filter_2d(i,j) * dt_h) * &
+                                                (forcing_hi%data_2d(i,j) - var_to_update%data_2d(i,j))
                             endif
-                        enddo
+                        endif
                     enddo
                 endif 
 
@@ -3072,32 +3056,24 @@ contains
                 ! only apply forcing data on the boundaries for advected scalars (e.g. temperature, humidity)
                 ! applying forcing to the edges has already been handeled when updating dqdt using the relaxation filter
                 if (.not.(var_to_update%force_boundaries)) then
-                    do j = jms,jme
-                        do k = this%kms,this%kme
-                            do i = ims,ime
-                                forcing_hi%data_3d(i,k,j) = forcing_hi%data_3d(i,k,j) + (forcing_hi%dqdt_3d(i,k,j) * dt)
+                    do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
+                        forcing_hi%data_3d(i,k,j) = forcing_hi%data_3d(i,k,j) + (forcing_hi%dqdt_3d(i,k,j) * dt)
                                 var_to_update%data_3d(i,k,j) = var_to_update%data_3d(i,k,j) + &
-                                                              (var_to_update%dqdt_3d(i,k,j) * dt)
-                            enddo
-                        enddo
+                                                        (var_to_update%dqdt_3d(i,k,j) * dt)
                     enddo
                 else if (any(this%relax_filter_3d > 0.0)) then
                     !Update forcing data to current time step
-                    do j = jms,jme
-                        do k = this%kms,this%kme
-                            do i = ims,ime
-                                if (this%relax_filter_3d(i,k,j) > 0.0) then
-                                    forcing_hi%data_3d(i,k,j) = forcing_hi%data_3d(i,k,j) + (forcing_hi%dqdt_3d(i,k,j) * dt)
-                                    if (this%relax_filter_3d(i,k,j) == 1.0) then
-                                        var_to_update%data_3d(i,k,j) = forcing_hi%data_3d(i,k,j)
-                                    else
-                                        var_to_update%data_3d(i,k,j) = var_to_update%data_3d(i,k,j) + &
-                                                        (this%relax_filter_3d(i,k,j) * dt_h) * &
-                                                        (forcing_hi%data_3d(i,k,j) - var_to_update%data_3d(i,k,j))
-                                    endif
-                                endif
-                            enddo
-                        enddo
+                    do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
+                        if (this%relax_filter_3d(i,k,j) > 0.0) then
+                            forcing_hi%data_3d(i,k,j) = forcing_hi%data_3d(i,k,j) + (forcing_hi%dqdt_3d(i,k,j) * dt)
+                            if (this%relax_filter_3d(i,k,j) == 1.0) then
+                                var_to_update%data_3d(i,k,j) = forcing_hi%data_3d(i,k,j)
+                            else
+                                var_to_update%data_3d(i,k,j) = var_to_update%data_3d(i,k,j) + &
+                                                (this%relax_filter_3d(i,k,j) * dt_h) * &
+                                                (forcing_hi%data_3d(i,k,j) - var_to_update%data_3d(i,k,j))
+                            endif
+                        endif
                     enddo
                 endif
             endif
@@ -3107,12 +3083,8 @@ contains
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
         if (.not.(options%adv%advect_density)) then
-            do j = jms,jme
-                do k = this%kms,this%kme
-                    do i = ims,ime
-                        this%w%data_3d(i,k,j) = this%w%data_3d(i,k,j) + (this%w%dqdt_3d(i,k,j) * dt)
-                    enddo
-                enddo
+            do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
+                this%w%data_3d(i,k,j) = this%w%data_3d(i,k,j) + (this%w%dqdt_3d(i,k,j) * dt)
             enddo
         endif
 

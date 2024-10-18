@@ -720,7 +720,7 @@ contains
                          domain% v %data_3d,      &
                          domain% w %data_3d,      &
                          domain% w_real %data_3d,      &
-                         domain%dzdx_u, domain%dzdy_v, domain%dzdx, domain%dzdy,   &
+                         domain%dzdx_u, domain%dzdy_v, domain%dzdx%data_3d, domain%dzdy%data_3d,   &
                          domain%jacobian_w)
                              
 

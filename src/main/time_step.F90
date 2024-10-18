@@ -224,6 +224,10 @@ contains
                 write(*,*) 'time_step determining u: ',domain%u%data_3d(max_i,max_k,max_j)
                 write(*,*) 'time_step determining v: ',domain%v%data_3d(max_i,max_k,max_j)
             endif
+            write(*,*) 'time_step determining w_real: ',domain%w_real%data_3d(max_i,max_k,max_j)
+            write(*,*) 'time_step determining jaco: ',domain%jacobian(max_i,max_k,max_j)
+            write(*,*) 'time_step determining dzdx: ',domain%dzdx%data_3d(max_i,max_k,max_j)
+            write(*,*) 'time_step determining dzdy: ',domain%dzdy%data_3d(max_i,max_k,max_j)
 
         endif
         ! Set dt to the outcome of reduce

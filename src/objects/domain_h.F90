@@ -73,6 +73,8 @@ module domain_interface
     type(variable_t) :: dz_interface
     type(variable_t) :: z_interface
     type(variable_t) :: dz_mass
+    type(variable_t) :: dzdx ! change in height with change in x/y position (used to calculate w_real vertical motions)
+    type(variable_t) :: dzdy ! change in height with change in x/y position (used to calculate w_real vertical motions)
     type(variable_t) :: nsquared
     type(variable_t) :: graupel
     type(variable_t) :: accumulated_precipitation
@@ -340,8 +342,6 @@ module domain_interface
     real,                       allocatable :: jacobian_u(:,:,:)
     real,                       allocatable :: jacobian_v(:,:,:)
     real,                       allocatable :: jacobian_w(:,:,:)
-    real,                       allocatable :: dzdx(:,:,:) ! change in height with change in x/y position (used to calculate w_real vertical motions)
-    real,                       allocatable :: dzdy(:,:,:) ! change in height with change in x/y position (used to calculate w_real vertical motions)
     real,                       allocatable :: dzdx_u(:,:,:) ! change in height with change in x/y position on u-grid
     real,                       allocatable :: dzdy_v(:,:,:) ! change in height with change in x/y position on v-grid
     ! BK 2020/05

@@ -2053,6 +2053,7 @@ contains
         call options%alloc_vars(                                                    &
                      [kVARS%z,                      kVARS%z_interface,              &
                       kVARS%dz,                     kVARS%dz_interface,             &
+                      kVARS%dzdx,                   kVARS%dzdy,                     &
                       kVARS%u,                      kVARS%v,                        &
                       kVARS%w,                      kVARS%w_real,                   &
                       kVARS%surface_pressure,       kVARS%roughness_z0,             &

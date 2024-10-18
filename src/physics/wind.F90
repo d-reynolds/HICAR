@@ -422,7 +422,7 @@ contains
         if ((options%wind%alpha_const<=0 .and. &
                 (options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS)) .or. &
                  options%wind%Sx) then
-                call update_stability(domain)
+                call update_stability(domain, options)
         endif
 
         ! rotate winds from cardinal directions to grid orientation (e.g. u is grid relative not truly E-W)
@@ -432,7 +432,7 @@ contains
         call domain%halo%exch_var(domain%v,do_dqdt=.True.)
 
         if (options%wind%Sx) then
-            call apply_Sx(domain%Sx,domain%TPI,domain%u%dqdt_3d,domain%v%dqdt_3d,domain%Ri%data_3d,domain%dzdx,domain%dzdy)
+            call apply_Sx(domain%Sx,domain%TPI,domain%u%dqdt_3d,domain%v%dqdt_3d,domain%Ri%data_3d,domain%dzdx%data_3d,domain%dzdy%data_3d)
 
             call domain%halo%exch_var(domain%u,do_dqdt=.True.)
             call domain%halo%exch_var(domain%v,do_dqdt=.True.)
@@ -447,11 +447,11 @@ contains
             if (options%physics%boundarylayer == kPBL_YSU) then
                 call apply_thermal_winds(domain%skin_temperature%data_2d,domain%exner%data_3d,domain%potential_temperature%data_3d,  &
                                      domain%z%data_3d, domain%dz_mass%data_3d,domain%u%dqdt_3d, domain%v%dqdt_3d,&
-                                     domain%dzdx,domain%dzdy, domain%coeff_heat_exchange_3d%data_3d)
+                                     domain%dzdx%data_3d,domain%dzdy%data_3d, domain%coeff_heat_exchange_3d%data_3d)
             else
                 call apply_thermal_winds(domain%skin_temperature%data_2d,domain%exner%data_3d,domain%potential_temperature%data_3d,  &
                                      domain%z%data_3d, domain%dz_mass%data_3d,                                                       &
-                                     domain%u%dqdt_3d, domain%v%dqdt_3d,domain%dzdx,domain%dzdy)
+                                     domain%u%dqdt_3d, domain%v%dqdt_3d,domain%dzdx%data_3d,domain%dzdy%data_3d)
             endif
             call domain%halo%exch_var(domain%u,do_dqdt=.True.)
             call domain%halo%exch_var(domain%v,do_dqdt=.True.)
@@ -483,7 +483,7 @@ contains
                              domain% v %dqdt_3d,      &
                              domain%w%dqdt_3d*0.0,      &
                              domain%w%dqdt_3d,      &
-                             domain%dzdx_u, domain%dzdy_v, domain%dzdx, domain%dzdy,   &
+                             domain%dzdx_u, domain%dzdy_v, domain%dzdx%data_3d, domain%dzdy%data_3d,   &
                              domain%jacobian_w)
 
 
@@ -528,7 +528,7 @@ contains
                          domain% v %dqdt_3d,      &
                          domain% w %dqdt_3d,      &
                          domain% w_real %data_3d,           &
-                         domain%dzdx_u, domain%dzdy_v, domain%dzdx, domain%dzdy,   &
+                         domain%dzdx_u, domain%dzdy_v, domain%dzdx%data_3d, domain%dzdy%data_3d,   &
                          domain%jacobian_w)
              
         !If not an update, then transfer the dqdt fields to data_3d
@@ -834,9 +834,10 @@ contains
 
     end subroutine allocate_winds
     
-    subroutine update_stability(domain)
+    subroutine update_stability(domain, options)
         implicit none
         type(domain_t), intent(inout) :: domain
+        type(options_t), intent(in) :: options
 
         real, dimension(ims:ime,kms:kme,jms:jme) :: wind_speed, temp_froude, u_m, v_m, u_shear, v_shear, winddir, stability
         integer, dimension(ims:ime,kms:kme,jms:jme) :: dir_indices
@@ -850,13 +851,6 @@ contains
         n_smoothing_passes = 5
         nsmooth_gridcells = 20 !int(500 / domain%dx)
         
-        !If it is our first time calculating Fr, allocate and populate froude_terrain array
-        if (.not.allocated(domain%froude_terrain)) then
-            allocate(domain%froude_terrain(1:72,ims:ime,kms:kme,jms:jme))
-
-            call compute_terrain_blocking_heights(domain)
-        endif
-                      
         u_m(ims:ime,kms:kme,jms:jme) = (domain%u%data_3d(ims:ime,kms:kme,jms:jme) + &
                                         domain%u%data_3d(ims+1:ime+1,kms:kme,jms:jme))/2
         v_m(ims:ime,kms:kme,jms:jme) = (domain%v%data_3d(ims:ime,kms:kme,jms:jme) + &
@@ -866,28 +860,39 @@ contains
         u_shear(:,kms+1:kme,:) = u_m(:,kms+1:kme,:) - u_m(:,kms:kme-1,:)
         v_shear(:,kms,:) = v_m(:,kms+4,:)
         v_shear(:,kms+1:kme,:) = v_m(:,kms+1:kme,:) - v_m(:,kms:kme-1,:)
-        
-        !Compute wind direction for each cell on mass grid
-        do i = ims, ime
-            do j = jms, jme
-                do k=kms, kme
-                    winddir(i,k,j) = ATAN(-u_m(i,k,j),-v_m(i,k,j))*rad2deg
-                    if(winddir(i,k,j) <= 0.0) winddir(i,k,j) = winddir(i,k,j)+360
-                    if(winddir(i,k,j) == 360.0) winddir(i,k,j) = 0.0
-                    dir_indices(i,k,j) = int(winddir(i,k,j)/5)+1                    
-                enddo
+
+        ! If we want variable alpha, then calculate froude terrrain
+        if (options%wind%alpha_const<0 .and. (options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS)) then
+            !If it is our first time calculating Fr, allocate and populate froude_terrain array
+            if (.not.allocated(domain%froude_terrain)) then
+                allocate(domain%froude_terrain(1:72,ims:ime,kms:kme,jms:jme))
+
+                call compute_terrain_blocking_heights(domain)
+            endif
+                        
+            
+            !Compute wind direction for each cell on mass grid
+            do i = ims, ime
+                do j = jms, jme
+                    do k=kms, kme
+                        winddir(i,k,j) = ATAN(-u_m(i,k,j),-v_m(i,k,j))*rad2deg
+                        if(winddir(i,k,j) <= 0.0) winddir(i,k,j) = winddir(i,k,j)+360
+                        if(winddir(i,k,j) == 360.0) winddir(i,k,j) = 0.0
+                        dir_indices(i,k,j) = int(winddir(i,k,j)/5)+1                    
+                    enddo
+                end do
             end do
-        end do
-        
-        !Build grid of Sx values based on wind direction at that cell
-        do i = ims, ime
-            do j = jms, jme
-                do k=kms, kme
-                    temp_froude(i,k,j) = domain%froude_terrain(dir_indices(i,k,j),i,k,j)
-                enddo
+            
+            !Build grid of Sx values based on wind direction at that cell
+            do i = ims, ime
+                do j = jms, jme
+                    do k=kms, kme
+                        temp_froude(i,k,j) = domain%froude_terrain(dir_indices(i,k,j),i,k,j)
+                    enddo
+                end do
             end do
-        end do
-        
+        endif
+
         wind_speed = sqrt( (u_m)**2 + (v_m)**2 )
         
         !Since we will loop up to nz-1, we set all Fr to 0.1, which will leave the upper layer as very stable
@@ -919,34 +924,44 @@ contains
                     stability(i,k,j) = calc_dry_stability(th_top, th_bot, z_top, z_bot) 
                     
                     domain%Ri%data_3d(i,k,j) =  calc_Ri(stability(i,k,j), u_shear(i,kms,j), v_shear(i,kms,j), (z_top-z_bot))
-                    
-                    th_bot = domain%potential_temperature%data_3d(i,k,j)
-                    th_top = domain%potential_temperature%data_3d(i,k+1,j)
-                    z_bot  = domain%z%data_3d(i,k,j)
-                    z_top  = domain%z%data_3d(i,k+1,j)
-                    
-                    ! If we have an upwind obstacle, use the obstacle height to calculate a bulk Froude Number over the column
-                    ! If there is nothing blocking, we calculate a local bulk Froude Number, using the local th and z indexed 
-                    ! above
-                    !if (.not.(temp_froude(i,k,j) == DEFAULT_FR_L)) then
-                    !The height of the obstacle is calculated from the blocking terrain height (z_obst-z_loc+1000)
-                    !    obstacle_height = temp_froude(i,k,j)-DEFAULT_FR_L+z_bot
-                    !
-                    !    do ob_k = k+1,kme
-                    !        if (domain%z%data_3d(i,ob_k,j) > obstacle_height) exit
-                    !    enddo
-                    !    ob_k = min(ob_k,kme)
-                    !    th_top = domain%potential_temperature%data_3d(i,ob_k,j)
-                    !    z_top  = domain%z%data_3d(i,ob_k,j)
-                    !endif
-                    stability(i,k,j) = calc_dry_stability(th_top, th_bot, z_top, z_bot, domain%potential_temperature%data_3d(i,kms,j)) 
-
-                    !Above function calculates N^2, but froude number wants just N
-                    stability(i,k,j) = sqrt(max(stability(i,k,j), 0.0))
-                    domain%froude%data_3d(i,k,j) = calc_froude(stability(i,k,j), temp_froude(i,k,j), wind_speed(i,k,j))
                 enddo
             enddo
         enddo
+
+
+        if (options%wind%alpha_const<0 .and. (options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS)) then
+            do i = ims,ime
+                do j = jms,jme
+                    do k = kms,kme-1
+                
+                        th_bot = domain%potential_temperature%data_3d(i,k,j)
+                        th_top = domain%potential_temperature%data_3d(i,k+1,j)
+                        z_bot  = domain%z%data_3d(i,k,j)
+                        z_top  = domain%z%data_3d(i,k+1,j)
+                        
+                        ! If we have an upwind obstacle, use the obstacle height to calculate a bulk Froude Number over the column
+                        ! If there is nothing blocking, we calculate a local bulk Froude Number, using the local th and z indexed 
+                        ! above
+                        !if (.not.(temp_froude(i,k,j) == DEFAULT_FR_L)) then
+                        !The height of the obstacle is calculated from the blocking terrain height (z_obst-z_loc+1000)
+                        !    obstacle_height = temp_froude(i,k,j)-DEFAULT_FR_L+z_bot
+                        !
+                        !    do ob_k = k+1,kme
+                        !        if (domain%z%data_3d(i,ob_k,j) > obstacle_height) exit
+                        !    enddo
+                        !    ob_k = min(ob_k,kme)
+                        !    th_top = domain%potential_temperature%data_3d(i,ob_k,j)
+                        !    z_top  = domain%z%data_3d(i,ob_k,j)
+                        !endif
+                        stability(i,k,j) = calc_dry_stability(th_top, th_bot, z_top, z_bot, domain%potential_temperature%data_3d(i,kms,j)) 
+
+                        !Above function calculates N^2, but froude number wants just N
+                        stability(i,k,j) = sqrt(max(stability(i,k,j), 0.0))
+                        domain%froude%data_3d(i,k,j) = calc_froude(stability(i,k,j), temp_froude(i,k,j), wind_speed(i,k,j))
+                    enddo
+                enddo
+            enddo
+        endif
         !do n = 1,n_smoothing_passes
         !    do j=jms,jme
         !        ymin = max(j-nsmooth_gridcells, jms)
