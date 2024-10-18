@@ -748,7 +748,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    !$omp shared(TH,EFFC,EFFI,EFFS,EFFR,EFFG,RAINNC,RAINNCV,SNOWNC,SNOWNCV,GRAUPELNC,GRAUPELNCV,SR) &
    !$omp firstprivate(IHAIL,IGRAUP,ISUB,IBASE,INUC,ILIQ,NDCNST,INUM,IACT,DT) &
    !$omp firstprivate(its, ite, jts, jte, kts,kte)
-   !$omp do
+   !$omp do schedule(dynamic)
    do j=jts,jte      ! j loop (north-south)
    do i=its,ite      ! i loop (east-west)
    !
