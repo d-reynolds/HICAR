@@ -247,7 +247,7 @@ contains
    real,dimension(ims:ime,jms:jme)         :: uoce, voce, wstar, delta
    real :: bepswitch ! 0 if not using bep or bep+bem, 1 if using
 !
-   qv2d(its:ite,:) = 0.0
+   !qv2d(its:ite,:) = 0.0
 !
    bepswitch = 0.0
    a_u(:,:,:)=0.0
@@ -268,6 +268,17 @@ contains
    voce(:,:)=0.0
    frcurb(:,:)=0.0   
 
+  !$omp parallel default(shared) private(i,j,k) &
+  !$omp firstprivate(its, ite, jts, jte, kts, kte) &
+  !$omp firstprivate(ims, ime, jms, jme, kms, kme) &
+  !$omp firstprivate(ids, ide, jds, jde, kds, kde) &
+  !$omp firstprivate(rovcp, rd, rovg, cp, g, xlv, rv, ep1, ep2, karman, dt) &
+  !$omp firstprivate(flag_qi, ysu_topdown_pblmix, bepswitch) &
+  !$omp private(qv2d,pdh,pdhi,rqvbl2dt)
+  !!$omp private(a_u,a_v,a_t,a_q,a_e,b_u,b_v,b_t,b_q,b_e,sfk,vlk,dlg,dl_u,frcurb) &
+  !!$omp private(dusfc,dvsfc,dtsfc,dqsfc) &
+  !!$omp private(uoce,voce,wstar,delta)
+  !$omp do
    do j = jts,jte
       do k = kts,kte+1
         do i = its,ite
@@ -357,6 +368,9 @@ contains
      enddo
 !
    enddo
+  !$omp end do
+  !$omp end parallel
+
 !
    end subroutine ysu
 !

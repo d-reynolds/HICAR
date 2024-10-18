@@ -835,7 +835,7 @@ contains
                         RHUM = MIN(rh(k), 1.45)
                         RH_00 = RH_00 + (1.45-RH_00)*(-12.0-tc)/(-12.0+85.)
                         if (RH_00 .ge. 1.5) then
-                            WRITE (*,*) ' FATAL: RH_00 too large (1.5): ', RH_00, RH_00L, tc
+                            ! WRITE (*,*) ' FATAL: RH_00 too large (1.5): ', RH_00, RH_00L, tc
                         endif
                         RH_00 = min(RH_00, 1.45)
                         CLDFRA(K) = MAX(0., 1.0-SQRT((1.46-RHUM)/(1.46-RH_00)))

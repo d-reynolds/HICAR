@@ -52,7 +52,7 @@ program icar
     type(time_delta_t) :: small_time_delta
     
     integer :: i, ierr, exec_team
-    real :: t_val
+    real :: t_val, t_val2, t_val3
     logical :: init_flag, io_loop, info_only, gen_nml, only_namelist_check
     character(len=MAXFILELENGTH) :: namelist_file
 
@@ -206,40 +206,74 @@ program icar
             write(*,*) "Domain : ",trim(options%domain%init_conditions_file)
             write(*,*) "Number of images:",i
             write(*,*) ""
-            write(*,*) "Average timing across compute images:"
+            write(*,*) "Timing across compute images:"
+            write(*,*) ""
+            write(*,'(A31 A10 A3 A10 A3 A10)') " ", "mean", " | ", "min", " | ", "max"
         endif
         t_val = timer_mean(total_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "total          : ", t_val 
+        t_val2 = timer_min(total_timer, domain%compute_comms)
+        t_val3 = timer_max(total_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "total", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(initialization_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "init           : ", t_val
+        t_val2 = timer_min(initialization_timer, domain%compute_comms)
+        t_val3 = timer_max(initialization_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "init", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(input_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "input          : ", t_val
+        t_val2 = timer_min(input_timer, domain%compute_comms)
+        t_val3 = timer_max(input_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "input", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(output_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "output         : ", t_val
+        t_val2 = timer_min(output_timer, domain%compute_comms)
+        t_val3 = timer_max(output_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "output", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(physics_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "physics        : ", t_val
+        t_val2 = timer_min(physics_timer, domain%compute_comms)
+        t_val3 = timer_max(physics_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "physics", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(mp_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "microphysics   : ", t_val
+        t_val2 = timer_min(mp_timer, domain%compute_comms)
+        t_val3 = timer_max(mp_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "microphysics", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(adv_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "advection      : ", t_val
+        t_val2 = timer_min(adv_timer, domain%compute_comms)
+        t_val3 = timer_max(adv_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(rad_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "radiation      : ", t_val
+        t_val2 = timer_min(rad_timer, domain%compute_comms)
+        t_val3 = timer_max(rad_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "radiation", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(lsm_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "LSM            : ", t_val
+        t_val2 = timer_min(lsm_timer, domain%compute_comms)
+        t_val3 = timer_max(lsm_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "LSM", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(pbl_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "PBL            : ", t_val
+        t_val2 = timer_min(pbl_timer, domain%compute_comms)
+        t_val3 = timer_max(pbl_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "PBL", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(forcing_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "forcing        : ", t_val 
+        t_val2 = timer_min(forcing_timer, domain%compute_comms)
+        t_val3 = timer_max(forcing_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "forcing", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(wind_bal_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "wind bal       : ", t_val
+        t_val2 = timer_min(wind_bal_timer, domain%compute_comms)
+        t_val3 = timer_max(wind_bal_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "wind bal", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(diagnostic_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "diagnostic     : ", t_val
+        t_val2 = timer_min(diagnostic_timer, domain%compute_comms)
+        t_val3 = timer_max(diagnostic_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "diagnostic", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(send_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "halo-exchange(send)  : ", t_val 
+        t_val2 = timer_min(send_timer, domain%compute_comms)
+        t_val3 = timer_max(send_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "halo-exchange(send)", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(ret_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "halo-exchange(retrieve)  : ", t_val
+        t_val2 = timer_min(ret_timer, domain%compute_comms)
+        t_val3 = timer_max(ret_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "halo-exchange(retrieve)", ":", t_val, " | ", t_val2, " | ", t_val3
         t_val = timer_mean(wind_timer, domain%compute_comms)
-        if (STD_OUT_PE) write(*,*) "winds          : ", t_val     
+        t_val2 = timer_min(wind_timer, domain%compute_comms)
+        t_val3 = timer_max(wind_timer, domain%compute_comms)
+        if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "winds", ":", t_val, " | ", t_val2, " | ", t_val3
 
     case(kIO_TEAM)
     
@@ -300,6 +334,8 @@ program icar
     end select
     
     CALL MPI_Finalize()
+
+    call exit
 contains
 
     function timer_mean(timer,comms) result(mean_t)
@@ -315,6 +351,33 @@ contains
         mean_t = t_sum/kNUM_COMPUTE
     
     end function
+
+    function timer_max(timer,comms) result(t_sum)
+        implicit none
+        type(timer_t), intent(inout) :: timer
+        type(MPI_Comm), intent(in) :: comms
+
+        real :: mean_t, t_sum
+        integer :: ierr
+            
+        t_sum = timer%get_time()
+        call MPI_Allreduce(MPI_IN_PLACE,t_sum,1,MPI_REAL,MPI_MAX,comms,ierr)
+    
+    end function
+
+    function timer_min(timer,comms) result(t_sum)
+        implicit none
+        type(timer_t), intent(inout) :: timer
+        type(MPI_Comm), intent(in) :: comms
+
+        real :: mean_t, t_sum
+        integer :: ierr
+            
+        t_sum = timer%get_time()
+        call MPI_Allreduce(MPI_IN_PLACE,t_sum,1,MPI_REAL,MPI_MIN,comms,ierr)
+    
+    end function
+
 
     function step_end(time1, time2, end_time) result(min_time)
         implicit none
