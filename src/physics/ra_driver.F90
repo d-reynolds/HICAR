@@ -125,7 +125,13 @@ contains
                 domain%tend%th_lwrad = 0
         endif
         update_interval=options%rad%update_interval_rrtmg ! 30 min, 1800 s   600 ! 10 min (600 s)
-        last_model_time = domain%model_time%seconds()-update_interval
+
+        !Saftey bound, in case update_interval is 0, or very small
+        if (update_interval<=10) then
+            last_model_time = domain%model_time%seconds()-10
+        else
+            last_model_time = domain%model_time%seconds()-update_interval
+        endif
 
     end subroutine radiation_init
 

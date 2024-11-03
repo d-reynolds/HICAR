@@ -335,7 +335,6 @@ program icar
     
     CALL MPI_Finalize()
 
-    call exit
 contains
 
     function timer_mean(timer,comms) result(mean_t)
