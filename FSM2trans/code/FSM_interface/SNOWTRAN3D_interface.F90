@@ -711,6 +711,7 @@ module SNOWTRAN3D_interface
 
     use DRIVING, only: &
       Ta,                &! Air temperature (K)
+      zH,                &! Height of the measurement (m)
       RH                  ! Relative humidity (%)
 
     use LANDUSE, only: &
@@ -788,7 +789,7 @@ module SNOWTRAN3D_interface
             if (conc > epsilon(conc)) then
 
               ! Compute the sublimation due to suspension.
-              call getsublim(z,RH(i,j),Ta(i,j),Utau(i,j), &
+              call getsublim(z,RH(i,j),zH(i,j),Ta(i,j),Utau(i,j), &
                              z_0(i,j),V_susp,V_salt,Utau_t(i,j),1.0)
 
               ! Perform the quadrature (summation), without the constants.
@@ -806,7 +807,7 @@ module SNOWTRAN3D_interface
 
           ! Include the sublimation contribution due to saltation.
           z = h_star(i,j) / 2.0
-          call getsublim(z,RH(i,j),Ta(i,j),Utau(i,j), &
+          call getsublim(z,RH(i,j),zH(i,j),Ta(i,j),Utau(i,j), &
                          z_0(i,j),V_susp,V_salt,Utau_t(i,j),0.0)
 
           Qsubl(i,j) = Qsubl(i,j) + V_salt * conc_salt(i,j) * h_star(i,j)
@@ -1294,7 +1295,7 @@ module SNOWTRAN3D_interface
 
     use DRIVING, only: &
       Ua,                   &! Wind speed (m/s)
-      zU                     ! Wind speed measurement height (m)
+      zH                     ! Height of the wind speed measurement (m)
 
     use PARAMETERS, only : &
       z0sn                   ! Snow roughness length (m)
@@ -1346,15 +1347,15 @@ module SNOWTRAN3D_interface
           ! Saltation will not occur.
           sfrac = snowthickness(i,j) / max(vegsnowd_xy(i,j),veg_z0(i,j)) ! Eq. 3, LS 1998
           z_0(i,j) = sfrac * z0sn + (1.0 - sfrac) * veg_z0(i,j) ! Eq. 4, LS 1998
-          z_0_tmp = min(0.25*zU,z_0(i,j))
-          Utau(i,j) = Ua(i,j) * vkman / log(zU/z_0_tmp)
+          z_0_tmp = min(0.25*zH(i,j),z_0(i,j))
+          Utau(i,j) = Ua(i,j) * vkman / log(zH(i,j)/z_0_tmp)
           h_star(i,j) = z_0(i,j) * h_const / C_z
 
         else if (Ds_soft(i,j) <= epsilon(Ds_soft)) then
 
           ! Saltation will not occur.
           z_0(i,j) = z0sn
-          Utau(i,j) = Ua(i,j) * vkman / log(zU/z_0(i,j))
+          Utau(i,j) = Ua(i,j) * vkman / log(zH(i,j)/z_0(i,j))
           h_star(i,j) = z_0(i,j)
 
         else
@@ -1368,7 +1369,7 @@ module SNOWTRAN3D_interface
           ! wind speed to be 1.0 m/s, and the maximum wind speed to be
           ! 30 m/s at 10-m height.
           windtmp = max(1.0,Ua(i,j))
-          wind_max = 30.0 * log(zU/z0sn)/log(10.0/z0sn)
+          wind_max = 30.0 * log(zH(i,j)/z0sn)/log(10.0/z0sn)
           windtmp = min(windtmp,wind_max) 
 
           ! For u* over 0.6, use the relation z0 = 0.00734 u* - 0.0022,
@@ -1376,14 +1377,14 @@ module SNOWTRAN3D_interface
           ! for windspeeds greater than about 35 m/s this will have to be
           ! modified for the solution algorithm to converge (because the
           ! roughness length will start to be higher than the obs height!).
-          threshold = 0.6/vkman * log(zU/0.0022)
+          threshold = 0.6/vkman * log(zH(i,j)/0.0022)
           if (windtmp <= threshold) then
             threshold_flag = 1.0
           else
             threshold_flag = 2.0
           end if
 
-          call solve1(Utautmp,guess,windtmp, &
+          call solve1(Utautmp,guess,windtmp, zH(i,j),&
                       threshold_flag)
 
           if (Utautmp > Utau_t(i,j)) then
@@ -1400,7 +1401,7 @@ module SNOWTRAN3D_interface
             ! Because we have determined that we do not have saltation, make
             ! sure Utau does not exceed Utau_t.
             z_0(i,j) = z0sn
-            Utau(i,j) = Ua(i,j) * vkman / log(zU/z_0(i,j))
+            Utau(i,j) = Ua(i,j) * vkman / log(zH(i,j)/z_0(i,j))
             Utau(i,j) = min(Utau(i,j),Utau_t(i,j))
             h_star(i,j) = z_0(i,j) * h_const / C_z
 
@@ -1417,14 +1418,11 @@ module SNOWTRAN3D_interface
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    subroutine solve1(xnew,guess,windtmp,threshold_flag)
+    subroutine solve1(xnew,guess,windtmp,zU,threshold_flag)
 
     use CONSTANTS, only: &
       grav,              &! Acceleration due to gravity (m/s^2)
       vkman               ! Von Karman constant
-
-    use DRIVING, only: &
-      zU                  ! Wind speed measurement height (m)
 
     use CONSTANTS_SNOWTRAN3D, only: &
       C_z                 ! Coefficient 0.12 in Liston and Sturm (1998) eq. 5 p. 500
@@ -1434,6 +1432,7 @@ module SNOWTRAN3D_interface
     real, intent(in) :: &
       guess,             &! Initial guess for Utau (m/s)
       windtmp,           &! Wind speed (m/s)
+      zU,                &! Model input ("measurement") height (m)
       threshold_flag      ! Flag if u* is above threshold
 
     real, intent(inout) :: &  
@@ -1487,7 +1486,7 @@ module SNOWTRAN3D_interface
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    subroutine getsublim(z,RH,Ta,Utau_s,z_0,V_susp,V_salt,Utau_t_s,flag)
+    subroutine getsublim(z,RH,zRH,Ta,Utau_s,z_0,V_susp,V_salt,Utau_t_s,flag)
 
     use CONSTANTS, only: &
       hcon_air,          &! Thermal conductivity of air (W/m/K)
@@ -1501,14 +1500,12 @@ module SNOWTRAN3D_interface
       xM,                &! Molecular weight of water (kg/kmol)
       visc_air            ! Kinematic viscosity of air (m^2/s)
 
-    use DRIVING, only: &
-      zRH                 ! Relative humidity measurement height (m)
-
     implicit none
 
     real, intent(in) :: &
       z,                 &! Height (m)
       RH,                &! Relative humidity (%)
+      zRH,               &! Height of model input (m)
       Ta,                &! Air temperature (K)
       Utau_t_s,          &! Threshold friction velocity (m/s)
       Utau_s,            &! Friction velocity (m/s)
@@ -2418,8 +2415,8 @@ module SNOWTRAN3D_interface
 
     use DRIVING, only: &
       Ua,                &! Wind speed (m/s)
-      dt,                &! Timestep (s)
-      zU                  ! Wind speed measurement height (m)
+      zH,                &! Height of wind measurements (m)
+      dt                  ! Timestep (s)
 
     use PARAMETERS, only : &
       rhos_min,          &! Minimum snow density (kg/m^3)
@@ -2464,7 +2461,7 @@ module SNOWTRAN3D_interface
         if (isnan(dem(i,j))) goto 24 ! Exclude points outside of the domain
 
         ! Calculate the 2-m wind speed.
-        windspd_2m = Ua(i,j) * log(2.0/z0sn)/log(zU/z0sn)
+        windspd_2m = Ua(i,j) * log(2.0/z0sn)/log(zH(i,j)/z0sn)
 
         ! Initialize coefficients
         A1 = 0.0013

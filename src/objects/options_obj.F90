@@ -62,6 +62,7 @@ contains
         call lt_parameters_namelist(    namelist_file,    this, info_only=info_only, gen_nml=gen_nml)
         call mp_parameters_namelist(    namelist_file,    this, info_only=info_only, gen_nml=gen_nml)
         call adv_parameters_namelist(   namelist_file,   this, info_only=info_only, gen_nml=gen_nml)
+        call sm_parameters_namelist(    namelist_file,    this, info_only=info_only, gen_nml=gen_nml)
         call lsm_parameters_namelist(   namelist_file,   this, info_only=info_only, gen_nml=gen_nml)
         call cu_parameters_namelist(    namelist_file,    this, info_only=info_only, gen_nml=gen_nml)
         call rad_parameters_namelist(   namelist_file,   this, info_only=info_only, gen_nml=gen_nml)
@@ -788,7 +789,7 @@ contains
         logical :: interactive, debug, &
                    use_mp_options, use_lt_options, use_adv_options, use_lsm_options, &
                    use_cu_options, use_rad_options, use_pbl_options, use_sfc_options, &
-                   use_wind_options
+                   use_wind_options, use_sm_options
 
         character(len=MAXFILELENGTH) :: calendar, start_date, end_date
         character(len=MAXVARLENGTH)  :: version, comment, phys_suite
@@ -799,6 +800,7 @@ contains
                               use_mp_options,     &
                               use_lt_options,     &
                               use_lsm_options,    &
+                              use_sm_options,     &
                               use_adv_options,    &
                               use_cu_options,     &
                               use_rad_options,    &
@@ -825,6 +827,7 @@ contains
         call set_nml_var_default(use_adv_options, 'use_adv_options', print_info, gennml)
         call set_nml_var_default(use_cu_options, 'use_cu_options', print_info, gennml)
         call set_nml_var_default(use_lsm_options, 'use_lsm_options', print_info, gennml)
+        call set_nml_var_default(use_sm_options, 'use_sm_options', print_info, gennml)
         call set_nml_var_default(use_rad_options, 'use_rad_options', print_info, gennml)
         call set_nml_var_default(use_pbl_options, 'use_pbl_options', print_info, gennml)
         call set_nml_var_default(use_sfc_options, 'use_sfc_options', print_info, gennml)
@@ -853,6 +856,7 @@ contains
         call set_nml_var(options%use_lt_options, use_lt_options, 'use_lt_options')
         call set_nml_var(options%use_adv_options, use_adv_options, 'use_adv_options')
         call set_nml_var(options%use_lsm_options, use_lsm_options, 'use_lsm_options')
+        call set_nml_var(options%use_sm_options, use_sm_options, 'use_sm_options')
         call set_nml_var(options%use_cu_options, use_cu_options, 'use_cu_options')
         call set_nml_var(options%use_rad_options, use_rad_options, 'use_rad_options')
         call set_nml_var(options%use_pbl_options, use_pbl_options, 'use_pbl_options')
@@ -1582,8 +1586,9 @@ contains
         integer :: ice_category                      ! index that defines the ice category in LU_Categories
         integer :: water_category                    ! index that defines the water category in LU_Categories
         integer :: sf_urban_phys
+        integer :: num_soil_layers
         real    :: nmp_soiltstep
-        integer :: fsm_nsnow_max, nmp_dveg, nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_run, nmp_opt_frz, nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot, nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo, nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, noahmp_output
+        integer :: nmp_dveg, nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_run, nmp_opt_frz, nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot, nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo, nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, noahmp_output
 
         integer :: lake_category                    ! index that defines the lake category in (some) LU_Categories
 
@@ -1595,7 +1600,7 @@ contains
                                   nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot,           &
                                   nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo,          &
                                   nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, nmp_soiltstep,       &
-                                  sf_urban_phys, noahmp_output, fsm_nsnow_max !! MJ added
+                                  sf_urban_phys, noahmp_output, num_soil_layers !! MJ added
 
         print_info = .False.
         if (present(info_only)) print_info = info_only
@@ -1606,6 +1611,7 @@ contains
         call set_nml_var_default(LU_Categories, 'LU_Categories', print_info, gennml)
         call set_nml_var_default(update_interval_lsm, 'update_interval_lsm', print_info, gennml)
         call set_nml_var_default(monthly_vegfrac, 'monthly_vegfrac', print_info, gennml)
+        call set_nml_var_default(num_soil_layers, 'num_soil_layers', print_info, gennml)
 
         call set_nml_var_default(monthly_albedo, 'monthly_albedo', print_info, gennml)
         call set_nml_var_default(urban_category, 'urban_category', print_info, gennml)
@@ -1638,7 +1644,6 @@ contains
         call set_nml_var_default(nmp_opt_tdrn, 'nmp_opt_tdrn', print_info, gennml)
         call set_nml_var_default(nmp_soiltstep, 'nmp_soiltstep', print_info, gennml)
         call set_nml_var_default(noahmp_output, 'noahmp_output', print_info, gennml)
-        call set_nml_var_default(fsm_nsnow_max, 'fsm_nsnow_max', print_info, gennml)
 
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
@@ -1671,6 +1676,8 @@ contains
         call set_nml_var(lsm_options%LU_Categories, LU_Categories, 'LU_Categories')
         call set_nml_var(lsm_options%update_interval, update_interval_lsm, 'update_interval_lsm')
         call set_nml_var(lsm_options%monthly_vegfrac, monthly_vegfrac, 'monthly_vegfrac')
+        call set_nml_var(lsm_options%num_soil_layers, num_soil_layers, 'num_soil_layers')
+
         call set_nml_var(lsm_options%monthly_albedo, monthly_albedo, 'monthly_albedo')
         call set_nml_var(lsm_options%urban_category, urban_category, 'urban_category')
         call set_nml_var(lsm_options%ice_category, ice_category, 'ice_category')
@@ -1702,7 +1709,6 @@ contains
         call set_nml_var(lsm_options%nmp_opt_tdrn, nmp_opt_tdrn, 'nmp_opt_tdrn')
         call set_nml_var(lsm_options%nmp_soiltstep, nmp_soiltstep, 'nmp_soiltstep')
         call set_nml_var(lsm_options%noahmp_output, noahmp_output, 'noahmp_output')
-        call set_nml_var(lsm_options%fsm_nsnow_max, fsm_nsnow_max, 'fsm_nsnow_max')
 
         
         ! copy the data back into the global options data structure
@@ -1711,13 +1717,101 @@ contains
         ! Change z length of snow arrays here, since we need to change their size for the output arrays, which are set in
         ! output_options_namelist
         if (options%physics%snowmodel==kSM_FSM) then
-                kSNOW_GRID_Z = options%lsm%fsm_nsnow_max
+                kSNOW_GRID_Z = options%sm%fsm_nsnow_max
                 kSNOWSOIL_GRID_Z = kSNOW_GRID_Z+kSOIL_GRID_Z
         endif
 
     end subroutine lsm_parameters_namelist
 
+    subroutine sm_parameters_namelist(filename, options, info_only, gen_nml)
+        implicit none
+        character(len=*),   intent(in)   :: filename
+        type(options_t),    intent(inout):: options
+        logical, intent(in), optional  :: info_only, gen_nml
 
+        type(sm_options_type) :: sm_options
+        integer :: name_unit, rc
+        logical :: print_info, gennml
+
+        integer :: fsm_nsnow_max      ! maximum number of snow layers in the FSM2trans snow model
+        integer :: fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, fsm_hiswet, &
+                   fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst
+        real    :: fsm_ds_min, fsm_ds_surflay
+        logical :: fsm_hn_on, fsm_for_hn
+
+        ! define the namelist
+        namelist /sm_parameters/ fsm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, fsm_hiswet, &
+                                 fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst, &
+                                 fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn
+
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(fsm_nsnow_max, 'fsm_nsnow_max', print_info, gennml)
+        call set_nml_var_default(fsm_albedo, 'fsm_albedo', print_info, gennml)
+        call set_nml_var_default(fsm_canmod, 'fsm_canmod', print_info, gennml)
+        call set_nml_var_default(fsm_checks, 'fsm_checks', print_info, gennml)
+        call set_nml_var_default(fsm_condct, 'fsm_condct', print_info, gennml)
+        call set_nml_var_default(fsm_densty, 'fsm_densty', print_info, gennml)
+        call set_nml_var_default(fsm_exchng, 'fsm_exchng', print_info, gennml)
+        call set_nml_var_default(fsm_hiswet, 'fsm_hiswet', print_info, gennml)
+        call set_nml_var_default(fsm_hydrol, 'fsm_hydrol', print_info, gennml)
+        call set_nml_var_default(fsm_radsbg, 'fsm_radsbg', print_info, gennml)
+        call set_nml_var_default(fsm_snfrac, 'fsm_snfrac', print_info, gennml)
+        call set_nml_var_default(fsm_snolay, 'fsm_snolay', print_info, gennml)
+        call set_nml_var_default(fsm_snslid, 'fsm_snslid', print_info, gennml)
+        call set_nml_var_default(fsm_sntran, 'fsm_sntran', print_info, gennml)
+        call set_nml_var_default(fsm_zoffst, 'fsm_zoffst', print_info, gennml)
+        call set_nml_var_default(fsm_ds_min, 'fsm_ds_min', print_info, gennml)
+        call set_nml_var_default(fsm_ds_surflay, 'fsm_ds_surflay', print_info, gennml)
+        
+        call set_nml_var_default(fsm_hn_on, 'fsm_hn_on', print_info, gennml)
+        call set_nml_var_default(fsm_for_hn, 'fsm_for_hn', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        ! read the namelist options
+        if (options%general%use_sm_options) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=sm_parameters)
+            close(name_unit)
+            if (rc /= 0) then
+                if (STD_OUT_PE) write(*,*) "--------------------------------"
+                if (STD_OUT_PE) write(*,*) "Error reading 'sm_parameters' namelist, continuing with defaults"
+                if (STD_OUT_PE) write(*,*) "--------------------------------"
+            endif
+        endif
+
+        call set_nml_var(sm_options%fsm_nsnow_max, fsm_nsnow_max, 'fsm_nsnow_max')
+        call set_nml_var(sm_options%fsm_albedo, fsm_albedo, 'fsm_albedo')
+        call set_nml_var(sm_options%fsm_canmod, fsm_canmod, 'fsm_canmod')
+        call set_nml_var(sm_options%fsm_checks, fsm_checks, 'fsm_checks')
+        call set_nml_var(sm_options%fsm_condct, fsm_condct, 'fsm_condct')
+        call set_nml_var(sm_options%fsm_densty, fsm_densty, 'fsm_densty')
+        call set_nml_var(sm_options%fsm_exchng, fsm_exchng, 'fsm_exchng')
+        call set_nml_var(sm_options%fsm_hiswet, fsm_hiswet, 'fsm_hiswet')
+        call set_nml_var(sm_options%fsm_hydrol, fsm_hydrol, 'fsm_hydrol')
+        call set_nml_var(sm_options%fsm_radsbg, fsm_radsbg, 'fsm_radsbg')
+        call set_nml_var(sm_options%fsm_snfrac, fsm_snfrac, 'fsm_snfrac')
+        call set_nml_var(sm_options%fsm_snolay, fsm_snolay, 'fsm_snolay')
+        call set_nml_var(sm_options%fsm_snslid, fsm_snslid, 'fsm_snslid')
+        call set_nml_var(sm_options%fsm_sntran, fsm_sntran, 'fsm_sntran')
+        call set_nml_var(sm_options%fsm_zoffst, fsm_zoffst, 'fsm_zoffst')
+        call set_nml_var(sm_options%fsm_ds_min, fsm_ds_min, 'fsm_ds_min')
+        call set_nml_var(sm_options%fsm_ds_surflay, fsm_ds_surflay, 'fsm_ds_surflay')
+
+        call set_nml_var(sm_options%fsm_hn_on, fsm_hn_on, 'fsm_hn_on')
+        call set_nml_var(sm_options%fsm_for_hn, fsm_for_hn, 'fsm_for_hn')
+        
+        ! copy the data back into the global options data structure
+        options%sm = sm_options
+
+    end subroutine sm_parameters_namelist
     !> -------------------------------
     !! Initialize the radiation model options
     !!

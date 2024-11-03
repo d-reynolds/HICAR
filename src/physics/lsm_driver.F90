@@ -728,7 +728,7 @@ contains
         endif
         
         if (options%physics%landsurface==kLSM_NOAH .or. options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
-            num_soil_layers=4 ! to .nml?
+            num_soil_layers=options%lsm%num_soil_layers ! to .nml?
             call allocate_noah_data(num_soil_layers)
         endif
         ! initial guesses (not needed?)
@@ -1120,7 +1120,11 @@ contains
         if (options%physics%landsurface == 0) return
 
         if (last_model_time==-999) then
-            last_model_time = domain%model_time%seconds()-update_interval
+            if (update_interval<=dt) then
+                last_model_time = domain%model_time%seconds()-dt
+            else
+                last_model_time = domain%model_time%seconds()-update_interval
+            endif
         endif
 
         if ((domain%model_time%seconds() - last_model_time) >= update_interval) then

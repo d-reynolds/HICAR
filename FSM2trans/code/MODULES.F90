@@ -169,10 +169,7 @@ integer :: &
 real :: &
   hour                ! Hour of day
 real :: &
-  dt,                &! Timestep (s)
-  zT,                &! Temperature measurement height (m)
-  zU,                &! Wind speed measurement height (m)
-  zRH                 ! Relative humidity measurement height (m)
+  dt                  ! Timestep (s)
 real, allocatable :: &
   LW(:,:),           &! Incoming longwave radiation (W/m^2)
   Ps(:,:),           &! Surface pressure (Pa)
@@ -186,7 +183,9 @@ real, allocatable :: &
   Ta(:,:),           &! Air temperature (K)
   Tv(:,:),           &! Time-varying transmissivity for direct SWR (-)
   Ua(:,:),           &! Wind speed (m/s)
-  Udir(:,:)           ! Wind direction (degrees, clockwise from N)
+  Udir(:,:),         &! Wind direction (degrees, clockwise from N)
+  zH(:,:)             ! Model input ("measurement") height (m)
+
 end module DRIVING
 
 !-----------------------------------------------------------------------

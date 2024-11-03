@@ -4,17 +4,15 @@
 subroutine SETUP_interface()
 
 !MJ added-----------------------------------------------------------------
-use FSM_interface, only: Nx_HICAR,Ny_HICAR,NNsmax_HICAR,lat_HICAR,lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,shd_HICAR
+use FSM_interface, only: Nx_HICAR,Ny_HICAR,zH_HICAR,NNsmax_HICAR,lat_HICAR,lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,shd_HICAR, &
+                         NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,&
+                         NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS,LHN_ON,LFOR_HN, DDs_min, DDs_surflay, NNsoil_HICAR
 !MJ added-----------------------------------------------------------------
 
 use MODCONF, only: CANMOD,DENSTY,ALBEDO,CANMOD,CONDCT,DENSTY,&
   EXCHNG,HYDROL,SNFRAC,RADSBG,ZOFFST,SNTRAN,SNSLID,SNOLAY,HISWET,CHECKS,HN_ON,FOR_HN
   
-use MODOUTPUT, only: LIST_DIAG_RESULTS, LIST_STATE_RESULTS
-
 use CONSTANTS
-
-use DIAGNOSTICS, only : Nave
 
 use DRIVING, only: &
   dt,                &! Timestep (s)
@@ -31,9 +29,7 @@ use DRIVING, only: &
   Tv,                &! Time-varying canopy transmissivity for dSWR (-)
   Ua,                &! Wind speed (m/s)
   Udir,              &! Wind direction (degrees, clockwise from N)
-  zT,                &! Temperature measurement height (m)
-  zU,                &! Wind speed measurement height (m)
-  zRH                 ! Relative humidity measurement height (m)
+  zH                  ! Model input ("measurement") height (m)
   
 use GRID
 
@@ -55,15 +51,8 @@ integer :: &
   iresults_count
   
 integer :: &
-  NNsmax, NNsoil, NNx, NNy, NNt, nml_unit
-  
-integer :: &
-  NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,&
-  NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS
-  
-real :: &
-  DDs_min,DDs_surflay,zzT,zzU,zzRH
-
+  NNsoil, nml_unit
+    
 real :: &
   hcon_min            ! Thermal conductivity of soil minerals (W/m/K)
   
@@ -73,99 +62,51 @@ real, allocatable :: &
 
 character(len=200) :: nlst_file
 
-character(len=4), dimension(36) :: CLIST_DIAG_RESULTS
-
-character(len=4), dimension(12) :: CLIST_STATE_RESULTS
-
-logical :: LHN_ON  ! activate the HN model
-
-logical :: LFOR_HN
-
 logical :: lexist
 
 !-1- !!!!!!!!!!!!!!!!!!!!  READ THE NAMELIST  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-namelist  /nam_grid/    NNx,NNy,NNsmax,NNsoil,DDs_min,DDs_surflay
-namelist  /nam_driving/ NNt,zzT,zzU,zzRH
-namelist  /nam_modconf/ NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,&
-                        NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS,LHN_ON,LFOR_HN
-namelist /nam_results/ CLIST_DIAG_RESULTS, CLIST_STATE_RESULTS
 
 ! get namelist path from first command argument.
-call getarg(1, nlst_file)
-INQUIRE (FILE=nlst_file, EXIST=lexist)
-if (lexist) then
-  open(newunit=nml_unit, file = nlst_file)
-else
-  print*, '  namelist file: ', trim(nlst_file), ' does not exist'
-  call exit(1)
-endif
 
 ! Initialization of variables
-NNsmax = 3
-NNsoil = 4 ! Attention, 5 soil layers in JIM ... 
-NNx = 1
-NNy = 1
-DDs_min = 0.02 ! Minimum possible snow layer thickness (m)
-DDs_surflay = 0.5 ! Maximum thickness of surface fine snow layering (m)
-read(nml_unit, nam_grid)
-Nsoil = NNsoil
+Nsoil = NNsoil_HICAR
+Ds_min = DDs_min
+Ds_surflay = DDs_surflay
 
 !!!!!!!!----> MJ: we receive it once in intializing for each image
 Nx = Nx_HICAR !NNx
 Ny = Ny_HICAR !NNy
 Nsmax = NNsmax_HICAR
 
-Ds_min = DDs_min
-Ds_surflay = DDs_surflay
-
+! Height of first model level, will be used for surface scaling laws
+allocate(zH(Nx,Ny))
 allocate(Dzsnow(Nsmax))
 allocate(Dzsoil(Nsoil))
+
+zH = zH_HICAR
+
+
 if (Nsmax == 3) then
   Dzsnow = (/0.1, 0.2, 0.4/)
 else if (Nsmax == 6) then
   Dzsnow = (/0.05, 0.05, 0.1, 0.1, 0.2, 0.2/)
 else
-  print*, "Nsmax /= 3 or 6, Please specify your values for Dzsnow" 
+  print*, "Nsmax /= 3 or 6, The FSM2trans snow model currently only supports 3 or 6 snow layers" 
   call exit()
 endif
 if (Nsoil == 4) then
   Dzsoil = (/0.1, 0.2, 0.4, 0.8/) ! Attention, 0.05, 0.1, 0.1, 0.5, 1.25 in JIM...
 else
-  print*, "Nsoil /= 4, Please specify your values for Dzsoil" 
+  print*, "Nsoil /= 4, The FSM2trans snow model currently only supports 4 soil layers" 
   call exit()
 endif
 
-! Driving data
-NNt = 1
-zzT = 10
-zzU = 10
-zzRH = 10
-read(nml_unit,nam_driving)
-Nt = NNt
-zT = zzT
-zU = zzU
-zRH = zzRH
+Nt = 1
 dt = 1.0 / Nt
+
 
 ! Model configuration
 ! -1 for mandatory NLST arguments.
-NALBEDO = -1
-NCANMOD = -1
-NCONDCT = -1
-NDENSTY = -1
-NEXCHNG = -1
-NHYDROL = -1
-NSNFRAC = -1
-NRADSBG = -1
-NZOFFST = -1
-NSNTRAN = -1
-NSNSLID = -1
-NSNOLAY = -1
-NHISWET = -1
-NCHECKS = -1
-LHN_ON = .FALSE.
-LFOR_HN = .FALSE.
-read(nml_unit, nam_modconf)
 ALBEDO = NALBEDO
 CANMOD = NCANMOD
 CONDCT = NCONDCT
@@ -185,23 +126,10 @@ FOR_HN = LFOR_HN
 if (ALBEDO==-1 .or. CANMOD==-1 .or. CONDCT==-1 .or. DENSTY==-1 .or. EXCHNG==-1 &
     .or. HYDROL==-1 .or. SNFRAC==-1 .or. RADSBG==-1 .or. ZOFFST==-1 &
     .or. SNTRAN==-1 .or. SNSLID==-1 .or. SNOLAY==-1 .or. HISWET==-1 .or. CHECKS ==-1) then
-  print*, 'model configuration error:\n please specify all the fields of MODCONF in the namelist (&nam_modconf)'
+  print*, 'model configuration error:\n please specify all of the FSM2trans model configuration variables in the namelist'
   call exit(1)
 endif
 
-! List of output variables
-CLIST_DIAG_RESULTS(:)  = '    ' ! BC 13-char length
-CLIST_STATE_RESULTS(:) = '    ' ! BC 13-char length
-read(nml_unit, nam_results)
-iresults_count = count(CLIST_DIAG_RESULTS /= '             ') ! BC 13-char length
-LIST_DIAG_RESULTS(1:iresults_count) = CLIST_DIAG_RESULTS(1:iresults_count)
-iresults_count = count(CLIST_STATE_RESULTS /= '             ') ! BC 13-char length
-LIST_STATE_RESULTS(1:iresults_count) = CLIST_STATE_RESULTS(1:iresults_count)
-
-! Outputs
-Nave = 1 !24 Set to one, 24h averages created in OSHD Matlab wrapper
-
-close(nml_unit)
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 !-2- !!!!!!!!!!!!!!!!!!!!    OPEN THE FILES   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -379,7 +307,6 @@ do j = 1, Ny
 end do
 
 ! Convert time scales from hours to seconds
-dt = 3600*dt
 tcnc = 3600*tcnc
 tcnm = 3600*tcnm
 tcld = 3600*tcld

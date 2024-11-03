@@ -88,7 +88,7 @@ do tt = 1, Nt
   call THERMAL(csoil,Ds1,gs1,ks1,ksnow,ksoil,Ts1,Tveg0)
 
   do n = 1, Nitr
-    call SFEXCH(gs1,KH,KHa,KHg,KHv,KWg,KWv,Usc)
+    call SFEXCH_interface(gs1,KH,KHa,KHg,KHv,KWg,KWv,Usc)
 
     if (CANMOD == 1) then
       call EBALFOR(Ds1,KHa,KHg,KHv,KWg,KWv,ks1,SWsrf,SWveg,Ts1,Tveg0, &

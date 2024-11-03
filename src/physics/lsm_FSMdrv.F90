@@ -14,7 +14,10 @@ module module_sf_FSMdrv
     use domain_interface,    only : domain_t
     use io_routines,         only : io_write, io_read, io_add_attribute
     use FSM_interface , only:  FSM_SETUP,FSM_DRIVE,FSM_PHYSICS, FSM_SNOWSLIDE, FSM_SNOWSLIDE_END, FSM_CUMULATE_SD, FSM_SNOWTRAN_SETUP, FSM_SNOWTRAN_SALT_START, FSM_SNOWTRAN_SALT, FSM_SNOWTRAN_SALT_END, FSM_SNOWTRAN_SUSP_START, FSM_SNOWTRAN_SUSP, FSM_SNOWTRAN_SUSP_END, FSM_SNOWTRAN_ACCUM
-    use FSM_interface , only:  Nx_HICAR, Ny_HICAR,NNsmax_HICAR,lat_HICAR,lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,shd_HICAR
+    use FSM_interface , only:  Nx_HICAR, Ny_HICAR, zH_HICAR, NNsmax_HICAR, NNsoil_HICAR, lat_HICAR, &
+                               lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,shd_HICAR, LHN_ON, LFOR_HN, &
+                               NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,&
+                               NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS, DDs_min, DDs_surflay
     use FSM_interface, only: &
       year,          &
       month,         &
@@ -121,6 +124,7 @@ contains
         last_snowslide = 4000
 
         !!
+        allocate(zH_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(lat_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(lon_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(terrain_HICAR(Nx_HICAR,Ny_HICAR))
@@ -128,6 +132,7 @@ contains
         allocate(shd_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(z0_bare(domain%grid%its:domain%grid%ite,domain%grid%jts:domain%grid%jte))
 
+        zH_HICAR=TRANSPOSE(domain%dz_mass%data_3d(its:ite,domain%grid%kms,jts:jte))
         lat_HICAR=TRANSPOSE(domain%latitude%data_2d(its:ite,jts:jte))
         lon_HICAR=TRANSPOSE(domain%longitude%data_2d(its:ite,jts:jte))
         terrain_HICAR=TRANSPOSE(domain%terrain%data_2d(its:ite,jts:jte))
@@ -144,7 +149,29 @@ contains
         
         z0_bare = 0.01
         dx_HICAR=domain%dx
-        NNsmax_HICAR=options%lsm%fsm_nsnow_max
+        NNsoil_HICAR=options%lsm%num_soil_layers
+        NNsmax_HICAR=options%sm%fsm_nsnow_max
+        DDs_min=options%sm%fsm_ds_min
+        DDs_surflay=options%sm%fsm_ds_surflay
+
+        !copy over namelist options to FSM2trans
+        NALBEDO=options%sm%fsm_albedo
+        NCANMOD=options%sm%fsm_canmod
+        NCONDCT=options%sm%fsm_condct
+        NDENSTY=options%sm%fsm_densty
+        NEXCHNG=options%sm%fsm_exchng
+        NHYDROL=options%sm%fsm_hydrol
+        NSNFRAC=options%sm%fsm_snfrac
+        NRADSBG=options%sm%fsm_radsbg
+        NZOFFST=options%sm%fsm_zoffst
+        NSNTRAN=options%sm%fsm_sntran
+        NSNSLID=options%sm%fsm_snslid
+        NSNOLAY=options%sm%fsm_snolay
+        NHISWET=options%sm%fsm_hiswet
+        NCHECKS=options%sm%fsm_checks
+
+        LHN_ON=options%sm%fsm_hn_on
+        LFOR_HN=options%sm%fsm_for_hn
 
         !!
         allocate(Esrf_(Nx_HICAR,Ny_HICAR)); Esrf_=0.
@@ -171,6 +198,7 @@ contains
         allocate(Roff_sum(Nx_HICAR,Ny_HICAR)); Roff_sum=0.
         allocate(meltflux_out_sum(Nx_HICAR,Ny_HICAR)); meltflux_out_sum=0.   
         !!
+
         call FSM_SETUP()
 
         if (SNTRAN+SNSLID > 0) then
@@ -422,7 +450,6 @@ contains
 
         !The End.
         call FSM_CUMULATE_SD()
-        
         !! giving feedback to HICAR -- should only be done for snow-covered cells, or cells which were just snowed on
         do j=j_s,j_e
             do i=i_s,i_e
@@ -441,7 +468,6 @@ contains
                     else
                         domain%albedo%data_3d(hi, 1, hj) = albs(j,i)
                     endif
-
                     !
                     domain%skin_temperature%data_2d(hi,hj)=Tsrf(j,i)
                     domain%snow_height%data_2d(hi,hj)=snowdepth_(j,i)
