@@ -3057,8 +3057,8 @@ contains
                 ! applying forcing to the edges has already been handeled when updating dqdt using the relaxation filter
                 if (.not.(var_to_update%force_boundaries)) then
                     do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
-                        forcing_hi%data_3d(i,k,j) = forcing_hi%data_3d(i,k,j) + (forcing_hi%dqdt_3d(i,k,j) * dt)
-                                var_to_update%data_3d(i,k,j) = var_to_update%data_3d(i,k,j) + &
+                        forcing_hi%data_3d(i,k,j)    = forcing_hi%data_3d(i,k,j) + (forcing_hi%dqdt_3d(i,k,j) * dt)
+                        var_to_update%data_3d(i,k,j) = var_to_update%data_3d(i,k,j) + &
                                                         (var_to_update%dqdt_3d(i,k,j) * dt)
                     enddo
                 else if (any(this%relax_filter_3d > 0.0)) then

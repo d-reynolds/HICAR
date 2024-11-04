@@ -2076,7 +2076,7 @@ contains
             if (.not.first_file_exists .and. STD_OUT_PE) write(*,*) "The first forcing file does not exist = ", trim(forcing_files(1))
             if (.not.last_file_exists .and. STD_OUT_PE) write(*,*) "The last forcing file does not exist = ", trim(forcing_files(nfiles))
 
-            stop "At least the first or last forcing file does not exist. Only the first and last file are checked, please check the rest."
+            ! stop "At least the first or last forcing file does not exist. Only the first and last file are checked, please check the rest."
         endif
 
 
