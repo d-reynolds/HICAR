@@ -377,9 +377,8 @@ contains
         n_3d = 1
 
         do i = 1,size(this%rst_var_indices)
-            var = get_metadata(this%rst_var_indices(i))
+            var = this%outputer%variables(this%rst_var_indices(i))
             name = var%name
-
             call check_ncdf( nf90_inq_varid(ncid, name, var_id), " Getting var ID for "//trim(name))
             call check_ncdf( nf90_var_par_access(ncid, var_id, nf90_collective))
             

@@ -215,7 +215,7 @@ contains
             write(*,*) 'time_step determining i:      ',max_i
             write(*,*) 'time_step determining j:      ',max_j
             write(*,*) 'time_step determining k:      ',max_k
-            if (present_dt_seconds<future_dt_seconds) then
+            if (future_dt_seconds<present_dt_seconds) then
                 write(*,*) 'time_step determining w_grid: ',domain%w%dqdt_3d(max_i,max_k,max_j)
                 write(*,*) 'time_step determining u: ',domain%u%dqdt_3d(max_i,max_k,max_j)
                 write(*,*) 'time_step determining v: ',domain%v%dqdt_3d(max_i,max_k,max_j)
@@ -250,13 +250,13 @@ contains
     !! @param next_output   Next time to write an output file (in "model_time")
     !!
     !!------------------------------------------------------------
-    subroutine step(domain, forcing, end_time, options, mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer)
+    subroutine step(domain, forcing, end_time, new_input, options, mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer)
         implicit none
         type(domain_t),     intent(inout)   :: domain
         type(boundary_t),   intent(inout)   :: forcing
         type(Time_type),    intent(in)      :: end_time
         type(options_t),    intent(in)      :: options
-
+        logical,            intent(in)      :: new_input
         type(timer_t),      intent(inout)   :: mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer
 
         real            :: last_print_time
@@ -271,8 +271,8 @@ contains
         
         time_step_size = end_time - domain%model_time
         
-        ! Initialize to just over update_dt to force an update on first loop
-        if (domain%model_time==options%general%start_time) last_wind_update = options%wind%update_dt%seconds() + 1
+        ! Initialize to just over update_dt to force an update on first loop after input ingestion
+        if (new_input) last_wind_update = options%wind%update_dt%seconds() + 1
 
         last_loop = .False.
         ! now just loop over internal timesteps computing all physics in order (operator splitting...)
@@ -280,7 +280,6 @@ contains
             
             !Determine dt
             if (last_wind_update >= options%wind%update_dt%seconds()) then
-
                 call domain%diagnostic_update(options)
 
                 call wind_timer%start()

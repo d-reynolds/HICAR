@@ -60,7 +60,10 @@ module FSM_interface
     !!
     public :: FSM_SETUP,FSM_DRIVE,FSM_PHYSICS,FSM_SNOWSLIDE, FSM_SNOWSLIDE_END, FSM_CUMULATE_SD, FSM_SNOWTRAN_SETUP, FSM_SNOWTRAN_SALT_START, FSM_SNOWTRAN_SALT, FSM_SNOWTRAN_SALT_END, FSM_SNOWTRAN_SUSP_START, FSM_SNOWTRAN_SUSP, FSM_SNOWTRAN_SUSP_END, FSM_SNOWTRAN_ACCUM
     
-    public :: Nx_HICAR, Ny_HICAR,NNsmax_HICAR,lat_HICAR,lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,shd_HICAR, SNTRAN, SNSLID
+    public :: Nx_HICAR, Ny_HICAR, zH_HICAR, NNsmax_HICAR, NNsoil_HICAR, lat_HICAR,lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,&
+              shd_HICAR, SNTRAN, SNSLID, LHN_ON, LFOR_HN, &
+              NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,&
+              NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS, DDs_min,DDs_surflay
     !!
     public ::            &
       year,              &
@@ -113,9 +116,16 @@ module FSM_interface
 !      Qsalt_v
       
     
-    integer :: Nx_HICAR, Ny_HICAR, NNsmax_HICAR    
+    integer :: Nx_HICAR, Ny_HICAR, NNsmax_HICAR, NNsoil_HICAR
+
+    integer :: &
+        NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,&
+        NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS
+        
+    logical :: LHN_ON, LFOR_HN
 
     real, allocatable:: &
+      zH_HICAR(:,:),    & ! height of first model level in HICAR
       lat_HICAR(:,:),   & ! lat from HICAR based WGS84
       lon_HICAR(:,:),   & ! lon from HICAR based WGS84
       slope_HICAR(:,:), & ! terrain slope
@@ -123,8 +133,10 @@ module FSM_interface
       terrain_HICAR(:,:)
  
     real :: & !!!!!!!!---->
+      DDs_min,DDs_surflay, & ! minimum snow layer thickness and thickness of surface layer
       dx_HICAR            !   The grid spacing of the high-resolution data in HICAR
- 
+      
+    
  contains
     
     !!!!!!!!!

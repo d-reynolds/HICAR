@@ -1805,7 +1805,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
 	        TSLB(I,NS,J) = MIN(TSLB(I,NS,J),263.15) ! set glacier temp to at most -10C
               END DO
 	        !TMN(I,J) = MIN(TMN(I,J),263.15)         ! set deep temp to at most -10C
-		SNOW(I,J) = MAX(SNOW(I,J), 10.0)        ! set SWE to at least 10mm
+		      !SNOW(I,J) = MAX(SNOW(I,J), 10.0)        ! set SWE to at least 10mm
                 SNOWH(I,J)=SNOW(I,J)*0.01               ! SNOW in mm and SNOWH in m
 	    ELSE
 

@@ -162,8 +162,6 @@ module options_types
         character (len=MAXVARLENGTH) :: LU_Categories   ! land use categories to read from VEGPARM.tbl (e.g. "USGS")
         real :: max_swe                                 ! maximum value for Snow water equivalent (excess above this is removed)
         real :: snow_den_const                          ! variable for converting snow height into SWE or visa versa when input data is incomplete 
-        integer :: fsm_nsnow_max                        ! maximum number of snow layers for FSM2 to use. Set here, since it will
-                                                        ! change the size of arrays elsewhere in domain_obj        
         real :: update_interval                         ! minimum time to let pass before recomputing LSM ~300s (it may be longer)  [s]
         ! the following categories will be set by default if an known LU_Category is used
         integer :: urban_category                       ! LU index value that equals "urban"
@@ -175,6 +173,7 @@ module options_types
         logical :: monthly_vegfrac
         logical :: monthly_albedo
         integer :: sf_urban_phys
+        integer :: num_soil_layers
         
         integer :: nmp_dveg
         integer :: nmp_opt_crs
@@ -201,6 +200,32 @@ module options_types
         real    :: nmp_soiltstep
 
     end type lsm_options_type
+
+    ! ------------------------------------------------
+    ! store Snow Model options
+    ! ------------------------------------------------
+    type sm_options_type
+        integer :: fsm_nsnow_max                        ! maximum number of snow layers for FSM2 to use. Set here, since it will
+                                                        ! change the size of arrays elsewhere in domain_obj 
+        real    :: fsm_ds_min, fsm_ds_surflay
+        integer :: fsm_albedo
+        integer :: fsm_canmod
+        integer :: fsm_checks
+        integer :: fsm_condct
+        integer :: fsm_densty
+        integer :: fsm_exchng
+        integer :: fsm_hiswet
+        integer :: fsm_hydrol
+        integer :: fsm_radsbg
+        integer :: fsm_snfrac
+        integer :: fsm_snolay
+        integer :: fsm_snslid
+        integer :: fsm_sntran
+        integer :: fsm_zoffst
+        logical :: fsm_hn_on
+        logical :: fsm_for_hn
+
+    end type sm_options_type
 
     ! ------------------------------------------------
     ! store Radiation options
@@ -274,6 +299,7 @@ module options_types
         logical :: use_lt_options
         logical :: use_adv_options
         logical :: use_lsm_options
+        logical :: use_sm_options
         logical :: use_rad_options
         logical :: use_pbl_options
         logical :: use_sfc_options

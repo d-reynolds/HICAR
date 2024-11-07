@@ -90,15 +90,6 @@ function install_netcdf_c {
     make -j 8
     make install
 }
-function install_petsc {
-    wget --no-check-certificate -q https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.21.2.tar.gz
-    tar -xzf petsc-3.21.2.tar.gz
-    cd petsc-3.21.2/
-    ./configure --prefix=$INSTALLDIR #&> config.log
-    make -j 4
-    make install
-}
-
 
 function install_netcdf_fortran {
     cd $WORKDIR
@@ -119,6 +110,17 @@ function install_netcdf_fortran {
     make install
 }
 
+function install_petsc {
+    cd $WORKDIR
+    git clone -b release https://gitlab.com/petsc/petsc.git petsc
+    cd petsc
+    git pull # obtain new release fixes (since a prior clone or pull)
+    ./configure --prefix=$INSTALLDIR #&> config.log
+    make -j 8
+    make check
+    make install
+}
+
 
 function hicar_dependencies {
     echo hicar_dependencies
@@ -126,8 +128,9 @@ function hicar_dependencies {
     sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
-    sudo apt-get install petsc-dev
+    # sudo apt-get install petsc-dev
 
+    install_petsc
     install_zlib
     install_hdf5
     install_PnetCDF

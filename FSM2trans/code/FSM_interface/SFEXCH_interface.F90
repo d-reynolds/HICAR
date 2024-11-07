@@ -1,7 +1,7 @@
 !-----------------------------------------------------------------------
 ! Surface exchange coefficients
 !-----------------------------------------------------------------------
-subroutine SFEXCH(gs1,KH,KHa,KHg,KHv,KWg,KWv,Usc)
+subroutine SFEXCH_interface(gs1,KH,KHa,KHg,KHv,KWg,KWv,Usc)
 
 use MODCONF, only: CANMOD, ZOFFST, EXCHNG
 
@@ -14,8 +14,7 @@ use DRIVING, only: &
   Ps,                &! Surface pressure (Pa)
   Qa,                &! Specific humidity (kg/kg)
   Ua,                &! Wind speed (m/s)
-  zT,                &! Temperature and humidity measurement height (m)
-  zU                  ! Wind measurement height (m)
+  zH                  ! Model input ("measurement") height (m)
 
 use GRID, only: &
   Nx,Ny               ! Grid dimensions
@@ -119,12 +118,12 @@ do i = 1, Nx
 
   if (ZOFFST == 0) then
     ! Heights specified above ground
-    zU1 = zU
-    zT1 = zT
+    zU1 = zH(i,j)
+    zT1 = zH(i,j)
   else ! ZOFFST == 1
     ! Heights specified above canopy top
-    zU1 = zU + hcan(i,j)
-    zT1 = zT + hcan(i,j)
+    zU1 = zH(i,j) + hcan(i,j)
+    zT1 = zH(i,j) + hcan(i,j)
   endif
 
   ! Roughness lengths and friction velocity
@@ -133,9 +132,9 @@ do i = 1, Nx
     z0g = z0loc(i,j)
     if (fsnow(i,j) == 0) z0g = z0sf(i,j)
     z0h = 0.1 * z0g 
-    Uso = Ua(i,j)*log(zsub/z0g)/log(zU/z0g)
-    ustar = vkman*Ua(i,j)/log(zU/z0g) 
-    rgo = log(zT/z0h)/(vkman*ustar) 
+    Uso = Ua(i,j)*log(zsub/z0g)/log(zH(i,j)/z0g)
+    ustar = vkman*Ua(i,j)/log(zH(i,j)/z0g) 
+    rgo = log(zH(i,j)/z0h)/(vkman*ustar) 
 
     ! Forest
     if (fveg(i,j) > epsilon(fveg(i,j))) then
@@ -232,4 +231,4 @@ do i = 1, Nx
 end do
 end do
 
-end subroutine SFEXCH
+end subroutine SFEXCH_interface

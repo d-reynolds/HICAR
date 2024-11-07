@@ -53,7 +53,7 @@ program icar
     
     integer :: i, ierr, exec_team
     real :: t_val, t_val2, t_val3
-    logical :: init_flag, io_loop, info_only, gen_nml, only_namelist_check
+    logical :: init_flag, io_loop, new_input, info_only, gen_nml, only_namelist_check
     character(len=MAXFILELENGTH) :: namelist_file
 
 
@@ -141,7 +141,7 @@ program icar
                 if (STD_OUT_PE) write(*,*) " ----------------------------------------------------------------------"
                 if (STD_OUT_PE) write(*,*) "Updating Boundary conditions"
                 next_input = next_input + options%forcing%input_dt
-
+                new_input = .True.
                 call input_timer%start()
 
                 call ioclient%receive(boundary)
@@ -173,7 +173,7 @@ program icar
             ! this is the meat of the model physics, run all the physics for the current time step looping over internal timesteps
             if (.not.(options%wind%wind_only)) then
                 call physics_timer%start()
-                call step(domain, boundary, step_end(next_input, next_output, options%general%end_time), options,           &
+                call step(domain, boundary, step_end(next_input, next_output, options%general%end_time), new_input, options,           &
                                 mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, &
                                 send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer)
                 call physics_timer%stop()
@@ -181,7 +181,7 @@ program icar
                 call domain%apply_forcing(boundary, options, real(options%output%output_dt%seconds()))
                 domain%model_time = next_output
             endif
-
+            new_input = .False.
             ! -----------------------------------------------------
             !  Write output data if it is time
             ! -----------------------------------------------------
@@ -335,7 +335,6 @@ program icar
     
     CALL MPI_Finalize()
 
-    call exit
 contains
 
     function timer_mean(timer,comms) result(mean_t)

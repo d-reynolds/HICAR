@@ -691,6 +691,11 @@ contains
                 write(nml_unit,*) "!   Optionally specified land surface model parameters (mostly for NoahMP)"
                 write(nml_unit,*) "! ---------------------------------------------------------------------------------------------------"
                 write(nml_unit,*) "&lsm_parameters"
+            case ("SM_Parameters")
+                write(nml_unit,*) "! ---------------------------------------------------------------------------------------------------"
+                write(nml_unit,*) "!   Optionally specified snow model parameters (mostly for FSM2trans, at the moment)"
+                write(nml_unit,*) "! ---------------------------------------------------------------------------------------------------"
+                write(nml_unit,*) "&sm_parameters"
             case ("CU_Parameters")
                 write(nml_unit,*) "! ---------------------------------------------------------------------------------------------------"
                 write(nml_unit,*) "!   Optionally specified convection parameters"
@@ -839,6 +844,10 @@ contains
                 group = "General"
             case ("use_lsm_options")
                 description = "Read the LSM namelist section to set options relevant for the LSM model (T/F)"
+                default = ".True."
+                group = "General"
+            case ("use_sm_options")
+                description = "Read the SM namelist section to set options relevant for the snow model (T/F)"
                 default = ".True."
                 group = "General"
             case ("use_cu_options")
@@ -2089,6 +2098,12 @@ contains
                 description = "Use monthly albedo data (T/F)"
                 default = ".False."
                 group = "LSM_Parameters"
+            case ("num_soil_layers")
+                description = "Number of soil layers in the LSM"
+                default = "4"
+                min = 1
+                max = 20
+                group = "LSM_Parameters"
             case ("urban_category")
                 description = "Land use category corresponding to urban classification."//achar(10)//BLNK_CHR_N// &
                     "Setting to -1 uses default value for the given land use classification given in 'LU_Categories'. "
@@ -2336,12 +2351,144 @@ contains
                 units = "kg/m^3"
                 default = "100."
                 group = "LSM_Parameters"
+            ! --------------------------------------
+            ! --------------------------------------
+            ! Snow Model parameters namelist variables
+            ! --------------------------------------
+            ! --------------------------------------
             case ("fsm_nsnow_max")
                 description = "Maximum number of snow layers to allow for a FSM simulation"
                 min = 4
                 max = 20
                 default = "6"
-                group = "LSM_Parameters"
+                group = "SM_Parameters"
+            case ("fsm_ds_min")
+                description = "Minimum possible snow layer thickness to allow for a FSM simulation"
+                min = 0
+                max = 1
+                units = "m"
+                default = "0.02"
+                group = "SM_Parameters"
+            case ("fsm_ds_surflay")
+                description = "Maximum thickness of surface fine snow layering in an FSM simulation"
+                min = 0
+                max = 1
+                units = "m"
+                default = "0.5"
+                group = "SM_Parameters"
+            case ("fsm_albedo")
+                description = "Albedo scheme to use in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(0 = diagnostic, 1 = prognostic, 2 = prognostic, tuned for Switzerland)"
+                allocate(values(3))
+                values = [0, 1, 2]
+                default = "1"
+                group = "SM_Parameters"
+            case ("fsm_canmod")
+                description = "Canopy scheme to use in an FSM simulation"!//achar(10)//BLNK_CHR_N// &
+                    !"(1 = random, 2 = maximum-random, 3 = maximum, 4 = exponential, 5 = exponential-random)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
+                group = "SM_Parameters"
+            case ("fsm_condct")
+                description = "Conductivity scheme to use in an FSM simulation"!//achar(10)//BLNK_CHR_N// &
+                    !"(1 = random, 2 = maximum-random, 3 = maximum, 4 = exponential, 5 = exponential-random)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "1"
+                group = "SM_Parameters"
+            case ("fsm_densty")
+                description = "Snow compaction scheme to use in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                   "0 = Fixed snow density,"//achar(10)//BLNK_CHR_N// &
+                   "1 = Snow compaction with age,"//achar(10)//BLNK_CHR_N// &
+                   "2 = Snow compaction by overburden,"//achar(10)//BLNK_CHR_N// &
+                   "3 = Snow compaction by overburden, dependent on liquid water content (Crocus B92))"
+                allocate(values(4))
+                values = [0, 1, 2, 3]
+                default = "3"
+                group = "SM_Parameters"
+            case ("fsm_exchng")
+                description = "Surface exchange scheme to use in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                   "(0 = No stability adjustment, 1 = Stability adjustment, 2 = ???)"
+                allocate(values(3))
+                values = [0, 1, 2]
+                default = "1"
+                group = "SM_Parameters"
+            case ("fsm_hydrol")
+                description = "Snow hydraulic scheme to use in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                   "(0 = free-draining snow, 1 = bucket storage, 2 = density-dependent bucket storage"
+                allocate(values(3))
+                values = [0, 1, 2]
+                default = "2"
+                group = "SM_Parameters"
+            case ("fsm_snfrac")
+                description = "Snow fractional area scheme to use in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(0 = ????, 1 = HelbigHS, 2 = HelbigHS0, 3 = Point model, 4 = Original FSM)"
+                allocate(values(5))
+                values = [0, 1, 2, 3, 4]
+                default = "4"
+                group = "SM_Parameters"
+            case ("fsm_radsbg")
+                description = "Radiation subgrid parameterization to use in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(0 = no subgrid parameterization, 1 = subgrid parameterization)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
+                group = "SM_Parameters"
+            case ("fsm_zoffst")
+                description = "Height of input provided to an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(0 = height above terrain, 1 = height above terrain + canopy)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
+                group = "SM_Parameters"
+            case ("fsm_sntran")
+                description = "Flag to turn on SnowTran-3D in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(0 = OFF, 1 = ON)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
+                group = "SM_Parameters"
+            case ("fsm_snslid")
+                description = "Flag to turn on SnowSlide in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(0 = OFF, 1 = ON)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
+                group = "SM_Parameters"
+            case ("fsm_snolay")
+                description = "Snow layering scheme to use in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(0 = Original Layering routine, 1 = Density-dependant layering)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "1"
+                group = "SM_Parameters"
+            case ("fsm_hiswet")
+                description = "Flag to use the history of wetting when determining surface"//achar(10)//BLNK_CHR_N// &
+                              "threshold friction velocity"//achar(10)//BLNK_CHR_N// &
+                    "(0 = OFF, 1 = ON)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
+                group = "SM_Parameters"
+            case ("fsm_checks")
+                description = "Check FSM state variables at each FSM time step"//achar(10)//BLNK_CHR_N// &
+                    "(0 = no checks, 1 = some checks, 2 = lotta checks)"
+                allocate(values(3))
+                values = [0, 1, 2]
+                default = "0"
+                group = "SM_Parameters"
+            case("fsm_hn_on")
+                description = "Flag to turn on the HN model in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(.False. = OFF, .True. = ON)"
+                default = ".False."
+                group = "SM_Parameters"
+            case("fsm_for_hn")
+                description = "Another flag to turn on the HN model in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(.False. = OFF, .True. = ON)"
+                default = ".False."
+                group = "SM_Parameters"
+
             ! --------------------------------------
             ! --------------------------------------
             ! Radiation parameters namelist variables
