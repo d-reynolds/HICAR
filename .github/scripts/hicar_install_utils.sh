@@ -5,7 +5,7 @@ set -x
 
 # see link for size of runner
 # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
-export JN=-j4
+export JN=-j8
 
 if [ -z "$WORKDIR" ]; then
     export WORKDIR=$HOME/workdir
@@ -26,7 +26,7 @@ function install_szip {
     tar -xzf szip-2.1.1.tar.gz
     cd szip-2.1.1
     ./configure --prefix=$INSTALLDIR &> config.log
-    make -j 4 &> make.log
+    make -j 8 &> make.log
     make install
 }
 
@@ -37,7 +37,7 @@ function install_zlib {
     tar -xvzf zlib-1.3.1.tar.gz
     cd zlib-1.3.1/
     ./configure --prefix=$INSTALLDIR &> config.log
-    make -j 4 &> make.log
+    make -j 8 &> make.log
     make check
     make install
 }
@@ -53,7 +53,7 @@ function install_hdf5 {
     export LDFLAGS=-L$INSTALLDIR/lib
     export CC=mpicc
     ./configure --prefix=$INSTALLDIR --enable-parallel --with-zlib=$INSTALLDIR #&> config.log
-    make -j 4
+    make -j 8
     make install
     # CFLAGS=-DH5_USE_110_API make
     # (CFLAGS=-DH5_USE_110_API make | awk 'NR%100 == 0')
@@ -72,7 +72,7 @@ function install_PnetCDF {
     export LDFLAGS=-L$INSTALLDIR/lib
     ./configure --prefix=${INSTALLDIR}
     # cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSTALLDIR}"
-    make -j 4
+    make -j 8
     make install
 }
 
@@ -87,7 +87,7 @@ function install_netcdf_c {
     export CC=mpicc
     export LIBS=-ldl
     ./configure --prefix=${INSTALLDIR} --disable-shared --enable-pnetcdf --enable-parallel-tests
-    make -j 4
+    make -j 8
     make install
 }
 function install_petsc {
@@ -115,7 +115,7 @@ function install_netcdf_fortran {
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     export LIBS=$(nc-config --libs)
     CC=mpicc FC=mpif90 F77=mpif77 ./configure --prefix=${INSTALLDIR} --disable-shared
-    make -j 4
+    make -j 8
     make install
 }
 

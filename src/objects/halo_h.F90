@@ -41,7 +41,6 @@ module halo_interface
 
         type(MPI_Group)    :: north_neighbor_grp, south_neighbor_grp, east_neighbor_grp, west_neighbor_grp
 
-        type(MPI_comm) :: neighbor_comm
 #ifdef CRAY_PE
     	real, allocatable :: south_batch_in_3d(:,:,:,:)[:]
     	real, allocatable :: north_batch_in_3d(:,:,:,:)[:]
@@ -58,10 +57,10 @@ module halo_interface
         real, contiguous, pointer :: west_batch_in_3d(:,:,:,:)
         real, contiguous, pointer :: east_batch_in_3d(:,:,:,:)
 
-        real, pointer :: south_batch_in_2d(:,:,:)
-        real, pointer :: north_batch_in_2d(:,:,:)
-        real, pointer :: west_batch_in_2d(:,:,:)
-        real, pointer :: east_batch_in_2d(:,:,:)
+        real, contiguous, pointer :: south_batch_in_2d(:,:,:)
+        real, contiguous, pointer :: north_batch_in_2d(:,:,:)
+        real, contiguous, pointer :: west_batch_in_2d(:,:,:)
+        real, contiguous, pointer :: east_batch_in_2d(:,:,:)
 #endif
 
 #ifdef CRAY_PE
@@ -75,22 +74,22 @@ module halo_interface
         real, pointer     :: west_in_3d(:,:,:)
         real, pointer     :: east_in_3d(:,:,:)
 #endif
-   	 real, allocatable :: north_buffer_3d(:,:,:,:)
-   	 real, allocatable :: south_buffer_3d(:,:,:,:)
-     real, allocatable :: east_buffer_3d(:,:,:,:)
-   	 real, allocatable :: west_buffer_3d(:,:,:,:)
+      real, contiguous, pointer :: north_buffer_3d(:,:,:,:)
+   	  real, contiguous, pointer :: south_buffer_3d(:,:,:,:)
+      real, contiguous, pointer :: east_buffer_3d(:,:,:,:)
+   	  real, contiguous, pointer :: west_buffer_3d(:,:,:,:)
 
-   	  real, allocatable :: north_buffer_2d(:,:,:)
-  	  real, allocatable :: south_buffer_2d(:,:,:)
-  	  real, allocatable :: east_buffer_2d(:,:,:)
-   	  real, allocatable :: west_buffer_2d(:,:,:)
+      real, contiguous, pointer :: north_buffer_2d(:,:,:)
+      real, contiguous, pointer :: south_buffer_2d(:,:,:)
+      real, contiguous, pointer :: east_buffer_2d(:,:,:)
+      real, contiguous, pointer :: west_buffer_2d(:,:,:)
 
     	  ! Neighboring images of this image
     	  integer, allocatable :: neighbors(:)
     	  integer, allocatable :: corner_neighbors(:)
 
-  	  integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor
-    	  integer :: northwest_neighbor, southwest_neighbor, northeast_neighbor, southeast_neighbor
+  	  integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor, halo_rank
+      integer :: northwest_neighbor, southwest_neighbor, northeast_neighbor, southeast_neighbor
 
   	  logical :: north_boundary = .True.
   	  logical :: south_boundary = .True.

@@ -30,8 +30,10 @@ output_domain_fn = 'output_domain.nc'
 ###########################################################################
 
 dom = xr.open_dataset(target_domain_fn)
-dom_rad = xr.open_dataset(large_domain_fn)
-
+if (not(large_domain_fn=="")):
+    dom_rad = xr.open_dataset(large_domain_fn)
+else:
+    dom_rad = 0
 dom_out = hd.wholeShebang(dom,dom_rad,res=res)
 
 dom_out.to_netcdf(output_domain_fn)

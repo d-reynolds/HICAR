@@ -21,9 +21,10 @@ import ProjHelpers as ph
 # GLOBAL definitions
 WGS64_crs = pyproj.CRS('EPSG:4326')
 
-def wholeShebang(ds_in,ds_in_rad,res=50,terr_filter=10,TPI_thresh=100,valley_thresh=1500,LL_border=0.05):
+def wholeShebang(ds_in,ds_in_rad=0,res=50,terr_filter=10,TPI_thresh=100,valley_thresh=1500,LL_border=0.05):
     
-    ds_in = addHorayzonParms(ds_in,ds_in_rad)
+    if (not(ds_in_rad==0)):
+        ds_in = addHorayzonParms(ds_in,ds_in_rad)
     #ds_in = addRidgeValleyDists(ds_in,ds_in_rad,res=res,terr_filter=terr_filter,TPI_thresh=TPI_thresh,\
     #                            valley_thresh=valley_thresh,LL_border=LL_border)
     
