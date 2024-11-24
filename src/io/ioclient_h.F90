@@ -17,6 +17,7 @@ module ioclient_interface
   use boundary_interface, only : boundary_t
   use domain_interface,   only : domain_t
   use options_interface,  only : options_t
+  use options_types,      only : forcing_options_type
 
 !  use time_object,        only : Time_type, THREESIXTY, GREGORIAN, NOCALENDAR, NOLEAP
 
@@ -55,18 +56,20 @@ module ioclient_interface
       integer :: frames_per_outfile, restart_count
 
       logical :: written = .False.
+      logical :: nest_updated = .False.
 
-      real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer_3d
+      real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer_3d, forcing_buffer
       real, dimension(:,:,:),   pointer :: write_buffer_2d
-      type(MPI_Win) :: write_win_3d, write_win_2d, read_win
+      type(MPI_Win) :: write_win_3d, write_win_2d, read_win, forcing_win
       type(MPI_Group) :: parent_group
+      character(len=kMAX_NAME_LENGTH) :: vars_for_nest(kMAX_STORAGE_VARS)
 
   contains
 
       procedure, public  :: push
       procedure, public  :: receive
       procedure, public  :: receive_rst
-
+      procedure, public  :: update_nest
       procedure, public  :: init
   end type
 
@@ -76,13 +79,14 @@ module ioclient_interface
       !! Initialize the object (e.g. allocate the variables array)
       !!
       !!----------------------------------------------------------
-      module subroutine init(this, domain, forcing, options)
-          implicit none
-          class(ioclient_t),  intent(inout)  :: this
-          type(domain_t),     intent(inout)  :: domain
-          type(boundary_t),   intent(in)     :: forcing
-          type(options_t),    intent(in)     :: options
-      end subroutine
+    module subroutine init(this, domain, forcing, options, n_indx)
+        implicit none
+        class(ioclient_t),  intent(inout)  :: this
+        type(domain_t),     intent(inout)  :: domain
+        type(boundary_t),   intent(in)     :: forcing
+        type(options_t),    intent(in)     :: options(:)
+        integer,            intent(in)     :: n_indx
+    end subroutine
 
       !>----------------------------------------------------------
       !! Push output data to IO buffer
@@ -116,6 +120,15 @@ module ioclient_interface
 
       end subroutine
 
+        !>----------------------------------------------------------
+        !! Update the nest
+        !!
+        !!----------------------------------------------------------
+        module subroutine update_nest(this, domain)
+            implicit none
+            class(ioclient_t), intent(inout) :: this
+            type(domain_t),    intent(in) :: domain
+        end subroutine
 
       module subroutine close_files(this)
           class(ioclient_t), intent(inout) :: this

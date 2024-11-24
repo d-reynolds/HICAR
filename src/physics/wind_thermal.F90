@@ -63,17 +63,9 @@ contains
         jte = domain%grid%jte
         kts = domain%grid%kts
         kte = domain%grid%kte
-        
-        i_s = ims
-        i_e = ime
-        j_s = jms
-        j_e = jme
 
-        if (ims==ids) i_s = its
-        if (ime==ide) i_e = ite
-        if (jms==jds) j_s = jts
-        if (jme==jde) j_e = jte
-
+        if (allocated(k_200m)) deallocate(k_200m)
+        if (allocated(k_1200m)) deallocate(k_1200m)
         allocate(k_200m(ims:ime,jms:jme))
         allocate(k_1200m(ims:ime,jms:jme))
         k_200m = 0
@@ -97,8 +89,10 @@ contains
                 z_mean = SUM(options%domain%dz_levels(1:k))
                 if (z_mean > Max_flow_height .and. therm_k_max==0) therm_k_max = max(2,k-1)
             enddo
-            
+
+            if (allocated(level_height)) deallocate(level_height)
             allocate( level_height(ims:ime,kms:therm_k_max,jms:jme))
+
             do k = kms,therm_k_max
                 level_height(:,k,:) = domain%z%data_3d(:,k,:)-domain%z_interface%data_3d(ims:ime,kms,jms:jme)
             enddo
@@ -120,6 +114,18 @@ contains
         integer ::  i, j, k
         real    :: C_1, C_2, C_3, C_4, C_5
         real    :: K_int, slp_wnd_spd, gamma, theta_0, C, N, h_p, sig_0, mu, small, Iz, u_A, u_0, u_1, K_sca
+
+        !set indices
+        i_s = ims
+        i_e = ime
+        j_s = jms
+        j_e = jme
+
+        if (ims==ids) i_s = its
+        if (ime==ide) i_e = ite
+        if (jms==jds) j_s = jts
+        if (jme==jde) j_e = jte
+
 
         do j = jms,jme
             do i = ims,ime

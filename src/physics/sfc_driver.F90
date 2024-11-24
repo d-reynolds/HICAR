@@ -35,7 +35,7 @@ module surface_layer
 
     implicit none
     real,allocatable, dimension(:,:)    ::  windspd, gz1oz0, t2d, th2d, regime, flhc, flqc, q2d, &
-                                            rmol, mol, qgh, qsfc, cpm, mavail, zol
+                                            rmol, qgh, qsfc, cpm, mavail, zol
 
     private
     public :: sfc_var_request, sfc_init, sfc   !, sfc_finalize
@@ -58,7 +58,7 @@ contains
                          kVARS%dz_interface, kVARS%pressure,  kVARS%skin_temperature, &
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m,                  &
                          kVARS%roughness_z0, kVARS%hpbl, kVARS%QFX,       &
-                         kVARS%land_mask, kVARS%br, kVARS%ustar,                      &
+                         kVARS%land_mask, kVARS%br, kVARS%MOL, kVARS%ustar,                      &
                          kVARS%chs, kVARS%chs2, kVARS%cqs2,                           &
                          kVARS%u, kVARS%v, kVARS%psim, kVARS%psih, kVARS%fm, kVARS%fh])
 
@@ -68,7 +68,7 @@ contains
                          [kVARS%water_vapor, kVARS%temperature, kVARS%potential_temperature, kVARS%surface_pressure, &
                          kVARS%dz_interface, kVARS%pressure,  kVARS%skin_temperature, &
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m,                  &
-                         kVARS%roughness_z0, kVARS%hpbl, kVARS%QFX,       &
+                         kVARS%roughness_z0, kVARS%hpbl, kVARS%MOL, kVARS%QFX,       &
                          kVARS%chs, kVARS%chs2, kVARS%cqs2,               &
                          kVARS%u, kVARS%v ])
 
@@ -76,23 +76,46 @@ contains
     end subroutine sfc_var_request
 
 
-    subroutine sfc_init(domain,options)
+    subroutine sfc_init(domain,options,context_chng)
         implicit none
         type(domain_t),     intent(inout)   :: domain
         type(options_t),    intent(in)      :: options
+        logical, optional,  intent(in)      :: context_chng
+
+        logical :: context_change
+
+        if (present(context_chng)) then
+            context_change = context_chng
+        else
+            context_change = .false.
+        endif
 
         ids = domain%ids ; ide = domain%ide ; jds = domain%jds ; jde = domain%jde ; kds = domain%kds ; kde = domain%kde
         ims = domain%ims ; ime = domain%ime ; jms = domain%jms ; jme = domain%jme ; kms = domain%kms ; kme = domain%kme
         its = domain%its ; ite = domain%ite ; jts = domain%jts ; jte = domain%jte ; kts = domain%kts ; kte = domain%kte
 
-        if (STD_OUT_PE) write(*,*) "Initializing Surface Layer scheme"
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing Surface Layer scheme"
 
         if (options%physics%surfacelayer==kSFC_MM5REV) then
-            if (STD_OUT_PE) write(*,*) "    Revised MM5"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Revised MM5"
+            
+            if (allocated(windspd)) deallocate(windspd)
+            if (allocated(rmol)) deallocate(rmol)
+            if (allocated(zol)) deallocate(zol)
+            if (allocated(qgh)) deallocate(qgh)
+            if (allocated(qsfc)) deallocate(qsfc)
+            if (allocated(cpm)) deallocate(cpm)
+            if (allocated(flhc)) deallocate(flhc)
+            if (allocated(flqc)) deallocate(flqc)
+            if (allocated(regime)) deallocate(regime)
+            if (allocated(mavail)) deallocate(mavail)
+            if (allocated(t2d)) deallocate(t2d)
+            if (allocated(th2d)) deallocate(th2d)
+            if (allocated(q2d)) deallocate(q2d)
+            if (allocated(gz1oz0)) deallocate(gz1oz0)
             
             allocate(windspd(ims:ime, jms:jme))
             allocate(rmol(ims:ime, jms:jme))
-            allocate(mol(ims:ime, jms:jme))
             allocate(zol(ims:ime, jms:jme))
             allocate(qgh(ims:ime, jms:jme))
             allocate(qsfc(ims:ime, jms:jme))
@@ -101,23 +124,24 @@ contains
             allocate(flqc(ims:ime, jms:jme))
             allocate(regime(ims:ime, jms:jme))
             allocate(mavail(ims:ime, jms:jme))
+            allocate(t2d(ims:ime, jms:jme))
+            allocate(th2d(ims:ime, jms:jme))
+            allocate(q2d(ims:ime, jms:jme))
+            allocate(gz1oz0(ims:ime, jms:jme))  !-- gz1oz0      log(z/z0) where z0 is roughness length
+
             rmol = 0.0
-            mol = 0.0
             zol = 0.0
             qgh = 0.0
             qsfc = 0.0
             cpm = 0.0
             flhc = 0.0
             flqc = 0.0
-            mavail = 0.0
+            mavail = 0.3
 
-            allocate(t2d(ims:ime, jms:jme))
-            allocate(th2d(ims:ime, jms:jme))
-            allocate(q2d(ims:ime, jms:jme))
-            allocate(gz1oz0(ims:ime, jms:jme))  !-- gz1oz0      log(z/z0) where z0 is roughness length
             gz1oz0 = log((domain%z%data_3d(:,kts,:) - domain%terrain%data_2d) / domain%roughness_z0%data_2d)
             
-            
+            if (context_change) return
+
             call sfclayrevinit(ims,ime,jms,jme,                    &
                             its,ite,jts,jte,                       &
                             options%sfc%sbrlim)!,          &
@@ -162,7 +186,7 @@ contains
                ,fh=domain%fh%data_2d                   &
                ,flhc=flhc                              & !these are only used by 1 PBL scheme in WRF, which is not in ICAR, so we dont need to use them
                ,flqc=flqc                              & !these are only used by 1 PBL scheme in WRF, which is not in ICAR, so we dont need to use them
-               ,mol=mol                                &
+               ,mol=domain%mol%data_2d                 &
                ,rmol=rmol                              &
                ,qgh=qgh                                &
                ,qsfc=qsfc                              &

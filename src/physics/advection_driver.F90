@@ -23,18 +23,28 @@ module advection
     public :: advect, adv_init, adv_var_request
 contains
 
-    subroutine adv_init(domain,options)
+    subroutine adv_init(domain,options, context_chng)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in) :: options
+        logical, optional, intent(in) :: context_chng
 
-        if (STD_OUT_PE) write(*,*) ""
-        if (STD_OUT_PE) write(*,*) "Initializing Advection"
+        logical :: context_change
+
+        if (present(context_chng)) then
+            context_change = context_chng
+        else
+            context_change = .false.
+        endif
+
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) ""
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing Advection"
         if (options%physics%advection==kADV_STD) then
-            if (STD_OUT_PE) write(*,*) "    Standard"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Standard"
             call adv_std_init(domain,options)
+            if (options%adv%flux_corr > 0) call init_fluxcorr(domain)
         else if(options%physics%advection==kADV_MPDATA) then
-            if (STD_OUT_PE) write(*,*) "    MP-DATA"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    MP-DATA"
             call mpdata_init(domain,options)
         endif
         
@@ -42,7 +52,6 @@ contains
         kms = domain%kms; kme = domain%kme
         jms = domain%jms; jme = domain%jme
         
-        if (options%adv%flux_corr > 0) call init_fluxcorr(domain)
         !Allocate storage variable for temp-quantities
 
     end subroutine adv_init
@@ -68,7 +77,7 @@ contains
         type(variable_t) :: var_to_advect
         integer :: j, k, i
 
-        real, dimension(ims:ime,kms:kme,jms:jme) :: adv_dz, temp
+        real, dimension(ims:ime,kms:kme,jms:jme) :: temp
 
         real, allocatable :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
         ! integer :: nx, nz, ny
@@ -89,8 +98,6 @@ contains
             call mpdata_compute_wind(domain,options,dt)
         endif
         
-        adv_dz = domain%advection_dz
-
         ! !$OMP PARALLEL default(shared) &
         ! !$OMP private(i,j,k) &
         ! !$OMP firstprivate(adv_dz, options,U_m,V_m,W_m,denom)
@@ -103,11 +110,11 @@ contains
                     !Initial advection-tendency calculations
                     temp  = domain%adv_vars%var_list(i)%var%data_3d
 
-                    call adv_std_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, adv_dz,t_factor_in=0.333)
-                    call adv_std_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, adv_dz,t_factor_in=0.5)
+                    call adv_std_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%advection_dz,t_factor_in=0.333)
+                    call adv_std_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%advection_dz,t_factor_in=0.5)
     
                     !final advection call with tendency-fluxes
-                    call adv_fluxcorr_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, adv_dz)
+                    call adv_fluxcorr_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%advection_dz)
     
                     domain%adv_vars%var_list(i)%var%data_3d = temp
                 else if(options%physics%advection==kADV_MPDATA) then
@@ -115,7 +122,7 @@ contains
                 endif
             else
                 if (options%physics%advection==kADV_STD) then
-                    call adv_std_advect3d(domain%adv_vars%var_list(i)%var%data_3d,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, adv_dz)
+                    call adv_std_advect3d(domain%adv_vars%var_list(i)%var%data_3d,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%advection_dz)
                 !else if(options%physics%advection==kADV_MPDATA) then                                    
                 !    call mpdata_advect3d(var, rho, jaco, dz, options)
                 endif

@@ -32,6 +32,10 @@ contains
         jts = domain%jts
         jte = domain%jte    
 
+        if (allocated(usign)) deallocate(usign)
+        if (allocated(vsign)) deallocate(vsign)
+        if (allocated(wsign)) deallocate(wsign)
+        
         allocate(usign(its-1:ite+1,kms:kme,jts-1:jte+1))
         allocate(vsign(its-1:ite+1,kms:kme,jts-1:jte+1))
         allocate(wsign(its-1:ite+1,kms:kme,jts-1:jte+1))

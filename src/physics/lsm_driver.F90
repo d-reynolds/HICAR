@@ -62,23 +62,19 @@ module land_surface
     ! Keeping them at the module level prevents having to allocate/deallocate every call
     ! also avoids adding LOTS of LSM variables to the main domain datastrucurt
     real,allocatable, dimension(:,:)    :: SMSTAV,SFCRUNOFF,UDRUNOFF, SW,                           &
-                                           SNOW,SNOWC,SNOWH, ACSNOW, ACSNOM, SNOALB,           &
-                                           QGH, GSW, ALBEDO, ALBBCK, Z0,               &
+                                           SNOWC, ACSNOW, ACSNOM, SNOALB,           &
+                                           QGH, GSW, ALBEDO, ALBBCK, Z0, qz0,              &
                                            EMBCK, QSFC, CPM, SR, CHS, CHS2, CQS2,                   &
-                                           CHKLOWQ, LAI, QZ0, VEGFRAC, SHDMIN,SHDMAX,SNOTIME,SNOPCX,&
-                                           POTEVP,RIB, NOAHRES,FLX4_2D,FVB_2D,FBUR_2D,              &
-                                           FGSN_2D, z_atm,Ri,       &
-                                           current_precipitation, nmp_snow, nmp_snowh
-    double precision,allocatable, dimension(:,:)    :: RAINBL
-
-    integer,allocatable, dimension(:,:) :: rain_bucket ! used to start the previous time step rain bucket
+                                           VEGFRAC, SHDMIN,SHDMAX,SNOTIME,SNOPCX,&
+                                           POTEVP, NOAHRES,z_atm,Ri,chklowq,  &
+                                           flx4_2d,fvb_2d,fbur_2d,fgsn_2d, &
+                                           nmp_snow, nmp_snowh
 
     logical :: MYJ, FRPCPN,ua_phys,RDLAI2D,USEMONALB
     real,allocatable, dimension(:,:,:)  :: SMCREL
-    real,allocatable, dimension(:,:)    :: dTemp,lhdQV, windspd
+    real,allocatable, dimension(:,:)    :: windspd
     real,allocatable, dimension(:)      :: Zs,DZs
     real :: XICE_THRESHOLD
-    integer,allocatable, dimension(:,:) :: IVGTYP,ISLTYP ! IVGTYP not used?
     integer :: ITIMESTEP, update_interval, cur_vegmonth
 
 !     real, parameter :: kappa=0.4 ! this should be karman from data_structure
@@ -88,7 +84,7 @@ module land_surface
     real, parameter :: MAX_EXCHANGE_C = 0.5
     real, parameter :: MIN_EXCHANGE_C = 0.004
 
-    character(len=MAXVARLENGTH) :: MMINLU
+    character(len=kMAX_NAME_LENGTH) :: MMINLU
     logical :: FNDSOILW,FNDSNOWH,RDMAXALB
     integer :: num_soil_layers,ISURBAN,ISICE,ISWATER, ISLAKE
     integer :: exchange_term
@@ -99,14 +95,10 @@ module land_surface
     real    :: NMP_SOILTSTEP
     integer :: IDVEG,IOPT_CRS,IOPT_BTR,IOPT_RUN,IOPT_SFC,IOPT_FRZ,IOPT_INF,IOPT_RAD,IOPT_ALB,IOPT_SNF,IOPT_TBOT, IOPT_TDRN, IOPT_NMPOUTPUT
     integer :: IOPT_STC, IOPT_GLA, IOPT_RSF, IOPT_SOIL, IOPT_PEDO, IOPT_CROP, IOPT_IRR, IOPT_IRRM, IZ0TLND, SF_URBAN_PHYSICS
-    real,allocatable,dimension(:,:) :: chstarxy
-    character(len=MAXVARLENGTH) :: landuse_name
-    real, allocatable :: day_frac(:), solar_elevation(:)
+    character(len=kMAX_NAME_LENGTH) :: landuse_name
 
     ! MJ added for FSM
-    double precision,allocatable, dimension(:,:)    :: SNOWBL    
-    real,allocatable, dimension(:,:) :: current_snow, current_rain
-    integer,allocatable, dimension(:,:) :: snow_bucket      
+    real,allocatable, dimension(:,:) :: current_snow, current_rain, current_precipitation
 
     ! Lake model: (allocated on lake init)
     real, allocatable, dimension (:,:)      ::      TH2 !, savedtke12d  lakedepth2d,
@@ -337,33 +329,7 @@ contains
         where(Ri<0)  F2=(1-(15*Ri)/(1+((70.5*karman**2 * sqrt(-Ri * z_atm/z0))/(lnz_atm_term**2))) )
 
     end subroutine F2_formula
-    
-    subroutine psi_m_stable_formula(rat,psi_m)
-        real, dimension(:,:),intent(in) :: rat
-        real, dimension(:,:),intent(inout) :: psi_m
-
-        real :: a, b
-
-        a = 6.1
-        b = 2.5
         
-        psi_m = -a * log(rat + (1 + rat**(b))**(1/b))
-    
-    end subroutine psi_m_stable_formula
-    
-    subroutine psi_h_stable_formula(rat,psi_h)
-        real, dimension(:,:),intent(in) :: rat
-        real, dimension(:,:),intent(inout) :: psi_h
-
-        real :: c, d
-
-        c = 5.3
-        d = 1.1
-        
-        psi_h = -c * log(rat + (1 + rat**(d))**(1/d))
-    
-    end subroutine psi_h_stable_formula
-    
     
 !From Appendix A.2 in Chen et al 1997
 ! Impact of Atmospheric Surface-layer Parameterizations in the new Land-surface Scheme of the Ncep Mesoscale ETA Model
@@ -503,6 +469,7 @@ contains
         real, intent(in) :: dt
         integer :: i,j,k
         integer, SAVE :: nz = 0
+        real :: dTemp, lhdQV
 
         ! PBL scheme should handle the distribution of sensible and latent heat fluxes. If we are
         ! running the LSM without a PBL scheme, as may be done for High-resolution runs, then 
@@ -523,17 +490,17 @@ contains
 
                 ! convert sensible heat flux to a temperature delta term
                 ! (J/(s*m^2) * s / (J/(kg*K)) => kg*K/m^2) ... /((kg/m^3) * m) => K
-                dTemp(i,j) = (sensible_heat(i,j) * dt/cp)  &
+                dTemp = (sensible_heat(i,j) * dt/cp)  &
                         / (density(i,k,j))
                 ! add temperature delta converted back to potential temperature
-                th(i,k,j) = th(i,k,j) + (dTemp(i,j) / pii(i,k,j))
+                th(i,k,j) = th(i,k,j) + (dTemp / pii(i,k,j))
 
                 ! convert latent heat flux to a mixing ratio tendancy term
                 ! (J/(s*m^2) * s / (J/kg) => kg/m^2) ... / (kg/m^3 * m) => kg/kg
-                lhdQV(i,j) = (latent_heat(i,j) / XLV * dt) &
+                lhdQV = (latent_heat(i,j) / XLV * dt) &
                         / (density(i,k,j))
                 ! add water vapor in kg/kg
-                qv(i,k,j) = qv(i,k,j) + lhdQV(i,j)
+                qv(i,k,j) = qv(i,k,j) + lhdQV
 
             end do ! i
             end do ! k
@@ -554,74 +521,69 @@ contains
 
         ITIMESTEP=1
         
-        allocate(SMSTAV(ims:ime,jms:jme))
-        SMSTAV = 0.5 !average soil moisture available for transp (between SMCWLT and SMCMAX)
-        allocate(SFCRUNOFF(ims:ime,jms:jme))
-        SFCRUNOFF = 0
-        allocate(UDRUNOFF(ims:ime,jms:jme))
-        UDRUNOFF = 0
-        allocate(SNOW(ims:ime,jms:jme))
-        SNOW = 0
-        allocate(SNOWC(ims:ime,jms:jme))
-        SNOWC = 0
-        allocate(SNOWH(ims:ime,jms:jme))
-        SNOWH = 0
-        allocate(ACSNOW(ims:ime,jms:jme))
-        ACSNOW = 0
-        allocate(ACSNOM(ims:ime,jms:jme))
-        ACSNOM = 0
-        allocate(SNOALB(ims:ime,jms:jme))
-        SNOALB = 0.8
+        if (allocated(SMSTAV)) deallocate(SMSTAV)
+        if (allocated(SFCRUNOFF)) deallocate(SFCRUNOFF)
+        if (allocated(UDRUNOFF)) deallocate(UDRUNOFF)
+        if (allocated(SNOWC)) deallocate(SNOWC)
+        if (allocated(ACSNOW)) deallocate(ACSNOW)
+        if (allocated(ACSNOM)) deallocate(ACSNOM)
+        if (allocated(SNOALB)) deallocate(SNOALB)
+        if (allocated(QGH)) deallocate(QGH)
+        if (allocated(GSW)) deallocate(GSW)
+        if (allocated(chklowq)) deallocate(chklowq) 
+        if (allocated(ALBEDO)) deallocate(ALBEDO)
+        if (allocated(ALBBCK)) deallocate(ALBBCK)
+        if (allocated(EMBCK)) deallocate(EMBCK)
+        if (allocated(CPM)) deallocate(CPM)
+        if (allocated(SR)) deallocate(SR)
+        if (allocated(SHDMIN)) deallocate(SHDMIN)
+        if (allocated(SHDMAX)) deallocate(SHDMAX)
+        if (allocated(SNOTIME)) deallocate(SNOTIME)
+        if (allocated(SNOPCX)) deallocate(SNOPCX)
+        if (allocated(POTEVP)) deallocate(POTEVP)
+        if (allocated(SMCREL)) deallocate(SMCREL)
+        if (allocated(NOAHRES)) deallocate(NOAHRES)
+        if (allocated(fbur_2d)) deallocate(fbur_2d)
+        if (allocated(fgsn_2d)) deallocate(fgsn_2d)
+        if (allocated(flx4_2d)) deallocate(flx4_2d)
+        if (allocated(fvb_2d)) deallocate(fvb_2d)
+        if (allocated(VEGFRAC)) deallocate(VEGFRAC)
+        if (allocated(nmp_snow)) deallocate(nmp_snow)
+        if (allocated(nmp_snowh)) deallocate(nmp_snowh)
 
-        allocate(QGH(ims:ime,jms:jme))
-        QGH = 0.02 ! saturated mixing ratio at ~20C
-        allocate(GSW(ims:ime,jms:jme))
-        GSW = 0
+        allocate(SMSTAV(ims:ime,jms:jme),source=0.5)!average soil moisture available for transp (between SMCWLT and SMCMAX)
+        allocate(SFCRUNOFF(ims:ime,jms:jme), source=0.0)
+        allocate(UDRUNOFF(ims:ime,jms:jme), source=0.0)
+        allocate(SNOWC(ims:ime,jms:jme), source=0.0)
+        allocate(ACSNOW(ims:ime,jms:jme), source=0.0)
+        allocate(ACSNOM(ims:ime,jms:jme), source=0.0)
+        allocate(SNOALB(ims:ime,jms:jme), source=0.8)
 
-        allocate(ALBEDO(ims:ime,jms:jme))
-        ALBEDO = 0.17
-        allocate(ALBBCK(ims:ime,jms:jme))
-        ALBBCK = 0.17 !?
-        allocate(EMBCK(ims:ime,jms:jme))
-        EMBCK = 0.99
-        allocate(CPM(ims:ime,jms:jme))
-        CPM = 0
-        allocate(SR(ims:ime,jms:jme))
-        SR = 0
-        allocate(CHKLOWQ(ims:ime,jms:jme))
-        CHKLOWQ = 0
-        allocate(QZ0(ims:ime,jms:jme))
-        QZ0 = 0 ! used to check for saturation? but only relevant if myj == True
+        allocate(QGH(ims:ime,jms:jme), source=0.02) ! saturated mixing ratio at ~20C
+        allocate(GSW(ims:ime,jms:jme), source=0.0)
+        allocate(chklowq(ims:ime,jms:jme), source=0.0)
+        allocate(ALBEDO(ims:ime,jms:jme), source=0.17)
+        allocate(ALBBCK(ims:ime,jms:jme), source=0.17)
+        allocate(EMBCK(ims:ime,jms:jme), source=0.99)
+        allocate(CPM(ims:ime,jms:jme), source=0.0)
+        allocate(SR(ims:ime,jms:jme), source=0.0)
 
-        allocate(FLX4_2D(ims:ime,jms:jme))
-        allocate(FVB_2D(ims:ime,jms:jme))
-        allocate(FBUR_2D(ims:ime,jms:jme))
-        allocate(FGSN_2D(ims:ime,jms:jme))
+        allocate(SHDMIN(ims:ime,jms:jme), source=0.0)
+        allocate(SHDMAX(ims:ime,jms:jme), source=100.0)
+        allocate(SNOTIME(ims:ime,jms:jme), source=0.0)
+        allocate(SNOPCX(ims:ime,jms:jme), source=0.0)
+        allocate(POTEVP(ims:ime,jms:jme), source=0.0)
+        allocate(SMCREL(ims:ime,num_soil_layers,jms:jme), source=0.0)
+        allocate(NOAHRES(ims:ime,jms:jme), source=0.0)
+        allocate(VEGFRAC(ims:ime,jms:jme), source=50.0)
 
-        allocate(SHDMIN(ims:ime,jms:jme))
-        SHDMIN = 0
-        allocate(SHDMAX(ims:ime,jms:jme))
-        SHDMAX = 100
-        allocate(SNOTIME(ims:ime,jms:jme))
-        SNOTIME = 0
-        allocate(SNOPCX(ims:ime,jms:jme))
-        SNOPCX = 0
-        allocate(POTEVP(ims:ime,jms:jme))
-        POTEVP = 0
-        allocate(SMCREL(ims:ime,num_soil_layers,jms:jme))
-        SMCREL = 0
-        allocate(RIB(ims:ime,jms:jme))
-        RIB = 0
-        allocate(NOAHRES(ims:ime,jms:jme))
-        NOAHRES = 0
-        allocate(VEGFRAC(ims:ime,jms:jme))
-        VEGFRAC = 50
+        allocate(fbur_2d(ims:ime,jms:jme), source=0.0)
+        allocate(fgsn_2d(ims:ime,jms:jme), source=0.0)
+        allocate(flx4_2d(ims:ime,jms:jme), source=0.0)
+        allocate(fvb_2d(ims:ime,jms:jme), source=0.0)
 
         allocate(nmp_snow(ims:ime,jms:jme))
         allocate(nmp_snowh(ims:ime,jms:jme))
-
-        allocate(day_frac(ims:ime))
-        allocate(solar_elevation(ims:ime))
 
         XICE_THRESHOLD = 1
         RDLAI2D = .false. !TLE check back on this one
@@ -630,8 +592,8 @@ contains
         FRPCPN = .false. ! set this to true and calculate snow ratio to use microphysics based snow/rain partitioning
         ua_phys = .false.
 
-        allocate(Zs(num_soil_layers))
-        allocate(DZs(num_soil_layers))
+        if (.not.(allocated(Zs))) allocate(Zs(num_soil_layers))
+        if (.not.(allocated(DZs))) allocate(DZs(num_soil_layers))
         !DZs = [0.1,0.3,0.6,1.0]
         !if (options%physics%landsurface==kSM_FSM) then !! MJ added to adapt with FSM for the soil layer thickness
             DZs = [0.1,0.2,0.4,0.8]
@@ -643,18 +605,27 @@ contains
 
     end subroutine allocate_noah_data
 
-    subroutine lsm_init(domain,options)
+    subroutine lsm_init(domain,options, context_chng)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in)    :: options
+        logical, optional, intent(in) :: context_chng
         integer :: i,j
+        logical :: context_change
+        real,allocatable,dimension(:,:) :: chstarxy
 
         if (options%physics%landsurface == 0) return   !! So we cannot (currently) run without lsm but with water.
 
-        if (STD_OUT_PE) write(*,*) "Initializing LSM"
+        if (present(context_chng)) then
+            context_change = context_chng
+        else
+            context_change = .false.
+        endif
 
-        if (STD_OUT_PE) write(*,*) "    max soil_deep_temperature on init: ", maxval(domain%soil_deep_temperature%data_2d)
-        if (STD_OUT_PE) write(*,*) "    max skin_temperature on init: ", maxval(domain%skin_temperature%data_2d)
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing LSM"
+
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) "    max soil_deep_temperature on init: ", maxval(domain%soil_deep_temperature%data_2d)
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) "    max skin_temperature on init: ", maxval(domain%skin_temperature%data_2d)
 
         exchange_term = 1
 
@@ -678,26 +649,23 @@ contains
         kts = domain%grid%kts
         kte = domain%grid%kte
 
+        if (allocated(SW)) deallocate(SW)
+        if (allocated(Z0)) deallocate(Z0)
+        if (allocated(QZ0)) deallocate(QZ0)
+        if (allocated(QSFC)) deallocate(QSFC)
+        if (allocated(Ri)) deallocate(Ri)
+        if (allocated(z_atm)) deallocate(z_atm)
+        if (allocated(current_precipitation)) deallocate(current_precipitation)
+        if (allocated(windspd)) deallocate(windspd)
+
         allocate(SW(ims:ime,jms:jme))
-
-        allocate(dTemp(its:ite,jts:jte))
-        dTemp = 0
-        allocate(lhdQV(its:ite,jts:jte))
-        lhdQV = 0
-        allocate(Z0(ims:ime,jms:jme))
-        Z0 = domain%roughness_z0%data_2d ! this should get updated by the LSM(?)
-        allocate(QSFC(ims:ime,jms:jme))
-        QSFC = domain%water_vapor%data_3d(:,kms,:) ! this should get updated by the lsm    (BK: BUT does not fed back to domain%water_vapor%data_3d ?)
-        allocate(Ri(ims:ime,jms:jme))
-        Ri = 0
-        allocate(z_atm(ims:ime,jms:jme))
-        z_atm = 50
-
-        allocate(current_precipitation(ims:ime,jms:jme))
-        current_precipitation = 0
-
-        allocate(windspd(ims:ime,jms:jme))
-        windspd = 3
+        allocate(Z0(ims:ime,jms:jme), source=domain%roughness_z0%data_2d)
+        allocate(QZ0(ims:ime,jms:jme), source=0.0)
+        allocate(QSFC(ims:ime,jms:jme), source=domain%water_vapor%data_3d(:,kms,:))
+        allocate(Ri(ims:ime,jms:jme), source=0.0)
+        allocate(z_atm(ims:ime,jms:jme), source=50.0)
+        allocate(current_precipitation(ims:ime,jms:jme), source=0.0)
+        allocate(windspd(ims:ime,jms:jme), source=1.0)
 
         ! NOTE, these fields have probably not been initialized yet...
         ! windspd = sqrt(domain%u10**2+domain%v10**2)
@@ -707,24 +675,12 @@ contains
                 write(*,*) "Land Surface models need microphysics to run"
                 stop "Land Surface models need microphysics to run"
             endif
-            allocate(RAINBL(ims:ime,jms:jme))
-            RAINBL = domain%accumulated_precipitation%data_2dd  ! used to store last time step accumulated precip so that it can be subtracted from the current step
-                                ! set to domain%rain incase this is a restart run and rain is non-zero to start
-            allocate(rain_bucket(ims:ime,jms:jme))
-            rain_bucket = domain%precipitation_bucket  ! used to store last time step accumulated precip so that it can be subtracted from the current step
 
             ! MJ added:
-            allocate(current_snow(ims:ime,jms:jme)) ! MJ added 
-            current_snow = 0
-
-            allocate(current_rain(ims:ime,jms:jme)) ! MJ added 
-            current_rain = 0
-
-            allocate(SNOWBL(ims:ime,jms:jme))! for snowfall:
-            SNOWBL = domain%accumulated_snowfall%data_2dd  ! used to store last time step accumulated precip so that it can be subtracted from the current step
-
-            allocate(snow_bucket(ims:ime,jms:jme))
-            snow_bucket = domain%snowfall_bucket
+            if (allocated(current_snow)) deallocate(current_snow)
+            if (allocated(current_rain)) deallocate(current_rain)
+            allocate(current_snow(ims:ime,jms:jme), source=0.0) ! MJ added 
+            allocate(current_rain(ims:ime,jms:jme), source=0.0) ! MJ added 
         endif
         
         if (options%physics%landsurface==kLSM_NOAH .or. options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
@@ -737,16 +693,19 @@ contains
         
         if(options%domain%snowh_var /="" .or. options%domain%swe_var /="") then 
             FNDSNOWH= .True.
-            if (STD_OUT_PE) write(*,*) "    Find snow height in file i.s.o. calculating them from SWE: FNDSNOWH=", FNDSNOWH
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Find snow height in file i.s.o. calculating them from SWE: FNDSNOWH=", FNDSNOWH
         else
             FNDSNOWH=.False. ! calculate SNOWH from SNOW
         endif
 
         ! Noah Land Surface Model
         if (options%physics%landsurface==kLSM_NOAH) then
-            if (STD_OUT_PE) write(*,*) "    Noah LSM"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Noah LSM"
 
             !These are still needed for NoahLSM, since it assumes that the exchange coefficients are multiplied by windspeed
+            if (allocated(CHS)) deallocate(CHS)
+            if (allocated(CHS2)) deallocate(CHS2)
+            if (allocated(CQS2)) deallocate(CQS2)
             allocate(CHS(ims:ime,jms:jme))
             allocate(CHS2(ims:ime,jms:jme))
             allocate(CQS2(ims:ime,jms:jme))
@@ -821,7 +780,7 @@ contains
 
         ! Noah-MP Land Surface Model
         if (options%physics%landsurface==kLSM_NOAHMP) then
-            if (STD_OUT_PE) write(*,*) "    Noah-MP LSM"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Noah-MP LSM"
 
             FNDSOILW=.False. ! calculate SOILW (this parameter is ignored in LSM_NOAH_INIT)
             RDMAXALB=.False.
@@ -885,8 +844,7 @@ contains
 
 
             !allocate dummy variable that doesn't do anything
-            allocate(chstarxy(ims:ime,jms:jme))
-            chstarxy = 0
+            allocate(chstarxy(ims:ime,jms:jme), source=0.0)
 
             call NOAHMP_INIT ( MMINLU,                                  &
                                 domain%snow_water_equivalent%data_2d,   &
@@ -984,11 +942,13 @@ contains
         !                                                     program.
         !                                     = 0, do not use lake depth data.
 
-            if (STD_OUT_PE) write(*,*) "Initializing Lake model"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing Lake model"
 
             ! allocate arrays:
-            allocate( lake_or_not(ims:ime, jms:jme))
-            allocate( TH2( ims:ime, jms:jme ))
+            if (allocated(lake_or_not)) deallocate( lake_or_not)
+            if (allocated(TH2)) deallocate( TH2)
+            allocate(lake_or_not(ims:ime, jms:jme))
+            allocate(TH2( ims:ime, jms:jme ))
 
             ! ISURBAN = options%lsm%urban_category
             ISICE   = options%lsm%ice_category
@@ -1003,7 +963,7 @@ contains
 
             lake_count=0
             if(ISLAKE==-1) then
-                if(STD_OUT_PE) write(*,*)  "   WARNING: no lake category in LU data: The model will try to guess lake-gridpoints. This option has not been properly tested!"
+                if(STD_OUT_PE .and. .not.context_change) write(*,*)  "   WARNING: no lake category in LU data: The model will try to guess lake-gridpoints. This option has not been properly tested!"
                 lakeflag=0  ! If no lake cat is provided, the lake model will determine lakes based
                             ! on the criterion (ivgtyp(i,j)==iswater .and. ht(i,j)>=lake_min_elev))
             else
@@ -1025,7 +985,7 @@ contains
 
             ! setlake_depth_flag and use_lakedepth flag. (They seem to be redundant, but whatever):
             if( associated(domain%lake_depth%data_2d) ) then
-                if(STD_OUT_PE) write(*,*) "   Using Lake depth data "
+                if(STD_OUT_PE .and. .not.context_change) write(*,*) "   Using Lake depth data "
                 use_lakedepth = 1
                 lake_depth_flag = 1
             else
@@ -1078,8 +1038,8 @@ contains
 
         if (options%physics%snowmodel == kSM_FSM) then
 #ifdef FSM
-            if (STD_OUT_PE) write(*,*) "    SnowModel: FSM2"
-            call sm_FSM_init(domain,options)
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: FSM2"
+            call sm_FSM_init(domain,options,context_change)
             
             !DZs already allocated in alloc_noah above
             !Hard code DZs here just for FSM, since this is also hard-coded in FSM
@@ -1093,8 +1053,8 @@ contains
             !allocate(DZs(num_soil_layers))
             !!
 #else
-            if (STD_OUT_PE) write(*,*) "    User asked to use FSM, but it is not compiled in this version of ICAR"
-            if (STD_OUT_PE) write(*,*) "    Please de-select FSM in the namelist, or recompile ICAR with the FSM library linked"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    User asked to use FSM, but it is not compiled in this version of ICAR"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Please de-select FSM in the namelist, or recompile ICAR with the FSM library linked"
             stop "FSM not compiled in this version of ICAR"
 #endif
         endif
@@ -1116,7 +1076,9 @@ contains
         real, intent(in) :: dt
         real :: lsm_dt
         integer :: i,j
-        
+
+        real, allocatable, dimension(:) :: solar_elevation
+
         if (options%physics%landsurface == 0) return
 
         if (last_model_time==-999) then
@@ -1137,7 +1099,7 @@ contains
                 SW = domain%shortwave%data_2d
             endif
 
-            ! if (STD_OUT_PE) write(*,*) "    lsm start: snow_water_equivalent max:", MAXVAL(domain%snow_water_equivalent%data_2d)
+            ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: snow_water_equivalent max:", MAXVAL(domain%snow_water_equivalent%data_2d)
 
             ! exchange coefficients
             windspd = sqrt(domain%u_10m%data_2d**2 + domain%v_10m%data_2d**2)
@@ -1275,14 +1237,14 @@ contains
                     endif
                 endif
 
-                ! if (STD_OUT_PE) write(*,*) "    lsm start: accumulated_precipitation max:", MAXVAL(domain%accumulated_precipitation%data_2dd)
-                ! if (STD_OUT_PE) write(*,*) "    lsm start: RAINBL max:", MAXVAL(RAINBL)
-                ! if (STD_OUT_PE) write(*,*) "    lsm start: domain%precipitation_bucket max:", MAXVAL(domain%precipitation_bucket)
-                ! if (STD_OUT_PE) write(*,*) "    lsm start: rain_bucket max:", MAXVAL(rain_bucket)
+                ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: accumulated_precipitation max:", MAXVAL(domain%accumulated_precipitation%data_2dd)
+                ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: RAINBL max:", MAXVAL(RAINBL)
+                ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: domain%precipitation_bucket max:", MAXVAL(domain%precipitation_bucket)
+                ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: rain_bucket max:", MAXVAL(rain_bucket)
 
 
                 ! RAINBL(i,j) = [kg m-2]   RAINBL = domain%accumulated_precipitation%data_2dd  ! used to store last time step accumulated precip so that it can be subtracted from the current step
-                current_precipitation = (domain%accumulated_precipitation%data_2dd - RAINBL) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
+                current_precipitation = (domain%accumulated_precipitation%data_2d - domain%RAINLSM%data_2d) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
 
                 CHS = domain%chs%data_2d*windspd
                 CHS2 = domain%chs2%data_2d*windspd
@@ -1387,13 +1349,13 @@ contains
                 !more parameters
                 landuse_name = options%lsm%LU_Categories            !test whether this works or if we need something separate
 
-                ! if (STD_OUT_PE) write(*,*) "    lsm start: accumulated_precipitation max:", MAXVAL(domain%accumulated_precipitation%data_2d)
-                ! if (STD_OUT_PE) write(*,*) "    lsm start: RAINBL max:", MAXVAL(RAINBL)
-                ! if (STD_OUT_PE) write(*,*) "    lsm start: domain%precipitation_bucket max:", MAXVAL(domain%precipitation_bucket)
-                ! if (STD_OUT_PE) write(*,*) "    lsm start: rain_bucket max:", MAXVAL(rain_bucket)
+                ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: accumulated_precipitation max:", MAXVAL(domain%accumulated_precipitation%data_2d)
+                ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: RAINBL max:", MAXVAL(RAINBL)
+                ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: domain%precipitation_bucket max:", MAXVAL(domain%precipitation_bucket)
+                ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: rain_bucket max:", MAXVAL(rain_bucket)
                 
-                current_snow = (domain%accumulated_snowfall%data_2dd-SNOWBL)!+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
-                current_precipitation = (domain%accumulated_precipitation%data_2dd - RAINBL) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
+                current_snow = (domain%accumulated_snowfall%data_2d-domain%SNOWLSM%data_2d)!+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
+                current_precipitation = (domain%accumulated_precipitation%data_2d - domain%RAINLSM%data_2d) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
 
 !                do I = ims,ime
 !                  do J = jms,jme
@@ -1401,8 +1363,10 @@ contains
 !                  enddo
 !                enddo
 
+                allocate(solar_elevation(ims:ime))
 
                 do j = jms,jme
+
                     solar_elevation  = calc_solar_elevation(date=domain%model_time, tzone=options%rad%tzone, &
                         lon=domain%longitude%data_2d, lat=domain%latitude%data_2d, j=j, &
                         ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite)
@@ -1610,8 +1574,8 @@ contains
 
             !! MJ added: this block is for FSM as sm.
             if (options%physics%snowmodel == kSM_FSM) then
-                current_precipitation = (domain%accumulated_precipitation%data_2dd-RAINBL)!+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE !! MJ: this is the total prep=rainfall+snowfall in kg m-2
-                current_snow = (domain%accumulated_snowfall%data_2dd-SNOWBL)!+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
+                current_precipitation = (domain%accumulated_precipitation%data_2d - domain%RAINLSM%data_2d) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
+                current_snow = (domain%accumulated_snowfall%data_2d-domain%SNOWLSM%data_2d)!+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
                 current_rain = max(current_precipitation-current_snow,0.) !! MJ: rainfall in kg m-2
                 !!
                 domain%windspd_10m%data_2d(its:ite,jts:jte)=windspd(its:ite,jts:jte)
@@ -1629,10 +1593,8 @@ contains
             !!
             if (options%physics%landsurface > kLSM_BASIC) then
             
-                RAINBL = domain%accumulated_precipitation%data_2dd
-                rain_bucket = domain%precipitation_bucket
-                SNOWBL = domain%accumulated_snowfall%data_2dd
-                snow_bucket = domain%snowfall_bucket
+                domain%RAINLSM%data_2d = domain%accumulated_precipitation%data_2d
+                domain%SNOWLSM%data_2d = domain%accumulated_snowfall%data_2d
                 
                 domain%longwave_up%data_2d = STBOLT * domain%land_emissivity%data_2d * domain%skin_temperature%data_2d**4
                 ! accumulate soil moisture over the entire column

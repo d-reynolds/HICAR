@@ -11,7 +11,7 @@
 !!
 !!------------------------------------------------------------
 module time_delta_object
-    use icar_constants, only : MAXSTRINGLENGTH
+    use icar_constants, only : kMAX_STRING_LENGTH
     use iso_fortran_env, only: real64
 
     implicit none
@@ -132,7 +132,7 @@ contains
     function as_string(self) result(pretty_string)
         implicit none
         class(time_delta_t), intent(in) :: self
-        character(len=MAXSTRINGLENGTH)  :: pretty_string
+        character(len=kMAX_STRING_LENGTH)  :: pretty_string
 
         if (abs(self%seconds()) < 1) then
             write(pretty_string,"(F8.4,A)") self%seconds(), " seconds"

@@ -84,20 +84,28 @@ module module_sf_FSMdrv
     real            :: last_snowslide
    
     real, allocatable :: &
-        z0_bare(:,:),            & !bare ground z0 before getting covered in snow
-        snowfall_sum(:,:),       & !aggregated per output interval
-        rainfall_sum(:,:),       & !aggregated per output interval
-        Roff_sum(:,:),           & !aggregated per output interval
-        meltflux_out_sum(:,:)      !aggregated per output interval
+        z0_bare(:,:)                 !bare ground z0 before getting covered in snow
+        ! snowfall_sum(:,:),       & !aggregated per output interval
+        ! rainfall_sum(:,:),       & !aggregated per output interval
+        ! Roff_sum(:,:),           & !aggregated per output interval
+        ! meltflux_out_sum(:,:)      !aggregated per output interval
 
 contains
  
-    subroutine sm_FSM_init(domain,options)
+    subroutine sm_FSM_init(domain,options, context_chng)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in)    :: options
+        logical, optional, intent(in) :: context_chng
         integer :: i,j
+        logical :: context_change
         !!
+
+        if (present(context_chng)) then
+            context_change = context_chng
+        else
+            context_change = .False.
+        endif
         
         ims = domain%grid%ims
         ime = domain%grid%ime
@@ -124,6 +132,14 @@ contains
         last_snowslide = 4000
 
         !!
+        if (allocated(zH_HICAR)) deallocate(zH_HICAR)
+        if (allocated(lat_HICAR)) deallocate(lat_HICAR)
+        if (allocated(lon_HICAR)) deallocate(lon_HICAR)
+        if (allocated(terrain_HICAR)) deallocate(terrain_HICAR)
+        if (allocated(slope_HICAR)) deallocate(slope_HICAR)
+        if (allocated(shd_HICAR)) deallocate(shd_HICAR)
+        if (allocated(z0_bare)) deallocate(z0_bare)
+
         allocate(zH_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(lat_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(lon_HICAR(Nx_HICAR,Ny_HICAR))
@@ -174,6 +190,23 @@ contains
         LFOR_HN=options%sm%fsm_for_hn
 
         !!
+        if (allocated(Esrf_)) deallocate(Esrf_)
+        if (allocated(Gsoil_)) deallocate(Gsoil_)
+        if (allocated(H_)) deallocate(H_)
+        if (allocated(LE_)) deallocate(LE_)
+        if (allocated(Melt_)) deallocate(Melt_)
+        if (allocated(Rnet_)) deallocate(Rnet_)
+        if (allocated(Roff_)) deallocate(Roff_)
+        if (allocated(snowdepth_)) deallocate(snowdepth_)
+        if (allocated(SWE_)) deallocate(SWE_)
+        if (allocated(KH_)) deallocate(KH_)
+        if (allocated(meltflux_out_)) deallocate(meltflux_out_)
+        if (allocated(Sliq_out_)) deallocate(Sliq_out_)
+        if (allocated(dm_salt_)) deallocate(dm_salt_)
+        if (allocated(dm_susp_)) deallocate(dm_susp_)
+        if (allocated(dm_subl_)) deallocate(dm_subl_)
+        if (allocated(dm_slide_)) deallocate(dm_slide_)
+
         allocate(Esrf_(Nx_HICAR,Ny_HICAR)); Esrf_=0.
         allocate(Gsoil_(Nx_HICAR,Ny_HICAR));Gsoil_=0.
         allocate(H_(Nx_HICAR,Ny_HICAR)); H_=0.
@@ -193,10 +226,10 @@ contains
         !allocate(Qs_u(Nx_HICAR,Ny_HICAR)); Qs_u=0.
         !allocate(Qs_v(Nx_HICAR,Ny_HICAR)); Qs_v=0.
         !!
-        allocate(snowfall_sum(Nx_HICAR,Ny_HICAR)); snowfall_sum=0.
-        allocate(rainfall_sum(Nx_HICAR,Ny_HICAR)); rainfall_sum=0.
-        allocate(Roff_sum(Nx_HICAR,Ny_HICAR)); Roff_sum=0.
-        allocate(meltflux_out_sum(Nx_HICAR,Ny_HICAR)); meltflux_out_sum=0.   
+        ! allocate(snowfall_sum(Nx_HICAR,Ny_HICAR)); snowfall_sum=0.
+        ! allocate(rainfall_sum(Nx_HICAR,Ny_HICAR)); rainfall_sum=0.
+        ! allocate(Roff_sum(Nx_HICAR,Ny_HICAR)); Roff_sum=0.
+        ! allocate(meltflux_out_sum(Nx_HICAR,Ny_HICAR)); meltflux_out_sum=0.   
         !!
 
         call FSM_SETUP()
@@ -210,7 +243,7 @@ contains
 
         !!        
         !! MJ added this block to read in while we use restart file:
-        if (options%restart%restart) then
+        if (options%restart%restart .or. context_change) then
             !! giving feedback to HICAR
             Tsrf = TRANSPOSE(domain%skin_temperature%data_2d(its:ite,jts:jte))
             if (options%lsm%monthly_albedo) then
@@ -250,13 +283,6 @@ contains
         !        endif
         !    end do
         !end do
-
-        !!
-        do j = 1, Ny_HICAR
-            do i = 1, Nx_HICAR
-                !if (STD_OUT_PE) write(*,*) "  albsH, albsF  ",i, j, domain%albs%data_2d(i+its-1,j+jts-1), albs(i,j)
-            end do
-        end do
         !SYNC ALL
     end subroutine sm_FSM_init
 

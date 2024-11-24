@@ -14,7 +14,7 @@ submodule(time_object) time_implementation
 
     implicit none
 
-    ! integer, parameter :: MAXSTRINGLENGTH = 1024
+    ! integer, parameter :: kMAX_STRING_LENGTH = 1024
     ! integer, parameter, public :: GREGORIAN=0, NOLEAP=1, THREESIXTY=2, NOCALENDAR=-1
     ! integer, parameter, public :: NON_VALID_YEAR = -9999
     
@@ -593,7 +593,7 @@ contains
     module function units(this)
         implicit none
         class(Time_type), intent(in)   :: this
-        character(len=MAXSTRINGLENGTH) :: units
+        character(len=kMAX_STRING_LENGTH) :: units
 
         write(units, '("days since ",i4,"-",i2.2,"-",i2.2," ",i2.2,":00:00")') &
                 this%year_zero,this%month_zero,this%day_zero,this%hour_zero
@@ -609,8 +609,8 @@ contains
         implicit none
         class(Time_type), intent(in) :: this
         character(len=*), intent(in), optional :: input_format
-        character(len=MAXSTRINGLENGTH) :: pretty_string
-        character(len=MAXSTRINGLENGTH) :: format
+        character(len=kMAX_STRING_LENGTH) :: pretty_string
+        character(len=kMAX_STRING_LENGTH) :: format
         integer :: i
 
         associate(year  => this%year,   &
@@ -850,7 +850,7 @@ contains
     !!  Subtract two times and return a time_delta object
     !!
     !!------------------------------------------------------------
-    module function difference(t1, t2) result(dt)
+    module function difference_times(t1, t2) result(dt)
         implicit none
         class(Time_type), intent(in) :: t1, t2
         type(time_delta_t) :: dt
@@ -873,7 +873,23 @@ contains
             call dt%set(seconds=dble((t1%mjd() - temp_time%mjd()) * 86400.0D0))
         endif
 
-    end function difference
+    end function difference_times
+
+    !>------------------------------------------------------------
+    !!  Subtract a time_delta from a time object and return a time object
+    !!
+    !!------------------------------------------------------------
+    module function difference_time_delta(t1, dt) result(t2)
+        implicit none
+        class(Time_type),   intent(in) :: t1
+        type(time_delta_t), intent(in) :: dt
+        type(Time_type) :: t2
+
+        t2 = t1 ! set calendar startyear, etc.
+
+        call t2%set(t1%mjd() - dt%days())
+
+    end function difference_time_delta
 
     !>------------------------------------------------------------
     !!  Add a given time delta to a time object

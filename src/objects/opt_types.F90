@@ -1,6 +1,6 @@
 module options_types
 
-    use icar_constants,             only : kMAX_STRING_LENGTH, MAXLEVELS, MAXFILELENGTH, MAX_NUMBER_FILES, MAXVARLENGTH, kMAX_STORAGE_VARS, kMAX_NAME_LENGTH
+    use icar_constants,             only : kMAX_STRING_LENGTH, MAXLEVELS, kMAX_FILE_LENGTH, MAX_NUMBER_FILES, kMAX_NAME_LENGTH, kMAX_STORAGE_VARS, kMAX_NAME_LENGTH
     use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
 
@@ -103,8 +103,8 @@ module options_types
                                             ! If model layers are thicker, substepping will be used.
 
         logical :: read_LUT, write_LUT      ! options to read the LUT from disk (or write it)
-        character(len=MAXFILELENGTH) :: u_LUT_Filename  ! u LUT filename to write
-        character(len=MAXFILELENGTH) :: v_LUT_Filename  ! v LUT filename to write
+        character(len=kMAX_FILE_LENGTH) :: u_LUT_Filename  ! u LUT filename to write
+        character(len=kMAX_FILE_LENGTH) :: v_LUT_Filename  ! v LUT filename to write
         logical :: overwrite_lt_lut         ! if true any existing LUT file will be over written
 
     end type lt_options_type
@@ -159,7 +159,7 @@ module options_types
     ! store Land Surface Model options
     ! ------------------------------------------------
     type lsm_options_type
-        character (len=MAXVARLENGTH) :: LU_Categories   ! land use categories to read from VEGPARM.tbl (e.g. "USGS")
+        character (len=kMAX_NAME_LENGTH) :: LU_Categories   ! land use categories to read from VEGPARM.tbl (e.g. "USGS")
         real :: max_swe                                 ! maximum value for Snow water equivalent (excess above this is removed)
         real :: snow_den_const                          ! variable for converting snow height into SWE or visa versa when input data is incomplete 
         real :: update_interval                         ! minimum time to let pass before recomputing LSM ~300s (it may be longer)  [s]
@@ -245,7 +245,7 @@ module options_types
     type output_options_type
 
         ! file names
-        character (len=MAXFILELENGTH) :: output_file        
+        character (len=kMAX_FILE_LENGTH) :: output_folder        
 
         real :: outputinterval          ! time between output [s]
         integer :: frames_per_outfile      ! frames (outputintervals) per out file
@@ -267,7 +267,7 @@ module options_types
         integer :: restart_count        ! the frequency, in number of output timesteps, that we write out a restart file
 
         ! file names
-        character (len=MAXFILELENGTH) :: restart_out_file, restart_in_file
+        character (len=kMAX_FILE_LENGTH) :: restart_folder !, restart_in_file
 
         ! restart information
         type(Time_type) :: restart_time ! Date of the restart time step
@@ -281,7 +281,7 @@ module options_types
     ! ------------------------------------------------
     type general_options_type
 
-        character (len=MAXVARLENGTH) :: version, comment, phys_suite
+        character (len=kMAX_NAME_LENGTH) :: version, comment, phys_suite
 
         logical :: debug                ! outputs a little more information at runtime (not much at present)
         logical :: interactive          ! set to true if running at the commandline to see %complete printed
@@ -290,8 +290,11 @@ module options_types
         ! date/time parameters
         type(Time_type) :: start_time   ! Date to start running the model
         type(Time_type) :: end_time     ! End point for the model simulation
-        character(len=MAXFILELENGTH) :: calendar
+        character(len=kMAX_FILE_LENGTH) :: calendar
 
+        integer :: nests               ! number of nests to run
+        integer :: parent_nest         ! parent nest number
+        integer, allocatable :: child_nests(:)          ! child nest number
 
         ! physics parameterization options
         logical :: use_mp_options
@@ -327,7 +330,7 @@ module options_types
 
 
         ! variable names from init/BC/wind/... files
-        character (len=MAXVARLENGTH) :: latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar, &
+        character (len=kMAX_NAME_LENGTH) :: latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar, &
                                         pvar,tvar,qvvar,qcvar,qivar,qrvar,qsvar,qgvar,i2mvar,i3mvar,&
                                         qncvar,qnivar,qnrvar,qnsvar,qngvar,i2nvar,i3nvar,&
                                         i1avar,i1cvar,i2avar,i2cvar,i3avar,i3cvar,hgtvar, &
@@ -337,10 +340,10 @@ module options_types
                                         time_var
 
         ! The following are NOT read from the namelist -- instead they are set/calculated from other options which ARE read from the namelist
-        character(len=MAXVARLENGTH) :: vars_to_read(kMAX_STORAGE_VARS)
+        character(len=kMAX_NAME_LENGTH) :: vars_to_read(kMAX_STORAGE_VARS)
         integer                     :: dim_list(    kMAX_STORAGE_VARS)
 
-        character (len=MAXFILELENGTH), dimension(:), allocatable :: boundary_files
+        character (len=kMAX_FILE_LENGTH), dimension(:), allocatable :: boundary_files
         type(time_delta_t) :: input_dt  ! store in_dt as a time delta object
         logical :: compute_z            ! flag that we need to compute z from p, this is determined from the vars specified (not read)
 
@@ -353,7 +356,7 @@ module options_types
     type domain_options_type
 
         ! file names
-        character (len=MAXFILELENGTH) :: init_conditions_file                                        
+        character (len=kMAX_FILE_LENGTH) :: init_conditions_file                                        
 
         
         ! various real parameters/options
@@ -366,7 +369,7 @@ module options_types
         integer :: nz                   ! number of model vertical levels
 
         ! note this can't be allocatable because gfortran does not support allocatable components inside derived type coarrays...
-        real, dimension(MAXLEVELS)::dz_levels ! model layer thicknesses to be read from namelist
+        real, allocatable ::dz_levels(:) ! model layer thicknesses to be read from namelist
         real    :: flat_z_height        ! height above mean ground level [m] above which z levels are flat in space
         
         logical :: sleve                ! Using a sleve space_varying_dz offers control over the decay of terrain features in the vertical grid structure. See Schär et al 2002, Leuenberger et al 2009
@@ -381,13 +384,13 @@ module options_types
         real    :: agl_cap              ! height up to which AGL height is used for vertical interpolation
 
         ! variable names from init/BC/wind/... files
-        character (len=MAXVARLENGTH) :: hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,landvar,lakedepthvar, &
+        character (len=kMAX_NAME_LENGTH) :: hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,landvar,lakedepthvar, &
                                         snowh_var, soiltype_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var, &
                                         vegtype_var,vegfrac_var, albedo_var, vegfracmax_var, lai_var, canwat_var, &
                                         linear_mask_var, nsq_calibration_var, &
                                         sinalpha_var, cosalpha_var
 
-        character(len=MAXVARLENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var !!MJ added
+        character(len=kMAX_NAME_LENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var !!MJ added
 
 
     end type domain_options_type

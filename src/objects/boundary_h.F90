@@ -11,7 +11,6 @@ module boundary_interface
     use time_delta_object,        only : time_delta_t
     use data_structures,          only : interpolable_type
     use grid_interface,           only : grid_t
-
     implicit none
 
     private
@@ -45,6 +44,8 @@ module boundary_interface
         real, dimension(:,:),   allocatable :: lat, lon
         real, dimension(:,:,:), allocatable :: z            ! 3D z elevation data on the forcing grid
         real, dimension(:,:,:), allocatable :: interpolated_z ! 3D z interpolated to the model grid (horizontally and vertically)
+        
+        logical :: z_is_set = .false.
 
         type(interpolable_type) :: geo
         type(interpolable_type) :: geo_agl
@@ -59,6 +60,7 @@ module boundary_interface
 
         ! procedure :: find_start_time
         procedure :: init_local
+        procedure :: init_local_asnest
         procedure :: update_computed_vars
         procedure :: interpolate_original_levels
     end type
@@ -66,14 +68,13 @@ module boundary_interface
     interface
 
     ! Set default component values
-    module subroutine init(this, options, domain_lat, domain_lon, domain_vars)
-        implicit none
-        class(boundary_t), intent(inout) :: this
-        type(options_t),   intent(inout) :: options
-        real, dimension(:,:), intent(in) :: domain_lat
-        real, dimension(:,:), intent(in) :: domain_lon
-        type(var_dict_t),  intent(inout) :: domain_vars
-
+    module subroutine init(this, options, domain_lat, domain_lon, domain_vars, parent_options)
+        class(boundary_t),    intent(inout) :: this
+        type(options_t),      intent(inout) :: options
+        real, dimension(:,:), intent(in)    :: domain_lat
+        real, dimension(:,:), intent(in)    :: domain_lon
+        type(var_dict_t),     intent(inout) :: domain_vars
+        type(options_t), optional, intent(in)    :: parent_options
     end subroutine
 
     module subroutine init_local(this, options, file_list, var_list, dim_list, start_time, &
@@ -94,6 +95,18 @@ module boundary_interface
         real, dimension(:,:), intent(in)                :: domain_lon
         type(var_dict_t),     intent(inout)             :: domain_vars
     end subroutine
+
+    module subroutine init_local_asnest(this, var_list, dim_list, domain_lat, domain_lon, domain_vars, parent_options)
+        class(boundary_t),               intent(inout)  :: this
+        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
+        integer,                         intent(in)     :: dim_list (:)
+        real, dimension(:,:),            intent(in)     :: domain_lat
+        real, dimension(:,:),            intent(in)     :: domain_lon
+        type(var_dict_t),                intent(inout)  :: domain_vars
+        type(options_t),                 intent(in)     :: parent_options
+    end subroutine
+
+
 
     module subroutine update_delta_fields(this, dt)
         implicit none

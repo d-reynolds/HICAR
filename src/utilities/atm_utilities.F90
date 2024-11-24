@@ -17,9 +17,8 @@ module mod_atm_utilities
 
     implicit none
 
-    real,     private :: N_squared  = 1e-5
-    logical,  private :: variable_N = .True.
-    real,     private :: max_froude, min_froude, froude_gain
+    !real,     private :: N_squared  = 1e-5
+    !logical,  private :: variable_N = .True.
     real,   parameter :: RADDEG = 1./DEGRAD
 
 contains
@@ -457,17 +456,9 @@ contains
         real :: BV_freq
 
         if (qc<1e-7) then
-            if (variable_N) then
-                BV_freq = calc_dry_stability(th_top, th_bot, z_top, z_bot)
-            else
-                BV_freq = N_squared
-            endif
+            BV_freq = calc_dry_stability(th_top, th_bot, z_top, z_bot)
         else
-            if (variable_N) then
-                BV_freq = calc_moist_stability(th_top*pii_top, th_bot*pii_bot, z_top, z_bot, qv_top, qv_bot, qc)
-            else
-                BV_freq = N_squared/10.0 ! might be better as max(1e-7,N_squared-(1e-4))
-            endif
+            BV_freq = calc_moist_stability(th_top*pii_top, th_bot*pii_bot, z_top, z_bot, qv_top, qv_bot, qc)
         endif
 
     end function calc_stability
@@ -717,22 +708,6 @@ contains
         end associate
     end function
 
-
-    !> -------------------------------
-    !!
-    !! Initialize module level variables with configuration options
-    !!
-    !! -------------------------------
-    subroutine init_atm_utilities(options)
-        implicit none
-        type(options_t) :: options
-
-        N_squared   = options%lt%N_squared
-        variable_N  = options%lt%variable_N
-
-        froude_gain = 1 / max(max_froude-min_froude, 0.001)
-
-    end subroutine init_atm_utilities
 
 !+---+-----------------------------------------------------------------+
 !..Cloud fraction scheme by G. Thompson (NCAR-RAL), not intended for

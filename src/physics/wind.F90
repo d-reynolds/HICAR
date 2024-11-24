@@ -771,28 +771,9 @@ contains
         type(domain_t),  intent(inout) :: domain
         type(options_t), intent(in)    :: options
 
-
-        ids = domain%ids ; ide = domain%ide ; jds = domain%jds ; jde = domain%jde ; kds = domain%kds ; kde = domain%kde
-        ims = domain%ims ; ime = domain%ime ; jms = domain%jms ; jme = domain%jme ; kms = domain%kms ; kme = domain%kme
-        its = domain%its ; ite = domain%ite ; jts = domain%jts ; jte = domain%jte ; kts = domain%kts ; kte = domain%kte
-
-        i_s = its-1
-        i_e = ite+1
-        j_s = jts-1
-        j_e = jte+1
+        call set_module_indices(domain)
         
-        if (ims==ids) i_s = ims
-        if (ime==ide) i_e = ime
-        if (jms==jds) j_s = jms
-        if (jme==jde) j_e = jme
-        
-        first_wind = .True.
-
         call allocate_winds(domain)
-
-        do i=kms,kme
-            domain%advection_dz(:,i,:) = options%domain%dz_levels(i)
-        enddo
 
         if (options%physics%windtype==kWIND_LINEAR .or. &
                  options%physics%windtype==kLINEAR_OBRIEN_WINDS .or. &
@@ -808,6 +789,25 @@ contains
         
     end subroutine init_winds
 
+    subroutine set_module_indices(domain)
+        type(domain_t), intent(in) :: domain
+
+        ids = domain%ids ; ide = domain%ide ; jds = domain%jds ; jde = domain%jde ; kds = domain%kds ; kde = domain%kde
+        ims = domain%ims ; ime = domain%ime ; jms = domain%jms ; jme = domain%jme ; kms = domain%kms ; kme = domain%kme
+        its = domain%its ; ite = domain%ite ; jts = domain%jts ; jte = domain%jte ; kts = domain%kts ; kte = domain%kte
+
+        i_s = its-1
+        i_e = ite+1
+        j_s = jts-1
+        j_e = jte+1
+        
+        if (ims==ids) i_s = ims
+        if (ime==ide) i_e = ime
+        if (jms==jds) j_s = jms
+        if (jme==jde) j_e = jme
+
+    end subroutine set_module_indices
+
     !>------------------------------------------------------------
     !! Allocate memory used in various wind related routines
     !!
@@ -815,22 +815,13 @@ contains
     subroutine allocate_winds(domain)
         type(domain_t), intent(inout) :: domain
 
-        if (.not.allocated(domain%advection_dz)) then
-            allocate(domain%advection_dz(ims:ime,kms:kme,jms:jme))
-        endif
-
         ! note w is special cased because it does not have a forcing variable, so it is not necessarily allocated automatically
         if (.not.associated(domain%w%dqdt_3d)) then
             allocate(domain%w%dqdt_3d(ims:ime,kms:kme,jms:jme))
             domain%w%dqdt_3d = 0
-        endif
 
-        ! if (.not.allocated(domain%dzdx)) then
-        !     allocate(domain%dzdx(nx-1,ny))
-        ! endif
-        ! if (.not.allocated(domain%dzdy)) then
-        !     allocate(domain%dzdy(nx,ny-1))
-        ! endif
+            first_wind = .True.
+        endif
 
     end subroutine allocate_winds
     

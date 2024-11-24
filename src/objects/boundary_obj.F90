@@ -26,12 +26,14 @@ contains
     !! Distributes initial conditions to all other images
     !!
     !!------------------------------------------------------------
-    module subroutine init(this, options, domain_lat, domain_lon, domain_vars)
-        class(boundary_t), intent(inout) :: this
-        type(options_t),   intent(inout) :: options
-        real, dimension(:,:), intent(in)     :: domain_lat
-        real, dimension(:,:), intent(in)     :: domain_lon
-        type(var_dict_t),     intent(inout)  :: domain_vars
+    module subroutine init(this, options, domain_lat, domain_lon, domain_vars, parent_options)
+        class(boundary_t),    intent(inout) :: this
+        type(options_t),      intent(inout) :: options
+        real, dimension(:,:), intent(in)    :: domain_lat
+        real, dimension(:,:), intent(in)    :: domain_lon
+        type(var_dict_t),     intent(inout) :: domain_vars
+        type(options_t), optional, intent(in)    :: parent_options
+
 
         character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
         integer,                         allocatable :: var_dimensions(:)
@@ -46,17 +48,26 @@ contains
         ! then create grid and initialize a variable...
         ! also need to explicitly save lat and lon data
         ! if (STD_OUT_PE) then
+        if (present(parent_options)) then
+            call this%init_local_asnest(vars_to_read, var_dimensions,   &
+                                    domain_lat,        &
+                                    domain_lon,       &
+                                    domain_vars,      &
+                                    parent_options)
+        else
             call this%init_local(options,                           &
-                                 options%forcing%boundary_files, &
-                                 vars_to_read, var_dimensions,      &
-                                 options%general%start_time,     &
-                                 options%forcing%latvar,         &
-                                 options%forcing%lonvar,         &
-                                 options%forcing%zvar,           &
-                                 options%forcing%time_var,       &
-                                 options%forcing%pvar,           &
-                                 domain_lat, domain_lon, domain_vars)
-
+                                    options%forcing%boundary_files, &
+                                    vars_to_read, var_dimensions,   &
+                                    options%general%start_time,     &
+                                    options%forcing%latvar,         &
+                                    options%forcing%lonvar,         &
+                                    options%forcing%zvar,           &
+                                    options%forcing%time_var,       &
+                                    options%forcing%pvar,           &
+                                    domain_lat,        &
+                                    domain_lon,       &
+                                    domain_vars)
+        endif
         ! endif
         ! call this%distribute_initial_conditions()
 
@@ -90,7 +101,6 @@ contains
 
         type(variable_t)  :: test_variable
         real, allocatable :: temp_z(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:)
-        character(len=5)       :: img_str
 
         integer :: i, nx, ny, nz
 
@@ -101,6 +111,19 @@ contains
         !  read in latitude and longitude coordinate data
         call io_read(this%firstfile, lat_var, temp_lat, this%firststep)
         call io_read(this%firstfile, lon_var, temp_lon, this%firststep)
+
+        if (minval(domain_lat) < minval(temp_lat) .or. maxval(domain_lat) > maxval(temp_lat)) then
+            write(*,*) 'ERROR: First domain not contained within forcing data'
+            write(*,*) 'Lat min/max of domain on process ',PE_RANK_GLOBAL+1,': ',minval(domain_lat),' ',maxval(domain_lat)
+            write(*,*) 'Lat min/max of forcing data:         ',minval(temp_lat),' ',maxval(temp_lat)
+            stop
+        endif
+        if (minval(domain_lon) < minval(temp_lon) .or. maxval(domain_lon) > maxval(temp_lon)) then
+            write(*,*) 'ERROR: First domain not contained within forcing data'
+            write(*,*) 'Lon min/max of domain on process ',PE_RANK_GLOBAL+1,': ',minval(domain_lon),' ',maxval(domain_lon)
+            write(*,*) 'Lon min/max of forcing data:         ',minval(temp_lon),' ',maxval(temp_lon)
+            stop
+        endif
 
         !Here we should begin the sub-setting:
         !domain object should be fed in as an argument
@@ -124,11 +147,12 @@ contains
             ny = size(temp_z,2)
             nz = size(temp_z,3)
             if (allocated(this%z)) deallocate(this%z)
-            allocate(this%z((this%ite-this%ite+1),nz,(this%jte-this%jts+1)))
+            allocate(this%z((this%ite-this%its+1),nz,(this%jte-this%jts+1)))
             allocate(temp_z_trans(1:nx,1:nz,1:ny))
             
             temp_z_trans(1:nx,1:nz,1:ny) = reshape(temp_z, shape=[nx,nz,ny], order=[1,3,2])
             this%z = temp_z_trans(this%its:this%ite,1:nz,this%jts:this%jte)
+            this%z_is_set = .True.
         else
             call io_read(this%firstfile, p_var,   temp_z,   this%firststep)
             nx = size(temp_z,1)
@@ -136,7 +160,7 @@ contains
             nz = size(temp_z,3)
 
             if (allocated(this%z)) deallocate(this%z)
-            allocate(this%z((this%ite-this%ite+1),nz,(this%jte-this%jts+1)))
+            allocate(this%z((this%ite-this%its+1),nz,(this%jte-this%jts+1)))
 
         endif
         
@@ -162,6 +186,84 @@ contains
     end subroutine
 
     !>------------------------------------------------------------
+    !! Set default component values
+    !! Reads initial conditions from the forcing file
+    !!
+    !!------------------------------------------------------------
+    module subroutine init_local_asnest(this, var_list, dim_list, domain_lat, domain_lon, domain_vars, parent_options)
+        class(boundary_t),               intent(inout)  :: this
+        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
+        integer,                         intent(in)     :: dim_list (:)
+        real, dimension(:,:),            intent(in)     :: domain_lat
+        real, dimension(:,:),            intent(in)     :: domain_lon
+        type(var_dict_t),                intent(inout)  :: domain_vars
+        type(options_t),                 intent(in)     :: parent_options
+
+        type(variable_t)  :: test_variable
+        
+        integer :: i
+        real, allocatable, dimension(:,:) :: parent_nest_lat, parent_nest_lon
+
+        !Here we should begin the sub-setting:
+        !domain object should be fed in as an argument
+        !The lat/lon bounds of the domain object are used to find the appropriate indexes of the forcing data
+        !These bounds are then extended by 1 in each direction to accomodate bilinear interpolation
+
+        !  read in latitude and longitude coordinate data
+        call io_read(parent_options%domain%init_conditions_file, parent_options%domain%lat_hi, parent_nest_lat)
+        call io_read(parent_options%domain%init_conditions_file, parent_options%domain%lon_hi, parent_nest_lon)
+
+        if (minval(domain_lat) < minval(parent_nest_lat) .or. maxval(domain_lat) > maxval(parent_nest_lat)) then
+            write(*,*) 'ERROR: Nested domain not contained within parent domain: ',trim(parent_options%domain%init_conditions_file)
+            write(*,*) 'Lat min/max of nested domain on process ',PE_RANK_GLOBAL+1,': ',minval(domain_lat),' ',maxval(domain_lat)
+            write(*,*) 'Lat min/max of parent domain:               ',minval(parent_nest_lat),' ',maxval(parent_nest_lat)
+            stop
+        endif
+        if (minval(domain_lon) < minval(parent_nest_lon) .or. maxval(domain_lon) > maxval(parent_nest_lon)) then
+            write(*,*) 'ERROR: Nested domain not contained within parent domain: ',trim(parent_options%domain%init_conditions_file)
+            write(*,*) 'Lon min/max of nested domain on process ',PE_RANK_GLOBAL+1,': ',minval(domain_lon),' ',maxval(domain_lon)
+            write(*,*) 'Lon min/max of parent domain:               ',minval(parent_nest_lon),' ',maxval(parent_nest_lon)
+            stop
+        endif
+
+        call set_boundary_image(this, parent_nest_lat, parent_nest_lon, domain_lat, domain_lon)
+
+        !After finding forcing image indices, subset the lat/lon variables
+        allocate(this%lat((this%ite-this%its+1),(this%jte-this%jts+1)))
+        allocate(this%lon((this%ite-this%its+1),(this%jte-this%jts+1)))
+
+        this%lat = parent_nest_lat(this%its:this%ite,this%jts:this%jte)
+        this%lon = parent_nest_lon(this%its:this%ite,this%jts:this%jte)
+
+        ! Get the height coordinate of the parent nest
+        this%kts = 1
+        this%kte = parent_options%domain%nz
+
+        if (allocated(this%z)) deallocate(this%z)
+        allocate(this%z((this%ite-this%its+1),this%kte,(this%jte-this%jts+1)))
+        this%z = 0.0 !parent_nest_z(this%its:this%ite,1:this%kte,this%jts:this%jte)
+        ! Set this flag here so that we will set z later in domain%setup_geo_interpolation to be the z data read from forcing data
+        this%z_is_set = .False.
+
+        if (this%ite < this%its) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%kte < this%kts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+
+        ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
+        do i=1, size(var_list)
+            call add_var_to_dict(this, var_list(i), dim_list(i), [(this%ite-this%its+1), this%kte, (this%jte-this%jts+1)])
+        end do
+
+        call domain_vars%reset_iterator()
+
+        do while (domain_vars%has_more_elements())
+            test_variable = domain_vars%next()
+            call add_var_hi_to_dict(this%variables_hi, test_variable%forcing_var, test_variable%grid)
+        enddo
+
+    end subroutine
+
+    !>------------------------------------------------------------
     !! Set the boundary data structure to the correct time step / file in the list of files
     !!
     !! Reads the time_var from each file successively until it finds a timestep that matches time
@@ -173,7 +275,7 @@ contains
         character(len=*),   intent(in) :: file_list(:)
         character(len=*),   intent(in) :: time_var
 
-        character(len=MAXFILELENGTH) :: filename
+        character(len=kMAX_FILE_LENGTH) :: filename
         integer          :: error, n
 
         this%firststep = find_timestep_in_filelist(file_list, time_var, time, this%firstfile, error)

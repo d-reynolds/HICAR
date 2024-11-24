@@ -21,7 +21,7 @@ module string
         module procedure str_i
     end interface
 
-    integer,parameter::MAXSTRINGLENGTH=100
+    integer,parameter::kMAX_STRING_LENGTH=100
 contains
     !>------------------------------
     !! Convert a string to a double precision real number
@@ -73,7 +73,7 @@ contains
         implicit none
         double precision, intent(in) :: value                       ! double precision value to be converted
         character(len=*), intent(in), optional :: fmt               ! optional format string for conversion
-        character(len=MAXSTRINGLENGTH) :: output_string ! return value
+        character(len=kMAX_STRING_LENGTH) :: output_string ! return value
 
         if (present(fmt)) then
             write(output_string,fmt) value
@@ -94,7 +94,7 @@ contains
         implicit none
         real, intent(in) :: value                                   ! single precision value to be converted
         character(len=*), intent(in), optional :: fmt               ! optional format string for conversion
-        character(len=MAXSTRINGLENGTH) :: output_string ! return value
+        character(len=kMAX_STRING_LENGTH) :: output_string ! return value
 
         if (present(fmt)) then
             write(output_string,fmt) value
@@ -115,7 +115,7 @@ contains
         implicit none
         integer, intent(in) :: value                                ! integer value to be converted
         character(len=*), intent(in), optional :: fmt               ! optional format string for conversion
-        character(len=MAXSTRINGLENGTH) :: output_string ! return value
+        character(len=kMAX_STRING_LENGTH) :: output_string ! return value
 
         if (present(fmt)) then
             write(output_string,fmt) value
@@ -126,4 +126,43 @@ contains
         output_string=trim(adjustl(output_string))
     end function str_i
 
+    !>------------------------------
+    !! Split a string into tokens according to a delimiter
+    !!
+    !!------------------------------
+    pure function split_str(tmp_str, delimiter) result(tokens)
+        implicit none
+        character(len=*), intent(in)  :: tmp_str
+        character(len=1), intent(in) :: delimiter
+        character(len=kMAX_STRING_LENGTH), allocatable :: tokens(:)
+
+        integer :: i, n, start, end
+        character(len=kMAX_STRING_LENGTH) :: str_in
+
+        str_in = trim(tmp_str)
+        str_in = trim(str_in)
+
+        n = 1
+        do i = 1, len(str_in)
+            if (str_in(i:i) == delimiter) then
+                n = n + 1
+            endif
+        end do
+
+        allocate(tokens(n))
+
+        n = 0
+        start = 1
+        do i = 1, len(str_in)
+            if (str_in(i:i) == delimiter) then
+                end = i - 1
+                n = n + 1
+                tokens(n) = str_in(start:end)
+                start = i + 1
+            endif
+        end do
+
+        n = n + 1
+        tokens(n) = str_in(start:)
+    end function split_str
 end module string

@@ -39,10 +39,9 @@ module planetary_boundary_layer
 
 
     implicit none
-    real,allocatable, dimension(:,:)    ::  windspd, hpbl, psim, &
-                                            psih, u10d, v10d, CHS, xland_real, regime
+    real,allocatable, dimension(:,:)    ::  windspd, regime
     ! integer, allocatable, dimension(:,:) :: kpbl2d
-    real, allocatable, dimension(:,:,:) :: tend_u_ugrid, tend_v_vgrid, RTHRATEN
+    real, allocatable, dimension(:,:,:) :: RTHRATEN!, tend_u_ugrid, tend_v_vgrid
 
     private
     public :: pbl_var_request, pbl_init, pbl, pbl_finalize, pbl_apply_tend
@@ -104,11 +103,19 @@ contains
     end subroutine pbl_var_request
 
 
-    subroutine pbl_init(domain,options)
+    subroutine pbl_init(domain,options,context_chng)
         implicit none
         type(domain_t),     intent(inout)   :: domain
         type(options_t),    intent(in)      :: options
+        logical, optional, intent(in)       :: context_chng
 
+        logical :: context_change
+
+        if (present(context_chng)) then
+            context_change = context_chng
+        else
+            context_change = .False.
+        endif
         ids = domain%ids ; ide = domain%ide ; jds = domain%jds ; jde = domain%jde ; kds = domain%kds ; kde = domain%kde
         ims = domain%ims ; ime = domain%ime ; jms = domain%jms ; jme = domain%jme ; kms = domain%kms ; kme = domain%kme
         its = domain%its ; ite = domain%ite ; jts = domain%jts ; jte = domain%jte ; kts = domain%kts ; kte = domain%kte
@@ -119,40 +126,39 @@ contains
         if (.not.allocated(domain%tend%qv_pbl)) allocate(domain%tend%qv_pbl(ims:ime,kms:kme,jms:jme))
         domain%tend%qv_pbl=0
 
-        if (STD_OUT_PE) write(*,*) "Initializing PBL Scheme"
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing PBL Scheme"
 
         !if (options%physics%boundarylayer==kPBL_SIMPLE) then
-        !    if (STD_OUT_PE) write(*,*) "    Simple PBL"
+        !    if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Simple PBL"
         !    call init_simple_pbl(domain, options)
         !else if (options%physics%boundarylayer==kPBL_DIAGNOSTIC) then
-        !    if (STD_OUT_PE) write(*,*) "    Diagnostic PBL"
+        !    if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Diagnostic PBL"
         !    call init_diagnostic_pbl(domain, options)
         if (options%physics%boundarylayer==kPBL_YSU) then
 
-            if (STD_OUT_PE) write(*,*) "    YSU PBL"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    YSU PBL"
 
             ! allocate local vars YSU:
+            if (allocated(windspd)) deallocate(windspd)
             allocate(windspd(ims:ime, jms:jme))
             ! allocate(hpbl(ims:ime, jms:jme))  ! this should go to domain object for convective modules!!
-            allocate(psim(ims:ime, jms:jme))
-            ! psim= 0.5
-            allocate(psih(ims:ime, jms:jme))
-            ! psih=0.5
-            allocate(u10d(ims:ime, jms:jme))
-            allocate(v10d(ims:ime, jms:jme))
+            !allocate(u10d(ims:ime, jms:jme))
+            !allocate(v10d(ims:ime, jms:jme))
             ! allocate(kpbl2d(ims:ime, jms:jme)) ! domain%kpbl now
             ! allocate(CHS(ims:ime,jms:jme))
             ! CHS = 0.01
-            allocate(xland_real(ims:ime,jms:jme))
-            xland_real=real(domain%land_mask)
+            !allocate(xland_real(ims:ime,jms:jme))
+            !xland_real=real(domain%land_mask)
+            if (allocated(regime)) deallocate(regime)
             allocate(regime(ims:ime,jms:jme))
-            allocate(tend_u_ugrid(ims:ime+1, kms:kme, jms:jme)) ! to add the calculated u/v tendencies to the u/v grid
-            allocate(tend_v_vgrid(ims:ime, kms:kme, jms:jme+1))
+            !allocate(tend_u_ugrid(ims:ime+1, kms:kme, jms:jme)) ! to add the calculated u/v tendencies to the u/v grid
+            !allocate(tend_v_vgrid(ims:ime, kms:kme, jms:jme+1))
+            if (allocated(RTHRATEN)) deallocate(RTHRATEN)
             allocate(RTHRATEN(ims:ime, kms:kme, jms:jme)) !initialize radiative heating tendencies and set to 0 in case user turns on ysu radiative heating w/o radiations scheme
             RTHRATEN = 0.0
             ! initialize tendencies (this is done in ysu init but only for tiles, not mem (ie its vs ims))
             ! BK: check if this actually matters ???
-            if(.not.restart)then
+            if(.not.context_change)then
                 do j = jms,jme
                 do k = kms,kme
                 do i = ims,ime
@@ -176,7 +182,7 @@ contains
                         ,rqiblten=domain%tend%qi_pbl            &
                         ,p_qi=1                                 &
                         ,p_first_scalar=1                       &
-                        ,restart=restart                        &
+                        ,restart=context_change                        &
                         ,allowed_to_read= allowed_to_read      &
                         ,ids=ids, ide=ide, jds=jds, jde=jde     &
                         ,kds=kds, kde=kde, ims=ims, ime=ime     &

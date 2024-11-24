@@ -27,7 +27,6 @@ submodule(domain_interface) domain_implementation
         module procedure setup_var
     end interface
     
-    real, allocatable :: mod_temp_3d(:,:,:), surf_temp_1(:,:), surf_temp_2(:,:)
     real, parameter::deg2rad=0.017453293 !2*pi/360
     
     ! primary public routines : init, get_initial_conditions, halo_send, halo_retrieve, or halo_exchange
@@ -38,11 +37,13 @@ contains
     !! Initialize the size of the domain
     !!
     !! -------------------------------
-    module subroutine init(this, options)
+    module subroutine init(this, options, nest_indx)
         class(domain_t), intent(inout) :: this
         type(options_t), intent(inout) :: options
+        integer, intent(in) :: nest_indx
 
         this%dx = options%domain%dx
+        this%nest_indx = nest_indx
         
         call read_domain_shape(this, options)
         
@@ -251,6 +252,7 @@ contains
         if (0<var_list( kVARS%evap_canopy) )                call this%vars_to_out%add_var( trim( get_varname( kVARS%evap_canopy                  )), this%evap_canopy)
         if (0<var_list( kVARS%evap_soil_surface) )          call this%vars_to_out%add_var( trim( get_varname( kVARS%evap_soil_surface            )), this%evap_soil_surface)
         if (0<var_list( kVARS%transpiration_rate) )         call this%vars_to_out%add_var( trim( get_varname( kVARS%transpiration_rate           )), this%transpiration_rate)
+        if (0<var_list( kVARS%mol) )                        call this%vars_to_out%add_var( trim( get_varname( kVARS%mol                          )), this%mol)
         if (0<var_list( kVARS%ch_veg) )                     call this%vars_to_out%add_var( trim( get_varname( kVARS%ch_veg                       )), this%ch_veg)
         if (0<var_list( kVARS%ch_veg_2m) )                  call this%vars_to_out%add_var( trim( get_varname( kVARS%ch_veg_2m                    )), this%ch_veg_2m)
         if (0<var_list( kVARS%ch_bare) )                    call this%vars_to_out%add_var( trim( get_varname( kVARS%ch_bare                      )), this%ch_bare)
@@ -370,7 +372,9 @@ contains
       call diagnostic_update(this,options)
 
       call this%enforce_limits()
+
       this%model_time = options%general%start_time
+      this%started = .True.
 
     end subroutine
 
@@ -390,7 +394,9 @@ contains
         type(options_t), intent(in)      :: options
         integer :: i, j, k
         real :: qsum
-        
+        real, dimension(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme) :: mod_temp_3d
+        real, dimension(this%ims:this%ime, this%jms:this%jme) :: surf_temp_1, surf_temp_2
+
         associate(ims => this%ims, ime => this%ime,                             &
                   jms => this%jms, jme => this%jme,                             &
                   kms => this%kms, kme => this%kme,                             &
@@ -615,10 +621,6 @@ contains
         jms = this%grid%jms
         jme = this%grid%jme
 
-        allocate( mod_temp_3d( ims:ime, kms:kme, jms:jme))
-        allocate( surf_temp_1( ims:ime, jms:jme))
-        allocate( surf_temp_2( ims:ime, jms:jme))
-
         if (STD_OUT_PE) print *,"  Initializing variables"
 
         if (0<opt%vars_to_allocate( kVARS%u) )                          call setup(this%u,                        this%u_grid,   forcing_var=opt%forcing%uvar,       list=this%variables_to_force, force_boundaries=.False.)
@@ -650,9 +652,11 @@ contains
         if (0<opt%vars_to_allocate( kVARS%ice3_number))                 call setup(this%ice3_number,      this%grid,     forcing_var=opt%forcing%i3nvar,      list=this%variables_to_force, force_boundaries=.True.)
         if (0<opt%vars_to_allocate( kVARS%ice3_a))                      call setup(this%ice3_a,           this%grid,     forcing_var=opt%forcing%i3avar,      list=this%variables_to_force, force_boundaries=.True.)
         if (0<opt%vars_to_allocate( kVARS%ice3_c))                      call setup(this%ice3_c,           this%grid,     forcing_var=opt%forcing%i3cvar,      list=this%variables_to_force, force_boundaries=.True.)
-        if (0<opt%vars_to_allocate( kVARS%precipitation) )              call setup(this%accumulated_precipitation,this%grid2d, dtype=kDOUBLE )
-        if (0<opt%vars_to_allocate( kVARS%convective_precipitation) )   call setup(this%accumulated_convective_pcp,this%grid2d )
-        if (0<opt%vars_to_allocate( kVARS%snowfall) )                   call setup(this%accumulated_snowfall,     this%grid2d, dtype=kDOUBLE )
+        if (0<opt%vars_to_allocate( kVARS%precipitation) )              call setup(this%accumulated_precipitation,  this%grid2d )
+        if (0<opt%vars_to_allocate( kVARS%convective_precipitation) )   call setup(this%accumulated_convective_pcp, this%grid2d )
+        if (0<opt%vars_to_allocate( kVARS%snowfall) )                   call setup(this%accumulated_snowfall,       this%grid2d )
+        if (0<opt%vars_to_allocate( kVARS%precipitation) )              call setup(this%RAINLSM,                    this%grid2d )
+        if (0<opt%vars_to_allocate( kVARS%snowfall) )                   call setup(this%SNOWLSM,                    this%grid2d )
         if (0<opt%vars_to_allocate( kVARS%pressure) )                   call setup(this%pressure,                 this%grid,     forcing_var=opt%forcing%pvar,       list=this%variables_to_force, force_boundaries=.False.)
         if (0<opt%vars_to_allocate( kVARS%temperature) )                call setup(this%temperature,              this%grid )
         if (0<opt%vars_to_allocate( kVARS%exner) )                      call setup(this%exner,                    this%grid )
@@ -664,7 +668,7 @@ contains
         if (0<opt%vars_to_allocate( kVARS%dzdy) )                       call setup(this%dzdy,                     this%grid )
         if (0<opt%vars_to_allocate( kVARS%density) )                    call setup(this%density,                  this%grid )
         if (0<opt%vars_to_allocate( kVARS%pressure_interface) )         call setup(this%pressure_interface,       this%grid8w )
-        if (0<opt%vars_to_allocate( kVARS%graupel) )                    call setup(this%graupel,                  this%grid2d, dtype=kDOUBLE )
+        if (0<opt%vars_to_allocate( kVARS%graupel) )                    call setup(this%graupel,                  this%grid2d )
         if (0<opt%vars_to_allocate( kVARS%cloud_fraction) )             call setup(this%cloud_fraction,           this%grid2d )
         if (0<opt%vars_to_allocate( kVARS%shortwave) )                  call setup(this%shortwave,                this%grid2d,   forcing_var=opt%forcing%swdown_var,  list=this%variables_to_force, force_boundaries=.False.)
         if (0<opt%vars_to_allocate( kVARS%shortwave_direct) )           call setup(this%shortwave_direct,         this%grid2d)
@@ -785,6 +789,7 @@ contains
         if (0<opt%vars_to_allocate( kVARS%evap_canopy) )                call setup(this%evap_canopy,              this%grid2d)
         if (0<opt%vars_to_allocate( kVARS%evap_soil_surface) )          call setup(this%evap_soil_surface,        this%grid2d)
         if (0<opt%vars_to_allocate( kVARS%transpiration_rate) )         call setup(this%transpiration_rate,       this%grid2d)
+        if (0<opt%vars_to_allocate( kVARS%mol) )                        call setup(this%mol,                      this%grid2d)
         if (0<opt%vars_to_allocate( kVARS%ch_veg) )                     call setup(this%ch_veg,                   this%grid2d)
         if (0<opt%vars_to_allocate( kVARS%ch_veg_2m) )                  call setup(this%ch_veg_2m,                this%grid2d)
         if (0<opt%vars_to_allocate( kVARS%ch_bare) )                    call setup(this%ch_bare,                  this%grid2d)
@@ -873,7 +878,6 @@ contains
         if (0<opt%vars_to_allocate( kVARS%snow_nlayers) )               call setup(this%snow_nlayers,            this%grid2d, dtype=kINTEGER )
         ! integer variable_t types aren't available (yet...)
         if (0<opt%vars_to_allocate( kVARS%convective_precipitation) )   allocate(this%cu_precipitation_bucket  (ims:ime, jms:jme),          source=0)
-        if (0<opt%vars_to_allocate( kVARS%precipitation) )              allocate(this%precipitation_bucket     (ims:ime, jms:jme),          source=0)
         if (0<opt%vars_to_allocate( kVARS%snowfall) )                   allocate(this%snowfall_bucket          (ims:ime, jms:jme),          source=0)
         if (0<opt%vars_to_allocate( kVARS%veg_type) )                   allocate(this%veg_type                 (ims:ime, jms:jme),          source=7)
         if (0<opt%vars_to_allocate( kVARS%soil_type) )                  allocate(this%soil_type                (ims:ime, jms:jme),          source=3)
@@ -2704,7 +2708,7 @@ contains
         type(options_t), intent(in)     :: options
 
         type(interpolable_type) :: forc_u_from_mass, forc_v_from_mass
-
+        type(variable_t) :: temporary_data
         integer :: nx, ny, nz, i, j, k, ims, ime, jms, jme
         real, allocatable, dimension(:,:) :: AGL_cap, AGL_u_cap, AGL_v_cap, AGL_n, AGL_u_n, AGL_v_n
 
@@ -2717,6 +2721,14 @@ contains
         call geo_LUT(this%geo_v,  forcing%geo_v)
 
         if (allocated(forcing%z)) then  ! In case of external 2D forcing data, skip the VLUTs.
+
+            ! See if we did not set forcing z at initialization of boundary object. This can happen
+            ! if we are a nest, and the forcing object could not reach the parent domain's global z field at
+            ! initialization time.
+            if (.not.forcing%z_is_set) then
+                temporary_data = forcing%variables%get_var(options%forcing%zvar)
+                forcing%z = temporary_data%data_3d
+            endif
 
             forc_u_from_mass%lat = forcing%geo%lat
             forc_u_from_mass%lon = forcing%geo%lon

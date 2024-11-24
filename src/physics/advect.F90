@@ -872,23 +872,4 @@ contains
         endif
     end subroutine adv_std_compute_wind
 
-    subroutine setup_advection_dz(domain, options)
-        implicit none
-        type(domain_t),  intent(inout) :: domain
-        type(options_t), intent(in)    :: options
-        integer :: i
-
-        if (.not.allocated(domain%advection_dz)) then
-            allocate(domain%advection_dz(ims:ime,kms:kme,jms:jme))
-        else
-            return
-        endif
-
-        do i=kms,kme
-            domain%advection_dz(:,i,:) = options%domain%dz_levels(i)
-        enddo
-
-    end subroutine setup_advection_dz
-
-
 end module adv_std

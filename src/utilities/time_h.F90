@@ -18,7 +18,7 @@ module time_object
 
     private
 
-    integer, parameter :: MAXSTRINGLENGTH = 1024
+    integer, parameter :: kMAX_STRING_LENGTH = 1024
     integer, parameter, public :: GREGORIAN=0, NOLEAP=1, THREESIXTY=2, NOCALENDAR=-1
     integer, parameter, public :: NON_VALID_YEAR = -9999
 
@@ -40,6 +40,7 @@ module time_object
         integer :: year, month, day, hour, minute, second
 
         real(real128) :: current_date_time = 0
+
 
       contains
         procedure, public  :: date        => calendar_date
@@ -67,6 +68,7 @@ module time_object
         procedure, private :: set_from_mjd
         procedure, private :: set_calendar
 
+
         ! operator overloading to permit comparison of time objects as (t1 < t2), (t1 == t2) etc.
         procedure, private :: equal
         generic,   public  :: operator(==)   => equal
@@ -83,8 +85,9 @@ module time_object
 
         procedure, private :: addition
         generic,   public  :: operator(+)    => addition
-        procedure, private :: difference
-        generic,   public  :: operator(-)    => difference
+        procedure, private :: difference_time_delta
+        procedure, private :: difference_times
+        generic,   public  :: operator(-)    => difference_time_delta, difference_times
 
     end type Time_type
 
@@ -320,7 +323,7 @@ interface
     module function units(this)
         implicit none
         class(Time_type), intent(in)   :: this
-        character(len=MAXSTRINGLENGTH) :: units
+        character(len=kMAX_STRING_LENGTH) :: units
 
     end function units
 
@@ -333,7 +336,7 @@ interface
         implicit none
         class(Time_type), intent(in) :: this
         character(len=*), intent(in), optional :: input_format
-        character(len=MAXSTRINGLENGTH) :: pretty_string
+        character(len=kMAX_STRING_LENGTH) :: pretty_string
 
     end function as_string
 
@@ -453,12 +456,24 @@ interface
     !!  Subtract two times and return a time_delta object
     !!
     !!------------------------------------------------------------
-    module function difference(t1, t2) result(dt)
+    module function difference_times(t1, t2) result(dt)
         implicit none
         class(Time_type), intent(in) :: t1, t2
         type(time_delta_t) :: dt
 
-    end function difference
+    end function difference_times
+
+    !>------------------------------------------------------------
+    !!  Subtract two times and return a time_delta object
+    !!
+    !!------------------------------------------------------------
+    module function difference_time_delta(t1, dt) result(t2)
+        implicit none
+        class(Time_type),   intent(in) :: t1
+        type(time_delta_t), intent(in) :: dt
+        type(Time_type) :: t2
+
+    end function difference_time_delta
 
     !>------------------------------------------------------------
     !!  Add a given time delta to a time object

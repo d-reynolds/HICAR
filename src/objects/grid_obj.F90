@@ -145,10 +145,33 @@ contains
       type(MPI_Comm), optional, intent(in)    :: comms
       integer, optional, intent(in)    :: global_nz, adv_order, nx_extra, ny_extra
 
-      integer :: halo_size, ierr
+      integer :: halo_size, ierr, tile_size_estimate
 
       halo_size = kDEFAULT_HALO_SIZE
       if (present(adv_order)) halo_size = ceiling(adv_order/2.0)
+
+      !! Check if we have an inefficient number of processors, or are degenerate
+      ! get estimate for number of processors per side for a square tile
+      tile_size_estimate = ceiling(sqrt(real(nx*ny)/real(kNUM_COMPUTE)))
+
+      ! check if we actually have more halo space than tile space
+      if (tile_size_estimate <= halo_size) then
+        if (STD_OUT_PE) write(*,*) '------------------------------------------------------------------------------------------'
+        if (STD_OUT_PE) write(*,*) 'WARNING: For domain of horizontal size ',nx,'x',ny
+        if (STD_OUT_PE) write(*,*) 'WARNING: Size of a processing tile is near the size of the halo.'
+        if (STD_OUT_PE) write(*,*) 'WARNING: This usually results from running a small domain with a large number of processors'
+        if (STD_OUT_PE) write(*,*) 'WARNING: For better computational efficiency, try changing the number of processes'
+        if (STD_OUT_PE) write(*,*) 'WARNING: used in combination with this domain'
+        if (STD_OUT_PE) write(*,*) '------------------------------------------------------------------------------------------'
+      else if(tile_size_estimate <= 1) then
+        if (STD_OUT_PE) write(*,*) '------------------------------------------------------------------------------------------'
+        if (STD_OUT_PE) write(*,*) 'WARNING: For domain of horizontal size ',nx,'x',ny
+        if (STD_OUT_PE) write(*,*) 'ERROR: Size of a processing tile is less than 1.'
+        if (STD_OUT_PE) write(*,*) 'ERROR: Domain decomposition is degenerate.'
+        if (STD_OUT_PE) write(*,*) 'ERROR: Change the number of processes this simulation is run with'
+        if (STD_OUT_PE) write(*,*) '------------------------------------------------------------------------------------------'
+        stop
+      endif
 
       this%nx_e = 0
       this%ny_e = 0

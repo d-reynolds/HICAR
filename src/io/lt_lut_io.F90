@@ -131,13 +131,14 @@ contains
     !!                  4 if the version in the LUT file doesn't match that of the code
     !!
     !!----------------------------------------------------------
-    function read_LUT(filename, uLUT, vLUT, dz, dims, options) result(error)
+    function read_LUT(filename, uLUT, vLUT, dz, options, dims) result(error)
         implicit none
         character(len=*), intent(in) :: filename
         real, allocatable, dimension(:,:,:,:,:,:), intent(inout) :: uLUT, vLUT
         real, dimension(:), intent(in) :: dz
-        integer, dimension(3,2), intent(in) :: dims
         type(lt_options_type), intent(in) :: options
+        integer, dimension(3,2), optional, intent(in) :: dims
+
         ! type(lt_options_type), intent(inout) :: options
         integer :: error
         error=0
@@ -152,7 +153,7 @@ contains
             if (STD_OUT_PE) write(*,*) "WARNING: LUT not read, file lt_LUT_version does not match code"
             return
         endif
-        if (.not.dims_match(filename, dims)) then
+        if ( present(dims) .and. .not.dims_match(filename, dims)) then
             error = 2
             if (STD_OUT_PE) write(*,*) "WARNING: LUT not read, LUT dims and specified dims do not match"
             return
@@ -304,7 +305,7 @@ contains
 
             ! This will be the netCDF ID for the file and data variable.
             integer :: ncid, varid,dimids(ndims)
-            character(len=MAXVARLENGTH), dimension(ndims) :: dims
+            character(len=kMAX_NAME_LENGTH), dimension(ndims) :: dims
             integer :: dim_length
 
             if (present(dimnames)) then
@@ -384,7 +385,7 @@ contains
 
             ! This will be the netCDF ID for the file and data variable.
             integer :: ncid, varid,dimids(ndims)
-            character(len=MAXVARLENGTH), dimension(ndims) :: dims
+            character(len=kMAX_NAME_LENGTH), dimension(ndims) :: dims
             integer :: dim_length
 
             if (present(dimnames)) then
@@ -631,7 +632,7 @@ contains
         character(len=*), intent(in) :: value_name
 
         integer :: error
-        character(len=MAXVARLENGTH)  :: test_value
+        character(len=kMAX_NAME_LENGTH)  :: test_value
 
         ! default return value assumes no error
         error = 0

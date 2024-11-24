@@ -48,7 +48,7 @@ module microphysics
     integer :: update_interval
     real*8 :: last_model_time
     ! temporary variables
-    real,allocatable,dimension(:,:) :: SR, last_rain, last_snow, this_precip, this_snow,refl_10cm
+    real,allocatable,dimension(:,:) :: SR, last_rain, last_snow, last_graup, refl_10cm
 
 
     public :: mp, mp_var_request
@@ -64,38 +64,52 @@ contains
     !! @param   options     ICAR model options to specify required initializations
     !!
     !!----------------------------------------------------------
-    subroutine mp_init(options)
+    subroutine mp_init(domain,options,context_chng)
         implicit none
-        type(options_t), intent(inout) :: options
+        type(domain_t), intent(in) :: domain
+        type(options_t), intent(in) :: options
+        logical, optional, intent(in) :: context_chng
 
-        if (STD_OUT_PE) write(*,*) ""
-        if (STD_OUT_PE) write(*,*) "Initializing Microphysics"
-        if (options%physics%microphysics    == kMP_THOMPSON) then
-            if (STD_OUT_PE) write(*,*) "    Thompson Microphysics"
-            call thompson_init(options%mp)
-        elseif (options%physics%microphysics    == kMP_THOMP_AER) then
-            if (STD_OUT_PE) write(*,*) "    Thompson Eidhammer Microphysics"
-            if (STD_OUT_PE) write(*,*) "    ERROR: not yet implemented (init function needs arguments), exiting..."
-            stop
-!            call thompson_aer_init()
-        elseif (options%physics%microphysics == kMP_SB04) then
-            if (STD_OUT_PE) write(*,*) "    Simple Microphysics"
-        elseif (options%physics%microphysics==kMP_MORRISON) then
-            if (STD_OUT_PE) write(*,*) "    Morrison Microphysics"
-            call MORR_TWO_MOMENT_INIT(hail_opt=1)
-        elseif (options%physics%microphysics==kMP_ISHMAEL) then
-            if (STD_OUT_PE) write(*,*) "    Jensen-Ischmael Microphysics"
-            call jensen_ishmael_init()
-        elseif (options%physics%microphysics==kMP_WSM6) then
-            if (STD_OUT_PE) write(*,*) "    WSM6 Microphysics"
-            call wsm6init(rhoair0,rhowater,rhosnow,cliq,cpv)
-        elseif (options%physics%microphysics==kMP_WSM3) then
-            if (STD_OUT_PE) write(*,*) "    WSM3 Microphysics"
-            call wsm3init(rhoair0,rhowater,rhosnow,cliq,cpv, allowed_to_read=.True.)
+        logical :: context_change
+        if (present(context_chng)) then
+            context_change = context_chng
+        else
+            context_change = .false.
         endif
 
         update_interval = options%mp%update_interval
         last_model_time = -999
+
+        call allocate_module_variables(domain%ims, domain%ime, domain%jms, domain%jme, domain%kms, domain%kme)
+
+        ! If we are just changing the nest context, no need to re-initialize microphysics routines themselves
+        if (context_change) return
+
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) ""
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing Microphysics"
+        if (options%physics%microphysics    == kMP_THOMPSON) then
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Thompson Microphysics"
+            call thompson_init(options%mp)
+        elseif (options%physics%microphysics    == kMP_THOMP_AER) then
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Thompson Eidhammer Microphysics"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    ERROR: not yet implemented (init function needs arguments), exiting..."
+            stop
+!            call thompson_aer_init()
+        elseif (options%physics%microphysics == kMP_SB04) then
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Simple Microphysics"
+        elseif (options%physics%microphysics==kMP_MORRISON) then
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Morrison Microphysics"
+            call MORR_TWO_MOMENT_INIT(hail_opt=1)
+        elseif (options%physics%microphysics==kMP_ISHMAEL) then
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Jensen-Ischmael Microphysics"
+            call jensen_ishmael_init()
+        elseif (options%physics%microphysics==kMP_WSM6) then
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    WSM6 Microphysics"
+            call wsm6init(rhoair0,rhowater,rhosnow,cliq,cpv)
+        elseif (options%physics%microphysics==kMP_WSM3) then
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    WSM3 Microphysics"
+            call wsm3init(rhoair0,rhowater,rhosnow,cliq,cpv, allowed_to_read=.True.)
+        endif
 
     end subroutine mp_init
 
@@ -283,34 +297,25 @@ contains
         integer, intent(in) :: ims,ime,jms,jme,kms,kme
 
         ! snow rain ratio
-        if (.not.allocated(SR)) then
-            allocate(SR(ims:ime,jms:jme))
-            SR=0
-        endif
+        if (allocated(SR)) deallocate(SR)
+        allocate(SR(ims:ime,jms:jme))
+        SR=0
         ! last snow amount
-        if (.not.allocated(last_snow)) then
-            allocate(last_snow(ims:ime,jms:jme))
-            last_snow=0
-        endif
+        if (allocated(last_snow)) deallocate(last_snow)
+        allocate(last_snow(ims:ime,jms:jme))
+        last_snow=0
         ! last rain amount
-        if (.not.allocated(last_rain)) then
-            allocate(last_rain(ims:ime,jms:jme))
-            last_rain=0
-        endif
+        if (allocated(last_rain)) deallocate(last_rain)
+        allocate(last_rain(ims:ime,jms:jme))
+        last_rain=0
         ! temporary precip amount
-        if (.not.allocated(this_precip)) then
-            allocate(this_precip(ims:ime,jms:jme))
-            this_precip=0
-        endif
-        if (.not.allocated(this_snow)) then
-            allocate(this_snow(ims:ime,jms:jme))
-            this_snow=0
-        endif
+        if (allocated(last_graup)) deallocate(last_graup)
+        allocate(last_graup(ims:ime,jms:jme))
+        last_graup=0
 
-        if (.not.allocated(refl_10cm)) then
-            allocate(refl_10cm(ims:ime,jms:jme))
-            refl_10cm=0
-        endif
+        if (allocated(refl_10cm)) deallocate(refl_10cm)
+        allocate(refl_10cm(ims:ime,jms:jme))
+        refl_10cm=0
         ! if (.not.allocated(domain%tend%qr)) then
         !     allocate(domain%tend%qr(nx,nz,ny))
         !     domain%tend%qr=0
@@ -339,11 +344,6 @@ contains
         integer,        intent(in)    :: its,ite, jts,jte, kts,kte
         integer,        intent(in)    :: ims,ime, jms,jme, kms,kme
         integer,        intent(in)    :: ids,ide, jds,jde, kds,kde
-        real :: precipitation(ims:ime, jms:jme), graupel(ims:ime, jms:jme), snowfall(ims:ime, jms:jme)
-
-        precipitation = 0
-        graupel = 0
-        snowfall = 0
         
         ! run the thompson microphysics
         if (options%physics%microphysics==kMP_THOMPSON) then
@@ -362,11 +362,11 @@ contains
                               dz = domain%dz_mass%data_3d,                          &
                               dt_in = dt,                                           &
                               itimestep = 1,                                        & ! not used in thompson
-                              RAINNC = precipitation,    &
-                              RAINNCV = this_precip,                                & ! not used outside thompson (yet)
+                              RAINNC = domain%accumulated_precipitation%data_2d,    &
+                              RAINNCV = last_rain,                                & ! not used outside thompson (yet)
                               SR = SR,                                              & ! not used outside thompson (yet)
-                              SNOWNC = snowfall,         &
-                              GRAUPELNC = graupel,       &
+                              SNOWNC = domain%accumulated_snowfall%data_2d,         &
+                              GRAUPELNC = domain%graupel%data_2d,       &
                               ids = ids, ide = ide,                   & ! domain dims
                               jds = jds, jde = jde,                   &
                               kds = kds, kde = kde,                   &
@@ -393,9 +393,9 @@ contains
                                   w =  domain%w_real%data_3d,                           &
                                   dz = domain%dz_interface%data_3d,                     &
                                   dt_in = dt,                                           &
-                                  RAINNC = precipitation,    &
-                                  SNOWNC = snowfall,         &
-                                  GRAUPELNC = graupel,       &
+                                  RAINNC = domain%accumulated_precipitation%data_2d,    &
+                                  SNOWNC = domain%accumulated_snowfall%data_2d,         &
+                                  GRAUPELNC = domain%graupel%data_2d,       &
                                   re_cloud = domain%re_cloud%data_3d,                   &
                                   re_ice   = domain%re_ice%data_3d,                     &
                                   re_snow  = domain%re_snow%data_3d,                    &
@@ -420,8 +420,8 @@ contains
                                   domain%cloud_water_mass%data_3d,          &
                                   domain%rain_mass%data_3d,                 &
                                   domain%snow_mass%data_3d,                 &
-                                  precipitation, &
-                                  snowfall,      &
+                                  domain%accumulated_precipitation%data_2d, &
+                                  domain%accumulated_snowfall%data_2d,      &
                                   dt,                                       &
                                   domain%dz_mass%data_3d,                   &
                                   ims = ims, ime = ime,                   & ! memory dims
@@ -449,12 +449,12 @@ contains
                              P = domain%pressure%data_3d,                 &
                              DT_IN = dt, DZ = domain%dz_interface%data_3d,     &
                              W = domain%w_real%data_3d,                        &
-                             RAINNC = precipitation, &
+                             RAINNC = domain%accumulated_precipitation%data_2d, &
                              RAINNCV = last_rain, SR=SR,                  &
-                             SNOWNC = snowfall,&
+                             SNOWNC = domain%accumulated_snowfall%data_2d,&
                              SNOWNCV = last_snow,                         &
-                             GRAUPELNC = graupel,          &
-                             GRAUPELNCV = this_precip,                    & ! hm added 7/13/13
+                             GRAUPELNC = domain%graupel%data_2d,          &
+                             GRAUPELNCV = last_graup,                    & ! hm added 7/13/13
                              EFFC = domain%re_cloud%data_3d,          &
                              EFFI = domain%re_ice%data_3d,            &
                              EFFS = domain%re_snow%data_3d,           &
@@ -499,9 +499,9 @@ contains
                              IDS=ids,IDE=ide, JDS=jds,JDE=jde, KDS=kds,KDE=kde, &
                              IMS=ims,IME=ime, JMS=jms,JME=jme, KMS=kms,KME=kme, &
                              ITS=its,ITE=ite, JTS=jts,JTE=jte, KTS=kts,KTE=kte, &
-                             RAINNC = precipitation, &
+                             RAINNC = domain%accumulated_precipitation%data_2d, &
                              RAINNCV = last_rain,                    &
-                             SNOWNC = snowfall,&
+                             SNOWNC = domain%accumulated_snowfall%data_2d,&
                              SNOWNCV = last_snow,                         &
                              diag_effc3d=domain%re_cloud%data_3d,               &
                              diag_effi3d=domain%re_ice%data_3d,                 &
@@ -542,11 +542,11 @@ contains
                               XLS = XLS, XLV0 = XLV, XLF0 = XLF,                    &
                               den0 = rhoair0, denr = rhowater,                  &
                               cliq = cliq, cice = cice, psat = psat,                                   &
-                              rain = precipitation,    &
-                              rainncv = this_precip,                                & ! not used outside thompson (yet)
+                              rain = domain%accumulated_precipitation%data_2d,    &
+                              rainncv = last_rain,                                & ! not used outside thompson (yet)
                               sr = SR,                                              & ! not used outside thompson (yet)
-                              snow = snowfall,         &
-                              graupel = graupel,       &
+                              snow = domain%accumulated_snowfall%data_2d,         &
+                              graupel = domain%graupel%data_2d,       &
                               ids = ids, ide = ide,                   & ! domain dims
                               jds = jds, jde = jde,                   &
                               kds = kds, kde = kde,                   &
@@ -575,11 +575,11 @@ contains
                               XLS = XLS, XLV0 = XLV, XLF0 = XLF,                    &
                               den0 = rhoair0, denr = rhowater,                      &
                               cliq = cliq, cice = cice, psat = psat,                &
-                              rain = precipitation,      &
-                              rainncv = this_precip,                                & ! not used outside thompson (yet)
+                              rain = domain%accumulated_precipitation%data_2d,      &
+                              rainncv = last_rain,                                & ! not used outside thompson (yet)
                               sr = SR,                                              & ! not used outside thompson (yet)
-                              snow = snowfall,           &
-                              snowncv = this_snow,                                  &
+                              snow = domain%accumulated_snowfall%data_2d,           &
+                              snowncv = last_snow,                                  &
                               has_reqc=0, has_reqi=0, has_reqs=0,     &
                               ids = ids, ide = ide,                   & ! domain dims
                               jds = jds, jde = jde,                   &
@@ -590,16 +590,6 @@ contains
                               its = its, ite = ite,                   & ! tile dims
                               jts = jts, jte = jte,                   &
                               kts = kts, kte = kte)
-        endif
-
-        if (associated(domain%accumulated_precipitation%data_2dd)) then
-            domain%accumulated_precipitation%data_2dd = domain%accumulated_precipitation%data_2dd + precipitation
-        endif
-        if (associated(domain%graupel%data_2dd)) then
-            domain%graupel%data_2dd = domain%graupel%data_2dd + graupel
-        endif
-        if (associated(domain%accumulated_snowfall%data_2dd)) then
-            domain%accumulated_snowfall%data_2dd = domain%accumulated_snowfall%data_2dd + snowfall
         endif
 
     end subroutine process_subdomain
@@ -691,8 +681,6 @@ contains
         jds = domain%grid%jds;   jms = domain%grid%jms;   jts = domain%grid%jts
         jde = domain%grid%jde;   jme = domain%grid%jme;   jte = domain%grid%jte
         ny  = domain%grid%ny
-
-        if (.not.allocated(SR)) call allocate_module_variables(ims, ime, jms, jme, kms, kme)
 
         ! if this is the first time mp is called, set last time such that mp will update
         if (last_model_time==-999) then
@@ -787,17 +775,15 @@ contains
         if (allocated(SR)) then
             deallocate(SR)
         endif
-        if (allocated(last_snow)) then
-            deallocate(last_snow)
-        endif
         if (allocated(last_rain)) then
             deallocate(last_rain)
         endif
-        if (allocated(this_precip)) then
-            deallocate(this_precip)
+        if (allocated(last_snow)) then
+            deallocate(last_snow)
         endif
-        if (allocated(this_snow)) then
-            deallocate(this_snow)
+        if (allocated(last_graup)) then
+            deallocate(last_graup)
         endif
+
     end subroutine mp_finish
 end module microphysics

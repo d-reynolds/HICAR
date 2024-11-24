@@ -652,6 +652,9 @@ contains
 
         ! append total number of images and the current image number to the LUT filename
         call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
+        call MPI_Comm_rank(domain%compute_comms, my_index)
+        ! MPI returns rank, which is 0-indexed
+        my_index = my_index + 1
 
         LUT_file = trim(options%lt%u_LUT_Filename) // "_" // trim(str(num_PE)) // "_" // trim(str(PE_RANK_GLOBAL)) // ".nc"
 
@@ -661,14 +664,6 @@ contains
         ! the domain to work over
         nz = size(domain%u%data_3d,  2)
 
-        call setup_remote_grids(u_grids, v_grids, domain%global_terrain, nz, domain%grid%halo_size)
-
-        ! ensure these are at their required size for all images
-        nx = maxval(v_grids%nx)
-        ny = maxval(u_grids%ny)
-        nxu = maxval(u_grids%nx)
-        nyv = maxval(v_grids%ny)
-
         fftnx = size(domain%terrain_frequency, 1)
         fftny = size(domain%terrain_frequency, 2)
         ! note:
@@ -677,16 +672,8 @@ contains
         ! default assumes no errors in reading the LUT
         error = 0
 
-        ! store to make it easy to check dim sizes in read_LUT
-        LUT_dims(:,1) = [nxu,nz,ny]
-        LUT_dims(:,2) = [nx,nz,nyv]
-
         total_LUT_entries = n_dir_values * n_spd_values * n_nsq_values
         
-        call MPI_Comm_rank(domain%compute_comms, my_index)
-        ! MPI returns rank, which is 0-indexed
-        my_index = my_index + 1
-
         ! create the array of spd, dir, and nsq values to create LUTs for
         ! generates the values for each look up table dimension
         ! generate table of wind directions to be used
@@ -697,25 +684,17 @@ contains
         call linear_space(spd_values,spdmin,spdmax,n_spd_values)
 
         ! Allocate the (LARGE) look up tables for both U and V
-        if (.not.options%lt%read_LUT) then
-            allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny), source=0.0)
-            allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv), source=0.0)
-            error=0
-        else
+        if (options%lt%read_LUT .or. module_initialized) then
             if (STD_OUT_PE) write(*,*) "    Reading LUT from file: ", trim(LUT_file)
+
             error=1
-            error = read_LUT(LUT_file, hi_u_LUT, hi_v_LUT, options%domain%dz_levels(:nz), LUT_dims, options%lt)
+            error = read_LUT(LUT_file, hi_u_LUT, hi_v_LUT, options%domain%dz_levels(:nz), options%lt, LUT_dims)
             
             if (error/=0) then
                 if (STD_OUT_PE) write(*,*) "WARNING: LUT on disk does not match that specified in the namelist or does not exist."
                 if (STD_OUT_PE) write(*,*) "    LUT will be recreated"
-                if (allocated(hi_u_LUT)) deallocate(hi_u_LUT)
-                allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny), source=0.0)
-                if (allocated(hi_v_LUT)) deallocate(hi_v_LUT)
-                allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv), source=0.0)
             endif
         endif
-
         
         start_pos = nint((real(my_index-1) / kNUM_COMPUTE) * total_LUT_entries)
         if (my_index==kNUM_COMPUTE) then
@@ -731,7 +710,25 @@ contains
         if (STD_OUT_PE) write(*,*) "Stabilities:",exp(nsq_values)
         ! endif
 
-        if (reverse.or.(.not.((options%lt%read_LUT).and.(error==0)))) then
+        if ( (reverse.or.(.not.((options%lt%read_LUT).and.(error==0)))) .and. (.not.module_initialized) ) then
+
+            call setup_remote_grids(u_grids, v_grids, domain%global_terrain, nz, domain%grid%halo_size)
+
+            ! ensure these are at their required size for all images
+            nx = maxval(v_grids%nx)
+            ny = maxval(u_grids%ny)
+            nxu = maxval(u_grids%nx)
+            nyv = maxval(v_grids%ny)
+            
+            ! store to make it easy to check dim sizes in read_LUT
+            LUT_dims(:,1) = [nxu,nz,ny]
+            LUT_dims(:,2) = [nx,nz,nyv]
+    
+            if (allocated(hi_u_LUT)) deallocate(hi_u_LUT)
+            allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny), source=0.0)
+            if (allocated(hi_v_LUT)) deallocate(hi_v_LUT)
+            allocate(hi_v_LUT(n_spd_values, n_dir_values, n_nsq_values, nx,  nz, nyv), source=0.0)
+
             ! loop over combinations of U, V, and Nsq values
             loops_completed = 0
             if (STD_OUT_PE) write(*,*) "    Initializing linear theory"
@@ -865,7 +862,7 @@ contains
             if (STD_OUT_PE) flush(output_unit)
         endif
 
-        if ((options%lt%write_LUT).and.(.not.reverse)) then
+        if ((options%lt%write_LUT).and.(.not.reverse).and.(.not.module_initialized)) then
             if ((options%lt%read_LUT) .and. (error == 0)) then
                 if (STD_OUT_PE) write(*,*) "    Not writing Linear Theory LUT to file because LUT was read from file"
             else
@@ -962,7 +959,7 @@ contains
             do j=1,nz
                 do i=1,nx
 
-                    if (variable_N) then
+                    !if (variable_N) then
                         ! look up vsmooth gridcells up to nz at the maximum
                         top = min(j+vsmooth, nz)
                         ! if (top-j)/=vsmooth, then look down enough layers to make the window vsmooth in size
@@ -995,9 +992,9 @@ contains
                             ! e.g. pii will not be set in the forcing data, so this may need a little thought.
                             nsquared(i+ims-1,j+kms-1,k+jms-1) = 3e-6
                         endif
-                    else
-                        nsquared(i+ims-1,j+kms-1,k+jms-1) = N_squared
-                    endif
+                    !else
+                    !    nsquared(i+ims-1,j+kms-1,k+jms-1) = N_squared
+                    !endif
                 end do
                 ! look up table is computed in log space
                 nsquared(:,j+kms-1,k+jms-1) = log(nsquared(:,j+kms-1,k+jms-1))
@@ -1232,30 +1229,33 @@ contains
         ! twice, once for domain and once for bc%next_domain
         call set_module_options(options)
 
-        ! Create a buffer zone around the topography to smooth the edges
-        buffer = original_buffer
-        ! first create it including a 5 grid cell smoothing function
-        call add_buffer_topo(domain%global_terrain, complex_terrain_firstpass, 5, buffer)
-        buffer = 2
-        ! then further add a small (~2) grid cell buffer where all cells have the same value
-        call add_buffer_topo(real(real(complex_terrain_firstpass)), complex_terrain, 0, buffer, debug=options%general%debug)
-        buffer = buffer + original_buffer
-
-        nx = size(complex_terrain, 1)
-        ny = size(complex_terrain, 2)
-
         if (STD_OUT_PE) write(*,*) "Initializing linear winds"
-        allocate(domain%terrain_frequency(nx,ny))
+        if (.not.(allocated(domain%terrain_frequency))) then
+            allocate(domain%terrain_frequency(nx,ny))
 
-        ! calculate the fourier transform of the terrain for use in linear winds
-        plan = fftw_plan_dft_2d(ny, nx, complex_terrain, domain%terrain_frequency, FFTW_FORWARD, FFTW_ESTIMATE)
-        call fftw_execute_dft(plan, complex_terrain, domain%terrain_frequency)
-        call fftw_destroy_plan(plan)
-        ! normalize FFT by N - grid cells
-        domain%terrain_frequency = domain%terrain_frequency / (nx * ny)
-        ! shift the grid cell quadrants
-        ! need to test what effect all of the related shifts actually have...
-        call fftshift(domain%terrain_frequency)
+
+            ! Create a buffer zone around the topography to smooth the edges
+            buffer = original_buffer
+            ! first create it including a 5 grid cell smoothing function
+            call add_buffer_topo(domain%global_terrain, complex_terrain_firstpass, 5, buffer)
+            buffer = 2
+            ! then further add a small (~2) grid cell buffer where all cells have the same value
+            call add_buffer_topo(real(real(complex_terrain_firstpass)), complex_terrain, 0, buffer, debug=options%general%debug)
+            buffer = buffer + original_buffer
+
+            nx = size(complex_terrain, 1)
+            ny = size(complex_terrain, 2)
+
+            ! calculate the fourier transform of the terrain for use in linear winds
+            plan = fftw_plan_dft_2d(ny, nx, complex_terrain, domain%terrain_frequency, FFTW_FORWARD, FFTW_ESTIMATE)
+            call fftw_execute_dft(plan, complex_terrain, domain%terrain_frequency)
+            call fftw_destroy_plan(plan)
+            ! normalize FFT by N - grid cells
+            domain%terrain_frequency = domain%terrain_frequency / (nx * ny)
+            ! shift the grid cell quadrants
+            ! need to test what effect all of the related shifts actually have...
+            call fftshift(domain%terrain_frequency)
+        endif
 
         if (linear_contribution/=1) then
             if (STD_OUT_PE) write(*,*) "  Using a fraction of the linear perturbation:",linear_contribution
@@ -1267,10 +1267,10 @@ contains
 
 
         ! set up linear_mask variable
-        if (.not.reverse) then
-            if (allocated(linear_mask)) deallocate(linear_mask)
-            allocate(linear_mask(nx,ny))
-            linear_mask = linear_contribution
+        !if (.not.reverse) then
+            !if (allocated(linear_mask)) deallocate(linear_mask)
+            !allocate(linear_mask(nx,ny))
+            !linear_mask = linear_contribution
 
             ! if (use_linear_mask) then
             !     if (STD_OUT_PE) write(*,*) "  Reading Linear Mask"
@@ -1288,12 +1288,12 @@ contains
             ! if (useDensity) then
                 ! linear_mask = linear_mask * 2
             ! endif
-        endif
+        !endif
 
         ! set up nsq_calibration variable
-        if ( (.not.reverse) .and. (.not.allocated(nsq_calibration)) ) then
-            allocate(nsq_calibration(nx,ny))
-            nsq_calibration = 1
+        !if ( (.not.reverse) .and. (.not.allocated(nsq_calibration)) ) then
+            !allocate(nsq_calibration(nx,ny))
+            !nsq_calibration = 1
 
             ! if (use_nsq_calibration) then
             !     if (STD_OUT_PE) write(*,*) "  Reading Linear Mask"
@@ -1305,26 +1305,26 @@ contains
             !     where(nsq_calibration<1) nsq_calibration = 1 + 1/( (1-1/nsq_calibration)/100 )
             !     where(nsq_calibration>1) nsq_calibration = 1 + (nsq_calibration-1)/100
             ! endif
-        endif
+        !endif
 
         ! allocate the fields that will hold the perturbation only so we can update it
         ! slowly and add the total to the domain%u,v
         if (reverse) then
-            if (.not.allocated(lo_u_perturbation)) then
-                allocate(lo_u_perturbation(nx+1,nz,ny))
-                lo_u_perturbation=0
-                allocate(lo_v_perturbation(nx,nz,ny+1))
-                lo_v_perturbation=0
-            endif
+            if (allocated(lo_u_perturbation)) deallocate(lo_u_perturbation)
+            if (allocated(lo_v_perturbation)) deallocate(lo_v_perturbation)
+            allocate(lo_u_perturbation(nx+1,nz,ny))
+            lo_u_perturbation=0
+            allocate(lo_v_perturbation(nx,nz,ny+1))
+            lo_v_perturbation=0
             u_perturbation=>lo_u_perturbation
             v_perturbation=>lo_v_perturbation
         else
-            if (.not.allocated(hi_u_perturbation)) then
-                allocate(hi_u_perturbation(nx+1,nz,ny))
-                hi_u_perturbation=0
-                allocate(hi_v_perturbation(nx,nz,ny+1))
-                hi_v_perturbation=0
-            endif
+            if (allocated(hi_u_perturbation)) deallocate(hi_u_perturbation)
+            if (allocated(hi_v_perturbation)) deallocate(hi_v_perturbation)
+            allocate(hi_u_perturbation(nx+1,nz,ny))
+            hi_u_perturbation=0
+            allocate(hi_v_perturbation(nx,nz,ny+1))
+            hi_v_perturbation=0
             u_perturbation=>hi_u_perturbation
             v_perturbation=>hi_v_perturbation
         endif
@@ -1373,10 +1373,10 @@ contains
         ! this is a little trickier, because it does have to be domain dependant... could at least be stored in the domain though...
         if (rev) then
             linear_contribution = options%lt%rm_linear_contribution
-            N_squared = options%lt%rm_N_squared
+            !N_squared = options%lt%rm_N_squared
         else
             linear_contribution = options%lt%linear_contribution
-            N_squared = options%lt%N_squared
+            !N_squared = options%lt%N_squared
         endif
 
         ! add the spatially variable linear field

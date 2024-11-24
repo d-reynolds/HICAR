@@ -227,7 +227,7 @@ contains
         character(len=*),   intent(in) :: file_list(:)
         character(len=*),   intent(in) :: time_var
 
-        character(len=MAXFILELENGTH) :: filename
+        character(len=kMAX_FILE_LENGTH) :: filename
         integer          :: error, n
 
         this%curstep = find_timestep_in_filelist(file_list, time_var, time, filename, error)

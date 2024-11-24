@@ -78,10 +78,11 @@ module domain_interface
     type(variable_t) :: nsquared
     type(variable_t) :: graupel
     type(variable_t) :: accumulated_precipitation
-    integer,allocatable :: precipitation_bucket(:,:)
+    type(variable_t) :: RAINLSM  ! Precipitation since the last LSM call
     type(variable_t) :: accumulated_convective_pcp
     integer,allocatable :: cu_precipitation_bucket(:,:)
     type(variable_t) :: accumulated_snowfall
+    type(variable_t) :: SNOWLSM  ! Snowfall since the last LSM call
     type(variable_t) :: precip_in_total
     type(variable_t) :: snowfall_ground
     type(variable_t) :: rainfall_ground
@@ -216,6 +217,7 @@ module domain_interface
     type(variable_t) :: evap_canopy
     type(variable_t) :: evap_soil_surface
     type(variable_t) :: transpiration_rate
+    type(variable_t) :: mol
     type(variable_t) :: ch_veg
     type(variable_t) :: ch_veg_2m
     type(variable_t) :: ch_bare
@@ -330,6 +332,8 @@ module domain_interface
 
     real :: smooth_height, dx
     integer :: nsmooth
+    logical :: started = .false.
+    logical :: ended = .false.
 
     complex(C_DOUBLE_COMPLEX),  allocatable :: terrain_frequency(:,:) ! FFT(terrain)
     double precision,           allocatable :: costheta(:,:)
@@ -379,7 +383,7 @@ module domain_interface
     ! contains the size of the domain (or the local tile?)
     integer :: nx, ny, nz, nx_global, ny_global
     integer :: ximg, ximages, yimg, yimages
-
+    integer :: nest_indx
     logical :: north_boundary = .True.
     logical :: south_boundary = .True.
     logical :: east_boundary = .True.
@@ -436,10 +440,11 @@ module domain_interface
   interface
 
     ! Set default component values
-    module subroutine init(this, options)
+    module subroutine init(this, options, nest_indx)
         implicit none
         class(domain_t), intent(inout) :: this
         type(options_t), intent(inout) :: options
+        integer,         intent(in)    :: nest_indx
     end subroutine
     
     ! read initial atmospheric conditions from forcing data

@@ -10,10 +10,11 @@ module options_interface
     implicit none
 
     private
-    public :: options_t
+    public :: options_t, general_namelist, inter_nest_options_check
 
     type :: options_t
         character(len=kMAX_STRING_LENGTH) :: comment
+        integer :: nest_indx
 
         ! master list of variables for different processes... not sure if this is the best place to store this information
 
@@ -29,7 +30,7 @@ module options_interface
 
         type(general_options_type)      :: general
 
-        type(domain_options_type)       :: domain
+        type(domain_options_type)        :: domain
 
         type(forcing_options_type)      :: forcing
 
@@ -45,27 +46,28 @@ module options_interface
         type(time_options_type)         :: time
 
         ! physics parameterization options
-        type(mp_options_type)           :: mp
+        type(mp_options_type)            :: mp
 
-        type(lt_options_type)           :: lt
+        type(lt_options_type)            :: lt
 
-        type(adv_options_type)          :: adv
+        type(adv_options_type)           :: adv
 
-        type(lsm_options_type)          :: lsm
+        type(lsm_options_type)           :: lsm
 
-        type(sm_options_type)           :: sm
+        type(sm_options_type)            :: sm
 
-        type(cu_options_type)           :: cu
+        type(cu_options_type)            :: cu
 
-        type(rad_options_type)          :: rad
+        type(rad_options_type)           :: rad
         
-        type(pbl_options_type)          :: pbl
+        type(pbl_options_type)           :: pbl
 
-        type(sfc_options_type)          :: sfc
+        type(sfc_options_type)           :: sfc
 
     contains
 
         procedure, public  :: init
+        procedure, public  :: setup_synthetic_forcing
         procedure, public  :: alloc_vars
         procedure, public  :: restart_vars
         procedure, public  :: advect_vars
@@ -75,11 +77,25 @@ module options_interface
 
 interface
 
-    module subroutine init(this, namelist_file, info_only, gen_nml, only_namelist_check)
+    module subroutine init(this, namelist_file, n_indx, info_only, gen_nml)
         implicit none
         class(options_t),   intent(inout)  :: this
         character(len=*),   intent(in)     :: namelist_file
-        logical,            intent(in)     :: info_only, gen_nml, only_namelist_check
+        integer,            intent(in)     :: n_indx
+        logical,            intent(in)     :: info_only, gen_nml
+    end subroutine
+
+    module subroutine inter_nest_options_check(options)
+        implicit none
+        type(options_t), intent(inout) :: options(:)
+    end subroutine
+
+    module subroutine general_namelist(filename, gen_options, n_indx, info_only, gen_nml)
+        implicit none
+        character(len=*),             intent(in)    :: filename
+        type(general_options_type),   intent(inout) :: gen_options
+        integer,                      intent(in)    :: n_indx
+        logical, intent(in), optional  :: info_only, gen_nml
     end subroutine
 
     module subroutine alloc_vars(this, input_vars, var_idx, error)
@@ -104,6 +120,11 @@ interface
         integer, optional, intent(in)  :: input_vars(:)
         integer, optional, intent(in)  :: var_idx
         integer, optional, intent(out) :: error
+    end subroutine
+
+    module subroutine setup_synthetic_forcing(this)
+        implicit none
+        class(options_t), intent(inout):: this
     end subroutine
 
     module subroutine exch_vars(this, input_vars, var_idx, error)

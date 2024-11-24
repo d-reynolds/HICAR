@@ -79,6 +79,9 @@ Ny = Ny_HICAR !NNy
 Nsmax = NNsmax_HICAR
 
 ! Height of first model level, will be used for surface scaling laws
+if (allocated(zH)) deallocate(zH)
+if (allocated(Dzsnow)) deallocate(Dzsnow)
+if (allocated(Dzsoil)) deallocate(Dzsoil)
 allocate(zH(Nx,Ny))
 allocate(Dzsnow(Nsmax))
 allocate(Dzsoil(Nsoil))
@@ -138,6 +141,21 @@ endif
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 !-3- !!!!!!!!!!!!!!!!!!!!  ALLOCATE VARIABLES !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+if (allocated(LW)) deallocate(LW)
+if (allocated(Ps)) deallocate(Ps)
+if (allocated(Qa)) deallocate(Qa)
+if (allocated(Rf)) deallocate(Rf)
+if (allocated(Sf)) deallocate(Sf)
+if (allocated(Sdir)) deallocate(Sdir)
+if (allocated(Sdif)) deallocate(Sdif)
+if (allocated(Ta)) deallocate(Ta)
+if (allocated(Ua)) deallocate(Ua)
+if (allocated(Udir)) deallocate(Udir)
+if (allocated(RH)) deallocate(RH)
+if (allocated(Sf24h)) deallocate(Sf24h)
+if (allocated(Tv)) deallocate(Tv)
+
+
 
 allocate(LW(Nx,Ny))
 allocate(Ps(Nx,Ny))
@@ -234,6 +252,12 @@ endif
 
 ! Surface data from defaults or namelists 
 ! Surface properties 
+if (allocated(alb0)) deallocate(alb0)
+if (allocated(fcly)) deallocate(fcly)
+if (allocated(fsnd)) deallocate(fsnd)
+if (allocated(z0sf)) deallocate(z0sf)
+if (allocated(vegsnowd_xy)) deallocate(vegsnowd_xy)
+
 allocate(alb0(Nx,Ny))
 allocate(fcly(Nx,Ny))
 allocate(fsnd(Nx,Ny))
@@ -246,6 +270,17 @@ z0sf(:,:) = 0.2
 vegsnowd_xy(:,:) = 0.1
 
 ! Canopy parameters
+if (allocated(canh)) deallocate(canh)
+if (allocated(fsky)) deallocate(fsky)
+if (allocated(fveg)) deallocate(fveg)
+if (allocated(fves)) deallocate(fves)
+if (allocated(hcan)) deallocate(hcan)
+if (allocated(lai)) deallocate(lai)
+if (allocated(scap)) deallocate(scap)
+if (allocated(trcn)) deallocate(trcn)
+if (allocated(VAI)) deallocate(VAI)
+if (allocated(vfhp)) deallocate(vfhp)
+
 allocate(canh(Nx,Ny))
 allocate(fsky(Nx,Ny))
 allocate(fveg(Nx,Ny)) 
@@ -265,6 +300,16 @@ trcn(:,:) = undef
 VAI(:,:)  = undef
 
 !Terrain properties
+if (allocated(slopemu)) deallocate(slopemu)
+if (allocated(xi)) deallocate(xi)
+if (allocated(Ld)) deallocate(Ld)
+if (allocated(lat)) deallocate(lat)
+if (allocated(lon)) deallocate(lon)
+if (allocated(dem)) deallocate(dem)
+if (allocated(slope)) deallocate(slope)
+if (allocated(Shd)) deallocate(Shd)
+if (allocated(forest)) deallocate(forest)
+
 allocate(slopemu(Nx,Ny))
 allocate(xi(Nx,Ny))
 allocate(Ld(Nx,Ny))
@@ -285,6 +330,13 @@ Shd(:,:) = undef
 forest(:,:) = undef
 
 ! Derived soil parameters
+if (allocated(b)) deallocate(b)
+if (allocated(hcap_soil)) deallocate(hcap_soil)
+if (allocated(hcon_soil)) deallocate(hcon_soil)
+if (allocated(sathh)) deallocate(sathh)
+if (allocated(Vsat)) deallocate(Vsat)
+if (allocated(Vcrit)) deallocate(Vcrit)
+
 allocate(b(Nx,Ny))
 allocate(hcap_soil(Nx,Ny))
 allocate(hcon_soil(Nx,Ny))
@@ -314,6 +366,34 @@ tmlt = 3600*tmlt
 trho = 3600*trho
 
 ! Allocate state variables
+if (allocated(albs)) deallocate(albs)
+if (allocated(Ds)) deallocate(Ds)
+if (allocated(Nsnow)) deallocate(Nsnow)
+if (allocated(Qcan)) deallocate(Qcan)
+if (allocated(rgrn)) deallocate(rgrn)
+if (allocated(Sice)) deallocate(Sice)
+if (allocated(Sliq)) deallocate(Sliq)
+if (allocated(Sveg)) deallocate(Sveg)
+if (allocated(Tcan)) deallocate(Tcan)
+if (allocated(theta)) deallocate(theta)
+if (allocated(Tsnow)) deallocate(Tsnow)
+if (allocated(Tsoil)) deallocate(Tsoil)
+if (allocated(Tsrf)) deallocate(Tsrf)
+if (allocated(fsnow)) deallocate(fsnow)
+if (allocated(Tveg)) deallocate(Tveg)
+if (allocated(snowdepthmin)) deallocate(snowdepthmin)
+if (allocated(snowdepthmax)) deallocate(snowdepthmax)
+if (allocated(snowdepthhist)) deallocate(snowdepthhist)
+if (allocated(swemin)) deallocate(swemin)
+if (allocated(swemax)) deallocate(swemax)
+if (allocated(swehist)) deallocate(swehist)
+if (allocated(histowet)) deallocate(histowet)
+if (allocated(fsky_terr)) deallocate(fsky_terr)
+if (allocated(dm_tot_subl)) deallocate(dm_tot_subl)
+if (allocated(dm_tot_trans)) deallocate(dm_tot_trans)
+if (allocated(dm_tot_slide)) deallocate(dm_tot_slide)
+if (allocated(index_grid_dem_sorted)) deallocate(index_grid_dem_sorted)
+
 allocate(albs(Nx,Ny))
 allocate(Ds(Nsmax,Nx,Ny))
 allocate(Nsnow(Nx,Ny))
@@ -371,6 +451,8 @@ dm_tot_slide(:,:) = undef
 index_grid_dem_sorted(:,:) = iundef
 
 ! Initial soil profiles from namelist
+if (allocated(fsat)) deallocate(fsat)
+if (allocated(Tprof)) deallocate(Tprof)
 allocate(fsat(Nsoil))
 allocate(Tprof(Nsoil))
 fsat(:)  = 0.5

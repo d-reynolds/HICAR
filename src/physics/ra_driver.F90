@@ -36,7 +36,8 @@ module radiation
     integer :: update_interval
     real*8  :: last_model_time
     real    :: solar_constant
-
+    real    :: p_top = 100000.0
+    
     !! MJ added to aggregate radiation over output interval
     real, allocatable, dimension(:,:) :: sum_SWdif, sum_SWdir, sum_SW, sum_LW, cos_project_angle, solar_elevation_store, solar_azimuth_store
     real, allocatable                 :: solar_azimuth(:), solar_elevation(:)
@@ -49,9 +50,18 @@ module radiation
     
 contains
 
-    subroutine radiation_init(domain,options)
+    subroutine radiation_init(domain,options, context_chng)
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in) :: options
+        logical, optional, intent(in) :: context_chng
+
+        logical :: context_change
+
+        if (present(context_chng)) then
+            context_change = context_chng
+        else
+            context_change = .false.
+        endif
         
         ims = domain%grid%ims
         ime = domain%grid%ime
@@ -73,6 +83,17 @@ contains
         kds = domain%grid%kds
         kde = domain%grid%kde
         
+        if (options%physics%radiation == 0) return
+
+        update_interval=options%rad%update_interval_rrtmg ! 30 min, 1800 s   600 ! 10 min (600 s)
+
+        !Saftey bound, in case update_interval is 0, or very small
+        if (update_interval<=10) then
+            last_model_time = domain%model_time%seconds()-10
+        else
+            last_model_time = domain%model_time%seconds()-update_interval
+        endif
+
         !! MJ added to aggregate radiation over output interval
         !allocate(sum_SW(domain%grid%ims:domain%grid%ime,domain%grid%jms:domain%grid%jme)); sum_SW=0.
         !allocate(sum_SWdif(domain%grid%ims:domain%grid%ime,domain%grid%jms:domain%grid%jme)); sum_SWdif=0.
@@ -80,38 +101,48 @@ contains
         !allocate(sum_LW(domain%grid%ims:domain%grid%ime,domain%grid%jms:domain%grid%jme)); sum_LW=0.
         
         if (options%physics%radiation_downScaling==1) then
+            if (allocated(cos_project_angle)) deallocate(cos_project_angle)
             allocate(cos_project_angle(ims:ime,jms:jme)) !! MJ added
+            if (allocated(solar_elevation_store)) deallocate(solar_elevation_store)
             allocate(solar_elevation_store(ims:ime,jms:jme)) !! MJ added
+            if (allocated(solar_azimuth_store)) deallocate(solar_azimuth_store)
             allocate(solar_azimuth_store(ims:ime,jms:jme)) !! MJ added
         endif
         
+        if (allocated(solar_elevation)) deallocate(solar_elevation)
         allocate(solar_elevation(ims:ime))
+        if (allocated(solar_azimuth)) deallocate(solar_azimuth)
         allocate(solar_azimuth(ims:ime)) !! MJ added
 
+        ! If we are just changing nest contexts, we don't need to reinitialize the radiation modules
+        if (context_change) return
 
-        if (STD_OUT_PE) write(*,*) "Initializing Radiation"
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing Radiation"
 
         if (options%physics%radiation==kRA_BASIC) then
-            if (STD_OUT_PE) write(*,*) "    Basic Radiation"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Basic Radiation"
         endif
         if (options%physics%radiation==kRA_SIMPLE .or. (options%physics%landsurface>0 .and. options%physics%radiation==0)) then
-            if (STD_OUT_PE) write(*,*) "    Simple Radiation"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Simple Radiation"
             !call ra_simple_init(domain)
         endif!! MJ added to detect the time for outputting 
 
         if (options%physics%radiation==kRA_RRTMG) then
-            if (STD_OUT_PE) write(*,*) "    RRTMG"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    RRTMG"
             if(.not.allocated(domain%tend%th_lwrad)) &
                 allocate(domain%tend%th_lwrad(domain%ims:domain%ime,domain%kms:domain%kme,domain%jms:domain%jme))
             if(.not.allocated(domain%tend%th_swrad)) &
                 allocate(domain%tend%th_swrad(domain%ims:domain%ime,domain%kms:domain%kme,domain%jms:domain%jme))
 
             if (options%physics%microphysics .ne. kMP_THOMP_AER) then
-               if (STD_OUT_PE)write(*,*) '    NOTE: When running RRTMG, microphysics option 5 works best.'
+               if (STD_OUT_PE .and. .not.context_change)write(*,*) '    NOTE: When running RRTMG, microphysics option 5 works best.'
             endif
 
+            ! This will capture the highest pressure level of all nests in this simulation
+            p_top = min(p_top, minval(domain%pressure_interface%data_3d(domain%ims:domain%ime,domain%kme+1,domain%jms:domain%jme)))
+
             call rrtmg_lwinit(                           &
-                p_top=(minval(domain%pressure_interface%data_3d(:,domain%kme+1,:))),     allowed_to_read=.TRUE. ,                &
+                p_top=p_top,     allowed_to_read=.TRUE. ,                &
                 ids=domain%ids, ide=domain%ide, jds=domain%jds, jde=domain%jde, kds=domain%kds, kde=domain%kde,                &
                 ims=domain%ims, ime=domain%ime, jms=domain%jms, jme=domain%jme, kms=domain%kms, kme=domain%kme,                &
                 its=domain%its, ite=domain%ite, jts=domain%jts, jte=domain%jte, kts=domain%kts, kte=domain%kte                 )
@@ -123,14 +154,6 @@ contains
                 its=domain%its, ite=domain%ite, jts=domain%jts, jte=domain%jte, kts=domain%kts, kte=domain%kte                 )
                 domain%tend%th_swrad = 0
                 domain%tend%th_lwrad = 0
-        endif
-        update_interval=options%rad%update_interval_rrtmg ! 30 min, 1800 s   600 ! 10 min (600 s)
-
-        !Saftey bound, in case update_interval is 0, or very small
-        if (update_interval<=10) then
-            last_model_time = domain%model_time%seconds()-10
-        else
-            last_model_time = domain%model_time%seconds()-update_interval
         endif
 
     end subroutine radiation_init

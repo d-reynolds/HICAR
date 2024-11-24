@@ -190,16 +190,16 @@ contains
         ! courant condition for 3D advection. 
                 
         ! If this is the first step (future_dt_seconds has not yet been set)
-        if (future_dt_seconds == DT_BIG) then
-            present_dt_seconds = compute_dt(domain%dx, domain%u%data_3d, domain%v%data_3d, &
-                            domain%w%data_3d, domain%density%data_3d, options%domain%dz_levels, &
-                            domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
-                            domain%its, domain%ite, domain%jts, domain%jte, &
-                            options%time%cfl_reduction_factor, &
-                            use_density=.false.)
-        else
-            present_dt_seconds = future_dt_seconds
-        endif
+        !if (future_dt_seconds == DT_BIG) then
+        present_dt_seconds = compute_dt(domain%dx, domain%u%data_3d, domain%v%data_3d, &
+                        domain%w%data_3d, domain%density%data_3d, options%domain%dz_levels, &
+                        domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
+                        domain%its, domain%ite, domain%jts, domain%jte, &
+                        options%time%cfl_reduction_factor, &
+                        use_density=.false.)
+        !else
+        !    present_dt_seconds = future_dt_seconds
+        !endif
         
         future_dt_seconds = compute_dt(domain%dx, domain%u%dqdt_3d, domain%v%dqdt_3d, &
                         domain%w%dqdt_3d, domain%density%data_3d, options%domain%dz_levels, &

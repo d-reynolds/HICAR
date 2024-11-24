@@ -1,5 +1,5 @@
 !>------------------------------------------------
-!! Defines model constants (e.g. gravity, and MAXFILELENGTH)
+!! Defines model constants (e.g. gravity, and kMAX_FILE_LENGTH)
 !!
 !!------------------------------------------------
 module icar_constants
@@ -20,15 +20,22 @@ module icar_constants
     integer :: kNUM_PROC_PER_NODE = 0
     integer :: kNUM_IO_PER_NODE = 1
     
+    character(len=5), parameter :: kCHAR_NO_VAL = "-9999"
+    integer,          parameter :: kINT_NO_VAL = -9999
+    real,             parameter :: kREAL_NO_VAL = -9999.0
+
     !Flag-value to indicate a part of a read-write buffer which was never filled
     real, parameter :: kEMPT_BUFF = -123456789.0
     
     ! string lengths
-    integer, parameter :: kMAX_FILE_LENGTH = 1024
-    integer, parameter :: kMAX_DIM_LENGTH  = 1024
-    integer, parameter :: kMAX_NAME_LENGTH = 1024
-    integer, parameter :: kMAX_ATTR_LENGTH = 1024
+    integer, parameter :: kMAX_FILE_LENGTH =   1024
+    integer, parameter :: kMAX_DIM_LENGTH  =   1024
+    integer, parameter :: kMAX_NAME_LENGTH =   1024
+    integer, parameter :: kMAX_ATTR_LENGTH =   1024
+    integer, parameter :: kMAX_STRING_LENGTH = 1024  ! maximum length of other strings (e.g. netcdf attributes)
 
+    ! maximum number of nests
+    integer, parameter :: kMAX_NESTS = 10
     !>--------------------------------------------
     ! list of integer constants to be used when accessing various arrays that track variable allocation, usage, etc. requests
     !
@@ -171,6 +178,7 @@ module icar_constants
         integer :: coeff_momentum_exchange_3d
         integer :: QFX
         integer :: br
+        integer :: MOL
         integer :: psim
         integer :: psih
         integer :: fm
@@ -366,7 +374,7 @@ module icar_constants
                                                             261, 262, 263, 264, 265, 266, 267, 268, 269, 270,  &
                                                             271, 272, 273, 274, 275, 276, 277, 278, 279, 280,  &
                                                             281, 282, 283, 284, 285, 286, 287, 288, 289, 290,  &
-                                                            291)
+                                                            291, 292)
 
     integer, parameter :: kINTEGER_BITS     = storage_size(kINTEGER_BITS)
     integer, parameter :: kMAX_STORAGE_VARS = storage_size(kVARS) / kINTEGER_BITS
@@ -385,12 +393,8 @@ module icar_constants
 !>------------------------------------------------
 !! Model constants (mostly string lengths)
 !! ------------------------------------------------
-    integer, parameter :: MAXFILELENGTH      =   1024  ! maximum file name length
-    integer, parameter :: MAXVARLENGTH       =   1024  ! maximum variable name length
     integer, parameter :: MAXLEVELS          =    500  ! maximum number of vertical layers (should typically be ~10-20)
     integer, parameter :: MAX_NUMBER_FILES   =  50000  ! maximum number of permitted input files (probably a bit extreme)
-    integer, parameter :: MAXSTRINGLENGTH    =   1024  ! maximum length of other strings (e.g. netcdf attributes)
-    integer, parameter :: kMAX_STRING_LENGTH =   1024  ! maximum length of other strings (e.g. netcdf attributes)
 
 
 !>------------------------------------------------

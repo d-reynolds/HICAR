@@ -1,6 +1,6 @@
 !>------------------------------------------------
 !! Contains type definitions for a variety of model data strucutres
-!! Also defines model constants (e.g. gravity, and MAXFILELENGTH)
+!! Also defines model constants (e.g. gravity, and kMAX_FILE_LENGTH)
 !!
 !!  @author
 !!  Ethan Gutmann (gutmann@ucar.edu)

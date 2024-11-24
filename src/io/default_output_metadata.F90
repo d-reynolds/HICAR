@@ -2335,6 +2335,16 @@ contains
         !>------------------------------------------------------------
         !!  Sensible Heat Exchange Coefficient, Vegetated
         !!------------------------------------------------------------
+        associate(var=>var_meta(kVARS%mol))
+            var%name        = "mol"
+            var%dimensions  = two_d_t_dimensions
+            var%three_d     = .False.
+            var%two_d       = .True.
+            var%unlimited_dim=.True.
+            var%attributes  = [attribute_t("non_standard_name", "Monin-Obukhov Length"),                    &
+                               attribute_t("units",         "m"),                                   &
+                               attribute_t("coordinates",   "lat lon")]
+        end associate
         associate(var=>var_meta(kVARS%ch_veg))
             var%name        = "ch_veg"
             var%dimensions  = two_d_t_dimensions

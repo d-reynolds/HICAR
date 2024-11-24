@@ -323,7 +323,7 @@ contains
         real(real128), allocatable, dimension(:) :: temp_times_128
         integer :: time_idx, error
         integer :: start_year, start_month, start_day, start_hour
-        character(len=MAXSTRINGLENGTH) :: calendar, units
+        character(len=kMAX_STRING_LENGTH) :: calendar, units
         real(real128) :: calendar_gain
 
         ! first read the time variable (presumebly a 1D real(real64) array)

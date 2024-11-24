@@ -23,25 +23,27 @@ submodule(ioclient_interface) ioclient_implementation
 
 contains        
     
-    module subroutine init(this, domain, forcing, options)
+    module subroutine init(this, domain, forcing, options, n_indx)
         implicit none
         class(ioclient_t),  intent(inout)  :: this
         type(domain_t),     intent(inout)  :: domain
         type(boundary_t),   intent(in)     :: forcing
-        type(options_t),    intent(in)     :: options
+        type(options_t),    intent(in)     :: options(:)
+        integer,            intent(in)     :: n_indx
 
         type(variable_t) :: var
         type(MPI_Group) :: family_group
 
-        integer :: my_rank, comm_size
+        integer :: my_rank, comm_size, some_child_id
         
-        if (STD_OUT_PE) write(*,*) 'Initializing I/O Clients'
+        !if (STD_OUT_PE) write(*,*) 'Initializing I/O Clients'
     
         this%i_s_r = forcing%its; this%i_e_r = forcing%ite
         this%k_s_r = forcing%kts; this%k_e_r = forcing%kte
         this%j_s_r = forcing%jts; this%j_e_r = forcing%jte
         this%written = .False.
-        
+        this%nest_updated = .False.
+
         this%i_s_w = domain%its; this%i_e_w = domain%ite
         this%k_s_w = domain%kts; this%k_e_w = domain%kte+1
         this%j_s_w = domain%jts; this%j_e_w = domain%jte
@@ -51,6 +53,16 @@ contains
         if (domain%ime == domain%ide) this%i_e_w = domain%ide !Add extra to accomodate staggered vars
         if (domain%jms == domain%jds) this%j_s_w = domain%jds
         if (domain%jme == domain%jde) this%j_e_w = domain%jde !Add extra to accomodate staggered vars
+
+
+        ! If this run uses nests, then set the variables which we need to output to a child nest
+        ! Because microphysics must be the same for all nests, we can use any of the forcing_options
+        ! structures on a child nest, since these are all the same. Use domain #2, since there will always
+        ! be at least 1 nest following this condition
+        if (size(options(n_indx)%general%child_nests) > 0) then
+            some_child_id = options(n_indx)%general%child_nests(1)
+            this%vars_for_nest = options(some_child_id)%forcing%vars_to_read
+        endif
 
         call init_with_server(this)
 
@@ -111,7 +123,7 @@ contains
 
         type(c_ptr) :: tmp_ptr
         integer(KIND=MPI_ADDRESS_KIND) :: win_size
-        integer :: nx_w, nz_w, ny_w, n_w_2d, n_w_3d, ierr
+        integer :: nx_w, nz_w, ny_w, n_w_2d, n_f, n_w_3d, ierr
         integer :: nx_r, nz_r, ny_r, n_r, real_size
 
         CALL MPI_Type_size(MPI_REAL, real_size)
@@ -121,6 +133,7 @@ contains
         ny_w = 0
         n_w_3d = 0
         n_w_2d = 0
+        n_f = 0
 
         nx_r = 0
         nz_r = 0
@@ -138,6 +151,8 @@ contains
 
         call MPI_Allreduce(MPI_IN_PLACE,n_w_3d,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,n_w_2d,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,n_f,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+
         call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
         ! +1 added to handle variables on staggered grids
@@ -151,6 +166,13 @@ contains
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_2d)
         call C_F_POINTER(tmp_ptr, this%write_buffer_2d, [n_w_2d, nx_w, ny_w])
         this%write_buffer_2d = kEMPT_BUFF
+
+        ! This is the buffer for the forcing data. Necesarry so that output data can sit around in its own buffer while the ioserver
+        ! is busy distributing the forcing data to the child nests 
+        win_size = n_f*nx_w*ny_w*nz_w
+        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%forcing_win)
+        call C_F_POINTER(tmp_ptr, this%forcing_buffer, [n_f, nx_w, nz_w, ny_w])
+        this%forcing_buffer = kEMPT_BUFF
 
         win_size = n_r*nx_r*nz_r*ny_r
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%read_win)
@@ -219,6 +241,52 @@ contains
 
 
     end subroutine 
+
+    module subroutine update_nest(this, domain)
+        implicit none
+        class(ioclient_t),   intent(inout) :: this
+        type(domain_t),      intent(in)    :: domain
+
+        type(variable_t) :: var
+        integer :: i, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, err
+
+        n_3d = 1
+
+        ! Do MPI_Win_Wait on forcing_win. This is mostly unnecesarry, since the server process is what will be waiting on us, which is handeled by the MPI_Win_Start call
+        ! in ioserver%gather_foring. Still, MPI_Win_Wait is called here for completeness of PSCW model
+        if (this%nest_updated) then
+            call MPI_Win_Wait(this%forcing_win)
+        endif
+        this%nest_updated = .False.
+        !This is false only when it is the first call to push (i.e. first write call)
+
+        do i = 1, size(this%vars_for_nest)
+            ! get the next variable in the structure
+            if (this%vars_for_nest(i) == '') cycle
+            var = domain%vars_to_out%get_var(this%vars_for_nest(i),err=err)
+            if (var%two_d) cycle
+
+            if (err > 0) then
+                write(*,*) 'Error: Variable ', this%vars_for_nest(i), ' not found in parent domain: ', domain%nest_indx
+                stop
+            end if
+            i_s_w = this%i_s_w; i_e_w = this%i_e_w
+            j_s_w = this%j_s_w; j_e_w = this%j_e_w
+            if (domain%ime == domain%ide) i_e_w = i_e_w+var%xstag !Add extra to accomodate staggered vars
+            if (domain%jme == domain%jde) j_e_w = j_e_w+var%ystag !Add extra to accomodate staggered vars
+            nx = i_e_w - i_s_w + 1
+            ny = j_e_w - j_s_w + 1
+
+            this%forcing_buffer(n_3d,1:nx,1:var%dim_len(2),1:ny) = &
+                var%data_3d(i_s_w:i_e_w,1:var%dim_len(2),j_s_w:j_e_w)
+            n_3d = n_3d+1
+        enddo
+
+        this%nest_updated = .True.
+        ! Do MPI_Win_Post on forcing_win to inform that server process can begin gathering of nest data
+        call MPI_Win_Post(this%parent_group,0,this%forcing_win)
+
+    end subroutine
     
     ! This subroutine receives the input fields from the IO buffer
     ! for assignment to the forcing object

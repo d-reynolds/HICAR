@@ -94,13 +94,22 @@ contains
     end subroutine cu_var_request
 
 
-    subroutine init_convection(domain,options)
+    subroutine init_convection(domain,options, context_chng)
         implicit none
         type(domain_t),  intent(inout) :: domain
         type(options_t), intent(in) :: options
+        logical, optional, intent(in) :: context_chng
+
+        logical :: context_change
         integer :: i, j
 
-        if (STD_OUT_PE) write(*,*) "Initializing Cumulus Scheme"
+        if (present(context_chng)) then
+            context_change = context_chng
+        else
+            context_change = .false.
+        endif
+
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing Cumulus Scheme"
 
         ! module level variables for easy access... need to think about tiling to permit halo processing separately.
         ids = domain%grid%ids
@@ -123,33 +132,39 @@ contains
         kte = domain%grid%kte
 
         if (options%physics%convection > 0) then
+            if (allocated(CU_ACT_FLAG)) deallocate(CU_ACT_FLAG)
             allocate(CU_ACT_FLAG(ims:ime,jms:jme), source=.False.)
             CU_ACT_FLAG(its:ite, jts:jte) = .True.
 
+            if (allocated(RAINCV)) deallocate(RAINCV)
+            if (allocated(PRATEC)) deallocate(PRATEC)
             allocate(RAINCV(ims:ime,jms:jme))
             allocate(PRATEC(ims:ime,jms:jme))
 
             RAINCV = 0
             PRATEC = 0
-
+            
+            if (allocated(W0AVG)) deallocate(W0AVG)
             allocate(W0AVG(ims:ime,kms:kme,jms:jme))
             W0AVG = 0
 
+            if (allocated(XLAND)) deallocate(XLAND)
             allocate(XLAND(ims:ime,jms:jme))
             XLAND = domain%land_mask
             where(domain%land_mask == 0) XLAND = 2 ! 0 is water if using "LANDMASK" as input
 
+            if (allocated(w_stochastic)) deallocate(w_stochastic)
             allocate(w_stochastic(ims:ime,kms:kme,jms:jme))
 
         endif
 
         if (options%physics%convection == kCU_TIEDTKE) then
-            if (STD_OUT_PE) write(*,*) "    Tiedtke Cumulus scheme"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Tiedtke Cumulus scheme"
 
             call tiedtkeinit(domain%tend%th,domain%tend%qv,   &
                              domain%tend%qc,domain%tend%qi,   &
                              domain%tend%u, domain%tend%v,    &
-                             .false.,1,1,0,                   &
+                             context_change,1,1,0,            &
                              .true.,                          &
                              ids,ide, jds,jde, kds,kde,       &
                              ims,ime, jms,jme, kms,kme,       &
@@ -171,8 +186,10 @@ contains
 
 
         else if (options%physics%convection==kCU_NSAS) then
-            if (STD_OUT_PE) write(*,*) "     NSAS Cumulus scheme"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "     NSAS Cumulus scheme"
 
+            if (allocated(lowest_convection_layer)) deallocate(lowest_convection_layer)
+            if (allocated(highest_convection_layer)) deallocate(highest_convection_layer)
             allocate(lowest_convection_layer(ims:ime,jms:jme))
             allocate(highest_convection_layer(ims:ime,jms:jme))
 
@@ -191,7 +208,7 @@ contains
                             ,rqicuten=domain%tend%qi                            &
                             ,rucuten=domain%tend%u                              &
                             ,rvcuten=domain%tend%v                              &
-                            ,restart=.false.             &  ! options%restart                            &
+                            ,restart=context_change             &  ! options%restart                            &
                             ,p_qc=1                                             & ! copied from Tiedke; no idea as to what these 3 flags represent.
                             ,p_qi=1                                             &
                             ,p_first_scalar=0                                   &
@@ -202,8 +219,16 @@ contains
                             )
 
         else if (options%physics%convection==kCU_BMJ) then
-            if (STD_OUT_PE) write(*,*) "     BMJ Cumulus scheme"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "     BMJ Cumulus scheme"
 
+            if (allocated(CLDEFI)) deallocate(CLDEFI)
+            if (allocated(CUBOT)) deallocate(CUBOT)
+            if (allocated(CUTOP)) deallocate(CUTOP)
+            if (allocated(CCLDFRA)) deallocate(CCLDFRA)
+            if (allocated(QCCONV)) deallocate(QCCONV)
+            if (allocated(QICONV)) deallocate(QICONV)
+            if (allocated(CONVCLD)) deallocate(CONVCLD)
+            if (allocated(lowlyr)) deallocate(lowlyr)
             allocate( CLDEFI(ims:ime,jms:jme) )
             allocate( CUBOT(IMS:IME,JMS:JME) )
             allocate( CUTOP(IMS:IME,JMS:JME) )  ! INTENT:OUT
@@ -235,7 +260,7 @@ contains
                          ,lowlyr=lowlyr                                         & !-- LOWLYR        index of lowest model layer above the ground
                          ,cp=cp                                                 & ! cp  = 1012.0    ! J/kg/K   specific heat capacity of moist STP air?                 CP
                          ,RD=r_d                      & ! r_d (wrf_constatns) = 287., while Rd  = 287.058 (icar_constants)
-                         ,RESTART= .false.                                      &
+                         ,RESTART=context_change                                      &
                          ,allowed_to_read=.true.                                & !
                          ,ids=ids, ide=ide, jds=jds, jde=jde, kds=kds, kde=kde  &
                          ,ims=ims, ime=ime, jms=jms, jme=jme, kms=kms, kme=kme  &
@@ -244,9 +269,9 @@ contains
 
          endif
 
-         if ((options%cu%stochastic_cu /= kNO_STOCHASTIC) .and.  (STD_OUT_PE)) then
+         if ((options%cu%stochastic_cu /= kNO_STOCHASTIC) .and.  (STD_OUT_PE .and. .not.context_change)) then
             write(*,*)"      stochastic W pertubation for convection triggering"  ! to check that it actually turns on/of
-         elseif ((options%cu%stochastic_cu == kNO_STOCHASTIC) .and.  (STD_OUT_PE)) then
+         elseif ((options%cu%stochastic_cu == kNO_STOCHASTIC) .and.  (STD_OUT_PE .and. .not.context_change)) then
             write(*,*)"      No stochastic W pertubation for convection triggering"
          endif
 
@@ -496,7 +521,7 @@ subroutine convect(domain,options,dt_in)
             !     domain%qrain(:,:,j) =domain%qrain(:,:,j) + domain%tend%Qr(:,:,j)*internal_dt
             ! endif
 
-            domain%accumulated_precipitation%data_2dd(:,j)  = domain%accumulated_precipitation%data_2dd(:,j) + RAINCV(:,j)
+            domain%accumulated_precipitation%data_2d(:,j)  = domain%accumulated_precipitation%data_2d(:,j) + RAINCV(:,j)
             domain%accumulated_convective_pcp%data_2d(:,j) = domain%accumulated_convective_pcp%data_2d(:,j) + RAINCV(:,j)
 
             ! if (options%physics%convection==kCU_TIEDTKE) then

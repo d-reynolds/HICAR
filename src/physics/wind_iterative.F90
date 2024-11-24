@@ -87,13 +87,14 @@ contains
         alpha = alpha_in(i_s:i_e,k_s:k_e,j_s:j_e) 
         
         if (.not.(allocated(A_coef))) then
+            ! Can't be called in module-level init function, since we first need alpha
             call initialize_coefs(domain)
-            call KSPSetComputeOperators(ksp,ComputeMatrix,0,ierr)
         elseif (.not.( ALL(alpha==minval(alpha)) )) then
             call update_coefs(domain)
-            call KSPSetComputeOperators(ksp,ComputeMatrix,0,ierr)
         endif
-                                        
+
+        call KSPSetComputeOperators(ksp,ComputeMatrix,0,ierr)
+    
         ! call KSPGetOperators(ksp, A, PETSC_NULL_MAT, ierr) ! The second parameter is for the right-hand matrix, which can be NULL if not needed
         ! call MatIsSymmetric(A, PETSC_SMALL, isSymmetric, ierr);
         ! if (isSymmetric) then
@@ -725,7 +726,10 @@ contains
 
         PetscErrorCode ierr
 
-
+        deallocate(A_coef,B_coef,C_coef,D_coef,E_coef,F_coef,G_coef,H_coef,I_coef,J_coef,K_coef,L_coef,M_coef,N_coef,O_coef)
+        deallocate(div,dz_if,jaco,dzdx,dzdy,sigma,alpha)
+        deallocate(xl,yl)
+        
         call VecDestroy(localX,ierr)
         call DMDestroy(da,ierr)
         call KSPDestroy(ksp,ierr)
@@ -784,7 +788,7 @@ contains
         call KSPSetComputeInitialGuess(ksp,ComputeInitialGuess,0,ierr)
         ! call KSPSetUp(ksp, ierr)
 
-        if(STD_OUT_PE) write(*,*) 'Initialized PETSc'
+        !if(STD_OUT_PE) write(*,*) 'Initialized PETSc'
     end subroutine
     
     subroutine init_module_vars(domain)
