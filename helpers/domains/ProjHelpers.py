@@ -298,10 +298,10 @@ prepGridsForRegridder(ds_in,to_ds,ds_in_crs,ds_in_xvar,ds_in_yvar,ds_in_xdim,\
         # at the moment, parallel doesn't seem to work, so just disable for all cases
         parallel = False
         regridder = xe.Regridder(ds_in_grid_with_bounds, ds_to_grid_with_bounds, \
-                             method=method,extrap_method=extrap,reuse_weights=reuse,parallel=parallel)
+                             method=method,extrap_method=extrap,reuse_weights=reuse)#,parallel=parallel)
         print('Finished with smooth regridder')
         disc_regridder = xe.Regridder(ds_in_grid_with_bounds, ds_to_grid_with_bounds, \
-                             method='nearest_s2d',extrap_method=extrap,reuse_weights=reuse,parallel=parallel)
+                             method='nearest_s2d',extrap_method=extrap,reuse_weights=reuse)#,parallel=parallel)
     print('Finished making regridders')
     
     ds_out = regridder(ds_in)

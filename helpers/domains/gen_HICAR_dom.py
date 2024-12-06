@@ -20,6 +20,10 @@ large_domain_fn = 'Large_domain.nc'
 # Name of output file
 output_domain_fn = 'output_domain.nc'
 
+# classification system for land use categories. Used to create land mask
+# based on what the water type is for the land use classification. Currently
+# only USGS is supported
+LU_Category = 'USGS'
 # These are used in the calculation of ridelines, and can be tuned if the user
 # is not satisfied with the deliniation of ridgelines in the output file
 # terr_filter = 10
@@ -34,6 +38,6 @@ if (not(large_domain_fn=="")):
     dom_rad = xr.open_dataset(large_domain_fn)
 else:
     dom_rad = 0
-dom_out = hd.wholeShebang(dom,dom_rad,res=res)
+dom_out = hd.wholeShebang(dom,dom_rad,res=res,LU_Category=LU_Category)
 
 dom_out.to_netcdf(output_domain_fn)
