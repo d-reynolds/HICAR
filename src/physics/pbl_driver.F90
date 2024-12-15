@@ -171,7 +171,7 @@ contains
                 enddo
                 enddo
                 enddo
-              endif
+            endif
 
 
             call ysuinit(rublten=domain%tend%u                  &

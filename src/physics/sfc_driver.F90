@@ -229,7 +229,7 @@ contains
                ,isftcflx=options%sfc%isftcflx  &
                ,scm_force_flux=options%sfc%scm_force_flux)
                                              
-                endif
+            endif
     end subroutine sfc
 
 !    subroutine sfc_finalize(options)
