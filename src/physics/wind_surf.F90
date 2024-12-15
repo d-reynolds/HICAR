@@ -321,7 +321,7 @@ contains
         if ( STD_OUT_PE ) then
             !write (*,*) "Saving *_Sx.nc"
             !Save file
-            call io_write(filename, "Sx", domain%Sx(:,:,:,:) ) 
+            !call io_write(filename, "Sx", domain%Sx(:,:,:,:) ) 
             !call io_write("TPI_out.nc", "TPI", domain%neighbor_TPI(:,:) ) 
             !call io_write("sheltering_TPI.nc", "Sx_shelter", sheltering_TPI(:,:,:,:) ) 
         endif

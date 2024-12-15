@@ -32,7 +32,7 @@ module wind_iterative_old
 
     implicit none
     private
-    public:: init_iter_winds_old, calc_iter_winds_old, finalize_iter_winds
+    public:: init_iter_winds_old, calc_iter_winds_old, finalize_iter_winds_old
     real, parameter::deg2rad=0.017453293 !2*pi/360
     real, parameter :: rad2deg=57.2957779371
     real, allocatable, dimension(:,:,:) :: A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, H_coef, I_coef, &
@@ -42,6 +42,13 @@ module wind_iterative_old
     real, allocatable, dimension(:,:)    :: dzdx_surf, dzdy_surf
     integer, allocatable :: xl(:), yl(:)
     integer              :: hs, i_s, i_e, k_s, k_e, j_s, j_e, ims, ime, kms, kme, jms, jme
+
+
+    KSP            ksp
+    PC             pc
+    DM             da
+    Vec            localX
+
 contains
 
 
@@ -68,9 +75,7 @@ contains
         integer k !, i_s, i_e, k_s, k_e, j_s, j_e
         
         PetscErrorCode ierr
-        KSP            ksp
-        DM             da
-        Vec            x, localX
+        Vec            x
         PetscInt       one, x_size, iteration
         PetscReal      norm, conv_tol
         KSPConvergedReason reason
@@ -82,64 +87,51 @@ contains
         div = div_in(i_s:i_e,k_s:k_e,j_s:j_e) 
         one = 1
         alpha = alpha_in(i_s:i_e,k_s:k_e,j_s:j_e) 
-        
+
+
         if (.not.(allocated(A_coef))) then
+            ! Can't be called in module-level init function, since we first need alpha
             call initialize_coefs(domain)
-        else
+        elseif (.not.( ALL(alpha==minval(alpha)) )) then
             call update_coefs(domain)
         endif
-                                                                
-        call KSPCreate(domain%compute_comms%MPI_VAL,ksp,ierr)
-        conv_tol = 1e-10
 
-        call KSPSetTolerances(ksp,conv_tol,PETSC_DEFAULT_REAL,PETSC_DEFAULT_REAL,PETSC_DEFAULT_INTEGER,ierr)
-        call KSPSetType(ksp,KSPBCGSL,ierr);
-        
-        call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
-                          (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
-                          xl, PETSC_NULL_INTEGER,yl,da,ierr)
-        
-        call DMSetFromOptions(da,ierr)
-        call DMSetUp(da,ierr)
-        
-        call KSPSetDM(ksp,da,ierr)
-        call KSPSetComputeInitialGuess(ksp,ComputeInitialGuess,0,ierr)
-        call KSPSetComputeRHS(ksp,ComputeRHS,0,ierr)
         call KSPSetComputeOperators(ksp,ComputeMatrix,0,ierr)
+    
+        ! call KSPGetOperators(ksp, A, PETSC_NULL_MAT, ierr) ! The second parameter is for the right-hand matrix, which can be NULL if not needed
+        ! call MatIsSymmetric(A, PETSC_SMALL, isSymmetric, ierr);
+        ! if (isSymmetric) then
+        !     if(STD_OUT_PE) write(*,*) 'Matrix is symmetric'
+        !     call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
+        ! else 
+        !     if(STD_OUT_PE) write(*,*) 'Matrix is not symmetric'
+        !     call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
+        ! endif
+        call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPPIPEFCG <-- this one tested to give fastest convergence...
+                         !KSPPIPEGCR <-- this one tested to give fastest convergence...
+                         !KSPGCR <-- this one tested to give fastest convergence...
 
-        call KSPSetFromOptions(ksp,ierr)
-        call DMCreateLocalVector(da,localX,ierr)
+        call KSPSetComputeRHS(ksp,ComputeRHS,0,ierr)
+
         call KSPSolve(ksp,PETSC_NULL_VEC,PETSC_NULL_VEC,ierr)
-        
+
         call KSPGetSolution(ksp,x,ierr)
-        call KSPGetConvergedReason(ksp, reason, ierr)
         call KSPGetIterationNumber(ksp, iteration, ierr)
-        if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iteration,' iterations, reason: ',reason
+        if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iteration,' iterations'
         
         !Subset global solution x to local grid so that we can access ghost-points
         call DMGlobalToLocalBegin(da,x,INSERT_VALUES,localX,ierr)
         call DMGlobalToLocalEnd(da,x,INSERT_VALUES,localX,ierr)
 
-        if ( STD_OUT_PE .and. reason < 0) then
-            write (*,*) 'PETSc ERROR: convergence failed after ',iteration,' iterations'
-            write (*,*) 'PETSc KSP Error code:  ',reason
-            !stop
-        endif
-
         call DMDAVecGetArrayF90(da,localX,lambda, ierr)
         call calc_updated_winds(domain, lambda, update, adv_den)
+        domain%alpha%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) = lambda(i_s:i_e,k_s:k_e,j_s:j_e)
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
-
+        
         !Exchange u and v, since the outer points are not updated in above function
         call domain%halo%exch_var(domain%u,do_dqdt=update)
         call domain%halo%exch_var(domain%v,do_dqdt=update)
-
-        call VecDestroy(localX,ierr)
-        call DMDestroy(da,ierr)
-        call KSPDestroy(ksp,ierr)
-        
-        !call finalize_iter_winds()
-                
+                         
     end subroutine calc_iter_winds_old
 
     subroutine calc_updated_winds(domain,lambda,update,adv_den) !u, v, w, jaco_u,jaco_v,jaco_w,u_dzdx,v_dzdy,lambda, ids, ide, jds, jde)
@@ -306,8 +298,8 @@ contains
             do k=zs,(zs+zm-1)
                 do i=xs,(xs+xm-1)
                     !For global boundary conditions
-                    if (i.le.1 .or. j.le.1 .or. k.eq.0 .or. &
-                        i.ge.mx-2 .or. j.ge.my-2 .or. k.eq.mz-1) then
+                    if (i.le.0 .or. j.le.0 .or. k.eq.0 .or. &
+                        i.ge.mx-1 .or. j.ge.my-1 .or. k.eq.mz-1) then
                         barray(i,k,j) = 0.0
                     else
                         barray(i,k,j) = -2*div(i,k,j)
@@ -372,8 +364,8 @@ contains
                 row(MatStencil_i) = i
                 row(MatStencil_j) = k
                 row(MatStencil_k) = j
-                if (i.le.1 .or. j.le.1 .or. &
-                    i.ge.mx-2 .or. j.ge.my-2) then
+                if (i.le.0 .or. j.le.0 .or. &
+                    i.ge.mx-1 .or. j.ge.my-1) then
                     v(1) = 1.0
                     call MatSetValuesStencil(arr_B,i1,row,i1,row,v,INSERT_VALUES, ierr)
                 else if (k.eq.mz-1) then
@@ -707,30 +699,76 @@ contains
     end subroutine
     
 
-    subroutine finalize_iter_winds()
+    subroutine finalize_iter_winds_old()
         implicit none
 
         PetscErrorCode ierr
 
+        deallocate(A_coef,B_coef,C_coef,D_coef,E_coef,F_coef,G_coef,H_coef,I_coef,J_coef,K_coef,L_coef,M_coef,N_coef,O_coef)
+        deallocate(div,dz_if,jaco,dzdx,dzdy,dzdx_surf, dzdy_surf, sigma,alpha)
+        deallocate(xl,yl)
+        
+        call VecDestroy(localX,ierr)
+        call DMDestroy(da,ierr)
+        call KSPDestroy(ksp,ierr)
         call PetscFinalize(ierr)
+
     end subroutine
 
-    subroutine init_iter_winds_old(domain)
+    subroutine init_petsc_comms(domain)
         implicit none
         type(domain_t), intent(in) :: domain
         PetscErrorCode ierr
 
         PETSC_COMM_WORLD = domain%compute_comms%MPI_VAL
-        
         call PetscInitialize(PETSC_NULL_CHARACTER, ierr)
         if (ierr .ne. 0) then
             print*,'Unable to initialize PETSc'
             stop
-        endif 
-        call init_module_vars(domain)
-        if(STD_OUT_PE) write(*,*) 'Initialized PETSc'
+        endif
+
     end subroutine
-    
+
+    subroutine init_iter_winds_old(domain)
+        implicit none
+        type(domain_t), intent(in) :: domain
+
+        PetscInt       one, iter
+        PetscReal      conv_tol
+        PetscErrorCode ierr
+
+        call init_petsc_comms(domain)
+        call init_module_vars(domain)
+
+        one = 1
+
+        call KSPCreate(domain%compute_comms%MPI_VAL,ksp,ierr)
+        conv_tol = 1e-4
+        call KSPSetFromOptions(ksp,ierr)
+
+        !call KSPSetTolerances(ksp,conv_tol,PETSC_DEFAULT_REAL,PETSC_DEFAULT_REAL,PETSC_DEFAULT_INTEGER,ierr)
+        call KSPSetType(ksp,KSPPIPEFCG,ierr) !KSPPIPEFCG <-- this one tested to give fastest convergence...
+                                              ! KSPPIPEBCGS <--- Could be faster, but needs to be tested...
+        !call KSPGetPC(ksp,pc, ierr)
+        !call PCSetType(pc,PCSOR, ierr)
+        ! call KSPSetLagNorm(ksp, PETSC_TRUE, ierr)
+        call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
+                          (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
+                          xl, PETSC_NULL_INTEGER_ARRAY ,yl,da,ierr)
+        
+        call DMSetFromOptions(da,ierr)
+        call DMSetUp(da,ierr)
+        call DMCreateLocalVector(da,localX,ierr)
+        
+        call KSPSetDMActive(ksp,PETSC_FALSE, ierr)
+        call KSPSetDM(ksp,da,ierr)
+
+        call KSPSetComputeInitialGuess(ksp,ComputeInitialGuess,0,ierr)
+        ! call KSPSetUp(ksp, ierr)
+
+        !if(STD_OUT_PE) write(*,*) 'Initialized PETSc'
+    end subroutine
+
     subroutine init_module_vars(domain)
         implicit none
         type(domain_t), intent(in) :: domain
@@ -785,8 +823,8 @@ contains
             yl = 0
             
             dx = domain%dx
-            dzdx  = domain%dzdx(i_s:i_e,k_s:k_e,j_s:j_e) 
-            dzdy  = domain%dzdy(i_s:i_e,k_s:k_e,j_s:j_e)
+            dzdx  = domain%dzdx%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) 
+            dzdy  = domain%dzdy%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
             jaco = domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e)
             
             dzdx_surf = 0.1
@@ -815,8 +853,8 @@ contains
             if (domain%grid%ximg == 1) yl(domain%grid%yimg) = domain%grid%ny-hs*2
         
             !Wait for all images to contribute their dimension            
-            call MPI_Allreduce(MPI_IN_PLACE,xl,domain%grid%ximages,MPI_INT,MPI_MAX,domain%compute_comms, ierr)
-            call MPI_Allreduce(MPI_IN_PLACE,yl,domain%grid%yimages,MPI_INT,MPI_MAX,domain%compute_comms, ierr)
+            call MPI_Allreduce(MPI_IN_PLACE,xl,domain%grid%ximages,MPI_INT,MPI_MAX,domain%compute_comms%MPI_VAL, ierr)
+            call MPI_Allreduce(MPI_IN_PLACE,yl,domain%grid%yimages,MPI_INT,MPI_MAX,domain%compute_comms%MPI_VAL, ierr)
 
             !Add points to xy-edges to accomodate ghost-points of DMDA grid
             !cells at boundaries have 1 extra for ghost-point, and should also be corrected

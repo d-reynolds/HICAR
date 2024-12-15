@@ -31,6 +31,7 @@ program icar
     use time_delta_object,  only : time_delta_t
     use icar_constants
     use wind_iterative,     only : finalize_iter_winds
+    use wind_iterative_old, only : finalize_iter_winds_old
     use ioserver_interface, only : ioserver_t
     use ioclient_interface, only : ioclient_t
     use io_routines,        only : io_write
@@ -133,6 +134,7 @@ program icar
         if (STD_OUT_PE) write(*,'(/ A)') "----------------------------------------------------------------"
         if (STD_OUT_PE) write(*,'(A)')   "Finished domain initialization, beginning physics initialization"
         if (STD_OUT_PE) write(*,'(A)')   "----------------------------------------------------------------"
+        old_nest = 1
 
         ! Need to break the loop here to ensure that the boundary object is first initilaized for all nests
         do i = 1, n_nests
@@ -143,10 +145,16 @@ program icar
                 call total_timer(i)%start()
                 call initialization_timer(i)%start()    
 
+                if (old_nest /= i) then
+                    call end_nest_context(domain(old_nest), options(old_nest))
+                    old_nest = i
+                endif
+
                 if (STD_OUT_PE) write(*,"(/ A22,I2,A2,A,A16)") "-------------- Domain ",i," (",trim(options(i)%domain%init_conditions_file),") --------------"
                 call init_model_state(options(i), domain(i), boundary(i), ioclient(i))
                 next_output(i) = options(i)%general%start_time + options(i)%output%output_dt
                 next_input(i) = options(i)%general%start_time !+ options(1)%forcing%input_dt
+                old_nest = i
 
                 call total_timer(i)%stop()
                 call initialization_timer(i)%stop() 
@@ -159,8 +167,6 @@ program icar
         if (STD_OUT_PE) write(*,'(A)')   "Initialization complete, beginning physics integration"
         if (STD_OUT_PE) write(*,'(A)')   "------------------------------------------------------"
 
-        old_nest = 1
-        
         do while (ANY(domain%ended .eqv. .False.))
             do i = 1, n_nests
 
@@ -372,7 +378,7 @@ program icar
             if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "halo-exchange(retrieve)", ":", t_val, " | ", t_val2, " | ", t_val3
             t_val = timer_mean(wait_timer(i), domain(1)%compute_comms)
             t_val2 = timer_min(wait_timer(i), domain(1)%compute_comms)
-            t_val2 = timer_min(wait_timer(i), domain(1)%compute_comms)
+            t_val3 = timer_max(wait_timer(i), domain(1)%compute_comms)
             if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "halo-exchange(wait)", ":", t_val, " | ", t_val2, " | ", t_val3
             t_val = timer_mean(wind_timer(i), domain(1)%compute_comms)
             t_val2 = timer_min(wind_timer(i), domain(1)%compute_comms)

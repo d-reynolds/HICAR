@@ -11,7 +11,7 @@ module wind
 
     use linear_theory_winds, only : linear_perturb, setup_linwinds
     use wind_iterative,      only : calc_iter_winds, init_iter_winds
-    !use wind_iterative_old,      only : calc_iter_winds_old
+    use wind_iterative_old,  only : calc_iter_winds_old, init_iter_winds_old
 
     !use mod_blocking,        only : update_froude_number, initialize_blocking
     use data_structures
@@ -510,9 +510,9 @@ contains
                                 domain%jacobian_u, domain%jacobian_v,domain%jacobian_w,domain%advection_dz,domain%dx, &
                                 domain%density%data_3d,options,horz_only=.False.)
 
-                call calc_iter_winds(domain,domain%alpha%data_3d,div,options%adv%advect_density,update_in=.True.)
+                !call calc_iter_winds(domain,domain%alpha%data_3d,div,options%adv%advect_density,update_in=.True.)
 
-                !call calc_iter_winds_old(domain,domain%alpha%data_3d,div,options%adv%advect_density,update_in=.True.)
+                call calc_iter_winds(domain,domain%alpha%data_3d,div,options%adv%advect_density,update_in=.True.)
             endif
         elseif (options%physics%windtype==kOBRIEN_WINDS) then
             call Obrien_winds(domain, options, update_in=.True.)
