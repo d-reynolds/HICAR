@@ -191,13 +191,21 @@ module show MODULE_NAME
 
 # Compiling FSM
 
-If the user wants to use the snowmodel [FSM2](https://egusphere.copernicus.org/preprints/2023/egusphere-2023-2071/), it must also be compiled prior to compiling HICAR. The process for compiling FSM2 is simple, and similar to that for HICAR. First, the user must get the FSM2 distribution, which can be done as:
+If the user wants to use the snowmodel [FSM2](https://egusphere.copernicus.org/preprints/2023/egusphere-2023-2071/), it must also be compiled prior to compiling HICAR. The process for compiling FSM2 is simple, and similar to that for HICAR. 
+
+To couple with FSM2, the user must first get the FSM2 distribution, which can be done as:
 
 ```bash
 git clone https://github.com/oshd-slf/jim_operational.git
 ```
 
-This downloads the whole FSM2 distribution. To compile FSM2 as a library which can be called from HICAR, the steps below can be followed. In the below block, `FSM2_Dir` refers to the root directory of the FSM2 git repo from the previous step.
+Note that FSM2 development is not gaurenteed to always dovetail nicely with the HICAR interface. The last tested FSM2 commit hash was:
+
+```bash
+64221dc358bc22026d08b61fc45f282f12089b9f
+```
+
+To compile FSM2 as a library which can be called from HICAR, the steps below can be followed. In the below block, `FSM2_Dir` refers to the root directory of the FSM2 git repo from the previous step.
 
 ```bash
 cp HICAR/src/physics/FSM2_interface/FSM2_CMakeLists.txt FSM2_Dir/FSM_SOURCE_CODE/CMakeLists.txt  # Copy the FSM2 CMake file to the FSM2 distribution
