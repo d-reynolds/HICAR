@@ -22,6 +22,7 @@ module nest_manager
     use surface_layer,              only : sfc_init
     use wind,                       only : init_winds
     use wind_iterative,             only : finalize_iter_winds
+    use wind_iterative_old,         only : finalize_iter_winds_old
     use icar_constants
     use iso_fortran_env
     use mpi_f08

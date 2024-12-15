@@ -287,6 +287,13 @@ contains
             if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
         endif
 
+        ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
+        if ((options%physics%surfacelayer==0).and.(options%physics%boundarylayer>0)) then
+            if (STD_OUT_PE) write(*,*) "  "
+            if (STD_OUT_PE) write(*,*) "  ERROR, a surface layer scheme is required when using a PBL scheme,"
+            if (STD_OUT_PE) write(*,*) "  ERROR, set sfc > 0 in the namelist."
+        endif
+
         ! prior to v 0.9.3 this was assumed, so throw a warning now just in case.
         if ((options%forcing%z_is_geopotential .eqv. .False.).and. &
             (options%forcing%zvar=="PH")) then
@@ -1027,7 +1034,7 @@ contains
         endif
 
         count = 0
-        do i = 1, kMAX_NESTS
+        do i = 1, nests
             if (parent_nest(i) == n_indx) count = count + 1
         end do
 
@@ -1035,7 +1042,7 @@ contains
         if (count == 0) return
 
         count = 0
-        do i = 1, kMAX_NESTS
+        do i = 1, nests
             if (parent_nest(i) == n_indx) then
                 count = count + 1
                 gen_options%child_nests(count) = i
@@ -1218,6 +1225,13 @@ contains
         call set_nml_var(domain_options%aspect_angle_var, aspect_angle_var(n_indx), 'aspect_angle_var',domain_options, aspect_angle_var(1))
         call set_nml_var(domain_options%shd_var, shd_var(n_indx), 'shd_var',domain_options, shd_var(1))
 
+        ! dx and init_conditions_file are required, check that they are set
+        call require_var(domain_options%init_conditions_file, "Initial Conditions file")
+        if (domain_options%dx <= 0) then
+            if (STD_OUT_PE) write(*,*) "  ERROR: dx must be specified in namelist"
+            if (STD_OUT_PE) write(*,*) "  ERROR: dx not specified for domain: ", n_indx
+            stop
+        endif
 
         allocate(domain_options%dz_levels(domain_options%nz))
         

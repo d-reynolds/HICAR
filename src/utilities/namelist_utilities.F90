@@ -1714,10 +1714,12 @@ contains
                 default = "../restart/"
                 group = "Restart"
             case ("restartinterval")
-                description = "Frequency of writing restart files, expressed in number of outputintervals."//achar(10)//BLNK_CHR_N// &
-                              "Must be set for all domains in a series of nests, such that all nests output restart files at the same time."
+                description = "Frequency of writing restart files, expressed in number of outputintervals for the first domain."//achar(10)//BLNK_CHR_N// &
+                              "Must be set for all domains in a series of nests, such that all nests output restart files at the same time."//achar(10)//BLNK_CHR_N// &
+                              "If it is not set for subequent nests, HICAR will try to calculate a restartinterval for domains"//achar(10)//BLNK_CHR_N// &
+                              "that results in the same restart write time as for the first domain."
                 min = 1
-                max = 100
+                max = 1000
                 units ='number of output steps'
                 default = "24"
                 group = "Restart"
@@ -1746,7 +1748,7 @@ contains
                 default = "3600"
                 group = "Output"
             case ("frames_per_outfile")
-                description = "Number of frames to write to each output file"
+                description = "Number of output steps to write to each output file"
                 min = 1
                 max = 100
                 default = "24"

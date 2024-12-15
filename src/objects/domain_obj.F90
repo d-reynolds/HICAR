@@ -1497,7 +1497,6 @@ contains
                 dzdy_v(:,i,jms)   = dzdy(:,i,jms)*1.5 - dzdy(:,i,jms+1)*0.5
                 dzdy_v(:,i,jme+1)   = dzdy(:,i,jme)*1.5 - dzdy(:,i,jme-1)*0.5
                 
-
             enddo
             
             !Finishing touch
@@ -1511,6 +1510,10 @@ contains
             jacobian     = neighbor_jacobian(ims:ime,:,jms:jme)
 
         end associate
+        ! call array_offset_x(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
+        ! this%jacobian_u(this%ims:this%ime+1,:,this%jms:this%jme) = temp
+        ! call array_offset_y(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
+        ! this%jacobian_v(this%ims:this%ime,:,this%jms:this%jme+1) = temp
 
     end subroutine setup_sleve
 
@@ -1997,8 +2000,8 @@ contains
         deallocate(temp)
         allocate(temp(this%ids:this%ide+1,this%jds:this%jde))
         call array_offset_x(global_terr, temp)
-        temp(this%ids,this%jds:this%jde) = temp(this%ids+1,this%jds:this%jde)
-        temp(this%ide+1,this%jds:this%jde) = temp(this%ide,this%jds:this%jde)
+        !temp(this%ids,this%jds:this%jde) = temp(this%ids+1,this%jds:this%jde)
+        !temp(this%ide+1,this%jds:this%jde) = temp(this%ide,this%jds:this%jde)
         
         h2_u = temp(this%u_grid2d%ims:this%u_grid2d%ime, this%u_grid2d%jms:this%u_grid2d%jme)
         do i =1,options%domain%terrain_smooth_cycles
@@ -2013,8 +2016,8 @@ contains
         deallocate(temp)
         allocate(temp(this%ids:this%ide,this%jds:this%jde+1))
         call array_offset_y(global_terr, temp)
-        temp(this%ids:this%ide,this%jds) = temp(this%ids:this%ide,this%jds+1)
-        temp(this%ids:this%ide,this%jde+1) = temp(this%ids:this%ide,this%jde)
+        !temp(this%ids:this%ide,this%jds) = temp(this%ids:this%ide,this%jds+1)
+        !temp(this%ids:this%ide,this%jde+1) = temp(this%ids:this%ide,this%jde)
         h2_v = temp(this%v_grid2d%ims:this%v_grid2d%ime, this%v_grid2d%jms:this%v_grid2d%jme)
         
         do i =1,options%domain%terrain_smooth_cycles
@@ -2723,11 +2726,21 @@ contains
         if (allocated(forcing%z)) then  ! In case of external 2D forcing data, skip the VLUTs.
 
             ! See if we did not set forcing z at initialization of boundary object. This can happen
-            ! if we are a nest, and the forcing object could not reach the parent domain's global z field at
-            ! initialization time.
+            ! if we are a nest, and the parent domain's global z field was not yet set at the time of
+            ! initialization.
             if (.not.forcing%z_is_set) then
                 temporary_data = forcing%variables%get_var(options%forcing%zvar)
                 forcing%z = temporary_data%data_3d
+            endif
+
+            ! check that the forcing z is higher than the domain z
+            if ( maxval(forcing%z) < maxval(this%geo%z) ) then
+                if (STD_OUT_PE) write(*,*) "ERROR: Forcing or parent-nest z is lower than domain z."
+                if (STD_OUT_PE) write(*,*) "ERROR: Check earlier output during domain initialization"
+                if (STD_OUT_PE) write(*,*) "ERROR: to ensure that nested domains fit within their parent domain."
+                if (STD_OUT_PE) write(*,*) "ERROR: Otherwise, ensure that the vertical extent of all domains"
+                if (STD_OUT_PE) write(*,*) "ERROR: fits within the forcing domain."
+                stop
             endif
 
             forc_u_from_mass%lat = forcing%geo%lat
