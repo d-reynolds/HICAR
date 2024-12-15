@@ -4,14 +4,20 @@
 subroutine SETUP_interface()
 
 !MJ added-----------------------------------------------------------------
-use FSM_interface, only: Nx_HICAR,Ny_HICAR,zH_HICAR,NNsmax_HICAR,lat_HICAR,lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,shd_HICAR, &
-                         NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,&
-                         NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS,LHN_ON,LFOR_HN, DDs_min, DDs_surflay, NNsoil_HICAR
+use FSM_interface, only: Nx_HICAR,Ny_HICAR,NNsmax_HICAR,lat_HICAR,lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,shd_HICAR, &
+                         NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,NOSHDTN,NALRADT,&
+                         NSNTRAN,NSNSLID,NSNOLAY,NCHECKS,LHN_ON,LFOR_HN, DDs_min, DDs_surflay, NNsoil_HICAR,              &
+                         CTILE,rtthresh, LZ0PERT,LWCPERT,LFSPERT,LALPERT,LSLPERT
 !MJ added-----------------------------------------------------------------
 
-use MODCONF, only: CANMOD,DENSTY,ALBEDO,CANMOD,CONDCT,DENSTY,&
-  EXCHNG,HYDROL,SNFRAC,RADSBG,ZOFFST,SNTRAN,SNSLID,SNOLAY,HISWET,CHECKS,HN_ON,FOR_HN
-  
+use MODCONF, only: ALBEDO, CANMOD, CONDCT, DENSTY, EXCHNG, HYDROL, &
+            SNFRAC, RADSBG, ZOFFST, OSHDTN, HN_ON, FOR_HN, ALRADT, &
+            SNTRAN, SNSLID, SNOLAY, CHECKS
+
+use MODPERT, only: Z0PERT, WCPERT, FSPERT, ALPERT, SLPERT
+
+use MODTILE, only: TILE, tthresh 
+
 use CONSTANTS
 
 use DRIVING, only: &
@@ -29,8 +35,16 @@ use DRIVING, only: &
   Tv,                &! Time-varying canopy transmissivity for dSWR (-)
   Ua,                &! Wind speed (m/s)
   Udir,              &! Wind direction (degrees, clockwise from N)
-  zH                  ! Model input ("measurement") height (m)
-  
+  zT,                &! Model input temperature height (m)
+  zU,                &! Model input wind speed height (m)
+  zRH,               &! Model input relative humidity height (m)
+  z0P,               &! z0 perturbations
+  wcP,               &! liquid water capacity perturbations
+  fsP,               &! fresh snow density perturbations
+  alP,               &! albedo perturbations
+  slP,               &! settling perturbations
+  Sdird               ! Direct-beam shortwave radiation, per horizontal surface area (W/m2)
+
 use GRID
 
 use PARAMETERS
@@ -49,20 +63,13 @@ integer :: &
   i,j,               &! Point counters
   k,                 &! Level counter
   iresults_count
-  
-integer :: &
-  NNsoil, nml_unit
-    
+      
 real :: &
   hcon_min            ! Thermal conductivity of soil minerals (W/m/K)
   
 real, allocatable :: &
   fsat(:),           &! Initial moisture content of soil layers as fractions of saturation
   Tprof(:)            ! Initial soil layer temperatures (K)
-
-character(len=200) :: nlst_file
-
-logical :: lexist
 
 !-1- !!!!!!!!!!!!!!!!!!!!  READ THE NAMELIST  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -78,16 +85,16 @@ Nx = Nx_HICAR !NNx
 Ny = Ny_HICAR !NNy
 Nsmax = NNsmax_HICAR
 
-! Height of first model level, will be used for surface scaling laws
-if (allocated(zH)) deallocate(zH)
+! Height of input data, will be used for surface scaling laws
+! from lsmFSM.F90, this is always gonna be 10m
 if (allocated(Dzsnow)) deallocate(Dzsnow)
 if (allocated(Dzsoil)) deallocate(Dzsoil)
-allocate(zH(Nx,Ny))
 allocate(Dzsnow(Nsmax))
 allocate(Dzsoil(Nsoil))
 
-zH = zH_HICAR
-
+zU = 10
+zRH = 2
+zT = 2
 
 if (Nsmax == 3) then
   Dzsnow = (/0.1, 0.2, 0.4/)
@@ -104,9 +111,8 @@ else
   call exit()
 endif
 
-Nt = 1
-dt = 1.0 / Nt
-
+! To be set later by HICAR...
+dt = 1.0
 
 ! Model configuration
 ! -1 for mandatory NLST arguments.
@@ -119,19 +125,31 @@ HYDROL = NHYDROL
 SNFRAC = NSNFRAC
 RADSBG = NRADSBG
 ZOFFST = NZOFFST
+OSHDTN = NOSHDTN
+ALRADT = NALRADT
 SNTRAN = NSNTRAN
 SNSLID = NSNSLID
 SNOLAY = NSNOLAY
-HISWET = NHISWET
 CHECKS = NCHECKS
 HN_ON = LHN_ON
 FOR_HN = LFOR_HN
 if (ALBEDO==-1 .or. CANMOD==-1 .or. CONDCT==-1 .or. DENSTY==-1 .or. EXCHNG==-1 &
-    .or. HYDROL==-1 .or. SNFRAC==-1 .or. RADSBG==-1 .or. ZOFFST==-1 &
-    .or. SNTRAN==-1 .or. SNSLID==-1 .or. SNOLAY==-1 .or. HISWET==-1 .or. CHECKS ==-1) then
+    .or. HYDROL==-1 .or. SNFRAC==-1 .or. RADSBG==-1 .or. ZOFFST==-1 .or. OSHDTN == -1 .or. ALRADT == -1 & 
+    .or. SNTRAN==-1 .or. SNSLID==-1 .or. SNOLAY==-1 .or. CHECKS ==-1) then
   print*, 'model configuration error:\n please specify all of the FSM2trans model configuration variables in the namelist'
   call exit(1)
 endif
+
+! Model perturbations
+Z0PERT = LZ0PERT
+WCPERT = LWCPERT
+FSPERT = LFSPERT
+ALPERT = LALPERT
+SLPERT = LSLPERT
+
+! Modelled tile 
+TILE = CTILE
+tthresh = rtthresh
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -154,7 +172,12 @@ if (allocated(Udir)) deallocate(Udir)
 if (allocated(RH)) deallocate(RH)
 if (allocated(Sf24h)) deallocate(Sf24h)
 if (allocated(Tv)) deallocate(Tv)
-
+if (allocated(z0P)) deallocate(z0P)
+if (allocated(wcP)) deallocate(wcP)
+if (allocated(fsP)) deallocate(fsP)
+if (allocated(alP)) deallocate(alP)
+if (allocated(slP)) deallocate(slP)
+if (allocated(Sdird)) deallocate(Sdird)
 
 
 allocate(LW(Nx,Ny))
@@ -173,6 +196,13 @@ allocate(RH(Nx,Ny))
 allocate(Sf24h(Nx,Ny))
 allocate(Tv(Nx,Ny))
 
+if (Z0PERT) allocate(z0P(Nx,Ny))
+if (WCPERT) allocate(wcP(Nx,Ny))
+if (FSPERT) allocate(fsP(Nx,Ny))
+if (ALPERT) allocate(alP(Nx,Ny))
+if (SLPERT) allocate(slP(Nx,Ny))
+if ((ALRADT == 1) .OR. (OSHDTN == 1)) allocate(Sdird(Nx,Ny))
+
 ! use Tv dummy in case of open simulations
 if (CANMOD == 0) then
   Tv(:,:) = 1
@@ -185,7 +215,7 @@ Nitr = 4
 avg0 = 0.1
 avgs = 0.4
 cden = 0.004
-cvai = 6.6
+cvai = 4.4
 cveg = 20
 Gcn1 = 0.5
 Gcn2 = 0
@@ -199,8 +229,8 @@ tcnm = 48
 
 ! Defaults for snow parameters
 a_eta = 0.1
-asmx = 0.8
-asmn = 0.5
+asmx = 0.86       ! unused if OSHDTN = 1
+asmn = 0.6
 b_eta = 0.023
 bstb = 5
 bthr = 2
@@ -218,7 +248,6 @@ rhos_max = 750.0
 rcld = 300
 rgr0 = 5e-5
 rmlt = 500
-Salb = 10
 snda = 2.8e-6
 Talb = -2
 tcld = 1000
@@ -226,6 +255,14 @@ tmlt = 100
 trho = 200
 Wirr = 0.03
 z0sn = 0.002
+Sfmin = 10
+
+! some defaults different for forest tile - commented-out values based on FS-EBP runs, revisit during tuning
+if (TILE == 'forest') then
+  ! asmx = 0.88
+  hfsn = 0.3    
+  z0sn = 0.01   
+endif 
 
 ! Defaults for ground surface parameters
 bstb = 5
@@ -234,17 +271,15 @@ gsat = 0.01
 ! Defaults for additional parameters required for forest snow process parametrization
 adfs = 3
 adfl = 2
-fsar = 0.2
-psf  = 1.1
-psr  = 0.2
+fsar = 0.1
+psf  = 1
+psr  = 0.1
 wcan = 2.5
 zsub = 2
-zgf = 5
-zgr = 5
+zgf = 1
+zgr = 0
 khcf = 3
 
-! Default for tile parameters 
-fthresh = 0.1
 
 if (DENSTY == 0) then
   rhof = rho0
@@ -262,12 +297,19 @@ allocate(alb0(Nx,Ny))
 allocate(fcly(Nx,Ny))
 allocate(fsnd(Nx,Ny))
 allocate(z0sf(Nx,Ny))
-allocate(vegsnowd_xy(Nx,Ny))
-alb0(:,:) = 0.2
+if (SNTRAN == 1) allocate(vegsnowd_xy(Nx,Ny))
+
+if (TILE == 'glacier') then
+  alb0(:,:) = 0.3
+  z0sf(:,:) = 0.04
+else
+  alb0(:,:) = 0.2
+  z0sf(:,:) = 0.2
+endif
 fcly(:,:) = 0.3
 fsnd(:,:) = 0.6
-z0sf(:,:) = 0.2
-vegsnowd_xy(:,:) = 0.1
+if (TILE == 'forest') z0sf(:,:) = 0.2
+if (SNTRAN == 1) vegsnowd_xy(:,:) = 0.1
 
 ! Canopy parameters
 if (allocated(canh)) deallocate(canh)
@@ -308,26 +350,40 @@ if (allocated(lon)) deallocate(lon)
 if (allocated(dem)) deallocate(dem)
 if (allocated(slope)) deallocate(slope)
 if (allocated(Shd)) deallocate(Shd)
-if (allocated(forest)) deallocate(forest)
+if (allocated(tilefrac)) deallocate(tilefrac)
+if (allocated(glacierfrac)) deallocate(glacierfrac)
+if (allocated(fsky_terr)) deallocate(fsky_terr)
 
-allocate(slopemu(Nx,Ny))
-allocate(xi(Nx,Ny))
-allocate(Ld(Nx,Ny))
+allocate(fsky_terr(Nx,Ny))
 allocate(lat(Nx,Ny))
 allocate(lon(Nx,Ny))
 allocate(dem(Nx,Ny))
-allocate(slope(Nx,Ny))
-allocate(Shd(Nx,Ny))
-allocate(forest(Nx,Ny))
-slopemu(:,:) = undef
-xi(:,:) = undef
-Ld(:,:) = undef
-lat(:,:) = undef
-lon(:,:) = undef
-dem(:,:) = undef
-slope(:,:) = undef
-Shd(:,:) = undef
-forest(:,:) = undef
+allocate(tilefrac(Nx,Ny))
+allocate(glacierfrac(Nx,Ny))
+fsky_terr(:,:)   = undef
+lat(:,:)         = undef
+lon(:,:)         = undef
+dem(:,:)         = undef
+tilefrac(:,:)    = undef
+glacierfrac(:,:) = undef
+
+if (SNFRAC == 0) then
+  allocate(slopemu(Nx,Ny))
+  allocate(xi(Nx,Ny))
+  slopemu(:,:)   = undef
+  xi(:,:)        = undef
+endif
+if (SNFRAC == 0 .or. SNTRAN == 1) then
+  allocate(Ld(Nx,Ny))
+  Ld(:,:)        = undef
+endif
+
+if (SNSLID == 1) then
+  allocate(slope(Nx,Ny))
+  allocate(Shd(Nx,Ny))
+  slope(:,:)     = undef
+  Shd(:,:)       = undef
+endif
 
 ! Derived soil parameters
 if (allocated(b)) deallocate(b)
@@ -343,6 +399,7 @@ allocate(hcon_soil(Nx,Ny))
 allocate(sathh(Nx,Ny))
 allocate(Vsat(Nx,Ny))
 allocate(Vcrit(Nx,Ny))
+
 do j = 1, Ny
   do i = 1, Nx
     if (fcly(i,j) + fsnd(i,j) > 1) then
@@ -388,17 +445,16 @@ if (allocated(swemin)) deallocate(swemin)
 if (allocated(swemax)) deallocate(swemax)
 if (allocated(swehist)) deallocate(swehist)
 if (allocated(histowet)) deallocate(histowet)
-if (allocated(fsky_terr)) deallocate(fsky_terr)
-if (allocated(dm_tot_subl)) deallocate(dm_tot_subl)
-if (allocated(dm_tot_trans)) deallocate(dm_tot_trans)
-if (allocated(dm_tot_slide)) deallocate(dm_tot_slide)
-if (allocated(index_grid_dem_sorted)) deallocate(index_grid_dem_sorted)
+if (allocated(dSWE_tot_subl)) deallocate(dSWE_tot_subl)
+if (allocated(dSWE_tot_slide)) deallocate(dSWE_tot_slide)
+if (allocated(index_sorted_dem)) deallocate(index_sorted_dem)
 
 allocate(albs(Nx,Ny))
 allocate(Ds(Nsmax,Nx,Ny))
 allocate(Nsnow(Nx,Ny))
 allocate(Qcan(Nx,Ny))
 allocate(rgrn(Nsmax,Nx,Ny))
+allocate(histowet(Nsmax,Nx,Ny)) ! LQ: histowet allocated in any case to simplify the layering routine
 allocate(Sice(Nsmax,Nx,Ny))
 allocate(Sliq(Nsmax,Nx,Ny))
 allocate(Sveg(Nx,Ny))
@@ -409,46 +465,57 @@ allocate(Tsoil(Nsoil,Nx,Ny))
 allocate(Tsrf(Nx,Ny))
 allocate(fsnow(Nx,Ny))
 allocate(Tveg(Nx,Ny))
-allocate(snowdepthmin(Nx,Ny))
-allocate(snowdepthmax(Nx,Ny))
-allocate(snowdepthhist(Nx,Ny,14))
-allocate(swemin(Nx,Ny))
-allocate(swemax(Nx,Ny))
-allocate(swehist(Nx,Ny,14))
-allocate(histowet(Nsmax,Nx,Ny))
-allocate(fsky_terr(Nx,Ny))
-allocate(dm_tot_subl(Nx,Ny))
-allocate(dm_tot_trans(Nx,Ny))
-allocate(dm_tot_slide(Nx,Ny))
-allocate(index_grid_dem_sorted(Nx*Ny,2))
 
 ! Default initialization of state variables 
-firstit      = 1;
-albs(:,:)    = undef
-Ds(:,:,:)    = undef
-fsnow(:,:)   = undef
-Nsnow(:,:)   = iundef
-Qcan(:,:)    = undef
-rgrn(:,:,:)  = undef !*GM watch out: rgrn currently not tracked
-Sice(:,:,:)  = undef
-Sliq(:,:,:)  = undef
-Sveg(:,:)    = undef
-Tcan(:,:)    = undef
-Tsnow(:,:,:) = undef
-Tsoil(:,:,:) = undef
-Tveg(:,:)    = undef
-snowdepthmin(:,:) = undef
-snowdepthmax(:,:) = undef
-snowdepthhist(:,:,:) = undef
-swemin(:,:) = undef
-swemax(:,:) = undef
-swehist(:,:,:) = undef
-histowet(:,:,:) = undef
-fsky_terr(:,:) = undef
-dm_tot_subl(:,:) = undef
-dm_tot_trans(:,:) = undef
-dm_tot_slide(:,:) = undef
-index_grid_dem_sorted(:,:) = iundef
+albs(:,:)               = undef
+Ds(:,:,:)               = undef
+fsnow(:,:)              = undef
+Nsnow(:,:)              = iundef
+Qcan(:,:)               = undef
+rgrn(:,:,:)             = undef !*GM watch out: rgrn currently not tracked
+histowet(:,:,:)         = undef ! LQ: histowet only tracked if SNTRAN
+Sice(:,:,:)             = undef
+Sliq(:,:,:)             = undef
+Sveg(:,:)               = undef
+Tcan(:,:)               = undef
+Tsnow(:,:,:)            = undef
+Tsoil(:,:,:)            = undef
+Tveg(:,:)               = undef
+
+! Allocation and initialization of optional state variables
+if (SNFRAC == 0 .or. SNFRAC == 2) then
+  allocate(snowdepthmax(Nx,Ny))
+  snowdepthmax(:,:) = undef
+endif
+
+if (SNFRAC == 0) then
+  allocate(snowdepthmin(Nx,Ny))
+  allocate(snowdepthhist(14,Nx,Ny))
+  allocate(swemin(Nx,Ny))
+  allocate(swemax(Nx,Ny))
+  allocate(swehist(14,Nx,Ny))
+  snowdepthmin(:,:)     = undef
+  snowdepthhist(:,:,:)  = undef
+  swemin(:,:)           = undef
+  swemax(:,:)           = undef
+  swehist(:,:,:)        = undef
+endif
+
+if (SNTRAN == 1) then
+  allocate(dSWE_tot_subl(Nx,Ny))
+  allocate(dSWE_tot_salt(Nx,Ny))
+  allocate(dSWE_tot_susp(Nx,Ny))
+  dSWE_tot_subl(:,:)    = undef
+  dSWE_tot_salt(:,:)    = undef
+  dSWE_tot_susp(:,:)    = undef
+endif
+
+if (SNSLID == 1) then
+  allocate(dSWE_tot_slide(Nx,Ny))
+  allocate(index_sorted_dem(Nx*Ny,2))
+  dSWE_tot_slide(:,:)   = undef
+  index_sorted_dem(:,:) = iundef
+endif
 
 ! Initial soil profiles from namelist
 if (allocated(fsat)) deallocate(fsat)
@@ -480,6 +547,43 @@ lat(:,:)=lat_HICAR(:,:) !!!!!!!!---->read(1127) lat
 lon(:,:)=lon_HICAR(:,:) !!!!!!!!---->read(1128) lon
 dem(:,:)=terrain_HICAR(:,:) !!!!!!!!---->read(1129) dem
 
+! Cap glacier temperatures to 0°C 
+if (TILE == 'glacier') then
+  do j = 1, Ny
+  do i = 1, Nx
+    Tsrf(i,j) = min(Tsrf(i,j),Tm)
+    do k = 1, Nsoil
+      Tsoil(k,i,j) = min(Tsoil(k,i,j),Tm)
+    end do
+  end do
+  end do
+endif
+
+! model tile fractions 
+if (TILE == 'open') then 
+  tilefrac = dem/dem   ! temporary fix to get ones within our entire domain, assuming we always want to run an open tile. may have to be revisited
+  if (SNTRAN == 1 .OR. SNSLID == 1) then
+    glacierfrac = 0.0
+  endif
+else 
+  tilefrac = 0.0
+endif 
+
+if (TILE == 'open' .AND. (SNTRAN == 1 .OR. SNSLID == 1)) then ! Cap glacier temperatures only in relevant pixels, and alter snow free albedo and roughness lengths
+  do j = 1, Ny
+  do i = 1, Nx
+    if (glacierfrac(i,j) > epsilon(glacierfrac(i,j))) then
+      Tsrf(i,j) = min(Tsrf(i,j),Tm)
+      alb0(i,j) = 0.3 
+      z0sf(i,j) = 0.04
+      do k = 1, Nsoil
+        Tsoil(k,i,j) = min(Tsoil(k,i,j),Tm)
+      end do
+    endif
+  end do
+  end do
+endif 
+
 if (SNFRAC == 0 .or. SNFRAC == 2) then
   snowdepthmax(:,:) =0.0 !!!!!!!!---->read(1110) snowdepthmax
 endif
@@ -496,7 +600,7 @@ if (SNFRAC == 0 ) then
   Ld(:,:)              =dx_HICAR !!!!!!!!---->read(1126) Ld
 endif
 
-if (CANMOD == 0) then
+if (TILE /= 'forest') then
   ! canopy properties (no canopy)
   VAI(:,:)  = 0
   hcan(:,:) = 0
@@ -504,8 +608,8 @@ if (CANMOD == 0) then
   trcn(:,:) = exp(-kdif*VAI(:,:))
   fveg(:,:) = 1 - exp(-kveg*VAI(:,:))
   fves(:,:) = 1 - exp(-kveg*VAI(:,:))
-else ! CANMOD == 1
-  ! states specific to forest runs
+else ! TILE == 'forest'
+  ! lus fields specific to forest runs
   Qcan(:,:)    =0.0   !!!!!!!!---->read(1130) Qcan
   Sveg(:,:)    =0.0   !!!!!!!!---->read(1131) Sveg
   Tcan(:,:)    =285   !!!!!!!!---->read(1132) Tcan
@@ -514,13 +618,13 @@ else ! CANMOD == 1
   hcan(:,:)    =0.0   !!!!!!!!---->read(1135) hcan
   lai(:,:)     =0.0   !!!!!!!!---->read(1136) lai
   vfhp(:,:)    =1.0   !!!!!!!!---->read(1137) vfhp
+  fves(:,:)    =0.0
 
   ! derived canopy properties 
   VAI(:,:) = lai(:,:) 
-  fves(:,:) = fveg(:,:)  !!! *GM to be revised 
+  trcn(:,:) = 1-0.9*fveg(:,:)  
   do j = 1, Ny
     do i = 1, Nx
-      trcn(i,j) = 1-VAI(i,j)/5
       fsky(i,j) = vfhp(i,j)/trcn(i,j)
       if ( fsky(i,j) > 1 ) trcn(i,j) = vfhp(i,j)
       if ( fsky(i,j) > 1 ) fsky(i,j) = 1
@@ -534,8 +638,8 @@ scap(:,:) = cvai*VAI(:,:)
 
 if (SNTRAN == 1) then
   ! states specific to SNOWTRAN3D
-  !!!!!! read(1140) dm_tot_subl
-  !!!!!! read(1141) dm_tot_trans
+  !!!!!! read(1140) dSWE_tot_subl
+  !!!!!! read(1141) dSWE_tot_trans
   Ld(:,:)              =dx_HICAR !!!!!!!!---->read(1126) Ld
 endif
 
@@ -543,8 +647,68 @@ if (SNSLID == 1) then
   ! states specific to SnowSlide
   slope(:,:)=slope_HICAR(:,:)
   Shd(:,:)=shd_HICAR(:,:)
-  !!!!!! read(1142) dm_tot_slide
+  !!!!!! read(1142) dSWE_tot_slide
   !!!!!! read(1143) index_grid_dem_sorted
+endif
+
+! Tuned snow surface properties
+
+if (allocated(adc)) deallocate(adc)
+if (allocated(afs)) deallocate(afs)
+if (allocated(z0_snow)) deallocate(z0_snow)
+
+allocate(adc(Nx,Ny))
+allocate(afs(Nx,Ny))
+allocate(z0_snow(Nx,Ny))
+
+if (OSHDTN == 0) then
+
+  adm = 100
+  adc(:,:) = 1000
+  afs(:,:) = asmx
+  if (TILE == 'glacier' .or. ((SNTRAN == 1 .or. SNSLID == 1) .and. glacierfrac(i,j) > epsilon(glacierfrac(i,j)))) then
+    z0_snow(:,:) = 0.0009
+  else
+    z0_snow(:,:) = z0sn
+  endif
+
+else ! OSHDTN == 1
+
+  adm = 130
+
+  do j = 1, Ny
+    do i = 1, Nx
+    
+      ! Elevation-dependent tuning of cold snow albedo decay time
+      if (dem(i,j) >= 2300) then
+        adc(i,j)  = 6000
+      elseif (dem(i,j) <= 1500) then
+        adc(i,j) = 3000
+      else
+        adc(i,j) = 6000 + (2300 - dem(i,j)) / (2300 - 1500) * (3000 - 6000)
+      endif
+      
+      ! Fresh snow albedo is now constant (previously elevation-dependent)
+      afs(i,j) = asmx
+      
+      ! Elevation-dependent tuning of snow roughness length
+      if (TILE == 'glacier' .or. ((SNTRAN == 1 .or. SNSLID == 1) .and. glacierfrac(i,j) > epsilon(glacierfrac(i,j)))) then
+        z0_snow(i,j) = 0.0009
+      elseif (TILE == 'forest') then
+        z0_snow(i,j) = z0sn
+      else
+        if (dem(i,j) >= 2300) then
+          z0_snow(i,j) = 0.01
+        elseif (dem(i,j) >= 1500) then
+          z0_snow(i,j) = 0.2 + (dem(i,j) - 1500) / (2300 - 1500) * (0.01 - 0.2)
+        else
+          z0_snow(i,j) = 0.2
+        endif
+      endif
+      
+    end do
+  end do
+  
 endif
 
 end subroutine SETUP_interface

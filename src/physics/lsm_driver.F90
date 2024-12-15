@@ -221,7 +221,7 @@ contains
                          kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%snowfall, kVARS%albedo,                &
                          kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%Nsnow,   &
                          kVARS%rainfall_tstep, kVARS%shd, kVARS%snowfall_tstep, kVARS%meltflux_out_tstep, kVARS%Sliq_out, &
-                         kVARS%windspd_10m, kVARS%dm_salt, kVARS%dm_susp, kVARS%dm_subl, kVARS%dm_slide])
+                         kVARS%windspd_10m, kVARS%dSWE_salt, kVARS%dSWE_susp, kVARS%dSWE_subl, kVARS%dSWE_slide])
 
              call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
 
@@ -1603,23 +1603,25 @@ contains
                     domain%soil_totalmoisture%data_2d = domain%soil_totalmoisture%data_2d + domain%soil_water_content%data_3d(:,i,:) * DZS(i) * 1000
                 enddo
 
-                ! 2m Air T and Q are not well defined if Tskin is not coupled with the surface fluxes
-                call surface_diagnostics(domain%sensible_heat%data_2d,          &
-                                         domain%qfx%data_2d,                    &
-                                         domain%skin_temperature%data_2d,       &
-                                         QSFC,                                  &
-                                         domain%chs2%data_2d,                   &
-                                         domain%cqs2%data_2d,                   &
-                                         domain%temperature_2m%data_2d,         &
-                                         domain%humidity_2m%data_2d,            &
-                                         domain%surface_pressure%data_2d,       &
-                                         (VEGFRAC/100.0),                       &
-                                         domain%veg_type,                       &
-                                         domain%land_mask,                      &
-                                         domain%temperature_2m_veg%data_2d,     &
-                                         domain%temperature_2m_bare%data_2d,    &
-                                         domain%mixing_ratio_2m_veg%data_2d,    &
-                                         domain%mixing_ratio_2m_bare%data_2d)
+                if (options%physics%surfacelayer == 0) then
+                    ! 2m Air T and Q are not well defined if Tskin is not coupled with the surface fluxes
+                    call surface_diagnostics(domain%sensible_heat%data_2d,          &
+                                            domain%qfx%data_2d,                    &
+                                            domain%skin_temperature%data_2d,       &
+                                            QSFC,                                  &
+                                            domain%chs2%data_2d,                   &
+                                            domain%cqs2%data_2d,                   &
+                                            domain%temperature_2m%data_2d,         &
+                                            domain%humidity_2m%data_2d,            &
+                                            domain%surface_pressure%data_2d,       &
+                                            (VEGFRAC/100.0),                       &
+                                            domain%veg_type,                       &
+                                            domain%land_mask,                      &
+                                            domain%temperature_2m_veg%data_2d,     &
+                                            domain%temperature_2m_bare%data_2d,    &
+                                            domain%mixing_ratio_2m_veg%data_2d,    &
+                                            domain%mixing_ratio_2m_bare%data_2d)
+                endif
 
             endif
             !!

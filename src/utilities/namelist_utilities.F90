@@ -2710,6 +2710,20 @@ contains
                 values = [0, 1]
                 default = "0"
                 group = "SM_Parameters"
+            case ("fsm_oshdtn")
+                description = "OSHD specific tuning options for the FSM2 model"//achar(10)//BLNK_CHR_N// &
+                    "of fresh snow albedo, snow roughness lengths and fresh snow density (0 = OFF, 1 = ON)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
+                group = "SM_Parameters"
+            case ("fsm_alradt")
+                description = "Activate tuning of the albedo decay"//achar(10)//BLNK_CHR_N// &
+                    "as a function of incoming direct shortwave radiation (0 = OFF, 1 = ON)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
+                group = "SM_Parameters"
             case ("fsm_sntran")
                 description = "Flag to turn on SnowTran-3D in an FSM simulation"//achar(10)//BLNK_CHR_N// &
                     "(0 = OFF, 1 = ON)"
@@ -2731,14 +2745,6 @@ contains
                 values = [0, 1]
                 default = "1"
                 group = "SM_Parameters"
-            case ("fsm_hiswet")
-                description = "Flag to use the history of wetting when determining surface"//achar(10)//BLNK_CHR_N// &
-                              "threshold friction velocity"//achar(10)//BLNK_CHR_N// &
-                    "(0 = OFF, 1 = ON)"
-                allocate(values(2))
-                values = [0, 1]
-                default = "0"
-                group = "SM_Parameters"
             case ("fsm_checks")
                 description = "Check FSM state variables at each FSM time step"//achar(10)//BLNK_CHR_N// &
                     "(0 = no checks, 1 = some checks, 2 = lotta checks)"
@@ -2752,11 +2758,35 @@ contains
                 default = ".False."
                 group = "SM_Parameters"
             case("fsm_for_hn")
-                description = "Another flag to turn on the HN model in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                description = "Flag to write 18h states for the hn model"//achar(10)//BLNK_CHR_N// &
                     "(.False. = OFF, .True. = ON)"
                 default = ".False."
                 group = "SM_Parameters"
-
+            case("fsm_z0pert")
+                description = "Flag to turn on the z0 perturbations in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(.False. = OFF, .True. = ON)"
+                default = ".False."
+                group = "SM_Parameters"
+            case("fsm_wcpert")
+                description = "Flag to turn on the liquid water capacity perturbations in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(.False. = OFF, .True. = ON)"
+                default = ".False."
+                group = "SM_Parameters"
+            case("fsm_fspert")
+                description = "Flag to turn on the fresh snow density perturbations in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(.False. = OFF, .True. = ON)"
+                default = ".False."
+                group = "SM_Parameters"
+            case("fsm_alpert")
+                description = "Flag to turn on the albedo perturbations in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(.False. = OFF, .True. = ON)"
+                default = ".False."
+                group = "SM_Parameters"
+            case("fsm_slpert")
+                description = "Flag to turn on the settling perturbations in an FSM simulation"//achar(10)//BLNK_CHR_N// &
+                    "(.False. = OFF, .True. = ON)"
+                default = ".False."
+                group = "SM_Parameters"
             ! --------------------------------------
             ! --------------------------------------
             ! Radiation parameters namelist variables

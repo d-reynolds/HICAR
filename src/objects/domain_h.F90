@@ -405,10 +405,10 @@ module domain_interface
     type(variable_t) :: Sliq
     type(variable_t) :: Ds
     type(variable_t) :: fsnow
-    type(variable_t) :: dm_salt
-    type(variable_t) :: dm_susp
-    type(variable_t) :: dm_subl
-    type(variable_t) :: dm_slide
+    type(variable_t) :: dSWE_salt
+    type(variable_t) :: dSWE_susp
+    type(variable_t) :: dSWE_subl
+    type(variable_t) :: dSWE_slide
     type(variable_t) :: Nsnow
     type(variable_t) :: rainfall_tstep
     type(variable_t) :: snowfall_tstep

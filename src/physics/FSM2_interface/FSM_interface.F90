@@ -36,7 +36,6 @@ module FSM_interface
 ! Model state variables  
 !-----------------------------------------------------------------------
     use STATE_VARIABLES, only: &
-      firstit,           &
       Tsrf,              &! Surface skin temperature (K)
       Tsnow,             &! Snow layer temperatures (K)
       Sice,              &! Ice content of snow layers (kg/m^2)
@@ -62,8 +61,10 @@ module FSM_interface
     
     public :: Nx_HICAR, Ny_HICAR, zH_HICAR, NNsmax_HICAR, NNsoil_HICAR, lat_HICAR,lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,&
               shd_HICAR, SNTRAN, SNSLID, LHN_ON, LFOR_HN, &
-              NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,&
-              NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS, DDs_min,DDs_surflay
+              NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,NOSHDTN,NALRADT,&
+              NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS, DDs_min,DDs_surflay,                           &
+              CTILE,rtthresh, LZ0PERT,LWCPERT,LFSPERT,LALPERT,LSLPERT
+
     !!
     public ::            &
       year,              &
@@ -83,7 +84,6 @@ module FSM_interface
       Ua,                &
       Udir
     public ::  	&
-      firstit,           &
       Tsrf,              &
       Tsnow,             &
       Sice,              &
@@ -96,6 +96,7 @@ module FSM_interface
       theta,             &
       z0sn
     public ::  	&
+      firstit,     &
       Esrf_,       &
       Gsoil_,      &
       H_,          &
@@ -108,10 +109,10 @@ module FSM_interface
       KH_,         &  
       meltflux_out_, &
       Sliq_out_,     &
-      dm_salt_,      &
-      dm_susp_,      &
-      dm_subl_,      &
-      dm_slide_!,     &
+      dSWE_salt_,      &
+      dSWE_susp_,      &
+      dSWE_subl_,      &
+      dSWE_slide_!,     &
 !      Qsalt_u,       &
 !      Qsalt_v
       
@@ -119,8 +120,8 @@ module FSM_interface
     integer :: Nx_HICAR, Ny_HICAR, NNsmax_HICAR, NNsoil_HICAR
 
     integer :: &
-        NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,&
-        NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS
+        NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,NOSHDTN,NALRADT,&
+        NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS,LZ0PERT,LWCPERT,LFSPERT,LALPERT,LSLPERT
         
     logical :: LHN_ON, LFOR_HN
 
@@ -134,9 +135,10 @@ module FSM_interface
  
     real :: & !!!!!!!!---->
       DDs_min,DDs_surflay, & ! minimum snow layer thickness and thickness of surface layer
+      rtthresh,            & ! threshold for tile
       dx_HICAR            !   The grid spacing of the high-resolution data in HICAR
       
-    
+    character(len=20) :: CTILE
  contains
     
     !!!!!!!!!
@@ -163,13 +165,13 @@ module FSM_interface
     end subroutine FSM_CUMULATE_SD
 
 
-    subroutine FSM_SNOWSLIDE(snowdepth0,Sice0,snowdepth0_buff,Sice0_buff,aval,first_it,dm_slide)
+    subroutine FSM_SNOWSLIDE(snowdepth0,Sice0,snowdepth0_buff,Sice0_buff,aval,first_it,dSWE_slide)
         implicit none
         
         real, intent(inout) :: &
           snowdepth0(Nx_HICAR,Ny_HICAR), &
           Sice0(Nx_HICAR,Ny_HICAR),      &
-          dm_slide(Nx_HICAR,Ny_HICAR)
+          dSWE_slide(Nx_HICAR,Ny_HICAR)
         real, intent(out) :: &
           snowdepth0_buff(Nx_HICAR,Ny_HICAR), &
           Sice0_buff(Nx_HICAR,Ny_HICAR)
@@ -181,14 +183,14 @@ module FSM_interface
         if (SNSLID==1) then
         
             !Run over all cells, not removing snow from image border
-            call SNOWSLIDE_interface(snowdepth0,Sice0,dm_slide,first_it,.False.,aval)
+            call SNOWSLIDE_interface(snowdepth0,Sice0,dSWE_slide,first_it,.False.,aval)
 
             !Save Sice0 and snowdepth0 to output buffers to hand to HICAR for exchange
             snowdepth0_buff = snowdepth0
             Sice0_buff = Sice0
             first_it = .False.
             !Run over image border cells to adjust snowdepth0 and sice0
-            call SNOWSLIDE_interface(snowdepth0,Sice0,dm_slide,first_it,.True.,aval)
+            call SNOWSLIDE_interface(snowdepth0,Sice0,dSWE_slide,first_it,.True.,aval)
         endif
         
     end subroutine FSM_SNOWSLIDE
@@ -289,20 +291,18 @@ module FSM_interface
     subroutine FSM_SNOWTRAN_ACCUM()
         implicit none
         real :: &
-          dm_salt(Nx_HICAR,Ny_HICAR), &
-          dm_susp(Nx_HICAR,Ny_HICAR), &
-          dm_subl(Nx_HICAR,Ny_HICAR), &
-          dm_subgrid(Nx_HICAR,Ny_HICAR)
+          dSWE_salt(Nx_HICAR,Ny_HICAR), &
+          dSWE_susp(Nx_HICAR,Ny_HICAR), &
+          dSWE_subl(Nx_HICAR,Ny_HICAR)
 
         if (SNTRAN==1) then
-            dm_salt(:,:) = 0.
-            dm_susp(:,:) = 0.
-            dm_subl(:,:) = 0.
-            dm_subgrid(:,:) = 0.
+            dSWE_salt(:,:) = 0.
+            dSWE_susp(:,:) = 0.
+            dSWE_subl(:,:) = 0.
 
-            call SNOWTRAN3D_accum(dm_salt,dm_susp,dm_subl,dm_subgrid)
+            call SNOWTRAN3D_accum(dSWE_salt,dSWE_susp,dSWE_subl)
         
-            call CUMULATE_SNOWTRAN3D_interface(dm_salt,dm_susp,dm_subl,dm_subgrid)
+            call CUMULATE_SNOWTRAN3D_interface(dSWE_salt,dSWE_susp,dSWE_subl)
         endif
         
     end subroutine FSM_SNOWTRAN_ACCUM

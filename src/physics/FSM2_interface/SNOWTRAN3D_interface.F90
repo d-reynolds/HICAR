@@ -51,14 +51,14 @@ module SNOWTRAN3D_interface
       z_0,               &! Surface roughness length (m)
       Qsalt,             &! Total saltation flux (kg/m/s)
       Qsubl,             &! Total sublimation loss from blowing snow(kg/m/s)
-      dm_s_u,            &! change in mass from transport, U-direction
-      dm_s_u_gain,       &! gain in mass from transport, U-direction
-      dm_s_u_loss,       &! loss in mass from transport, U-direction
-      dm_s_v,            &! change in mass from transport, V-direction
-      dm_s_v_gain,       &! gain in mass from transport, V-direction
-      dm_s_v_loss,       &! loss in mass from transport, V-direction
-      dm_salt,           &! Net change in mass from saltation
-      dm_susp,           &! Net change in mass from suspension
+      dSWE_s_u,            &! change in mass from transport, U-direction
+      dSWE_s_u_gain,       &! gain in mass from transport, U-direction
+      dSWE_s_u_loss,       &! loss in mass from transport, U-direction
+      dSWE_s_v,            &! change in mass from transport, V-direction
+      dSWE_s_v_gain,       &! gain in mass from transport, V-direction
+      dSWE_s_v_loss,       &! loss in mass from transport, V-direction
+      dSWE_salt,           &! Net change in mass from saltation
+      dSWE_susp,           &! Net change in mass from suspension
       snowdepth0,        &! Snow depth of snowdrift accumulation, averaged over the grid cell (m)
       Sice0               ! Surface layer ice content for transported snow (kg/m^2)
 
@@ -80,13 +80,15 @@ module SNOWTRAN3D_interface
       vegsnowd_xy         ! Vegetation snow holding capacity (m)
 
     use STATE_VARIABLES, only: &
-      firstit,           &! First iteration identifier
       Ds,                &! Snow layer thicknesses (m)
       Nsnow,             &! Number of snow layers
       fsnow,             &! Snow cover fraction 
       Sice,              &! Ice content of snow layers (kg/m^2)
       Sliq,              &! Liquid content of snow layers (kg/m^2)
       Tsnow               ! Snow layer temperatures (K)
+
+    use MODULES_interface, only: &
+      firstit                   ! First iteration identifier    
 
     use LANDUSE, only: &
       Ld,                &! Grid cell size (m)
@@ -125,14 +127,14 @@ module SNOWTRAN3D_interface
         if (allocated(z_0)) deallocate(z_0)
         if (allocated(Qsalt)) deallocate(Qsalt)
         if (allocated(Qsubl)) deallocate(Qsubl)
-        if (allocated(dm_s_u)) deallocate(dm_s_u)
-        if (allocated(dm_s_u_gain)) deallocate(dm_s_u_gain)
-        if (allocated(dm_s_u_loss)) deallocate(dm_s_u_loss)
-        if (allocated(dm_s_v)) deallocate(dm_s_v)
-        if (allocated(dm_s_v_gain)) deallocate(dm_s_v_gain)
-        if (allocated(dm_s_v_loss)) deallocate(dm_s_v_loss)
-        if (allocated(dm_salt)) deallocate(dm_salt)
-        if (allocated(dm_susp)) deallocate(dm_susp)
+        if (allocated(dSWE_s_u)) deallocate(dSWE_s_u)
+        if (allocated(dSWE_s_u_gain)) deallocate(dSWE_s_u_gain)
+        if (allocated(dSWE_s_u_loss)) deallocate(dSWE_s_u_loss)
+        if (allocated(dSWE_s_v)) deallocate(dSWE_s_v)
+        if (allocated(dSWE_s_v_gain)) deallocate(dSWE_s_v_gain)
+        if (allocated(dSWE_s_v_loss)) deallocate(dSWE_s_v_loss)
+        if (allocated(dSWE_salt)) deallocate(dSWE_salt)
+        if (allocated(dSWE_susp)) deallocate(dSWE_susp)
         if (allocated(snowdepth0)) deallocate(snowdepth0)
         if (allocated(Sice0)) deallocate(Sice0)
 
@@ -153,14 +155,14 @@ module SNOWTRAN3D_interface
         allocate(z_0(Nx,Ny))
         allocate(Qsalt(Nx,Ny))
         allocate(Qsubl(Nx,Ny))
-        allocate(dm_s_u(Nx,Ny))
-        allocate(dm_s_u_gain(Nx,Ny))
-        allocate(dm_s_u_loss(Nx,Ny))
-        allocate(dm_s_v(Nx,Ny))
-        allocate(dm_s_v_gain(Nx,Ny))
-        allocate(dm_s_v_loss(Nx,Ny))
-        allocate(dm_salt(Nx,Ny))
-        allocate(dm_susp(Nx,Ny))
+        allocate(dSWE_s_u(Nx,Ny))
+        allocate(dSWE_s_u_gain(Nx,Ny))
+        allocate(dSWE_s_u_loss(Nx,Ny))
+        allocate(dSWE_s_v(Nx,Ny))
+        allocate(dSWE_s_v_gain(Nx,Ny))
+        allocate(dSWE_s_v_loss(Nx,Ny))
+        allocate(dSWE_salt(Nx,Ny))
+        allocate(dSWE_susp(Nx,Ny))
         allocate(snowdepth0(Nx,Ny))
         allocate(Sice0(Nx,Ny))
 
@@ -259,28 +261,16 @@ module SNOWTRAN3D_interface
     end subroutine SNOWTRAN3D_setup
       
       
-    subroutine SNOWTRAN3D_accum(dm_salt_out,dm_susp_out,dm_subl_out,dm_subgrid_out)
+    subroutine SNOWTRAN3D_accum(dSWE_salt_out,dSWE_susp_out,dSWE_subl_out)
     
     real, intent(inout) :: &
-      dm_salt_out(Nx,Ny),    &! SWE change due to saltation (kg/m^2), to be output
-      dm_susp_out(Nx,Ny),    &! SWE change due to suspension (kg/m^2), to be output
-      dm_subl_out(Nx,Ny),    &! SWE change due to sublimation (kg/m^2), to be output
-      dm_subgrid_out(Nx,Ny)   ! SWE change due to subgrid redistribution (kg/m^2), to be output
+      dSWE_salt_out(Nx,Ny),    &! SWE change due to saltation (kg/m^2), to be output
+      dSWE_susp_out(Nx,Ny),    &! SWE change due to suspension (kg/m^2), to be output
+      dSWE_subl_out(Nx,Ny)      ! SWE change due to sublimation (kg/m^2), to be output
       
-    real :: &
-      tabler_nn(Nx,Ny),  &! Tabler surfaces NN
-      tabler_ss(Nx,Ny),  &! Tabler surfaces SS
-      tabler_ee(Nx,Ny),  &! Tabler surfaces EE
-      tabler_ww(Nx,Ny),  &! Tabler surfaces WW
-      tabler_ne(Nx,Ny),  &! Tabler surfaces NE
-      tabler_se(Nx,Ny),  &! Tabler surfaces SE
-      tabler_sw(Nx,Ny),  &! Tabler surfaces SW
-      tabler_nw(Nx,Ny)    ! Tabler surfaces NW
-
 
     ! Initialize all fluxes at 0
-    dm_subl_out(:,:) = 0.0
-    dm_subgrid_out(:,:) = 0.0
+    dSWE_subl_out(:,:) = 0.0
 
     ! If the blowing snow flag indicates wind transported snow
     ! somewhere within the domain (bs_flag = 1.0), run the saltation
@@ -298,17 +288,14 @@ module SNOWTRAN3D_interface
 
     ! Compute the new snow depth due to accumulation from precipitation,
     ! saltation, and suspension, and the mass loss due to sublimation.
-    call accum(tabler_nn,tabler_ss,tabler_ee,tabler_ww, &
-               tabler_ne,tabler_se,tabler_sw,tabler_nw, &
-               dm_subl_out, &
-               dm_subgrid_out)
+    call accum(dSWE_subl_out)
                
     ! Accumulation of new snow, calculation of snow cover fraction and relayering
     call SNOW_LAYERING(snowdepth0,Sice0)
                
     !These are calculated earlier, so copy them over now
-    dm_salt_out = dm_salt
-    dm_susp_out = dm_susp
+    dSWE_salt_out = dSWE_salt
+    dSWE_susp_out = dSWE_susp
 
 
     end subroutine SNOWTRAN3D_accum
@@ -318,8 +305,6 @@ module SNOWTRAN3D_interface
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     subroutine compute_soft_snow()
-
-    use MODCONF, only: HISWET
 
     use STATE_VARIABLES, only: &
       Ds,                &! Snow layer thicknesses (m)
@@ -336,45 +321,23 @@ module SNOWTRAN3D_interface
       i,j,               &! Point counters
       k                   ! Layer counter
 
-    ! Original SNOWTRAN3D determination of soft snow
-    if (HISWET == 0) then
-
-      do i = 1, Nx
-        do j = 1, Ny
-
-          if (isnan(dem(i,j))) goto 2 ! Exclude points outside of the domain
-
-          k = 1
-          do while (k <= Nsnow(i,j) .AND. Sliq(k,i,j) < epsilon(Sliq))
-            Ds_soft(i,j) = Ds_soft(i,j) + Ds(k,i,j)
-            k = k + 1
-          end do
-
-          2 continue  ! Exclude points outside of the domain   
-
-        end do
-      end do
-
     ! New determination of soft snow based on layer wetting history and temperature
-    else ! HISWET == 1
+    ! Now histowet is used by default
+    do i = 1, Nx
+      do j = 1, Ny
 
-      do i = 1, Nx
-        do j = 1, Ny
+        if (isnan(dem(i,j))) goto 2 ! Exclude points outside of the domain
 
-          if (isnan(dem(i,j))) goto 3 ! Exclude points outside of the domain
-
-          k = 1
-          do while (k <= Nsnow(i,j) .AND. Sliq(k,i,j) < epsilon(Sliq) .AND. histowet(k,i,j) < 0.5)
-            Ds_soft(i,j) = Ds_soft(i,j) + Ds(k,i,j)
-            k = k + 1
-          end do
-
-          3 continue  ! Exclude points outside of the domain   
-
+        k = 1
+        do while (k <= Nsnow(i,j) .AND. Sliq(k,i,j) < epsilon(Sliq) .AND. histowet(k,i,j) < 0.5)
+          Ds_soft(i,j) = Ds_soft(i,j) + Ds(k,i,j)
+          k = k + 1
         end do
-      end do
 
-    end if
+        2 continue  ! Exclude points outside of the domain   
+
+      end do
+    end do
 
     end subroutine compute_soft_snow
 
@@ -410,7 +373,7 @@ module SNOWTRAN3D_interface
     do i = 1, Nx
       do j = 1, Ny
 
-        if (isnan(dem(i,j))) goto 4 ! Exclude points outside of the domain
+        if (isnan(dem(i,j))) goto 3 ! Exclude points outside of the domain
 
         Ds_soft_old = Ds_soft(i,j)
         Ds_soft(i,j) = 0.0
@@ -439,7 +402,7 @@ module SNOWTRAN3D_interface
 
         end do
 
-        4 continue  ! Exclude points outside of the domain   
+        3 continue  ! Exclude points outside of the domain   
 
       end do
     end do
@@ -449,10 +412,7 @@ module SNOWTRAN3D_interface
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    subroutine accum(tabler_nn,tabler_ss,tabler_ee,tabler_ww, &
-                     tabler_ne,tabler_se,tabler_sw,tabler_nw, &
-                     dm_subl, &
-                     dm_subgrid)
+    subroutine accum(dSWE_subl)
 
     use CONSTANTS, only: &
       rho_wat                 ! Density of water (kg/m^3)
@@ -468,61 +428,46 @@ module SNOWTRAN3D_interface
       fsnow,                 &! Snow cover fraction 
       Sice,                  &! Ice content of snow layers (kg/m^2)
       Sliq,                  &! Liquid content of snow layers (kg/m^2)
-      dm_tot_subl,           &! Cumulated SWE change due to sublimation (kg/m^2)
-      dm_tot_trans            ! Cumulated transported SWE (kg/m^2)
+      dSWE_tot_subl,         &! Cumulated SWE change due to sublimation (kg/m^2)
+      dSWE_tot_salt,         &! Cumulated SWE change due to saltation (kg/m^2)
+      dSWE_tot_susp           ! Cumulated SWE change due to suspension (kg/m^2)
 
     use LANDUSE, only: &
       dem                     ! Terrain elevation (m)
 
     use PARAM_SNOWTRAN3D, only: &
-      subgrid_flag,          &! Flag for subgrid parameterization
       rho_snow                ! Constant snow density (kg/m^3)
 
     implicit none
 
-    real, intent(in) :: &
-      tabler_nn(Nx,Ny),      &! Tabler surfaces NN
-      tabler_ss(Nx,Ny),      &! Tabler surfaces SS
-      tabler_ee(Nx,Ny),      &! Tabler surfaces EE
-      tabler_ww(Nx,Ny),      &! Tabler surfaces WW
-      tabler_ne(Nx,Ny),      &! Tabler surfaces NE
-      tabler_se(Nx,Ny),      &! Tabler surfaces SE
-      tabler_sw(Nx,Ny),      &! Tabler surfaces SW
-      tabler_nw(Nx,Ny)        ! Tabler surfaces NW
-
     real, intent(inout) :: &
-      dm_subl(Nx,Ny),        &! SWE change due to sublimation (kg/m^2)
-      dm_subgrid(Nx,Ny)       ! SWE change due to subgrid redistribution (kg/m^2)
+      dSWE_subl(Nx,Ny)          ! SWE change due to sublimation (kg/m^2)
 
     integer :: &
       i,j                     ! Point counters
 
     real :: &
-      dm_subl_loss,          &! SWE loss due to sublimation (kg/m^2)
+      dSWE_subl_loss,          &! SWE loss due to sublimation (kg/m^2)
       dh_subl_loss,          &! Snow depth loss due to sublimation (m)
-      dh_subgrid,            &! Snow depth change due to subgrid redistribution (m)
       Ds_hard,               &! Hard snow thickness (m)
       swe_loc,               &! Total snowpack SWE (kg/m^2)
       snowdmin                ! Minimum snow depth to allow transport (m)
-
-    real :: &
-      snowdepth_tabler(Nx,Ny) ! Snow depth Tabler (m)
 
     if (bs_flag == 1.0) then
 
       ! SALTATION
       !call getnewdepth(Qsalt_u, &
-      !                 Qsalt_v,dm_salt,snowdepth0,Sice0)
+      !                 Qsalt_v,dSWE_salt,snowdepth0,Sice0)
 
       ! SUSPENSION
       !call getnewdepth(Qsusp_u, &
-      !                 Qsusp_v,dm_susp,snowdepth0,Sice0)
+      !                 Qsusp_v,dSWE_susp,snowdepth0,Sice0)
 
       ! SUBLIMATION
       do i = 2, Nx-1
         do j = 2, Ny-1
 
-          if (isnan(dem(i,j))) goto 5 ! Exclude points outside of the domain
+          if (isnan(dem(i,j))) goto 4 ! Exclude points outside of the domain
 
           ! Make adjustments for the case where there is no snow available
           ! on the ground (or captured within the vegetation) to be
@@ -532,13 +477,13 @@ module SNOWTRAN3D_interface
           swe_loc = sum(Sice(:,i,j) + Sliq(:,i,j))
 
           ! Convert Qsubl to sublimated snow depth dh_subl_loss.
-          dm_subl(i,j) = Qsubl(i,j) * dt * fsnow(i,j)
-          dm_subl_loss = - dm_subl(i,j)
-          dm_subl_loss = min(dm_subl_loss,swe_loc)
-          if (dm_subl_loss > epsilon(dm_subl_loss)) then
-            call HS_FROM_SWE(dm_subl_loss,dh_subl_loss,i,j)
+          dSWE_subl(i,j) = Qsubl(i,j) * dt * fsnow(i,j)
+          dSWE_subl_loss = - dSWE_subl(i,j)
+          dSWE_subl_loss = min(dSWE_subl_loss,swe_loc)
+          if (dSWE_subl_loss > epsilon(dSWE_subl_loss)) then
+            call HS_FROM_SWE(dSWE_subl_loss,dh_subl_loss,i,j)
           else
-            dm_subl_loss = 0.0
+            dSWE_subl_loss = 0.0
             dh_subl_loss = 0.0
           end if
 
@@ -546,81 +491,30 @@ module SNOWTRAN3D_interface
             if (snowthickness(i,j) - dh_subl_loss / fsnow(i,j) <= snowdmin) then
               dh_subl_loss = (snowthickness(i,j) - snowdmin) * fsnow(i,j)
               if (dh_subl_loss > epsilon(dh_subl_loss)) then
-                call SWE_FROM_HS(dh_subl_loss,dm_subl_loss,i,j)
-                dm_subl(i,j) = - dm_subl_loss
+                call SWE_FROM_HS(dh_subl_loss,dSWE_subl_loss,i,j)
+                dSWE_subl(i,j) = - dSWE_subl_loss
               else
                 dh_subl_loss = 0.0
-                dm_subl(i,j) = 0.0
+                dSWE_subl(i,j) = 0.0
               end if
             end if
           else
-            dm_subl(i,j) = 0.0
-            dm_subl_loss = 0.0
+            dSWE_subl(i,j) = 0.0
+            dSWE_subl_loss = 0.0
             dh_subl_loss = 0.0
           end if
 
-          if (dm_subl_loss > epsilon(dm_subl_loss) .and. dh_subl_loss > epsilon(dh_subl_loss)) then
-            call SNOW_ABLATION(dh_subl_loss,dm_subl_loss,i,j)
+          if (dSWE_subl_loss > epsilon(dSWE_subl_loss) .and. dh_subl_loss > epsilon(dh_subl_loss)) then
+            call SNOW_ABLATION(dh_subl_loss,dSWE_subl_loss,i,j)
           end if
 
           ! Update the snow layer thicknesses
           snowthickness(i,j) = sum(Ds(:,i,j))
 
-          5 continue  ! Exclude points outside of the domain
+          4 continue  ! Exclude points outside of the domain
 
         end do
       end do
-
-      ! Run the subgrid parameterization to account for unrealistic
-      ! snow accumulation spikes.
-      if (subgrid_flag == 1.0) then
-
-        ! Save a copy of the snow distribution to be used to calculate the
-        ! snow distribution changes resulting from the subgrid
-        ! redistribution.
-        snowdepth_tabler(i,j) = snowthickness(i,j) * fsnow(i,j)
-
-        ! Do the Tabler corrections
-        call subgrid_1(snowdepth_tabler, &
-                       tabler_nn,tabler_ss,tabler_ee,tabler_ww, &
-                       tabler_ne,tabler_se,tabler_sw,tabler_nw)
-
-        ! Calculate the snow depth resulting from the subgrid
-        ! redistribution.
-        do i = 1, Nx
-          do j = 1, Ny
-
-            if (isnan(dem(i,j))) goto 6 ! Exclude points outside of the domain
-
-            dh_subgrid = snowdepth_tabler(i,j) - snowthickness(i,j) * fsnow(i,j)
-            dm_subgrid(i,j) = dh_subgrid * rho_snow
-
-            if (-dm_subgrid(i,j) > epsilon(-dm_subgrid) .and. -dh_subgrid > epsilon(-dh_subgrid)) then
-
-              call SNOW_ABLATION(-dh_subgrid,-dm_subgrid(i,j),i,j)
-
-            ! Net mass gain for this grid cell at this time step.
-            else if (dm_subgrid(i,j) > epsilon(dm_subgrid) .and. dh_subgrid > epsilon(dh_subgrid)) then
-
-              ! Add to the existing top layer.
-              Sice0(i,j) = Sice0(i,j) + dm_subgrid(i,j)
-              snowdepth0(i,j) = snowdepth0(i,j) + dh_subgrid
-
-            end if
-
-            ! Update the snow layer thicknesses
-            snowthickness(i,j) = sum(Ds(:,i,j))
-
-            6 continue  ! Exclude points outside of the domain
-
-          end do
-        end do
-
-      else
-
-        dm_subgrid(:,:) = 0.0
-
-      end if
 
     end if
 
@@ -628,14 +522,14 @@ module SNOWTRAN3D_interface
     do i = 2, Nx-1
       do j = 2, Ny-1
 
-        if (isnan(dem(i,j))) goto 7 ! Exclude points outside of the domain
+        if (isnan(dem(i,j))) goto 5 ! Exclude points outside of the domain
 
         ! Fill summing arrays of the sublimation and transport quantities.
-        dm_tot_subl(i,j) = dm_tot_subl(i,j) + dm_subl(i,j)
-        dm_tot_trans(i,j) = dm_tot_trans(i,j) + dm_salt(i,j) + &
-                            dm_susp(i,j) + dm_subgrid(i,j)
-
-        7 continue  ! Exclude points outside of the domain
+        dSWE_tot_subl(i,j) = dSWE_tot_subl(i,j) + dSWE_subl(i,j)
+        dSWE_tot_salt(i,j) = dSWE_tot_salt(i,j) + dSWE_salt(i,j) 
+        dSWE_tot_susp(i,j) = dSWE_tot_susp(i,j) + dSWE_susp(i,j)
+    
+        5 continue  ! Exclude points outside of the domain
 
       end do
     end do
@@ -651,15 +545,15 @@ module SNOWTRAN3D_interface
 
         !Clear trans arrays
         Qs_u = 0.0
-        dm_s_u = 0.0
-        dm_s_u_gain = 0.0
-        dm_s_u_loss = 0.0
+        dSWE_s_u = 0.0
+        dSWE_s_u_gain = 0.0
+        dSWE_s_u_loss = 0.0
         Qs_v = 0.0
-        dm_s_v = 0.0
-        dm_s_v_gain = 0.0
-        dm_s_v_loss = 0.0
+        dSWE_s_v = 0.0
+        dSWE_s_v_gain = 0.0
+        dSWE_s_v_loss = 0.0
         
-        dm_susp = 0.0
+        dSWE_susp = 0.0
         Qsubl = 0.0
 
         ! If the blowing snow flag indicates wind transported snow
@@ -681,15 +575,15 @@ module SNOWTRAN3D_interface
 
         !Clear trans arrays
         Qs_u = 0.0
-        dm_s_u = 0.0
-        dm_s_u_gain = 0.0
-        dm_s_u_loss = 0.0
+        dSWE_s_u = 0.0
+        dSWE_s_u_gain = 0.0
+        dSWE_s_u_loss = 0.0
         Qs_v = 0.0
-        dm_s_v = 0.0
-        dm_s_v_gain = 0.0
-        dm_s_v_loss = 0.0
+        dSWE_s_v = 0.0
+        dSWE_s_v_gain = 0.0
+        dSWE_s_v_loss = 0.0
         
-        dm_salt = 0.0
+        dSWE_salt = 0.0
         Qsalt = 0.0
     
         call saltation_init(Qs_u,Qs_v)
@@ -698,14 +592,14 @@ module SNOWTRAN3D_interface
 
     subroutine SNOWTRAN3D_susp_end()
     
-    implicit none
+      implicit none
 
-    real                :: &
-      dm_s(Nx,Ny)    ! Net mass change to sum
+      real                :: &
+        dSWE_s(Nx,Ny)    ! Net mass change to sum
     
       ! Sum new depth from the mass change arrays (stored as module variables)
-      call sumnewdepth(dm_s)
-      dm_susp = dm_s
+      call sumnewdepth(dSWE_s)
+      dSWE_susp = dSWE_s
     
     end subroutine SNOWTRAN3D_susp_end
     
@@ -717,14 +611,14 @@ module SNOWTRAN3D_interface
        Qs_v(Nx,Ny)            ! y component of either Qsalt or Qsusp (kg/m/s)
 
       real                :: &
-        dm_s(Nx,Ny)    ! Net mass change to sum
+        dSWE_s(Nx,Ny)    ! Net mass change to sum
     
       ! Solve for the saltation flux.
       call saltation_accum(Qs_u,Qs_v)
 
       ! Sum new depth from the mass change arrays (stored as module variables)
-      call sumnewdepth(dm_s)
-      dm_salt = dm_s
+      call sumnewdepth(dSWE_s)
+      dSWE_salt = dSWE_s
       
     end subroutine SNOWTRAN3D_salt_end
 
@@ -739,7 +633,6 @@ module SNOWTRAN3D_interface
 
     use DRIVING, only: &
       Ta,                &! Air temperature (K)
-      zH,                &! Height of the measurement (m)
       RH                  ! Relative humidity (%)
 
     use LANDUSE, only: &
@@ -785,13 +678,15 @@ module SNOWTRAN3D_interface
     do i = 1, Nx
       do j = 1, Ny
       
-        if (isnan(dem(i,j))) goto 8 ! Exclude points outside of the domain
+        if (isnan(dem(i,j))) goto 6 ! Exclude points outside of the domain
         
         Qsusp = 0.0
         
         if (Qsalt(i,j) > epsilon(Qsalt)) then
           Utau_fallvel = Utau(i,j) / fall_vel
-          if (h_star(i,j) == z_0(i,j)) h_star(i,j) = 2.0 * z_0(i,j)
+          ! LQ: the present subroutine (suspension) is only called in the case there is saltation (bs_flag = 1)
+          ! in which case (see third case of solveUtau): h* = (h_const/C_z) z0 = 13.3 z0
+          ! So no need to check h*, the following log is always positive
           U_r = Utau(i,j)/vkman * log(h_star(i,j)/z_0(i,j))
           phistar_Cr = Utau(i,j)/U_r * Ur_const
           prd = phistar_Cr * Utau_fallvel
@@ -817,7 +712,7 @@ module SNOWTRAN3D_interface
             if (conc > epsilon(conc)) then
 
               ! Compute the sublimation due to suspension.
-              call getsublim(z,RH(i,j),zH(i,j),Ta(i,j),Utau(i,j), &
+              call getsublim(z,RH(i,j),Ta(i,j),Utau(i,j), &
                              z_0(i,j),V_susp,V_salt,Utau_t(i,j),1.0)
 
               ! Perform the quadrature (summation), without the constants.
@@ -835,7 +730,7 @@ module SNOWTRAN3D_interface
 
           ! Include the sublimation contribution due to saltation.
           z = h_star(i,j) / 2.0
-          call getsublim(z,RH(i,j),zH(i,j),Ta(i,j),Utau(i,j), &
+          call getsublim(z,RH(i,j),Ta(i,j),Utau(i,j), &
                          z_0(i,j),V_susp,V_salt,Utau_t(i,j),0.0)
 
           Qsubl(i,j) = Qsubl(i,j) + V_salt * conc_salt(i,j) * h_star(i,j)
@@ -849,7 +744,7 @@ module SNOWTRAN3D_interface
         Qsusp_v(i,j) = Qsusp * abs(vwind(i,j)) / &
                        sqrt(uwind(i,j)**2 + vwind(i,j)**2)
 
-        8 continue  ! Exclude points outside of the domain
+        6 continue  ! Exclude points outside of the domain
 
       end do
     end do
@@ -891,7 +786,7 @@ module SNOWTRAN3D_interface
     do i = 1, Nx
       do j = 1, Ny
 
-        if (isnan(dem(i,j))) goto 10 ! Exclude points outside of the domain
+        if (isnan(dem(i,j))) goto 8 ! Exclude points outside of the domain
 
         ! For a given wind speed, find Qsalt_max.
         Qsalt_max(i,j) = 0.68 * rho_air / grav * &
@@ -905,7 +800,7 @@ module SNOWTRAN3D_interface
         Qsalt_maxv(i,j) = Qsalt_max(i,j) * abs(vwind(i,j)) / &
                           sqrt(uwind(i,j)**2 + vwind(i,j)**2)
 
-        10 continue  ! Exclude points outside of the domain
+        8 continue  ! Exclude points outside of the domain
 
       end do
     end do
@@ -921,13 +816,13 @@ module SNOWTRAN3D_interface
       do i = 1, Nx
         do j = 1, Ny
 
-          if (isnan(dem(i,j))) goto 11 ! Exclude points outside of the domain
+          if (isnan(dem(i,j))) goto 9 ! Exclude points outside of the domain
 
           ! Zero incoming flux at the boundaries.
           Qsalt_u(i,j) = 0.0
           Qsalt_v(i,j) = 0.0
 
-          11 continue  ! Exclude points outside of the domain
+          9 continue  ! Exclude points outside of the domain
 
         end do
       end do
@@ -935,13 +830,13 @@ module SNOWTRAN3D_interface
       do i = 1, Nx
         do j = 1, Ny
 
-          if (isnan(dem(i,j))) goto 12 ! Exclude points outside of the domain
+          if (isnan(dem(i,j))) goto 10 ! Exclude points outside of the domain
 
           ! Steady-state (maximum) incoming flux at the boundaries.
           Qsalt_u(i,j) = Qsalt_maxu(i,j)
           Qsalt_v(i,j) = Qsalt_maxv(i,j)
 
-          12 continue  ! Exclude points outside of the domain
+          10 continue  ! Exclude points outside of the domain
 
         end do
       end do
@@ -970,7 +865,7 @@ module SNOWTRAN3D_interface
     do i = 1, Nx
       do j = 1, Ny
 
-        if (isnan(dem(i,j))) goto 14 ! Exclude points outside of the domain
+        if (isnan(dem(i,j))) goto 12 ! Exclude points outside of the domain
 
         ! This statement below has been handeled in the SNOWTRAN3D_fluxes function now
         !if ((snowthickness(i,j) <= vegsnowd_xy(i,j)) .or. (Ds_soft(i,j) <= epsilon(Ds_soft))) then
@@ -980,7 +875,7 @@ module SNOWTRAN3D_interface
         
         Qsalt(i,j) = Qsalt_u(i,j) + Qsalt_v(i,j)
 
-        14 continue  ! Exclude points outside of the domain
+        12 continue  ! Exclude points outside of the domain
 
       end do
     end do
@@ -999,6 +894,8 @@ module SNOWTRAN3D_interface
         use DRIVING, only: &
           dt                     ! Timestep (s)
 
+        use PARAM_SNOWTRAN3D, only: &
+          blowby                 ! Fraction of the saltation flux transferred downwind
         use CONSTANTS_SNOWTRAN3D, only: &
           fetch,                &! Equilibrium fetch distance (m)
           xmu                    ! Scaling constant for non-equilibrium saltation transport
@@ -1027,22 +924,9 @@ module SNOWTRAN3D_interface
           dh_s_loss,            &!Holder variable for calculating loss of snow height
           snowdmin,             &
           swe_loc,              &! SWE in the snow covered part of the pixel (kg/m^2)
-          blowby,               &! Blowby parameter (see description below)
           dUtau,                &! Utau difference (m/s)
           scale_EW,             &! Scaling coefficient for Eqn. 9 in L&S 1998
           scale_NS               ! Scaling coefficient for Eqn. 9 in L&S 1998
-
-        ! The blowby parameter is implemented to account for the erosion
-        ! of the tops of deep snow accumulations.  It corrects a
-        ! deficiency in the du*/dx* < 0 formulation.  It is a number that
-        ! should range from 0 to 1.0, and represents the fraction of the
-        ! upwind saltation flux that is transfered farther downwind into
-        ! the next grid cell.  So, the bigger the number, the less
-        ! peaked the drift accumulation profile is.  blowby = 0.0 is the
-        ! original model.  I am now using the Tabler surfaces to do the
-        ! same kind of thing, so here I hard-code the parameter as in the
-        ! original model.
-        blowby = 0.0
 
         ! Define the scaling coefficients for Eqn. 9 in L&S 1998. Don't
         ! let them be greater than 1.0 or you will make more snow than
@@ -1088,16 +972,16 @@ module SNOWTRAN3D_interface
                   25 continue
                   
                   swe_loc = sum(Sice(:,i,j) + Sliq(:,i,j))
-                  dm_s_u_loss(i,j) = dt * Qsalt_u(i,j) * fsnow(i,j) / delta_WE
-                  dm_s_u_gain(i,j) = dt * Qsalt_u(i,j-1) * fsnow(i,j-1) / delta_WE
-                  dm_s_u_loss(i,j) = min(dm_s_u_loss(i,j),swe_loc) ! No need to adjust Qsalt_u here because if thresholded, it will be done in the next if loop anyway
-                  if (dm_s_u_loss(i,j) > epsilon(dm_s_u_loss)) then
-                    call HS_FROM_SWE(dm_s_u_loss(i,j),dh_s_loss,i,j)
+                  dSWE_s_u_loss(i,j) = dt * Qsalt_u(i,j) * fsnow(i,j) / delta_WE
+                  dSWE_s_u_gain(i,j) = dt * Qsalt_u(i,j-1) * fsnow(i,j-1) / delta_WE
+                  dSWE_s_u_loss(i,j) = min(dSWE_s_u_loss(i,j),swe_loc) ! No need to adjust Qsalt_u here because if thresholded, it will be done in the next if loop anyway
+                  if (dSWE_s_u_loss(i,j) > epsilon(dSWE_s_u_loss)) then
+                    call HS_FROM_SWE(dSWE_s_u_loss(i,j),dh_s_loss,i,j)
                   else
-                    dm_s_u_loss(i,j) = 0.0
+                    dSWE_s_u_loss(i,j) = 0.0
                     dh_s_loss = 0.0
                   end if
-                  dm_s_u(i,j) = dm_s_u_gain(i,j) - dm_s_u_loss(i,j)
+                  dSWE_s_u(i,j) = dSWE_s_u_gain(i,j) - dSWE_s_u_loss(i,j)
                   
                   if (Qsalt_u(i,j)==0.0) cycle
                   
@@ -1107,15 +991,15 @@ module SNOWTRAN3D_interface
                   if (snowthickness(i,j) - dh_s_loss / fsnow(i,j) <= snowdmin) then
                     dh_s_loss = (snowthickness(i,j) - snowdmin) * fsnow(i,j)
                     if (dh_s_loss > epsilon(dh_s_loss)) then
-                      call SWE_FROM_HS(dh_s_loss,dm_s_u_loss(i,j),i,j)
+                      call SWE_FROM_HS(dh_s_loss,dSWE_s_u_loss(i,j),i,j)
                     else
-                      dm_s_u_loss(i,j) = 0.0
+                      dSWE_s_u_loss(i,j) = 0.0
                     end if
-                    dm_s_u(i,j) = dm_s_u_gain(i,j) - dm_s_u_loss(i,j)
-                    Qsalt_u(i,j) = Qsalt_u(i,j-1) - dm_s_u(i,j) * delta_WE / dt / fsnow(i,j)
+                    dSWE_s_u(i,j) = dSWE_s_u_gain(i,j) - dSWE_s_u_loss(i,j)
+                    Qsalt_u(i,j) = Qsalt_u(i,j-1) - dSWE_s_u(i,j) * delta_WE / dt / fsnow(i,j)
                   end if
                   
-                  dm_s_u(i,j) = dm_s_u_gain(i,j) - dm_s_u_loss(i,j)
+                  dSWE_s_u(i,j) = dSWE_s_u_gain(i,j) - dSWE_s_u_loss(i,j)
                 end do
               end do
             end do
@@ -1152,16 +1036,16 @@ module SNOWTRAN3D_interface
                   26 continue
                   
                   swe_loc = sum(Sice(:,i,j) + Sliq(:,i,j))
-                  dm_s_u_loss(i,j) = dt * Qsalt_u(i,j) * fsnow(i,j) / delta_WE
-                  dm_s_u_gain(i,j) = dt * Qsalt_u(i,j+1) * fsnow(i,j+1) / delta_WE
-                  dm_s_u_loss(i,j) = min(dm_s_u_loss(i,j),swe_loc) ! No need to adjust Qsalt_u here because if thresholded, it will be done in the next if loop anyway
-                  if (dm_s_u_loss(i,j) > epsilon(dm_s_u_loss)) then
-                    call HS_FROM_SWE(dm_s_u_loss(i,j),dh_s_loss,i,j)
+                  dSWE_s_u_loss(i,j) = dt * Qsalt_u(i,j) * fsnow(i,j) / delta_WE
+                  dSWE_s_u_gain(i,j) = dt * Qsalt_u(i,j+1) * fsnow(i,j+1) / delta_WE
+                  dSWE_s_u_loss(i,j) = min(dSWE_s_u_loss(i,j),swe_loc) ! No need to adjust Qsalt_u here because if thresholded, it will be done in the next if loop anyway
+                  if (dSWE_s_u_loss(i,j) > epsilon(dSWE_s_u_loss)) then
+                    call HS_FROM_SWE(dSWE_s_u_loss(i,j),dh_s_loss,i,j)
                   else
-                    dm_s_u_loss(i,j) = 0.0
+                    dSWE_s_u_loss(i,j) = 0.0
                     dh_s_loss = 0.0
                   end if
-                  dm_s_u(i,j) = dm_s_u_gain(i,j) - dm_s_u_loss(i,j)
+                  dSWE_s_u(i,j) = dSWE_s_u_gain(i,j) - dSWE_s_u_loss(i,j)
                   
                   if (Qsalt_u(i,j)==0.0) cycle
                   
@@ -1171,12 +1055,12 @@ module SNOWTRAN3D_interface
                   if (snowthickness(i,j) - dh_s_loss / fsnow(i,j) <= snowdmin) then
                     dh_s_loss = (snowthickness(i,j) - snowdmin) * fsnow(i,j)
                     if (dh_s_loss > epsilon(dh_s_loss)) then
-                      call SWE_FROM_HS(dh_s_loss,dm_s_u_loss(i,j),i,j)
+                      call SWE_FROM_HS(dh_s_loss,dSWE_s_u_loss(i,j),i,j)
                     else
-                      dm_s_u_loss(i,j) = 0.0
+                      dSWE_s_u_loss(i,j) = 0.0
                     end if
-                    dm_s_u(i,j) = dm_s_u_gain(i,j) - dm_s_u_loss(i,j)
-                    Qsalt_u(i,j) = Qsalt_u(i,j+1) - dm_s_u(i,j) * delta_WE / dt / fsnow(i,j)
+                    dSWE_s_u(i,j) = dSWE_s_u_gain(i,j) - dSWE_s_u_loss(i,j)
+                    Qsalt_u(i,j) = Qsalt_u(i,j+1) - dSWE_s_u(i,j) * delta_WE / dt / fsnow(i,j)
                   end if
                   
                 end do
@@ -1215,16 +1099,16 @@ module SNOWTRAN3D_interface
                   27 continue
                                     
                   swe_loc = sum(Sice(:,i,j) + Sliq(:,i,j))
-                  dm_s_v_loss(i,j) = dt * Qsalt_v(i,j) * fsnow(i,j) / delta_SN
-                  dm_s_v_gain(i,j) = dt * Qsalt_v(i-1,j) * fsnow(i-1,j) / delta_SN
-                  dm_s_v_loss(i,j) = min(dm_s_v_loss(i,j),swe_loc) ! No need to adjust Qsalt_v here because if thresholded, it will be done in the next if loop anyway
-                  if (dm_s_v_loss(i,j) > epsilon(dm_s_v_loss)) then
-                    call HS_FROM_SWE(dm_s_v_loss(i,j),dh_s_loss,i,j)
+                  dSWE_s_v_loss(i,j) = dt * Qsalt_v(i,j) * fsnow(i,j) / delta_SN
+                  dSWE_s_v_gain(i,j) = dt * Qsalt_v(i-1,j) * fsnow(i-1,j) / delta_SN
+                  dSWE_s_v_loss(i,j) = min(dSWE_s_v_loss(i,j),swe_loc) ! No need to adjust Qsalt_v here because if thresholded, it will be done in the next if loop anyway
+                  if (dSWE_s_v_loss(i,j) > epsilon(dSWE_s_v_loss)) then
+                    call HS_FROM_SWE(dSWE_s_v_loss(i,j),dh_s_loss,i,j)
                   else
-                    dm_s_v_loss(i,j) = 0.0
+                    dSWE_s_v_loss(i,j) = 0.0
                     dh_s_loss = 0.0
                   end if
-                  dm_s_v(i,j) = dm_s_v_gain(i,j) - dm_s_v_loss(i,j)
+                  dSWE_s_v(i,j) = dSWE_s_v_gain(i,j) - dSWE_s_v_loss(i,j)
                   
                   if (Qsalt_v(i,j)==0.0) cycle
                   
@@ -1234,12 +1118,12 @@ module SNOWTRAN3D_interface
                   if (snowthickness(i,j) - dh_s_loss / fsnow(i,j) <= snowdmin) then
                     dh_s_loss = (snowthickness(i,j) - snowdmin) * fsnow(i,j)
                     if (dh_s_loss > epsilon(dh_s_loss)) then
-                      call SWE_FROM_HS(dh_s_loss,dm_s_v_loss(i,j),i,j)
+                      call SWE_FROM_HS(dh_s_loss,dSWE_s_v_loss(i,j),i,j)
                     else
-                      dm_s_v_loss(i,j) = 0.0
+                      dSWE_s_v_loss(i,j) = 0.0
                     end if
-                    dm_s_v(i,j) = dm_s_v_gain(i,j) - dm_s_v_loss(i,j)
-                    Qsalt_v(i,j) = Qsalt_v(i-1,j) - dm_s_v(i,j) * delta_SN / dt / fsnow(i,j)
+                    dSWE_s_v(i,j) = dSWE_s_v_gain(i,j) - dSWE_s_v_loss(i,j)
+                    Qsalt_v(i,j) = Qsalt_v(i-1,j) - dSWE_s_v(i,j) * delta_SN / dt / fsnow(i,j)
                   end if
                 end do
               end do
@@ -1278,16 +1162,16 @@ module SNOWTRAN3D_interface
                   28 continue
                   
                   swe_loc = sum(Sice(:,i,j) + Sliq(:,i,j))
-                  dm_s_v_loss(i,j) = dt * Qsalt_v(i,j) * fsnow(i,j) / delta_SN
-                  dm_s_v_gain(i,j) = dt * Qsalt_v(i+1,j) * fsnow(i+1,j) / delta_SN
-                  dm_s_v_loss(i,j) = min(dm_s_v_loss(i,j),swe_loc) ! No need to adjust Qsalt_v here because if thresholded, it will be done in the next if loop anyway
-                  if (dm_s_v_loss(i,j) > epsilon(dm_s_v_loss)) then
-                    call HS_FROM_SWE(dm_s_v_loss(i,j),dh_s_loss,i,j)
+                  dSWE_s_v_loss(i,j) = dt * Qsalt_v(i,j) * fsnow(i,j) / delta_SN
+                  dSWE_s_v_gain(i,j) = dt * Qsalt_v(i+1,j) * fsnow(i+1,j) / delta_SN
+                  dSWE_s_v_loss(i,j) = min(dSWE_s_v_loss(i,j),swe_loc) ! No need to adjust Qsalt_v here because if thresholded, it will be done in the next if loop anyway
+                  if (dSWE_s_v_loss(i,j) > epsilon(dSWE_s_v_loss)) then
+                    call HS_FROM_SWE(dSWE_s_v_loss(i,j),dh_s_loss,i,j)
                   else
-                    dm_s_v_loss(i,j) = 0.0
+                    dSWE_s_v_loss(i,j) = 0.0
                     dh_s_loss = 0.0
                   end if
-                  dm_s_v(i,j) = dm_s_v_gain(i,j) - dm_s_v_loss(i,j)
+                  dSWE_s_v(i,j) = dSWE_s_v_gain(i,j) - dSWE_s_v_loss(i,j)
                   
                   if (Qsalt_v(i,j)==0.0) cycle
                   
@@ -1297,12 +1181,12 @@ module SNOWTRAN3D_interface
                   if (snowthickness(i,j) - dh_s_loss / fsnow(i,j) <= snowdmin) then
                     dh_s_loss = (snowthickness(i,j) - snowdmin) * fsnow(i,j)
                     if (dh_s_loss > epsilon(dh_s_loss)) then
-                      call SWE_FROM_HS(dh_s_loss,dm_s_v_loss(i,j),i,j)
+                      call SWE_FROM_HS(dh_s_loss,dSWE_s_v_loss(i,j),i,j)
                     else
-                      dm_s_v_loss(i,j) = 0.0
+                      dSWE_s_v_loss(i,j) = 0.0
                     end if
-                    dm_s_v(i,j) = dm_s_v_gain(i,j) - dm_s_v_loss(i,j)
-                    Qsalt_v(i,j) = Qsalt_v(i+1,j) - dm_s_v(i,j) * delta_SN / dt / fsnow(i,j)
+                    dSWE_s_v(i,j) = dSWE_s_v_gain(i,j) - dSWE_s_v_loss(i,j)
+                    Qsalt_v(i,j) = Qsalt_v(i+1,j) - dSWE_s_v(i,j) * delta_SN / dt / fsnow(i,j)
                   end if
                 end do
               end do
@@ -1323,13 +1207,11 @@ module SNOWTRAN3D_interface
 
     use DRIVING, only: &
       Ua,                   &! Wind speed (m/s)
-      zH                     ! Height of the wind speed measurement (m)
-
-    use PARAMETERS, only : &
-      z0sn                   ! Snow roughness length (m)
+      zU                     ! Height of the wind speed measurement (m)
 
     use PARAMMAPS, only: &
-      vegsnowd_xy            ! Vegetation snow holding capacity (m)
+      vegsnowd_xy,          &! Vegetation snow holding capacity (m)
+      z0_snow                ! Roughness length of snow (m)
 
     use LANDUSE, only: &
       dem                    ! Terrain elevation (m)
@@ -1366,7 +1248,7 @@ module SNOWTRAN3D_interface
     do i = 1, Nx
       do j = 1, Ny
 
-        if (isnan(dem(i,j))) goto 15 ! Exclude points outside of the domain
+        if (isnan(dem(i,j))) goto 13 ! Exclude points outside of the domain
 
         ! Determine whether snow is saltating (this influences how Utau
         ! and z_0 are computed).
@@ -1374,16 +1256,16 @@ module SNOWTRAN3D_interface
 
           ! Saltation will not occur.
           sfrac = snowthickness(i,j) / max(vegsnowd_xy(i,j),veg_z0(i,j)) ! Eq. 3, LS 1998
-          z_0(i,j) = sfrac * z0sn + (1.0 - sfrac) * veg_z0(i,j) ! Eq. 4, LS 1998
-          z_0_tmp = min(0.25*zH(i,j),z_0(i,j))
-          Utau(i,j) = Ua(i,j) * vkman / log(zH(i,j)/z_0_tmp)
+          z_0(i,j) = sfrac * z0_snow(i,j) + (1.0 - sfrac) * veg_z0(i,j) ! Eq. 4, LS 1998
+          z_0_tmp = min(0.25*zU,z_0(i,j))
+          Utau(i,j) = Ua(i,j) * vkman / log(zU/z_0_tmp)
           h_star(i,j) = z_0(i,j) * h_const / C_z
 
         else if (Ds_soft(i,j) <= epsilon(Ds_soft)) then
 
           ! Saltation will not occur.
-          z_0(i,j) = z0sn
-          Utau(i,j) = Ua(i,j) * vkman / log(zH(i,j)/z_0(i,j))
+          z_0(i,j) = z0_snow(i,j)
+          Utau(i,j) = Ua(i,j) * vkman / log(zU/z_0(i,j))
           h_star(i,j) = z_0(i,j)
 
         else
@@ -1397,7 +1279,7 @@ module SNOWTRAN3D_interface
           ! wind speed to be 1.0 m/s, and the maximum wind speed to be
           ! 30 m/s at 10-m height.
           windtmp = max(1.0,Ua(i,j))
-          wind_max = 30.0 * log(zH(i,j)/z0sn)/log(10.0/z0sn)
+          wind_max = 30.0 * log(zU/z0_snow(i,j))/log(10.0/z0_snow(i,j))
           windtmp = min(windtmp,wind_max) 
 
           ! For u* over 0.6, use the relation z0 = 0.00734 u* - 0.0022,
@@ -1405,14 +1287,14 @@ module SNOWTRAN3D_interface
           ! for windspeeds greater than about 35 m/s this will have to be
           ! modified for the solution algorithm to converge (because the
           ! roughness length will start to be higher than the obs height!).
-          threshold = 0.6/vkman * log(zH(i,j)/0.0022)
+          threshold = 0.6/vkman * log(zU/0.0022)
           if (windtmp <= threshold) then
             threshold_flag = 1.0
           else
             threshold_flag = 2.0
           end if
 
-          call solve1(Utautmp,guess,windtmp, zH(i,j),&
+          call solve1(Utautmp,guess,windtmp, &
                       threshold_flag)
 
           if (Utautmp > Utau_t(i,j)) then
@@ -1428,15 +1310,15 @@ module SNOWTRAN3D_interface
             ! We do not have saltation, but the vegetation is covered by snow.
             ! Because we have determined that we do not have saltation, make
             ! sure Utau does not exceed Utau_t.
-            z_0(i,j) = z0sn
-            Utau(i,j) = Ua(i,j) * vkman / log(zH(i,j)/z_0(i,j))
+            z_0(i,j) = z0_snow(i,j)
+            Utau(i,j) = Ua(i,j) * vkman / log(zU/z_0(i,j))
             Utau(i,j) = min(Utau(i,j),Utau_t(i,j))
             h_star(i,j) = z_0(i,j) * h_const / C_z
 
           end if
         end if
 
-        15 continue  ! Exclude points outside of the domain
+        13 continue  ! Exclude points outside of the domain
 
       end do
     end do
@@ -1446,11 +1328,14 @@ module SNOWTRAN3D_interface
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    subroutine solve1(xnew,guess,windtmp,zU,threshold_flag)
+    subroutine solve1(xnew,guess,windtmp,threshold_flag)
 
     use CONSTANTS, only: &
       grav,              &! Acceleration due to gravity (m/s^2)
       vkman               ! Von Karman constant
+
+    use DRIVING, only: &
+      zU                  ! Height of the wind speed measurement (m)
 
     use CONSTANTS_SNOWTRAN3D, only: &
       C_z                 ! Coefficient 0.12 in Liston and Sturm (1998) eq. 5 p. 500
@@ -1460,7 +1345,6 @@ module SNOWTRAN3D_interface
     real, intent(in) :: &
       guess,             &! Initial guess for Utau (m/s)
       windtmp,           &! Wind speed (m/s)
-      zU,                &! Model input ("measurement") height (m)
       threshold_flag      ! Flag if u* is above threshold
 
     real, intent(inout) :: &  
@@ -1514,7 +1398,7 @@ module SNOWTRAN3D_interface
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    subroutine getsublim(z,RH,zRH,Ta,Utau_s,z_0,V_susp,V_salt,Utau_t_s,flag)
+    subroutine getsublim(z,RH,Ta,Utau,z_0,V_susp,V_salt,Utau_t,flag)
 
     use CONSTANTS, only: &
       hcon_air,          &! Thermal conductivity of air (W/m/K)
@@ -1528,15 +1412,17 @@ module SNOWTRAN3D_interface
       xM,                &! Molecular weight of water (kg/kmol)
       visc_air            ! Kinematic viscosity of air (m^2/s)
 
+    use DRIVING, only: &
+      zRH                 ! Relative humidity measurement height (m)
+
     implicit none
 
     real, intent(in) :: &
       z,                 &! Height (m)
       RH,                &! Relative humidity (%)
-      zRH,               &! Height of model input (m)
       Ta,                &! Air temperature (K)
-      Utau_t_s,          &! Threshold friction velocity (m/s)
-      Utau_s,            &! Friction velocity (m/s)
+      Utau_t,          &! Threshold friction velocity (m/s)
+      Utau,            &! Friction velocity (m/s)
       flag,              &! 1: sublimation due to suspension, 0: sublimation due to saltation
       z_0                 ! Surface roughness length (m)
 
@@ -1581,7 +1467,7 @@ module SNOWTRAN3D_interface
     rbar_r = 4.6e-5 * z**(-0.258)
     xmbar = 4.0/3.0 * pi * rho_ice * rbar_r**3 * (1.0 + 3.0/alpha + 2.0/alpha**2)
     rbar = ((3.0 * xmbar) / (4.0 * pi * rho_ice))**(0.33)
-    u_z = Utau_s/vkman * log(z/z_0)
+    u_z = Utau/vkman * log(z/z_0)
     x_r = 0.005 * u_z**(1.36)
     wbar = 1.1e7 * rbar**(1.8)
 
@@ -1604,7 +1490,7 @@ module SNOWTRAN3D_interface
 
       ! Compute the sublimation loss rate coefficient for the saltation
       ! layer.
-      V_rsalt = 0.68 * Utau_s + 2.3 * Utau_t_s
+      V_rsalt = 0.68 * Utau + 2.3 * Utau_t
       xN_r = 2.0 * rbar * V_rsalt / visc_air
       xNu = 1.79 + 0.606 * xN_r**(0.5)
       xSh = xNu
@@ -1934,16 +1820,16 @@ module SNOWTRAN3D_interface
       jend = index_uw(i,k*2+1)
       do j = jstart, jend
         swe_loc = sum(Sice(:,i,j) + Sliq(:,i,j))
-        dm_s_u_loss(i,j) = dt * Qs_u(i,j) * fsnow(i,j) / delta_WE
-        dm_s_u_gain(i,j) = dt * Qs_u(i,j-1) * fsnow(i,j-1) / delta_WE
-        dm_s_u_loss(i,j) = min(dm_s_u_loss(i,j),swe_loc) ! No need to adjust Qs_u here because if thresholded, it will be done in the next if loop anyway
-        if (dm_s_u_loss(i,j) > epsilon(dm_s_u_loss)) then
-          call HS_FROM_SWE(dm_s_u_loss(i,j),dh_s_loss,i,j)
+        dSWE_s_u_loss(i,j) = dt * Qs_u(i,j) * fsnow(i,j) / delta_WE
+        dSWE_s_u_gain(i,j) = dt * Qs_u(i,j-1) * fsnow(i,j-1) / delta_WE
+        dSWE_s_u_loss(i,j) = min(dSWE_s_u_loss(i,j),swe_loc) ! No need to adjust Qs_u here because if thresholded, it will be done in the next if loop anyway
+        if (dSWE_s_u_loss(i,j) > epsilon(dSWE_s_u_loss)) then
+          call HS_FROM_SWE(dSWE_s_u_loss(i,j),dh_s_loss,i,j)
         else
-          dm_s_u_loss(i,j) = 0.0
+          dSWE_s_u_loss(i,j) = 0.0
           dh_s_loss = 0.0
         end if
-        dm_s_u(i,j) = dm_s_u_gain(i,j) - dm_s_u_loss(i,j)
+        dSWE_s_u(i,j) = dSWE_s_u_gain(i,j) - dSWE_s_u_loss(i,j)
   
         ! Make adjustments for the case where there is no snow available
         ! on the ground (or captured within the vegetation) to be
@@ -1954,17 +1840,17 @@ module SNOWTRAN3D_interface
           if (snowthickness(i,j) - dh_s_loss / fsnow(i,j) <= snowdmin) then
             dh_s_loss = (snowthickness(i,j) - snowdmin) * fsnow(i,j)
             if (dh_s_loss > epsilon(dh_s_loss)) then
-              call SWE_FROM_HS(dh_s_loss,dm_s_u_loss(i,j),i,j)
+              call SWE_FROM_HS(dh_s_loss,dSWE_s_u_loss(i,j),i,j)
             else
-              dm_s_u_loss(i,j) = 0.0
+              dSWE_s_u_loss(i,j) = 0.0
             end if
-            dm_s_u(i,j) = dm_s_u_gain(i,j) - dm_s_u_loss(i,j)
-            Qs_u(i,j) = Qs_u(i,j-1) - dm_s_u(i,j) * delta_WE / dt / fsnow(i,j)
+            dSWE_s_u(i,j) = dSWE_s_u_gain(i,j) - dSWE_s_u_loss(i,j)
+            Qs_u(i,j) = Qs_u(i,j-1) - dSWE_s_u(i,j) * delta_WE / dt / fsnow(i,j)
           end if
         else
           Qs_u(i,j) = 0.0
-          dm_s_u_loss(i,j) = 0.0
-          dm_s_u(i,j) = dm_s_u_gain(i,j)
+          dSWE_s_u_loss(i,j) = 0.0
+          dSWE_s_u(i,j) = dSWE_s_u_gain(i,j)
         end if
       end do
     end do
@@ -1977,16 +1863,16 @@ module SNOWTRAN3D_interface
       jstart = index_ue(i,k*2+1)-1
       do j = jstart, jend,-1
         swe_loc = sum(Sice(:,i,j) + Sliq(:,i,j))
-        dm_s_u_loss(i,j) = dt * Qs_u(i,j) * fsnow(i,j) / delta_WE
-        dm_s_u_gain(i,j) = dt * Qs_u(i,j+1) * fsnow(i,j+1) / delta_WE
-        dm_s_u_loss(i,j) = min(dm_s_u_loss(i,j),swe_loc) ! No need to adjust Qs_u here because if thresholded, it will be done in the next if loop anyway
-        if (dm_s_u_loss(i,j) > epsilon(dm_s_u_loss)) then
-          call HS_FROM_SWE(dm_s_u_loss(i,j),dh_s_loss,i,j)
+        dSWE_s_u_loss(i,j) = dt * Qs_u(i,j) * fsnow(i,j) / delta_WE
+        dSWE_s_u_gain(i,j) = dt * Qs_u(i,j+1) * fsnow(i,j+1) / delta_WE
+        dSWE_s_u_loss(i,j) = min(dSWE_s_u_loss(i,j),swe_loc) ! No need to adjust Qs_u here because if thresholded, it will be done in the next if loop anyway
+        if (dSWE_s_u_loss(i,j) > epsilon(dSWE_s_u_loss)) then
+          call HS_FROM_SWE(dSWE_s_u_loss(i,j),dh_s_loss,i,j)
         else
-          dm_s_u_loss(i,j) = 0.0
+          dSWE_s_u_loss(i,j) = 0.0
           dh_s_loss = 0.0
         end if
-        dm_s_u(i,j) = dm_s_u_gain(i,j) - dm_s_u_loss(i,j)
+        dSWE_s_u(i,j) = dSWE_s_u_gain(i,j) - dSWE_s_u_loss(i,j)
   
         ! Make adjustments for the case where there is no snow available
         ! on the ground (or captured within the vegetation) to be
@@ -1997,17 +1883,17 @@ module SNOWTRAN3D_interface
           if (snowthickness(i,j) - dh_s_loss / fsnow(i,j) <= snowdmin) then
             dh_s_loss = (snowthickness(i,j) - snowdmin) * fsnow(i,j)
             if (dh_s_loss > epsilon(dh_s_loss)) then
-              call SWE_FROM_HS(dh_s_loss,dm_s_u_loss(i,j),i,j)
+              call SWE_FROM_HS(dh_s_loss,dSWE_s_u_loss(i,j),i,j)
             else
-              dm_s_u_loss(i,j) = 0.0
+              dSWE_s_u_loss(i,j) = 0.0
             end if
-            dm_s_u(i,j) = dm_s_u_gain(i,j) - dm_s_u_loss(i,j)
-            Qs_u(i,j) = Qs_u(i,j+1) - dm_s_u(i,j) * delta_WE / dt / fsnow(i,j)
+            dSWE_s_u(i,j) = dSWE_s_u_gain(i,j) - dSWE_s_u_loss(i,j)
+            Qs_u(i,j) = Qs_u(i,j+1) - dSWE_s_u(i,j) * delta_WE / dt / fsnow(i,j)
           end if
         else
           Qs_u(i,j) = 0.0
-          dm_s_u_loss(i,j) = 0.0
-          dm_s_u(i,j) = dm_s_u_gain(i,j)
+          dSWE_s_u_loss(i,j) = 0.0
+          dSWE_s_u(i,j) = dSWE_s_u_gain(i,j)
         end if
       end do
     end do
@@ -2020,16 +1906,16 @@ module SNOWTRAN3D_interface
       iend = index_vs(j,k*2+1)
       do i = istart, iend
         swe_loc = sum(Sice(:,i,j) + Sliq(:,i,j))
-        dm_s_v_loss(i,j) = dt * Qs_v(i,j) * fsnow(i,j) / delta_SN
-        dm_s_v_gain(i,j) = dt * Qs_v(i-1,j) * fsnow(i-1,j) / delta_SN
-        dm_s_v_loss(i,j) = min(dm_s_v_loss(i,j),swe_loc) ! No need to adjust Qs_v here because if thresholded, it will be done in the next if loop anyway
-        if (dm_s_v_loss(i,j) > epsilon(dm_s_v_loss)) then
-          call HS_FROM_SWE(dm_s_v_loss(i,j),dh_s_loss,i,j)
+        dSWE_s_v_loss(i,j) = dt * Qs_v(i,j) * fsnow(i,j) / delta_SN
+        dSWE_s_v_gain(i,j) = dt * Qs_v(i-1,j) * fsnow(i-1,j) / delta_SN
+        dSWE_s_v_loss(i,j) = min(dSWE_s_v_loss(i,j),swe_loc) ! No need to adjust Qs_v here because if thresholded, it will be done in the next if loop anyway
+        if (dSWE_s_v_loss(i,j) > epsilon(dSWE_s_v_loss)) then
+          call HS_FROM_SWE(dSWE_s_v_loss(i,j),dh_s_loss,i,j)
         else
-          dm_s_v_loss(i,j) = 0.0
+          dSWE_s_v_loss(i,j) = 0.0
           dh_s_loss = 0.0
         end if
-        dm_s_v(i,j) = dm_s_v_gain(i,j) - dm_s_v_loss(i,j)
+        dSWE_s_v(i,j) = dSWE_s_v_gain(i,j) - dSWE_s_v_loss(i,j)
   
         ! Make adjustments for the case where there is no snow available
         ! on the ground (or captured within the vegetation) to be
@@ -2040,17 +1926,17 @@ module SNOWTRAN3D_interface
           if (snowthickness(i,j) - dh_s_loss / fsnow(i,j) <= snowdmin) then
             dh_s_loss = (snowthickness(i,j) - snowdmin) * fsnow(i,j)
             if (dh_s_loss > epsilon(dh_s_loss)) then
-              call SWE_FROM_HS(dh_s_loss,dm_s_v_loss(i,j),i,j)
+              call SWE_FROM_HS(dh_s_loss,dSWE_s_v_loss(i,j),i,j)
             else
-              dm_s_v_loss(i,j) = 0.0
+              dSWE_s_v_loss(i,j) = 0.0
             end if
-            dm_s_v(i,j) = dm_s_v_gain(i,j) - dm_s_v_loss(i,j)
-            Qs_v(i,j) = Qs_v(i-1,j) - dm_s_v(i,j) * delta_SN / dt / fsnow(i,j)
+            dSWE_s_v(i,j) = dSWE_s_v_gain(i,j) - dSWE_s_v_loss(i,j)
+            Qs_v(i,j) = Qs_v(i-1,j) - dSWE_s_v(i,j) * delta_SN / dt / fsnow(i,j)
           end if
         else
           Qs_v(i,j) = 0.0
-          dm_s_v_loss(i,j) = 0.0
-          dm_s_v(i,j) = dm_s_v_gain(i,j)
+          dSWE_s_v_loss(i,j) = 0.0
+          dSWE_s_v(i,j) = dSWE_s_v_gain(i,j)
         end if
       end do
     end do
@@ -2063,16 +1949,16 @@ module SNOWTRAN3D_interface
       istart = index_vn(j,k*2+1)-1
       do i = istart, iend,-1
         swe_loc = sum(Sice(:,i,j) + Sliq(:,i,j))
-        dm_s_v_loss(i,j) = dt * Qs_v(i,j) * fsnow(i,j) / delta_SN
-        dm_s_v_gain(i,j) = dt * Qs_v(i+1,j) * fsnow(i+1,j) / delta_SN
-        dm_s_v_loss(i,j) = min(dm_s_v_loss(i,j),swe_loc) ! No need to adjust Qs_v here because if thresholded, it will be done in the next if loop anyway
-        if (dm_s_v_loss(i,j) > epsilon(dm_s_v_loss)) then
-          call HS_FROM_SWE(dm_s_v_loss(i,j),dh_s_loss,i,j)
+        dSWE_s_v_loss(i,j) = dt * Qs_v(i,j) * fsnow(i,j) / delta_SN
+        dSWE_s_v_gain(i,j) = dt * Qs_v(i+1,j) * fsnow(i+1,j) / delta_SN
+        dSWE_s_v_loss(i,j) = min(dSWE_s_v_loss(i,j),swe_loc) ! No need to adjust Qs_v here because if thresholded, it will be done in the next if loop anyway
+        if (dSWE_s_v_loss(i,j) > epsilon(dSWE_s_v_loss)) then
+          call HS_FROM_SWE(dSWE_s_v_loss(i,j),dh_s_loss,i,j)
         else
-          dm_s_v_loss(i,j) = 0.0
+          dSWE_s_v_loss(i,j) = 0.0
           dh_s_loss = 0.0
         end if
-        dm_s_v(i,j) = dm_s_v_gain(i,j) - dm_s_v_loss(i,j)
+        dSWE_s_v(i,j) = dSWE_s_v_gain(i,j) - dSWE_s_v_loss(i,j)
   
         ! Make adjustments for the case where there is no snow available
         ! on the ground (or captured within the vegetation) to be
@@ -2083,17 +1969,17 @@ module SNOWTRAN3D_interface
           if (snowthickness(i,j) - dh_s_loss / fsnow(i,j) <= snowdmin) then
             dh_s_loss = (snowthickness(i,j) - snowdmin) * fsnow(i,j)
             if (dh_s_loss > epsilon(dh_s_loss)) then
-              call SWE_FROM_HS(dh_s_loss,dm_s_v_loss(i,j),i,j)
+              call SWE_FROM_HS(dh_s_loss,dSWE_s_v_loss(i,j),i,j)
             else
-              dm_s_v_loss(i,j) = 0.0
+              dSWE_s_v_loss(i,j) = 0.0
             end if
-            dm_s_v(i,j) = dm_s_v_gain(i,j) - dm_s_v_loss(i,j)
-            Qs_v(i,j) = Qs_v(i+1,j) - dm_s_v(i,j) * delta_SN / dt / fsnow(i,j)
+            dSWE_s_v(i,j) = dSWE_s_v_gain(i,j) - dSWE_s_v_loss(i,j)
+            Qs_v(i,j) = Qs_v(i+1,j) - dSWE_s_v(i,j) * delta_SN / dt / fsnow(i,j)
           end if
         else
           Qs_v(i,j) = 0.0
-          dm_s_v_loss(i,j) = 0.0
-          dm_s_v(i,j) = dm_s_v_gain(i,j)
+          dSWE_s_v_loss(i,j) = 0.0
+          dSWE_s_v(i,j) = dSWE_s_v_gain(i,j)
         end if
       end do
     end do
@@ -2101,7 +1987,7 @@ module SNOWTRAN3D_interface
 
   end subroutine SNOWTRAN3D_susp
 
-  subroutine sumnewdepth(dm_s)
+  subroutine sumnewdepth(dSWE_s)
 
     use PARAMMAPS, only: &
       vegsnowd_xy            ! Vegetation snow holding capacity (m)
@@ -2116,17 +2002,17 @@ module SNOWTRAN3D_interface
       rho_snow            ! Constant snow density (kg/m^3)
 
     real, intent(inout) :: &
-      dm_s(Nx,Ny)          ! SWE change due to either saltation or suspension (kg/m^2)
+      dSWE_s(Nx,Ny)          ! SWE change due to either saltation or suspension (kg/m^2)
 
     real :: &
       dh_s,                 &! Snow depth change due to either saltation or suspension (m)
       dh_s_gain,            &! Snow depth gain due to either saltation or suspension (m)
       dh_s_loss,            &! Snow depth loss due to either saltation or suspension (m)
-      dm_s_loss,            &! SWE loss due to either saltation or suspension (kg/m^2)
-      dm_s_gain,            &! SWE gain due to either saltation or suspension (kg/m^2)
+      dSWE_s_loss,            &! SWE loss due to either saltation or suspension (kg/m^2)
+      dSWE_s_gain,            &! SWE gain due to either saltation or suspension (kg/m^2)
       eps,                  &! Epsilon
-      weight_u,             &! x weight for dm_s
-      weight_v               ! y weight for dm_s
+      weight_u,             &! x weight for dSWE_s
+      weight_v               ! y weight for dSWE_s
 
     integer :: &
       i,j,k                  ! Point counters
@@ -2146,36 +2032,36 @@ module SNOWTRAN3D_interface
         !weight_v = abs(dh_s_v(i,j)) / &
         !           (abs(dh_s_u(i,j)) + abs(dh_s_v(i,j)) + eps)
 
-        !dm_s_u(i,j) = weight_u * dm_s_u(i,j)
-        !dm_s_v(i,j) = weight_v * dm_s_v(i,j)
-        !dm_s_u_gain(i,j) = weight_u * dm_s_u_gain(i,j)
-        !dm_s_v_gain(i,j) = weight_v * dm_s_v_gain(i,j)
-        !dm_s_u_loss(i,j) = weight_u * dm_s_u_loss(i,j)
-        !dm_s_v_loss(i,j) = weight_v * dm_s_v_loss(i,j)
+        !dSWE_s_u(i,j) = weight_u * dSWE_s_u(i,j)
+        !dSWE_s_v(i,j) = weight_v * dSWE_s_v(i,j)
+        !dSWE_s_u_gain(i,j) = weight_u * dSWE_s_u_gain(i,j)
+        !dSWE_s_v_gain(i,j) = weight_v * dSWE_s_v_gain(i,j)
+        !dSWE_s_u_loss(i,j) = weight_u * dSWE_s_u_loss(i,j)
+        !dSWE_s_v_loss(i,j) = weight_v * dSWE_s_v_loss(i,j)
 
-        dm_s(i,j) = dm_s_u(i,j) + dm_s_v(i,j)
-        dm_s_gain = dm_s_u_gain(i,j) + dm_s_v_gain(i,j)
-        dm_s_loss = dm_s_u_loss(i,j) + dm_s_v_loss(i,j)
-        dh_s_gain = dm_s_gain / rho_snow
-        if (dm_s_loss > epsilon(dm_s_loss)) then
-          call HS_FROM_SWE(dm_s_loss,dh_s_loss,i,j)
+        dSWE_s(i,j) = dSWE_s_u(i,j) + dSWE_s_v(i,j)
+        dSWE_s_gain = dSWE_s_u_gain(i,j) + dSWE_s_v_gain(i,j)
+        dSWE_s_loss = dSWE_s_u_loss(i,j) + dSWE_s_v_loss(i,j)
+        dh_s_gain = dSWE_s_gain / rho_snow
+        if (dSWE_s_loss > epsilon(dSWE_s_loss)) then
+          call HS_FROM_SWE(dSWE_s_loss,dh_s_loss,i,j)
         else
-          dm_s_loss = 0.0
+          dSWE_s_loss = 0.0
           dh_s_loss = 0.0
         end if
         dh_s = dh_s_gain - dh_s_loss
 
         Ds_soft(i,j) = max(Ds_soft(i,j) - dh_s_loss,0.0)
 
-        if (dm_s_loss > epsilon(dm_s_loss) .and. dh_s_loss > epsilon(dh_s_loss)) then
-          call SNOW_ABLATION(dh_s_loss,dm_s_loss,i,j)
+        if (dSWE_s_loss > epsilon(dSWE_s_loss) .and. dh_s_loss > epsilon(dh_s_loss)) then
+          call SNOW_ABLATION(dh_s_loss,dSWE_s_loss,i,j)
         end if
 
         ! Net mass gain for this grid cell at this time step.
-        if (dm_s_gain > epsilon(dm_s_gain) .and. dh_s_gain > epsilon(dh_s_gain)) then
+        if (dSWE_s_gain > epsilon(dSWE_s_gain) .and. dh_s_gain > epsilon(dh_s_gain)) then
 
           ! Add to the existing top layer.
-          Sice0(i,j) = Sice0(i,j) + dm_s_gain
+          Sice0(i,j) = Sice0(i,j) + dSWE_s_gain
           snowdepth0(i,j) = snowdepth0(i,j) + dh_s_gain
 
         end if
@@ -2193,246 +2079,6 @@ module SNOWTRAN3D_interface
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    subroutine subgrid_1(snowdepth_tabler, &
-                         tabler_nn,tabler_ss,tabler_ee,tabler_ww, &
-                         tabler_ne,tabler_se,tabler_sw,tabler_nw)
-
-    ! This subroutine forces SnowTran-3D's snow accumluation profiles
-    ! to be bounded by the equilibrium topographic drift catchment
-    ! profiles observed and modeled by Tabler (1975).
-
-    ! Tabler, R. D., 1975: Predicting profiles of snowdrifts in
-    ! topographic catchments.  Proceedings of the 43rd Annual Western
-    ! Snow Conference, San Diego, California, 87-97.
-
-    use LANDUSE, only: &
-      dem                     ! Terrain elevation (m)
-
-    use PARAM_SNOWTRAN3D, only: &
-      tabler_dir              ! Dominant wind direction
-
-    implicit none
-
-    real, intent(in) :: &
-      tabler_nn(Nx,Ny),      &! Tabler surfaces NN
-      tabler_ss(Nx,Ny),      &! Tabler surfaces SS
-      tabler_ee(Nx,Ny),      &! Tabler surfaces EE
-      tabler_ww(Nx,Ny),      &! Tabler surfaces WW
-      tabler_ne(Nx,Ny),      &! Tabler surfaces NE
-      tabler_se(Nx,Ny),      &! Tabler surfaces SE
-      tabler_sw(Nx,Ny),      &! Tabler surfaces SW
-      tabler_nw(Nx,Ny)        ! Tabler surfaces NW
-
-    real, intent(inout) :: &
-      snowdepth_tabler(Nx,Ny) ! Snow depth (m)
-
-    integer :: &
-      i,j,k,                 &! Point counters
-      istart,iend,           &! Point counters boundaries
-      jstart,jend             ! Point counters boundaries
-
-    real :: &
-      tabler,                &! Tabler surface (m)
-      snow_sfc,              &! Snow surface (m)
-      snow_d_extra            ! Extra snow depth (m)
-
-    real :: &
-      snow_d1(Nx,Ny),        &! Temporary snow depth variable (m)
-      snow_d2(Nx,Ny),        &! Temporary snow depth variable (m)
-      weight_u(Nx,Ny),       &! Weight for snow depth on x axis
-      weight_v(Nx,Ny)         ! Weight for snow depth on y axis
-
-    ! Create a copy of the incoming snow depth distribution.  Also define
-    ! the u and v weighting functions.
-    do j = 1, Ny
-      do i = 1, Nx
-
-        if (isnan(dem(i,j))) goto 22 ! Exclude points outside of the domain
-
-        snow_d1(i,j) = snowdepth_tabler(i,j)
-        snow_d2(i,j) = snowdepth_tabler(i,j)
-
-        weight_u(i,j) = abs(uwind(i,j)) / &
-                        sqrt(uwind(i,j)**2 + vwind(i,j)**2)
-        weight_v(i,j) = abs(vwind(i,j)) / &
-                        sqrt(uwind(i,j)**2 + vwind(i,j)**2)
-
-        22 continue  ! Exclude points outside of the domain
-
-      end do
-    end do
-
-    ! Consider WESTERLY winds.
-    do i = 1, Nx
-      do k = 1, index_uw(i,1)
-        jstart = index_uw(i,k*2)+1
-        jend = index_uw(i,k*2+1)
-        do j = jstart, jend
-
-          if (tabler_dir > 337.5 .AND. tabler_dir <= 360.0 .OR. &
-             tabler_dir >= 0.0 .AND. tabler_dir <= 22.5) then
-            tabler = tabler_nn(i,j)
-          else if (tabler_dir > 157.5 .AND. tabler_dir <= 202.5) then
-            tabler = tabler_ss(i,j)
-          else if (tabler_dir > 202.5 .AND. tabler_dir <= 247.5) then
-            tabler = tabler_sw(i,j)
-          else if (tabler_dir > 247.5 .AND. tabler_dir <= 292.5) then
-            tabler = tabler_ww(i,j)
-          else if (tabler_dir > 292.5 .AND. tabler_dir <= 337.5) then
-            tabler = tabler_nw(i,j)
-          end if
-
-          snow_sfc = tabler
-
-          if (snow_d1(i,j) > snow_sfc) then
-            snow_d_extra = (snow_d1(i,j) - snow_sfc) * weight_u(i,j)
-            snow_d1(i,j) = snow_d1(i,j) - snow_d_extra
-            if (i < Nx) then
-              snow_d1(i,j+1) = snow_d1(i,j+1) + snow_d_extra
-            else
-              snow_d1(i,j) = snow_d1(i,j)
-            end if
-          end if
-
-        end do
-      end do
-    end do
-
-    ! Consider EASTERLY winds.
-    do i = 1, Nx
-      do k = 1, index_ue(i,1)
-        jend = index_ue(i,k*2)
-        jstart = index_ue(i,k*2+1)-1
-        do j = jstart, jend,-1
-
-          if (tabler_dir > 337.5 .AND. tabler_dir <= 360.0 .OR. &
-              tabler_dir >= 0.0 .AND. tabler_dir <= 22.5) then
-            tabler = tabler_nn(i,j)
-          else if (tabler_dir > 22.5 .AND. tabler_dir <= 67.5) then
-            tabler = tabler_ne(i,j)
-          else if (tabler_dir > 67.5 .AND. tabler_dir <= 112.5) then
-            tabler = tabler_ee(i,j)
-          else if (tabler_dir > 112.5 .AND. tabler_dir <= 157.5) then
-            tabler = tabler_se(i,j)
-          else if (tabler_dir > 157.5 .AND. tabler_dir <= 202.5) then
-            tabler = tabler_ss(i,j)
-          end if
-
-          snow_sfc = tabler
-
-          if (snow_d1(i,j) > snow_sfc) then
-            snow_d_extra = (snow_d1(i,j) - snow_sfc) * weight_u(i,j)
-            snow_d1(i,j) = snow_d1(i,j) - snow_d_extra
-            if (i > 1) then
-              snow_d1(i,j-1) = snow_d1(i,j-1) + snow_d_extra
-            else
-              snow_d1(i,j) = snow_d1(i,j)
-            end if
-          end if
-        end do
-      end do
-    end do
-
-    ! Consider SOUTHERLY winds.
-    do j = 1, Ny
-      do k = 1, index_vs(j,1)
-        istart = index_vs(j,k*2)+1
-        iend = index_vs(j,k*2+1)
-        do i = istart, iend
-
-          if (tabler_dir > 67.5 .AND. tabler_dir <= 112.5) then
-            tabler = tabler_ee(i,j)
-          else if (tabler_dir > 112.5 .AND. tabler_dir <= 157.5) then
-            tabler = tabler_se(i,j)
-          else if (tabler_dir > 157.5 .AND. tabler_dir <= 202.5) then
-            tabler = tabler_ss(i,j)
-          else if (tabler_dir > 202.5 .AND. tabler_dir <= 247.5) then
-            tabler = tabler_sw(i,j)
-          else if (tabler_dir > 247.5 .AND. tabler_dir <= 292.5) then
-            tabler = tabler_ww(i,j)
-          end if
-
-          snow_sfc = tabler
-
-          if (snow_d2(i,j) > snow_sfc) then
-            snow_d_extra = (snow_d2(i,j) - snow_sfc) * weight_v(i,j)
-            snow_d2(i,j) = snow_d2(i,j) - snow_d_extra
-            if (j < Ny) then
-              snow_d2(i+1,j) = snow_d2(i+1,j) + snow_d_extra
-            else
-              snow_d2(i,j) = snow_d2(i,j)
-            end if
-          end if
-        end do
-      end do
-    end do
-
-    ! Consider NORTHERLY winds.
-    do j = 1, Ny
-      do k = 1, index_vn(j,1)
-        iend = index_vn(j,k*2)
-        istart = index_vn(j,k*2+1)-1
-        do i = istart, iend,-1
-
-          if (tabler_dir > 337.5 .AND. tabler_dir <= 360.0 .OR. &
-              tabler_dir >= 0.0 .AND. tabler_dir <= 22.5) then
-            tabler = tabler_nn(i,j)
-          else if (tabler_dir > 22.5 .AND. tabler_dir <= 67.5) then
-            tabler = tabler_ne(i,j)
-          else if (tabler_dir > 67.5 .AND. tabler_dir <= 112.5) then
-            tabler = tabler_ee(i,j)
-          else if (tabler_dir > 247.5 .AND. tabler_dir <= 292.5) then
-            tabler = tabler_ww(i,j)
-          else if (tabler_dir > 292.5 .AND. tabler_dir <= 337.5) then
-            tabler = tabler_nw(i,j)
-          end if
-
-          snow_sfc = tabler
-
-          if (snow_d2(i,j) > snow_sfc) then
-            snow_d_extra = (snow_d2(i,j) - snow_sfc) * weight_v(i,j)
-            snow_d2(i,j) = snow_d2(i,j) - snow_d_extra
-            if (j > 1) then
-              snow_d2(i-1,j) = snow_d2(i-1,j) + snow_d_extra
-            else
-              snow_d2(i,j) = snow_d2(i,j)
-            end if
-          end if
-
-        end do
-      end do
-    end do
-
-    ! Update the snow depths resulting from these redistributions.
-    do j = 1, Ny
-      do i = 1, Nx
-
-        if (isnan(dem(i,j))) goto 23 ! Exclude points outside of the domain
-
-        snowdepth_tabler(i,j) = snow_d1(i,j) * weight_u(i,j) + &
-                      snow_d2(i,j) * weight_v(i,j)
-
-        23 continue  ! Exclude points outside of the domain
-
-      end do
-    end do
-
-    ! Clean up the boundaries.  Make the boundary values equal to
-    ! the values just inside the boundaries.
-    do i = 2, Nx-1
-      snowdepth_tabler(i,1) = snowdepth_tabler(i,2)
-      snowdepth_tabler(i,Ny) = snowdepth_tabler(i,Ny-1)
-    end do
-    do j = 1, Ny
-      snowdepth_tabler(1,j) = snowdepth_tabler(2,j)
-      snowdepth_tabler(Nx,j) = snowdepth_tabler(Nx-1,j)
-    end do
-
-    end subroutine subgrid_1
-
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
     subroutine surface_snow()
 
     use CONSTANTS, only: &
@@ -2443,14 +2089,16 @@ module SNOWTRAN3D_interface
 
     use DRIVING, only: &
       Ua,                &! Wind speed (m/s)
-      zH,                &! Height of wind measurements (m)
+      zU,                &! Height of wind measurements (m)
       dt                  ! Timestep (s)
 
     use PARAMETERS, only : &
       rhos_min,          &! Minimum snow density (kg/m^3)
-      rhos_max,          &! Maximum snow density (kg/m^3)
-      z0sn                ! Snow roughness length (m)
-
+      rhos_max            ! Maximum snow density (kg/m^3)
+      
+    use PARAMMAPS, only: &
+      z0_snow             ! Roughness length of snow (m)
+      
     use PARAM_SNOWTRAN3D, only: &
       rho_snow            ! Constant snow density (kg/m^3)
 
@@ -2489,7 +2137,7 @@ module SNOWTRAN3D_interface
         if (isnan(dem(i,j))) goto 24 ! Exclude points outside of the domain
 
         ! Calculate the 2-m wind speed.
-        windspd_2m = Ua(i,j) * log(2.0/z0sn)/log(zH(i,j)/z0sn)
+        windspd_2m = Ua(i,j) * log(2.0/z0_snow(i,j))/log(zU/z0_snow(i,j))
 
         ! Initialize coefficients
         A1 = 0.0013

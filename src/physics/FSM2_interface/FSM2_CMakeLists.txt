@@ -1,7 +1,7 @@
 # Always set the cmake min version.
 cmake_minimum_required(VERSION 3.0)
 
-project(FSM_interface)
+project(FSM2)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake")
 
@@ -106,7 +106,7 @@ endif()
 include(GNUInstallDirs)
 
     
-add_library(FSM_interface STATIC ${SOURCE_FILES})
+add_library(FSM2 STATIC ${SOURCE_FILES})
 
 
 # Set the location for library installation -- i.e., /usr/lib in this case
@@ -115,7 +115,7 @@ set(CMAKE_INSTALL_LIBDIR ${PROJECT_SOURCE_DIR}/lib/)
 set(CMAKE_Fortran_MODULE_DIRECTORY  ${PROJECT_SOURCE_DIR}/build/)
 
 # this is to copy the library to the diseired directory
-install(TARGETS FSM_interface  DESTINATION  ${CMAKE_INSTALL_LIBDIR})
+install(TARGETS FSM2  DESTINATION  ${CMAKE_INSTALL_LIBDIR})
 
 
 # this is to copy build folder including .mod files in $HOME/include directory
@@ -123,8 +123,8 @@ install(TARGETS FSM_interface  DESTINATION  ${CMAKE_INSTALL_LIBDIR})
 #install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/build DESTINATION ${CMAKE_Fortran_MODULE_DIRECTORY}) 
 #install(PROGRAMS ${modeFiles} DESTINATION ${CMAKE_Fortran_MODULE_DIRECTORY}/sec) # not working
     
-#add_executable(test_FSM_interface test/test_FSM_interface.f90)
-#target_link_libraries(test_FSM_interface FSM_interface ${PROJECT_LINK_LIBS})
+#add_executable(test_FSM2 test/test_FSM2.f90)
+#target_link_libraries(test_FSM2 FSM2 ${PROJECT_LINK_LIBS})
 
 ADD_CUSTOM_TARGET( distclean make clean
 				   COMMAND ${CMAKE_COMMAND} -E remove_directory CMakeFiles

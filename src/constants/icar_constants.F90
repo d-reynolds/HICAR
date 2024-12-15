@@ -298,10 +298,10 @@ module icar_constants
         integer :: Ds           !! MJ added
         integer :: fsnow        !! MJ added
         integer :: Nsnow        !! MJ added
-        integer :: dm_salt      !! DR added
-        integer :: dm_susp      !! DR added
-        integer :: dm_subl      !! DR added
-        integer :: dm_slide     !! DR added
+        integer :: dSWE_salt      !! DR added
+        integer :: dSWE_susp      !! DR added
+        integer :: dSWE_subl      !! DR added
+        integer :: dSWE_slide     !! DR added
         integer :: rainfall_tstep     !! MJ added
         integer :: snowfall_tstep     !! MJ added
         integer :: meltflux_out_tstep !! MJ added

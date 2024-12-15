@@ -34,7 +34,7 @@ module surface_layer
 
 
     implicit none
-    real,allocatable, dimension(:,:)    ::  windspd, gz1oz0, t2d, th2d, regime, flhc, flqc, q2d, &
+    real,allocatable, dimension(:,:)    ::  windspd, gz1oz0, th2d, regime, flhc, flqc, &
                                             rmol, qgh, qsfc, cpm, mavail, zol
 
     private
@@ -57,7 +57,7 @@ contains
                          [kVARS%water_vapor, kVARS%temperature, kVARS%potential_temperature, kVARS%surface_pressure, &
                          kVARS%dz_interface, kVARS%pressure,  kVARS%skin_temperature, &
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m,                  &
-                         kVARS%roughness_z0, kVARS%hpbl, kVARS%QFX,       &
+                         kVARS%temperature_2m, kVARS%humidity_2m, kVARS%roughness_z0, kVARS%hpbl, kVARS%QFX,       &
                          kVARS%land_mask, kVARS%br, kVARS%MOL, kVARS%ustar,                      &
                          kVARS%chs, kVARS%chs2, kVARS%cqs2,                           &
                          kVARS%u, kVARS%v, kVARS%psim, kVARS%psih, kVARS%fm, kVARS%fh])
@@ -109,9 +109,7 @@ contains
             if (allocated(flqc)) deallocate(flqc)
             if (allocated(regime)) deallocate(regime)
             if (allocated(mavail)) deallocate(mavail)
-            if (allocated(t2d)) deallocate(t2d)
             if (allocated(th2d)) deallocate(th2d)
-            if (allocated(q2d)) deallocate(q2d)
             if (allocated(gz1oz0)) deallocate(gz1oz0)
             
             allocate(windspd(ims:ime, jms:jme))
@@ -124,9 +122,7 @@ contains
             allocate(flqc(ims:ime, jms:jme))
             allocate(regime(ims:ime, jms:jme))
             allocate(mavail(ims:ime, jms:jme))
-            allocate(t2d(ims:ime, jms:jme))
             allocate(th2d(ims:ime, jms:jme))
-            allocate(q2d(ims:ime, jms:jme))
             allocate(gz1oz0(ims:ime, jms:jme))  !-- gz1oz0      log(z/z0) where z0 is roughness length
 
             rmol = 0.0
@@ -201,8 +197,8 @@ contains
                ,qfx=domain%qfx%data_2d                 & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
                ,lh=domain%latent_heat%data_2d          & !  LH  - net upward latent flux at the surface (W/m^2/s)
                ,th2=th2d                               &
-               ,t2=t2d                                 &
-               ,q2=q2d                                 &
+               ,t2=domain%temperature_2m%data_2d       &
+               ,q2=domain%humidity_2m%data_2d          &
                ,gz1oz0=gz1oz0                          &
                ,br=domain%br%data_2d                   &
                ,wspd=windspd                           & ! i/o -- wspd        wind speed at lowest model level (m/s)

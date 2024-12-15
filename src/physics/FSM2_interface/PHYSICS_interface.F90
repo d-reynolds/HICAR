@@ -5,18 +5,15 @@ subroutine PHYSICS_interface
 
 use MODCONF, only: CANMOD, RADSBG, CHECKS
 
+use MODTILE, only: TILE
+
 use GRID, only: &
   Nsmax,             &! Maximum number of snow layers
   Nsoil,             &! Number of soil layers
   Nx,Ny               ! Grid dimensions
 
 use PARAMETERS, only: &
-  Nt,                &! Number of iterations of physics within an input timestep
-                      ! (Nt = 4 implies a 15 min timestep for an hourly input timestep)
   Nitr                ! Number of iterations in energy balance calulation
-
-use STATE_VARIABLES, only : &
-  firstit             ! First iteration identifier
 
 implicit none
 
@@ -81,38 +78,35 @@ integer :: &
   tt,                &! Iteration counter for physics
   n                   ! Iteration counter in energy balance calulation
 
-do tt = 1, Nt
+call RADIATION(alb,SWsrf,SWveg,Sdirt,Sdift,asrf_out,SWsci,LWt)
 
-  call RADIATIONNN(alb,SWsrf,SWveg,Sdirt,Sdift,asrf_out,SWsci)
+call THERMAL(csoil,Ds1,gs1,ks1,ksnow,ksoil,Ts1,Tveg0)
 
-  call THERMAL(csoil,Ds1,gs1,ks1,ksnow,ksoil,Ts1,Tveg0)
+do n = 1, Nitr
+  call SFEXCH(gs1,KH,KHa,KHg,KHv,KWg,KWv,Usc)
 
-  do n = 1, Nitr
-    call SFEXCH_interface(gs1,KH,KHa,KHg,KHv,KWg,KWv,Usc)
-
-    if (CANMOD == 1) then
-      call EBALFOR(Ds1,KHa,KHg,KHv,KWg,KWv,ks1,SWsrf,SWveg,Ts1,Tveg0, &
-                  Esrf,Eveg,G,H,Hsrf,LE,LEsrf,Melt,Rnet,Rsrf,LWsci,LWveg)
-    endif
+  if (CANMOD == 1 .and. TILE == 'forest') then
+    call EBALFOR(Ds1,KHa,KHg,KHv,KWg,KWv,ks1,SWsrf,SWveg,Ts1,Tveg0, &
+                Esrf,Eveg,G,H,Hsrf,LE,LEsrf,Melt,Rnet,Rsrf,LWsci,LWveg)
+  else 
 
     if (RADSBG == 1) then
       call EBALSRF_SBG(Ds1,KH,KHa,KHv,KWg,KWv,ks1,SWsrf,SWveg,Ts1, &
                   Esrf,Eveg,G,H,Hsrf,LE,LEsrf,Melt,Rnet,Rsrf,LWt)
     else
       call EBALSRF(Ds1,KH,KHa,KHv,KWg,KWv,ks1,SWsrf,SWveg,Ts1, &
-                  Esrf,Eveg,G,H,Hsrf,LE,LEsrf,Melt,Rnet,Rsrf,LWt, &
+                  Esrf,Eveg,G,H,Hsrf,LE,LEsrf,Melt,Rnet,Rsrf, &
                   LWsci,LWveg)
     endif  
-    
-  end do
-
-  call CANOPY(Eveg,unload,intcpt,Sbveg)
-
-  call SNOW(Esrf,G,ksnow,ksoil,Melt,unload,Gsoil,Roff,meltflux_out,Sbsrf)
-
-  call SOIL(csoil,Gsoil,ksoil)
-
+  endif 
+  
 end do
+
+call CANOPY(Eveg,unload,intcpt,Sbveg)
+
+call SNOW_interface(Esrf,G,ksnow,ksoil,Melt,unload,Gsoil,Roff,meltflux_out,Sbsrf)
+
+call SOIL(csoil,Gsoil,ksoil)
 
 call CUMULATE_interface(Roff,meltflux_out,Esrf,Gsoil,KH,LE,Melt,Rnet,H)
 

@@ -77,10 +77,10 @@ end do
 
 end subroutine CUMULATE_SD_interface
 
-subroutine CUMULATE_SNOWTRAN3D_interface(dm_salt,dm_susp,dm_subl,dm_subgrid)
+subroutine CUMULATE_SNOWTRAN3D_interface(dSWE_salt,dSWE_susp,dSWE_subl)
 
 !MJ added-----------------------------------------------------------------
-use MODULES_interface, only : dm_salt_, dm_susp_, dm_subl_
+use MODULES_interface, only : dSWE_salt_, dSWE_susp_, dSWE_subl_
 !MJ added-----------------------------------------------------------------
 
 use GRID, only: &
@@ -89,24 +89,22 @@ use GRID, only: &
 implicit none
 
 real, intent(in) :: &
-  dm_salt(Nx,Ny),   &! saltation flux per timestep (kg/m^2)
-  dm_susp(Nx,Ny),   &! sublimation per timestep (kg/m^2)
-  dm_subl(Nx,Ny),   &! blowing snow sublimation per timestep (kg/m^2)
-  dm_subgrid(Nx,Ny)  ! subgrid redistribution per timestep (kg/m^2)
+  dSWE_salt(Nx,Ny),   &! saltation flux per timestep (kg/m^2)
+  dSWE_susp(Nx,Ny),   &! sublimation per timestep (kg/m^2)
+  dSWE_subl(Nx,Ny)     ! blowing snow sublimation per timestep (kg/m^2)
 
   !call CUMULATE_SD_interface()
 
-  dm_salt_=dm_salt
-  dm_susp_=dm_susp
-  dm_subl_=dm_subl
-  !dm_subgrid_=dm_subgrid
+  dSWE_salt_=dSWE_salt
+  dSWE_susp_=dSWE_susp
+  dSWE_subl_=dSWE_subl
 
 end subroutine CUMULATE_SNOWTRAN3D_interface
 
-subroutine CUMULATE_SNOWSLIDE_interface(dm_slide)
+subroutine CUMULATE_SNOWSLIDE_interface(dSWE_slide)
 
 !MJ added-----------------------------------------------------------------
-use MODULES_interface, only : dm_slide_
+use MODULES_interface, only : dSWE_slide_
 !MJ added-----------------------------------------------------------------
 
 use GRID, only: &
@@ -115,10 +113,10 @@ use GRID, only: &
 implicit none
 
 real, intent(in) :: &
-  dm_slide(Nx,Ny)    ! avalanched redistribution per timestep (kg/m^2)
+  dSWE_slide(Nx,Ny)    ! avalanched redistribution per timestep (kg/m^2)
 
   !call CUMULATE_SD_interface()
 
-  dm_slide_=dm_slide
+  dSWE_slide_=dSWE_slide
 
 end subroutine CUMULATE_SNOWSLIDE_interface

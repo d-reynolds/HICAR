@@ -3682,7 +3682,7 @@ contains
         !>------------------------------------------------------------
         !!  saltation flux from FSM
         !!------------------------------------------------------------
-        associate(var=>var_meta(kVARS%dm_salt))
+        associate(var=>var_meta(kVARS%dSWE_salt))
             var%name        = "salt"
             var%dimensions  = two_d_t_dimensions
             var%three_d     = .False.
@@ -3695,7 +3695,7 @@ contains
         !>------------------------------------------------------------
         !!  suspension flux from FSM
         !!------------------------------------------------------------
-        associate(var=>var_meta(kVARS%dm_susp))
+        associate(var=>var_meta(kVARS%dSWE_susp))
             var%name        = "susp"
             var%dimensions  = two_d_t_dimensions
             var%three_d     = .False.
@@ -3708,7 +3708,7 @@ contains
         !>------------------------------------------------------------
         !!  blowing snow sublimation from FSM
         !!------------------------------------------------------------
-        associate(var=>var_meta(kVARS%dm_subl))
+        associate(var=>var_meta(kVARS%dSWE_subl))
             var%name        = "blow_subl"
             var%dimensions  = two_d_t_dimensions
             var%three_d     = .False.
@@ -3721,7 +3721,7 @@ contains
         !>------------------------------------------------------------
         !!  sliding snow transport from FSM
         !!------------------------------------------------------------
-        associate(var=>var_meta(kVARS%dm_slide))
+        associate(var=>var_meta(kVARS%dSWE_slide))
             var%name        = "slide"
             var%dimensions  = two_d_t_dimensions
             var%three_d     = .False.

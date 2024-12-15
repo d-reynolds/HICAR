@@ -318,10 +318,10 @@ contains
         if (0<var_list( kVARS%Ds) )                         call this%vars_to_out%add_var( trim( get_varname( kVARS%Ds                           )), this%Ds)
         if (0<var_list( kVARS%fsnow) )                      call this%vars_to_out%add_var( trim( get_varname( kVARS%fsnow                        )), this%fsnow)
         if (0<var_list( kVARS%Nsnow) )                      call this%vars_to_out%add_var( trim( get_varname( kVARS%Nsnow                        )), this%Nsnow)   
-        if (0<var_list( kVARS%dm_salt))                     call this%vars_to_out%add_var( trim( get_varname( kVARS%dm_salt                      )), this%dm_salt) 
-        if (0<var_list( kVARS%dm_susp))                     call this%vars_to_out%add_var( trim( get_varname( kVARS%dm_susp                      )), this%dm_susp) 
-        if (0<var_list( kVARS%dm_subl))                     call this%vars_to_out%add_var( trim( get_varname( kVARS%dm_subl                      )), this%dm_subl) 
-        if (0<var_list( kVARS%dm_slide))                    call this%vars_to_out%add_var( trim( get_varname( kVARS%dm_slide                     )), this%dm_slide) 
+        if (0<var_list( kVARS%dSWE_salt))                     call this%vars_to_out%add_var( trim( get_varname( kVARS%dSWE_salt                      )), this%dSWE_salt) 
+        if (0<var_list( kVARS%dSWE_susp))                     call this%vars_to_out%add_var( trim( get_varname( kVARS%dSWE_susp                      )), this%dSWE_susp) 
+        if (0<var_list( kVARS%dSWE_subl))                     call this%vars_to_out%add_var( trim( get_varname( kVARS%dSWE_subl                      )), this%dSWE_subl) 
+        if (0<var_list( kVARS%dSWE_slide))                    call this%vars_to_out%add_var( trim( get_varname( kVARS%dSWE_slide                     )), this%dSWE_slide) 
 
         !!
         if (0<var_list( kVARS%rainfall_tstep) )             call this%vars_to_out%add_var( trim( get_varname( kVARS%rainfall_tstep               )), this%rainfall_tstep)        
@@ -918,10 +918,10 @@ contains
         if (0<opt%vars_to_allocate( kVARS%Ds) )                         call setup(this%Ds,         this%grid_snow)        
         if (0<opt%vars_to_allocate( kVARS%fsnow) )                      call setup(this%fsnow,      this%grid2d)        
         if (0<opt%vars_to_allocate( kVARS%Nsnow) )                      call setup(this%Nsnow,      this%grid2d)   
-        if (0<opt%vars_to_allocate( kVARS%dm_salt) )                    call setup(this%dm_salt,    this%grid2d)        
-        if (0<opt%vars_to_allocate( kVARS%dm_susp) )                    call setup(this%dm_susp,    this%grid2d)        
-        if (0<opt%vars_to_allocate( kVARS%dm_subl) )                    call setup(this%dm_subl,    this%grid2d)        
-        if (0<opt%vars_to_allocate( kVARS%dm_slide) )                   call setup(this%dm_slide,   this%grid2d)        
+        if (0<opt%vars_to_allocate( kVARS%dSWE_salt) )                    call setup(this%dSWE_salt,    this%grid2d)        
+        if (0<opt%vars_to_allocate( kVARS%dSWE_susp) )                    call setup(this%dSWE_susp,    this%grid2d)        
+        if (0<opt%vars_to_allocate( kVARS%dSWE_subl) )                    call setup(this%dSWE_subl,    this%grid2d)        
+        if (0<opt%vars_to_allocate( kVARS%dSWE_slide) )                   call setup(this%dSWE_slide,   this%grid2d)        
 
         !!
         if (0<opt%vars_to_allocate( kVARS%rainfall_tstep) )             call setup(this%rainfall_tstep,     this%grid2d)        
@@ -2508,10 +2508,10 @@ contains
         if (associated(this%Ds%data_3d))                  this%Ds%data_3d=0.
         if (associated(this%fsnow%data_2d))               this%fsnow%data_2d=0.
         if (associated(this%Nsnow%data_2d))               this%Nsnow%data_2d=0.
-        if (associated(this%dm_salt%data_2d))             this%dm_salt%data_2d=0.
-        if (associated(this%dm_susp%data_2d))             this%dm_susp%data_2d=0.
-        if (associated(this%dm_subl%data_2d))             this%dm_subl%data_2d=0.
-        if (associated(this%dm_slide%data_2d))            this%dm_slide%data_2d=0.
+        if (associated(this%dSWE_salt%data_2d))             this%dSWE_salt%data_2d=0.
+        if (associated(this%dSWE_susp%data_2d))             this%dSWE_susp%data_2d=0.
+        if (associated(this%dSWE_subl%data_2d))             this%dSWE_subl%data_2d=0.
+        if (associated(this%dSWE_slide%data_2d))            this%dSWE_slide%data_2d=0.
 
         !!
         if (associated(this%rainfall_tstep%data_2d))      this%rainfall_tstep%data_2d=0.

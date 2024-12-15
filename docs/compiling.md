@@ -191,15 +191,26 @@ module show MODULE_NAME
 
 # Compiling FSM
 
-If the user wants to use the snowmodel [FSM2trans](https://egusphere.copernicus.org/preprints/2023/egusphere-2023-2071/), it must also be compiled prior to compiling HICAR. The process for compiling FSM2trans is simple, and similar to that for HICAR:
+If the user wants to use the snowmodel [FSM2](https://egusphere.copernicus.org/preprints/2023/egusphere-2023-2071/), it must also be compiled prior to compiling HICAR. The process for compiling FSM2 is simple, and similar to that for HICAR. First, the user must get the FSM2 distribution, which can be done as:
 
 ```bash
-cd HICAR/FSM2trans         # Navigate to the FSM2trans folder
-mkdir build                # Make the build directory
-cd build
-cmake ../                  # Generate makefile
-make -j 4
-make install               # FSM2trans is now installed
+git clone https://github.com/oshd-slf/jim_operational.git
 ```
 
-FSM2trans is now installed and will be automatically linked when compiling HICAR
+This downloads the whole FSM2 distribution. To compile FSM2 as a library which can be called from HICAR, the steps below can be followed. In the below block, `FSM2_Dir` refers to the root directory of the FSM2 git repo from the previous step.
+
+```bash
+cp HICAR/src/physics/FSM2_interface/FSM2_CMakeLists.txt FSM2_Dir/FSM_SOURCE_CODE/CMakeLists.txt  # Copy the FSM2 CMake file to the FSM2 distribution
+cd FSM2_Dir/FSM_SOURCE_CODE
+mkdir build                # Make the build directory
+cd build
+cmake ../                  # Generate FSM2 makefile
+make -j 4
+make install               # FSM2 library is now installed to ../lib
+```
+
+FSM2 is now installed. To link FSM2 to HICAR when installing HICAR, set the `FSM_DIR` variable when calling cmake for HICAR. In this way, the previous cmake command under the section "Compiling HICAR" can be changed to:
+
+```bash
+cmake ../ -DFC=gfortran -DFSM_DIR=FSM2_Dir/FSM_SOURCE_CODE
+```

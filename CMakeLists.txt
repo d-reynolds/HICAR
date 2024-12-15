@@ -29,7 +29,7 @@ if (NOT DEFINED MPI_DIR OR MPI_DIR STREQUAL "")
 	set(MPI_DIR $ENV{MPICH_DIR} CACHE PATH "Path to MPI installation")
 endif()
 if (NOT DEFINED FSM_DIR OR FSM_DIR STREQUAL "")
-	set(FSM_DIR ${PROJECT_SOURCE_DIR}/FSM2trans CACHE PATH "Path to the compiled FSM installation (root directory of the lib and build directories)")
+	set(FSM_DIR $ENV{FSM_DIR} CACHE PATH "Path to the compiled FSM installation (root directory of the lib and build directories)")
 endif()
 
 if (NOT DEFINED MPICH_DIR AND DEFINED ENV{MPICH_DIR})
@@ -39,7 +39,7 @@ endif()
 
 option(ASSERTIONS "Check logical assertions at runtime" ON)
 option(CAF "Turn on Coarray-Fortran (only available with Cray Compiler)" OFF)
-option(FSM "Link to the FSM2trans snow model, requires separate compilation of FSM2trans in the ${PROJECT_SOURCE_DIR}/FSM2trans directory" ON)
+option(FSM "Link to the FSM2 snow model, requires separate compilation of the FSM2 model" ON)
 #########################################
 
 #Set constants for project
@@ -145,6 +145,8 @@ message(STATUS "...done auto-detecting the environment")
 macro(Disable_FSM)
 	set(FSM OFF)
 	list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/lsm_FSMdrv.F90)
+	FILE(GLOB_RECURSE FSM2_INTERFACE  ${PROJECT_SOURCE_DIR}/src/physics/FSM2_interface/*)
+	list(REMOVE_ITEM SOURCE_FILES ${FSM2_INTERFACE})
 endmacro()
 
 #-DUSE_ASSERTIONS -- controls whether to use assertions in the code
@@ -159,13 +161,13 @@ if(CAF AND COMPILER STREQUAL "cray")
   	add_definitions(-DCRAY_PE)
 endif()
 
-#-DFSM -- controls compilation of FSM2trans driver and linking to the FSM2trans library
-IF (FSM AND IS_DIRECTORY ${PROJECT_SOURCE_DIR}/FSM2trans/lib AND
-			IS_DIRECTORY ${PROJECT_SOURCE_DIR}/FSM2trans/build)
+#-DFSM -- controls compilation of FSM2 driver and linking to the FSM2 library
+IF (FSM AND IS_DIRECTORY ${FSM_DIR}/lib AND
+			IS_DIRECTORY ${FSM_DIR}/build)
 	add_definitions(-DFSM)
-elseif(FSM AND NOT (IS_DIRECTORY ${PROJECT_SOURCE_DIR}/FSM2trans/lib AND
-					IS_DIRECTORY ${PROJECT_SOURCE_DIR}/FSM2trans/build))
-	message(WARNING "FSM2trans not found, disabling FSM2trans support.\nTo enable, set the FSM_DIR variable to the root directory of the FSM2trans library.")
+elseif(FSM AND NOT (IS_DIRECTORY ${FSM_DIR}/lib AND
+					IS_DIRECTORY ${FSM_DIR}/build))
+	message(WARNING "FSM2 not found, disabling FSM2 support.\nTo enable, set the FSM_DIR variable to the root directory of the FSM2 install (i.e. the directory which contains the 'lib' and 'build' subdirectories).")
 	Disable_FSM()
 elseif(NOT IS_DIRECTORY FSM_DIR AND NOT FSM)
 	Disable_FSM()
@@ -361,9 +363,9 @@ endif()
 
 
 if (FSM)
-	find_library(FSM2TRANS_LIB NAMES FSM_interface REQUIRED)
+	find_library(FSM2_LIB NAMES FSM2 REQUIRED)
 	target_include_directories(HICAR PUBLIC ${FSM_DIR}/build)
-	target_link_libraries(HICAR PUBLIC ${FSM2TRANS_LIB})
+	target_link_libraries(HICAR PUBLIC ${FSM2_LIB})
 endif()
 
 target_include_directories(HICAR PUBLIC ${MPI_INCLUDE_DIR})

@@ -214,7 +214,6 @@ module options_types
         integer :: fsm_condct
         integer :: fsm_densty
         integer :: fsm_exchng
-        integer :: fsm_hiswet
         integer :: fsm_hydrol
         integer :: fsm_radsbg
         integer :: fsm_snfrac
@@ -222,8 +221,15 @@ module options_types
         integer :: fsm_snslid
         integer :: fsm_sntran
         integer :: fsm_zoffst
+        integer :: fsm_oshdtn
+        integer :: fsm_alradt
         logical :: fsm_hn_on
         logical :: fsm_for_hn
+        logical :: fsm_z0pert
+        logical :: fsm_wcpert
+        logical :: fsm_fspert
+        logical :: fsm_alpert
+        logical :: fsm_slpert
 
     end type sm_options_type
 

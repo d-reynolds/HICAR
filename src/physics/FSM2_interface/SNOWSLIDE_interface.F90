@@ -8,17 +8,19 @@
 ! West of (i,j): (i,j-1)
 ! East of (i,j): (i,j+1)
 !-----------------------------------------------------------------------
-subroutine SNOWSLIDE_interface(snowdepth0,Sice0,dm_slide,first_it,BUFF_RM,snow_depo)
+subroutine SNOWSLIDE_interface(snowdepth0,Sice0,dSWE_slide,first_it,BUFF_RM,snow_depo)
 
 use GRID, only: &
   Nx,Ny                     ! Grid dimensions
 
 use STATE_VARIABLES, only: &
-  firstit,                 &! First iteration identifier
   fsnow,                   &! Snow cover fraction 
   Ds,                      &! Snow layer thicknesses (m)
-  dm_tot_slide,            &! Cumulated SWE change due to snow slides (kg/m^2)
-  index_grid_dem_sorted     ! Location (i,j) of sorted grid points
+  dSWE_tot_slide,            &! Cumulated SWE change due to snow slides (kg/m^2)
+  index_sorted_dem     ! Location (i,j) of sorted grid points
+
+use MODULES_interface, only: &
+  firstit                   ! First iteration identifier
 
 use LANDUSE, only: &
   dem,                     &! Terrain elevation (m)
@@ -36,7 +38,7 @@ implicit none
 real, intent(inout) :: &
   snowdepth0(Nx,Ny),       &! Snow depth of deposited snow (m)
   Sice0(Nx,Ny),            &! Ice content of deposited snow (kg/m^2)
-  dm_slide(Nx,Ny)           ! SWE change due to snow slides (kg/m^2)
+  dSWE_slide(Nx,Ny)           ! SWE change due to snow slides (kg/m^2)
 
 logical, intent(inout) :: &
   first_it,                &! Controls if minimum slope angle should triger initial avalanches
@@ -122,8 +124,8 @@ end if
 ! Treating grid points from the highest to the lowest
 do n = 1, Nx*Ny
 
-  i = index_grid_dem_sorted(n,1)
-  j = index_grid_dem_sorted(n,2)
+  i = index_sorted_dem(n,1)
+  j = index_sorted_dem(n,2)
   
   n_halo=.False.
   s_halo=.False.
@@ -263,19 +265,21 @@ do n = 1, Nx*Ny
               endif
           endif
           
+          !If we are not on an image frame, reduce the local snow depth
+          !If we are on an image frame, and this is a FRAME call, then we may reduce local snow depth
           if (snowdepth0(i,j) - snowdepth_available > epsilon(snowdepth0)) then
 
             wt = snowdepth_available / snowdepth0(i,j)
-            swe_available = wt * Sice0(i,j)
-            
-            !If we are not on an image frame, reduce the local snow depth
-            !If we are on an image frame, and this is a FRAME call, then we may reduce local snow depth
             snowdepth0(i,j) = snowdepth0(i,j) - snowdepth_available
+            swe_available = wt * Sice0(i,j)
             Sice0(i,j) = Sice0(i,j) - swe_available
+            
           else if (snowdepth_available - snowdepth0(i,j) > epsilon(snowdepth0)) then
 
             snowdepth_available2 = snowdepth_available - snowdepth0(i,j)
+            snowdepth0(i,j) = 0.0
             swe_available = Sice0(i,j)
+            Sice0(i,j) = 0.0
 
             ! Compute the mass of snow available for transport
             call SWE_FROM_HS(snowdepth_available2,swe_available2,i,j)
@@ -284,18 +288,16 @@ do n = 1, Nx*Ny
 
             swe_available = swe_available + swe_available2
             
-            snowdepth0(i,j) = 0.0
-            Sice0(i,j) = 0.0
           else ! snowdepth_available == snowdepth0(i,j)
 
-            swe_available = Sice0(i,j)
-            
             snowdepth0(i,j) = 0.0
+            swe_available = Sice0(i,j)
             Sice0(i,j) = 0.0
+
           endif
           
-          dm_slide(i,j) = dm_slide(i,j) - swe_available
-          dm_tot_slide(i,j) = dm_tot_slide(i,j) - swe_available
+          dSWE_slide(i,j) = dSWE_slide(i,j) - swe_available
+          dSWE_tot_slide(i,j) = dSWE_tot_slide(i,j) - swe_available
 
           
           !We only want to remove snow on a buffer remove run
@@ -310,8 +312,8 @@ do n = 1, Nx*Ny
                 Sice0(i-1,j) = Sice0(i-1,j) + dswe
                 snowdepth0(i-1,j) = snowdepth0(i-1,j) + dswe / rho_deposit
                 snow_depo(i-1,j) = .TRUE.
-                dm_slide(i-1,j) = dm_slide(i-1,j) + dswe
-                dm_tot_slide(i-1,j) = dm_tot_slide(i-1,j) + dswe
+                dSWE_slide(i-1,j) = dSWE_slide(i-1,j) + dswe
+                dSWE_tot_slide(i-1,j) = dSWE_tot_slide(i-1,j) + dswe
               end if
 
               ! North
@@ -320,8 +322,8 @@ do n = 1, Nx*Ny
                 Sice0(i+1,j) = Sice0(i+1,j) + dswe
                 snowdepth0(i+1,j) = snowdepth0(i+1,j) + dswe / rho_deposit
                 snow_depo(i+1,j) = .TRUE.
-                dm_slide(i+1,j) = dm_slide(i+1,j) + dswe
-                dm_tot_slide(i+1,j) = dm_tot_slide(i+1,j) + dswe
+                dSWE_slide(i+1,j) = dSWE_slide(i+1,j) + dswe
+                dSWE_tot_slide(i+1,j) = dSWE_tot_slide(i+1,j) + dswe
               end if
 
               ! West
@@ -330,8 +332,8 @@ do n = 1, Nx*Ny
                 Sice0(i,j-1) = Sice0(i,j-1) + dswe
                 snowdepth0(i,j-1) = snowdepth0(i,j-1) + dswe / rho_deposit
                 snow_depo(i,j-1) = .TRUE.
-                dm_slide(i,j-1) = dm_slide(i,j-1) + dswe
-                dm_tot_slide(i,j-1) = dm_tot_slide(i,j-1) + dswe
+                dSWE_slide(i,j-1) = dSWE_slide(i,j-1) + dswe
+                dSWE_tot_slide(i,j-1) = dSWE_tot_slide(i,j-1) + dswe
               end if
 
               ! East
@@ -340,8 +342,8 @@ do n = 1, Nx*Ny
                 Sice0(i,j+1) = Sice0(i,j+1) + dswe
                 snowdepth0(i,j+1) = snowdepth0(i,j+1) + dswe / rho_deposit
                 snow_depo(i,j+1) = .TRUE.
-                dm_slide(i,j+1) = dm_slide(i,j+1) + dswe
-                dm_tot_slide(i,j+1) = dm_tot_slide(i,j+1) + dswe
+                dSWE_slide(i,j+1) = dSWE_slide(i,j+1) + dswe
+                dSWE_tot_slide(i,j+1) = dSWE_tot_slide(i,j+1) + dswe
               end if
 
               ! South-West
@@ -350,8 +352,8 @@ do n = 1, Nx*Ny
                 Sice0(i-1,j-1) = Sice0(i-1,j-1) + dswe
                 snowdepth0(i-1,j-1) = snowdepth0(i-1,j-1) + dswe / rho_deposit
                 snow_depo(i-1,j-1) = .TRUE.
-                dm_slide(i-1,j-1) = dm_slide(i-1,j-1) + dswe
-                dm_tot_slide(i-1,j-1) = dm_tot_slide(i-1,j-1) + dswe
+                dSWE_slide(i-1,j-1) = dSWE_slide(i-1,j-1) + dswe
+                dSWE_tot_slide(i-1,j-1) = dSWE_tot_slide(i-1,j-1) + dswe
               end if
 
               ! South-East
@@ -360,8 +362,8 @@ do n = 1, Nx*Ny
                 Sice0(i-1,j+1) = Sice0(i-1,j+1) + dswe
                 snowdepth0(i-1,j+1) = snowdepth0(i-1,j+1) + dswe / rho_deposit
                 snow_depo(i-1,j+1) = .TRUE.
-                dm_slide(i-1,j+1) = dm_slide(i-1,j+1) + dswe
-                dm_tot_slide(i-1,j+1) = dm_tot_slide(i-1,j+1) + dswe
+                dSWE_slide(i-1,j+1) = dSWE_slide(i-1,j+1) + dswe
+                dSWE_tot_slide(i-1,j+1) = dSWE_tot_slide(i-1,j+1) + dswe
               end if
 
               ! North-West
@@ -370,8 +372,8 @@ do n = 1, Nx*Ny
                 Sice0(i+1,j-1) = Sice0(i+1,j-1) + dswe
                 snowdepth0(i+1,j-1) = snowdepth0(i+1,j-1) + dswe / rho_deposit
                 snow_depo(i+1,j-1) = .TRUE.
-                dm_slide(i+1,j-1) = dm_slide(i+1,j-1) + dswe
-                dm_tot_slide(i+1,j-1) = dm_tot_slide(i+1,j-1) + dswe
+                dSWE_slide(i+1,j-1) = dSWE_slide(i+1,j-1) + dswe
+                dSWE_tot_slide(i+1,j-1) = dSWE_tot_slide(i+1,j-1) + dswe
               end if
 
               ! North-East
@@ -380,8 +382,8 @@ do n = 1, Nx*Ny
                 Sice0(i+1,j+1) = Sice0(i+1,j+1) + dswe
                 snowdepth0(i+1,j+1) = snowdepth0(i+1,j+1) + dswe / rho_deposit
                 snow_depo(i+1,j+1) = .TRUE.
-                dm_slide(i+1,j+1) = dm_slide(i+1,j+1) + dswe
-                dm_tot_slide(i+1,j+1) = dm_tot_slide(i+1,j+1) + dswe
+                dSWE_slide(i+1,j+1) = dSWE_slide(i+1,j+1) + dswe
+                dSWE_tot_slide(i+1,j+1) = dSWE_tot_slide(i+1,j+1) + dswe
               end if
           end if
 
@@ -407,7 +409,7 @@ use GRID, only: &
   Nx,Ny                 ! Grid dimensions
 
 use STATE_VARIABLES, only: &
-  index_grid_dem_sorted ! Location (i,j) of sorted grid points
+  index_sorted_dem ! Location (i,j) of sorted grid points
 
 use LANDUSE, only: &
   dem                   ! Terrain elevation (m)
@@ -431,14 +433,14 @@ real :: &
 
 n = 1
 temp_sorted = 1
-i1 = index_grid_dem_sorted(1,1)
-j1 = index_grid_dem_sorted(1,2)
+i1 = index_sorted_dem(1,1)
+j1 = index_sorted_dem(1,2)
 elev_next = dem(i1,j1) + snowdepth(i1,j1)
 
 do while(n < Nx*Ny .and. temp_sorted == 1)
 
-  i = index_grid_dem_sorted(n+1,1)
-  j = index_grid_dem_sorted(n+1,2)
+  i = index_sorted_dem(n+1,1)
+  j = index_sorted_dem(n+1,2)
   elev = elev_next
   elev_next = dem(i,j) + snowdepth(i,j)
   if (elev_next > elev) then
@@ -464,7 +466,7 @@ use GRID, only: &
   Nx,Ny                 ! Grid dimensions
 
 use STATE_VARIABLES, only: &
-  index_grid_dem_sorted ! Location (i,j) of sorted grid points
+  index_sorted_dem ! Location (i,j) of sorted grid points
 
 use LANDUSE, only: &
   dem                   ! Terrain elevation (m)
@@ -501,19 +503,19 @@ do j = 1, Ny
     dem_with_snow_loc = dem(i,j) !+ snowdepth_loc
     if (iter == 1) then
       dem_sorted(1) = dem_with_snow_loc
-      index_grid_dem_sorted(1,1) = i
-      index_grid_dem_sorted(1,2) = j
+      index_sorted_dem(1,1) = i
+      index_sorted_dem(1,2) = j
     else if (iter == 2) then
       if (dem_sorted(1) < dem_with_snow_loc) then
         dem_sorted(2) = dem_sorted(1)
         dem_sorted(1) = dem_with_snow_loc
-        index_grid_dem_sorted(2,:) = index_grid_dem_sorted(1,:)
-        index_grid_dem_sorted(1,1) = i
-        index_grid_dem_sorted(1,2) = j
+        index_sorted_dem(2,:) = index_sorted_dem(1,:)
+        index_sorted_dem(1,1) = i
+        index_sorted_dem(1,2) = j
       else
         dem_sorted(2) = dem_with_snow_loc
-        index_grid_dem_sorted(2,1) = i
-        index_grid_dem_sorted(2,2) = j
+        index_sorted_dem(2,1) = i
+        index_sorted_dem(2,2) = j
       end if
     else
       ! Bisection method
@@ -533,16 +535,16 @@ do j = 1, Ny
       end do
       if (index_first == iter - 1 .and. dem_sorted(iter-1) > dem_with_snow_loc)  then
         dem_sorted(iter) = dem_with_snow_loc
-        index_grid_dem_sorted(iter,1) = i
-        index_grid_dem_sorted(iter,2) = j
+        index_sorted_dem(iter,1) = i
+        index_sorted_dem(iter,2) = j
       else
         do n = iter, index_first + 1, -1
           dem_sorted(n) = dem_sorted(n-1)
-          index_grid_dem_sorted(n,:) = index_grid_dem_sorted(n-1,:)
+          index_sorted_dem(n,:) = index_sorted_dem(n-1,:)
         end do
         dem_sorted(index_first) = dem_with_snow_loc
-        index_grid_dem_sorted(index_first,1) = i
-        index_grid_dem_sorted(index_first,2) = j
+        index_sorted_dem(index_first,1) = i
+        index_sorted_dem(index_first,2) = j
       end if
     end if
 

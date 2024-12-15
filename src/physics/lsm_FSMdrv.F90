@@ -14,10 +14,10 @@ module module_sf_FSMdrv
     use domain_interface,    only : domain_t
     use io_routines,         only : io_write, io_read, io_add_attribute
     use FSM_interface , only:  FSM_SETUP,FSM_DRIVE,FSM_PHYSICS, FSM_SNOWSLIDE, FSM_SNOWSLIDE_END, FSM_CUMULATE_SD, FSM_SNOWTRAN_SETUP, FSM_SNOWTRAN_SALT_START, FSM_SNOWTRAN_SALT, FSM_SNOWTRAN_SALT_END, FSM_SNOWTRAN_SUSP_START, FSM_SNOWTRAN_SUSP, FSM_SNOWTRAN_SUSP_END, FSM_SNOWTRAN_ACCUM
-    use FSM_interface , only:  Nx_HICAR, Ny_HICAR, zH_HICAR, NNsmax_HICAR, NNsoil_HICAR, lat_HICAR, &
+    use FSM_interface , only:  Nx_HICAR, Ny_HICAR, NNsmax_HICAR, NNsoil_HICAR, lat_HICAR, &
                                lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,shd_HICAR, LHN_ON, LFOR_HN, &
-                               NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,&
-                               NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS, DDs_min, DDs_surflay
+                               NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,NOSHDTN,NALRADT,&
+                               NSNTRAN,NSNSLID,NSNOLAY,NCHECKS, LZ0PERT, LWCPERT, LFSPERT, LALPERT, LSLPERT, CTILE, rtthresh, DDs_min, DDs_surflay
     use FSM_interface, only: &
       year,          &
       month,         &
@@ -48,10 +48,10 @@ module module_sf_FSMdrv
       KH_,           &  
       meltflux_out_, &
       Sliq_out_,     &
-      dm_salt_,      &
-      dm_susp_,      &
-      dm_subl_,      &
-      dm_slide_!,     &
+      dSWE_salt_,      &
+      dSWE_susp_,      &
+      dSWE_subl_,      &
+      dSWE_slide_!,     &
       !Qs_u,       &
       !Qs_v
 
@@ -132,7 +132,6 @@ contains
         last_snowslide = 4000
 
         !!
-        if (allocated(zH_HICAR)) deallocate(zH_HICAR)
         if (allocated(lat_HICAR)) deallocate(lat_HICAR)
         if (allocated(lon_HICAR)) deallocate(lon_HICAR)
         if (allocated(terrain_HICAR)) deallocate(terrain_HICAR)
@@ -140,7 +139,6 @@ contains
         if (allocated(shd_HICAR)) deallocate(shd_HICAR)
         if (allocated(z0_bare)) deallocate(z0_bare)
 
-        allocate(zH_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(lat_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(lon_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(terrain_HICAR(Nx_HICAR,Ny_HICAR))
@@ -148,7 +146,6 @@ contains
         allocate(shd_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(z0_bare(domain%grid%its:domain%grid%ite,domain%grid%jts:domain%grid%jte))
 
-        zH_HICAR=TRANSPOSE(domain%dz_mass%data_3d(its:ite,domain%grid%kms,jts:jte))
         lat_HICAR=TRANSPOSE(domain%latitude%data_2d(its:ite,jts:jte))
         lon_HICAR=TRANSPOSE(domain%longitude%data_2d(its:ite,jts:jte))
         terrain_HICAR=TRANSPOSE(domain%terrain%data_2d(its:ite,jts:jte))
@@ -180,11 +177,23 @@ contains
         NSNFRAC=options%sm%fsm_snfrac
         NRADSBG=options%sm%fsm_radsbg
         NZOFFST=options%sm%fsm_zoffst
+        NOSHDTN=options%sm%fsm_oshdtn
+        NALRADT=options%sm%fsm_alradt
         NSNTRAN=options%sm%fsm_sntran
         NSNSLID=options%sm%fsm_snslid
         NSNOLAY=options%sm%fsm_snolay
-        NHISWET=options%sm%fsm_hiswet
         NCHECKS=options%sm%fsm_checks
+
+        LZ0PERT=options%sm%fsm_z0pert
+        LWCPERT=options%sm%fsm_wcpert
+        LFSPERT=options%sm%fsm_fspert
+        LALPERT=options%sm%fsm_alpert
+        LSLPERT=options%sm%fsm_slpert
+
+        ! Hard coding these tile values for now
+        ! not sure how they are supposed to be used?
+        CTILE='open'
+        rtthresh=0.1
 
         LHN_ON=options%sm%fsm_hn_on
         LFOR_HN=options%sm%fsm_for_hn
@@ -202,10 +211,10 @@ contains
         if (allocated(KH_)) deallocate(KH_)
         if (allocated(meltflux_out_)) deallocate(meltflux_out_)
         if (allocated(Sliq_out_)) deallocate(Sliq_out_)
-        if (allocated(dm_salt_)) deallocate(dm_salt_)
-        if (allocated(dm_susp_)) deallocate(dm_susp_)
-        if (allocated(dm_subl_)) deallocate(dm_subl_)
-        if (allocated(dm_slide_)) deallocate(dm_slide_)
+        if (allocated(dSWE_salt_)) deallocate(dSWE_salt_)
+        if (allocated(dSWE_susp_)) deallocate(dSWE_susp_)
+        if (allocated(dSWE_subl_)) deallocate(dSWE_subl_)
+        if (allocated(dSWE_slide_)) deallocate(dSWE_slide_)
 
         allocate(Esrf_(Nx_HICAR,Ny_HICAR)); Esrf_=0.
         allocate(Gsoil_(Nx_HICAR,Ny_HICAR));Gsoil_=0.
@@ -219,10 +228,10 @@ contains
         allocate(KH_(Nx_HICAR,Ny_HICAR)); KH_=0.0
         allocate(meltflux_out_(Nx_HICAR,Ny_HICAR)); meltflux_out_=0.
         allocate(Sliq_out_(Nx_HICAR,Ny_HICAR)); Sliq_out_=0.
-        allocate(dm_salt_(Nx_HICAR,Ny_HICAR)); dm_salt_=0.
-        allocate(dm_susp_(Nx_HICAR,Ny_HICAR)); dm_susp_=0.
-        allocate(dm_subl_(Nx_HICAR,Ny_HICAR)); dm_subl_=0.
-        allocate(dm_slide_(Nx_HICAR,Ny_HICAR)); dm_slide_=0.
+        allocate(dSWE_salt_(Nx_HICAR,Ny_HICAR)); dSWE_salt_=0.
+        allocate(dSWE_susp_(Nx_HICAR,Ny_HICAR)); dSWE_susp_=0.
+        allocate(dSWE_subl_(Nx_HICAR,Ny_HICAR)); dSWE_subl_=0.
+        allocate(dSWE_slide_(Nx_HICAR,Ny_HICAR)); dSWE_slide_=0.
         !allocate(Qs_u(Nx_HICAR,Ny_HICAR)); Qs_u=0.
         !allocate(Qs_v(Nx_HICAR,Ny_HICAR)); Qs_v=0.
         !!
@@ -331,20 +340,19 @@ contains
         hour=real(domain%model_time%hour)
         dt=lsm_dt
         
-        
         LW=TRANSPOSE(domain%longwave%data_2d(its:ite,jts:jte))
         Ps=TRANSPOSE(domain%surface_pressure%data_2d(its:ite,jts:jte))
         Rf=TRANSPOSE(current_rain(its:ite,jts:jte))
-        !!
         Sdir=TRANSPOSE(domain%shortwave_direct%data_2d(its:ite,jts:jte))  !Sdir=domain%shortwave%data_2d(its:ite,jts:jte)
         Sdif=TRANSPOSE(domain%shortwave_diffuse%data_2d(its:ite,jts:jte)) !Sdif=0.0
-        !!
         Sf=TRANSPOSE(current_snow(its:ite,jts:jte))
-        !
         Sf24h=TRANSPOSE(domain%snowfall_tstep%data_2d(its:ite,jts:jte))
-        !
-        Ta= TRANSPOSE(domain%temperature%data_3d(its:ite,domain%grid%kms,jts:jte))!domain%temperature_2m%data_2d(its:ite,jts:jte)
-        Qa= TRANSPOSE(domain%water_vapor%data_3d(its:ite,domain%grid%kms,jts:jte))!domain%humidity_2m%data_2d(its:ite,jts:jte)
+        
+        ! This should always be 2m temperature and humidity
+        Ta= TRANSPOSE(domain%temperature_2m%data_2d(its:ite,jts:jte))
+        Qa= TRANSPOSE(domain%humidity_2m%data_2d(its:ite,jts:jte))
+
+        ! This should always be 10m wind speed
         Ua=TRANSPOSE(windspd(its:ite,jts:jte))
         
         !CAUTION -- Udir hardcoded to use domain%u/v instead of v_10m/u_10m. This is done since we need to access 
@@ -360,10 +368,10 @@ contains
         if ((domain%model_time%seconds() - dt <= last_output%seconds()) .and. &
             (domain%model_time%seconds()   >=    last_output%seconds())) then
             !If we are the first call since the last output, reset the per-output counters
-            domain%dm_slide%data_2d = 0.
-            domain%dm_salt%data_2d  = 0.
-            domain%dm_susp%data_2d  = 0.
-            domain%dm_subl%data_2d  = 0.
+            domain%dSWE_slide%data_2d = 0.
+            domain%dSWE_salt%data_2d  = 0.
+            domain%dSWE_susp%data_2d  = 0.
+            domain%dSWE_subl%data_2d  = 0.
             last_output = last_output + options%output%output_dt
         endif
         
@@ -431,14 +439,14 @@ contains
                 SD_0_buff = 0.0
                 Sice_0_buff = 0.0
 
-                dm_slide_ = 0.0
+                dSWE_slide_ = 0.0
                 first_SLIDE = .True.
                 aval = .False.
                 !Snowslide needs the corner snow depth information from corner neighbor processes
                 !call exch_FSM_state_vars(domain,corners_in=.True.)
                 
                 do i=1,10
-                    call FSM_SNOWSLIDE(SD_0,Sice_0,SD_0_buff,Sice_0_buff,aval,first_SLIDE,dm_slide_)
+                    call FSM_SNOWSLIDE(SD_0,Sice_0,SD_0_buff,Sice_0_buff,aval,first_SLIDE,dSWE_slide_)
                     
                     ! Copy interior buffer for exchange
                     call exch_SLIDE_buffers(domain,SD_0_buff,Sice_0_buff)
@@ -449,8 +457,8 @@ contains
                     aval(j_s:j_e,i_s:i_e) = .False.
                     
                     !Must accumulate slide changes here, since we will loop over calls to snowslide
-                    domain%dm_slide%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = &
-                            domain%dm_slide%data_2d(domain%its:domain%ite,domain%jts:domain%jte) + TRANSPOSE(dm_slide_(j_s:j_e,i_s:i_e))
+                    domain%dSWE_slide%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = &
+                            domain%dSWE_slide%data_2d(domain%its:domain%ite,domain%jts:domain%jte) + TRANSPOSE(dSWE_slide_(j_s:j_e,i_s:i_e))
 
                     ! trade over buffer to halo cells, in case avalanching snow was passed on previous iteration.
                     SD_0(1,:) = SD_0_buff(1,:)
@@ -518,14 +526,14 @@ contains
                 
                     if (SNTRAN>0) then
                         ! Convert to rate 1/s
-                        domain%dm_salt%data_2d(hi,hj)=domain%dm_salt%data_2d(hi,hj) + dm_salt_(j,i)
-                        domain%dm_susp%data_2d(hi,hj)= domain%dm_susp%data_2d(hi,hj) + dm_susp_(j,i)
-                        domain%dm_subl%data_2d(hi,hj)= domain%dm_subl%data_2d(hi,hj) + dm_subl_(j,i)
+                        domain%dSWE_salt%data_2d(hi,hj)=domain%dSWE_salt%data_2d(hi,hj) + dSWE_salt_(j,i)
+                        domain%dSWE_susp%data_2d(hi,hj)= domain%dSWE_susp%data_2d(hi,hj) + dSWE_susp_(j,i)
+                        domain%dSWE_subl%data_2d(hi,hj)= domain%dSWE_subl%data_2d(hi,hj) + dSWE_subl_(j,i)
                         !Add sublimated snow to latent heat flux. 
                         !Sometimes FSM returns NaN values for blowing snow sublimation, so mask those out here
-                        if (abs(dm_subl_(j,i))>1) dm_subl_(j,i) = 0.0
-                        domain%latent_heat%data_2d(hi,hj)   = domain%latent_heat%data_2d(hi,hj)   + (-dm_subl_(j,i))*XLS/dt 
-                        domain%sensible_heat%data_2d(hi,hj) = domain%sensible_heat%data_2d(hi,hj) + ( dm_subl_(j,i))*XLS/dt 
+                        if (abs(dSWE_subl_(j,i))>1) dSWE_subl_(j,i) = 0.0
+                        domain%latent_heat%data_2d(hi,hj)   = domain%latent_heat%data_2d(hi,hj)   + (-dSWE_subl_(j,i))*XLS/dt 
+                        domain%sensible_heat%data_2d(hi,hj) = domain%sensible_heat%data_2d(hi,hj) + ( dSWE_subl_(j,i))*XLS/dt 
                     endif
                 endif
             enddo

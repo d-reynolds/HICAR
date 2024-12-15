@@ -1981,13 +1981,13 @@ contains
         logical :: print_info, gennml
 
         integer :: fsm_nsnow_max(kMAX_NESTS)      ! maximum number of snow layers in the FSM2trans snow model
-        integer, dimension(kMAX_NESTS) :: fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, fsm_hiswet, &
+        integer, dimension(kMAX_NESTS) :: fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
                    fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst
         real, dimension(kMAX_NESTS)    :: fsm_ds_min, fsm_ds_surflay
         logical, dimension(kMAX_NESTS) :: fsm_hn_on, fsm_for_hn
 
         ! define the namelist
-        namelist /sm_parameters/ fsm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, fsm_hiswet, &
+        namelist /sm_parameters/ fsm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
                                  fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst, &
                                  fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn
 
@@ -2005,7 +2005,6 @@ contains
         call set_nml_var_default(fsm_condct, 'fsm_condct', print_info, gennml)
         call set_nml_var_default(fsm_densty, 'fsm_densty', print_info, gennml)
         call set_nml_var_default(fsm_exchng, 'fsm_exchng', print_info, gennml)
-        call set_nml_var_default(fsm_hiswet, 'fsm_hiswet', print_info, gennml)
         call set_nml_var_default(fsm_hydrol, 'fsm_hydrol', print_info, gennml)
         call set_nml_var_default(fsm_radsbg, 'fsm_radsbg', print_info, gennml)
         call set_nml_var_default(fsm_snfrac, 'fsm_snfrac', print_info, gennml)
@@ -2056,7 +2055,6 @@ contains
         call set_nml_var(sm_options%fsm_condct, fsm_condct(n_indx), 'fsm_condct', fsm_condct(1))
         call set_nml_var(sm_options%fsm_densty, fsm_densty(n_indx), 'fsm_densty', fsm_densty(1))
         call set_nml_var(sm_options%fsm_exchng, fsm_exchng(n_indx), 'fsm_exchng', fsm_exchng(1))
-        call set_nml_var(sm_options%fsm_hiswet, fsm_hiswet(n_indx), 'fsm_hiswet', fsm_hiswet(1))
         call set_nml_var(sm_options%fsm_hydrol, fsm_hydrol(n_indx), 'fsm_hydrol', fsm_hydrol(1))
         call set_nml_var(sm_options%fsm_radsbg, fsm_radsbg(n_indx), 'fsm_radsbg', fsm_radsbg(1))
         call set_nml_var(sm_options%fsm_snfrac, fsm_snfrac(n_indx), 'fsm_snfrac', fsm_snfrac(1))
