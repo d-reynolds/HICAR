@@ -446,6 +446,8 @@ if (allocated(swemax)) deallocate(swemax)
 if (allocated(swehist)) deallocate(swehist)
 if (allocated(histowet)) deallocate(histowet)
 if (allocated(dSWE_tot_subl)) deallocate(dSWE_tot_subl)
+if (allocated(dSWE_tot_salt)) deallocate(dSWE_tot_salt)
+if (allocated(dSWE_tot_susp)) deallocate(dSWE_tot_susp)
 if (allocated(dSWE_tot_slide)) deallocate(dSWE_tot_slide)
 if (allocated(index_sorted_dem)) deallocate(index_sorted_dem)
 
@@ -666,11 +668,16 @@ if (OSHDTN == 0) then
   adm = 100
   adc(:,:) = 1000
   afs(:,:) = asmx
-  if (TILE == 'glacier' .or. ((SNTRAN == 1 .or. SNSLID == 1) .and. glacierfrac(i,j) > epsilon(glacierfrac(i,j)))) then
-    z0_snow(:,:) = 0.0009
-  else
-    z0_snow(:,:) = z0sn
-  endif
+
+  do j = 1, Ny
+    do i = 1, Nx
+      if (TILE == 'glacier' .or. ((SNTRAN == 1 .or. SNSLID == 1) .and. glacierfrac(i,j) > epsilon(glacierfrac(i,j)))) then
+        z0_snow(i,j) = 0.0009
+      else
+        z0_snow(i,j) = z0sn
+      endif
+    enddo
+  enddo
 
 else ! OSHDTN == 1
 

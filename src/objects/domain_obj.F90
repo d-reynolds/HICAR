@@ -2733,16 +2733,6 @@ contains
                 forcing%z = temporary_data%data_3d
             endif
 
-            ! check that the forcing z is higher than the domain z
-            if ( maxval(forcing%z) < maxval(this%geo%z) ) then
-                if (STD_OUT_PE) write(*,*) "ERROR: Forcing or parent-nest z is lower than domain z."
-                if (STD_OUT_PE) write(*,*) "ERROR: Check earlier output during domain initialization"
-                if (STD_OUT_PE) write(*,*) "ERROR: to ensure that nested domains fit within their parent domain."
-                if (STD_OUT_PE) write(*,*) "ERROR: Otherwise, ensure that the vertical extent of all domains"
-                if (STD_OUT_PE) write(*,*) "ERROR: fits within the forcing domain."
-                stop
-            endif
-
             forc_u_from_mass%lat = forcing%geo%lat
             forc_u_from_mass%lon = forcing%geo%lon
             forc_v_from_mass%lat = forcing%geo%lat
@@ -2845,12 +2835,15 @@ contains
             call vLUT(this%geo_u, forcing%geo_u)
             call vLUT(this%geo_v, forcing%geo_v)
                         
-            
-            !if (options%domain%use_agl_height) then
-            !    do k=size(forcing%z,  2),1,-1
-            !         forcing%z(:,k,:) = forcing%z(:,k,:)+forcing%original_geo%z(:,1,:)*AGL_forcing_n(:,k,:)
-            !    enddo
-            !endif
+            ! check that the forcing z is higher than the domain z
+            ! if ( maxval(forcing%z) < maxval(this%geo%z) ) then
+            !     write(*,*) "ERROR: Forcing or parent-nest z is lower than domain z."
+            !     write(*,*) "ERROR: Check earlier output during domain initialization"
+            !     write(*,*) "ERROR: to ensure that nested domains fit within their parent domain."
+            !     write(*,*) "ERROR: Otherwise, ensure that the vertical extent of all domains"
+            !     write(*,*) "ERROR: fits within the forcing domain."
+            !     stop
+            ! endif
 
         end if
         
