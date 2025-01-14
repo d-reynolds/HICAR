@@ -52,8 +52,6 @@ contains
         kms = domain%kms; kme = domain%kme
         jms = domain%jms; jme = domain%jme
         
-        !Allocate storage variable for temp-quantities
-
     end subroutine adv_init
 
     subroutine adv_var_request(options)

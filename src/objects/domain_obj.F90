@@ -395,7 +395,7 @@ contains
         integer :: i, j, k
         real :: qsum
         real, dimension(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme) :: mod_temp_3d
-        real, dimension(this%ims:this%ime, this%jms:this%jme) :: surf_temp_1, surf_temp_2
+        real, dimension(this%ims:this%ime, this%jms:this%jme) :: surf_temp_1, surf_temp_2, surf_temp_3
 
         associate(ims => this%ims, ime => this%ime,                             &
                   jms => this%jms, jme => this%jme,                             &
@@ -491,26 +491,24 @@ contains
             call compute_iq(this%iwi%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
         endif
         
-        if (options%physics%surfacelayer == 0) then
-            ! temporary constant
-            if (associated(this%roughness_z0%data_2d)) then
-                ! use log-law of the wall to convert from first model level to surface
-                surf_temp_1 = karman / log((this%z%data_3d(ims:ime,kms,jms:jme) - this%terrain%data_2d(ims:ime,jms:jme)) / this%roughness_z0%data_2d(ims:ime,jms:jme))
-                ! use log-law of the wall to convert from surface to 10m height
-                surf_temp_2 = log(10.0 / this%roughness_z0%data_2d(ims:ime,jms:jme)) / karman
-            endif
+        ! temporary constant
+        if (associated(this%roughness_z0%data_2d)) then
+            ! use log-law of the wall to convert from first model level to surface
+            surf_temp_1 = karman / log((this%z%data_3d(ims:ime,kms,jms:jme) - this%terrain%data_2d(ims:ime,jms:jme)) / this%roughness_z0%data_2d(ims:ime,jms:jme))
+            ! use log-law of the wall to convert from surface to 10m height
+            surf_temp_2 = log(10.0 / this%roughness_z0%data_2d(ims:ime,jms:jme)) / karman
+        endif
 
-            if (associated(this%u_10m%data_2d)) then
-                this%ustar        (ims:ime,jms:jme) = u_mass      (ims:ime,kms,jms:jme) * surf_temp_1
-                this%u_10m%data_2d(ims:ime,jms:jme) = this%ustar(ims:ime,jms:jme)     * surf_temp_2
-                this%ustar        (ims:ime,jms:jme) = v_mass      (ims:ime,kms,jms:jme) * surf_temp_1
-                this%v_10m%data_2d(ims:ime,jms:jme) = this%ustar(ims:ime,jms:jme)     * surf_temp_2
-            endif
+        if (associated(this%u_10m%data_2d)) then
+            surf_temp_3                         = u_mass      (ims:ime,kms,jms:jme) * surf_temp_1
+            this%u_10m%data_2d(ims:ime,jms:jme) = surf_temp_3     * surf_temp_2
+            surf_temp_3                         = v_mass      (ims:ime,kms,jms:jme) * surf_temp_1
+            this%v_10m%data_2d(ims:ime,jms:jme) = surf_temp_3     * surf_temp_2
+        endif
 
-            if (allocated(this%ustar)) then
-                ! now calculate master ustar based on U and V combined in quadrature
-                this%ustar(its:ite,jts:jte) = sqrt(u_mass(its:ite,kms,jts:jte)**2 + v_mass(its:ite,kms,jts:jte)**2) * surf_temp_1(its:ite,jts:jte)
-            endif
+        if (allocated(this%ustar)) then
+            ! now calculate master ustar based on U and V combined in quadrature
+            this%ustar(its:ite,jts:jte) = sqrt(u_mass(its:ite,kms,jts:jte)**2 + v_mass(its:ite,kms,jts:jte)**2) * surf_temp_1(its:ite,jts:jte)
         endif
         
         end associate
@@ -2489,6 +2487,7 @@ contains
         if (associated(this%cqs2%data_2d)) this%cqs2%data_2d=0.01
         if (associated(this%qfx%data_2d)) this%qfx%data_2d=0.0
         if (associated(this%br%data_2d)) this%br%data_2d=0.0
+        if (associated(this%mol%data_2d)) this%mol%data_2d=0.0
         if (associated(this%psim%data_2d)) this%psim%data_2d=0.0
         if (associated(this%psih%data_2d)) this%psih%data_2d=0.0
         if (associated(this%fm%data_2d)) this%fm%data_2d=0.0

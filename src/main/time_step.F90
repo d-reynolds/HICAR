@@ -75,9 +75,9 @@ contains
 
         maxwind1d = 0
         maxwind3d = 0
-        max_i = 0
-        max_j = 0
-        max_k = 0
+        max_i = 1
+        max_j = 1
+        max_k = 1
 
         ! to ensure we are stable for 3D advection we'll use the average "max" wind speed
         ! but that average has to be divided by sqrt(3) for stability in 3 dimensional advection
@@ -165,7 +165,7 @@ contains
         if (time_percent > (last_time + 5.0)) then
             last_time = last_time + 5.0
             ! this used to just use the nice $ (or advance="NO") trick, but at least with some mpi implementations, it buffers this output until it crashes
-            write(*,"(A,f5.1,A,A)") char(13), max(0.0, time_percent)," %  dt=",trim(dt%as_string())
+            write(*,"(A2,f5.1,A,A)") "  ", max(0.0, time_percent)," %  dt=",trim(dt%as_string())
         endif
 
     end subroutine print_progress

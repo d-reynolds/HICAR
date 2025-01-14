@@ -10,6 +10,7 @@ enable_language (Fortran)
 #########################################
 ####### Set up the user variables #######
 set(FC "" CACHE STRING "Set the fortran compiler to use (can be auto-detected for most cases)")
+set(MODE "release" CACHE STRING "Set compilation flags, useful for debugging")
 #########################################
 
 FILE(GLOB_RECURSE SOURCE_FILES  code/*.F90)
@@ -91,14 +92,22 @@ message(STATUS "...done auto-detecting the environment")
 
 ############################################
 
-set(CMAKE_BUILD_TYPE Release)
+if(MODE STREQUAL "debug")
+    set(CMAKE_BUILD_TYPE Debug)
 
-if (COMPILER STREQUAL "gnu")
+    if (COMPILER STREQUAL "gnu")
+        set(CMAKE_Fortran_FLAGS "-c -O0 -g -fopenmp -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion")
+    elseif (COMPILER STREQUAL "cray")
+	set(CMAKE_Fortran_FLAGS "-h noomp -c  -g -eZ")
+    endif()
+elseif (MODE STREQUAL "release")
+    set(CMAKE_BUILD_TYPE Release)
+
+    if (COMPILER STREQUAL "gnu")
 	set(CMAKE_Fortran_FLAGS "-fopenmp -lgomp -O2 -mfma -c -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens")  #-fcheck=all -Wall  # -ffast-math #-flto #
-elseif (COMPILER STREQUAL "intel")
-	set(CMAKE_Fortran_FLAGS "-c -u -qopenmp -liomp5 -O3 -xHost -ftz -fpe0")# -check stack,bounds -fp-stack-check
-elseif (COMPILER STREQUAL "cray")
+    elseif (COMPILER STREQUAL "cray")
 	set(CMAKE_Fortran_FLAGS "-h noomp -hfp3 -O2 -c -eI")
+    endif()
 endif()
 
 #This sets the location for library installation -- i.e., ${CMAKE_INSTALL_LIBDIR}=/usr/local/lib 

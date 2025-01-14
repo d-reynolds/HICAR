@@ -140,9 +140,13 @@ contains
                 call helper_delta%set(options(i)%restart%restart_count*options(i)%output%outputinterval)
                 parent_restart_time = options(i)%general%start_time + helper_delta
 
-                !Loop through all child nests
-                do n = 1, size(options(i)%general%child_nests)
-                    child_nest_indx = options(i)%general%child_nests(n)
+                !Loop through all child nests in the chain
+                do n = i+1, size(options)
+
+                    child_nest_indx = n
+                    ! If we have hit another root nest, then we are done with this chain
+                    if (options(child_nest_indx)%general%parent_nest == 0) exit
+
                     if (child_nest_indx <= i) then
                         if (STD_OUT_PE) write(*,*) "  ERROR: Child nest index ",child_nest_indx," is less than the parent nest index ",i
                         stop
@@ -234,6 +238,19 @@ contains
         integer, intent(in), optional :: n_indx
 
         integer :: i
+
+        ! Check that boundary conditions file exists
+        if (trim(options%domain%init_conditions_file) /= '') then
+            call check_file_exists(trim(options%domain%init_conditions_file), message='A boundary conditions file does not exist.')
+        endif
+
+        ! Check that the output and restart folders exists
+        if (trim(options%output%output_folder) /= '') then
+            call check_file_exists(trim(options%output%output_folder), message='Output folder does not exist.')
+        endif
+        if (trim(options%restart%restart_folder) /= '') then
+            call check_file_exists(trim(options%restart%restart_folder), message='Restart folder does not exist.')
+        endif
 
         !clean output var list
         do i=1, size(options%output%vars_for_output)

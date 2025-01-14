@@ -102,24 +102,24 @@ do j = 1, Ny
   end do
 end do
 
-! If first iteration of the model, we need to sort the DEM anyway
-if (firstit == 1) then
+! If first iteration of the model, we need to sort the DEM anyway (this is now handeled in setup)
+! if (firstit == 1) then
 
-  ! Sort grid points by decreasing elevation in a one-dimension vector
-  call SORT_DEM(snowdepth)
+!   ! Sort grid points by decreasing elevation in a one-dimension vector
+!   call SORT_DEM(snowdepth)
 
-!else
-!
-!  ! Check if the DEM vector is still sorted by decreasing elevation, despite snowdepth changes
-!  is_sorted = 0
-!  call CHECK_SORTED_DEM(snowdepth,is_sorted)
-!
-!  ! If the vector is not sorted anymore, we need to sort it again
-!  if (is_sorted == 0) then
-!    call SORT_DEM(snowdepth)
-!  end if
+! !else
+! !
+! !  ! Check if the DEM vector is still sorted by decreasing elevation, despite snowdepth changes
+! !  is_sorted = 0
+! !  call CHECK_SORTED_DEM(snowdepth,is_sorted)
+! !
+! !  ! If the vector is not sorted anymore, we need to sort it again
+! !  if (is_sorted == 0) then
+! !    call SORT_DEM(snowdepth)
+! !  end if
 
-end if
+! end if
 
 ! Treating grid points from the highest to the lowest
 do n = 1, Nx*Ny
@@ -458,7 +458,7 @@ end subroutine CHECK_SORTED_DEM
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine SORT_DEM(snowdepth)
+subroutine SORT_DEM()
 
 ! This subroutine sorts the grid points by decreasing elevation in a one-dimension vector.
 
@@ -473,8 +473,8 @@ use LANDUSE, only: &
 
 implicit none
 
-real, intent(in) :: &
-  snowdepth(Nx,Ny)      ! Snow depth before slides (m)
+! real, intent(in) :: &
+!   snowdepth(Nx,Ny)      ! Snow depth before slides (m)
 
 integer :: &
   iter,                &! Number of iterations
@@ -499,7 +499,7 @@ do j = 1, Ny
   do i = 1, Nx
 
     iter = iter + 1
-    snowdepth_loc = snowdepth(i,j)
+    ! snowdepth_loc = snowdepth(i,j)
     dem_with_snow_loc = dem(i,j) !+ snowdepth_loc
     if (iter == 1) then
       dem_sorted(1) = dem_with_snow_loc

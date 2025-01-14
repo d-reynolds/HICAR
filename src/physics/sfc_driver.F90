@@ -132,7 +132,9 @@ contains
             cpm = 0.0
             flhc = 0.0
             flqc = 0.0
+            regime = 0.0
             mavail = 0.3
+            th2d = 0.0
 
             gz1oz0 = log((domain%z%data_3d(:,kts,:) - domain%terrain%data_2d) / domain%roughness_z0%data_2d)
             

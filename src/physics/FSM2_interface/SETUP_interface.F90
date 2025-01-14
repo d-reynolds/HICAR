@@ -651,6 +651,7 @@ if (SNSLID == 1) then
   Shd(:,:)=shd_HICAR(:,:)
   !!!!!! read(1142) dSWE_tot_slide
   !!!!!! read(1143) index_grid_dem_sorted
+  call SORT_DEM()
 endif
 
 ! Tuned snow surface properties
