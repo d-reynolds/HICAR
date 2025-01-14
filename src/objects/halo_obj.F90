@@ -163,12 +163,16 @@ module subroutine init(this, exch_vars, adv_vars, grid, comms)
         this%corner_neighbors(current) = PE_RANK_GLOBAL+1
     endif
     
+    ! Detect if neighbors are on shared memory hardware
+    call detect_shared_memory(this, comms)
+
     !Now allocate the actual 3D halo
 #ifdef CRAY_PE
 allocate( this%south_in_3d( this%grid%ns_halo_nx+this%halo_size*2, this%grid%halo_nz, this%halo_size+1   )[*])
 allocate( this%north_in_3d( this%grid%ns_halo_nx+this%halo_size*2, this%grid%halo_nz, this%halo_size        )[*])
 allocate( this%east_in_3d(  this%halo_size       ,  this%grid%halo_nz, this%grid%ew_halo_ny+this%halo_size*2  )[*])
 allocate( this%west_in_3d(  this%halo_size+1,  this%grid%halo_nz, this%grid%ew_halo_ny+this%halo_size*2  )[*])
+
 #else
 !We only want to set up remote windows for domain objects which are part of the actual domain
 if (.not.(comms == MPI_COMM_NULL)) then
@@ -202,6 +206,7 @@ endif
 
     !...and the larger 3D halo for batch exchanges
     call setup_batch_exch(this, exch_vars, adv_vars, comms)
+
 
 end subroutine
 
@@ -440,7 +445,11 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                 call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%halo_rank+this%grid%ximages/), tmp_MPI_grp, ierr)
                 call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
-                call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%north_3d_win, ierr)
+                if (this%north_shared) then
+                    call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%north_3d_win, ierr)
+                else
+                    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%north_3d_win, ierr)
+                endif
                 call C_F_POINTER(tmp_ptr, this%north_batch_in_3d, [this%n_3d, nx, nz, ny])
                 this%north_batch_in_3d = 1
 
@@ -450,7 +459,11 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                 call MPI_Group_incl(comp_proc, 2, (/this%halo_rank-this%grid%ximages, this%halo_rank/), tmp_MPI_grp, ierr)
                 call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
-                call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%south_3d_win)
+                if (this%south_shared) then
+                    call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%south_3d_win)
+                else
+                    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%south_3d_win)
+                endif
                 call C_F_POINTER(tmp_ptr, this%south_batch_in_3d, [this%n_3d, nx, nz, ny])
                 this%south_batch_in_3d = 1
             endif
@@ -461,7 +474,11 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                 call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%halo_rank+this%grid%ximages/), tmp_MPI_grp, ierr)
                 call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
-                call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%north_3d_win, ierr)
+                if (this%north_shared) then
+                    call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%north_3d_win, ierr)
+                else
+                    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%north_3d_win, ierr)
+                endif
                 call C_F_POINTER(tmp_ptr, this%north_batch_in_3d, [this%n_3d, nx, nz, ny])
                 this%north_batch_in_3d = 1
             else if((mod(this%grid%yimg,2) == 1) .and. .not.(this%south_boundary)) then
@@ -470,18 +487,32 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                 call MPI_Group_incl(comp_proc, 2, (/this%halo_rank-this%grid%ximages, this%halo_rank/), tmp_MPI_grp, ierr)
                 call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
-                call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%south_3d_win)
+                if (this%south_shared) then
+                    call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%south_3d_win)
+                else
+                    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%south_3d_win)
+                endif
                 call C_F_POINTER(tmp_ptr, this%south_batch_in_3d, [this%n_3d, nx, nz, ny])
                 this%south_batch_in_3d = 1
             endif
 
             if (.not.(this%south_boundary)) then
-                call MPI_WIN_SHARED_QUERY(this%south_3d_win, 0, win_size, size_out, tmp_ptr)
-                call C_F_POINTER(tmp_ptr, this%south_buffer_3d, [this%n_3d, nx, nz, ny])
+                if (this%south_shared) then
+                    call MPI_WIN_SHARED_QUERY(this%south_3d_win, 0, win_size, size_out, tmp_ptr)
+                    call C_F_POINTER(tmp_ptr, this%south_batch_in_3d, [this%n_3d, nx, nz, ny])
+                else
+                    call MPI_WIN_GET_ATTR(this%south_3d_win, MPI_WIN_BASE, tmp_ptr, size_out)
+                    call C_F_POINTER(tmp_ptr, this%south_batch_in_3d, [this%n_3d, nx, nz, ny])
+                endif
             endif
             if (.not.(this%north_boundary)) then
-                call MPI_WIN_SHARED_QUERY(this%north_3d_win, 1, win_size, size_out, tmp_ptr)
-                call C_F_POINTER(tmp_ptr, this%north_buffer_3d, [this%n_3d, nx, nz, ny])
+                if (this%north_shared) then
+                    call MPI_WIN_SHARED_QUERY(this%north_3d_win, 1, win_size, size_out, tmp_ptr)
+                    call C_F_POINTER(tmp_ptr, this%north_batch_in_3d, [this%n_3d, nx, nz, ny])
+                else
+                    call MPI_WIN_GET_ATTR(this%north_3d_win, MPI_WIN_BASE, tmp_ptr, size_out)
+                    call C_F_POINTER(tmp_ptr, this%north_batch_in_3d, [this%n_3d, nx, nz, ny])
+                endif
             endif
 
             !Then do EW
@@ -500,70 +531,120 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
 
             !If this%grid%yimg is odd, then we allocate the north_3d_win. If it is even, we allocate the south_3d_win.
             if ((mod(this%grid%ximg,2) == 1) .and. .not.(this%east_boundary)) then
-                ! Create a group for the north-south exchange
+                ! Create a group for the east-west exchange
                 call MPI_Comm_group(comms, comp_proc)
                 call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%halo_rank+1/), tmp_MPI_grp, ierr)
                 call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
-                call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%east_3d_win, ierr)
+                if (this%east_shared) then
+                    call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%east_3d_win, ierr)
+                else
+                    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%east_3d_win, ierr)
+                endif
                 call C_F_POINTER(tmp_ptr, this%east_batch_in_3d, [this%n_3d, nx, nz, ny])
                 this%east_batch_in_3d = 1
 
             else if((mod(this%grid%ximg,2) == 0) .and. .not.(this%west_boundary)) then
-                ! Create a group for the north-south exchange
+                ! Create a group for the east-west exchange
                 call MPI_Comm_group(comms, comp_proc)
                 call MPI_Group_incl(comp_proc, 2, (/this%halo_rank-1, this%halo_rank/), tmp_MPI_grp, ierr)
                 call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
-                call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%west_3d_win)
+                if (this%west_shared) then
+                    call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%west_3d_win)
+                else
+                    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%west_3d_win)
+                endif
                 call C_F_POINTER(tmp_ptr, this%west_batch_in_3d, [this%n_3d, nx, nz, ny])
                 this%west_batch_in_3d = 1
             endif
 
             if ((mod(this%grid%ximg,2) == 0) .and. .not.(this%east_boundary)) then
-                ! Create a group for the north-south exchange
+                ! Create a group for the east-west exchange
                 call MPI_Comm_group(comms, comp_proc)
                 call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%halo_rank+1/), tmp_MPI_grp, ierr)
                 call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
-                call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%east_3d_win, ierr)
+                if (this%east_shared) then
+                    call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%east_3d_win, ierr)
+                else
+                    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%east_3d_win, ierr)
+                endif
                 call C_F_POINTER(tmp_ptr, this%east_batch_in_3d, [this%n_3d, nx, nz, ny])
                 this%east_batch_in_3d = 1
             else if((mod(this%grid%ximg,2) == 1) .and. .not.(this%west_boundary)) then
-                ! Create a group for the north-south exchange
+                ! Create a group for the east-west exchange
                 call MPI_Comm_group(comms, comp_proc)
                 call MPI_Group_incl(comp_proc, 2, (/this%halo_rank-1, this%halo_rank/), tmp_MPI_grp, ierr)
                 call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
-                call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%west_3d_win)
+                if (this%west_shared) then
+                    call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%west_3d_win)
+                else
+                    call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%west_3d_win)
+                endif
                 call C_F_POINTER(tmp_ptr, this%west_batch_in_3d, [this%n_3d, nx, nz, ny])
                 this%west_batch_in_3d = 1
             endif
 
             if (.not.(this%east_boundary)) then
-                call MPI_WIN_SHARED_QUERY(this%east_3d_win, 1, win_size, size_out, tmp_ptr)
-                call C_F_POINTER(tmp_ptr, this%east_buffer_3d, [this%n_3d, nx, nz, ny])
+                if (this%east_shared) then
+                    call MPI_WIN_SHARED_QUERY(this%east_3d_win, 1, win_size, size_out, tmp_ptr)
+                    call C_F_POINTER(tmp_ptr, this%east_batch_in_3d, [this%n_3d, nx, nz, ny])
+                else
+                    call MPI_WIN_GET_ATTR(this%east_3d_win, MPI_WIN_BASE, tmp_ptr, size_out)
+                    call C_F_POINTER(tmp_ptr, this%east_batch_in_3d, [this%n_3d, nx, nz, ny])
+                endif
             endif
             if (.not.(this%west_boundary)) then
-                call MPI_WIN_SHARED_QUERY(this%west_3d_win, 0, win_size, size_out, tmp_ptr)
-                call C_F_POINTER(tmp_ptr, this%west_buffer_3d, [this%n_3d, nx, nz, ny])
+                if (this%west_shared) then
+                    call MPI_WIN_SHARED_QUERY(this%west_3d_win, 0, win_size, size_out, tmp_ptr)
+                    call C_F_POINTER(tmp_ptr, this%west_batch_in_3d, [this%n_3d, nx, nz, ny])
+                else
+                    call MPI_WIN_GET_ATTR(this%west_3d_win, MPI_WIN_BASE, tmp_ptr, size_out)
+                    call C_F_POINTER(tmp_ptr, this%west_batch_in_3d, [this%n_3d, nx, nz, ny])
+                endif
             endif
 
-            if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_3d_win)
-            if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_3d_win)
-            if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_3d_win)
-            if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_3d_win)
+            if (.not.(this%north_boundary)) then
+                if (this%north_shared) then
+                    call MPI_Win_fence(0, this%north_3d_win)
+                else
+                    call MPI_Win_post(this%north_neighbor_grp, 0, this%north_3d_win)
+                endif
+            endif
+            if (.not.(this%south_boundary)) then
+                if (this%south_shared) then
+                    call MPI_Win_fence(0, this%south_3d_win)
+                else
+                    call MPI_Win_post(this%south_neighbor_grp, 0, this%south_3d_win)
+                endif
+            endif
+            if (.not.(this%east_boundary)) then
+                if (this%east_shared) then
+                    call MPI_Win_fence(0, this%east_3d_win)
+                else
+                    call MPI_Win_post(this%east_neighbor_grp, 0, this%east_3d_win)
+                endif
+            endif
+            if (.not.(this%west_boundary)) then
+                if (this%west_shared) then
+                    call MPI_Win_fence(0, this%west_3d_win)
+                else
+                    call MPI_Win_post(this%west_neighbor_grp, 0, this%west_3d_win)
+                endif
+            endif
     endif
 #endif
 
-    !if (.not.(this%north_boundary)) allocate(this%north_buffer_3d(this%n_3d,1:(this%grid%ns_halo_nx+2),&
-    !                this%kms:this%kme,1:this%halo_size))
-    !if (.not.(this%south_boundary)) allocate(this%south_buffer_3d(this%n_3d,1:(this%grid%ns_halo_nx+2),&
-    !                this%kms:this%kme,1:this%halo_size))
-    !if (.not.(this%east_boundary)) allocate(this%east_buffer_3d(this%n_3d,1:this%halo_size,&
-    !                this%kms:this%kme,1:(this%grid%ew_halo_ny+2)))
-    !if (.not.(this%west_boundary)) allocate(this%west_buffer_3d(this%n_3d,1:this%halo_size,&
-    !                this%kms:this%kme,1:(this%grid%ew_halo_ny+2)))
+    if (.not.(this%north_boundary)) allocate(this%north_buffer_3d(this%n_3d,1:(this%grid%ns_halo_nx+2),&
+                    this%kms:this%kme,1:this%halo_size))
+    if (.not.(this%south_boundary)) allocate(this%south_buffer_3d(this%n_3d,1:(this%grid%ns_halo_nx+2),&
+                    this%kms:this%kme,1:this%halo_size))
+    if (.not.(this%east_boundary)) allocate(this%east_buffer_3d(this%n_3d,1:this%halo_size,&
+                    this%kms:this%kme,1:(this%grid%ew_halo_ny+2)))
+    if (.not.(this%west_boundary)) allocate(this%west_buffer_3d(this%n_3d,1:this%halo_size,&
+                    this%kms:this%kme,1:(this%grid%ew_halo_ny+2)))
 
 
     ! If no 2D vars present, don't allocate arrays (nothing should be calling exch 2D then)
@@ -744,15 +825,6 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
     call exch_vars%reset_iterator()
     n = 1
 
-    ! if (.not.(this%south_boundary)) call MPI_Win_Start(this%south_neighbor_grp,0,this%north_3d_win)
-    ! if (.not.(this%north_boundary)) call MPI_Win_Start(this%north_neighbor_grp,0,this%south_3d_win)
-    ! if (.not.(this%west_boundary)) call MPI_Win_Start(this%west_neighbor_grp,0,this%east_3d_win)
-    ! if (.not.(this%east_boundary)) call MPI_Win_Start(this%east_neighbor_grp,0,this%west_3d_win)
-    ! call MPI_Win_fence(0,this%south_3d_win)
-    ! call MPI_Win_fence(0,this%north_3d_win)
-    ! call MPI_Win_fence(0,this%west_3d_win)
-    ! call MPI_Win_fence(0,this%east_3d_win)
-    
     ! Now iterate through the dictionary as long as there are more elements present
     if (.not.(exch_v_only)) then
         do while (adv_vars%has_more_elements())
@@ -792,28 +864,22 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
         endif
     enddo
 
-    ! if (.not.(this%south_boundary)) call MPI_Win_Complete(this%north_3d_win)
-    ! if (.not.(this%north_boundary)) call MPI_Win_Complete(this%south_3d_win)
-    ! if (.not.(this%east_boundary)) call MPI_Win_Complete(this%west_3d_win)
-    ! if (.not.(this%west_boundary)) call MPI_Win_Complete(this%east_3d_win)
-    ! call MPI_Win_fence(0,this%south_3d_win)
-    ! call MPI_Win_fence(0,this%north_3d_win)
-    ! call MPI_Win_fence(0,this%west_3d_win)
-    ! call MPI_Win_fence(0,this%east_3d_win)
     if (.not.(this%south_boundary)) then
 #ifdef CRAY_PE        
         !DIR$ PGAS DEFER_SYNC
         this%north_batch_in_3d(:,:,:,:)[this%south_neighbor] = this%south_buffer_3d(:,:,:,:)
 #else
-        !indx = size(this%south_buffer_3d,1)
-        !this%north_batch_in_3d((this%south_neighbor-this%halo_rank),:,:,:,:) = this%south_buffer_3d
-
-        !call MPI_Win_Start(this%south_neighbor_grp,0,this%north_3d_win)
-        !call MPI_Put(this%south_buffer_3d, size(this%south_buffer_3d), &
-        !    MPI_REAL, this%south_neighbor, disp, size(this%south_buffer_3d), MPI_REAL, this%north_3d_win)
-        !call MPI_Put(this%south_buffer_3d, msg_size, &
-        !    this%N_3d_win_halo_type, this%south_neighbor, disp, msg_size, this%N_3d_win_halo_type, this%north_3d_win)
-        !call MPI_Win_Complete(this%north_3d_win)
+        if (this%south_shared) then
+            ! Direct array access for shared memory
+            this%north_batch_in_3d = this%south_buffer_3d
+        else
+            ! Use post-start-complete-wait for distributed memory
+            call MPI_Win_start(this%south_neighbor_grp, 0, this%north_3d_win)
+            call MPI_Put(this%south_buffer_3d, msg_size, &
+                this%N_3d_win_halo_type, this%south_neighbor, disp, msg_size, &
+                this%N_3d_win_halo_type, this%north_3d_win)
+            call MPI_Win_complete(this%north_3d_win)
+        endif
 #endif        
     endif
 
@@ -822,13 +888,17 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
         !DIR$ PGAS DEFER_SYNC
         this%south_batch_in_3d(:,:,:,:)[this%north_neighbor] = this%north_buffer_3d(:,:,:,:)
 #else
-        !call MPI_Win_Start(this%north_neighbor_grp,0,this%south_3d_win)
-        !call MPI_Put(this%north_buffer_3d, size(this%north_buffer_3d), &
-        !    MPI_REAL, this%north_neighbor, disp, size(this%north_buffer_3d), MPI_REAL, this%south_3d_win)
-        !call MPI_Put(this%north_buffer_3d, msg_size, &
-        !    this%S_3d_win_halo_type, this%north_neighbor, disp, msg_size, this%S_3d_win_halo_type, this%south_3d_win)
-        !call MPI_Win_Complete(this%south_3d_win)
-
+        if (this%north_shared) then
+            ! Direct array access for shared memory
+            this%south_batch_in_3d = this%north_buffer_3d
+        else
+            ! Use post-start-complete-wait for distributed memory
+            call MPI_Win_start(this%north_neighbor_grp, 0, this%south_3d_win)
+            call MPI_Put(this%north_buffer_3d, msg_size, &
+                this%S_3d_win_halo_type, this%north_neighbor, disp, msg_size, &
+                this%S_3d_win_halo_type, this%south_3d_win)
+            call MPI_Win_complete(this%south_3d_win)
+        endif
 #endif
     endif
 
@@ -837,12 +907,17 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
         !DIR$ PGAS DEFER_SYNC
         this%west_batch_in_3d(:,:,:,:)[this%east_neighbor] = this%east_buffer_3d(:,:,:,:)
 #else
-        !call MPI_Win_Start(this%east_neighbor_grp,0,this%west_3d_win)
-        !call MPI_Put(this%east_buffer_3d, size(this%east_buffer_3d), &
-        !    MPI_REAL, this%east_neighbor, disp, size(this%east_buffer_3d), MPI_REAL, this%west_3d_win)
-        !call MPI_Put(this%east_buffer_3d, msg_size, &
-        !    this%EW_3d_win_halo_type, this%east_neighbor, disp, msg_size, this%EW_3d_win_halo_type, this%west_3d_win)
-        !call MPI_Win_Complete(this%west_3d_win)
+        if (this%east_shared) then
+            ! Direct array access for shared memory
+            this%west_batch_in_3d = this%east_buffer_3d
+        else
+            ! Use post-start-complete-wait for distributed memory
+            call MPI_Win_start(this%east_neighbor_grp, 0, this%west_3d_win)
+            call MPI_Put(this%east_buffer_3d, msg_size, &
+                this%EW_3d_win_halo_type, this%east_neighbor, disp, msg_size, &
+                this%EW_3d_win_halo_type, this%west_3d_win)
+            call MPI_Win_complete(this%west_3d_win)
+        endif
 #endif  
     endif
 
@@ -851,12 +926,17 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
         !DIR$ PGAS DEFER_SYNC
         this%east_batch_in_3d(:,:,:,:)[this%west_neighbor] = this%west_buffer_3d(:,:,:,:)
 #else
-        !call MPI_Win_Start(this%west_neighbor_grp,0,this%east_3d_win)
-        !call MPI_Put(this%west_buffer_3d, size(this%west_buffer_3d), &
-        !    MPI_REAL, this%west_neighbor, disp, size(this%west_buffer_3d), MPI_REAL, this%east_3d_win)
-        !call MPI_Put(this%west_buffer_3d, msg_size, &
-        !    this%EW_3d_win_halo_type, this%west_neighbor, disp, msg_size, this%EW_3d_win_halo_type, this%east_3d_win)
-        !call MPI_Win_Complete(this%east_3d_win)
+        if (this%west_shared) then
+            ! Direct array access for shared memory
+            this%east_batch_in_3d = this%west_buffer_3d
+        else
+            ! Use post-start-complete-wait for distributed memory
+            call MPI_Win_start(this%west_neighbor_grp, 0, this%east_3d_win)
+            call MPI_Put(this%west_buffer_3d, msg_size, &
+                this%EW_3d_win_halo_type, this%west_neighbor, disp, msg_size, &
+                this%EW_3d_win_halo_type, this%east_3d_win)
+            call MPI_Win_complete(this%east_3d_win)
+        endif
 #endif        
     endif
 
@@ -882,22 +962,34 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars,exch_var_only,
     sync images( this%neighbors )
 #else
 
-    ! if (.not.(this%north_boundary)) call MPI_Win_flush_all(this%north_3d_win)
-
-    if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_3d_win)
-    if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_3d_win)
-    if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_3d_win)
-    if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_3d_win)
-
-    ! if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_3d_win)
-    ! if (.not.(this%west_boundary)) call MPI_Win_Wait(this%west_3d_win)
-    ! if (.not.(this%east_boundary)) call MPI_Win_Wait(this%east_3d_win)
-
-    ! if (.not.(this%north_boundary)) call MPI_Win_flush_all(this%north_3d_win)
-
-    ! call MPI_Win_sync(this%south_3d_win)
-    ! call MPI_Win_sync(this%west_3d_win)
-    ! call MPI_Win_sync(this%east_3d_win)
+    if (.not.(this%north_boundary)) then
+        if (this%north_shared) then
+            call MPI_Win_fence(0, this%north_3d_win)
+        else
+            call MPI_Win_wait(this%north_3d_win)
+        endif
+    endif
+    if (.not.(this%south_boundary)) then
+        if (this%south_shared) then
+            call MPI_Win_fence(0, this%south_3d_win)
+        else
+            call MPI_Win_wait(this%south_3d_win)
+        endif
+    endif
+    if (.not.(this%east_boundary)) then
+        if (this%east_shared) then
+            call MPI_Win_fence(0, this%east_3d_win)
+        else
+            call MPI_Win_wait(this%east_3d_win)
+        endif
+    endif
+    if (.not.(this%west_boundary)) then
+        if (this%west_shared) then
+            call MPI_Win_fence(0, this%west_3d_win)
+        else
+            call MPI_Win_wait(this%west_3d_win)
+        endif
+    endif
 #endif
 
     if (present(wait_timer)) call wait_timer%stop()
@@ -942,10 +1034,18 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars,exch_var_only,
     enddo
 
 #ifndef CRAY_PE
-    ! if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp,0,this%north_3d_win)
-    ! if (.not.(this%south_boundary)) call MPI_Win_Post(this%south_neighbor_grp,MPI_MODE_NOSTORE,this%south_3d_win)
-    ! if (.not.(this%west_boundary)) call MPI_Win_Post(this%west_neighbor_grp,MPI_MODE_NOSTORE,this%west_3d_win)
-    ! if (.not.(this%east_boundary)) call MPI_Win_Post(this%east_neighbor_grp,MPI_MODE_NOSTORE,this%east_3d_win)
+    if (.not.(this%north_boundary) .and. .not.this%north_shared) then
+        call MPI_Win_post(this%north_neighbor_grp, 0, this%north_3d_win)
+    endif
+    if (.not.(this%south_boundary) .and. .not.this%south_shared) then
+        call MPI_Win_post(this%south_neighbor_grp, 0, this%south_3d_win)
+    endif
+    if (.not.(this%east_boundary) .and. .not.this%east_shared) then
+        call MPI_Win_post(this%east_neighbor_grp, 0, this%east_3d_win)
+    endif
+    if (.not.(this%west_boundary) .and. .not.this%west_shared) then
+        call MPI_Win_post(this%west_neighbor_grp, 0, this%west_3d_win)
+    endif
 #endif
 
 end subroutine halo_3d_retrieve_batch
@@ -1179,6 +1279,7 @@ module subroutine put_south(this,var,do_dqdt)
   if (present(do_dqdt)) dqdt=do_dqdt
   
   offs=var%ystag
+  
   disp = 0
   msg_size = 1
   if (var%two_d) then
@@ -1790,5 +1891,62 @@ module subroutine retrieve_southeast_halo(this,var,do_dqdt)
       endif
   endif
 end subroutine
+
+!> -------------------------------
+!! Detect if neighbors are on shared memory hardware
+!!
+!! -------------------------------
+module subroutine detect_shared_memory(this, comms)
+    class(halo_t), intent(inout) :: this
+    type(MPI_comm), intent(in) :: comms
+    
+    integer :: ierr, shared_comm, shared_size, shared_rank
+    integer :: neighbor_shared_rank, neighbor_rank
+    
+    ! Create communicator for processes that can create shared memory
+    call MPI_Comm_split_type(comms, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, shared_comm, ierr)
+    
+    ! Get rank and size in shared memory communicator
+    call MPI_Comm_rank(shared_comm, shared_rank, ierr)
+    call MPI_Comm_size(shared_comm, shared_size, ierr)
+    
+    ! Initialize all shared flags to false
+    this%north_shared = .false.
+    this%south_shared = .false.
+    this%east_shared = .false.
+    this%west_shared = .false.
+    
+    ! Check if each neighbor is in same shared memory space
+    if (.not. this%north_boundary) then
+        neighbor_rank = this%north_neighbor
+        call MPI_Group_translate_ranks(this%north_neighbor_grp, 1, [neighbor_rank], shared_comm, neighbor_shared_rank, ierr)
+        this%north_shared = (neighbor_shared_rank /= MPI_UNDEFINED)
+    endif
+    
+    if (.not. this%south_boundary) then
+        neighbor_rank = this%south_neighbor
+        call MPI_Group_translate_ranks(this%south_neighbor_grp, 1, [neighbor_rank], shared_comm, neighbor_shared_rank, ierr)
+        this%south_shared = (neighbor_shared_rank /= MPI_UNDEFINED)
+    endif
+    
+    if (.not. this%east_boundary) then
+        neighbor_rank = this%east_neighbor
+        call MPI_Group_translate_ranks(this%east_neighbor_grp, 1, [neighbor_rank], shared_comm, neighbor_shared_rank, ierr)
+        this%east_shared = (neighbor_shared_rank /= MPI_UNDEFINED)
+    endif
+    
+    if (.not. this%west_boundary) then
+        neighbor_rank = this%west_neighbor
+        call MPI_Group_translate_ranks(this%west_neighbor_grp, 1, [neighbor_rank], shared_comm, neighbor_shared_rank, ierr)
+        this%west_shared = (neighbor_shared_rank /= MPI_UNDEFINED)
+    endif
+    
+    ! Free the shared memory communicator
+    call MPI_Comm_free(shared_comm, ierr)
+    
+    ! Set whether to use shared windows based on if any neighbors are shared
+    this%use_shared_windows = this%north_shared .or. this%south_shared .or. &
+                             this%east_shared .or. this%west_shared
+end subroutine detect_shared_memory
 
 end submodule

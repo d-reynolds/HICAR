@@ -101,6 +101,13 @@ module halo_interface
                 ims,ime, jms,jme, kms,kme, & ! for the memory in these arrays (m)
                 its,ite, jts,jte, kts,kte ! for the data tile to process   (t)
 
+    ! Flags indicating if shared memory communication is used for each direction
+    logical :: north_shared = .false.
+    logical :: south_shared = .false.
+    logical :: east_shared = .false.
+    logical :: west_shared = .false.
+    logical :: use_shared_windows = .false.
+
     contains
         procedure, public :: init
         procedure, public :: exch_var
