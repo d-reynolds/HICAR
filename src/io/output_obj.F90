@@ -107,7 +107,7 @@ contains
         temp_file = 'tmp_outfiles'//trim(str(PE_RANK_GLOBAL))//'.txt'
         cmd_str = 'ls '//trim(this%base_out_file_name)//'*.nc > '//trim(temp_file)
 
-        call system( cmd_str, status=error )
+        call EXECUTE_COMMAND_LINE( cmd_str, EXITSTAT=error )
 
         if (error /= 0) then
             return

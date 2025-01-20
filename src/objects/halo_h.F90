@@ -32,8 +32,7 @@ module halo_interface
         type(MPI_win)     :: east_2d_win
         type(MPI_win)     :: west_2d_win
 
-        type(MPI_Datatype) :: N_3d_win_halo_type
-        type(MPI_Datatype) :: S_3d_win_halo_type
+        type(MPI_Datatype) :: NS_3d_win_halo_type
         type(MPI_Datatype) :: EW_3d_win_halo_type
 
         type(MPI_Datatype) :: NS_2d_win_halo_type

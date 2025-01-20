@@ -11,7 +11,7 @@ module wind
 
     use linear_theory_winds, only : linear_perturb, setup_linwinds
     use wind_iterative,      only : calc_iter_winds, init_iter_winds
-    use wind_iterative_old,  only : calc_iter_winds_old, init_iter_winds_old
+!    use wind_iterative_old,  only : calc_iter_winds_old, init_iter_winds_old
 
     !use mod_blocking,        only : update_froude_number, initialize_blocking
     use data_structures

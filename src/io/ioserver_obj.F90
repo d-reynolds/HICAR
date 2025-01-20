@@ -26,7 +26,7 @@ contains
 
     module subroutine init(this, options, nest_indx)
         class(ioserver_t),  intent(inout)  :: this
-        type(options_t),    intent(in)     :: options(:)
+        type(options_t), allocatable, intent(in)     :: options(:)
         integer,            intent(in)     :: nest_indx
 
         type(variable_t) :: var
@@ -127,7 +127,7 @@ contains
         integer :: ierr, i_start, i_end, j_start, j_end, counter
 
         integer, allocatable, dimension(:) :: parent_ims, parent_ime, parent_jms, parent_jme
-        integer, allocatable, dimension(:) :: child_isr, child_ier, child_jsr, child_jer, block_lengths, displacements, indices
+        integer, allocatable, dimension(:) :: child_isr, child_ier, child_jsr, child_jer, block_lengths, displacements
         real,    allocatable, dimension(:,:) :: mask
         !Determine our rank in the this%IO_Comms communicator
         call MPI_Comm_rank(this%IO_Comms, my_rank, ierr)
@@ -503,7 +503,7 @@ contains
 
     module subroutine gather_forcing(this, child_ioservers)
         class(ioserver_t), intent(inout) :: this
-        type(ioserver_t), intent(in)    :: child_ioservers(:)
+        class(ioserver_t), intent(in)    :: child_ioservers(:)
 
         integer :: i, nx, ny, n, n_servers, ierr, msg_size, real_size, my_rank
         integer, allocatable :: send_msg_size_alltoall(:), buff_msg_size_alltoall(:), disp_alltoall(:)
@@ -572,10 +572,8 @@ contains
                     buff_msg_size_alltoall(n) = 0
                 endif
             enddo
-
             call MPI_Alltoallw(gather_buffer,  send_msg_size_alltoall, disp_alltoall, this%send_nest_types(i,:), &
                             forcing_buffer, buff_msg_size_alltoall, disp_alltoall, this%buffer_nest_types(i,:), this%IO_Comms)
-
             ! This call will scatter the forcing fields to the ioclients of the nest child
             if (this%io_time >= child_ioservers(i)%io_time - small_time_delta .and. .not.(child_ioservers(i)%ended)) call child_ioservers(i)%scatter_forcing(forcing_buffer)
         enddo

@@ -31,7 +31,7 @@ program icar
     use time_delta_object,  only : time_delta_t
     use icar_constants
     use wind_iterative,     only : finalize_iter_winds
-    use wind_iterative_old, only : finalize_iter_winds_old
+!    use wind_iterative_old, only : finalize_iter_winds_old
     use ioserver_interface, only : ioserver_t
     use ioclient_interface, only : ioclient_t
     use io_routines,        only : io_write

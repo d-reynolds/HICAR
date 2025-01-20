@@ -1663,7 +1663,6 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        type(pbl_options_type)::pbl_options
         integer :: name_unit, rc
         logical :: print_info, gennml
 
@@ -1840,7 +1839,6 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        type(lsm_options_type) :: lsm_options
         integer :: name_unit, rc
         logical :: print_info, gennml
 

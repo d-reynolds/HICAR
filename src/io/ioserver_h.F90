@@ -127,7 +127,7 @@ module ioserver_interface
         module subroutine init(this, options, nest_indx)
             implicit none
             class(ioserver_t),   intent(inout) :: this
-            type(options_t),     intent(in)    :: options(:)
+            type(options_t), allocatable, intent(in)    :: options(:)
             integer,             intent(in)    :: nest_indx
 
         end subroutine
@@ -173,7 +173,7 @@ module ioserver_interface
         !!----------------------------------------------------------
         module subroutine gather_forcing(this, child_ioservers)
             class(ioserver_t), intent(inout) :: this
-            type(ioserver_t), intent(in) :: child_ioservers(:)
+            class(ioserver_t), intent(in) :: child_ioservers(:)
         end subroutine
 
         !>----------------------------------------------------------

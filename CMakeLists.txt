@@ -56,8 +56,7 @@ FILE(GLOB_RECURSE SOURCE_FILES  ${PROJECT_SOURCE_DIR}/src/*.F90)
 FILE(GLOB_RECURSE CAF_TESTS  ${PROJECT_SOURCE_DIR}/src/tests/*)
 list(REMOVE_ITEM SOURCE_FILES ${CAF_TESTS})
 
-#list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative.F90)
-#list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_old.F90)
+list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_old.F90)
 
 #######################################
 
@@ -193,7 +192,7 @@ if(MODE STREQUAL "debug")
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
 	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h noomp -c  -g -eZ ) #-R cpbs --cray-print-opts
+		target_compile_options(HICAR PUBLIC -h noomp -O0) #-R cpbs --cray-print-opts
 	endif()
 elseif(MODE STREQUAL "debugslow")
 	set(CMAKE_BUILD_TYPE Debug)
