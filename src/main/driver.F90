@@ -41,7 +41,8 @@ program icar
     implicit none
 
     type(options_t), allocatable :: options(:)
-    type(domain_t), allocatable  :: domain(:)
+    type(domain_t) :: domain(kMAX_NESTS) ! Currently hard-coded, could be dynamic, but compile time on 
+                                         ! the Cray compiler is very slow for dynamically allocating large, derrived type arrays
     type(boundary_t), allocatable :: boundary(:)
     type(ioserver_t), allocatable  :: ioserver(:)
     type(ioclient_t), allocatable  :: ioclient(:)
@@ -98,8 +99,8 @@ program icar
     if (STD_OUT_PE) write(*,'(A /)') "--------------------------------------------------------"
 
     n_nests = options(1)%general%nests
-    ! Allocate the multiple domains, boundarys, and timers
-    allocate(domain(n_nests))
+    ! !Allocate the multiple domains, boundarys, and timers
+    !allocate(domain(2))
     allocate(boundary(n_nests))
     allocate(ioclient(n_nests))
     allocate(ioserver(n_nests))
@@ -167,7 +168,7 @@ program icar
         if (STD_OUT_PE) write(*,'(A)')   "Initialization complete, beginning physics integration"
         if (STD_OUT_PE) write(*,'(A)')   "------------------------------------------------------"
 
-        do while (ANY(domain%ended .eqv. .False.))
+        do while (ANY(domain(1:n_nests)%ended .eqv. .False.))
             do i = 1, n_nests
 
                 ! -----------------------------------------------------------
@@ -429,7 +430,7 @@ program icar
         !  End IO-Side Initialization
         !--------------------------------------------------------
 
-        do while (ANY(ioserver(:)%ended .eqv. .False.))
+        do while (ANY(ioserver(1:n_nests)%ended .eqv. .False.))
             do i = 1, n_nests
 
                 ! If we are a child nest, not at the end of our run time...

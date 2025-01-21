@@ -143,7 +143,7 @@ contains
         ! Assign all images in the IO team to the IO_comms MPI communicator. Use image indexing within initial team to get indexing of global MPI ranks
         CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, splitComm, ierr )
 
-        do n = 1, size(domain)
+        do n = 1, size(ioclient)
             select case (exec_team)
             case (kCOMPUTE_TEAM)
                     CALL MPI_Comm_dup( splitComm, domain(n)%compute_comms, ierr )

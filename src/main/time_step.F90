@@ -166,6 +166,7 @@ contains
             last_time = last_time + 5.0
             ! this used to just use the nice $ (or advance="NO") trick, but at least with some mpi implementations, it buffers this output until it crashes
             write(*,"(A2,f5.1,A,A)") "  ", max(0.0, time_percent)," %  dt=",trim(dt%as_string())
+            flush(output_unit)
         endif
 
     end subroutine print_progress
@@ -228,7 +229,7 @@ contains
             write(*,*) 'time_step determining jaco: ',domain%jacobian(max_i,max_k,max_j)
             write(*,*) 'time_step determining dzdx: ',domain%dzdx%data_3d(max_i,max_k,max_j)
             write(*,*) 'time_step determining dzdy: ',domain%dzdy%data_3d(max_i,max_k,max_j)
-
+            flush(output_unit)
         endif
         ! Set dt to the outcome of reduce
         call dt%set(seconds=seconds_out)
