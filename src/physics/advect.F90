@@ -155,7 +155,7 @@ contains
                 enddo
             enddo
         else if (horder==3) then
-            coef = (1./12)
+            coef = (1./12) * t_factor
             if (vorder==3) then
                 do j = j_s, j_e+1
                     do k = kms, kme
@@ -215,10 +215,10 @@ contains
                     do i = i_s,i_e
                         u = W_m(i,kms,j)
                         !Do simple upwind for the cells who's stencil does not allow higher-order
-                        flux_z(i,kms+1,j) = ((u + ABS(u)) * q(i,kms,j) + (u - ABS(u)) * q(i,kms+1,j))  * 0.5  
+                        flux_z(i,kms+1,j) = ((u + ABS(u)) * q(i,kms,j) + (u - ABS(u)) * q(i,kms+1,j))  * 0.5  * t_factor
                         
                         u = W_m(i,kme-1,j)
-                        flux_z(i,kme,j) = ((u + ABS(u)) * q(i,kme-1,j) + (u - ABS(u)) * q(i,kme,j))  * 0.5  
+                        flux_z(i,kme,j) = ((u + ABS(u)) * q(i,kme-1,j) + (u - ABS(u)) * q(i,kme,j))  * 0.5  * t_factor
                     enddo
                 enddo
             else
@@ -286,7 +286,7 @@ contains
                    enddo
                enddo
             enddo
-        else if (vorder==3 .and. (.not.(horder==3))) then
+        else if (vorder==3 .and. .not.(horder==3)) then
             coef = (1./12)*t_factor
             do concurrent (j = j_s:j_e, k = kms+2:kme-1, i = i_s:i_e)
                 u = W_m(i,k-1,j)
@@ -407,7 +407,7 @@ contains
                             tmp = 7*(q0+qin1) - (qi1+qin2)
                             tmp = u*tmp
                             !Application of 3rd order diffusive terms
-                            tmp = tmp - abs_u * (3*(q0-qin1) - (q1-qin2))
+                            tmp = tmp - abs_u * (3*(q0-qin1) - (qi1-qin2))
                             !Calculation of Upwind fluxes
                             flux_x_up(i,k,j) = ((u + abs_u) * qin1 + (u - abs_u) * q0)  * 0.5 * 0.5 ! additional "0.5" since we only want half of the upwind step
                             !Application of Upwind fluxes to higher order fluxes -- needed for flux correction step
@@ -543,8 +543,18 @@ contains
                 flux_y(i,k,j) = tmp*coef
             enddo
         endif
-        
-        if (vorder==3 .and. (.not.(horder==3))) then
+
+        if (vorder==1) then
+            do j = j_s,j_e
+               do k = kms+1,kme
+                   do i = i_s,i_e
+                       flux_z(i,k,j) = ((W_m(i,k-1,j) + ABS(W_m(i,k-1,j))) * q(i,k-1,j) + &
+                                    (W_m(i,k-1,j) - ABS(W_m(i,k-1,j))) * q(i,k,j))  * 0.5
+                   enddo
+               enddo
+            enddo
+        else if (vorder==3 .and. .not.(horder==3)) then
+        !else if (vorder==3) then
             coef = (1./12)
             do concurrent (j = j_s:j_e, k = kms+2:kme-1, i = i_s:i_e)
                 u = W_m(i,k-1,j)
@@ -729,45 +739,6 @@ contains
         
     end subroutine adv_fluxcorr_advect3d
 
-
-    ! subroutine adv_opt(qfluxes,qold,U_m,V_m,W_m,denom,dz)
-    !     implicit none
-    !     real, dimension(ims:ime,  kms:kme,jms:jme),  intent(inout)   :: qfluxes
-    !     real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: qold
-    !     real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: dz, denom
-    !     real, dimension(i_s:i_e+1,kms:kme,j_s:j_e),  intent(in)      :: U_m
-    !     real, dimension(i_s:i_e,  kms:kme,j_s:j_e+1),intent(in)      :: V_m
-    !     real, dimension(i_s:i_e,  kms:kme,j_s:j_e),intent(in)      :: W_m
-    !     ! interal parameters
-    !     real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1)   :: flux_x, flux_x_up
-    !     real, dimension(i_s:i_e+1,  kms:kme,j_s:j_e+1) :: flux_y, flux_y_up
-    !     real, dimension(i_s:i_e+1,  kms:kme+1,j_s:j_e+1) :: flux_z, flux_z_up
-
-    !     real    :: start_time
-    !     integer :: i, k, j
-
-    !     !Loop over all tile elements -- this loop is only run through once
-    !     do j = jts,jte
-    !         do k = kms,kme
-    !             do i = its,ite
-    !                 neigh_q = qold(i-1:i+1,k-1:k+1,j-1:j+1)
-    !                 !pull all values from qold that we will need for computation
-
-    !                 !compute first round of fluxes
-
-    !                 !apply first round of fluxes to get array of temporary concentrations
-
-    !                 !
-
-
-    !                 ! perform advection, from difference terms
-    !                 qfluxes(i,k,j)  = qold(i,k,j)  - &
-    !                               ((flux_x(i+1,k,j) - flux_x(i,k,j))  + &
-    !                                (flux_y(i,k,j+1) - flux_y(i,k,j))  + &
-    !                                (flux_z(i,k+1,j) - flux_z(i,k,j))  / &
-    !                                 dz(i,k,j))*denom(i,k,j)
-    !             enddo
-    !         enddo
 
     ! subroutine test_divergence(dz)
     !     implicit none

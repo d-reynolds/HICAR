@@ -2551,7 +2551,7 @@ contains
         ny_global = size(temporary_data,2)
         nz_global = options%domain%nz
         
-        adv_order = max(options%adv%h_order,options%adv%v_order)
+        adv_order = options%adv%h_order
         
         !If we are using the monotonic flux limiter, it is necesarry to calculate the fluxes one location deep into the
         !halo. Thus, we need one extra cell in each halo direction to support the finite difference stencil
