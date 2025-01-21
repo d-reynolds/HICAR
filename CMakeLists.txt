@@ -192,7 +192,7 @@ if(MODE STREQUAL "debug")
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
 	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h noomp -O0) #-R cpbs --cray-print-opts
+		target_compile_options(HICAR PUBLIC -h noomp -c -eI -O0) #-R cpbs --cray-print-opts
 	endif()
 elseif(MODE STREQUAL "debugslow")
 	set(CMAKE_BUILD_TYPE Debug)
@@ -223,7 +223,7 @@ elseif(MODE STREQUAL "release")
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h noomp -hfp3 -O2 -c -eI)
+		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -c -eI)
 		set(LINK "-h noomp")
 	endif()
 endif()
