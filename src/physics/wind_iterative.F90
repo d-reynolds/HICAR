@@ -22,7 +22,6 @@ module wind_iterative
 #include <petsc/finclude/petscdmda.h>
 
     use icar_constants,    only : STD_OUT_PE
-
     use domain_interface,  only : domain_t
     !use options_interface, only : options_t
     !use grid_interface,    only : grid_t
@@ -117,18 +116,14 @@ contains
         if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iter,' iterations'
         
         !Subset global solution x to local grid so that we can access ghost-points
-        call DMGlobalToLocalBegin(da,x,INSERT_VALUES,localX,ierr)
-        call DMGlobalToLocalEnd(da,x,INSERT_VALUES,localX,ierr)
+        call DMGlobalToLocal(da,x,INSERT_VALUES,localX,ierr)
 
         call DMDAVecGetArrayF90(da,localX,lambda, ierr)
         call calc_updated_winds(domain, lambda, update, adv_den)
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
-
         !Exchange u and v, since the outer points are not updated in above function
         call domain%halo%exch_var(domain%u,do_dqdt=update)
         call domain%halo%exch_var(domain%v,do_dqdt=update)
-         
-        !call finalize_iter_winds()
                 
     end subroutine calc_iter_winds
     
@@ -144,29 +139,11 @@ contains
         real, allocatable, dimension(:,:,:)    :: u_dlambdz, v_dlambdz, u_temp, v_temp, lambda_too, rho, rho_u, rho_v
         integer k, i_start, i_end, j_start, j_end !i_s, i_e, k_s, k_e, j_s, j_e, ids, ide, jds, jde
                 
-        !i_s = domain%its-1
-        !i_e = domain%ite+1
-        !k_s = domain%kts  
-        !k_e = domain%kte  
-        !j_s = domain%jts-1
-        !j_e = domain%jte+1
 
-
-        !i_s+hs, unless we are on global boundary, then i_s
-        i_start = i_s+1
-        if (i_s==domain%grid%ids) i_start = i_s
-        
-        !i_e, unless we are on global boundary, then i_e+1
-        i_end = i_e
-        if (i_e==domain%grid%ide) i_end = i_e+1
-        
-        !j_s+hs, unless we are on global boundary, then j_s
-        j_start = j_s+1
-        if (j_s==domain%grid%jds) j_start = j_s
-        
-        !j_e, unless we are on global boundary, then j_e+1
-        j_end = j_e
-        if (j_e==domain%grid%jde) j_end = j_e+1
+        i_start = i_s
+        i_end   = i_e+1
+        j_start = j_s
+        j_end   = j_e+1
 
         allocate(u_temp(i_start:i_end,k_s-1:k_e+1,j_s:j_e))
         allocate(v_temp(i_s:i_e,k_s-1:k_e+1,j_start:j_end))
@@ -525,14 +502,6 @@ contains
         type(domain_t), intent(in) :: domain
         
         real, allocatable, dimension(:,:,:) :: mixed_denom
-        !integer i_s, i_e, k_s, k_e, j_s, j_e
-        
-        !i_s = domain%its-1
-        !i_e = domain%ite+1
-        !k_s = domain%kts  
-        !k_e = domain%kte  
-        !j_s = domain%jts-1
-        !j_e = domain%jte+1
         
         allocate(A_coef(i_s:i_e,k_s:k_e,j_s:j_e))
         allocate(B_coef(i_s:i_e,k_s:k_e,j_s:j_e))
@@ -573,73 +542,86 @@ contains
         !This function sets A, B, annd C coefficients
         call update_coefs(domain)
                 
-        D_coef(i_s:i_e-1,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s+1:i_e,k_s:k_e,j_s:j_e) + &
-            domain%jacobian(i_s:i_e-1,k_s:k_e,j_s:j_e))/(2*domain%dx**2) + &
-            (sigma(i_s:i_e-1,:,:)**2 - 1)*(dzdx(i_s:i_e-1,:,:)+domain%dzdx_u(i_s+1:i_e,:,j_s:j_e))/&
-            mixed_denom(i_s:i_e-1,k_s:k_e,j_s:j_e)
-        E_coef(i_s+1:i_e,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s+1:i_e,k_s:k_e,j_s:j_e) + &
-            domain%jacobian(i_s:i_e-1,k_s:k_e,j_s:j_e))/(2*domain%dx**2) - &
-            (sigma(i_s+1:i_e,:,:)**2 - 1)*(dzdx(i_s+1:i_e,:,:)+domain%dzdx_u(i_s+1:i_e,:,j_s:j_e))/&
-            mixed_denom(i_s+1:i_e,k_s:k_e,j_s:j_e)
-        F_coef(i_s:i_e,k_s:k_e,j_s:j_e-1) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s+1:j_e) + &
-            domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e-1))/(2*domain%dx**2) + &
-            (sigma(:,:,j_s:j_e-1)**2 - 1)*(dzdy(:,:,j_s:j_e-1)+domain%dzdy_v(i_s:i_e,:,j_s+1:j_e))/&
-            mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e-1)
-        G_coef(i_s:i_e,k_s:k_e,j_s+1:j_e) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s+1:j_e) + &
-            domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e-1))/(2*domain%dx**2) - &
-            (sigma(:,:,j_s+1:j_e)**2 - 1)*(dzdy(:,:,j_s+1:j_e)+domain%dzdy_v(i_s:i_e,:,j_s+1:j_e))/&
-            mixed_denom(i_s:i_e,k_s:k_e,j_s+1:j_e)
+        D_coef(i_s:i_e,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s+1:i_e+1,k_s:k_e,j_s:j_e) + &
+            domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e))/(2*domain%dx**2) + &
+            (sigma(i_s:i_e,:,:)**2 - 1)*(dzdx(i_s:i_e,:,:)+domain%dzdx_u(i_s+1:i_e+1,:,j_s:j_e))/&
+            mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e)
+        E_coef(i_s:i_e,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e) + &
+            domain%jacobian(i_s-1:i_e-1,k_s:k_e,j_s:j_e))/(2*domain%dx**2) - &
+            (sigma(i_s:i_e,:,:)**2 - 1)*(dzdx(i_s:i_e,:,:)+domain%dzdx_u(i_s:i_e,:,j_s:j_e))/&
+            mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e)
+        F_coef(i_s:i_e,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s+1:j_e+1) + &
+            domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e))/(2*domain%dx**2) + &
+            (sigma(:,:,j_s:j_e)**2 - 1)*(dzdy(:,:,j_s:j_e)+domain%dzdy_v(i_s:i_e,:,j_s+1:j_e+1))/&
+            mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e)
+        G_coef(i_s:i_e,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e) + &
+            domain%jacobian(i_s:i_e,k_s:k_e,j_s-1:j_e-1))/(2*domain%dx**2) - &
+            (sigma(:,:,j_s:j_e)**2 - 1)*(dzdy(:,:,j_s:j_e)+domain%dzdy_v(i_s:i_e,:,j_s:j_e))/&
+            mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e)
 
-        D_coef(i_e,k_s:k_e,j_s:j_e) = D_coef(i_e-1,k_s:k_e,j_s:j_e)
-        E_coef(i_s,k_s:k_e,j_s:j_e) = E_coef(i_s+1,k_s:k_e,j_s:j_e)
-        F_coef(i_s:i_e,k_s:k_e,j_e) = F_coef(i_s:i_e,k_s:k_e,j_e-1)
-        G_coef(i_s:i_e,k_s:k_e,j_s) = G_coef(i_s:i_e,k_s:k_e,j_s+1)
 
-        H_coef(i_s:i_e-1,k_s:k_e-1,:) = &
-                -(sigma(i_s:i_e-1,k_s:k_e-1,:)**2)* &
-                (dzdx(i_s:i_e-1,k_s+1:k_e,:)+domain%dzdx_u(i_s+1:i_e,k_s:k_e-1,j_s:j_e))&
-                /mixed_denom(i_s:i_e-1,k_s:k_e-1,:)
-        I_coef(i_s+1:i_e,k_s:k_e-1,:) = &
-                (sigma(i_s+1:i_e,k_s:k_e-1,:)**2)* &
-                (dzdx(i_s+1:i_e,k_s+1:k_e,:)+&
-                domain%dzdx_u(i_s+1:i_e,k_s:k_e-1,j_s:j_e))/mixed_denom(i_s+1:i_e,k_s:k_e-1,:)
-        J_coef(i_s:i_e-1,k_s+1:k_e,:) = &
-                (dzdx(i_s:i_e-1,k_s:k_e-1,:)+domain%dzdx_u(i_s+1:i_e,k_s+1:k_e,j_s:j_e))&
-                /mixed_denom(i_s:i_e-1,k_s+1:k_e,:)
-        K_coef(i_s+1:i_e,k_s+1:k_e,:) = &
-                -(dzdx(i_s+1:i_e,k_s:k_e-1,:)+&
-                domain%dzdx_u(i_s+1:i_e,k_s+1:k_e,j_s:j_e))/mixed_denom(i_s+1:i_e,k_s+1:k_e,:)
+        H_coef(i_s:i_e,k_s:k_e-1,:) = &
+                -(sigma(i_s:i_e,k_s:k_e-1,:)**2)* &
+                (dzdx(i_s:i_e,k_s+1:k_e,:)+domain%dzdx_u(i_s+1:i_e+1,k_s:k_e-1,j_s:j_e))&
+                /mixed_denom(i_s:i_e,k_s:k_e-1,:)
+        I_coef(i_s:i_e,k_s:k_e-1,:) = &
+                (sigma(i_s:i_e,k_s:k_e-1,:)**2)* &
+                (dzdx(i_s:i_e,k_s+1:k_e,:)+&
+                domain%dzdx_u(i_s:i_e,k_s:k_e-1,j_s:j_e))/mixed_denom(i_s:i_e,k_s:k_e-1,:)
+        J_coef(i_s:i_e,k_s+1:k_e,:) = &
+                (dzdx(i_s:i_e,k_s:k_e-1,:)+domain%dzdx_u(i_s+1:i_e+1,k_s+1:k_e,j_s:j_e))&
+                /mixed_denom(i_s:i_e,k_s+1:k_e,:)
+        K_coef(i_s:i_e,k_s+1:k_e,:) = &
+                -(dzdx(i_s:i_e,k_s:k_e-1,:)+&
+                domain%dzdx_u(i_s:i_e,k_s+1:k_e,j_s:j_e))/mixed_denom(i_s:i_e,k_s+1:k_e,:)
 
-        L_coef(:,k_s:k_e-1,j_s:j_e-1) = &
-                -(sigma(:,k_s:k_e-1,j_s:j_e-1)**2)* &
-                (dzdy(:,k_s+1:k_e,j_s:j_e-1)+domain%dzdy_v(i_s:i_e,k_s:k_e-1,j_s+1:j_e))/mixed_denom(:,k_s:k_e-1,j_s:j_e-1)
-        M_coef(:,k_s:k_e-1,j_s+1:j_e) = &
-                (sigma(:,k_s:k_e-1,j_s+1:j_e)**2)* &
-                (dzdy(:,k_s+1:k_e,j_s+1:j_e)+domain%dzdy_v(i_s:i_e,k_s:k_e-1,j_s+1:j_e))/mixed_denom(:,k_s:k_e-1,j_s+1:j_e)
-        N_coef(:,k_s+1:k_e,j_s:j_e-1) = &
-                (dzdy(:,k_s:k_e-1,j_s:j_e-1)+domain%dzdy_v(i_s:i_e,k_s+1:k_e,j_s+1:j_e))/mixed_denom(:,k_s+1:k_e,j_s:j_e-1)
-        O_coef(:,k_s+1:k_e,j_s+1:j_e) = &
-                -(dzdy(:,k_s:k_e-1,j_s+1:j_e)+domain%dzdy_v(i_s:i_e,k_s+1:k_e,j_s+1:j_e))&
-                /mixed_denom(:,k_s+1:k_e,j_s+1:j_e)
+        L_coef(:,k_s:k_e-1,j_s:j_e) = &
+                -(sigma(:,k_s:k_e-1,j_s:j_e)**2)* &
+                (dzdy(:,k_s+1:k_e,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s:k_e-1,j_s+1:j_e+1))&
+                /mixed_denom(:,k_s:k_e-1,j_s:j_e)
+        M_coef(:,k_s:k_e-1,j_s:j_e) = &
+                (sigma(:,k_s:k_e-1,j_s:j_e)**2)* &
+                (dzdy(:,k_s+1:k_e,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s:k_e-1,j_s:j_e))&
+                /mixed_denom(:,k_s:k_e-1,j_s:j_e)
+        N_coef(:,k_s+1:k_e,j_s:j_e) = &
+                (dzdy(:,k_s:k_e-1,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s+1:k_e,j_s+1:j_e+1))&
+                /mixed_denom(:,k_s+1:k_e,j_s:j_e)
+        O_coef(:,k_s+1:k_e,j_s:j_e) = &
+                -(dzdy(:,k_s:k_e-1,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s+1:k_e,j_s:j_e))&
+                /mixed_denom(:,k_s+1:k_e,j_s:j_e)
 
-        J_coef(i_s:i_e-1,k_s,:) = (dzdx(i_s:i_e-1,k_s,:)+domain%dzdx_u(i_s+1:i_e,k_s,j_s:j_e))&
-                                    /mixed_denom(i_s:i_e-1,k_s,:)
-        K_coef(i_s+1:i_e,k_s,:) = -(dzdx(i_s+1:i_e,k_s,:)+domain%dzdx_u(i_s+1:i_e,k_s,j_s:j_e))&
-                                    /mixed_denom(i_s+1:i_e,k_s,:)
-        N_coef(:,k_s,j_s:j_e-1) = (dzdy(:,k_s,j_s:j_e-1)+domain%dzdy_v(i_s:i_e,k_s,j_s+1:j_e))&
-                                    /mixed_denom(:,k_s,j_s:j_e-1)
-        O_coef(:,k_s,j_s+1:j_e) = -(dzdy(:,k_s,j_s+1:j_e)+domain%dzdy_v(i_s:i_e,k_s,j_s+1:j_e))&
-                                    /mixed_denom(:,k_s,j_s+1:j_e)
+        J_coef(i_s:i_e,k_s,:) = (dzdx(i_s:i_e,k_s,:)+domain%dzdx_u(i_s+1:i_e+1,k_s,j_s:j_e))&
+                                    /mixed_denom(i_s:i_e,k_s,:)
+        K_coef(i_s:i_e,k_s,:) = -(dzdx(i_s:i_e,k_s,:)+domain%dzdx_u(i_s:i_e,k_s,j_s:j_e))&
+                                    /mixed_denom(i_s:i_e,k_s,:)
+        N_coef(:,k_s,j_s:j_e) = (dzdy(:,k_s,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s,j_s+1:j_e+1))&
+                                    /mixed_denom(:,k_s,j_s:j_e)
+        O_coef(:,k_s,j_s:j_e) = -(dzdy(:,k_s,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s,j_s:j_e))&
+                                    /mixed_denom(:,k_s,j_s:j_e)
+                            
+        if (domain%ims==domain%ids) then
+            E_coef(i_s,:,:) = E_coef(i_s+1,:,:)
+            I_coef(i_s,:,:) = I_coef(i_s+1,:,:)
+            K_coef(i_s,:,:) = K_coef(i_s+1,:,:)
+        endif
 
-        H_coef(i_e,:,:) = H_coef(i_e-1,:,:)
-        I_coef(i_s,:,:) = I_coef(i_s+1,:,:)
-        J_coef(i_e,:,:) = J_coef(i_e-1,:,:)
-        K_coef(i_s,:,:) = K_coef(i_s+1,:,:)
+        if (domain%ime==domain%ide) then
+            D_coef(i_e,:,:) = D_coef(i_e-1,:,:)
+            H_coef(i_e,:,:) = H_coef(i_e-1,:,:)
+            J_coef(i_e,:,:) = J_coef(i_e-1,:,:)
+        endif
 
-        L_coef(:,:,j_e) = L_coef(:,:,j_e-1)
-        M_coef(:,:,j_s) = M_coef(:,:,j_s+1)
-        N_coef(:,:,j_e) = N_coef(:,:,j_e-1)
-        O_coef(:,:,j_s) = O_coef(:,:,j_s+1)
+        if (domain%jms==domain%jds) then
+            G_coef(:,:,j_s) = G_coef(:,:,j_s+1)
+            M_coef(:,:,j_s) = M_coef(:,:,j_s+1)
+            O_coef(:,:,j_s) = O_coef(:,:,j_s+1)
+        endif
+
+        if (domain%jme==domain%jde) then
+            L_coef(:,:,j_e) = L_coef(:,:,j_e-1)
+            N_coef(:,:,j_e) = N_coef(:,:,j_e-1)
+            F_coef(:,:,j_e) = F_coef(:,:,j_e-1)
+        endif
 
     end subroutine initialize_coefs
     
@@ -649,15 +631,7 @@ contains
         implicit none
         type(domain_t), intent(in) :: domain        
         real, allocatable, dimension(:,:,:) :: mixed_denom
-        !integer i_s, i_e, k_s, k_e, j_s, j_e
-        
-        !i_s = domain%its-1
-        !i_e = domain%ite+1
-        !k_s = domain%kts  
-        !k_e = domain%kte  
-        !j_s = domain%jts-1
-        !j_e = domain%jte+1
-        
+                
         allocate(mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e))
         mixed_denom = 2*domain%dx*dz_if(:,k_s+1:k_e+1,:)*(sigma+sigma**2)
 
@@ -682,42 +656,61 @@ contains
                               dzdx(i_s:i_e,k_s,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s,j_s:j_e))) / &
                           ((sigma(:,k_s,:)+sigma(:,k_s,:)**2)*dz_if(:,k_s+1,:)**2)
                           
-        B_coef(i_s+1:i_e-1,:,:) = B_coef(i_s+1:i_e-1,:,:) - sigma(i_s+1:i_e-1,:,:)**2 * &
-                                    (domain%dzdx_u(i_s+2:i_e,:,j_s:j_e)-domain%dzdx_u(i_s+1:i_e-1,:,j_s:j_e))/(mixed_denom(i_s+1:i_e-1,:,:))
-                          
-        B_coef(:,:,j_s+1:j_e-1) = B_coef(:,:,j_s+1:j_e-1) - sigma(:,:,j_s+1:j_e-1)**2 * &
-                                    (domain%dzdy_v(i_s:i_e,:,j_s+2:j_e)-domain%dzdy_v(i_s:i_e,:,j_s+1:j_e-1))/(mixed_denom(:,:,j_s+1:j_e-1))
-                          
-        
-        C_coef(i_s+1:i_e-1,:,:) = C_coef(i_s+1:i_e-1,:,:) + &
-                                    (domain%dzdx_u(i_s+2:i_e,:,j_s:j_e)-domain%dzdx_u(i_s+1:i_e-1,:,j_s:j_e))/(mixed_denom(i_s+1:i_e-1,:,:))
-                          
-        C_coef(:,:,j_s+1:j_e-1) = C_coef(:,:,j_s+1:j_e-1) + &
-                                    (domain%dzdy_v(i_s:i_e,:,j_s+2:j_e)-domain%dzdy_v(i_s:i_e,:,j_s+1:j_e-1))/(mixed_denom(:,:,j_s+1:j_e-1))
+        B_coef = B_coef - sigma**2 * &
+                                    (domain%dzdx_u(i_s+1:i_e+1,:,j_s:j_e)-domain%dzdx_u(i_s:i_e,:,j_s:j_e)+ &
+                                     domain%dzdy_v(i_s:i_e,:,j_s+1:j_e+1)-domain%dzdy_v(i_s:i_e,:,j_s:j_e)) &
+                                     /(mixed_denom(i_s:i_e,:,:))
                                                     
-        B_coef(i_s,:,:) = B_coef(i_s+1,:,:)
-        B_coef(i_e,:,:) = B_coef(i_e-1,:,:)
-        B_coef(:,:,j_s) = B_coef(:,:,j_s+1)
-        B_coef(:,:,j_e) = B_coef(:,:,j_e-1)
         
-        C_coef(i_s,:,:) = C_coef(i_s+1,:,:)
-        C_coef(i_e,:,:) = C_coef(i_e-1,:,:)
-        C_coef(:,:,j_s) = C_coef(:,:,j_s+1)
-        C_coef(:,:,j_e) = C_coef(:,:,j_e-1)
-        
-        A_coef(i_s+1:i_e-1,k_s:k_e,j_s+1:j_e-1) = -((domain%jacobian(i_s+2:i_e,k_s:k_e,j_s+1:j_e-1) + &
-                                               2*domain%jacobian(i_s+1:i_e-1,k_s:k_e,j_s+1:j_e-1) + &
-                                               domain%jacobian(i_s:i_e-2,k_s:k_e,j_s+1:j_e-1))/(2*domain%dx**2)) &
-                                            -((domain%jacobian(i_s+1:i_e-1,k_s:k_e,j_s+2:j_e) + &
-                                               2*domain%jacobian(i_s+1:i_e-1,k_s:k_e,j_s+1:j_e-1) + &
-                                               domain%jacobian(i_s+1:i_e-1,k_s:k_e,j_s:j_e-2))/(2*domain%dx**2)) - &
-                                               B_coef(i_s+1:i_e-1,k_s:k_e,j_s+1:j_e-1) - C_coef(i_s+1:i_e-1,k_s:k_e,j_s+1:j_e-1)
+        C_coef = C_coef + &
+                                    (domain%dzdx_u(i_s+1:i_e+1,:,j_s:j_e)-domain%dzdx_u(i_s:i_e,:,j_s:j_e)+ &
+                                     domain%dzdy_v(i_s:i_e,:,j_s+1:j_e+1)-domain%dzdy_v(i_s:i_e,:,j_s:j_e)) &
+                                     /(mixed_denom(i_s:i_e,:,:))
+                                                    
+        if (domain%ims==domain%ids) then
+            B_coef(i_s,:,:) = B_coef(i_s+1,:,:)
+            C_coef(i_s,:,:) = C_coef(i_s+1,:,:)
+        endif
+
+        if (domain%ime==domain%ide) then
+            B_coef(i_e,:,:) = B_coef(i_e-1,:,:)
+            C_coef(i_e,:,:) = C_coef(i_e-1,:,:)
+        endif
+
+        if (domain%jms==domain%jds) then
+            B_coef(:,:,j_s) = B_coef(:,:,j_s+1)
+            C_coef(:,:,j_s) = C_coef(:,:,j_s+1)
+        endif
+
+        if (domain%jme==domain%jde) then
+            B_coef(:,:,j_e) = B_coef(:,:,j_e-1)
+            C_coef(:,:,j_e) = C_coef(:,:,j_e-1)
+        endif
+                            
+         A_coef(i_s:i_e,k_s:k_e,j_s:j_e) = -((domain%jacobian(i_s+1:i_e+1,k_s:k_e,j_s:j_e) + &
+                                                2*domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e) + &
+                                                domain%jacobian(i_s-1:i_e-1,k_s:k_e,j_s:j_e))/(2*domain%dx**2)) &
+                                             -((domain%jacobian(i_s:i_e,k_s:k_e,j_s+1:j_e+1) + &
+                                                2*domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e) + &
+                                                domain%jacobian(i_s:i_e,k_s:k_e,j_s-1:j_e-1))/(2*domain%dx**2)) - &
+                                                B_coef(i_s:i_e,k_s:k_e,j_s:j_e) - C_coef(i_s:i_e,k_s:k_e,j_s:j_e)
                                                
-        A_coef(i_s,:,j_s+1:j_e-1) = A_coef(i_s+1,:,j_s+1:j_e-1) 
-        A_coef(i_e,:,j_s+1:j_e-1) = A_coef(i_e-1,:,j_s+1:j_e-1) 
-        A_coef(i_s:i_e,:,j_s) = A_coef(i_s:i_e,:,j_s+1)
-        A_coef(i_s:i_e,:,j_e) = A_coef(i_s:i_e,:,j_e-1)
-                    
+        if (domain%ims==domain%ids) then
+            A_coef(i_s,:,j_s+1:j_e-1) = A_coef(i_s+1,:,j_s+1:j_e-1) 
+        endif
+
+        if (domain%ime==domain%ide) then
+            A_coef(i_e,:,j_s+1:j_e-1) = A_coef(i_e-1,:,j_s+1:j_e-1) 
+        endif
+
+        if (domain%jms==domain%jds) then
+            A_coef(:,:,j_s) = A_coef(i_s:i_e,:,j_s+1)
+        endif
+
+        if (domain%jme==domain%jde) then
+            A_coef(:,:,j_e) = A_coef(i_s:i_e,:,j_e-1)
+        endif
+                                        
     end subroutine
 
 
@@ -797,12 +790,12 @@ contains
 
         integer :: ierr
 
-        i_s = domain%its-1
-        i_e = domain%ite+1
+        i_s = domain%its
+        i_e = domain%ite
         k_s = domain%kts  
         k_e = domain%kte  
-        j_s = domain%jts-1
-        j_e = domain%jte+1
+        j_s = domain%jts
+        j_e = domain%jte
         
         !i_s+hs, unless we are on global boundary, then i_s
         if (domain%grid%ims==domain%grid%ids) i_s = domain%grid%ids
