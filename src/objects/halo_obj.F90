@@ -168,16 +168,16 @@ module subroutine init(this, exch_vars, adv_vars, grid, comms)
 
     !Now allocate the actual 3D halo
 #ifdef CRAY_PE
-allocate( this%south_in_3d( this%grid%ns_halo_nx+this%halo_size*2, this%grid%halo_nz, this%halo_size+1   )[*])
-allocate( this%north_in_3d( this%grid%ns_halo_nx+this%halo_size*2, this%grid%halo_nz, this%halo_size        )[*])
-allocate( this%east_in_3d(  this%halo_size       ,  this%grid%halo_nz, this%grid%ew_halo_ny+this%halo_size*2  )[*])
-allocate( this%west_in_3d(  this%halo_size+1,  this%grid%halo_nz, this%grid%ew_halo_ny+this%halo_size*2  )[*])
+allocate( this%south_in_3d( this%grid%ns_halo_nx, this%grid%halo_nz, this%halo_size+1   )[*])
+allocate( this%north_in_3d( this%grid%ns_halo_nx, this%grid%halo_nz, this%halo_size        )[*])
+allocate( this%east_in_3d(  this%halo_size       ,  this%grid%halo_nz, this%grid%ew_halo_ny  )[*])
+allocate( this%west_in_3d(  this%halo_size+1,  this%grid%halo_nz, this%grid%ew_halo_ny)[*])
 
 #else
 !We only want to set up remote windows for domain objects which are part of the actual domain
 if (.not.(comms == MPI_COMM_NULL)) then
 
-    nx = this%grid%ns_halo_nx+this%halo_size*2
+    nx = this%grid%ns_halo_nx
     nz = this%grid%halo_nz
     ny = this%halo_size+1
     win_size = nx*nz*ny
@@ -191,7 +191,7 @@ if (.not.(comms == MPI_COMM_NULL)) then
 
     nx = this%halo_size+1
     nz = this%grid%halo_nz
-    ny = this%grid%ew_halo_ny+this%halo_size*2
+    ny = this%grid%ew_halo_ny
     win_size = nx*nz*ny
     call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%east_in_win)
     call C_F_POINTER(tmp_ptr, this%east_in_3d, [nx, nz, ny])
@@ -261,103 +261,100 @@ module subroutine exch_var(this, var, do_dqdt, corners)
     endif
 
     ! if staggered in x direction, we need to carefully call the put and get commands
-        if(var%xstag>0) then
+    if(var%xstag>0) then
 #ifndef CRAY_PE                
-            call MPI_Win_fence(0,this%east_in_win)
-            call MPI_Win_fence(0,this%west_in_win)
+        call MPI_Win_fence(0,this%east_in_win)
+        call MPI_Win_fence(0,this%west_in_win)
 #endif
-            if (.not. this%east_boundary)  call this%put_east(var, dqdt)
-            if (.not. this%west_boundary)  call this%put_west(var, dqdt)
+        if (.not. this%east_boundary)  call this%put_east(var, dqdt)
+        if (.not. this%west_boundary)  call this%put_west(var, dqdt)
 
 #ifdef CRAY_PE
-            sync images( this%neighbors )
+        sync images( this%neighbors )
 #else
-            call MPI_Win_fence(0,this%east_in_win)
-            call MPI_Win_fence(0,this%west_in_win) 
+        call MPI_Win_fence(0,this%east_in_win)
+        call MPI_Win_fence(0,this%west_in_win) 
 #endif
 
-            if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
-            if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
+        if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
+        if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
 
 #ifndef CRAY_PE                
-            call MPI_Win_fence(0,this%south_in_win) 
-            call MPI_Win_fence(0,this%north_in_win)
+        call MPI_Win_fence(0,this%south_in_win) 
+        call MPI_Win_fence(0,this%north_in_win)
 #endif
-            if (.not. this%north_boundary) call this%put_north(var, dqdt)
-            if (.not. this%south_boundary) call this%put_south(var, dqdt)
+        if (.not. this%north_boundary) call this%put_north(var, dqdt)
+        if (.not. this%south_boundary) call this%put_south(var, dqdt)
 
 #ifdef CRAY_PE
-            sync images( this%neighbors )
+        sync images( this%neighbors )
 #else
-            call MPI_Win_fence(0,this%south_in_win)
-            call MPI_Win_fence(0,this%north_in_win) 
+        call MPI_Win_fence(0,this%south_in_win)
+        call MPI_Win_fence(0,this%north_in_win) 
 #endif
 
-            if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
-            if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
-        endif
-
-        ! if staggered in y direction, we need to carefully call the put and get commands
-        if(var%ystag>0) then
+        if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
+        if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
+    ! if staggered in y direction, we need to carefully call the put and get commands
+    elseif(var%ystag>0) then
 #ifndef CRAY_PE
-            call MPI_Win_fence(0,this%south_in_win)
-            call MPI_Win_fence(0,this%north_in_win)
+        call MPI_Win_fence(0,this%south_in_win)
+        call MPI_Win_fence(0,this%north_in_win)
 #endif
-            if (.not. this%north_boundary) call this%put_north(var, dqdt)
-            if (.not. this%south_boundary) call this%put_south(var, dqdt)
+        if (.not. this%north_boundary) call this%put_north(var, dqdt)
+        if (.not. this%south_boundary) call this%put_south(var, dqdt)
 
 #ifdef CRAY_PE
-            sync images( this%neighbors )
+        sync images( this%neighbors )
 #else
-            call MPI_Win_fence(0,this%south_in_win)
-            call MPI_Win_fence(0,this%north_in_win)
+        call MPI_Win_fence(0,this%south_in_win)
+        call MPI_Win_fence(0,this%north_in_win)
 #endif
 
-            if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
-            if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
+        if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
+        if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
 
 #ifndef CRAY_PE   
-            call MPI_Win_fence(0,this%east_in_win)
-            call MPI_Win_fence(0,this%west_in_win)
+        call MPI_Win_fence(0,this%east_in_win)
+        call MPI_Win_fence(0,this%west_in_win)
 #endif
-            if (.not. this%east_boundary)  call this%put_east(var, dqdt)
-            if (.not. this%west_boundary)  call this%put_west(var, dqdt)
+        if (.not. this%east_boundary)  call this%put_east(var, dqdt)
+        if (.not. this%west_boundary)  call this%put_west(var, dqdt)
 
 #ifdef CRAY_PE
-            sync images( this%neighbors )
+        sync images( this%neighbors )
 #else
-            call MPI_Win_fence(0,this%east_in_win)
-            call MPI_Win_fence(0,this%west_in_win)                
+        call MPI_Win_fence(0,this%east_in_win)
+        call MPI_Win_fence(0,this%west_in_win)                
 #endif
-            if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
-            if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
-        endif
+        if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
+        if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
 
-        if((var%ystag+var%xstag)==0) then
+    else
 #ifndef CRAY_PE
-            call MPI_Win_fence(0,this%south_in_win)
-            call MPI_Win_fence(0,this%north_in_win)
-            call MPI_Win_fence(0,this%east_in_win)
-            call MPI_Win_fence(0,this%west_in_win)
+        call MPI_Win_fence(0,this%south_in_win)
+        call MPI_Win_fence(0,this%north_in_win)
+        call MPI_Win_fence(0,this%east_in_win)
+        call MPI_Win_fence(0,this%west_in_win)
 #endif
-            if (.not. this%north_boundary) call this%put_north(var, dqdt)
-            if (.not. this%south_boundary) call this%put_south(var, dqdt)
-            if (.not. this%east_boundary)  call this%put_east(var, dqdt)
-            if (.not. this%west_boundary)  call this%put_west(var, dqdt)
+        if (.not. this%north_boundary) call this%put_north(var, dqdt)
+        if (.not. this%south_boundary) call this%put_south(var, dqdt)
+        if (.not. this%east_boundary)  call this%put_east(var, dqdt)
+        if (.not. this%west_boundary)  call this%put_west(var, dqdt)
 
 #ifdef CRAY_PE
-            sync images( this%neighbors )
+        sync images( this%neighbors )
 #else
-            call MPI_Win_fence(0,this%south_in_win)
-            call MPI_Win_fence(0,this%north_in_win)
-            call MPI_Win_fence(0,this%east_in_win)
-            call MPI_Win_fence(0,this%west_in_win)
+        call MPI_Win_fence(0,this%south_in_win)
+        call MPI_Win_fence(0,this%north_in_win)
+        call MPI_Win_fence(0,this%east_in_win)
+        call MPI_Win_fence(0,this%west_in_win)
 #endif
-            if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
-            if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
-            if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
-            if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
-        endif
+        if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
+        if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
+        if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
+        if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
+    endif
 
 end subroutine exch_var
 
@@ -407,19 +404,19 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
     this%n_2d = (adv_vars%n_vars+exch_vars%n_vars)-this%n_3d
 
 #ifdef CRAY_PE
-    allocate(this%north_batch_in_3d(this%n_3d,1:(this%grid%ns_halo_nx+2),&
+    allocate(this%north_batch_in_3d(this%n_3d,1:this%grid%ns_halo_nx,&
                     this%kms:this%kme,1:this%halo_size)[*])
-    allocate(this%south_batch_in_3d(this%n_3d,1:(this%grid%ns_halo_nx+2),&
+    allocate(this%south_batch_in_3d(this%n_3d,1:this%grid%ns_halo_nx,&
                     this%kms:this%kme,1:this%halo_size)[*])
     allocate(this%east_batch_in_3d(this%n_3d,1:this%halo_size,&
-                    this%kms:this%kme,1:(this%grid%ew_halo_ny+2))[*])
+                    this%kms:this%kme,1:this%grid%ew_halo_ny)[*])
     allocate(this%west_batch_in_3d(this%n_3d,1:this%halo_size,&
-                    this%kms:this%kme,1:(this%grid%ew_halo_ny+2))[*])
+                    this%kms:this%kme,1:this%grid%ew_halo_ny)[*])
     if (this%n_2d > 0) then
-        allocate(this%north_batch_in_2d(this%n_2d,1:(this%grid%ns_halo_nx+2),1:this%halo_size)[*])
-        allocate(this%south_batch_in_2d(this%n_2d,1:(this%grid%ns_halo_nx+2),1:this%halo_size)[*])
-        allocate(this%east_batch_in_2d(this%n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+2))[*])
-        allocate(this%west_batch_in_2d(this%n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+2))[*])
+        allocate(this%north_batch_in_2d(this%n_2d,1:this%grid%ns_halo_nx,1:this%halo_size)[*])
+        allocate(this%south_batch_in_2d(this%n_2d,1:this%grid%ns_halo_nx,1:this%halo_size)[*])
+        allocate(this%east_batch_in_2d(this%n_2d,1:this%halo_size,1:this%grid%ew_halo_ny)[*])
+        allocate(this%west_batch_in_2d(this%n_2d,1:this%halo_size,1:this%grid%ew_halo_ny)[*])
     endif
 #else
     if (.not.(comms == MPI_COMM_NULL)) then
@@ -430,7 +427,7 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
         call MPI_INFO_SET(info_in, 'alloc_shared_noncontig', '.true.')
 
         !First do NS
-        nx = this%grid%ns_halo_nx+2
+        nx = this%grid%ns_halo_nx
         nz = this%grid%halo_nz
         ny = this%halo_size
         win_size = nx*nz*ny*this%n_3d
@@ -536,8 +533,8 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                     call C_F_POINTER(tmp_ptr, this%south_buffer_2d, [this%n_2d, nx, ny])
                 endif
             else
-                allocate(this%south_buffer_3d(this%n_3d,1:(this%grid%ns_halo_nx+2),this%kms:this%kme,1:this%halo_size))
-                if (this%n_2d > 0) allocate(this%south_buffer_2d(this%n_2d,1:(this%grid%ns_halo_nx+2),1:this%halo_size))
+                allocate(this%south_buffer_3d(this%n_3d,1:this%grid%ns_halo_nx,this%kms:this%kme,1:this%halo_size))
+                if (this%n_2d > 0) allocate(this%south_buffer_2d(this%n_2d,1:this%grid%ns_halo_nx,1:this%halo_size))
             endif
         endif
         if (.not.(this%north_boundary)) then
@@ -550,15 +547,15 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                     call C_F_POINTER(tmp_ptr, this%north_buffer_2d, [this%n_2d, nx, ny])
                 endif
             else
-                allocate(this%north_buffer_3d(this%n_3d,1:(this%grid%ns_halo_nx+2),this%kms:this%kme,1:this%halo_size))
-                if (this%n_2d > 0) allocate(this%north_buffer_2d(this%n_2d,1:(this%grid%ns_halo_nx+2),1:this%halo_size))
+                allocate(this%north_buffer_3d(this%n_3d,1:this%grid%ns_halo_nx,this%kms:this%kme,1:this%halo_size))
+                if (this%n_2d > 0) allocate(this%north_buffer_2d(this%n_2d,1:this%grid%ns_halo_nx,1:this%halo_size))
             endif
         endif
 
         !Then do EW
         nx = this%halo_size
         nz = this%grid%halo_nz
-        ny = this%grid%ew_halo_ny+2
+        ny = this%grid%ew_halo_ny
         win_size = nx*nz*ny*this%n_3d
         win_size_2d = nx*ny*this%n_2d
 
@@ -660,8 +657,8 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                     call C_F_POINTER(tmp_ptr, this%east_buffer_2d, [this%n_2d, nx, ny])
                 endif
             else
-                allocate(this%east_buffer_3d(this%n_3d,1:this%halo_size,this%kms:this%kme,1:(this%grid%ew_halo_ny+2)))
-                if (this%n_2d > 0) allocate(this%east_buffer_2d(this%n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+2)))
+                allocate(this%east_buffer_3d(this%n_3d,1:this%halo_size,this%kms:this%kme,1:this%grid%ew_halo_ny))
+                if (this%n_2d > 0) allocate(this%east_buffer_2d(this%n_2d,1:this%halo_size,1:this%grid%ew_halo_ny))
             endif
         endif
         if (.not.(this%west_boundary)) then
@@ -674,8 +671,8 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                     call C_F_POINTER(tmp_ptr, this%west_buffer_2d, [this%n_2d, nx, ny])
                 endif
             else
-                allocate(this%west_buffer_3d(this%n_3d,1:this%halo_size,this%kms:this%kme,1:(this%grid%ew_halo_ny+2)))
-                if (this%n_2d > 0) allocate(this%west_buffer_2d(this%n_2d,1:this%halo_size,1:(this%grid%ew_halo_ny+2)))
+                allocate(this%west_buffer_3d(this%n_3d,1:this%halo_size,this%kms:this%kme,1:this%grid%ew_halo_ny))
+                if (this%n_2d > 0) allocate(this%west_buffer_2d(this%n_2d,1:this%halo_size,1:this%grid%ew_halo_ny))
             endif
         endif
 
@@ -1044,7 +1041,7 @@ module subroutine put_north(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=var%ystag
+  offs=0!var%ystag
   disp = 0
   msg_size = 1
 
@@ -1106,7 +1103,7 @@ module subroutine put_south(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=var%ystag
+  offs=0!var%ystag
   
   disp = 0
   msg_size = 1
@@ -1167,7 +1164,7 @@ module subroutine put_east(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=var%xstag
+  offs=0!var%xstag
   disp = 0
   msg_size = 1
 
@@ -1230,7 +1227,7 @@ module subroutine put_west(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=var%xstag
+  offs=0!var%xstag
   disp = 0
   msg_size = 1
 
@@ -1289,7 +1286,7 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=var%ystag
+  offs=0!var%ystag
   
   if (var%two_d) then
       n = ubound(var%data_2d,2)
@@ -1320,7 +1317,7 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=var%ystag
+  offs=0!var%ystag
  
   
   if (var%two_d) then
@@ -1352,7 +1349,7 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=var%xstag
+  offs=0!var%xstag
 
   if (var%two_d) then
       n = ubound(var%data_2d,1)
@@ -1383,7 +1380,7 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=var%xstag
+  offs=0!var%xstag
   
   if (var%two_d) then
       start = lbound(var%data_2d,1)
