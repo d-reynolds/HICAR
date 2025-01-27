@@ -190,14 +190,14 @@ contains
                                         (flux_z_up_1 - flux_z_up_0) * &
                                             dz_t_i)*denom(i,k,j)
 
-                    flux_in = -(( (abs(fx1)-fx1) - (abs(fx)+fx) ) + &
-                                ( (abs(fy1)-fy1) - (abs(fy)+fy) ) + &
-                                ( (abs(fz1)-fz1) - (abs(fz)+fz) ) * &
+                    flux_in =  (( (abs(fx1)-fx1) + (abs(fx)+fx) ) + &
+                                ( (abs(fy1)-fy1) + (abs(fy)+fy) ) + &
+                                ( (abs(fz1)-fz1) + (abs(fz)+fz) ) * &
                                     dz_t_i)*0.5*denom(i,k,j)
             
-                    flux_out = (( (abs(fx1)+fx1) - (abs(fx)-fx) ) + &
-                                ( (abs(fy1)+fy1) - (abs(fy)-fy) ) + &
-                                ( (abs(fz1)+fz1) - (abs(fz)-fz) ) * &
+                    flux_out = (( (abs(fx1)+fx1) + (abs(fx)-fx) ) + &
+                                ( (abs(fy1)+fy1) + (abs(fy)-fy) ) + &
+                                ( (abs(fz1)+fz1) + (abs(fz)-fz) ) * &
                                     dz_t_i)*0.5*denom(i,k,j)
     
                     scale_in(i,k,j) = (qmax-temp)/(flux_in  + 0.000000001)
