@@ -424,7 +424,7 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
         call MPI_INFO_SET(info_in, 'no_locks', '.true.')
         call MPI_INFO_SET(info_in, 'same_size', '.true.')
         call MPI_INFO_SET(info_in, 'same_disp_unit', '.true.')
-        call MPI_INFO_SET(info_in, 'alloc_shared_noncontig', '.true.')
+        ! call MPI_INFO_SET(info_in, 'alloc_shared_noncontig', '.true.')
 
         !First do NS
         nx = this%grid%ns_halo_nx
@@ -449,7 +449,7 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             call MPI_Comm_group(comms, comp_proc)
             call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%halo_rank+this%grid%ximages/), tmp_MPI_grp, ierr)
             call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
-
+    
             if (this%north_shared) then
                 call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%north_3d_win, ierr)
                 if (this%n_2d > 0) call MPI_WIN_ALLOCATE_SHARED(win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr_2d, this%north_2d_win, ierr)
@@ -459,9 +459,6 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             endif
             call C_F_POINTER(tmp_ptr, this%north_batch_in_3d, [this%n_3d, nx, nz, ny])
             if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%north_batch_in_2d, [this%n_2d, nx, ny])
-
-            this%north_batch_in_3d = 1
-            if (this%n_2d > 0) this%north_batch_in_2d = 1
 
         else if((mod(this%grid%yimg,2) == 0) .and. .not.(this%south_boundary)) then
             ! Create a group for the north-south exchange
@@ -478,9 +475,6 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             endif
             call C_F_POINTER(tmp_ptr, this%south_batch_in_3d, [this%n_3d, nx, nz, ny])
             if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%south_batch_in_2d, [this%n_2d, nx, ny])
-
-            this%south_batch_in_3d = 1
-            if (this%n_2d > 0) this%south_batch_in_2d = 1
 
         endif
 
@@ -499,9 +493,6 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             endif
             call C_F_POINTER(tmp_ptr, this%north_batch_in_3d, [this%n_3d, nx, nz, ny])
             if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%north_batch_in_2d, [this%n_2d, nx, ny])
-            
-            this%north_batch_in_3d = 1
-            if (this%n_2d > 0) this%north_batch_in_2d = 1
 
         else if((mod(this%grid%yimg,2) == 1) .and. .not.(this%south_boundary)) then
             ! Create a group for the north-south exchange
@@ -518,12 +509,13 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             endif
             call C_F_POINTER(tmp_ptr, this%south_batch_in_3d, [this%n_3d, nx, nz, ny])
             if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%south_batch_in_2d, [this%n_2d, nx, ny])
-
+        endif
+    
+        if (.not.(this%south_boundary)) then
+    
             this%south_batch_in_3d = 1
             if (this%n_2d > 0) this%south_batch_in_2d = 1
-        endif
-
-        if (.not.(this%south_boundary)) then
+    
             if (this%south_shared) then
                 call MPI_WIN_SHARED_QUERY(this%south_3d_win, 0, win_size, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%south_buffer_3d, [this%n_3d, nx, nz, ny])
@@ -538,6 +530,9 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             endif
         endif
         if (.not.(this%north_boundary)) then
+            this%north_batch_in_3d = 1
+            if (this%n_2d > 0) this%north_batch_in_2d = 1
+
             if (this%north_shared) then
                 call MPI_WIN_SHARED_QUERY(this%north_3d_win, 1, win_size, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%north_buffer_3d, [this%n_3d, nx, nz, ny])
@@ -586,9 +581,6 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             call C_F_POINTER(tmp_ptr, this%east_batch_in_3d, [this%n_3d, nx, nz, ny])
             if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%east_batch_in_2d, [this%n_2d, nx, ny])
 
-            this%east_batch_in_3d = 1
-            if (this%n_2d > 0) this%east_batch_in_2d = 1
-
         else if((mod(this%grid%ximg,2) == 0) .and. .not.(this%west_boundary)) then
             ! Create a group for the east-west exchange
             call MPI_Comm_group(comms, comp_proc)
@@ -604,9 +596,6 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             endif
             call C_F_POINTER(tmp_ptr, this%west_batch_in_3d, [this%n_3d, nx, nz, ny])
             if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%west_batch_in_2d, [this%n_2d, nx, ny])
-
-            this%west_batch_in_3d = 1
-            if (this%n_2d > 0) this%west_batch_in_2d = 1
         endif
 
         if ((mod(this%grid%ximg,2) == 0) .and. .not.(this%east_boundary)) then
@@ -624,9 +613,7 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             endif
             call C_F_POINTER(tmp_ptr, this%east_batch_in_3d, [this%n_3d, nx, nz, ny])
             if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%east_batch_in_2d, [this%n_2d, nx, ny])
-            
-            this%east_batch_in_3d = 1
-            if (this%n_2d > 0) this%east_batch_in_2d = 1
+
         else if((mod(this%grid%ximg,2) == 1) .and. .not.(this%west_boundary)) then
             ! Create a group for the east-west exchange
             call MPI_Comm_group(comms, comp_proc)
@@ -643,12 +630,14 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             call C_F_POINTER(tmp_ptr, this%west_batch_in_3d, [this%n_3d, nx, nz, ny])
             if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%west_batch_in_2d, [this%n_2d, nx, ny])
 
-            this%west_batch_in_3d = 1
-            if (this%n_2d > 0) this%west_batch_in_2d = 1
         endif
 
-        if (.not.(this%east_boundary)) then
+        if (.not.(this%east_boundary)) then    
+            this%east_batch_in_3d = 1
+            if (this%n_2d > 0) this%east_batch_in_2d = 1
+
             if (this%east_shared) then
+
                 call MPI_WIN_SHARED_QUERY(this%east_3d_win, 1, win_size, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%east_buffer_3d, [this%n_3d, nx, nz, ny])
 
@@ -662,6 +651,9 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             endif
         endif
         if (.not.(this%west_boundary)) then
+            this%west_batch_in_3d = 1
+            if (this%n_2d > 0) this%west_batch_in_2d = 1
+
             if (this%west_shared) then
                 call MPI_WIN_SHARED_QUERY(this%west_3d_win, 0, win_size, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%west_buffer_3d, [this%n_3d, nx, nz, ny])
@@ -675,12 +667,10 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                 if (this%n_2d > 0) allocate(this%west_buffer_2d(this%n_2d,1:this%halo_size,1:this%grid%ew_halo_ny))
             endif
         endif
-
         if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_3d_win)
         if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_3d_win)
         if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_3d_win)
         if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_3d_win)
-
         if (this%n_2d > 0) then
             if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_2d_win)
             if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_2d_win)

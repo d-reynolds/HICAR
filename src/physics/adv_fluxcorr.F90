@@ -68,8 +68,12 @@ contains
                     end if
                     if (k > kms) then
                         if (w(i,k,j) < 0) then
-                            wsign(i,k,j) = 1
-                        elseif (w(i,k-1,j) > 0) then
+                            if (k < kme) then
+                                wsign(i,k,j) = 1
+                            else
+                                wsign(i,k,j) = 0
+                            end if
+		        elseif (w(i,k-1,j) > 0) then
                             wsign(i,k,j) = -1
                         else
                             wsign(i,k,j) = 0
@@ -98,7 +102,7 @@ contains
         real, dimension(its-1:ite+2,kms:kme+1,jts-1:jte+2),intent(inout)    :: flux_z, flux_z_up
         
         
-        real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+1)   :: scale_in, scale_out, q3, q4, flux_x_cpy, flux_y_cpy, flux_z_cpy
+        real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+1)   :: scale_in, scale_out, q3, q4
         real :: dz_t_i, jaco_rho_t_i, fx, fx1, fy, fy1, fz, fz1, qmax, qmin, q_i, q_j, q_k, q0, temp, flux_in, flux_out
         integer :: i, j ,k
         real :: scale
@@ -204,7 +208,7 @@ contains
         do concurrent (j = jts:jte+1, k = kms:kme, i = its:ite+1)
 
                     if (i >= its) then
-                        flux_x (i,k,j) = flux_x (i,k,j) - flux_x_up(i,k,j)
+                        flux_x(i,k,j) = flux_x(i,k,j) - flux_x_up(i,k,j)
                         if (flux_x(i,k,j) > 0) then
                             flux_x(i,k,j) = max(0.0,min(scale_in(i,k,j),scale_out(i-1,k,j),1.0))*flux_x(i,k,j) + flux_x_up(i,k,j)
                         else
