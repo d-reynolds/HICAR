@@ -594,8 +594,8 @@ contains
         real,    intent(inout) :: alpha(ims:ime,kms:kme,jms:jme)
         
         !Following Moussiopoulos, et al. (1988). Bounding low Fr to avoid /0 error and negative Fr
-        alpha = 1.0 - 0.5*(1./max(froude**4,0.00001))*(sqrt(1.0+4.0*max(froude**4,0.00001)) - 1.0) 
-        alpha = min(max(alpha,0.01),1.0)
+        alpha = 1.0 - 0.5*max(froude**4,0.00001)*(sqrt(1.0+4.0/max(froude**4,0.00001)) - 1.0) 
+        alpha = min(max(alpha,0.04),5.0)
         alpha = sqrt(alpha)
 
         ! Ensure that there are no sharp transitions in alpha at boundary, 

@@ -50,7 +50,7 @@ program icar
     type(timer_t), allocatable, dimension(:) :: initialization_timer, total_timer, input_timer, &
                                                 output_timer, physics_timer, wind_timer, mp_timer, &
                                                 adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, &
-                                                send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer
+                                                send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer,flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time
 
     type(Time_type), allocatable, dimension(:) :: next_output, next_input
     type(Time_type) :: end_of_nest_loop
@@ -111,7 +111,8 @@ program icar
              mp_timer(n_nests), adv_timer(n_nests), rad_timer(n_nests), &
              lsm_timer(n_nests), pbl_timer(n_nests), exch_timer(n_nests), &
              send_timer(n_nests), ret_timer(n_nests), wait_timer(n_nests), &
-             forcing_timer(n_nests), diagnostic_timer(n_nests), wind_bal_timer(n_nests))
+             forcing_timer(n_nests), diagnostic_timer(n_nests), wind_bal_timer(n_nests), &
+             flux_time(n_nests), flux_up_time(n_nests), flux_corr_time(n_nests), sum_time(n_nests), adv_wind_time(n_nests))
 
     !Determine split of processes which will become I/O servers and which will be compute tasks
     !Also sets constants for the program to keep track of this splitting
@@ -256,7 +257,8 @@ program icar
                         call physics_timer(i)%start()
                         call step(domain(i), boundary(i), step_end(end_of_nest_loop, next_output(i)), new_input, options(i),           &
                                         mp_timer(i), adv_timer(i), rad_timer(i), lsm_timer(i), pbl_timer(i), exch_timer(i), &
-                                        send_timer(i), ret_timer(i), wait_timer(i), forcing_timer(i), diagnostic_timer(i), wind_bal_timer(i), wind_timer(i))
+                                        send_timer(i), ret_timer(i), wait_timer(i), forcing_timer(i), diagnostic_timer(i), wind_bal_timer(i), wind_timer(i), &
+                                        flux_time(i), flux_up_time(i), flux_corr_time(i), sum_time(i), adv_wind_time(i))
                         call physics_timer(i)%stop()
                     elseif (options(i)%wind%wind_only) then
                         call domain(i)%apply_forcing(boundary(i), options(i), real(options(i)%output%output_dt%seconds()))
@@ -345,6 +347,26 @@ program icar
             t_val2 = timer_min(adv_timer(i), domain(1)%compute_comms)
             t_val3 = timer_max(adv_timer(i), domain(1)%compute_comms)
             if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection", ":", t_val, " | ", t_val2, " | ", t_val3
+            t_val = timer_mean(sum_time(i), domain(1)%compute_comms)
+            t_val2 = timer_min(sum_time(i), domain(1)%compute_comms)
+            t_val3 = timer_max(sum_time(i), domain(1)%compute_comms)
+            if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_sum", ":", t_val, " | ", t_val2, " | ", t_val3
+            t_val = timer_mean(flux_time(i), domain(1)%compute_comms)
+            t_val2 = timer_min(flux_time(i), domain(1)%compute_comms)
+            t_val3 = timer_max(flux_time(i), domain(1)%compute_comms)
+            if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_flux", ":", t_val, " | ", t_val2, " | ", t_val3
+            t_val = timer_mean(flux_up_time(i), domain(1)%compute_comms)
+            t_val2 = timer_min(flux_up_time(i), domain(1)%compute_comms)
+            t_val3 = timer_max(flux_up_time(i), domain(1)%compute_comms)
+            if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_flux_up", ":", t_val, " | ", t_val2, " | ", t_val3
+            t_val = timer_mean(flux_corr_time(i), domain(1)%compute_comms)
+            t_val2 = timer_min(flux_corr_time(i), domain(1)%compute_comms)
+            t_val3 = timer_max(flux_corr_time(i), domain(1)%compute_comms)
+            if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_flux_corr", ":", t_val, " | ", t_val2, " | ", t_val3
+            t_val = timer_mean(adv_wind_time(i), domain(1)%compute_comms)
+            t_val2 = timer_min(adv_wind_time(i), domain(1)%compute_comms)
+            t_val3 = timer_max(adv_wind_time(i), domain(1)%compute_comms)
+            if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_wind", ":", t_val, " | ", t_val2, " | ", t_val3
             t_val = timer_mean(rad_timer(i), domain(1)%compute_comms)
             t_val2 = timer_min(rad_timer(i), domain(1)%compute_comms)
             t_val3 = timer_max(rad_timer(i), domain(1)%compute_comms)

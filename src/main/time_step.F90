@@ -251,14 +251,14 @@ contains
     !! @param next_output   Next time to write an output file (in "model_time")
     !!
     !!------------------------------------------------------------
-    subroutine step(domain, forcing, end_time, new_input, options, mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer)
+    subroutine step(domain, forcing, end_time, new_input, options, mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer,flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
         implicit none
         type(domain_t),     intent(inout)   :: domain
         type(boundary_t),   intent(inout)   :: forcing
         type(Time_type),    intent(in)      :: end_time
         type(options_t),    intent(in)      :: options
         logical,            intent(in)      :: new_input
-        type(timer_t),      intent(inout)   :: mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer
+        type(timer_t),      intent(inout)   :: mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer,flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time
 
         real            :: last_print_time
         real, save      :: last_wind_update
@@ -381,7 +381,7 @@ contains
                 
 
                 call adv_timer%start()
-                call advect(domain, options, real(dt%seconds()))
+                call advect(domain, options, real(dt%seconds()),flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
                 if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" advect(domain", fix=.True.)
                 call adv_timer%stop()
 

@@ -49,8 +49,6 @@ contains
 
         integer :: i, j, k
 
-        wsign = 0
-
         do i = its-1,ite+1
             do j = jts-1,jte+1
                 do k = kms,kme
@@ -69,10 +67,19 @@ contains
                         vsign(i,k,j) = 0
                     end if
                     if (k > kms) then
-                        if (w(i,k-1,j) > 0) wsign(i,k,j) = -1
-                    endif
-                    if (k < kme) then
-                        if (w(i,k,j) < 0) wsign(i,k,j) = 1
+                        if (w(i,k,j) < 0) then
+                            wsign(i,k,j) = 1
+                        elseif (w(i,k-1,j) > 0) then
+                            wsign(i,k,j) = -1
+                        else
+                            wsign(i,k,j) = 0
+                        end if
+                    else
+                        if (w(i,k,j) < 0) then
+                            wsign(i,k,j) = 1
+                        else
+                            wsign(i,k,j) = 0
+                        end if
                     end if
                 end do
             end do
@@ -170,58 +177,85 @@ contains
                     fy = flux_y(i,k,j)-flux_y_up_0; fy1 = flux_y(i,k,j+1)-flux_y_up_1
                     fz = flux_z(i,k,j)-flux_z_up_0; fz1 = flux_z(i,k+1,j)-flux_z_up_1
                                                 
+                    ! flux_x(i,k,j) = flux_x_up_0 - flux_x_up_1
+                    ! flux_y(i,k,j) = flux_y_up_0 - flux_y_up_1
+                    ! flux_z(i,k,j) = flux_z(i,k,j) - flux_z_up(i,k,j)
                     !Compute concentration if upwind only was used
                     temp  = q0 - ((flux_x_up_1 - flux_x_up_0) + &
                                         (flux_y_up_1 - flux_y_up_0) + &
                                         (flux_z_up_1 - flux_z_up_0) * &
                                             dz_t_i)*denom(i,k,j)
 
-
-                    flux_in = -((min(0.,fx1) - max(0.,fx)) + &
-                                (min(0.,fy1) - max(0.,fy)) + &
-                                (min(0.,fz1) - max(0.,fz)) * &
-                                    dz_t_i)*denom(i,k,j)
-
-                    flux_out = ((max(0.,fx1) - min(0.,fx)) + &
-                                (max(0.,fy1) - min(0.,fy)) + &
-                                (max(0.,fz1) - min(0.,fz)) * &
-                                    dz_t_i)*denom(i,k,j)
-
-                    scale_in(i,k,j) = min(1.0,max(0.,(qmax-temp)/(flux_in  + 1.E-15)))
-                    scale_out(i,k,j) = min(1.0,max(0.,(temp-qmin)/(flux_out+ 1.E-15)))
-
+                    flux_in = -(( (abs(fx1)-fx1) - (abs(fx)+fx) ) + &
+                                ( (abs(fy1)-fy1) - (abs(fy)+fy) ) + &
+                                ( (abs(fz1)-fz1) - (abs(fz)+fz) ) * &
+                                    dz_t_i)*0.5*denom(i,k,j)
+            
+                    flux_out = (( (abs(fx1)+fx1) - (abs(fx)-fx) ) + &
+                                ( (abs(fy1)+fy1) - (abs(fy)-fy) ) + &
+                                ( (abs(fz1)+fz1) - (abs(fz)-fz) ) * &
+                                    dz_t_i)*0.5*denom(i,k,j)
+    
+                    scale_in(i,k,j) = (qmax-temp)/(flux_in  + 0.000000001)
+                    scale_out(i,k,j) = (temp-qmin)/(flux_out+ 0.000000001)
                 enddo
             enddo
         enddo
+        do concurrent (j = jts:jte+1, k = kms:kme, i = its:ite+1)
 
-        do concurrent (j = jts-1:jte+1, k = kms:kme, i = its:ite+1)
-            flux_x (i,k,j) = flux_x (i,k,j) - flux_x_up(i,k,j)
-            if (flux_x(i,k,j) > 0) then
-                flux_x(i,k,j) = min(scale_in(i,k,j),scale_out(i-1,k,j))*flux_x(i,k,j)
-            else
-                flux_x(i,k,j) = min(scale_out(i,k,j),scale_in(i-1,k,j))*flux_x(i,k,j)
-            endif
-            flux_x(i,k,j) = flux_x(i,k,j) + flux_x_up(i,k,j)
+                    if (i >= its) then
+                        flux_x (i,k,j) = flux_x (i,k,j) - flux_x_up(i,k,j)
+                        if (flux_x(i,k,j) > 0) then
+                            flux_x(i,k,j) = max(0.0,min(scale_in(i,k,j),scale_out(i-1,k,j),1.0))*flux_x(i,k,j) + flux_x_up(i,k,j)
+                        else
+                            flux_x(i,k,j) = max(0.0,min(scale_out(i,k,j),scale_in(i-1,k,j),1.0))*flux_x(i,k,j) + flux_x_up(i,k,j)
+                        endif
+                    end if
+                    if (j >= jts) then
+                        flux_y(i,k,j) = flux_y(i,k,j) - flux_y_up(i,k,j)
+                        if (flux_y(i,k,j) > 0) then
+                            flux_y(i,k,j) = max(0.0,min(scale_in(i,k,j),scale_out(i,k,j-1),1.0))*flux_y(i,k,j) + flux_y_up(i,k,j)
+                        else
+                            flux_y(i,k,j) = max(0.0,min(scale_out(i,k,j),scale_in(i,k,j-1),1.0))*flux_y(i,k,j) + flux_y_up(i,k,j)
+                        endif
+                    endif
+                    if (k > kms) then
+                        flux_z(i,k,j) = flux_z(i,k,j) - flux_z_up(i,k,j)
+                        if (flux_z(i,k,j) > 0) then
+                            flux_z(i,k,j) = max(0.0,min(scale_in(i,k,j),scale_out(i,k-1,j),1.0))*flux_z(i,k,j) + flux_z_up(i,k,j)
+                        else
+                            flux_z(i,k,j) = max(0.0,min(scale_out(i,k,j),scale_in(i,k-1,j),1.0))*flux_z(i,k,j) + flux_z_up(i,k,j)
+                        endif
+                    endif
+            !     enddo
+            ! enddo
         enddo
-        do concurrent (j = jts:jte+1, k = kms:kme, i = its-1:ite+1)
-            flux_y(i,k,j) = flux_y(i,k,j) - flux_y_up(i,k,j)
 
-            if (flux_y(i,k,j) > 0) then
-                flux_y(i,k,j) = min(scale_in(i,k,j),scale_out(i,k,j-1))*flux_y(i,k,j)
-            else
-                flux_y(i,k,j) = min(scale_out(i,k,j),scale_in(i,k,j-1))*flux_y(i,k,j)
-            endif
-            flux_y(i,k,j) = flux_y(i,k,j) + flux_y_up(i,k,j)
-        enddo
-        do concurrent (j = jts-1:jte+1, k = kms+1:kme, i = its-1:ite+1)
-            flux_z(i,k,j) = flux_z(i,k,j) - flux_z_up(i,k,j)
-            if (flux_z(i,k,j) > 0) then
-                flux_z(i,k,j) = min(scale_in(i,k,j),scale_out(i,k-1,j))*flux_z(i,k,j)
-            else
-                flux_z(i,k,j) = min(scale_out(i,k,j),scale_in(i,k-1,j))*flux_z(i,k,j)
-            endif
-            flux_z(i,k,j) = flux_z(i,k,j) + flux_z_up(i,k,j)
-        enddo
+        ! do concurrent (j = jts:jte+1, k = kms:kme, i = its:ite+1)
+        !     flux_x (i,k,j) = flux_x (i,k,j) - flux_x_up(i,k,j)
+        !     if (flux_x(i,k,j) > 0) then
+        !         flux_x(i,k,j) = min(scale_in(i,k,j),scale_out(i-1,k,j))*flux_x(i,k,j) + flux_x_up(i,k,j)
+        !     else
+        !         flux_x(i,k,j) = min(scale_out(i,k,j),scale_in(i-1,k,j))*flux_x(i,k,j) + flux_x_up(i,k,j)
+        !     endif
+        ! enddo
+        ! do concurrent (j = jts:jte+1, k = kms:kme, i = its:ite+1)
+        !     flux_y(i,k,j) = flux_y(i,k,j) - flux_y_up(i,k,j)
+
+        !     if (flux_y(i,k,j) > 0) then
+        !         flux_y(i,k,j) = min(scale_in(i,k,j),scale_out(i,k,j-1))*flux_y(i,k,j) + flux_y_up(i,k,j)
+        !     else
+        !         flux_y(i,k,j) = min(scale_out(i,k,j),scale_in(i,k,j-1))*flux_y(i,k,j) + flux_y_up(i,k,j)
+        !     endif
+        ! enddo
+        ! do concurrent (j = jts:jte+1, k = kms+1:kme, i = its:ite+1)
+        !     flux_z(i,k,j) = flux_z(i,k,j) - flux_z_up(i,k,j)
+        !     if (flux_z(i,k,j) > 0) then
+        !         flux_z(i,k,j) = min(scale_in(i,k,j),scale_out(i,k-1,j))*flux_z(i,k,j) + flux_z_up(i,k,j)
+        !     else
+        !         flux_z(i,k,j) = min(scale_out(i,k,j),scale_in(i,k-1,j))*flux_z(i,k,j) + flux_z_up(i,k,j)
+        !     endif
+        ! enddo
 
     end subroutine WRF_flux_corr
 
