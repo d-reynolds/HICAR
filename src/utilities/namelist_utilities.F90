@@ -539,10 +539,6 @@ contains
         gennml = .False.
         if (present(gen_nml)) gennml = gen_nml
 
-        !convert the default value string to a real
-        default = trim(get_nml_var_default(name,print_info,gennml))
-
-
         if (gennml .or. info) then
             !convert the default value string to a real
             default = trim(get_nml_var_default(name,print_info,gennml))
@@ -570,10 +566,6 @@ contains
 
         gennml = .False.
         if (present(gen_nml)) gennml = gen_nml
-
-        !convert the default value string to a real
-        default = trim(get_nml_var_default(name,print_info,gennml))
-
 
         if (gennml .or. info) then
             !convert the default value string to a real
@@ -691,9 +683,9 @@ contains
         if (present(gen_nml)) gennml = gen_nml
 
         if (gennml .or. info) then
-            do n = 1, size(var,2)
-                var(:,n) = get_nml_var_default(name,print_info,gennml)
-            end do
+            ! do n = 1, size(var,2)
+            var(:,1) = get_nml_var_default(name,print_info,gennml)
+            ! end do
         else
             var = kCHAR_NO_VAL
         endif
