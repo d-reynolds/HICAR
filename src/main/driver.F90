@@ -253,17 +253,12 @@ program icar
                     if (STD_OUT_PE) flush(output_unit)
                     
                     ! this is the meat of the model physics, run all the physics for the current time step looping over internal timesteps
-                    if (.not.(options(i)%wind%wind_only)) then
-                        call physics_timer(i)%start()
-                        call step(domain(i), boundary(i), step_end(end_of_nest_loop, next_output(i)), new_input, options(i),           &
-                                        mp_timer(i), adv_timer(i), rad_timer(i), lsm_timer(i), pbl_timer(i), exch_timer(i), &
-                                        send_timer(i), ret_timer(i), wait_timer(i), forcing_timer(i), diagnostic_timer(i), wind_bal_timer(i), wind_timer(i), &
-                                        flux_time(i), flux_up_time(i), flux_corr_time(i), sum_time(i), adv_wind_time(i))
-                        call physics_timer(i)%stop()
-                    elseif (options(i)%wind%wind_only) then
-                        call domain(i)%apply_forcing(boundary(i), options(i), real(options(i)%output%output_dt%seconds()))
-                        domain(i)%model_time = next_output(i)
-                    endif
+                    call physics_timer(i)%start()
+                    call step(domain(i), boundary(i), step_end(end_of_nest_loop, next_output(i)), new_input, options(i),           &
+                                    mp_timer(i), adv_timer(i), rad_timer(i), lsm_timer(i), pbl_timer(i), exch_timer(i), &
+                                    send_timer(i), ret_timer(i), wait_timer(i), forcing_timer(i), diagnostic_timer(i), wind_bal_timer(i), wind_timer(i), &
+                                    flux_time(i), flux_up_time(i), flux_corr_time(i), sum_time(i), adv_wind_time(i))
+                    call physics_timer(i)%stop()
                     new_input = .False.
                     ! -----------------------------------------------------
                     !  Write output data if it is time

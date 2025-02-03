@@ -280,7 +280,7 @@ contains
         do while (domain%model_time < end_time .and. .not.(last_loop))
             
             !Determine dt
-            if (last_wind_update >= options%wind%update_dt%seconds()) then
+            if (last_wind_update >= options%wind%update_dt%seconds() .or. options%wind%wind_only) then
                 call domain%diagnostic_update(options)
 
                 call wind_timer%start()
@@ -292,8 +292,12 @@ contains
                 ! and that using a CFL criterion < 1.0 will cover this
                 call update_dt(dt, options, domain)
                 call update_wind_dqdt(domain, options)
-
                 last_wind_update = 0.0
+
+                if (options%wind%wind_only) then
+                    domain%model_time = end_time
+                    return
+                endif
             endif
             !call update_dt(dt, options, domain, end_time)
             ! Make sure we don't over step the forcing or output period

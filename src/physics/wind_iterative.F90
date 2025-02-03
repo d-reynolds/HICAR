@@ -616,26 +616,26 @@ contains
                             
         if (domain%ims==domain%ids) then
             E_coef(i_s,:,:) = E_coef(i_s+1,:,:)
-            I_coef(i_s,:,:) = I_coef(i_s+1,:,:)
-            K_coef(i_s,:,:) = K_coef(i_s+1,:,:)
+            ! I_coef(i_s,:,:) = I_coef(i_s+1,:,:)
+            ! K_coef(i_s,:,:) = K_coef(i_s+1,:,:)
         endif
 
         if (domain%ime==domain%ide) then
             D_coef(i_e,:,:) = D_coef(i_e-1,:,:)
-            H_coef(i_e,:,:) = H_coef(i_e-1,:,:)
-            J_coef(i_e,:,:) = J_coef(i_e-1,:,:)
+            ! H_coef(i_e,:,:) = H_coef(i_e-1,:,:)
+            ! J_coef(i_e,:,:) = J_coef(i_e-1,:,:)
         endif
 
         if (domain%jms==domain%jds) then
             G_coef(:,:,j_s) = G_coef(:,:,j_s+1)
-            M_coef(:,:,j_s) = M_coef(:,:,j_s+1)
-            O_coef(:,:,j_s) = O_coef(:,:,j_s+1)
+            ! M_coef(:,:,j_s) = M_coef(:,:,j_s+1)
+            ! O_coef(:,:,j_s) = O_coef(:,:,j_s+1)
         endif
 
         if (domain%jme==domain%jde) then
-            L_coef(:,:,j_e) = L_coef(:,:,j_e-1)
-            N_coef(:,:,j_e) = N_coef(:,:,j_e-1)
             F_coef(:,:,j_e) = F_coef(:,:,j_e-1)
+            ! L_coef(:,:,j_e) = L_coef(:,:,j_e-1)
+            ! N_coef(:,:,j_e) = N_coef(:,:,j_e-1)
         endif
 
     end subroutine initialize_coefs
@@ -691,33 +691,33 @@ contains
                                      domain%dzdy_v(i_s:i_e,:,j_s+1:j_e+1)-domain%dzdy_v(i_s:i_e,:,j_s:j_e)) &
                                      /(mixed_denom(i_s:i_e,:,:))
                                                     
-        if (domain%ims==domain%ids) then
-            B_coef(i_s,:,:) = B_coef(i_s+1,:,:)
-            C_coef(i_s,:,:) = C_coef(i_s+1,:,:)
-        endif
+        ! if (domain%ims==domain%ids) then
+        !     B_coef(i_s,:,:) = B_coef(i_s+1,:,:)
+        !     C_coef(i_s,:,:) = C_coef(i_s+1,:,:)
+        ! endif
 
-        if (domain%ime==domain%ide) then
-            B_coef(i_e,:,:) = B_coef(i_e-1,:,:)
-            C_coef(i_e,:,:) = C_coef(i_e-1,:,:)
-        endif
+        ! if (domain%ime==domain%ide) then
+        !     B_coef(i_e,:,:) = B_coef(i_e-1,:,:)
+        !     C_coef(i_e,:,:) = C_coef(i_e-1,:,:)
+        ! endif
 
-        if (domain%jms==domain%jds) then
-            B_coef(:,:,j_s) = B_coef(:,:,j_s+1)
-            C_coef(:,:,j_s) = C_coef(:,:,j_s+1)
-        endif
+        ! if (domain%jms==domain%jds) then
+        !     B_coef(:,:,j_s) = B_coef(:,:,j_s+1)
+        !     C_coef(:,:,j_s) = C_coef(:,:,j_s+1)
+        ! endif
 
-        if (domain%jme==domain%jde) then
-            B_coef(:,:,j_e) = B_coef(:,:,j_e-1)
-            C_coef(:,:,j_e) = C_coef(:,:,j_e-1)
-        endif
+        ! if (domain%jme==domain%jde) then
+        !     B_coef(:,:,j_e) = B_coef(:,:,j_e-1)
+        !     C_coef(:,:,j_e) = C_coef(:,:,j_e-1)
+        ! endif
                             
          A_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) = -((domain%jacobian(i_s_bnd+1:i_e_bnd+1,k_s:k_e,j_s_bnd:j_e_bnd) + &
                                                 2*domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) + &
                                                 domain%jacobian(i_s_bnd-1:i_e_bnd-1,k_s:k_e,j_s_bnd:j_e_bnd))/(2*domain%dx**2)) &
                                              -((domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd+1:j_e_bnd+1) + &
                                                 2*domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) + &
-                                                domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd-1:j_e_bnd-1))/(2*domain%dx**2)) - &
-                                                B_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) - C_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd)
+                                                domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd-1:j_e_bnd-1))/(2*domain%dx**2))! - &
+                                                !B_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) - C_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd)
                                                
         if (domain%ims==domain%ids) then
             A_coef(i_s,:,:) = A_coef(i_s+1,:,:) 
@@ -734,6 +734,8 @@ contains
         if (domain%jme==domain%jde) then
             A_coef(:,:,j_e) = A_coef(i_s:i_e,:,j_e-1)
         endif
+
+        A_coef = A_coef - B_coef - C_coef
                                         
     end subroutine
 
@@ -812,7 +814,7 @@ contains
         implicit none
         type(domain_t), intent(in) :: domain
 
-        integer :: ierr
+        integer :: ierr, k
 
         i_s = domain%its
         i_e = domain%ite
@@ -858,8 +860,16 @@ contains
                                    domain%advection_dz(i_s:i_e,k_s:k_e-1,j_s:j_e))/2
             dz_if(:,k_e+1,:) = domain%advection_dz(i_s:i_e,k_e,j_s:j_e)
             sigma = dz_if(:,k_s:k_e,:)/dz_if(:,k_s+1:k_e+1,:)
+                                
+            do k = k_s+1, k_e
+                if (domain%advection_dz(i_s,k,j_s) < domain%advection_dz(i_s,k-1,j_s)) then
+                    !if (STD_OUT_PE) write(*,*) 'ERROR: dz levels are not monotonically increasing in k'
+                    !if (STD_OUT_PE) write(*,*) 'ERROR: at level ', k, ' dz inrecases from ', domain%advection_dz(i_s,k-1,j_s), ' to ', domain%advection_dz(i_s,k,j_s)
+                    !if (STD_OUT_PE) write(*,*) 'ERROR: to correct, ensure that dz levels increase monotonically '
+                    !stop
+                endif
+            enddo
             
-                    
             !Calculate how global grid is decomposed for DMDA
             !subtract halo size from boundaries of each cell to get x/y extent
             if (domain%grid%yimg == 1) xl(domain%grid%ximg) = domain%grid%nx-hs*2
