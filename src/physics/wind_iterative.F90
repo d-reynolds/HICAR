@@ -119,12 +119,17 @@ contains
         call DMGlobalToLocal(da,x,INSERT_VALUES,localX,ierr)
 
         call DMDAVecGetArrayF90(da,localX,lambda, ierr)
+        !write(*,*) 'max_u: ',maxval(domain%u%dqdt_3d)
+        !write(*,*) 'max_v: ',maxval(domain%v%dqdt_3d)
+
         call calc_updated_winds(domain, lambda, update, adv_den)
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
         !Exchange u and v, since the outer points are not updated in above function
         call domain%halo%exch_var(domain%u,do_dqdt=update)
         call domain%halo%exch_var(domain%v,do_dqdt=update)
-                
+        !write(*,*) 'POST max_u: ',maxval(domain%u%dqdt_3d)
+        !write(*,*) 'POST max_v: ',maxval(domain%v%dqdt_3d)
+
     end subroutine calc_iter_winds
     
     subroutine calc_updated_winds(domain,lambda,update,adv_den) !u, v, w, jaco_u,jaco_v,jaco_w,u_dzdx,v_dzdy,lambda, ids, ide, jds, jde)
@@ -502,7 +507,8 @@ contains
         type(domain_t), intent(in) :: domain
         
         real, allocatable, dimension(:,:,:) :: mixed_denom
-        
+        integer :: i_e_bnd, i_s_bnd, j_e_bnd, j_s_bnd
+
         allocate(A_coef(i_s:i_e,k_s:k_e,j_s:j_e))
         allocate(B_coef(i_s:i_e,k_s:k_e,j_s:j_e))
         allocate(C_coef(i_s:i_e,k_s:k_e,j_s:j_e))
@@ -542,22 +548,31 @@ contains
         !This function sets A, B, annd C coefficients
         call update_coefs(domain)
                 
-        D_coef(i_s:i_e,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s+1:i_e+1,k_s:k_e,j_s:j_e) + &
-            domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e))/(2*domain%dx**2) + &
-            (sigma(i_s:i_e,:,:)**2 - 1)*(dzdx(i_s:i_e,:,:)+domain%dzdx_u(i_s+1:i_e+1,:,j_s:j_e))/&
-            mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e)
-        E_coef(i_s:i_e,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e) + &
-            domain%jacobian(i_s-1:i_e-1,k_s:k_e,j_s:j_e))/(2*domain%dx**2) - &
-            (sigma(i_s:i_e,:,:)**2 - 1)*(dzdx(i_s:i_e,:,:)+domain%dzdx_u(i_s:i_e,:,j_s:j_e))/&
-            mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e)
-        F_coef(i_s:i_e,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s+1:j_e+1) + &
-            domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e))/(2*domain%dx**2) + &
-            (sigma(:,:,j_s:j_e)**2 - 1)*(dzdy(:,:,j_s:j_e)+domain%dzdy_v(i_s:i_e,:,j_s+1:j_e+1))/&
-            mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e)
-        G_coef(i_s:i_e,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e) + &
-            domain%jacobian(i_s:i_e,k_s:k_e,j_s-1:j_e-1))/(2*domain%dx**2) - &
-            (sigma(:,:,j_s:j_e)**2 - 1)*(dzdy(:,:,j_s:j_e)+domain%dzdy_v(i_s:i_e,:,j_s:j_e))/&
-            mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e)
+        i_e_bnd = i_e
+        if (i_e == domain%grid%ide) i_e_bnd = i_e-1
+        i_s_bnd = i_s
+        if (i_s == domain%grid%ids) i_s_bnd = i_s+1
+        j_e_bnd = j_e
+        if (j_e == domain%grid%jde) j_e_bnd = j_e-1
+        j_s_bnd = j_s
+        if (j_s == domain%grid%jds) j_s_bnd = j_s+1
+
+        D_coef(i_s:i_e_bnd,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s+1:i_e_bnd+1,k_s:k_e,j_s:j_e) + &
+            domain%jacobian(i_s:i_e_bnd,k_s:k_e,j_s:j_e))/(2*domain%dx**2) + &
+            (sigma(i_s:i_e_bnd,:,:)**2 - 1)*(dzdx(i_s:i_e_bnd,:,:)+domain%dzdx_u(i_s+1:i_e_bnd+1,:,j_s:j_e))/&
+            mixed_denom(i_s:i_e_bnd,k_s:k_e,j_s:j_e)
+        E_coef(i_s_bnd:i_e,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s_bnd:i_e,k_s:k_e,j_s:j_e) + &
+            domain%jacobian(i_s_bnd-1:i_e-1,k_s:k_e,j_s:j_e))/(2*domain%dx**2) - &
+            (sigma(i_s_bnd:i_e,:,:)**2 - 1)*(dzdx(i_s_bnd:i_e,:,:)+domain%dzdx_u(i_s_bnd:i_e,:,j_s:j_e))/&
+            mixed_denom(i_s_bnd:i_e,k_s:k_e,j_s:j_e)
+        F_coef(i_s:i_e,k_s:k_e,j_s:j_e_bnd) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s+1:j_e_bnd+1) + &
+            domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e_bnd))/(2*domain%dx**2) + &
+            (sigma(:,:,j_s:j_e_bnd)**2 - 1)*(dzdy(:,:,j_s:j_e_bnd)+domain%dzdy_v(i_s:i_e,:,j_s+1:j_e_bnd+1))/&
+            mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e_bnd)
+        G_coef(i_s:i_e,k_s:k_e,j_s_bnd:j_e) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s_bnd:j_e) + &
+            domain%jacobian(i_s:i_e,k_s:k_e,j_s_bnd-1:j_e-1))/(2*domain%dx**2) - &
+            (sigma(:,:,j_s_bnd:j_e)**2 - 1)*(dzdy(:,:,j_s_bnd:j_e)+domain%dzdy_v(i_s:i_e,:,j_s_bnd:j_e))/&
+            mixed_denom(i_s:i_e,k_s:k_e,j_s_bnd:j_e)
 
 
         H_coef(i_s:i_e,k_s:k_e-1,:) = &
@@ -631,10 +646,19 @@ contains
         implicit none
         type(domain_t), intent(in) :: domain        
         real, allocatable, dimension(:,:,:) :: mixed_denom
-                
+        integer :: i_e_bnd, i_s_bnd, j_e_bnd, j_s_bnd
+
         allocate(mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e))
         mixed_denom = 2*domain%dx*dz_if(:,k_s+1:k_e+1,:)*(sigma+sigma**2)
 
+        i_e_bnd = i_e
+        if (i_e == domain%grid%ide) i_e_bnd = i_e-1
+        i_s_bnd = i_s
+        if (i_s == domain%grid%ids) i_s_bnd = i_s+1
+        j_e_bnd = j_e
+        if (j_e == domain%grid%jde) j_e_bnd = j_e-1
+        j_s_bnd = j_s
+        if (j_s == domain%grid%jds) j_s_bnd = j_s+1
 
         B_coef(:,k_s:k_e-1,:) = sigma(:,k_s:k_e-1,:) * &
                               ( (alpha(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + dzdy(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + &
@@ -687,20 +711,20 @@ contains
             C_coef(:,:,j_e) = C_coef(:,:,j_e-1)
         endif
                             
-         A_coef(i_s:i_e,k_s:k_e,j_s:j_e) = -((domain%jacobian(i_s+1:i_e+1,k_s:k_e,j_s:j_e) + &
-                                                2*domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e) + &
-                                                domain%jacobian(i_s-1:i_e-1,k_s:k_e,j_s:j_e))/(2*domain%dx**2)) &
-                                             -((domain%jacobian(i_s:i_e,k_s:k_e,j_s+1:j_e+1) + &
-                                                2*domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e) + &
-                                                domain%jacobian(i_s:i_e,k_s:k_e,j_s-1:j_e-1))/(2*domain%dx**2)) - &
-                                                B_coef(i_s:i_e,k_s:k_e,j_s:j_e) - C_coef(i_s:i_e,k_s:k_e,j_s:j_e)
+         A_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) = -((domain%jacobian(i_s_bnd+1:i_e_bnd+1,k_s:k_e,j_s_bnd:j_e_bnd) + &
+                                                2*domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) + &
+                                                domain%jacobian(i_s_bnd-1:i_e_bnd-1,k_s:k_e,j_s_bnd:j_e_bnd))/(2*domain%dx**2)) &
+                                             -((domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd+1:j_e_bnd+1) + &
+                                                2*domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) + &
+                                                domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd-1:j_e_bnd-1))/(2*domain%dx**2)) - &
+                                                B_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) - C_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd)
                                                
         if (domain%ims==domain%ids) then
-            A_coef(i_s,:,j_s+1:j_e-1) = A_coef(i_s+1,:,j_s+1:j_e-1) 
+            A_coef(i_s,:,:) = A_coef(i_s+1,:,:) 
         endif
 
         if (domain%ime==domain%ide) then
-            A_coef(i_e,:,j_s+1:j_e-1) = A_coef(i_e-1,:,j_s+1:j_e-1) 
+            A_coef(i_e,:,:) = A_coef(i_e-1,:,:) 
         endif
 
         if (domain%jms==domain%jds) then
@@ -769,7 +793,7 @@ contains
         ! call KSPSetLagNorm(ksp, PETSC_TRUE, ierr)
         call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
-                          xl, PETSC_NULL_INTEGER ,yl,da,ierr)
+                          xl, PETSC_NULL_INTEGER_ARRAY ,yl,da,ierr)
         
         call DMSetFromOptions(da,ierr)
         call DMSetUp(da,ierr)
