@@ -11,13 +11,12 @@ module wind
 
     use linear_theory_winds, only : linear_perturb, setup_linwinds
     use wind_iterative,      only : calc_iter_winds, init_iter_winds
-!    use wind_iterative_old,  only : calc_iter_winds_old, init_iter_winds_old
+    use wind_iterative_old,  only : calc_iter_winds_old, init_iter_winds_old
 
     !use mod_blocking,        only : update_froude_number, initialize_blocking
     use data_structures
     use variable_interface,       only : variable_t
     use iso_fortran_env
-
     use domain_interface,  only : domain_t
     use boundary_interface,only : boundary_t
     use options_interface, only : options_t
@@ -42,88 +41,88 @@ module wind
 contains
 
 
-        subroutine wind_linear_var_request(options)
-            implicit none
-            type(options_t), intent(inout) :: options
+    subroutine wind_linear_var_request(options)
+        implicit none
+        type(options_t), intent(inout) :: options
 
-            ! List the variables that are required to be allocated for the linear wind solution
-            call options%alloc_vars( &
-                            [kVARS%nsquared,    kVARS%potential_temperature,   kVARS%exner,            &
-                             kVARS%water_vapor, kVARS%cloud_water,             kVARS%rain_in_air,      &
-                             kVARS%u,           kVARS%v,                       kVARS%w,                &
-                             kVARS%dz ])
+        ! List the variables that are required to be allocated for the linear wind solution
+        call options%alloc_vars( &
+                        [kVARS%nsquared,    kVARS%potential_temperature,   kVARS%exner,            &
+                            kVARS%water_vapor, kVARS%cloud_water,             kVARS%rain_in_air,      &
+                            kVARS%u,           kVARS%v,                       kVARS%w,                &
+                            kVARS%dz ])
 
-            ! List the variables that are required to be advected
-            ! call options%advect_vars( &
-            !               [, &
-            !                , &
-            !                ] )
+        ! List the variables that are required to be advected
+        ! call options%advect_vars( &
+        !               [, &
+        !                , &
+        !                ] )
 
-            ! List the variables that are required for restarts with the linear wind solution
-            call options%restart_vars( &
-                            [kVARS%nsquared,    kVARS%potential_temperature,                           &
-                             kVARS%water_vapor, kVARS%cloud_water,             kVARS%rain_in_air,      &
-                             kVARS%u,           kVARS%v,                       kVARS%w,                &
-                             kVARS%dz ])
+        ! List the variables that are required for restarts with the linear wind solution
+        call options%restart_vars( &
+                        [kVARS%nsquared,    kVARS%potential_temperature,                           &
+                            kVARS%water_vapor, kVARS%cloud_water,             kVARS%rain_in_air,      &
+                            kVARS%u,           kVARS%v,                       kVARS%w,                &
+                            kVARS%dz ])
 
-        end subroutine
+    end subroutine
 
-        subroutine wind_var_request(options)
-            implicit none
-            type(options_t), intent(inout) :: options
+    subroutine wind_var_request(options)
+        implicit none
+        type(options_t), intent(inout) :: options
 
-            if (options%physics%windtype == kWIND_LINEAR .or. &
-                options%physics%windtype == kLINEAR_OBRIEN_WINDS .or. &
-                options%physics%windtype == kLINEAR_ITERATIVE_WINDS) then
-                call wind_linear_var_request(options)
-            endif
+        if (options%physics%windtype == kWIND_LINEAR .or. &
+            options%physics%windtype == kLINEAR_OBRIEN_WINDS .or. &
+            options%physics%windtype == kLINEAR_ITERATIVE_WINDS) then
+            call wind_linear_var_request(options)
+        endif
 
-            call options%alloc_vars([kVARS%blk_ri, kVARS%froude])
+        call options%alloc_vars([kVARS%blk_ri, kVARS%froude])
 
-            if (options%physics%windtype == kITERATIVE_WINDS .or. options%physics%windtype == kLINEAR_ITERATIVE_WINDS) then
-                call options%alloc_vars([kVARS%wind_alpha])
+        if (options%physics%windtype == kITERATIVE_WINDS .or. options%physics%windtype == kLINEAR_ITERATIVE_WINDS) then
+            call options%alloc_vars([kVARS%wind_alpha])
 
-                call options%restart_vars([kVARS%w_real])
-            endif
+            call options%restart_vars([kVARS%w_real])
+        endif
+        
+        
+        if (options%wind%thermal) then
+            call options%alloc_vars([kVARS%potential_temperature, kVARS%skin_temperature])
+            call options%exch_vars([kVARS%skin_temperature])
             
-            
-            if (options%wind%thermal) then
-                call options%alloc_vars([kVARS%potential_temperature, kVARS%skin_temperature])
-                call options%exch_vars([kVARS%skin_temperature])
-                
-                call options%restart_vars([kVARS%potential_temperature, kVARS%skin_temperature])
-            endif
-        end subroutine wind_var_request
+            call options%restart_vars([kVARS%potential_temperature, kVARS%skin_temperature])
+        endif
+    end subroutine wind_var_request
 
 
 
 
-        !------------------------------------------------------------------------------
-        ! subroutine balance_uvw
-        !
-        ! Purpose:
-        !   This subroutine balances the u, v, and w wind components in the domain
-        !   by calculating the divergence of the wind field and adjusting the
-        !   w component to ensure mass conservation.
-        !
-        ! Input:
-        !   domain   - Derived data type containing the domain information
-        !   options  - Derived data type containing various options
-        !   update_in (optional) - Logical variable indicating which variable data array to update
-        !
-        ! Output:
-        !   domain   - Derived data type with updated w component
-        !
-        ! Method:
-        !   1. Calculate the divergence of the wind field
-        !   2. Adjust the w component to balance the divergence
-        !   3. (Optional) Perform the same for the convective wind field
-        !
-        ! Note:
-        !   The convective wind field balancing is currently commented out.
-        !
-        !------------------------------------------------------------------------------    
-        subroutine balance_uvw(domain, options, update_in)
+    !------------------------------------------------------------------------------
+    ! subroutine balance_uvw
+    !
+    ! Purpose:
+    !   This subroutine balances the u, v, and w wind components in the domain
+    !   by calculating the divergence of the wind field and adjusting the
+    !   w component to ensure mass conservation.
+    !
+    ! Input:
+    !   domain   - Derived data type containing the domain information
+    !   options  - Derived data type containing various options
+    !   update_in (optional) - Logical variable indicating which variable data array to update
+    !
+    ! Output:
+    !   domain   - Derived data type with updated w component
+    !
+    ! Method:
+    !   1. Calculate the divergence of the wind field
+    !   2. Adjust the w component to balance the divergence
+    !   3. (Optional) Perform the same for the convective wind field
+    !
+    ! Note:
+    !   The convective wind field balancing is currently commented out.
+    !
+    !------------------------------------------------------------------------------    
+    subroutine balance_uvw(domain, options, update_in)
         ! This subroutine balances the u, v, and w wind components in the domain
         
         implicit none
@@ -194,7 +193,7 @@ contains
         ! endif
         ! endif
         
-        end subroutine balance_uvw
+    end subroutine balance_uvw
 
     subroutine calc_w(w,div,dz,jaco_w,rho,adv_den)
         real,    intent(inout)                                   :: w(ims:ime,kms:kme,jms:jme)
@@ -510,9 +509,7 @@ contains
                                 domain%jacobian_u, domain%jacobian_v,domain%jacobian_w,domain%advection_dz,domain%dx, &
                                 domain%density%data_3d,options,horz_only=.False.)
 
-                !call calc_iter_winds(domain,domain%alpha%data_3d,div,options%adv%advect_density,update_in=.True.)
-
-                call calc_iter_winds(domain,domain%alpha%data_3d,div,options%adv%advect_density,update_in=.True.)
+                call calc_iter_winds_old(domain,domain%alpha%data_3d,div,options%adv%advect_density,update_in=(.not.(first_wind)))
             endif
         elseif (options%physics%windtype==kOBRIEN_WINDS) then
             call Obrien_winds(domain, options, update_in=.True.)
@@ -781,8 +778,8 @@ contains
             call setup_linwinds(domain, options, .False., options%adv%advect_density)
         endif
         if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
-            !call init_iter_winds_old(domain)
-            call init_iter_winds(domain)
+            call init_iter_winds_old(domain,options)
+            !call init_iter_winds(domain)
         endif
 
         if (options%wind%thermal) call init_thermal_winds(domain, options)

@@ -30,8 +30,6 @@ program icar
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
     use icar_constants
-    use wind_iterative,     only : finalize_iter_winds
-!    use wind_iterative_old, only : finalize_iter_winds_old
     use ioserver_interface, only : ioserver_t
     use ioclient_interface, only : ioclient_t
     use io_routines,        only : io_write
@@ -208,7 +206,7 @@ program icar
 
                 !Switch nest contexts if needed
                 if (old_nest /= i) then
-                    call end_nest_context(domain(old_nest), options(old_nest))
+                    if (domain(old_nest)%ended .eqv. .False.) call end_nest_context(domain(old_nest), options(old_nest))
                     call start_nest_context(domain(i), options(i))
                     old_nest = i
                 endif
@@ -281,12 +279,12 @@ program icar
 
                 if(domain(i)%model_time + small_time_delta > options(i)%general%end_time) then
                     domain(i)%ended = .True.
+                    call end_nest_context(domain(i), options(i))
                     if (STD_OUT_PE) write(*,*) "Domain ",i," has reached the end of its run time."
                 endif
             enddo
         end do
         
-        if (ANY(options(:)%physics%windtype==kITERATIVE_WINDS) .or. ANY(options(:)%physics%windtype==kLINEAR_ITERATIVE_WINDS)) call finalize_iter_winds() 
         t_val = 0
         do i = 1,n_nests
             t_val = t_val + timer_mean(total_timer(i), domain(1)%compute_comms)

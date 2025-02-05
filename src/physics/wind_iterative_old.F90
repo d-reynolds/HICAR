@@ -29,25 +29,28 @@ module wind_iterative_old
     use petscdmda
     use array_utilities,      only : smooth_array_3d
     use icar_constants,       only : STD_OUT_PE
+    use options_interface, only : options_t
 
     implicit none
     private
     public:: init_iter_winds_old, calc_iter_winds_old, finalize_iter_winds_old
     real, parameter::deg2rad=0.017453293 !2*pi/360
     real, parameter :: rad2deg=57.2957779371
+    logical :: initialized = .False.
+
     real, allocatable, dimension(:,:,:) :: A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, H_coef, I_coef, &
                                            J_coef, K_coef, L_coef, M_coef, N_coef, O_coef
     real    :: dx
     real, allocatable, dimension(:,:,:)  :: div, dz_if, jaco, dzdx, dzdy, sigma, alpha
     real, allocatable, dimension(:,:)    :: dzdx_surf, dzdy_surf
     integer, allocatable :: xl(:), yl(:)
-    integer              :: hs, i_s, i_e, k_s, k_e, j_s, j_e, ims, ime, kms, kme, jms, jme
+    integer              :: hs, i_s, i_e, k_s, k_e, j_s, j_e
 
 
-    KSP            ksp
-    PC             pc
+    type(tKSP), allocatable, dimension(:) ::    ksp
     DM             da
-    Vec            localX
+    Vec            localX, b
+    Mat            arr_A,arr_B
 
 contains
 
@@ -75,9 +78,10 @@ contains
         integer k !, i_s, i_e, k_s, k_e, j_s, j_e
         
         PetscErrorCode ierr
-        Vec            x
         PetscInt       one, x_size, iteration
         PetscReal      norm, conv_tol
+        PetscBool      reuse_bool
+        Vec   x
         KSPConvergedReason reason
 
         update=.False.
@@ -96,8 +100,10 @@ contains
             call update_coefs(domain)
         endif
 
-        call KSPSetComputeOperators(ksp,ComputeMatrix,0,ierr)
-    
+        call KSPSetComputeOperators(ksp(domain%nest_indx),ComputeMatrix,0,ierr)
+        if (update_in) then
+            call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_TRUE,ierr)
+        endif
         ! call KSPGetOperators(ksp, A, PETSC_NULL_MAT, ierr) ! The second parameter is for the right-hand matrix, which can be NULL if not needed
         ! call MatIsSymmetric(A, PETSC_SMALL, isSymmetric, ierr);
         ! if (isSymmetric) then
@@ -107,31 +113,26 @@ contains
         !     if(STD_OUT_PE) write(*,*) 'Matrix is not symmetric'
         !     call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
         ! endif
-        call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPPIPEFCG <-- this one tested to give fastest convergence...
-                         !KSPPIPEGCR <-- this one tested to give fastest convergence...
-                         !KSPGCR <-- this one tested to give fastest convergence...
 
-        call KSPSetComputeRHS(ksp,ComputeRHS,0,ierr)
+        call KSPSetComputeRHS(ksp(domain%nest_indx),ComputeRHS,0,ierr)
 
-        call KSPSolve(ksp,PETSC_NULL_VEC,PETSC_NULL_VEC,ierr)
+        call KSPSolve(ksp(domain%nest_indx),PETSC_NULL_VEC,PETSC_NULL_VEC,ierr)
+        call KSPGetSolution(ksp(domain%nest_indx),x,ierr)
 
-        call KSPGetSolution(ksp,x,ierr)
-        call KSPGetIterationNumber(ksp, iteration, ierr)
+        call KSPGetIterationNumber(ksp(domain%nest_indx), iteration, ierr)
         if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iteration,' iterations'
         
         !Subset global solution x to local grid so that we can access ghost-points
-        call DMGlobalToLocalBegin(da,x,INSERT_VALUES,localX,ierr)
-        call DMGlobalToLocalEnd(da,x,INSERT_VALUES,localX,ierr)
+        call DMGlobalToLocal(da,x,INSERT_VALUES,localX,ierr)
 
         call DMDAVecGetArrayF90(da,localX,lambda, ierr)
         call calc_updated_winds(domain, lambda, update, adv_den)
-        domain%alpha%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) = lambda(i_s:i_e,k_s:k_e,j_s:j_e)
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
         
         !Exchange u and v, since the outer points are not updated in above function
-        call domain%halo%exch_var(domain%u,do_dqdt=update)
-        call domain%halo%exch_var(domain%v,do_dqdt=update)
-                         
+        call domain%halo%exch_var(domain%u,do_dqdt=.True.)
+        call domain%halo%exch_var(domain%v,do_dqdt=.True.)
+                                 
     end subroutine calc_iter_winds_old
 
     subroutine calc_updated_winds(domain,lambda,update,adv_den) !u, v, w, jaco_u,jaco_v,jaco_w,u_dzdx,v_dzdy,lambda, ids, ide, jds, jde)
@@ -144,31 +145,12 @@ contains
 
 
         real, allocatable, dimension(:,:,:)    :: u_dlambdz, v_dlambdz, u_temp, v_temp, lambda_too, rho, rho_u, rho_v
-        integer k, i_start, i_end, j_start, j_end !i_s, i_e, k_s, k_e, j_s, j_e, ids, ide, jds, jde
-                
-        !i_s = domain%its-1
-        !i_e = domain%ite+1
-        !k_s = domain%kts  
-        !k_e = domain%kte  
-        !j_s = domain%jts-1
-        !j_e = domain%jte+1
+        integer k, i_start, i_end, j_start, j_end 
 
-
-        !i_s+hs, unless we are on global boundary, then i_s
-        i_start = i_s+1
-        if (i_s==domain%grid%ids) i_start = i_s
-        
-        !i_e, unless we are on global boundary, then i_e+1
-        i_end = i_e
-        if (i_e==domain%grid%ide) i_end = i_e+1
-        
-        !j_s+hs, unless we are on global boundary, then j_s
-        j_start = j_s+1
-        if (j_s==domain%grid%jds) j_start = j_s
-        
-        !j_e, unless we are on global boundary, then j_e+1
-        j_end = j_e
-        if (j_e==domain%grid%jde) j_end = j_e+1
+        i_start = i_s
+        i_end   = i_e+1
+        j_start = j_s
+        j_end   = j_e+1
 
         allocate(u_temp(i_start:i_end,k_s-1:k_e+1,j_s:j_e))
         allocate(v_temp(i_s:i_e,k_s-1:k_e+1,j_start:j_end))
@@ -221,6 +203,8 @@ contains
         v_temp = (lambda(i_s:i_e,k_s-1:k_e+1,j_start:j_end) + lambda(i_s:i_e,k_s-1:k_e+1,j_start-1:j_end-1)) / 2 
 
         !divide dz differennces by dz. Note that dz will be horizontally constant
+        !STRUCT_DIFF: u_dlambdz and v_dlambdz are are calculated using "normal" numerics, and not the derivative for
+        !             a stretched vertical grid.
         do k=k_s,k_e
             u_dlambdz(:,k,:) = u_temp(:,k+1,:) - u_temp(:,k-1,:)
             v_dlambdz(:,k,:) = v_temp(:,k+1,:) - v_temp(:,k-1,:)
@@ -239,38 +223,27 @@ contains
         
         !PETSc arrays are zero-indexed
         
-        if (update) then
-            domain%u%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%u%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
-                                                            0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
-                                                            lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
-            (1/domain%jacobian_u(i_start:i_end,:,j_s:j_e))*domain%dzdx_u(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/(rho_u(i_start:i_end,:,j_s:j_e)*domain%jacobian_u(i_start:i_end,:,j_s:j_e))
-            
-            domain%v%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%v%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
-                                                            0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
-                                                            lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
-            (1/domain%jacobian_v(i_s:i_e,:,j_start:j_end))*domain%dzdy_v(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/(rho_v(i_s:i_e,:,j_start:j_end)*domain%jacobian_v(i_s:i_e,:,j_start:j_end))
-        else
-            domain%u%data_3d(i_start:i_end,:,j_s:j_e) = domain%u%data_3d(i_start:i_end,:,j_s:j_e) + &
-                                                            0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
-                                                            lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
-            (1/domain%jacobian_u(i_start:i_end,:,j_s:j_e))*domain%dzdx_u(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/rho_u(i_start:i_end,:,j_s:j_e)
-            
-            domain%v%data_3d(i_s:i_e,:,j_start:j_end) = domain%v%data_3d(i_s:i_e,:,j_start:j_end) + &
-                                                            0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
-                                                            lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
-            (1/domain%jacobian_v(i_s:i_e,:,j_start:j_end))*domain%dzdy_v(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/rho_v(i_s:i_e,:,j_start:j_end)
+        ! STRUCT_DIFF: divide by jacobian again when it is an "update" call
+        domain%u%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%u%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
+                                                        0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
+                                                        lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
+        (1/domain%jacobian_u(i_start:i_end,:,j_s:j_e))*domain%dzdx_u(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/(rho_u(i_start:i_end,:,j_s:j_e)*domain%jacobian_u(i_start:i_end,:,j_s:j_e))
         
-        endif
+        domain%v%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%v%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
+                                                        0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
+                                                        lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
+        (1/domain%jacobian_v(i_s:i_e,:,j_start:j_end))*domain%dzdy_v(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/(rho_v(i_s:i_e,:,j_start:j_end)*domain%jacobian_v(i_s:i_e,:,j_start:j_end))
+        
 
     end subroutine calc_updated_winds
 
-    subroutine ComputeRHS(ksp, vec_b, dummy, ierr)
+    subroutine ComputeRHS(ksp,vec_b,dummy,ierr)
         implicit none
         
-        PetscErrorCode :: ierr
-        KSP :: ksp
-        Vec :: vec_b, x
-        integer :: dummy(*)
+        PetscErrorCode  ierr
+        KSP ksp
+        Vec vec_b
+        integer dummy(*)
         DM      ::       dm
 
         PetscInt       i,j,k,mx,my,mz,xm,ym,zm,xs,ys,zs
@@ -324,21 +297,21 @@ contains
         call VecSet(vec_b,i_guess,ierr)
     end subroutine ComputeInitialGuess
 
-    subroutine ComputeMatrix(ksp,arr_A,arr_B,dummy,ierr)
+    subroutine ComputeMatrix(ksp,array_A,array_B)
         implicit none
-        PetscErrorCode  ierr
         KSP ksp
-        Mat arr_A,arr_B
-        integer dummy(*)
-        real denom
+        Mat array_A,array_B
+        ! integer dummy(*)
 
-
+        PetscErrorCode  ierr
         DM             da
         PetscInt       i,j,k,mx,my,mz,xm,ym,zm,xs,ys,zs,i1,i2,i6,i15
         DMDALocalInfo  info(DMDA_LOCAL_INFO_SIZE)
         PetscScalar    v(15)
         MatStencil     row(4),col(4,15),gnd_col(4,10),top_col(4,2)
-        
+
+        real :: denom
+
         i1 = 1
         i2 = 2
         i6 = 10
@@ -367,7 +340,7 @@ contains
                 if (i.le.0 .or. j.le.0 .or. &
                     i.ge.mx-1 .or. j.ge.my-1) then
                     v(1) = 1.0
-                    call MatSetValuesStencil(arr_B,i1,row,i1,row,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_B,i1,row,i1,row,v,INSERT_VALUES, ierr)
                 else if (k.eq.mz-1) then
                     !k
                     v(1) = 1/dz_if(i,k,j)
@@ -379,7 +352,7 @@ contains
                     top_col(MatStencil_i,2) = i
                     top_col(MatStencil_j,2) = k-1
                     top_col(MatStencil_k,2) = j
-                    call MatSetValuesStencil(arr_B,i1,row,i2,top_col,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_B,i1,row,i2,top_col,v,INSERT_VALUES, ierr)
 
                 else if (k.eq.0) then
                     denom = 2*(dzdx_surf(i,j)**2 + dzdy_surf(i,j)**2 + alpha(i,1,j)**2)/(jaco(i,1,j))
@@ -436,7 +409,7 @@ contains
                     gnd_col(MatStencil_i,10) = i
                     gnd_col(MatStencil_j,10) = k+1
                     gnd_col(MatStencil_k,10) = j+1
-                    call MatSetValuesStencil(arr_B,i1,row,i6,gnd_col,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_B,i1,row,i6,gnd_col,v,INSERT_VALUES, ierr)
                 else
                     !j - 1, k - 1
                     v(1) = O_coef(i,k,j)
@@ -513,17 +486,17 @@ contains
                     col(MatStencil_i,15) = i
                     col(MatStencil_j,15) = k-1
                     col(MatStencil_k,15) = j+1
-                    call MatSetValuesStencil(arr_B,i1,row,i15,col,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_B,i1,row,i15,col,v,INSERT_VALUES, ierr)
                 endif
             enddo
         enddo
         enddo
 
-        call MatAssemblyBegin(arr_B,MAT_FINAL_ASSEMBLY,ierr)
-        call MatAssemblyEnd(arr_B,MAT_FINAL_ASSEMBLY,ierr)
-        if (arr_A .ne. arr_B) then
-         call MatAssemblyBegin(arr_A,MAT_FINAL_ASSEMBLY,ierr)
-         call MatAssemblyEnd(arr_A,MAT_FINAL_ASSEMBLY,ierr)
+        call MatAssemblyBegin(array_B,MAT_FINAL_ASSEMBLY,ierr)
+        call MatAssemblyEnd(array_B,MAT_FINAL_ASSEMBLY,ierr)
+        if (array_A .ne. array_B) then
+         call MatAssemblyBegin(array_A,MAT_FINAL_ASSEMBLY,ierr)
+         call MatAssemblyEnd(array_A,MAT_FINAL_ASSEMBLY,ierr)
         endif
 
     end subroutine ComputeMatrix
@@ -709,19 +682,41 @@ contains
         deallocate(xl,yl)
         
         call VecDestroy(localX,ierr)
+        call VecDestroy(b, ierr)
+        call MatDestroy(arr_A,ierr)
+        call MatDestroy(arr_B,ierr)
         call DMDestroy(da,ierr)
-        call KSPDestroy(ksp,ierr)
-        call PetscFinalize(ierr)
+        ! call KSPDestroy(ksp,ierr)
+        ! call PetscFinalize(ierr)
 
     end subroutine
 
-    subroutine init_petsc_comms(domain)
+    subroutine init_petsc_comms(domain, options)
         implicit none
         type(domain_t), intent(in) :: domain
+        type(options_t), intent(in) :: options
         PetscErrorCode ierr
+
+        integer :: i
 
         PETSC_COMM_WORLD = domain%compute_comms%MPI_VAL
         call PetscInitialize(PETSC_NULL_CHARACTER, ierr)
+
+        allocate(ksp(options%general%nests))
+
+        do i=1,options%general%nests
+            ! if (options%physics%windtype == kITERATIVE_WINDS .or. &
+            !     options%physics%windtype == kLINEAR_ITERATIVE_WINDS) then
+                call KSPCreate(domain%compute_comms%MPI_VAL,ksp(i),ierr)
+                call KSPSetFromOptions(ksp(i),ierr)
+        
+                call KSPSetType(ksp(i),KSPPIPEGCR,ierr) !KSPPIPEFCG <-- this one does not converge.
+                                                !KSPPIPEGCR <-- this one tested to give fastest convergence...
+                call KSPSetComputeInitialGuess(ksp(i),ComputeInitialGuess,0,ierr)
+            ! endif
+        enddo
+        initialized = .True.
+
         if (ierr .ne. 0) then
             print*,'Unable to initialize PETSc'
             stop
@@ -729,44 +724,40 @@ contains
 
     end subroutine
 
-    subroutine init_iter_winds_old(domain)
+    subroutine init_iter_winds_old(domain, options)
         implicit none
         type(domain_t), intent(in) :: domain
+        type(options_t), intent(in) :: options
 
         PetscInt       one, iter
-        PetscReal      conv_tol
         PetscErrorCode ierr
 
-        call init_petsc_comms(domain)
+        if (.not.(initialized)) then
+            call init_petsc_comms(domain, options)
+        endif
+
+
+        ! call KSPSetReusePreconditioner(ksp,PETSC_TRUE,ierr)
+        ! call KSPSetComputeRHS(ksp,ComputeRHS,0,ierr)
+
         call init_module_vars(domain)
 
         one = 1
 
-        call KSPCreate(domain%compute_comms%MPI_VAL,ksp,ierr)
-        conv_tol = 1e-4
-        call KSPSetFromOptions(ksp,ierr)
-
-        !call KSPSetTolerances(ksp,conv_tol,PETSC_DEFAULT_REAL,PETSC_DEFAULT_REAL,PETSC_DEFAULT_INTEGER,ierr)
-        call KSPSetType(ksp,KSPPIPEFCG,ierr) !KSPPIPEFCG <-- this one tested to give fastest convergence...
-                                              ! KSPPIPEBCGS <--- Could be faster, but needs to be tested...
-        !call KSPGetPC(ksp,pc, ierr)
-        !call PCSetType(pc,PCSOR, ierr)
-        ! call KSPSetLagNorm(ksp, PETSC_TRUE, ierr)
         call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
-                          xl, PETSC_NULL_INTEGER ,yl,da,ierr)
+                          xl, PETSC_NULL_INTEGER_ARRAY ,yl,da,ierr)
         
         call DMSetFromOptions(da,ierr)
         call DMSetUp(da,ierr)
+
+        call KSPSetDM(ksp(domain%nest_indx),da,ierr)
+        ! call KSPSetDMActive(ksp,PETSC_FALSE, ierr)
+
         call DMCreateLocalVector(da,localX,ierr)
-        
-        call KSPSetDMActive(ksp,PETSC_FALSE, ierr)
-        call KSPSetDM(ksp,da,ierr)
-
-        call KSPSetComputeInitialGuess(ksp,ComputeInitialGuess,0,ierr)
-        ! call KSPSetUp(ksp, ierr)
-
-        !if(STD_OUT_PE) write(*,*) 'Initialized PETSc'
+        call DMCreateGlobalVector(da,b,ierr)
+        call DMCreateMatrix(da,arr_A,ierr)
+        call DMCreateMatrix(da,arr_B,ierr)
     end subroutine
 
     subroutine init_module_vars(domain)
@@ -775,21 +766,12 @@ contains
 
         integer :: ierr
 
-        i_s = domain%its-1
-        i_e = domain%ite+1
+        i_s = domain%its
+        i_e = domain%ite
         k_s = domain%kts  
         k_e = domain%kte  
-        j_s = domain%jts-1
-        j_e = domain%jte+1
-
-
-        ims = domain%ims
-        ime = domain%ime
-        kms = domain%kms  
-        kme = domain%kme  
-        jms = domain%jms
-        jme = domain%jme
-
+        j_s = domain%jts
+        j_e = domain%jte
 
         !i_s+hs, unless we are on global boundary, then i_s
         if (domain%grid%ims==domain%grid%ids) i_s = domain%grid%ids

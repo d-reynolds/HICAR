@@ -56,7 +56,7 @@ FILE(GLOB_RECURSE SOURCE_FILES  ${PROJECT_SOURCE_DIR}/src/*.F90)
 FILE(GLOB_RECURSE CAF_TESTS  ${PROJECT_SOURCE_DIR}/src/tests/*)
 list(REMOVE_ITEM SOURCE_FILES ${CAF_TESTS})
 
-list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_old.F90)
+# list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_old.F90)
 
 #######################################
 

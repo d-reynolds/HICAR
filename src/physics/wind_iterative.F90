@@ -270,10 +270,8 @@ contains
             do k=zs,(zs+zm-1)
                 do i=xs,(xs+xm-1)
                     !For global boundary conditions
-                    if (i.eq.0 .or. j.eq.0 .or. &
-                        i.eq.mx-1 .or. j.eq.my-1 .or. k.eq.mz-1) then
-                        barray(i,k,j) = 0.0
-                    else if (k.eq.0) then
+                    if (i.le.0 .or. j.le.0 .or. k.eq.0 .or. &
+                        i.ge.mx-1 .or. j.ge.my-1 .or. k.eq.mz-1) then
                         barray(i,k,j) = 0.0
                     else
                         barray(i,k,j) = -2*div(i,k,j)
@@ -616,26 +614,18 @@ contains
                             
         if (domain%ims==domain%ids) then
             E_coef(i_s,:,:) = E_coef(i_s+1,:,:)
-            ! I_coef(i_s,:,:) = I_coef(i_s+1,:,:)
-            ! K_coef(i_s,:,:) = K_coef(i_s+1,:,:)
         endif
 
         if (domain%ime==domain%ide) then
             D_coef(i_e,:,:) = D_coef(i_e-1,:,:)
-            ! H_coef(i_e,:,:) = H_coef(i_e-1,:,:)
-            ! J_coef(i_e,:,:) = J_coef(i_e-1,:,:)
         endif
 
         if (domain%jms==domain%jds) then
             G_coef(:,:,j_s) = G_coef(:,:,j_s+1)
-            ! M_coef(:,:,j_s) = M_coef(:,:,j_s+1)
-            ! O_coef(:,:,j_s) = O_coef(:,:,j_s+1)
         endif
 
         if (domain%jme==domain%jde) then
             F_coef(:,:,j_e) = F_coef(:,:,j_e-1)
-            ! L_coef(:,:,j_e) = L_coef(:,:,j_e-1)
-            ! N_coef(:,:,j_e) = N_coef(:,:,j_e-1)
         endif
 
     end subroutine initialize_coefs
