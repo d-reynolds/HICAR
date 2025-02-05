@@ -142,6 +142,12 @@ contains
                     qmax = max(q0, q_i, q_j, q_k)
                     qmin = min(q0, q_i, q_j, q_k)
 
+                    ! If the min and max for this point are 0, there is no flux limiter to calculate...
+                    if ((abs(qmax)+abs(qmin)) == 0) then
+                        scale_in(i,k,j) = 0.0
+                        scale_out(i,k,j) = 0.0
+                        cycle
+                    endif
                     !This is the original code, which is may be slower than the above
                     !included code, but is more readable
                     ! if (u(i,k,j) > 0) then
@@ -210,26 +216,35 @@ contains
                     if (i >= its) then
                         flux_x(i,k,j) = flux_x(i,k,j) - flux_x_up(i,k,j)
                         if (flux_x(i,k,j) > 0) then
-                            flux_x(i,k,j) = max(0.0,min(scale_in(i,k,j),scale_out(i-1,k,j),1.0))*flux_x(i,k,j) + flux_x_up(i,k,j)
+                            scale = max(0.0,min(scale_in(i,k,j),scale_out(i-1,k,j),1.0))
+                        elseif(flux_x(i,k,j) < 0) then
+                            scale = max(0.0,min(scale_out(i,k,j),scale_in(i-1,k,j),1.0))
                         else
-                            flux_x(i,k,j) = max(0.0,min(scale_out(i,k,j),scale_in(i-1,k,j),1.0))*flux_x(i,k,j) + flux_x_up(i,k,j)
+                            scale = 1.0
                         endif
+                        flux_x(i,k,j) = scale*flux_x(i,k,j) + flux_x_up(i,k,j)
                     end if
                     if (j >= jts) then
                         flux_y(i,k,j) = flux_y(i,k,j) - flux_y_up(i,k,j)
                         if (flux_y(i,k,j) > 0) then
-                            flux_y(i,k,j) = max(0.0,min(scale_in(i,k,j),scale_out(i,k,j-1),1.0))*flux_y(i,k,j) + flux_y_up(i,k,j)
+                            scale = max(0.0,min(scale_in(i,k,j),scale_out(i,k,j-1),1.0))
+                        elseif(flux_y(i,k,j) < 0) then
+                            scale = max(0.0,min(scale_out(i,k,j),scale_in(i,k,j-1),1.0))
                         else
-                            flux_y(i,k,j) = max(0.0,min(scale_out(i,k,j),scale_in(i,k,j-1),1.0))*flux_y(i,k,j) + flux_y_up(i,k,j)
+                            scale = 1.0
                         endif
+                        flux_y(i,k,j) = scale*flux_y(i,k,j) + flux_y_up(i,k,j)
                     endif
                     if (k > kms) then
                         flux_z(i,k,j) = flux_z(i,k,j) - flux_z_up(i,k,j)
                         if (flux_z(i,k,j) > 0) then
-                            flux_z(i,k,j) = max(0.0,min(scale_in(i,k,j),scale_out(i,k-1,j),1.0))*flux_z(i,k,j) + flux_z_up(i,k,j)
+                            scale = max(0.0,min(scale_in(i,k,j),scale_out(i,k-1,j),1.0))
+                        elseif(flux_z(i,k,j) < 0) then
+                            scale = max(0.0,min(scale_out(i,k,j),scale_in(i,k-1,j),1.0))
                         else
-                            flux_z(i,k,j) = max(0.0,min(scale_out(i,k,j),scale_in(i,k-1,j),1.0))*flux_z(i,k,j) + flux_z_up(i,k,j)
+                            scale = 1.0
                         endif
+                        flux_z(i,k,j) = scale*flux_z(i,k,j) + flux_z_up(i,k,j)
                     endif
             !     enddo
             ! enddo

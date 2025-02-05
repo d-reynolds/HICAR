@@ -708,7 +708,7 @@ contains
 
         if (flux_corr > 0) then
             call flux_up_time%start()
-            call flux3_w_up(qold,U_m, V_m, W_m, flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up)
+            call flux3_w_up(qfluxes,U_m, V_m, W_m, flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up)
             call flux_up_time%stop()
 
             call flux_corr_time%start()

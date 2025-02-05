@@ -368,9 +368,6 @@ contains
 
       if (allocated(this%znw).or.allocated(this%znu)) call init_znu(this)
 
-
-      call diagnostic_update(this,options)
-
       call this%enforce_limits()
 
       this%model_time = options%general%start_time
@@ -388,14 +385,18 @@ contains
     !! @param options   Model options (not used at present)
     !!
     !!------------------------------------------------------------
-    module subroutine diagnostic_update(this, options)
+    module subroutine diagnostic_update(this, forcing_update)
         implicit none
         class(domain_t),  intent(inout)   :: this
-        type(options_t), intent(in)      :: options
+        logical, intent(in), optional    :: forcing_update
         integer :: i, j, k
         real :: qsum
+        logical :: forcing_update_only
         real, dimension(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme) :: mod_temp_3d
         real, dimension(this%ims:this%ime, this%jms:this%jme) :: surf_temp_1, surf_temp_2, surf_temp_3
+
+        forcing_update_only = .False.
+        if (present(forcing_update)) forcing_update_only = forcing_update
 
         associate(ims => this%ims, ime => this%ime,                             &
                   jms => this%jms, jme => this%jme,                             &
@@ -423,10 +424,18 @@ contains
                   v_mass                => this%v_mass%data_3d,                 &
                   potential_temperature => this%potential_temperature%data_3d )
 
-        exner = exner_function(pressure)
-
         !Calculation of density
-        if (associated(this%density%data_3d)) then
+        if (forcing_update_only) then
+            exner = exner_function(this%pressure%dqdt_3d)
+
+            do concurrent (j = jms:jme, k = kms:kme, i = ims:ime)                
+                temperature(i,k,j) = this%potential_temperature%dqdt_3d(i,k,j) * exner(i,k,j)
+                density(i,k,j) =  this%pressure%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+this%water_vapor%dqdt_3d(i,k,j))) ! kg/m^3
+            enddo
+            return
+        else
+            exner = exner_function(pressure)
+
             do concurrent (j = jms:jme, k = kms:kme, i = ims:ime)
                 ! qsum = qv(i,k,j)
                 ! if(associated(this%cloud_water_mass%data_3d)) qsum = qsum + this%cloud_water_mass%data_3d(i,k,j)
@@ -467,7 +476,6 @@ contains
             enddo
         endif
                 
-        
         if (associated(this%surface_pressure%data_2d)) then
             psfc = pressure_i(ims:ime, kms, jms:jme)
         endif
@@ -3206,6 +3214,12 @@ contains
         
         !Ensure that input data for hydrometeors after interpolation have been forced to 0-minimum
         call this%enforce_limits(update_in=update_only)
+
+        !Perform a diagnostic_update to ensure that all diagnostic variables are set for the new forcing data
+        !This will be overwriten as soon as we enter the physics loop, but it is necesery to compute density
+        !For the future step so that the wind solver uses both future winds, and future density.
+        call this%diagnostic_update(forcing_update=update_only)
+
 
     end subroutine
 

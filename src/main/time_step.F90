@@ -117,7 +117,7 @@ contains
             ENDDO
         ENDDO
                 
-        maxwind3d = maxwind3d * sqrt3
+        maxwind3d = maxwind3d !* sqrt3
 
         !TESTING: Do we need to multiply maxwind3d by sqrt3 as the comment above suggests?
         ! maxwind3d = maxwind3d * sqrt3
@@ -281,17 +281,17 @@ contains
             
             !Determine dt
             if (last_wind_update >= options%wind%update_dt%seconds() .or. options%wind%wind_only) then
-                call domain%diagnostic_update(options)
-
                 call wind_timer%start()
                 call update_winds(domain, forcing, options)
                 call wind_timer%stop()
+
                 !Now that new winds have been calculated, get new time step in seconds, and see if they require adapting the time step
                 ! Note that there will currently be some discrepancy between using the current density and whatever density will be at 
                 ! the next time step, but we assume that it is negligable
                 ! and that using a CFL criterion < 1.0 will cover this
                 call update_dt(dt, options, domain)
                 call update_wind_dqdt(domain, options)
+
                 last_wind_update = 0.0
 
                 if (options%wind%wind_only) then
@@ -316,7 +316,7 @@ contains
             call forcing_timer%stop()
 
             call diagnostic_timer%start()
-            call domain%diagnostic_update(options)
+            call domain%diagnostic_update()
             call diagnostic_timer%stop()
 
             if (options%adv%advect_density) then
