@@ -467,6 +467,15 @@ program icar
 
                 if (ioserver(i)%ended .or. (ioserver(i)%started .eqv. .False.)) cycle
 
+
+                !See if we even have files to read
+                if (ioserver(i)%files_to_read) then
+                    !See of it is time to read.
+                    ! if (ioserver(i)%io_time + options(i)%forcing%input_dt + small_time_delta >= next_input(i)) then
+                        call ioserver(i)%read_file()
+                    ! endif
+                endif
+
                 next_input(i) = ioserver(i)%io_time + options(i)%forcing%input_dt
                 next_output(i) = ioserver(i)%io_time + options(i)%output%output_dt
 
@@ -475,14 +484,6 @@ program icar
                 do while (ioserver(i)%io_time + small_time_delta < end_of_nest_loop)
 
                     ioserver(i)%io_time = step_end(next_input(i),next_output(i))
-
-                    !See if we even have files to read
-                    if (ioserver(i)%files_to_read) then
-                        !See of it is time to read.
-                        if (ioserver(i)%io_time + options(i)%forcing%input_dt + small_time_delta >= next_input(i)) then
-                            call ioserver(i)%read_file()
-                        endif
-                    endif
 
                     ! If the next event is a change is nest scope, then we need to wait on this, as the compute team will wait for us
                     if ( (size(options(i)%general%child_nests) > 0) .and. ioserver(i)%io_time + small_time_delta >= end_of_nest_loop) then
