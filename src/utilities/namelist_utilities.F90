@@ -91,6 +91,9 @@ contains
             endif
         endif
 
+        if (present(usr_default)) then
+            call check_numeric_var_entry_type(usr_default,var,name)
+        endif
     end subroutine set_real_nml_var
 
     subroutine set_real_list_nml_var(var, var_val, name, usr_default)
@@ -202,15 +205,28 @@ contains
             endif
         endif
 
+        if (present(usr_default)) then
+            call check_numeric_var_entry_type((usr_default*1.0),(var*1.0),name)
+        endif
+
     end subroutine set_integer_nml_var
 
-    subroutine set_logical_nml_var(var, var_val, name)
+    subroutine set_logical_nml_var(var, var_val, name, usr_default)
         implicit none
         logical,    intent(inout) :: var
         logical,    intent(in) :: var_val
         character(len=*), intent(in) :: name
+        logical, optional, intent(in) :: usr_default
+
+        integer :: type
 
         var = var_val
+
+        type = get_nml_var_type(name)
+
+        if (type==1 .and. present(usr_default)) then
+            var = usr_default
+        endif
 
     end subroutine set_logical_nml_var
 
@@ -226,7 +242,7 @@ contains
         character(len=kMAX_STRING_LENGTH) :: group, default, description, units
         real :: min, max
         integer, allocatable :: values(:), var_dims(:), t_var_dims(:)
-        integer :: p, dim_indx, dim_len
+        integer :: p, dim_indx, dim_len, type
         character(len=kMAX_STRING_LENGTH) :: dim_name
         character(len=1), allocatable :: dimensions(:), t_dimensions(:), dimensions_tmp(:), t_dimensions_tmp(:)
         logical :: no_check_flag
@@ -237,7 +253,7 @@ contains
             no_check_flag = .False.
         endif
 
-        call get_nml_var_metadata(name,group,description,default,min,max,values,units,dimensions)
+        call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
 
         ! see if user wants to use this variable anyways
         if (.not.(var_val =="") .and. .not.(no_check_flag)) then
@@ -258,7 +274,7 @@ contains
                 !! then get the number of dimensions for the variable
                 call io_getdims(options%boundary_files(1), options%tvar, t_var_dims)
         !
-                call get_nml_var_metadata('tvar',group,description,default,min,max,values,units,t_dimensions)
+                call get_nml_var_metadata('tvar',group,description,default,min,max,type,values,units,t_dimensions)
 
                 ! reverse ordering of hgt_dimensions -- needed since fortran netCDF uses reverse ordering relative to python/nco
                 allocate(t_dimensions_tmp(size(t_dimensions)))
@@ -309,6 +325,8 @@ contains
         endif
         var = var_val
 
+        !call check_var_entry_type("",var_val,name)
+
     end subroutine set_char_forcing_nml_var
 
     subroutine set_char_domain_nml_var(var, var_val, name, options, usr_default)
@@ -323,11 +341,11 @@ contains
         character(len=kMAX_STRING_LENGTH) :: group, default, description, units
         real :: min, max
         integer, allocatable :: values(:), var_dims(:), hgt_var_dims(:)
-        integer :: i, dim_indx, dim_len
+        integer :: i, dim_indx, dim_len, type
         character(len=kMAX_STRING_LENGTH) :: dim_name
         character(len=1), allocatable :: dimensions(:), hgt_dimensions(:), dimensions_tmp(:), hgt_dimensions_tmp(:)
 
-        call get_nml_var_metadata(name,group,description,default,min,max,values,units,dimensions)
+        call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
 
         if (present(usr_default)) then
             ! If the user set the first value, but not the rest, then they want this first value to apply to all nests
@@ -365,7 +383,7 @@ contains
                 !! then get the number of dimensions for the variable
                 call io_getdims(options%init_conditions_file, options%hgt_hi, hgt_var_dims)
         !
-                call get_nml_var_metadata('hgt_hi',group,description,default,min,max,values,units,hgt_dimensions)
+                call get_nml_var_metadata('hgt_hi',group,description,default,min,max,type,values,units,hgt_dimensions)
 
                 ! reverse ordering of hgt_dimensions -- needed since fortran netCDF uses reverse ordering relative to python/nco
                 allocate(hgt_dimensions_tmp(size(hgt_dimensions)))
@@ -405,6 +423,8 @@ contains
             endif
         endif
 
+        if (present(usr_default)) call check_var_entry_type(usr_default,var,name)
+
     end subroutine set_char_domain_nml_var
 
     subroutine set_char_nml_var(var, var_val, name, usr_default)
@@ -420,19 +440,19 @@ contains
 
         if (present(usr_default)) then
             ! If the user set the first value, but not the rest, then they want this first value to apply to all nests
-            if ( (trim(usr_default) /= kCHAR_NO_VAL) .and. (trim(var_val) == kCHAR_NO_VAL )) then
-                var = usr_default
-            elseif ( trim(usr_default) == kCHAR_NO_VAL ) then
+            if ( (trim(usr_default) /= trim(kCHAR_NO_VAL)) .and. (trim(var_val) == trim(kCHAR_NO_VAL) )) then
+                var = trim(usr_default)
+            elseif ( trim(usr_default) == trim(kCHAR_NO_VAL) ) then
                 ! If the user did not set the first value, then there is no entry at all, so set it to the default
-                var = default
+                var = trim(default)
             else
-                var = var_val
+                var = trim(var_val)
             endif
         ! If this is not a variable for which nested values can differ, then we just check if the value was not set in the namelist
-        else if (trim(var_val) == kCHAR_NO_VAL) then
-            var = default
+        else if (trim(var_val) == trim(kCHAR_NO_VAL)) then
+            var = trim(default)
         else
-            var = var_val
+            var = trim(var_val)
         endif
 
         ! Perform regex match on var_val to see if it ends with '.txt'
@@ -442,6 +462,8 @@ contains
         if ((index(var, '.txt') > 0) .or. index(var, '.nc') > 0) then
             call check_file_exists(var, message=(trim(var)//"file does not exist."))
         endif
+
+        if (present(usr_default)) call check_var_entry_type(usr_default,var,name)
 
     end subroutine set_char_nml_var
 
@@ -692,6 +714,71 @@ contains
 
     end subroutine set_char_list_array_nml_var_default
 
+    subroutine check_var_entry_type(val_1,val_n,name)
+        implicit none
+        character(len=*), intent(in) :: val_1, val_n
+        character(len=*), intent(in) :: name
+
+        character(len=kMAX_STRING_LENGTH) :: default
+        integer :: type    
+
+        !convert the default value string to a real
+        default = trim(get_nml_var_default(name))
+        type = get_nml_var_type(name)
+
+        if (type==1) then
+            if (trim(val_1) /= trim(val_n)) then
+                if (STD_OUT_PE) write(*,*) "------------------------------------------------------------------------------------"
+                if (STD_OUT_PE) write(*,*) "Error: namelist option '", trim(name), "' must be the same for all nests" 
+                if (STD_OUT_PE) write(*,*) "Error: the first entry has the value: ", trim(val_1), " and another entry has the value: ", trim(val_n)
+                if (STD_OUT_PE) write(*,*) "------------------------------------------------------------------------------------"
+                stop
+            endif
+        elseif (type==2) then
+            if (trim(val_n) == default) then
+                if (STD_OUT_PE) write(*,*) "------------------------------------------------------------------------------------"
+                if (STD_OUT_PE) write(*,*) "Error: namelist option '", trim(name), "' is not uniquely set for each of the nests" 
+                if (STD_OUT_PE) write(*,*) "------------------------------------------------------------------------------------"
+                stop
+            endif
+        endif
+
+    end subroutine check_var_entry_type
+
+    subroutine check_numeric_var_entry_type(val_1,val_n,name)
+        implicit none
+        real, intent(in) :: val_1, val_n
+        character(len=*), intent(in) :: name
+
+        character(len=kMAX_STRING_LENGTH) :: default
+        real :: scalar_default
+        integer :: type    
+
+        !convert the default value string to a real
+        default = trim(get_nml_var_default(name))
+        read(default,*) scalar_default
+        type = get_nml_var_type(name)
+
+        if (type==1) then
+            if (val_1 /= val_n) then
+                if (STD_OUT_PE) write(*,*) "------------------------------------------------------------------------------------"
+                if (STD_OUT_PE) write(*,*) "Error: namelist option '", trim(name), "' must be the same for all nests" 
+                if (STD_OUT_PE) write(*,*) "Error: the first entry has the value: ", val_1, " and another entry has the value: ", val_n
+                if (STD_OUT_PE) write(*,*) "------------------------------------------------------------------------------------"
+                stop
+            endif
+        elseif (type==2) then
+            if (val_n == scalar_default) then
+                if (STD_OUT_PE) write(*,*) "------------------------------------------------------------------------------------"
+                if (STD_OUT_PE) write(*,*) "Error: namelist option '", trim(name), "' is not uniquely set for each of the nests" 
+                if (STD_OUT_PE) write(*,*) "------------------------------------------------------------------------------------"
+                stop
+            endif
+        endif
+
+    end subroutine check_numeric_var_entry_type
+
+
     function get_nml_var_minmax(name) result(minmax)
         implicit none
         character(len=*), intent(in) :: name
@@ -699,10 +786,11 @@ contains
         character(len=kMAX_STRING_LENGTH) :: group, default, description, units
         character(len=1), allocatable :: dimensions(:)
         real :: min, max
+        integer :: type
         integer, allocatable :: values(:)
         real :: minmax(2)
 
-        call get_nml_var_metadata(name,group,description,default,min,max,values,units,dimensions)
+        call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
 
         minmax = (/min, max/)
 
@@ -715,9 +803,10 @@ contains
         character(len=kMAX_STRING_LENGTH) :: group, default, description, units
         character(len=1), allocatable :: dimensions(:)
         real :: min, max
+        integer :: type
         integer, allocatable :: values(:)
 
-        call get_nml_var_metadata(name,group,description,default,min,max,values,units,dimensions)
+        call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
 
     end function get_nml_var_values
 
@@ -729,9 +818,10 @@ contains
         character(len=kMAX_STRING_LENGTH) :: group, default, description, units
         character(len=1), allocatable :: dimensions(:)
         real :: min, max
+        integer :: type
         integer, allocatable :: values(:)
 
-        call get_nml_var_metadata(name,group,description,default,min,max,values,units,dimensions)
+        call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
 
         if (present(info)) then
             if (info) call write_nml_var_info(name,group,description,default,min,max,values,units,dimensions)
@@ -741,6 +831,20 @@ contains
         endif
         
     end function get_nml_var_default
+
+    function get_nml_var_type(name) result(type)
+        implicit none
+        character(len=*), intent(in) :: name
+
+        character(len=kMAX_STRING_LENGTH) :: group, default, description, units
+        character(len=1), allocatable :: dimensions(:)
+        real :: min, max
+        integer :: type
+        integer, allocatable :: values(:)
+
+        call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
+        
+    end function get_nml_var_type
 
     subroutine write_nml_entry(name, default, description, dimensions, group)
         implicit none
@@ -1020,18 +1124,20 @@ contains
     end subroutine write_nml_var_info
 
 
-    subroutine get_nml_var_metadata(name, group, description, default, min, max, values, units, dimensions)
+    subroutine get_nml_var_metadata(name, group, description, default, min, max, type, values, units, dimensions)
         implicit none
         character(len=*), intent(in) :: name
         character(len=*), intent(out) :: group, description, default, units
         character(len=*), allocatable, intent(out) :: dimensions(:)
         real,    intent(out) :: min, max
+        integer, intent(out) :: type
         integer, allocatable, intent(out) :: values(:)
 
         group = ""
         description = ""
         default = ""
         units = ""
+        type = 0
 
         min = 0
         max = 0
@@ -1042,17 +1148,20 @@ contains
             ! --------------------------------------
             ! --------------------------------------
             case ("debug")
-                description = "(-) Debugging flag (T/F)"
+                description = "Debugging flag (T/F)"
                 default = ".False."
                 group = "General"
+                type = 1
             case ("interactive")
-                description = "(-) Interactive flag, prints out model progress during physics timesteps (T/F)"
+                description = "Interactive flag, prints out model progress during physics timesteps (T/F)"
                 default = ".False."
                 group = "General"
+                type = 1
             case ("calendar")
-                description = "(-) Calendar type for start/end date, values: (gregorian, noleap, 360_day)"
+                description = "Calendar type for start/end date, values: (gregorian, noleap, 360_day)"
                 default = "gregorian"
                 group = "General" 
+                type = 1
             case ("start_date")
                 description = "Start date for simulation, format: 'YYYY-MM-DD HH:MM:SS'"
                 default = ""
@@ -1062,18 +1171,21 @@ contains
                 default = ""
                 group = "General"
             case ("version")
-                description = "(-) Version of the model"
+                description = "Version of the model"
                 default = kVERSION_STRING
                 group = "General"
+                type = 1
             case ("comment")
-                description = "(-) Comment for the run, to be added to the output file metadata"
+                description = "Comment for the run, to be added to the output file metadata"
                 group = "General"
+                type = 1
             case ("nests")
-                description = "(-) Number of nests to use in the simulation"
+                description = "Number of nests to use in the simulation"
                 default = "1"
                 min = 1
                 max = kMAX_NESTS
                 group = "General"
+                type = 1
             case ("parent_nest")
                 description = "Parent nest indices for each nest, length 'nests'. "
                 default = "0"
@@ -1081,64 +1193,77 @@ contains
                 max = kMAX_NESTS
                 group = "General"
             case ("phys_suite")
-                description = "(-) Physics suite to use, current options: (HICAR)"
+                description = "Physics suite to use, current options: (HICAR)"
                 group = "General"
+                type = 1
             case ("use_mp_options")
-                description = "(-) Read the microphysics namelist section to set options relevant for the Thompson MP schemes (T/F)"
+                description = "Read the microphysics namelist section to set options relevant for the Thompson MP schemes (T/F)"
                 default = ".True."
                 group = "General"
+                type = 1
             case ("use_lt_options")
-                description = "(-) Read the linear theory namelist section to set options relevant for the linear-theory wind solver (T/F)"
+                description = "Read the linear theory namelist section to set options relevant for the linear-theory wind solver (T/F)"
                 default = ".True."
                 group = "General"
+                type = 1
             case ("use_sfc_options")
-                description = "(-) Read the surface namelist section to set options relevant for the surface model (T/F)"
+                description = "Read the surface namelist section to set options relevant for the surface model (T/F)"
                 default = ".True."
                 group = "General"
+                type = 1
             case ("use_rad_options")
-                description = "(-) Read the radiation namelist section to set options relevant for the radiation model (T/F)"
+                description = "Read the radiation namelist section to set options relevant for the radiation model (T/F)"
                 default = ".True."
                 group = "General"
+                type = 1
             case ("use_pbl_options")
-                description = "(-) Read the PBL namelist section to set options relevant for the PBL model (T/F)"
+                description = "Read the PBL namelist section to set options relevant for the PBL model (T/F)"
                 default = ".True."
                 group = "General"
+                type = 1
             case ("use_lsm_options")
-                description = "(-) Read the LSM namelist section to set options relevant for the LSM model (T/F)"
+                description = "Read the LSM namelist section to set options relevant for the LSM model (T/F)"
                 default = ".True."
                 group = "General"
+                type = 1
             case ("use_sm_options")
-                description = "(-) Read the SM namelist section to set options relevant for the snow model (T/F)"
+                description = "Read the SM namelist section to set options relevant for the snow model (T/F)"
                 default = ".True."
                 group = "General"
+                type = 1
             case ("use_cu_options")
-                description = "(-) Read the cumulus namelist section to set options relevant for the cumulus scheme (T/F)"
+                description = "Read the cumulus namelist section to set options relevant for the cumulus scheme (T/F)"
                 default = ".True."
                 group = "General"
+                type = 1
             case ("use_wind_options")
-                description = "(-) Read the wind namelist section to set options relevant for the wind solver (T/F)"
+                description = "Read the wind namelist section to set options relevant for the wind solver (T/F)"
                 default = ".True."
                 group = "General"
+                type = 1
             case ("use_adv_options")
-                description = "(-) Read the advection namelist section to set options relevant for the advection scheme (T/F)"
+                description = "Read the advection namelist section to set options relevant for the advection scheme (T/F)"
                 default = ".True."
                 group = "General"
+                type = 1
             ! --------------------------------------
             ! --------------------------------------
             ! Domain namelist variables
             ! --------------------------------------
             ! --------------------------------------
             case("init_conditions_file")
-                description = "(*) Path to file containing initial conditions"
+                description = "Path to file containing initial conditions"
                 default = ""
                 group = "Domain"
+                type = 2
             case("dx")
-                description = "(*) Horizontal grid spacing"
+                description = "Horizontal grid spacing"
                 min = 0
                 max = 1e6
                 units = "meters"
                 default = "0.0"
                 group = "Domain"
+                type = 2
             case("nz")
                 description = "Number of vertical levels"
                 min = 0
@@ -1392,319 +1517,374 @@ contains
             ! --------------------------------------
             ! --------------------------------------
             case ("forcing_file_list")
-                description = "(-) Path to file containing list of forcing files. Can be generated using helpers/filelist_script.sh"
+                description = "Path to file containing list of forcing files. Can be generated using helpers/filelist_script.sh"
                 default = ""
                 group = "Forcing"
+                type = 1
             case ("t_offset")
-                description = "(-) Offset to apply to temperature forcing data"
+                description = "Offset to apply to temperature forcing data"
                 min = -500
                 max = 500
                 default = "0.0"
                 group = "Forcing"
+                type = 1
             case ("inputinterval")
-                description = "(-) Interval between forcing data inputs in seconds"
+                description = "Interval between forcing data inputs in seconds"
                 min = 1
                 max = 86400
                 default = "3600"
                 group = "Forcing"
+                type = 1
             case ("limit_rh")
-                description = "(-) Limit forcing relative humidity to 100% (T/F)"
+                description = "Limit forcing relative humidity to 100% (T/F)"
                 default = ".False."
                 group = "Forcing"
+                type = 1
             case ("t_is_potential")
-                description = "(-) Forcing temperature variable is potential temperature (T/F)"
+                description = "Forcing temperature variable is potential temperature (T/F)"
                 default = ".True."
                 group = "Forcing"
+                type = 1
             case ("qv_is_spec_humidity")
-                description = "(-) Forcing QV variable is specific humidity (T/F)"
+                description = "Forcing QV variable is specific humidity (T/F)"
                 default = ".False."
                 group = "Forcing"
+                type = 1
             case ("qv_is_relative_humidity")
-                description = "(-) Forcing QV variable is relative humidity (T/F)"
+                description = "Forcing QV variable is relative humidity (T/F)"
                 default = ".False."
                 group = "Forcing"
+                type = 1
             case ("z_is_geopotential")
-                description = "(-) Forcing Z variable is geopotential height (T/F)"
+                description = "Forcing Z variable is geopotential height (T/F)"
                 default = ".False."
                 group = "Forcing"
+                type = 1
             case ("z_is_on_interface")
-                description = "(-) Forcing Z variable is on interface levels (T/F)"
+                description = "Forcing Z variable is on interface levels (T/F)"
                 default = ".False."
                 group = "Forcing"
+                type = 1
             case ("time_varying_z")
-                description = "(-) Forcing Z variable is time varying (T/F)"
+                description = "Forcing Z variable is time varying (T/F)"
                 default = ".False."
                 group = "Forcing"
+                type = 1
             case ("hgtvar")
-                description = "(-) Name of the terrain height variable in forcing file (REQUIRED)"
+                description = "Name of the terrain height variable in forcing file (REQUIRED)"
                 units = "meters"
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("latvar")
-                description = "(-) Name of the latitude variable in forcing file (REQUIRED)"
+                description = "Name of the latitude variable in forcing file (REQUIRED)"
                 units = "degrees"
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("lonvar")
-                description = "(-) Name of the longitude variable in forcing file (REQUIRED)"
+                description = "Name of the longitude variable in forcing file (REQUIRED)"
                 units = "degrees"
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("time_var")
-                description = "(-) Name of the time variable in forcing file (REQUIRED)"
+                description = "Name of the time variable in forcing file (REQUIRED)"
                 allocate(dimensions(1))
                 dimensions = ["T"]
                 group = "Forcing"
+                type = 1
             case ("uvar")
-                description = "(-) Name of the U wind variable in forcing file (REQUIRED)"
+                description = "Name of the U wind variable in forcing file (REQUIRED)"
                 units = "m/s"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("ulat")
-                description = "(-) Name of the latitude variable on the staggered U-grid in forcing file"
+                description = "Name of the latitude variable on the staggered U-grid in forcing file"
                 units = "degrees"
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("ulon")
-                description = "(-) Name of the longitude variable on the staggered U-grid in forcing file"
+                description = "Name of the longitude variable on the staggered U-grid in forcing file"
                 units = "degrees"
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("vvar")
-                description = "(-) Name of the V wind variable in forcing file (REQUIRED)"
+                description = "Name of the V wind variable in forcing file (REQUIRED)"
                 units = "m/s"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("vlat")
-                description = "(-) Name of the latitude variable on the staggered V-grid in forcing file"
+                description = "Name of the latitude variable on the staggered V-grid in forcing file"
                 units = "degrees"
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("vlon")
-                description = "(-) Name of the longitude variable on the staggered V-grid in forcing file"
+                description = "Name of the longitude variable on the staggered V-grid in forcing file"
                 units = "degrees"
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("wvar")
-                description = "(-) Name of the W wind variable in forcing file"
+                description = "Name of the W wind variable in forcing file"
                 units = "m/s"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("pslvar")
-                description = "(-) Name of the sea level pressure variable in forcing file"
+                description = "Name of the sea level pressure variable in forcing file"
                 units = "Pa"
                 allocate(dimensions(3))
                 dimensions = ["T", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("psvar")
-                description = "(-) Name of the surface pressure variable in forcing file"
+                description = "Name of the surface pressure variable in forcing file"
                 units = "Pa"
                 allocate(dimensions(3))
                 dimensions = ["T", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("pvar")
-                description = "(-) Name of the pressure variable in forcing file"
+                description = "Name of the pressure variable in forcing file"
                 units = "Pa"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("tvar")
-                description = "(-) Name of the temperature variable in forcing file (REQUIRED)"
+                description = "Name of the temperature variable in forcing file (REQUIRED)"
                 units = "K"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("qvvar")
-                description = "(-) Name of the water vapor mixing ration variable in forcing file (REQUIRED)"
+                description = "Name of the water vapor mixing ration variable in forcing file (REQUIRED)"
                 units = "kg/kg"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("qcvar")
-                description = "(-) Name of the cloud water mixing ratio variable in forcing file"
+                description = "Name of the cloud water mixing ratio variable in forcing file"
                 units = "kg/kg"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("qrvar")
-                description = "(-) Name of the rain water mixing ratio variable in forcing file"
+                description = "Name of the rain water mixing ratio variable in forcing file"
                 units = "kg/kg"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("qivar")
-                description = "(-) Name of the ice water mixing ratio variable in forcing file"
+                description = "Name of the ice water mixing ratio variable in forcing file"
                 units = "kg/kg"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("qgvar")
-                description = "(-) Name of the graupel mixing ratio variable in forcing file"
+                description = "Name of the graupel mixing ratio variable in forcing file"
                 units = "kg/kg"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("qsvar")
-                description = "(-) Name of the snow mixing ratio variable in forcing file"
+                description = "Name of the snow mixing ratio variable in forcing file"
                 units = "kg/kg"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("i2mvar")
-                description = "(-) Name of the ice2 mixing ration variable in forcing file"
+                description = "Name of the ice2 mixing ration variable in forcing file"
                 units = "kg/kg"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("i3mvar")
-                description = "(-) Name of the ice3 mixing ration variable in forcing file"
+                description = "Name of the ice3 mixing ration variable in forcing file"
                 units = "kg/kg"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("qncvar")
-                description = "(-) Name of the cloud number concentration variable in forcing file"
+                description = "Name of the cloud number concentration variable in forcing file"
                 units = "(kg^-1)"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("qnrvar")
-                description = "(-) Name of the rain number concentration variable in forcing file"
+                description = "Name of the rain number concentration variable in forcing file"
                 units = "(kg^-1)"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("qnivar")
-                description = "(-) Name of the ice number concentration variable in forcing file"
+                description = "Name of the ice number concentration variable in forcing file"
                 units = "(kg^-1)"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("qngvar")
-                description = "(-) Name of the graupel number concentration variable in forcing file"
+                description = "Name of the graupel number concentration variable in forcing file"
                 units = "(kg^-1)"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("qnsvar")
-                description = "(-) Name of the snow number concentration variable in forcing file"
+                description = "Name of the snow number concentration variable in forcing file"
                 units = "(kg^-1)"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("i2nvar")
-                description = "(-) Name of the ice2 number concentration variable in forcing file"
+                description = "Name of the ice2 number concentration variable in forcing file"
                 units = "(kg^-1)"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("i3nvar")
-                description = "(-) Name of the ice3 number concentration variable in forcing file"
+                description = "Name of the ice3 number concentration variable in forcing file"
                 units = "(kg^-1)"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("i1avar")
-                description = "(-) Name of the ice1 volume mixing ratio variable in forcing file"
+                description = "Name of the ice1 volume mixing ratio variable in forcing file"
                 units = "(m^3/kg)"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("i2avar")
-                description = "(-) Name of the ice2 volume mixing ratio variable in forcing file"
+                description = "Name of the ice2 volume mixing ratio variable in forcing file"
                 units = "(m^3/kg)"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("i3avar")
-                description = "(-) Name of the ice3 volume mixing ratio variable in forcing file"
+                description = "Name of the ice3 volume mixing ratio variable in forcing file"
                 units = "(m^3/kg)"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("i1cvar")
-                description = "(-) Name of the ice1 volume x aspect ratio mixing ratio variable in forcing file"
+                description = "Name of the ice1 volume x aspect ratio mixing ratio variable in forcing file"
                 units = "m^3/kg"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("i2cvar")
-                description = "(-) Name of the ice2 volume x aspect ratio mixing ratio variable in forcing file"
+                description = "Name of the ice2 volume x aspect ratio mixing ratio variable in forcing file"
                 units = "m^3/kg"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("i3cvar")
-                description = "(-) Name of the ice3 volume x aspect ratio mixing ratio variable in forcing file"
+                description = "Name of the ice3 volume x aspect ratio mixing ratio variable in forcing file"
                 units = "m^3/kg"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("zvar")
-                description = "(-) Name of the vertical height variable in forcing file (REQUIRED)"
+                description = "Name of the vertical height variable in forcing file (REQUIRED)"
                 units = "m"
                 allocate(dimensions(3))
                 dimensions = ["Z", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("shvar")
-                description = "(-) Name of the sensible heat flux variable in forcing file"
+                description = "Name of the sensible heat flux variable in forcing file"
                 units = "W/m^2"
                 allocate(dimensions(3))
                 dimensions = ["T", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("lhvar")
-                description = "(-) Name of the latent heat flux variable in forcing file"
+                description = "Name of the latent heat flux variable in forcing file"
                 units = "W/m^2"
                 allocate(dimensions(3))
                 dimensions = ["T", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("swdown_var")
-                description = "(-) Name of the shortwave downwelling radiation variable in forcing file"
+                description = "Name of the shortwave downwelling radiation variable in forcing file"
                 units = "W/m^2"
                 allocate(dimensions(3))
                 dimensions = ["T", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("lwdown_var")
-                description = "(-) Name of the longwave downwelling radiation variable in forcing file"
+                description = "Name of the longwave downwelling radiation variable in forcing file"
                 units = "W/m^2"
                 allocate(dimensions(3))
                 dimensions = ["T", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("sst_var")
-                description = "(-) Name of the sea surface temperature variable in forcing file"
+                description = "Name of the sea surface temperature variable in forcing file"
                 units = "K"
                 allocate(dimensions(3))
                 dimensions = ["T", "Y", "X"]
                 group = "Forcing"
+                type = 1
             case ("pblhvar")
-                description = "(-) Name of the planetary boundary layer height variable in forcing file"
+                description = "Name of the planetary boundary layer height variable in forcing file"
                 units = "m"
                 allocate(dimensions(3))
                 dimensions = ["T", "Y", "X"]
                 group = "Forcing"
+                type = 1
             ! --------------------------------------
             ! --------------------------------------
             ! Restart namelist variables
             ! --------------------------------------
             ! --------------------------------------
             case ("restart_run")
-                description = "(-) Flag to control if this is a restart run or not (T/F)"
+                description = "Flag to control if this is a restart run or not (T/F)"
                 default = '.False.'
                 group = "Restart"
+                type = 1
             case ("restart_folder")
-                description = "(-) Path to folder where restart files will be read from and output to"
+                description = "Path to folder where restart files will be read from and output to"
                 default = "../restart/"
                 group = "Restart"
+                type = 1
             case ("restartinterval")
                 description = "Frequency of writing restart files, expressed in number of outputintervals for the first domain."//achar(10)//BLNK_CHR_N// &
                               "Must be set for all domains in a series of nests, such that all nests output restart files at the same time."//achar(10)//BLNK_CHR_N// &
@@ -1716,22 +1896,25 @@ contains
                 default = "24"
                 group = "Restart"
             case ("restart_date")
-                description = "(-) Date to restart from, format: 'YYYY-MM-DD HH:MM:SS'"
+                description = "Date to restart from, format: 'YYYY-MM-DD HH:MM:SS'"
                 default = ""
                 group = "Restart"
+                type = 1
             case ("restart_step")
-                description = "(-) Step in restart_in_file to restart from"
+                description = "Step in restart_in_file to restart from"
                 default = "1"
                 group = "Restart"
+                type = 1
             ! --------------------------------------
             ! --------------------------------------
             ! Output namelist variables
             ! --------------------------------------
             ! --------------------------------------
             case ("output_folder")
-                description = "(-) Path to output folder"
+                description = "Path to output folder"
                 default = "../output/"
                 group = "Output"
+                type = 1
             case ("outputinterval")
                 description = "Frequency of writing output files in seconds"
                 min = 1
@@ -1795,7 +1978,7 @@ contains
                 default = "0"
                 group = "Physics"
             case ("mp")
-                description = "(-) Microphysics scheme to use: "//achar(10)//BLNK_CHR_N// &
+                description = "Microphysics scheme to use: "//achar(10)//BLNK_CHR_N// &
                                                           "0 = no MP,"//achar(10)//BLNK_CHR_N// &
                                                           "1 = Thompson et al (2008),"//achar(10)//BLNK_CHR_N// &
                                                           "2 = 'Linear' microphysics"//achar(10)//BLNK_CHR_N// &
@@ -1808,6 +1991,7 @@ contains
                 values = [0, 1, 2, 3, 4, 5, 6, 7]
                 default = "0"
                 group = "Physics"
+                type = 1
             case ("water")
                 description = "Water model to use:  "//achar(10)//BLNK_CHR_N// &
                                                    "0 = no open water fluxes,"//achar(10)//BLNK_CHR_N// &
@@ -2875,9 +3059,10 @@ contains
                 default = "400.0"
                 group = "Wind"
             case ("wind_only")
-                description = "(-) Flag for if this is a 'wind-only' run, i.e. only the wind solver should be run"
+                description = "Flag for if this is a 'wind-only' run, i.e. only the wind solver should be run"
                 default = ".False."
                 group = "Wind"
+                type = 1
             case ("update_frequency")
                 description = "Number of times to update the wind field per input time step."
                 min = 0
@@ -2911,6 +3096,12 @@ contains
 
         if (.not.(allocated(values))) allocate(values(0))
         if (.not.(allocated(dimensions))) allocate(dimensions(0))
+
+        if (type==1) then
+            description = "(-) "//description
+        elseif (type==2) then
+            description = "(*) "//description
+        endif
 
     end subroutine get_nml_var_metadata
 

@@ -480,8 +480,7 @@ contains
         logical, intent(in), optional  :: info_only, gen_nml
         integer :: name_unit, rc
         !variables to be used in the namelist
-        integer, dimension(kMAX_NESTS) :: pbl, lsm, sfc, sm, water, rad, conv, adv, wind, radiation_downscaling
-        integer :: mp
+        integer, dimension(kMAX_NESTS) :: pbl, lsm, mp, sfc, sm, water, rad, conv, adv, wind, radiation_downscaling
         logical :: print_info, gennml
         !define the namelist
         namelist /physics/ pbl, lsm, sfc, sm, water, mp, rad, conv, adv, wind, radiation_downscaling
@@ -524,13 +523,12 @@ contains
         call set_nml_var(phys_options%surfacelayer, sfc(n_indx), 'sfc', sfc(1))
         call set_nml_var(phys_options%snowmodel, sm(n_indx), 'sm', sm(1))
         call set_nml_var(phys_options%watersurface, water(n_indx), 'water', water(1))
-        call set_nml_var(phys_options%microphysics, mp, 'mp')
+        call set_nml_var(phys_options%microphysics, mp(n_indx), 'mp',mp(1))
         call set_nml_var(phys_options%radiation, rad(n_indx), 'rad', rad(1))
         call set_nml_var(phys_options%convection, conv(n_indx), 'conv', conv(1))
         call set_nml_var(phys_options%advection, adv(n_indx), 'adv', adv(1))
         call set_nml_var(phys_options%windtype, wind(n_indx), 'wind', wind(1))
         call set_nml_var(phys_options%radiation_downScaling, radiation_downscaling(n_indx), 'radiation_downscaling', radiation_downscaling(1))
-
 
     end subroutine physics_namelist
 
@@ -574,7 +572,7 @@ contains
         logical :: file_exists, print_info, gennml
 
         ! Local variables
-        character(len=kMAX_FILE_LENGTH) :: output_folder
+        character(len=kMAX_FILE_LENGTH) :: output_folder(kMAX_NESTS)
         character(len=kMAX_NAME_LENGTH) :: output_vars(kMAX_STORAGE_VARS, kMAX_NESTS)
         
         namelist /output/ output_vars, outputinterval, frames_per_outfile, output_folder
@@ -613,7 +611,7 @@ contains
             endif
         enddo        
 
-        call set_nml_var(output_options%output_folder, output_folder, 'output_folder')
+        call set_nml_var(output_options%output_folder, output_folder(n_indx), 'output_folder', output_folder(1))
         call set_nml_var(output_options%outputinterval, outputinterval(n_indx), 'outputinterval', outputinterval(1))
         call output_options%output_dt%set(seconds=outputinterval(n_indx))
         call set_nml_var(output_options%frames_per_outfile, frames_per_outfile(n_indx), 'frames_per_outfile', frames_per_outfile(1))
@@ -636,11 +634,11 @@ contains
         integer :: name_unit, rc
         integer    :: restartinterval(kMAX_NESTS)
 
-        logical :: file_exists, print_info, gennml, restart_run
+        logical :: file_exists, print_info, gennml, restart_run(kMAX_NESTS)
 
         ! Local variables
-        character(len=kMAX_FILE_LENGTH) :: restart_folder
-        character(len=kMAX_FILE_LENGTH) :: restart_date    ! date to restart
+        character(len=kMAX_FILE_LENGTH) :: restart_folder(kMAX_NESTS)
+        character(len=kMAX_FILE_LENGTH) :: restart_date(kMAX_NESTS)    ! date to restart
 
         namelist /restart/  restartinterval, restart_folder, restart_date, restart_run
 
@@ -671,19 +669,19 @@ contains
         ! Restart interval for this particular nest must be set to be the number of output intervals for this nest
         ! which results in the same restart timestep for the first nest
         call set_nml_var(options%restart%restart_count, restartinterval(n_indx), 'restartinterval', restartinterval(1))
-        call set_nml_var(options%restart%restart_folder, restart_folder, 'restart_folder')
-        call set_nml_var(options%restart%restart, restart_run, 'restart_run')
+        call set_nml_var(options%restart%restart_folder, restart_folder(n_indx), 'restart_folder', restart_folder(1))
+        call set_nml_var(options%restart%restart, restart_run(n_indx), 'restart_run', restart_run(1))
 
         !If the user did not ask for a restart run, leave the function now
         if (.not.(options%restart%restart)) return
         
         ! calculate the modified julian day for th restart date given
         call options%restart%restart_time%init(options%general%calendar)
-        if (restart_date=="") then
+        if (restart_date(n_indx)=="") then
             if (STD_OUT_PE) write(*,*) "  ERROR: restart_date must be specified in the namelist"
             stop
         else
-            call options%restart%restart_time%set(restart_date)
+            call options%restart%restart_time%set(restart_date(n_indx))
         endif
         
         
@@ -704,10 +702,10 @@ contains
 
         integer :: name_unit, rc, i, j, nfiles
         logical :: compute_p, print_info, gennml, no_check
-        logical :: limit_rh, z_is_geopotential, z_is_on_interface,&
+        logical, dimension(kMAX_NESTS) :: limit_rh, z_is_geopotential, z_is_on_interface,&
                    time_varying_z, t_is_potential, qv_is_spec_humidity, &
                    qv_is_relative_humidity
-        real    :: t_offset, inputinterval
+        real, dimension(kMAX_NESTS)    :: t_offset, inputinterval
 
         character(len=kMAX_FILE_LENGTH) :: forcing_file_list
         character(len=kMAX_FILE_LENGTH), allocatable :: boundary_files(:)
@@ -820,17 +818,17 @@ contains
             endif
         endif
 
-        call set_nml_var(options%forcing%t_offset, t_offset, 't_offset')
-        call set_nml_var(options%forcing%limit_rh, limit_rh, 'limit_rh')
-        call set_nml_var(options%forcing%z_is_geopotential, z_is_geopotential, 'z_is_geopotential')
-        call set_nml_var(options%forcing%z_is_on_interface, z_is_on_interface, 'z_is_on_interface')
-        call set_nml_var(options%forcing%time_varying_z, time_varying_z, 'time_varying_z')
-        call set_nml_var(options%forcing%t_is_potential, t_is_potential, 't_is_potential')
-        call set_nml_var(options%forcing%qv_is_relative_humidity, qv_is_relative_humidity, 'qv_is_relative_humidity')
-        call set_nml_var(options%forcing%qv_is_spec_humidity, qv_is_spec_humidity, 'qv_is_spec_humidity')
-        call set_nml_var(options%forcing%inputinterval, inputinterval, 'inputinterval')
+        call set_nml_var(options%forcing%t_offset, t_offset(n_indx), 't_offset', t_offset(1))
+        call set_nml_var(options%forcing%limit_rh, limit_rh(n_indx), 'limit_rh', limit_rh(1))
+        call set_nml_var(options%forcing%z_is_geopotential, z_is_geopotential(n_indx), 'z_is_geopotential', z_is_geopotential(1))
+        call set_nml_var(options%forcing%z_is_on_interface, z_is_on_interface(n_indx), 'z_is_on_interface', z_is_on_interface(1))
+        call set_nml_var(options%forcing%time_varying_z, time_varying_z(n_indx), 'time_varying_z', time_varying_z(1))
+        call set_nml_var(options%forcing%t_is_potential, t_is_potential(n_indx), 't_is_potential', t_is_potential(1))
+        call set_nml_var(options%forcing%qv_is_relative_humidity, qv_is_relative_humidity(n_indx), 'qv_is_relative_humidity', qv_is_relative_humidity(1))
+        call set_nml_var(options%forcing%qv_is_spec_humidity, qv_is_spec_humidity(n_indx), 'qv_is_spec_humidity', qv_is_spec_humidity(1))
+        call set_nml_var(options%forcing%inputinterval, inputinterval(n_indx), 'inputinterval', inputinterval(1))
 
-        call options%forcing%input_dt%set(seconds=inputinterval)
+        call options%forcing%input_dt%set(seconds=options%forcing%inputinterval)
 
         call require_var(lonvar, "Longitude")
         call require_var(latvar, "Latitude")
@@ -940,20 +938,18 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        integer :: name_unit, rc, nests, count, i
-        integer :: parent_nest(kMAX_NESTS)
+        integer :: name_unit, rc, count, i
+        integer, dimension(kMAX_NESTS) :: parent_nest, nests
         logical :: print_info, gennml
 
         ! parameters to read
-        logical :: interactive, debug, &
-                   use_mp_options, use_lt_options, use_adv_options, use_lsm_options, &
-                   use_cu_options, use_rad_options, use_pbl_options, use_sfc_options, &
-                   use_wind_options, use_sm_options
+        logical, dimension(kMAX_NESTS) :: interactive, debug, &
+                                            use_mp_options, use_lt_options, use_adv_options, use_lsm_options, &
+                                            use_cu_options, use_rad_options, use_pbl_options, use_sfc_options, &
+                                            use_wind_options, use_sm_options
 
-        character(len=kMAX_FILE_LENGTH), dimension(kMAX_NESTS) :: start_date, end_date
-        character(len=kMAX_FILE_LENGTH) :: calendar, start_date_checked, end_date_checked
-        character(len=kMAX_NAME_LENGTH)  :: version, comment, phys_suite
-
+        character(len=kMAX_FILE_LENGTH), dimension(kMAX_NESTS) :: start_date, end_date, calendar, version, comment, phys_suite
+        character(len=kMAX_NAME_LENGTH)                        :: start_date_checked, end_date_checked
         namelist /general/    debug, interactive, calendar,          &
                               version, comment, phys_suite,                 &
                               start_date, end_date, &
@@ -1009,34 +1005,34 @@ contains
             stop
         endif
 
-        call set_nml_var(gen_options%calendar, calendar, 'calendar')
-        call set_nml_var(gen_options%version, version, 'version')
-        call set_nml_var(gen_options%comment, comment, 'comment')
-        call set_nml_var(gen_options%phys_suite, phys_suite, 'phys_suite')
-        call set_nml_var(gen_options%debug, debug, 'debug')
-        call set_nml_var(gen_options%interactive, interactive, 'interactive')
-        call set_nml_var(gen_options%nests, nests, 'nests')
-        call set_nml_var(gen_options%use_mp_options, use_mp_options, 'use_mp_options')
-        call set_nml_var(gen_options%use_lt_options, use_lt_options, 'use_lt_options')
-        call set_nml_var(gen_options%use_adv_options, use_adv_options, 'use_adv_options')
-        call set_nml_var(gen_options%use_lsm_options, use_lsm_options, 'use_lsm_options')
-        call set_nml_var(gen_options%use_sm_options, use_sm_options, 'use_sm_options')
-        call set_nml_var(gen_options%use_cu_options, use_cu_options, 'use_cu_options')
-        call set_nml_var(gen_options%use_rad_options, use_rad_options, 'use_rad_options')
-        call set_nml_var(gen_options%use_pbl_options, use_pbl_options, 'use_pbl_options')
-        call set_nml_var(gen_options%use_sfc_options, use_sfc_options, 'use_sfc_options')
-        call set_nml_var(gen_options%use_wind_options, use_wind_options, 'use_wind_options')
+        call set_nml_var(gen_options%calendar, calendar(n_indx), 'calendar', calendar(1))
+        call set_nml_var(gen_options%version, version(n_indx), 'version', version(1))
+        call set_nml_var(gen_options%comment, comment(n_indx), 'comment', comment(1))
+        call set_nml_var(gen_options%phys_suite, phys_suite(n_indx), 'phys_suite',  phys_suite(1))
+        call set_nml_var(gen_options%debug, debug(n_indx), 'debug', debug(1))
+        call set_nml_var(gen_options%interactive, interactive(n_indx), 'interactive', interactive(1)) 
+        call set_nml_var(gen_options%nests, nests(n_indx), 'nests',  nests(1))
+        call set_nml_var(gen_options%use_mp_options, use_mp_options(n_indx), 'use_mp_options', use_mp_options(1))
+        call set_nml_var(gen_options%use_lt_options, use_lt_options(n_indx), 'use_lt_options', use_lt_options(1))
+        call set_nml_var(gen_options%use_adv_options, use_adv_options(n_indx), 'use_adv_options', use_adv_options(1))
+        call set_nml_var(gen_options%use_lsm_options, use_lsm_options(n_indx), 'use_lsm_options', use_lsm_options(1))
+        call set_nml_var(gen_options%use_sm_options, use_sm_options(n_indx), 'use_sm_options', use_sm_options(1))
+        call set_nml_var(gen_options%use_cu_options, use_cu_options(n_indx), 'use_cu_options', use_cu_options(1))
+        call set_nml_var(gen_options%use_rad_options, use_rad_options(n_indx), 'use_rad_options', use_rad_options(1))
+        call set_nml_var(gen_options%use_pbl_options, use_pbl_options(n_indx), 'use_pbl_options', use_pbl_options(1))
+        call set_nml_var(gen_options%use_sfc_options, use_sfc_options(n_indx), 'use_sfc_options', use_sfc_options(1))
+        call set_nml_var(gen_options%use_wind_options, use_wind_options(n_indx), 'use_wind_options', use_wind_options(1))
         call set_nml_var(start_date_checked, start_date(n_indx), 'start_date', start_date(1))
         call set_nml_var(end_date_checked, end_date(n_indx), 'end_date', end_date(1))
 
         if (trim(start_date_checked)/="") then
-            call gen_options%start_time%init(calendar)
+            call gen_options%start_time%init(gen_options%calendar)
             call gen_options%start_time%set(start_date_checked)
         else
             stop 'start date must be supplied in namelist'
         endif
         if (trim(end_date_checked)/="") then
-            call gen_options%end_time%init(calendar)
+            call gen_options%end_time%init(gen_options%calendar)
             call gen_options%end_time%set(end_date_checked)
         else
             stop 'end date must be supplied in namelist'
@@ -1051,7 +1047,7 @@ contains
         endif
 
         count = 0
-        do i = 1, nests
+        do i = 1, gen_options%nests
             if (parent_nest(i) == n_indx) count = count + 1
         end do
 
@@ -1059,7 +1055,7 @@ contains
         if (count == 0) return
 
         count = 0
-        do i = 1, nests
+        do i = 1, gen_options%nests
             if (parent_nest(i) == n_indx) then
                 count = count + 1
                 gen_options%child_nests(count) = i
@@ -1194,18 +1190,18 @@ contains
         endif
 
 
-        call set_nml_var(domain_options%dx, dx(n_indx), 'dx')
+        call set_nml_var(domain_options%dx, dx(n_indx), 'dx', dx(1))
         call set_nml_var(domain_options%nz, nz(n_indx), 'nz', nz(1))
         call set_nml_var(domain_options%longitude_system, longitude_system(n_indx), 'longitude_system', longitude_system(1))
-        call set_nml_var(domain_options%init_conditions_file, init_conditions_file(n_indx), 'init_conditions_file')
+        call set_nml_var(domain_options%init_conditions_file, init_conditions_file(n_indx), 'init_conditions_file', init_conditions_file(1))
         call set_nml_var(domain_options%flat_z_height, flat_z_height(n_indx), 'flat_z_height', flat_z_height(1))
-        call set_nml_var(domain_options%sleve, sleve(n_indx), 'sleve')
+        call set_nml_var(domain_options%sleve, sleve(n_indx), 'sleve', sleve(1))
         call set_nml_var(domain_options%terrain_smooth_windowsize, terrain_smooth_windowsize(n_indx), 'terrain_smooth_windowsize', terrain_smooth_windowsize(1))
         call set_nml_var(domain_options%terrain_smooth_cycles, terrain_smooth_cycles(n_indx), 'terrain_smooth_cycles', terrain_smooth_cycles(1))
         call set_nml_var(domain_options%decay_rate_L_topo, decay_rate_L_topo(n_indx), 'decay_rate_L_topo', decay_rate_L_topo(1))
         call set_nml_var(domain_options%decay_rate_S_topo, decay_rate_S_topo(n_indx), 'decay_rate_S_topo', decay_rate_S_topo(1))
         call set_nml_var(domain_options%sleve_n, sleve_n(n_indx), 'sleve_n', sleve_n(1))
-        call set_nml_var(domain_options%use_agl_height, use_agl_height(n_indx), 'use_agl_height')
+        call set_nml_var(domain_options%use_agl_height, use_agl_height(n_indx), 'use_agl_height', use_agl_height(1))
         call set_nml_var(domain_options%agl_cap, agl_cap(n_indx), 'agl_cap', agl_cap(1))
 
         ! NOTE: hgt_hi has to be the first of the variables read
@@ -1388,8 +1384,8 @@ contains
         call set_nml_var(mp_options%t_adjust, t_adjust(n_indx), 't_adjust', t_adjust(1))
         call set_nml_var(mp_options%C_cubes, C_cubes(n_indx), 'C_cubes', C_cubes(1))
         call set_nml_var(mp_options%C_sqrd, C_sqrd(n_indx), 'C_sqrd', C_sqrd(1))
-        call set_nml_var(mp_options%Ef_rw_l, Ef_rw_l(n_indx), 'Ef_rw_l')
-        call set_nml_var(mp_options%Ef_sw_l, Ef_sw_l(n_indx), 'Ef_sw_l')
+        call set_nml_var(mp_options%Ef_rw_l, Ef_rw_l(n_indx), 'Ef_rw_l', Ef_rw_l(1))
+        call set_nml_var(mp_options%Ef_sw_l, Ef_sw_l(n_indx), 'Ef_sw_l', Ef_sw_l(1))
 
         call set_nml_var(mp_options%update_interval, update_interval_mp(n_indx), 'update_interval_mp', update_interval_mp(1))
         call set_nml_var(mp_options%top_mp_level, top_mp_level(n_indx), 'top_mp_level', top_mp_level(1))
@@ -1531,8 +1527,8 @@ contains
             endif
         endif
 
-        call set_nml_var(lt_options%variable_N, variable_N(n_indx), 'variable_N')
-        call set_nml_var(lt_options%smooth_nsq, smooth_nsq(n_indx), 'smooth_nsq')
+        call set_nml_var(lt_options%variable_N, variable_N(n_indx), 'variable_N', variable_N(1))
+        call set_nml_var(lt_options%smooth_nsq, smooth_nsq(n_indx), 'smooth_nsq', smooth_nsq(1))
         call set_nml_var(lt_options%buffer, buffer(n_indx), 'buffer', buffer(1))
         call set_nml_var(lt_options%stability_window_size, stability_window_size(n_indx), 'stability_window_size', stability_window_size(1))
         call set_nml_var(lt_options%max_stability, max_stability(n_indx), 'max_stability', max_stability(1))
@@ -1544,9 +1540,9 @@ contains
         call set_nml_var(lt_options%rm_N_squared, rm_N_squared(n_indx), 'rm_N_squared', rm_N_squared(1))
         call set_nml_var(lt_options%rm_linear_contribution, rm_linear_contribution(n_indx), 'rm_linear_contribution', rm_linear_contribution(1))
         call set_nml_var(lt_options%linear_update_fraction, linear_update_fraction(n_indx), 'linear_update_fraction', linear_update_fraction(1))
-        call set_nml_var(lt_options%spatial_linear_fields, spatial_linear_fields(n_indx), 'spatial_linear_fields')
-        call set_nml_var(lt_options%linear_mask, linear_mask(n_indx), 'linear_mask')
-        call set_nml_var(lt_options%nsq_calibration, nsq_calibration(n_indx), 'nsq_calibration')
+        call set_nml_var(lt_options%spatial_linear_fields, spatial_linear_fields(n_indx), 'spatial_linear_fields', spatial_linear_fields(1))
+        call set_nml_var(lt_options%linear_mask, linear_mask(n_indx), 'linear_mask', linear_mask(1))
+        call set_nml_var(lt_options%nsq_calibration, nsq_calibration(n_indx), 'nsq_calibration', nsq_calibration(1))
         call set_nml_var(lt_options%dirmax, dirmax(n_indx), 'dirmax', dirmax(1))
         call set_nml_var(lt_options%dirmin, dirmin(n_indx), 'dirmin', dirmin(1))
         call set_nml_var(lt_options%spdmax, spdmax(n_indx), 'spdmax', spdmax(1))
@@ -1557,11 +1553,11 @@ contains
         call set_nml_var(lt_options%n_nsq_values, n_nsq_values(n_indx), 'n_nsq_values', n_nsq_values(1))
         call set_nml_var(lt_options%n_spd_values, n_spd_values(n_indx), 'n_spd_values', n_spd_values(1))
         call set_nml_var(lt_options%minimum_layer_size, minimum_layer_size(n_indx), 'minimum_layer_size', minimum_layer_size(1))
-        call set_nml_var(lt_options%read_LUT, read_LUT(n_indx), 'read_LUT')
-        call set_nml_var(lt_options%write_LUT, write_LUT(n_indx), 'write_LUT')
+        call set_nml_var(lt_options%read_LUT, read_LUT(n_indx), 'read_LUT', read_LUT(1))
+        call set_nml_var(lt_options%write_LUT, write_LUT(n_indx), 'write_LUT', write_LUT(1))
         call set_nml_var(lt_options%u_LUT_Filename, u_LUT_Filename(n_indx), 'u_LUT_Filename', u_LUT_Filename(1))
         call set_nml_var(lt_options%v_LUT_Filename, v_LUT_Filename(n_indx), 'v_LUT_Filename', v_LUT_Filename(1))
-        call set_nml_var(lt_options%overwrite_lt_lut, overwrite_lt_lut(n_indx), 'overwrite_lt_lut')
+        call set_nml_var(lt_options%overwrite_lt_lut, overwrite_lt_lut(n_indx), 'overwrite_lt_lut', overwrite_lt_lut(1))
 
 
     end subroutine lt_parameters_namelist
@@ -1638,13 +1634,13 @@ contains
             endif
         endif
 
-        call set_nml_var(adv_options%boundary_buffer, boundary_buffer(n_indx), 'boundary_buffer')
-        call set_nml_var(adv_options%MPDATA_FCT, MPDATA_FCT(n_indx), 'MPDATA_FCT')
+        call set_nml_var(adv_options%boundary_buffer, boundary_buffer(n_indx), 'boundary_buffer', boundary_buffer(1))
+        call set_nml_var(adv_options%MPDATA_FCT, MPDATA_FCT(n_indx), 'MPDATA_FCT', MPDATA_FCT(1))
         call set_nml_var(adv_options%mpdata_order, mpdata_order(n_indx), 'mpdata_order', mpdata_order(1))
         call set_nml_var(adv_options%flux_corr, flux_corr(n_indx), 'flux_corr', flux_corr(1))
         call set_nml_var(adv_options%h_order, h_order(n_indx), 'h_order', h_order(1))
         call set_nml_var(adv_options%v_order, v_order(n_indx), 'v_order', v_order(1))
-        call set_nml_var(adv_options%advect_density, advect_density(n_indx), 'advect_density')
+        call set_nml_var(adv_options%advect_density, advect_density(n_indx), 'advect_density', advect_density(1))
 
     end subroutine adv_parameters_namelist
 
@@ -1946,10 +1942,10 @@ contains
 
         call set_nml_var(lsm_options%LU_Categories, LU_Categories(n_indx), 'LU_Categories', LU_Categories(1))
         call set_nml_var(lsm_options%update_interval, update_interval_lsm(n_indx), 'update_interval_lsm', update_interval_lsm(1))
-        call set_nml_var(lsm_options%monthly_vegfrac, monthly_vegfrac(n_indx), 'monthly_vegfrac')
+        call set_nml_var(lsm_options%monthly_vegfrac, monthly_vegfrac(n_indx), 'monthly_vegfrac', monthly_vegfrac(1))
         call set_nml_var(lsm_options%num_soil_layers, num_soil_layers(n_indx), 'num_soil_layers', num_soil_layers(1))
 
-        call set_nml_var(lsm_options%monthly_albedo, monthly_albedo(n_indx), 'monthly_albedo')
+        call set_nml_var(lsm_options%monthly_albedo, monthly_albedo(n_indx), 'monthly_albedo', monthly_albedo(1))
         call set_nml_var(lsm_options%urban_category, urban_category(n_indx), 'urban_category', urban_category(1))
         call set_nml_var(lsm_options%ice_category, ice_category(n_indx), 'ice_category', ice_category(1))
         call set_nml_var(lsm_options%water_category, water_category(n_indx), 'water_category', water_category(1))
@@ -2151,7 +2147,7 @@ contains
         call set_nml_var(rad_options%update_interval_rrtmg, update_interval_rrtmg(n_indx), 'update_interval_rrtmg', update_interval_rrtmg(1))
         call set_nml_var(rad_options%icloud, icloud(n_indx), 'icloud', icloud(1))
         call set_nml_var(rad_options%cldovrlp, cldovrlp(n_indx), 'cldovrlp', cldovrlp(1))
-        call set_nml_var(rad_options%read_ghg, read_ghg(n_indx), 'read_ghg')
+        call set_nml_var(rad_options%read_ghg, read_ghg(n_indx), 'read_ghg', read_ghg(1))
         call set_nml_var(rad_options%tzone, tzone(n_indx), 'tzone', tzone(1))
         
     end subroutine rad_parameters_namelist
@@ -2169,8 +2165,7 @@ contains
         logical :: print_info, gennml
         !Define parameters
         integer, dimension(kMAX_NESTS) :: wind_iterations, update_frequency
-        logical, dimension(kMAX_NESTS) :: Sx, thermal
-        logical :: wind_only
+        logical, dimension(kMAX_NESTS) :: Sx, thermal, wind_only
         real, dimension(kMAX_NESTS)    :: Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, smooth_wind_distance
         
         !Make name-list
@@ -2225,9 +2220,9 @@ contains
             endif
         endif
 
-        call set_nml_var(wind_options%Sx, Sx(n_indx), 'Sx')
-        call set_nml_var(wind_options%thermal, thermal(n_indx), 'thermal')
-        call set_nml_var(wind_options%wind_only, wind_only, 'wind_only')
+        call set_nml_var(wind_options%Sx, Sx(n_indx), 'Sx', Sx(1))
+        call set_nml_var(wind_options%thermal, thermal(n_indx), 'thermal', thermal(1))
+        call set_nml_var(wind_options%wind_only, wind_only(n_indx), 'wind_only', wind_only(1))
         call set_nml_var(wind_options%Sx_dmax, Sx_dmax(n_indx), 'Sx_dmax', Sx_dmax(1))
         call set_nml_var(wind_options%TPI_dmax, TPI_dmax(n_indx), 'TPI_dmax', TPI_dmax(1))
         call set_nml_var(wind_options%TPI_scale, TPI_scale(n_indx), 'TPI_scale', TPI_scale(1))

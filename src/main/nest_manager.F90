@@ -77,6 +77,10 @@ contains
         type(domain_t), intent(in) :: domain
         type(options_t), intent(in) :: options
 
+        if (domain%ended) then
+            if (STD_OUT_PE) write(*,*) 'WARNING: end_nest_context called on already ended domain with nest id: ', domain%nest_id
+            return
+        end if
         if (options%physics%windtype == kITERATIVE_WINDS .or. &
             options%physics%windtype == kLINEAR_ITERATIVE_WINDS) then
                 call finalize_iter_winds_old()

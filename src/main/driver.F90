@@ -206,7 +206,7 @@ program icar
 
                 !Switch nest contexts if needed
                 if (old_nest /= i) then
-                    if (domain(old_nest)%ended .eqv. .False.) call end_nest_context(domain(old_nest), options(old_nest))
+                    call end_nest_context(domain(old_nest), options(old_nest))
                     call start_nest_context(domain(i), options(i))
                     old_nest = i
                 endif
@@ -278,8 +278,8 @@ program icar
                 call total_timer(i)%stop()
 
                 if(domain(i)%model_time + small_time_delta > options(i)%general%end_time) then
-                    domain(i)%ended = .True.
                     call end_nest_context(domain(i), options(i))
+                    domain(i)%ended = .True.
                     if (STD_OUT_PE) write(*,*) "Domain ",i," has reached the end of its run time."
                 endif
             enddo
