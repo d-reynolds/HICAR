@@ -1053,9 +1053,9 @@ contains
             !allocate(DZs(num_soil_layers))
             !!
 #else
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    User asked to use FSM, but it is not compiled in this version of ICAR"
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Please de-select FSM in the namelist, or recompile ICAR with the FSM library linked"
-            stop "FSM not compiled in this version of ICAR"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    User asked to use FSM, but it is not compiled in this version of HICAR"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Please de-select FSM in the namelist, or recompile HICAR with the FSM library linked"
+            stop "FSM2 not compiled in this version of HICAR"
 #endif
         endif
 

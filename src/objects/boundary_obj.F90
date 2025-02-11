@@ -279,9 +279,10 @@ contains
         integer          :: error, n
 
         this%firststep = find_timestep_in_filelist(file_list, time_var, time, this%firstfile, error)
-
+        
         if (error==1) then
             if (STD_OUT_PE) write(*,*) 'ERROR: Could not find the first time step in forcing files'
+            if (STD_OUT_PE) write(*,*) 'ERROR: Time: ',time%as_string()
             stop "Ran out of files to process while searching for matching time variable!"
         endif
 
