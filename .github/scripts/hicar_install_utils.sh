@@ -201,8 +201,6 @@ function install_petsc {
 
     if [ ! -d "$WORKDIR/petsc" ]; then
         git clone -b release https://gitlab.com/petsc/petsc.git petsc
-
-        cd petsc
     fi
 
     cd petsc
