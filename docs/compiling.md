@@ -10,7 +10,13 @@ HICAR relies upon four external libraries:
 - PETSc
 - Parallel NetCDF
 
-For an example of how to install these dependencies on a Linux system, see the script HICAR/.github/scripts/hicar_install_utils.sh
+The easiest way to install all dependencies on a Linux system is to call:
+
+```bash
+HICAR/.github/scripts/hicar_install_utils.sh hicar_dependencies
+```
+
+and follow the prompts. The following subsections detail commands to install each of the individual depencencies.
 
 ## MPI
 
@@ -58,6 +64,14 @@ HICAR/.github/scripts/hicar_install_utils.sh install_netcdf_fortran
 
 # Compiling HICAR
 
+The easiest way to compile HICAR is using the install utility command:
+
+```bash
+HICAR/.github/scripts/hicar_install_utils.sh hicar_install
+```
+
+Instructions for a more manual install of the model follows:
+
 HICAR is compiled using cmake to first generate a makefile. The full steps to generate a makefile are as follows
 
 ```bash
@@ -97,12 +111,12 @@ Starting from the root reposititory (HICAR/):
 ```bash
 mkdir build
 cd build
-export NETCDF_DIR=/path/to/netcdf/intall
-export FFTW_DIR=/path/to/fftw/intall
-export PETSC_DIR=/path/to/petsc/intall
+export NETCDF_DIR=/path/to/netcdf/root
+export FFTW_DIR=/path/to/fftw/root
+export PETSC_DIR=/path/to/petsc/root
 export PATH=/path/to/netcdf/bin:${PATH}                               # This line is needed to find the nc-config command installed with NetCDF, which
                                                                       # is used to determine the correct libraries to link to.
-export LD_LIBRARY_PATH=/path/to/netcdf/intall:${LD_LIBRARY_PATH}      # This line is quite important when NetCDF has been manually installed and linked
+export LD_LIBRARY_PATH=/path/to/netcdf/root:${LD_LIBRARY_PATH}      # This line is quite important when NetCDF has been manually installed and linked
 cmake ../
 make -j 4
 make install

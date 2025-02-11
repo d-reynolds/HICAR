@@ -1,10 +1,39 @@
 #!/usr/bin/env bash
 
+# see link for size of runner
+# https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
+
+# check if the GITHUB_WORKSPACE variable is set
+if [ -z "$GITHUB_WORKSPACE" ]; then
+
+    echo "------------------------------------------"
+    echo "        HICAR installation script"
+    echo "------------------------------------------"
+    # this is not a github action, so prompt the user for the location of the HICAR directory 
+    # and the install and work directories
+    GITHUB_WORKSPACE=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+    # now move two directories up to get to the root of the HICAR directory
+    GITHUB_WORKSPACE=$(dirname $(dirname $GITHUB_WORKSPACE))
+    echo "Installing HICAR found in repository: $GITHUB_WORKSPACE"
+    echo ""
+    echo "Please enter the location of the working directory where library files will be downloaded (blank for $HOME/workdir)"
+    read WORKDIR
+    if [ -z "$WORKDIR" ]; then
+        export WORKDIR=$HOME/workdir
+    fi
+    echo "Using working directory: $WORKDIR"
+    echo ""
+    echo "Please enter the location of the install directory where libraries will be installed (blank for $HOME/installdir)"
+    if [ -z "$INSTALLDIR" ]; then
+        export INSTALLDIR=$HOME/installdir
+    fi
+    read INSTALLDIR
+    echo "Using install directory: $INSTALLDIR"
+fi   
+
 set -e
 set -x
 
-# see link for size of runner
-# https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
 export JN=-j8
 
 if [ -z "$WORKDIR" ]; then
@@ -18,25 +47,22 @@ if [ -z "$INSTALLDIR" ]; then
 fi
 export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
 
-
-function install_szip {
-    echo install_szip
-    cd $WORKDIR
-    wget --no-check-certificate -q http://www.hdfgroup.org/ftp/lib-external/szip/2.1.1/src/szip-2.1.1.tar.gz
-    tar -xzf szip-2.1.1.tar.gz
-    cd szip-2.1.1
-    ./configure --prefix=$INSTALLDIR &> config.log
-    make -j 8 &> make.log
-    make install
-}
-
 function install_zlib {
     echo install_zlib
     cd $WORKDIR
-    wget --no-check-certificate -q https://www.zlib.net/zlib-1.3.1.tar.gz
-    tar -xvzf zlib-1.3.1.tar.gz
+
+    if [ ! -d "$WORKDIR/zlib-1.3.1" ]; then
+        wget --no-check-certificate -q https://www.zlib.net/zlib-1.3.1.tar.gz
+        tar -xvzf zlib-1.3.1.tar.gz
+    fi
+
     cd zlib-1.3.1/
-    ./configure --prefix=$INSTALLDIR &> config.log
+
+    # check if make file exists and if not, run configure
+    if [ ! -f "Makefile" ]; then
+        ./configure --prefix=$INSTALLDIR &> config.log
+    fi
+
     make -j 8 &> make.log
     make check
     make install
@@ -45,18 +71,26 @@ function install_zlib {
 function install_hdf5 {
     echo install_hdf5
     cd $WORKDIR
-    wget --no-check-certificate -q https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.14/hdf5-1.14.3/src/hdf5-1.14.3.tar.gz
-    tar -xzf hdf5-1.14.3.tar.gz
-    cd hdf5-1.14.3
-    # FCFLAGS="-DH5_USE_110_API" ./configure --prefix=$INSTALLDIR &> config.log
+
     export CPPFLAGS=-I$INSTALLDIR/include 
     export LDFLAGS=-L$INSTALLDIR/lib
     export CC=mpicc
-    ./configure --prefix=$INSTALLDIR --enable-parallel --with-zlib=$INSTALLDIR #&> config.log
+
+    if [ ! -d "$WORKDIR/hdf5-1.14.3" ]; then
+        wget --no-check-certificate -q https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.14/hdf5-1.14.3/src/hdf5-1.14.3.tar.gz
+        tar -xzf hdf5-1.14.3.tar.gz
+    fi
+    
+    cd hdf5-1.14.3
+
+    # check if make file exists and if not, run configure
+    if [ ! -f "Makefile" ]; then
+        ./configure --prefix=$INSTALLDIR --enable-parallel --with-zlib=$INSTALLDIR #&> config.log
+    fi
+
     make -j 8
     make install
-    # CFLAGS=-DH5_USE_110_API make
-    # (CFLAGS=-DH5_USE_110_API make | awk 'NR%100 == 0')
+
     export HDF5=$INSTALLDIR
     export HDF5_DIR=$INSTALLDIR
     export LD_LIBRARY_PATH=$INSTALLDIR/lib:$LD_LIBRARY_PATH
@@ -65,13 +99,22 @@ function install_hdf5 {
 function install_PnetCDF {
     echo install_PnetCDF
     cd $WORKDIR
-    wget --no-check-certificate -q https://parallel-netcdf.github.io/Release/pnetcdf-1.13.0.tar.gz
-    tar -xzf pnetcdf-1.13.0.tar.gz
-    cd pnetcdf-1.13.0
+
     export CPPFLAGS=-I$INSTALLDIR/include 
     export LDFLAGS=-L$INSTALLDIR/lib
-    ./configure --prefix=${INSTALLDIR}
-    # cmake ./ -D"NETCDF_ENABLE_PARALLEL4=ON" -D"CMAKE_INSTALL_PREFIX=${INSTALLDIR}"
+
+    if [ ! -d "$WORKDIR/pnetcdf-1.13.0" ]; then
+        wget --no-check-certificate -q https://parallel-netcdf.github.io/Release/pnetcdf-1.13.0.tar.gz
+        tar -xzf pnetcdf-1.13.0.tar.gz
+    fi
+
+    cd pnetcdf-1.13.0
+
+    # check if make file exists and if not, run configure
+    if [ ! -f "Makefile" ]; then
+        ./configure --prefix=${INSTALLDIR}
+    fi
+
     make -j 8
     make install
 }
@@ -79,14 +122,25 @@ function install_PnetCDF {
 function install_netcdf_c {
     echo install_netcdf_c
     cd $WORKDIR
-    wget --no-check-certificate -q https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.9.2.tar.gz
-    tar -xzf v4.9.2.tar.gz
-    cd netcdf-c-4.9.2
+
     export CPPFLAGS=-I$INSTALLDIR/include 
     export LDFLAGS=-L$INSTALLDIR/lib
     export CC=mpicc
     export LIBS=-ldl
-    ./configure --prefix=${INSTALLDIR} --disable-shared --enable-pnetcdf --enable-parallel-tests
+
+    if [ ! -d "$WORKDIR/netcdf-c-4.9.2" ]; then
+        wget --no-check-certificate -q https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.9.2.tar.gz
+        tar -xzf v4.9.2.tar.gz
+
+    fi
+    
+    cd netcdf-c-4.9.2
+
+    # check if make file exists and if not, run configure
+    if [ ! -f "Makefile" ]; then
+        ./configure --prefix=${INSTALLDIR} --disable-shared --enable-pnetcdf --enable-parallel-tests
+    fi
+
     make -j 8
     make install
 }
@@ -94,31 +148,51 @@ function install_netcdf_c {
 function install_netcdf_fortran {
     cd $WORKDIR
 
-    wget --no-check-certificate -q https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.6.1.tar.gz
-
-    tar -xzf v4.6.1.tar.gz
-
-    cd netcdf-fortran-4.6.1
     export CPPFLAGS=-I$INSTALLDIR/include 
     export LDFLAGS=-L$INSTALLDIR/lib
     export PATH=$INSTALLDIR/bin:$PATH
 
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     export LIBS=$(nc-config --libs)
-    CC=mpicc FC=mpif90 F77=mpif77 ./configure --prefix=${INSTALLDIR} --disable-shared
+
+    if [ ! -d "$WORKDIR/netcdf-fortran-4.6.1" ]; then
+        wget --no-check-certificate -q https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.6.1.tar.gz
+
+        tar -xzf v4.6.1.tar.gz
+    fi
+
+    cd netcdf-fortran-4.6.1
+
+    # check if make file exists and if not, run configure
+    if [ ! -f "Makefile" ]; then
+        CC=mpicc FC=mpif90 F77=mpif77 ./configure --prefix=${INSTALLDIR} --disable-shared
+    fi
+
     make -j 8
     make install
 }
 
 function install_petsc {
     cd $WORKDIR
-    git clone -b release https://gitlab.com/petsc/petsc.git petsc
+
+    if [ ! -d "$WORKDIR/petsc" ]; then
+        git clone -b release https://gitlab.com/petsc/petsc.git petsc
+
+        cd petsc
+    fi
+
     cd petsc
     git pull # obtain new release fixes (since a prior clone or pull)
-    ./configure --prefix=$INSTALLDIR #&> config.log
+
+    # check if make file exists and if not, run configure
+    if [ ! -f "Makefile" ]; then
+        ./configure --prefix=$INSTALLDIR --with-debugging=0 #&> config.log
+    fi
+
     make -j 8
     make check
     make install
+
 }
 
 
@@ -145,8 +219,13 @@ function hicar_install {
     echo hicar_install
     pwd
     cd ${GITHUB_WORKSPACE}
-    mkdir build
-    cd build
+    if [ ! -d "$GITHUB_WORKSPACE/build" ]; then
+        mkdir build
+        cd build
+    else
+        cd build
+        rm -rf *
+    fi
     export NETCDF_DIR=${INSTALLDIR}
     export FFTW_DIR=/usr
     export PETSC_DIR=/usr #${INSTALLDIR}
@@ -205,6 +284,6 @@ do
         execute_test_run)
             execute_test_run;;
         *)
-            echo "$func unknown"
+            echo "$func unknown";;
     esac
 done
