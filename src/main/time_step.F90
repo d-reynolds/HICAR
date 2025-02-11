@@ -233,7 +233,7 @@ contains
         endif
         ! Set dt to the outcome of reduce
         call dt%set(seconds=seconds_out)
-        if (STD_OUT_PE) write(*,*) 'time_step: ',dt%seconds()
+        if (STD_OUT_PE) write(*,*) 'time_step: ',trim(dt%as_string())
 
     end subroutine update_dt
     

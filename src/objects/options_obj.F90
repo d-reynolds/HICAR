@@ -677,11 +677,11 @@ contains
         
         ! calculate the modified julian day for th restart date given
         call options%restart%restart_time%init(options%general%calendar)
-        if (restart_date(n_indx)=="") then
+        if (restart_date(1)=="") then
             if (STD_OUT_PE) write(*,*) "  ERROR: restart_date must be specified in the namelist"
             stop
         else
-            call options%restart%restart_time%set(restart_date(n_indx))
+            call options%restart%restart_time%set(restart_date(1))
         endif
         
         

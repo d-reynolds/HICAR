@@ -356,6 +356,12 @@ contains
         type(variable_t) :: forcing_var
         
         if (first_wind) then            
+            ! do nothing if this is a restart run -- then we have read in the already calculated winds
+            if (options%restart%restart) then
+                first_wind = .False.
+                return
+            endif
+
             !Compute the forcing wind field at the current step
             forcing_var = forcing%variables_hi%get_var(options%forcing%uvar)
             do i = ims,ime+1
@@ -819,6 +825,7 @@ contains
 
             first_wind = .True.
         endif
+
 
     end subroutine allocate_winds
     
