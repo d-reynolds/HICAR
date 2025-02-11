@@ -208,7 +208,50 @@ endif
     call setup_batch_exch(this, exch_vars, adv_vars, comms)
 
 
-end subroutine
+end subroutine init
+
+module subroutine finalize(this)
+    class(halo_t), intent(inout) :: this
+
+    integer :: ierr
+    
+    if (this%n_2d > 0) then
+#ifdef CRAY_PE
+        deallocate(this%north_batch_in_2d)
+        deallocate(this%south_batch_in_2d)
+        deallocate(this%east_batch_in_2d)
+        deallocate(this%west_batch_in_2d)
+#else
+        call MPI_WIN_FREE(this%north_2d_win, ierr)
+        call MPI_WIN_FREE(this%south_2d_win, ierr)
+        call MPI_WIN_FREE(this%east_2d_win, ierr)
+        call MPI_WIN_FREE(this%west_2d_win, ierr)
+        call MPI_Type_free(this%NS_2d_win_halo_type, ierr)
+#endif
+    endif
+
+#ifdef CRAY_PE
+    deallocate(this%north_batch_in_3d)
+    deallocate(this%south_batch_in_3d)
+    deallocate(this%east_batch_in_3d)
+    deallocate(this%west_batch_in_3d)
+#else
+    if (.not.(this%north_boundary)) call MPI_WIN_FREE(this%north_3d_win, ierr)
+    if (.not.(this%south_boundary)) call MPI_WIN_FREE(this%south_3d_win, ierr)
+    if (.not.(this%east_boundary)) call MPI_WIN_FREE(this%east_3d_win, ierr)
+    if (.not.(this%west_boundary)) call MPI_WIN_FREE(this%west_3d_win, ierr)
+
+    call MPI_WIN_FREE(this%north_in_win, ierr)
+    call MPI_WIN_FREE(this%south_in_win, ierr)
+    call MPI_WIN_FREE(this%east_in_win, ierr)
+    call MPI_WIN_FREE(this%west_in_win, ierr)
+    call MPI_Type_free(this%NS_3d_win_halo_type, ierr)
+#endif
+
+    deallocate(this%neighbors)
+    deallocate(this%corner_neighbors)
+
+end subroutine finalize
 
 !> -------------------------------
 !! Exchange a given variable with neighboring processes.

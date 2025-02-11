@@ -60,6 +60,18 @@ contains
         call init_relax_filters(this)
 
     end subroutine
+
+    !> -------------------------------
+    !! Release memory associated with the domain
+    !!
+    !! -------------------------------
+    module subroutine release(this)
+        class(domain_t), intent(inout) :: this
+
+        this%ended = .True.
+        call this%halo%finalize()
+
+    end subroutine
     
     subroutine set_var_lists(this, options)
         class(domain_t), intent(inout) :: this

@@ -424,7 +424,7 @@ module domain_interface
 
   contains
     procedure :: init
-    
+    procedure :: release
     procedure :: enforce_limits
 
     procedure :: get_initial_conditions
@@ -445,6 +445,12 @@ module domain_interface
         class(domain_t), intent(inout) :: this
         type(options_t), intent(inout) :: options
         integer,         intent(in)    :: nest_indx
+    end subroutine
+
+    ! finalize domain object, freeing halo mpi windows
+    module subroutine release(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
     end subroutine
     
     ! read initial atmospheric conditions from forcing data

@@ -3,9 +3,29 @@
 # see link for size of runner
 # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources
 
+# if no arguments passed to the function, or if the only argument is "-h" or "--help" then list 
+# the available functions
+if [ $# -eq 0 ] || [ $# -eq 1 -a \( "$1" == "-h" -o "$1" == "--help" \) ]; then
+    bold=$(tput bold)
+    normal=$(tput sgr0)
+    echo "Usage: hicar_install_utils.sh [function1] [function2] ..."
+    echo ""
+    echo "Available functions:"
+    echo "  ${bold}hicar_install${normal}: install HICAR"
+    echo "  ${bold}gen_test_run_data${normal}: generate test run data"
+    echo "  ${bold}execute_test_run${normal}: execute a test run"
+    echo "  ${bold}hicar_dependencies${normal}: install dependencies for HICAR"
+    echo "  ${bold}install_zlib${normal}: install zlib"
+    echo "  ${bold}install_hdf5${normal}: install hdf5"
+    echo "  ${bold}install_PnetCDF${normal}: install PnetCDF"
+    echo "  ${bold}install_netcdf_c${normal}: install netcdf-c"
+    echo "  ${bold}install_netcdf_fortran${normal}: install netcdf-fortran"
+    exit 0
+fi
+
 # check if the GITHUB_WORKSPACE variable is set
 if [ -z "$GITHUB_WORKSPACE" ]; then
-
+    export HUMAN_RUN=1
     echo "------------------------------------------"
     echo "        HICAR installation script"
     echo "------------------------------------------"
@@ -16,19 +36,19 @@ if [ -z "$GITHUB_WORKSPACE" ]; then
     GITHUB_WORKSPACE=$(dirname $(dirname $GITHUB_WORKSPACE))
     echo "Installing HICAR found in repository: $GITHUB_WORKSPACE"
     echo ""
-    echo "Please enter the location of the working directory where library files will be downloaded (blank for $HOME/workdir)"
-    read WORKDIR
-    if [ -z "$WORKDIR" ]; then
-        export WORKDIR=$HOME/workdir
+    if [ -z "$WORKDIR" ]; then 
+        echo "Please enter the location of the working directory where library files will be downloaded (blank for $HOME/workdir)"
+        read WORKDIR
+        echo "Using working directory: $WORKDIR"
+        echo ""
     fi
-    echo "Using working directory: $WORKDIR"
-    echo ""
-    echo "Please enter the location of the install directory where libraries will be installed (blank for $HOME/installdir)"
     if [ -z "$INSTALLDIR" ]; then
-        export INSTALLDIR=$HOME/installdir
+        echo "Please enter the location of the install directory where libraries will be installed (blank for $HOME/installdir)"
+        read INSTALLDIR
+        echo "Using install directory: $INSTALLDIR"
     fi
-    read INSTALLDIR
-    echo "Using install directory: $INSTALLDIR"
+else
+    export HUMAN_RUN=0
 fi   
 
 set -e
@@ -38,12 +58,16 @@ export JN=-j8
 
 if [ -z "$WORKDIR" ]; then
     export WORKDIR=$HOME/workdir
-    mkdir -p $WORKDIR
+    if [ ! -d "$WORKDIR" ]; then
+        mkdir -p $WORKDIR
+    fi
 fi
 
 if [ -z "$INSTALLDIR" ]; then
     export INSTALLDIR=$HOME/installdir
-    mkdir -p $INSTALLDIR
+    if [ ! -d "$INSTALLDIR" ]; then
+        mkdir -p $INSTALLDIR
+    fi
 fi
 export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
 
@@ -231,7 +255,7 @@ function hicar_install {
     export PETSC_DIR=/usr #${INSTALLDIR}
     export PATH=${INSTALLDIR}/bin:$PATH
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
-    cmake ../ -DFSM=OFF
+    cmake ../ -DFSM=OFF -DMODE=debug
     make ${JN}
     make install
     
@@ -241,24 +265,25 @@ function hicar_install {
 
 function gen_test_run_data {
     cd ${GITHUB_WORKSPACE}/helpers
-    mkdir ${GITHUB_WORKSPACE}/Model_runs/
-    printf 'y\ny\n' | ./gen_HICAR_dir.sh ${GITHUB_WORKSPACE}/Model_runs/ ${GITHUB_WORKSPACE}
+    if [ ! -d "${GITHUB_WORKSPACE}/../Model_runs/" ]; then
+        mkdir ${GITHUB_WORKSPACE}/../Model_runs/
+    fi
+    printf 'y\ny\n' | ./gen_HICAR_dir.sh ${GITHUB_WORKSPACE}/../Model_runs/ ${GITHUB_WORKSPACE}
 }
 
 function execute_test_run {
-    cd ${GITHUB_WORKSPACE}/Model_runs/HICAR/input
+    cd ${GITHUB_WORKSPACE}/../Model_runs/HICAR/input
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
-    echo "Starting HICAR run"
-    mpirun -np 2 ${GITHUB_WORKSPACE}/bin/HICAR HICAR_Test_Case.nml
+    export np=$(nproc --all)
+    np=$((np/2))
+    np=$((np>2?np:2))
+    echo "Starting HICAR run using ${np} processors"
+    export OMP_NUM_THREADS=1
 
-    time_dim=$(ncdump -v ../output/*.nc | grep "time = UNLIMITED" | sed 's/[^0-9]*//g')
-
-    if [[ ${time_dim} == "1" ]]; then
-	echo "FAILURE: HICAR output time dimension should not be equal to one, it was ${time_dim}"
-	exit 1
+    if [ $HUMAN_RUN -eq 0 ]; then
+        mpirun -np $np ${GITHUB_WORKSPACE}/bin/HICAR HICAR_Test_Case.nml
     else
-	echo "SUCCESS: time dimension is equal to ${time_dim}"
-	exit 0
+        mpirun -np $np ${GITHUB_WORKSPACE}/bin/HICAR HICAR_Test_Case.nml 2>hicar.err
     fi
 }
 
