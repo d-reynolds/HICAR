@@ -208,7 +208,78 @@ endif
     call setup_batch_exch(this, exch_vars, adv_vars, comms)
 
 
-end subroutine
+end subroutine init
+
+module subroutine finalize(this)
+    class(halo_t), intent(inout) :: this
+
+    integer :: ierr
+    
+    if (this%n_2d > 0) then
+#ifdef CRAY_PE
+        deallocate(this%north_batch_in_2d)
+        deallocate(this%south_batch_in_2d)
+        deallocate(this%east_batch_in_2d)
+        deallocate(this%west_batch_in_2d)
+#else
+
+    if (.not.(this%north_boundary)) call MPI_Win_Start(this%north_neighbor_grp, 0, this%north_2d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Start(this%south_neighbor_grp, 0, this%south_2d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Start(this%east_neighbor_grp, 0, this%east_2d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Start(this%west_neighbor_grp, 0, this%west_2d_win)
+    if (.not.(this%north_boundary)) call MPI_Win_Complete( this%north_2d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Complete( this%south_2d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Complete(this%east_2d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Complete(this%west_2d_win)
+    if (.not.(this%north_boundary)) call MPI_Win_Wait( this%north_2d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Wait( this%south_2d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Wait(this%east_2d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Wait(this%west_2d_win)
+
+        call MPI_WIN_FREE(this%north_2d_win, ierr)
+        call MPI_WIN_FREE(this%south_2d_win, ierr)
+        call MPI_WIN_FREE(this%east_2d_win, ierr)
+        call MPI_WIN_FREE(this%west_2d_win, ierr)
+        call MPI_Type_free(this%NS_2d_win_halo_type, ierr)
+#endif
+    endif
+
+#ifdef CRAY_PE
+    deallocate(this%north_batch_in_3d)
+    deallocate(this%south_batch_in_3d)
+    deallocate(this%east_batch_in_3d)
+    deallocate(this%west_batch_in_3d)
+#else
+
+    if (.not.(this%north_boundary)) call MPI_Win_Start(this%north_neighbor_grp, 0, this%north_3d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Start(this%south_neighbor_grp, 0, this%south_3d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Start(this%east_neighbor_grp, 0, this%east_3d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Start(this%west_neighbor_grp, 0, this%west_3d_win)
+    if (.not.(this%north_boundary)) call MPI_Win_Complete( this%north_3d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Complete( this%south_3d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Complete(this%east_3d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Complete(this%west_3d_win)
+    if (.not.(this%north_boundary)) call MPI_Win_Wait( this%north_3d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Wait( this%south_3d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Wait(this%east_3d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Wait(this%west_3d_win)
+
+    if (.not.(this%north_boundary)) call MPI_WIN_FREE(this%north_3d_win, ierr)
+    if (.not.(this%south_boundary)) call MPI_WIN_FREE(this%south_3d_win, ierr)
+    if (.not.(this%east_boundary)) call MPI_WIN_FREE(this%east_3d_win, ierr)
+    if (.not.(this%west_boundary)) call MPI_WIN_FREE(this%west_3d_win, ierr)
+
+    call MPI_WIN_FREE(this%north_in_win, ierr)
+    call MPI_WIN_FREE(this%south_in_win, ierr)
+    call MPI_WIN_FREE(this%east_in_win, ierr)
+    call MPI_WIN_FREE(this%west_in_win, ierr)
+    call MPI_Type_free(this%NS_3d_win_halo_type, ierr)
+#endif
+
+    deallocate(this%neighbors)
+    deallocate(this%corner_neighbors)
+
+end subroutine finalize
 
 !> -------------------------------
 !! Exchange a given variable with neighboring processes.
@@ -667,15 +738,27 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                 if (this%n_2d > 0) allocate(this%west_buffer_2d(this%n_2d,1:this%halo_size,1:this%grid%ew_halo_ny))
             endif
         endif
-        if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_3d_win)
-        if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_3d_win)
-        if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_3d_win)
-        if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_3d_win)
+        ! if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_3d_win)
+        ! if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_3d_win)
+        ! if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_3d_win)
+        ! if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_3d_win)
+
+        if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp, 0, this%north_3d_win)
+        if (.not.(this%south_boundary)) call MPI_Win_Post(this%south_neighbor_grp, 0, this%south_3d_win)
+        if (.not.(this%east_boundary)) call MPI_Win_Post(this%east_neighbor_grp, 0, this%east_3d_win)
+        if (.not.(this%west_boundary)) call MPI_Win_Post(this%west_neighbor_grp, 0, this%west_3d_win)
+    
         if (this%n_2d > 0) then
-            if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_2d_win)
-            if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_2d_win)
-            if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_2d_win)
-            if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_2d_win)
+            ! if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_2d_win)
+            ! if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_2d_win)
+            ! if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_2d_win)
+            ! if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_2d_win)
+
+            if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp, 0, this%north_2d_win)
+            if (.not.(this%south_boundary)) call MPI_Win_Post(this%south_neighbor_grp, 0, this%south_2d_win)
+            if (.not.(this%east_boundary)) call MPI_Win_Post(this%east_neighbor_grp, 0, this%east_2d_win)
+            if (.not.(this%west_boundary)) call MPI_Win_Post(this%west_neighbor_grp, 0, this%west_2d_win)
+        
         endif
     endif
 #endif
@@ -705,6 +788,12 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
     call adv_vars%reset_iterator()
     call exch_vars%reset_iterator()
     n = 1
+
+
+    if (.not.(this%north_boundary)) call MPI_Win_Start(this%north_neighbor_grp, 0, this%north_3d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Start(this%south_neighbor_grp, 0, this%south_3d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Start(this%east_neighbor_grp, 0, this%east_3d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Start(this%west_neighbor_grp, 0, this%west_3d_win)
 
     ! Now iterate through the dictionary as long as there are more elements present. If two processors are on shared memory
     ! this step will directly copy the data to the other PE
@@ -802,6 +891,11 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
 #endif        
     endif
 
+    if (.not.(this%north_boundary)) call MPI_Win_Complete(this%north_3d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Complete(this%south_3d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Complete(this%east_3d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Complete(this%west_3d_win)
+
 end subroutine halo_3d_send_batch
 
 module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars,exch_var_only, wait_timer)
@@ -818,18 +912,22 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars,exch_var_only,
 
     exch_v_only = .False.
     if (present(exch_var_only)) exch_v_only=exch_var_only
-    if (present(wait_timer)) call wait_timer%start()
 
 #ifdef CRAY_PE        
     sync images( this%neighbors )
 #else
-    if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_3d_win)
-    if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_3d_win)
-    if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_3d_win)
-    if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_3d_win)
+    ! if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_3d_win)
+    ! if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_3d_win)
+    ! if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_3d_win)
+    ! if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_3d_win)
+
+    if (.not.(this%north_boundary)) call MPI_Win_Wait(this%north_3d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_3d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Wait(this%east_3d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Wait(this%west_3d_win)
+
 #endif
 
-    if (present(wait_timer)) call wait_timer%stop()
 
     call adv_vars%reset_iterator()
     call exch_vars%reset_iterator()
@@ -869,6 +967,10 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars,exch_var_only,
             n = n+1
         endif
     enddo
+    if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp, 0, this%north_3d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Post(this%south_neighbor_grp, 0, this%south_3d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Post(this%east_neighbor_grp, 0, this%east_3d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Post(this%west_neighbor_grp, 0, this%west_3d_win)
 
 end subroutine halo_3d_retrieve_batch
 
@@ -885,6 +987,13 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)
     disp = 0
 
     call exch_vars%reset_iterator()
+
+
+    if (.not.(this%north_boundary)) call MPI_Win_Start(this%north_neighbor_grp, 0, this%north_2d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Start(this%south_neighbor_grp, 0, this%south_2d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Start(this%east_neighbor_grp, 0, this%east_2d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Start(this%west_neighbor_grp, 0, this%west_2d_win)
+
     n = 1
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do while (exch_vars%has_more_elements())
@@ -951,6 +1060,10 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)
         endif
 #endif        
     endif
+    if (.not.(this%north_boundary)) call MPI_Win_Complete(this%north_2d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Complete(this%south_2d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Complete(this%east_2d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Complete(this%west_2d_win)
 
 end subroutine halo_2d_send_batch
 
@@ -964,10 +1077,15 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars)
 #ifdef CRAY_PE        
     sync images( this%neighbors )
 #else
-    if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_2d_win)
-    if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_2d_win)
-    if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_2d_win)
-    if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_2d_win)
+    ! if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_2d_win)
+    ! if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_2d_win)
+    ! if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_2d_win)
+    ! if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_2d_win)
+
+    if (.not.(this%north_boundary)) call MPI_Win_Wait(this%north_2d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_2d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Wait(this%east_2d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Wait(this%west_2d_win)
 #endif
 
     call exch_vars%reset_iterator()
@@ -985,6 +1103,10 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars)
         endif
     enddo
 
+    if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp, 0, this%north_2d_win)
+    if (.not.(this%south_boundary)) call MPI_Win_Post(this%south_neighbor_grp, 0, this%south_2d_win)
+    if (.not.(this%east_boundary)) call MPI_Win_Post(this%east_neighbor_grp, 0, this%east_2d_win)
+    if (.not.(this%west_boundary)) call MPI_Win_Post(this%west_neighbor_grp, 0, this%west_2d_win)
 
 end subroutine halo_2d_retrieve_batch
 

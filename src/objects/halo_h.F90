@@ -93,7 +93,7 @@ module halo_interface
   	  logical :: north_boundary = .True.
   	  logical :: south_boundary = .True.
    	  logical :: east_boundary = .True.
-    	  logical :: west_boundary = .True.
+      logical :: west_boundary = .True.
 
   	  ! store the start (s) and end (e) for the i,j,k dimensions
   	  integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
@@ -109,6 +109,7 @@ module halo_interface
 
     contains
         procedure, public :: init
+        procedure, public :: finalize
         procedure, public :: exch_var
         procedure, public :: batch_exch
         procedure, public :: halo_3d_send_batch
@@ -148,6 +149,11 @@ interface
         type(grid_t), intent(in) :: grid
         type(MPI_comm), intent(inout) :: comms
     end subroutine init
+
+    module subroutine finalize(this)
+        implicit none
+        class(halo_t), intent(inout) :: this
+    end subroutine finalize
 
     module subroutine exch_var(this, var, do_dqdt, corners)
         implicit none

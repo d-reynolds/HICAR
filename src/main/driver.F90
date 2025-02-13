@@ -279,7 +279,7 @@ program icar
 
                 if(domain(i)%model_time + small_time_delta > options(i)%general%end_time) then
                     call end_nest_context(domain(i), options(i))
-                    domain(i)%ended = .True.
+                    call domain(i)%release()
                     if (STD_OUT_PE) write(*,*) "Domain ",i," has reached the end of its run time."
                 endif
             enddo
@@ -401,6 +401,7 @@ program icar
             t_val3 = timer_max(wind_timer(i), domain(1)%compute_comms)
             if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "winds", ":", t_val, " | ", t_val2, " | ", t_val3
         enddo
+
     case(kIO_TEAM)
     
         !This is, unfortunately, stupidly, needed to allow coarrays to work. 
@@ -509,7 +510,6 @@ program icar
         call ioserver(1)%close_files()
     end select
 
-    call MPI_Barrier(MPI_COMM_WORLD)
     CALL MPI_Finalize()
 
 contains
