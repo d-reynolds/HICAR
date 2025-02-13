@@ -485,14 +485,6 @@ program icar
 
                     ioserver(i)%io_time = step_end(next_input(i),next_output(i))
 
-                    ! If the next event is a change is nest scope, then we need to wait on this, as the compute team will wait for us
-                    if ( (size(options(i)%general%child_nests) > 0) .and. ioserver(i)%io_time + small_time_delta >= end_of_nest_loop) then
-                        if (ANY(ioserver(options(i)%general%child_nests)%ended .eqv. .False.)) then
-                            ! This call will gather the model state of the forcing fields from the nest parent
-                            call ioserver(i)%gather_forcing(ioserver(options(i)%general%child_nests))
-                        endif
-                    endif
-
                     ! If we aren't yet done, then wait for an output
                     ! If we are at an output step, do it now
                     if (ioserver(i)%io_time+small_time_delta >= next_output(i) .and. ioserver(i)%io_time <= options(i)%general%end_time) then
@@ -500,6 +492,12 @@ program icar
                         next_output(i) = ioserver(i)%io_time + options(i)%output%output_dt
                     endif
                 end do
+
+                ! If the next event is a change is nest scope, then we need to wait on this, as the compute team for the child will wait for us
+                if ( (size(options(i)%general%child_nests) > 0) .and. (ANY(ioserver(options(i)%general%child_nests)%ended .eqv. .False.)) )then
+                    ! This call will gather the model state of the forcing fields from the nest parent
+                    call ioserver(i)%gather_forcing(ioserver(options(i)%general%child_nests))
+                endif
 
                 if (ioserver(i)%io_time + small_time_delta >= options(i)%general%end_time) then
                     ioserver(i)%ended = .True.
