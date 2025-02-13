@@ -236,10 +236,10 @@ module subroutine finalize(this)
     if (.not.(this%east_boundary)) call MPI_Win_Wait(this%east_2d_win)
     if (.not.(this%west_boundary)) call MPI_Win_Wait(this%west_2d_win)
 
-        call MPI_WIN_FREE(this%north_2d_win, ierr)
-        call MPI_WIN_FREE(this%south_2d_win, ierr)
-        call MPI_WIN_FREE(this%east_2d_win, ierr)
-        call MPI_WIN_FREE(this%west_2d_win, ierr)
+    if (.not.(this%north_boundary)) call MPI_WIN_FREE(this%north_2d_win, ierr)
+    if (.not.(this%south_boundary)) call MPI_WIN_FREE(this%south_2d_win, ierr)
+    if (.not.(this%east_boundary)) call MPI_WIN_FREE(this%east_2d_win, ierr)
+    if (.not.(this%west_boundary)) call MPI_WIN_FREE(this%west_2d_win, ierr)
         call MPI_Type_free(this%NS_2d_win_halo_type, ierr)
 #endif
     endif
