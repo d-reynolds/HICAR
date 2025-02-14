@@ -26,8 +26,16 @@ contains
         this%n_vars = 0
         this%n_dims      = 0
         this%is_initialized = .True.
-        this%output_counter = 1
-        this%restart_counter = 1
+        ! if this is a restart run, then there will be no initial call to save_out_file, meaning
+        ! that the output counter should be auto-incremented to 2 (1 + 1) here 
+        if (options%restart%restart) then
+            this%output_counter = 2
+            this%restart_counter = 2
+        else
+            this%output_counter = 1
+            this%restart_counter = 1
+        endif
+        
         this%its = its; this%ite = ite; this%kts = kts; this%kte = kte; this%jts = jts; this%jte = jte
         this%global_dim_len = (/ide, jde, kde/)
 
