@@ -3,6 +3,7 @@ module output_metadata
     use icar_constants
     use variable_interface,     only : variable_t
     use meta_data_interface,    only : attribute_t
+    use string,       only : to_lower
     implicit none
 
     type(variable_t), allocatable :: var_meta(:)
@@ -232,6 +233,93 @@ contains
         endif
 
     end function get_varindx
+
+    function get_var_matchinfo(var_indx,request_string) result(match_info)
+        implicit none
+        integer, intent(in) :: var_indx
+        character(len=*), intent(in) :: request_string
+
+        logical     :: match_info
+        integer :: i
+
+        ! default is to assume no match
+        match_info = .False.
+
+        if (var_indx>kMAX_STORAGE_VARS) then
+            stop "Invalid variable metadata requested in function get_var_matchinfo"
+        endif
+
+        ! initialize the module level constant data structure
+        if (.not.allocated(var_meta)) call init_var_meta()
+        
+        ! check if any part of request_string is in the description or name of the variable
+        if (index(to_lower(var_meta(var_indx)%name), trim(to_lower(request_string))) > 0) then
+            match_info = .True.
+        else
+            ! loop through each element of the attribute array
+            do i=1,var_meta(var_indx)%n_attrs
+                ! ignore the "units" and "coordinates" attributes
+                if (index(var_meta(var_indx)%attributes(i)%name, "units") > 0) cycle
+                if (index(var_meta(var_indx)%attributes(i)%name, "coordinates") > 0) cycle
+
+                if (index(to_lower(var_meta(var_indx)%attributes(i)%value), trim(to_lower(request_string))) > 0) then
+                    match_info = .True.
+                    exit
+                endif
+            enddo
+        endif
+    end function get_var_matchinfo
+
+    subroutine list_output_vars(keywords)
+        implicit none
+        character(len=*), intent(in) :: keywords(:)
+
+        integer :: i, j, k, match_count
+        character(len=kMAX_NAME_LENGTH) :: dimensions
+
+        ! initialize the module level constant data structure
+        if (.not.allocated(var_meta)) call init_var_meta()
+
+        if (STD_OUT_PE) write(*,*) "-------------------------------------------------"
+        if (STD_OUT_PE) write(*,"(A)", ADVANCE='NO') "Output variables matching keywords: "
+        do i = 1,size(keywords)
+            if (STD_OUT_PE) write(*,"(A,A)", ADVANCE='NO') trim(keywords(i)), " "
+        enddo
+        if (STD_OUT_PE) write(*,"(/ A)") "-------------------------------------------------"
+        if (STD_OUT_PE) write(*,*)
+
+
+        do i=1,size(var_meta)
+            match_count = 0
+            !check if name is not an empty string
+            if (len_trim(var_meta(i)%name) == 0) cycle
+            do k = 1,size(keywords)
+                if (get_var_matchinfo(i, keywords(k))) then
+                    match_count = match_count + 1
+                endif
+            enddo
+            if (match_count == size(keywords)) then
+                dimensions = ""
+                do j = 1,var_meta(i)%n_dimensions
+                    dimensions = trim(dimensions)//trim(var_meta(i)%dimensions(j))//", "
+                enddo
+                ! remove the trailing space
+                dimensions = trim(dimensions)
+                !remove trailing comma
+                dimensions = dimensions(1:len_trim(dimensions)-1)
+
+                if (STD_OUT_PE) write(*,*) "Name: ",trim(var_meta(i)%name)
+                if (STD_OUT_PE) write(*,*) 
+                if (STD_OUT_PE) write(*,"(A25,A)") "   namelist name: ",trim(var_meta(i)%name)
+                if (STD_OUT_PE) write(*,"(A25,A1,A,A1)") "   dimensions: ","[",trim(dimensions),"]"
+                do j=1,var_meta(i)%n_attrs
+                    if (STD_OUT_PE) write(*,"(A25,A)") (trim(var_meta(i)%attributes(j)%name)//": "),trim(var_meta(i)%attributes(j)%value)
+                enddo
+                if (STD_OUT_PE) write(*,*) "-------------------------------------------------"
+            endif
+        enddo
+
+    end subroutine list_output_vars
 
     !>------------------------------------------------------------
     !! Initialize the module level master data structure

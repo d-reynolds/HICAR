@@ -165,4 +165,26 @@ contains
         n = n + 1
         tokens(n) = str_in(start:)
     end function split_str
+
+    !>------------------------------
+    !! Convert a string to lower case
+    !!
+    !!------------------------------
+    pure function to_lower(str_in) result(str_out)
+        implicit none
+        character(len=*), intent(in) :: str_in
+        character(len=len(str_in)) :: str_out
+
+        integer :: i
+
+        str_out = trim(str_in)
+        do i = 1, len(trim(str_in))
+            if (ichar(str_in(i:i)) >= iachar('A') .and. ichar(str_in(i:i)) <= iachar('Z')) then
+                str_out(i:i) = char(ichar(str_in(i:i)) + iachar('a') - iachar('A'))
+            endif
+        end do
+        str_out = trim(str_out)
+
+    end function to_lower
+
 end module string

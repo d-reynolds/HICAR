@@ -35,7 +35,7 @@ program icar
     use io_routines,        only : io_write
     use namelist_utils,     only : get_nml_var_default
     use land_surface,               only : lsm_init
-
+    use output_metadata,    only : list_output_vars
     implicit none
 
     type(options_t), allocatable :: options(:)
@@ -581,6 +581,7 @@ contains
 
         integer :: cnt, p
         character(len=kMAX_FILE_LENGTH) :: first_arg, arg, default
+        character(len=kMAX_FILE_LENGTH), allocatable :: keywords(:)
         logical :: file_exists
 
         nml_file = ""
@@ -597,14 +598,16 @@ contains
             write(*,*) "                                  --all prints out information for all namelist variables."
             write(*,*) "    --check-nml:                  Check the namelist file for errors without running the model."
             write(*,*) "    --gen-nml:                    Generate a namelist file with default values."
+            write(*,*) "    --out-vars [keywords]:        List all output variables which are related to the space-separated list of keywords."
+            write(*,*)
             write(*,*) "    namelist_file:                The name of the namelist file to use."
             write(*,*)
-            write(*,*) "    Example to generate a namelist with default values:  ./HICAR --gen-nml namelist_file.nml"
-            write(*,*) "    Example to check namelist:                           ./HICAR --check-nml namelist_file.nml"
-            write(*,*) "    Example to run model:                                ./HICAR namelist_file.nml"
-            write(*,*) "    Example to learn about a namelist variable:          ./HICAR -v mp"
-            write(*,*) "    Example to generate namelist variable documentation: ./HICAR -v --all > namelist_doc.txt"
-
+            write(*,*) "    Example to generate a namelist with default values:                ./HICAR --gen-nml namelist_file.nml"
+            write(*,*) "    Example to check namelist:                                         ./HICAR --check-nml namelist_file.nml"
+            write(*,*) "    Example to run model:                                              ./HICAR namelist_file.nml"
+            write(*,*) "    Example to list all output variables related to wind or snow:      ./HICAR --out-vars wind snow"
+            write(*,*) "    Example to learn about a namelist variable:                        ./HICAR -v mp"
+            write(*,*) "    Example to generate namelist variable documentation:               ./HICAR -v --all > namelist_doc.txt"
             write(*,*)
 
 
@@ -648,11 +651,24 @@ contains
                 if (STD_OUT_PE) write(*,*) "ERROR: No namelist provided with the --gen-nml flag."
                 stop
             endif
+        elseif (first_arg == '--out-vars') then
+            if (cnt >= 2) then
+                allocate(keywords(cnt-1))
+                do p = 2, cnt
+                    call get_command_argument(p, arg)
+                    keywords(p-1) = arg
+                end do
+                call list_output_vars(keywords)
+                stop
+            elseif (cnt < 2) then
+                if (STD_OUT_PE) write(*,*) "ERROR: No keyword provided with the --out-vars flag."
+                stop
+            endif
         else
             nml_file = first_arg
         endif
 
-        if (.not.first_arg=='-v' .and. .not.first_arg=='--gen-nml') then
+        if (.not.first_arg=='-v' .and. .not.first_arg=='--gen-nml' .and. .not.first_arg=='--out-vars') then
             ! Check that the options file actually exists
             INQUIRE(file=trim(nml_file), exist=file_exists)
 

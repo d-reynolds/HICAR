@@ -1929,7 +1929,8 @@ contains
                 default = "24"
                 group = "Output"
             case ("output_vars")
-                description = "List of variables to output. See src/io/default_output_vars.f90 for available variables"
+                description = "List of variables to output. Call HICAR as: './HICAR --out-vars keyword' to get information"//achar(10)//BLNK_CHR_N// &
+                                "about the available output variables matching the keyword."
                 default = ""
                 group = "Output"
             ! --------------------------------------

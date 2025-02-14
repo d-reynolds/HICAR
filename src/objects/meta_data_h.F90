@@ -15,7 +15,7 @@ module meta_data_interface
 
     type meta_data_t
     !   private
-        character(len=kMAX_NAME_LENGTH) :: name
+        character(len=kMAX_NAME_LENGTH) :: name = ""
         integer :: n_attrs = 0
 
         type(attribute_t), allocatable :: attributes(:)
