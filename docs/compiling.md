@@ -207,10 +207,14 @@ module show MODULE_NAME
 
 If the user wants to use the snowmodel [FSM2](https://egusphere.copernicus.org/preprints/2023/egusphere-2023-2071/), it must also be compiled prior to compiling HICAR. The process for compiling FSM2 is simple, and similar to that for HICAR. 
 
-To couple with FSM2, the user must first get the FSM2 distribution, which can be done as:
+To couple with FSM2, the user must first get the FSM2 distribution. To get just the source code (recommended), setup a sparse checkout as follows:
 
 ```bash
-git clone https://github.com/oshd-slf/jim_operational.git
+git clone --no-checkout --filter=blob:none https://github.com/oshd-slf/jim_operational.git FSM2
+cd FSM2
+git sparse-checkout set --cone
+git checkout 64221dc358bc22026d08b61fc45f282f12089b9f
+git sparse-checkout set FSM_SOURCE_CODE/code/
 ```
 
 Note that FSM2 development is not gaurenteed to always dovetail nicely with the HICAR interface. The last tested FSM2 commit hash was:
