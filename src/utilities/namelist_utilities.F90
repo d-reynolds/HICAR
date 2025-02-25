@@ -92,7 +92,11 @@ contains
         endif
 
         if (present(usr_default)) then
-            call check_numeric_var_entry_type(usr_default,var,name)
+            if (usr_default /= kREAL_NO_VAL) then
+                call check_numeric_var_entry_type(usr_default,var,name)
+            else
+                call check_numeric_var_entry_type(default_val,var,name)
+            endif
         endif
     end subroutine set_real_nml_var
 
@@ -157,11 +161,12 @@ contains
         character(len=*), intent(in) :: name
         integer, optional, intent(in) :: usr_default
 
-        integer :: minmax(2)
+        integer :: minmax(2), default_val
         integer, allocatable :: values(:)
         character(len=kMAX_STRING_LENGTH) :: default
 
         default = trim(get_nml_var_default(name))
+        read(default,*) default_val
 
         if (present(usr_default)) then
             ! If the user set the first value, but not the rest, then they want this first value to apply to all nests
@@ -206,7 +211,11 @@ contains
         endif
 
         if (present(usr_default)) then
-            call check_numeric_var_entry_type((usr_default*1.0),(var*1.0),name)
+            if (usr_default /= kINT_NO_VAL) then
+                call check_numeric_var_entry_type((usr_default*1.0),(var*1.0),name)
+            else
+                call check_numeric_var_entry_type((default_val*1.0),(var*1.0),name)
+            endif
         endif
 
     end subroutine set_integer_nml_var
@@ -423,8 +432,13 @@ contains
             endif
         endif
 
-        if (present(usr_default)) call check_var_entry_type(usr_default,var,name)
-
+        if (present(usr_default)) then
+            if (usr_default /= kCHAR_NO_VAL) then
+                call check_var_entry_type(usr_default,var,name)
+            else
+                call check_var_entry_type(default,var,name)
+            endif
+        endif
     end subroutine set_char_domain_nml_var
 
     subroutine set_char_nml_var(var, var_val, name, usr_default)
@@ -463,7 +477,13 @@ contains
             call check_file_exists(var, message=(trim(var)//"file does not exist."))
         endif
 
-        if (present(usr_default)) call check_var_entry_type(usr_default,var,name)
+        if (present(usr_default)) then
+            if (usr_default /= kCHAR_NO_VAL) then
+                call check_var_entry_type(usr_default,var,name)
+            else
+                call check_var_entry_type(default,var,name)
+            endif
+        endif
 
     end subroutine set_char_nml_var
 
