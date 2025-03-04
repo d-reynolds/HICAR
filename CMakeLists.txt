@@ -44,102 +44,16 @@ option(FSM "Link to the FSM2 snow model, requires separate compilation of the FS
 
 #Set constants for project
 set(BUILD ${PROJECT_SOURCE_DIR}/build)
+add_subdirectory(${PROJECT_SOURCE_DIR}/tests)
+#######################################
 
+
+#########################################################
+######## Set up compiler options for the build ##########
 
 #######################################
 ########## Set up the sources #########
 FILE(GLOB_RECURSE SOURCE_FILES  ${PROJECT_SOURCE_DIR}/src/*.F90)
-
-# We still have the CAF tests in the source files, in case we want to 
-# debug the cray- CAF support in the future, but for the time being
-# we don't use them, so we need to remove them
-FILE(GLOB_RECURSE CAF_TESTS  ${PROJECT_SOURCE_DIR}/src/tests/*)
-list(REMOVE_ITEM SOURCE_FILES ${CAF_TESTS})
-
-# list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_old.F90)
-
-#######################################
-
-############################################
-############## Auto-detect  ################
-message(STATUS "")
-message(STATUS "Trying to auto-detect the environment...")
-list(APPEND CMAKE_MESSAGE_INDENT "  ")
-
-# Environment
-
-# Detect if we are running on a cray system, where ftn is always use as the fortran compiler
-# and the compiler type is determined by the compiler flags passed to ftn
-if (DEFINED ENV{CRAYPE_VERSION})
-	message(STATUS "Auto-detected Cray system, setting compiler to ftn")
-
-	set(CMAKE_Fortran_COMPILER_ID "Cray")
-	set(CMAKE_Fortran_COMPILER "ftn")
-	set(CMAKE_Fortran_COMPILER_LOADED TRUE)
-	if (NOT DEFINED FC OR FC STREQUAL "")
-		#if (DEFINED ENV{FC})
-			#message(STATUS "Using Fortran compiler flags for the compiler supplied by the environment variable FC")
-			#set(COMPILER $ENV{FC})
-			#else()
-			if ("$ENV{PE_ENV}" STREQUAL "GNU")
-				message(STATUS "Auto-detected GNU Programming Environment, using gnu compiler flags")
-				set(COMPILER "gnu")
-			elseif("$ENV{PE_ENV}" STREQUAL "INTEL")
-				message(STATUS "Auto-detected Intel Programming Environment, using intel compiler flags")
-				set(COMPILER "intel")
-			elseif ("$ENV{PE_ENV}" STREQUAL "CRAY")
-				message(STATUS "Auto-detected Cray Programming Environment, using cray compiler flags")
-				set(COMPILER "cray")
-			else()
-				message(FATAL_ERROR "Unknown Programming Environment")
-			endif()
-			#endif()
-	endif()
-else()
-	# If we are not on a cray system, we can use the compiler specified by the user
-	if (NOT DEFINED FC OR FC STREQUAL "")
-		if (DEFINED ENV{FC})
-			message(STATUS "Using Fortran compiler supplied by the environment variable FC: $ENV{FC}")
-			set(FC $ENV{FC})
-		elseif(DEFINED CMAKE_Fortran_COMPILER)
-			message(STATUS "Using Auto-detected Fortran compiler: ${CMAKE_Fortran_COMPILER}")
-			set(FC ${CMAKE_Fortran_COMPILER})
-		else()
-			message(FATAL_ERROR "No Fortran compiler specified")
-		endif()
-	elseif(DEFINED FC)
-		message(STATUS "Using Fortran compiler specified by the user in variable FC: ${FC}")
-	endif()
-	if (FC MATCHES "gfortran")
-		set(CMAKE_Fortran_COMPILER "gfortran")
-		set(CMAKE_Fortran_COMPILER_ID "GNU")
-		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
-		set(COMPILER "gnu")
-	elseif (FC MATCHES "ifort")
-		set(CMAKE_Fortran_COMPILER "ifort")
-		set(CMAKE_Fortran_COMPILER_ID "Intel")
-		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
-		set(COMPILER "intel")
-	elseif (FC MATCHES "mpif90")
-		set(CMAKE_Fortran_COMPILER "mpif90")
-		set(CMAKE_Fortran_COMPILER_ID "mpif90")
-		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
-		set(COMPILER "gnu")
-	else()
-		message(FATAL_ERROR "Unknown Fortran compiler (FC) specified")
-	endif()
-endif()
-
-string( TOLOWER "${MODE}" MODE )
-string( TOLOWER "${COMPILER}" COMPILER )
-
-list(POP_BACK CMAKE_MESSAGE_INDENT)
-message(STATUS "...done auto-detecting the environment")
-
-################################################
-
-#########################################################
-######## Set up compiler options for the build ##########
 
 macro(Disable_FSM)
 	set(FSM OFF)
@@ -180,63 +94,7 @@ add_definitions(-DVERSION=\"$(GIT_VERSION)\")
 
 
 add_executable(HICAR ${SOURCE_FILES})
-
-##########################################################
-############## Set up the compiler options ###############
-
-if(MODE STREQUAL "debug")
-	set(CMAKE_BUILD_TYPE Debug)
-
-    if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -c -O0 -g -fopenmp -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion)
-	elseif (COMPILER STREQUAL "intel")
-		target_compile_options(HICAR PUBLIC -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
-	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h noomp -c -eI -O0) #-R cpbs --cray-print-opts
-	endif()
-elseif(MODE STREQUAL "debugslow")
-	set(CMAKE_BUILD_TYPE Debug)
-
-	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -c -g -ffree-line-length-none -Wconversion)
-	elseif (COMPILER STREQUAL "intel")
-		target_compile_options(HICAR PUBLIC -debug -debug-parameters all -traceback -ftrapuv -g -fpe0 -c -u -check all -check noarg_temp_created -CB)
-	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -c -h noomp -eI -m 2 -O0 -g -R bcs)
-	endif()
-elseif(MODE STREQUAL "profile")
-	set(CMAKE_BUILD_TYPE Profile)
-
-	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fopt-info-missed=opt_info.txt -mfma -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
-		target_link_options(HICAR PUBLIC -pg)
-	elseif (COMPILER STREQUAL "intel")
-		target_compile_options(HICAR PUBLIC -pg -debug inline-debug-info -shared-intel)
-	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -c -h noomp -eI -m 2 -O0 -hpl=my_program_debug.pl -g -R bcs)
-	endif()
-elseif(MODE STREQUAL "release")
-	set(CMAKE_BUILD_TYPE Release)
-
-	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -O3 -fopenmp -finline-limit=10000 -mfma -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
-	elseif (COMPILER STREQUAL "intel")
-		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
-	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -c -eI)
-		set(LINK "-h noomp")
-	endif()
-endif()
-
-#set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${FFLAGS}")
-#set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LFLAGS}")
-
-##########################################################
-
-
-
-
-
+add_library(hicar_lib STATIC ${SOURCE_FILES})
 
 ###########################################################
 ############### Find or install dependencies ##############
@@ -267,10 +125,6 @@ find_package(PkgConfig REQUIRED)
 set (NETCDF_F90 "YES")
 find_package(MPI REQUIRED)
 find_package(OpenMP)
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(HICAR PUBLIC OpenMP::OpenMP_CXX)
-endif()
-
 find_package(FFTW REQUIRED)
 find_package(NetCDF REQUIRED)
 
@@ -292,6 +146,7 @@ if(PKG_CONFIG_FOUND)
 	if(PETSC_FOUND AND NOT (DEFINED ENV{CRAYPE_VERSION} AND (PETSC MATCHES ".*cray.*")))
 		message(STATUS "PETSc found with pkg-config")
 		target_link_libraries(HICAR PUBLIC PkgConfig::PETSC)
+		target_link_libraries(hicar_lib PUBLIC PkgConfig::PETSC)
 	elseif (EXISTS "${PETSC}/lib/petsc/conf/petscvariables")
 		message(STATUS "2. Trying to find PETSc by mimicking the cray-petsc makefile setup...")
 
@@ -346,6 +201,9 @@ endif()
 list(POP_BACK CMAKE_MESSAGE_INDENT)
 
 target_link_libraries(HICAR PUBLIC MPI::MPI_Fortran)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(HICAR PUBLIC OpenMP::OpenMP_CXX)
+endif()
 target_link_libraries(HICAR PUBLIC ${FFTW_LIBRARIES})
 
 if (NETCDF_FOUND)
@@ -365,6 +223,9 @@ if (FSM)
 	find_library(FSM2_LIB NAMES FSM2 REQUIRED)
 	target_include_directories(HICAR PUBLIC ${FSM_DIR}/build)
 	target_link_libraries(HICAR PUBLIC ${FSM2_LIB})
+
+	target_include_directories(hicar_lib PUBLIC ${FSM_DIR}/build)
+
 endif()
 
 target_include_directories(HICAR PUBLIC ${MPI_INCLUDE_DIR})
@@ -374,6 +235,10 @@ target_include_directories(HICAR PUBLIC ${NETCDF_INCLUDES})
 # Add the include directory to the compiler flags
 target_include_directories(HICAR PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
+target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(hicar_lib PUBLIC ${MPI_INCLUDE_DIR})
+target_include_directories(hicar_lib PUBLIC ${FFTW_INCLUDES})
+target_include_directories(hicar_lib PUBLIC ${NETCDF_INCLUDES})
 
 list(POP_BACK CMAKE_MESSAGE_INDENT)
 message(STATUS "...done searching for dependencies")
@@ -381,10 +246,140 @@ message(STATUS "...done searching for dependencies")
 ###########################################################
 
 
+############################################
+############## Auto-detect  ################
+message(STATUS "")
+message(STATUS "Trying to auto-detect the environment...")
+list(APPEND CMAKE_MESSAGE_INDENT "  ")
+
+# Environment
+
+# Detect if we are running on a cray system, where ftn is always use as the fortran compiler
+# and the compiler type is determined by the compiler flags passed to ftn
+if (DEFINED ENV{CRAYPE_VERSION})
+	message(STATUS "Auto-detected Cray system, setting compiler to ftn")
+
+	set(CMAKE_Fortran_COMPILER_ID "Cray")
+	set(CMAKE_Fortran_COMPILER_LOADED TRUE)
+	if (NOT DEFINED FC OR FC STREQUAL "")
+		#if (DEFINED ENV{FC})
+			#message(STATUS "Using Fortran compiler flags for the compiler supplied by the environment variable FC")
+			#set(COMPILER $ENV{FC})
+			#else()
+			if ("$ENV{PE_ENV}" STREQUAL "GNU")
+				message(STATUS "Auto-detected GNU Programming Environment, using gnu compiler flags")
+				set(COMPILER "gnu")
+			elseif("$ENV{PE_ENV}" STREQUAL "INTEL")
+				message(STATUS "Auto-detected Intel Programming Environment, using intel compiler flags")
+				set(COMPILER "intel")
+			elseif ("$ENV{PE_ENV}" STREQUAL "CRAY")
+				message(STATUS "Auto-detected Cray Programming Environment, using cray compiler flags")
+				set(COMPILER "cray")
+			else()
+				message(FATAL_ERROR "Unknown Programming Environment")
+			endif()
+	endif()
+	set(FC "ftn")
+else()
+	# If we are not on a cray system, we can use the compiler specified by the user
+	if (NOT DEFINED FC OR FC STREQUAL "")
+		if (DEFINED ENV{FC})
+			message(STATUS "Using Fortran compiler supplied by the environment variable FC: $ENV{FC}")
+			set(FC $ENV{FC})
+		elseif(DEFINED CMAKE_Fortran_COMPILER)
+			message(STATUS "Using Auto-detected Fortran compiler: ${CMAKE_Fortran_COMPILER}")
+			set(FC ${CMAKE_Fortran_COMPILER})
+		else()
+			message(FATAL_ERROR "No Fortran compiler specified")
+		endif()
+	elseif(DEFINED FC)
+		message(STATUS "Using Fortran compiler specified by the user in variable FC: ${FC}")
+	endif()
+	if (FC MATCHES "gfortran")
+		set(CMAKE_Fortran_COMPILER "gfortran")
+		set(CMAKE_Fortran_COMPILER_ID "GNU")
+		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
+		set(COMPILER "gnu")
+	elseif (FC MATCHES "ifort")
+		set(CMAKE_Fortran_COMPILER "ifort")
+		set(CMAKE_Fortran_COMPILER_ID "Intel")
+		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
+		set(COMPILER "intel")
+	elseif (FC MATCHES "mpif90")
+		set(CMAKE_Fortran_COMPILER "mpif90")
+		set(CMAKE_Fortran_COMPILER_ID "mpif90")
+		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
+		set(COMPILER "gnu")
+	else()
+		message(FATAL_ERROR "Unknown Fortran compiler (FC) specified")
+	endif()
+endif()
+
+string( TOLOWER "${MODE}" MODE )
+string( TOLOWER "${COMPILER}" COMPILER )
+
+list(POP_BACK CMAKE_MESSAGE_INDENT)
+message(STATUS "...done auto-detecting the environment")
+
+################################################
 
 
+##########################################################
+############## Set up the compiler options ###############
 
-#######################################################
+if(MODE STREQUAL "debug")
+	set(CMAKE_BUILD_TYPE Debug)
+	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_debug")
+
+    if (COMPILER STREQUAL "gnu")
+		target_compile_options(HICAR PUBLIC -c -O0 -g -fopenmp -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion)
+	elseif (COMPILER STREQUAL "intel")
+		target_compile_options(HICAR PUBLIC -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
+	elseif (COMPILER STREQUAL "cray")
+		target_compile_options(HICAR PUBLIC -h noomp -c -eI -G0 -m2 -rl -R bcdsp) #-R cpbs --cray-print-opts
+	endif()
+elseif(MODE STREQUAL "debugslow")
+	set(CMAKE_BUILD_TYPE Debug)
+
+	if (COMPILER STREQUAL "gnu")
+		target_compile_options(HICAR PUBLIC -c -g -ffree-line-length-none -Wconversion)
+	elseif (COMPILER STREQUAL "intel")
+		target_compile_options(HICAR PUBLIC -debug -debug-parameters all -traceback -ftrapuv -g -fpe0 -c -u -check all -check noarg_temp_created -CB)
+	elseif (COMPILER STREQUAL "cray")
+		target_compile_options(HICAR PUBLIC -c -h noomp -eI -m 2 -O0 -g -R bcs)
+	endif()
+elseif(MODE STREQUAL "profile")
+	set(CMAKE_BUILD_TYPE Profile)
+
+	if (COMPILER STREQUAL "gnu")
+		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fopt-info-missed=opt_info.txt -mfma -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
+		target_link_options(HICAR PUBLIC -pg)
+	elseif (COMPILER STREQUAL "intel")
+		target_compile_options(HICAR PUBLIC -pg -debug inline-debug-info -shared-intel)
+	elseif (COMPILER STREQUAL "cray")
+		target_compile_options(HICAR PUBLIC -c -h noomp -eI -m 2 -O0 -hpl=my_program_debug.pl -g -R bcs)
+	endif()
+elseif(MODE STREQUAL "release")
+	set(CMAKE_BUILD_TYPE Release)
+	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR")
+
+	if (COMPILER STREQUAL "gnu")
+		target_compile_options(HICAR PUBLIC -O3 -fopenmp -finline-limit=10000 -mfma -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
+	elseif (COMPILER STREQUAL "intel")
+		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
+	elseif (COMPILER STREQUAL "cray")
+		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -c -eI)
+		set(LINK "-h noomp")
+	endif()
+endif()
+
+#set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${FFLAGS}")
+#set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LFLAGS}")
+
+##########################################################
+
+
+######################################################k#
 ############## Print User Information #################
 get_target_property(MAIN_CFLAGS HICAR COMPILE_OPTIONS)
 string(REGEX REPLACE ";" " " MAIN_CFLAGS "${MAIN_CFLAGS}")
@@ -441,8 +436,6 @@ install(TARGETS HICAR  DESTINATION  ${CMAKE_INSTALL_EXEDIR})
 
 ADD_CUSTOM_TARGET( distclean make clean
 				   COMMAND ${CMAKE_COMMAND} -E remove_directory ${PROJECT_SOURCE_DIR}/build/CMakeFiles
-				   COMMAND ${CMAKE_COMMAND} -E remove *~ cmake_install.cmake install_manifest.txt Makefile CMakeCache.txt
-				   COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_Fortran_MODULE_DIRECTORY}
-				   COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_INSTALL_LIBDIR}
+				   COMMAND ${CMAKE_COMMAND} -E remove ${PROJECT_SOURCE_DIR}/build/cmake_install.cmake ${PROJECT_SOURCE_DIR}/build/install_manifest.txt ${PROJECT_SOURCE_DIR}/build/Makefile ${PROJECT_SOURCE_DIR}/build/CMakeCache.txt
 					)
 
