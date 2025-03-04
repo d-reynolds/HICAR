@@ -130,8 +130,8 @@ contains
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
         
         !Exchange u and v, since the outer points are not updated in above function
-        call domain%halo%exch_var(domain%u,do_dqdt=.True.)
-        call domain%halo%exch_var(domain%v,do_dqdt=.True.)
+        !call domain%halo%exch_var(domain%u,do_dqdt=.True.)
+        !call domain%halo%exch_var(domain%v,do_dqdt=.True.)
                                  
     end subroutine calc_iter_winds_old
 
@@ -769,7 +769,7 @@ contains
 
         call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
-                          xl, PETSC_NULL_INTEGER_ARRAY ,yl,da,ierr)
+                          xl, PETSC_NULL_INTEGER ,yl,da,ierr)
         
         call DMSetFromOptions(da,ierr)
         call DMSetUp(da,ierr)

@@ -25,7 +25,6 @@
 !!
 !!----------------------------------------------------------
 module planetary_boundary_layer
-    use data_structures
     use domain_interface,   only : domain_t
     use options_interface,  only : options_t
     !use pbl_simple,    only : simple_pbl, finalize_simple_pbl, init_simple_pbl

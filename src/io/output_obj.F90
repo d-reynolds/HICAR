@@ -1,5 +1,5 @@
 submodule(output_interface) output_implementation
-  use output_metadata,          only : get_metadata, get_varindx, get_varname
+  use output_metadata,          only : get_varmeta, get_varindx, get_varname
   use debug_module,             only : check_ncdf
   use iso_fortran_env,          only : output_unit
   use time_io,                  only : get_output_time, find_timestep_in_filelist
@@ -447,7 +447,7 @@ contains
         do i = 1,size(vars_to_out) 
             if (vars_to_out(i)>0) then
                 !i should equal the kVARS index of the variable we want to output
-                call this%add_to_output(get_metadata(i))
+                call this%add_to_output(get_varmeta(i))
             endif
         enddo
     end subroutine

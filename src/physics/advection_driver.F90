@@ -6,7 +6,6 @@
 !!
 !! ----------------------------------------------------------------------------
 module advection
-    use data_structures
     use icar_constants
     use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind
     use adv_mpdata,                 only : mpdata_init, mpdata_advect3d, mpdata_compute_wind

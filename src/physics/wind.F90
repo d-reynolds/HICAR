@@ -14,14 +14,14 @@ module wind
     use wind_iterative_old,  only : calc_iter_winds_old, init_iter_winds_old
 
     !use mod_blocking,        only : update_froude_number, initialize_blocking
-    use data_structures
     use variable_interface,       only : variable_t
     use iso_fortran_env
+    use icar_constants
     use domain_interface,  only : domain_t
     use boundary_interface,only : boundary_t
     use options_interface, only : options_t
     use grid_interface,    only : grid_t
-    use wind_surf, only         : apply_Sx
+    use wind_surf, only         : calc_Sx, calc_TPI, apply_Sx
     use wind_thermal, only      : apply_thermal_winds, init_thermal_winds
     use io_routines, only : io_read, io_write
     use mod_atm_utilities,   only : calc_froude, calc_Ri, calc_dry_stability
@@ -433,8 +433,8 @@ contains
         ! rotate winds from cardinal directions to grid orientation (e.g. u is grid relative not truly E-W)
         call make_winds_grid_relative(domain%u%dqdt_3d, domain%v%dqdt_3d, domain%sintheta, domain%costheta)
 
-        call domain%halo%exch_var(domain%u,do_dqdt=.True.)
-        call domain%halo%exch_var(domain%v,do_dqdt=.True.)
+        !call domain%halo%exch_var(domain%u,do_dqdt=.True.)
+        !call domain%halo%exch_var(domain%v,do_dqdt=.True.)
 
         if (options%wind%Sx) then
             call apply_Sx(domain%Sx,domain%TPI,domain%u%dqdt_3d,domain%v%dqdt_3d,domain%Ri%data_3d,domain%dzdx%data_3d,domain%dzdy%data_3d)
@@ -786,6 +786,12 @@ contains
         if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
             call init_iter_winds_old(domain,options)
             !call init_iter_winds(domain)
+        endif
+
+        if (options%wind%Sx) then
+            if (STD_OUT_PE) write(*,*) "    Calculating Sx and TPI for wind modification"
+            call calc_TPI(domain, options)
+            call calc_Sx(domain, options)
         endif
 
         if (options%wind%thermal) call init_thermal_winds(domain, options)

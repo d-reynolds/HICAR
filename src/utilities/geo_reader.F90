@@ -18,7 +18,6 @@
 !!------------------------------------------------------------
 module geo
     use data_structures
-    use icar_constants, only : kMAINTAIN_LON, kDATELINE_CENTERED, kPRIME_CENTERED, kGUESS_LON
 
     implicit none
 

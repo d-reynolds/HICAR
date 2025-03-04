@@ -6,8 +6,7 @@
 !!
 !! ----------------------------------------------------------------------------
 module convection
-    use data_structures
-!    use icar_constants
+    use icar_constants
     use mod_wrf_constants,  only: svpt0, EP_1, EP_2, gravity, XLS, XLV, cp, R_d
     use module_cu_tiedtke,  only: tiedtkeinit, CU_TIEDTKE
     ! use module_cu_kf,       only: kfinit, KFCPS

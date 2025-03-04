@@ -1,12 +1,11 @@
 module time_io
 
-    use data_structures
-    use icar_constants
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
     use string,             only : get_integer
     use io_routines,        only : io_read, io_read_attribute
-    use iso_fortran_env, only: real64, real128
+    use iso_fortran_env,    only: real64, real128
+    use icar_constants,     only: kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, STD_OUT_PE
 
     implicit none
 

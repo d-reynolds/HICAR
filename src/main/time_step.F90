@@ -10,7 +10,6 @@
 module time_step
     use iso_fortran_env
     use mpi_f08
-    use data_structures             ! *_type  types and kCONSTANTS
     use microphysics,               only : mp
     use advection,                  only : advect
     use mod_atm_utilities,          only : exner_function, compute_ivt, compute_iq
@@ -26,7 +25,9 @@ module time_step
     use debug_module,               only : domain_check
     use string,                     only : str
     use timer_interface,            only : timer_t
-
+    use time_object,                only : Time_type
+    use time_delta_object,          only : time_delta_t
+    use icar_constants,             only : STD_OUT_PE, PE_RANK_GLOBAL
     implicit none
     private
     double precision, parameter  :: DT_BIG = 36000.0

@@ -785,7 +785,7 @@ contains
         ! call KSPSetLagNorm(ksp, PETSC_TRUE, ierr)
         call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
-                          xl, PETSC_NULL_INTEGER_ARRAY ,yl,da,ierr)
+                          xl, PETSC_NULL_INTEGER ,yl,da,ierr)
         
         call DMSetFromOptions(da,ierr)
         call DMSetUp(da,ierr)

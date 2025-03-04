@@ -17,27 +17,25 @@
 !!
 !! ----------------------------------------------------------------------------
 module initialization
-    !use data_structures
     use options_interface,  only : options_t, general_namelist, inter_nest_options_check
     use options_types,      only : general_options_type
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
-    use microphysics,               only : mp_init
-    use advection,                  only : adv_init
-    use radiation,                  only : radiation_init
-    use convection,                 only : init_convection
-    use planetary_boundary_layer,   only : pbl_init
-    use land_surface,               only : lsm_init
-    use surface_layer,              only : sfc_init
+    use microphysics,               only : mp_init, mp_var_request
+    use advection,                  only : adv_init, adv_var_request
+    use radiation,                  only : radiation_init, ra_var_request
+    use convection,                 only : init_convection, cu_var_request
+    use planetary_boundary_layer,   only : pbl_init, pbl_var_request
+    use land_surface,               only : lsm_init, lsm_var_request
+    use surface_layer,              only : sfc_init, sfc_var_request
     use io_routines,                only : io_read, io_write, io_newunit
-    use wind,                       only : update_winds, init_winds
+    use wind,                       only : update_winds, init_winds, wind_var_request
     use omp_lib,                    only : omp_get_max_threads
     use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
     use ioserver_interface,         only : ioserver_t
     use ioclient_interface,         only : ioclient_t
     use iso_fortran_env
     use mpi_f08
-
 
     ! use io_routines,                only : io_read, &
     !                                        io_write3d,io_write3di, io_write
@@ -215,6 +213,9 @@ contains
         ! read in options file
         do i = 1, nests
             call options(i)%init(namelist_file, i, info_only=info_only, gen_nml=gen_nml)
+            call collect_physics_requests(options(i))
+            call options(i)%check()
+
             if (options(i)%general%parent_nest > 0) then
                 ! Setup options%forcing to expect synthetic forcing from parent domain
                 call options(i)%setup_synthetic_forcing()
@@ -353,5 +354,26 @@ contains
         write(*,*) ""
 
     end subroutine welcome_message
+
+    !> -------------------------------
+    !! Call all physics driver var_request routines
+    !!
+    !! var_request routines allow physics modules to requested
+    !! which variables they need to have allocated, advected, and written in restart files
+    !!
+    !! -------------------------------
+    subroutine collect_physics_requests(options)
+        type(options_t), intent(inout) :: options
+
+        call ra_var_request(options)
+        call lsm_var_request(options)
+        call sfc_var_request(options)
+        call pbl_var_request(options)
+        call cu_var_request(options)
+        call mp_var_request(options)
+        call adv_var_request(options)
+        call wind_var_request(options)
+
+    end subroutine collect_physics_requests
 
 end module

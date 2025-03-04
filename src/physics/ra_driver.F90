@@ -28,10 +28,10 @@ module radiation
     use module_ra_rrtmg_sw, only: rrtmg_swinit, rrtmg_swrad
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
-    use data_structures
-    use icar_constants, only : kVARS
+    use icar_constants, only : kVARS, kRA_BASIC, kRA_SIMPLE, kRA_RRTMG, STD_OUT_PE, kMP_THOMP_AER
     use mod_wrf_constants, only : cp, R_d, gravity, DEGRAD, DPD, piconst
     use mod_atm_utilities, only : cal_cldfra3, calc_solar_elevation
+
     implicit none
     integer :: update_interval
     real*8  :: last_model_time

@@ -8,7 +8,6 @@
 !!
 !!------------------------------------------------------------
 module wind_thermal
-    use data_structures
     use domain_interface,  only : domain_t
     use options_interface, only : options_t
     use io_routines,       only : io_write

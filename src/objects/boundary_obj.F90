@@ -16,6 +16,7 @@ submodule(boundary_interface) boundary_implementation
     use timer_interface,    only : timer_t
     use debug_module,           only : check_ncdf
     use mod_wrf_constants,      only : gravity
+    use icar_constants,         only : PE_RANK_GLOBAL, STD_OUT_PE, kMAX_FILE_LENGTH
     implicit none
 contains
 

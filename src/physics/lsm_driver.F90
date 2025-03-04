@@ -39,11 +39,11 @@ module land_surface
     use module_water_lake,   only : lake, lakeini, nlevsoil, nlevsnow, nlevlake
     use mod_atm_utilities,   only : sat_mr, calc_Richardson_nr, calc_solar_elevation
     use time_object,         only : Time_type
-    use data_structures
     use icar_constants,      only : kVARS, kLSM_NOAH, kLSM_NOAHMP, kSM_FSM
     use options_interface,   only : options_t
     use domain_interface,    only : domain_t
     use ieee_arithmetic
+    use data_structures
     use mod_wrf_constants,   only : gravity, KARMAN, cp, R_d, XLV, rcp, STBOLT, epsilon
 #ifdef FSM
     use module_sf_FSMdrv,   only : sm_FSM_init, sm_FSM

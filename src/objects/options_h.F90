@@ -67,6 +67,7 @@ module options_interface
     contains
 
         procedure, public  :: init
+        procedure, public  :: check
         procedure, public  :: setup_synthetic_forcing
         procedure, public  :: alloc_vars
         procedure, public  :: restart_vars
@@ -83,6 +84,11 @@ interface
         character(len=*),   intent(in)     :: namelist_file
         integer,            intent(in)     :: n_indx
         logical,            intent(in)     :: info_only, gen_nml
+    end subroutine
+
+    module subroutine check(this)
+        implicit none
+        class(options_t), intent(inout) :: this
     end subroutine
 
     module subroutine inter_nest_options_check(options)

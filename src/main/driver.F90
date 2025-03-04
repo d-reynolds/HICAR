@@ -82,10 +82,10 @@ program icar
 
     if (STD_OUT_PE .and. .not.(gen_nml .or. only_namelist_check .or. info_only)) then
         call welcome_message()
-        flush(output_unit)
         write(*,'(/ A)') "--------------------------------------------------------"
         write(*,'(A)')   "Initializing Options"
         write(*,'(A /)') "--------------------------------------------------------"
+        flush(output_unit)
 
     endif
 

@@ -48,7 +48,6 @@ module module_ra_simple
     use mod_atm_utilities,  only : relative_humidity, calc_solar_elevation
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
-    use data_structures
     use mod_wrf_constants,  only : piconst, DEGRAD, STBOLT
     ! use time
     

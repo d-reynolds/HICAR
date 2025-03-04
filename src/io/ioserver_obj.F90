@@ -15,7 +15,7 @@
 submodule(ioserver_interface) ioserver_implementation
   use debug_module,             only : check_ncdf
   use iso_fortran_env
-  use output_metadata,          only : get_metadata, get_varindx
+  use output_metadata,          only : get_varindx
   use string,                   only : split_str
   use io_routines,              only : check_file_exists
   use time_io,                    only : find_timestep_in_file
@@ -70,6 +70,9 @@ contains
         enddo
 
         this%n_w_2d = this%outputer%n_vars - this%n_w_3d
+
+        if (this%n_w_2d == 0) write(*,*) 'Warning: No 2D variables set for output, this should never happen'
+        if (this%n_w_3d == 0) write(*,*) 'Warning: No 3D variables set for output, this should never happen'
 
         call setup_MPI_windows(this)
         call setup_MPI_types(this)
@@ -290,8 +293,10 @@ contains
         win_size = this%n_w_2d*this%nx_w*this%ny_w
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_2d)
 
-        win_size = this%n_f*this%nx_w*this%ny_w*this%nz_w
-        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%nest_win)
+        if (this%n_f > 0) then
+            win_size = this%n_f*this%nx_w*this%ny_w*this%nz_w
+            call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%nest_win)
+        endif
 
         win_size = this%n_r*this%nx_r*this%nz_r*this%ny_r
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%read_win)
@@ -523,6 +528,11 @@ contains
         disp_alltoall = 0
         call small_time_delta%set(1)
 
+        if (this%n_f <= 0) then
+            if (STD_OUT_PE) write(*,*) 'No forcing fields to gather, but we entered gather_forcing. This is a bug.'
+            return
+        endif
+        
         allocate(gather_buffer(this%n_f,this%i_s_w:this%i_e_w+1,this%k_s_w:this%k_e_w,this%j_s_w:this%j_e_w+1))
 
         ! Do MPI_Win_Start on nest_win to initiate get

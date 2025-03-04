@@ -7,17 +7,7 @@ submodule(options_interface) options_implementation
     use time_object,                only : Time_type
     use string,                     only : str
     use model_tracking,             only : print_model_diffs
-
-    use convection,                 only : cu_var_request
-    use land_surface,               only : lsm_var_request
-    use surface_layer,              only : sfc_var_request
-    use radiation,                  only : ra_var_request
-    use microphysics,               only : mp_var_request
-    use advection,                  only : adv_var_request
-    use wind,                       only : wind_var_request
-    use planetary_boundary_layer,   only : pbl_var_request
-
-    use output_metadata,            only : get_varname
+    use output_metadata,            only : get_varname, get_varindx
     use namelist_utils,             only : set_nml_var, set_nml_var_default, set_namelist, write_nml_file_end
     implicit none
 
@@ -84,42 +74,11 @@ contains
         
         if (this%restart%restart) this%general%start_time = this%restart%restart_time
 
-        call collect_var_requests(this)
+        call default_var_requests(this)
 
-        ! check for any inconsistencies in the options requested
-        call options_check(this, n_indx)
         if (n_indx == 1) call version_check(this%general)
 
     end subroutine init
-
-    subroutine collect_var_requests(options)
-        type(options_t) :: options
-
-        call collect_physics_requests(options)
-        call default_var_requests(options)
-
-    end subroutine collect_var_requests
-
-    !> -------------------------------
-    !! Call all physics driver var_request routines
-    !!
-    !! var_request routines allow physics modules to requested
-    !! which variables they need to have allocated, advected, and written in restart files
-    !!
-    !! -------------------------------
-    subroutine collect_physics_requests(options)
-        type(options_t) :: options
-
-        call ra_var_request(options)
-        call lsm_var_request(options)
-        call sfc_var_request(options)
-        call pbl_var_request(options)
-        call cu_var_request(options)
-        call mp_var_request(options)
-        call adv_var_request(options)
-        call wind_var_request(options)
-
-    end subroutine collect_physics_requests
 
     !> -------------------------------
     !! Check options for consistency among different nests
@@ -231,73 +190,72 @@ contains
     !! Stops or prints a large warning depending on warning level requested and error found
     !!
     !! -------------------------------
-    subroutine options_check(options, n_indx)
+    subroutine check(this)
         ! Minimal error checking on option settings
         implicit none
-        type(options_t), intent(inout)::options
-        integer, intent(in), optional :: n_indx
+        type(options_t), intent(inout)::this
 
         integer :: i
 
         ! Check that boundary conditions file exists
-        if (trim(options%domain%init_conditions_file) /= '') then
-            call check_file_exists(trim(options%domain%init_conditions_file), message='A boundary conditions file does not exist.')
+        if (trim(this%domain%init_conditions_file) /= '') then
+            call check_file_exists(trim(this%domain%init_conditions_file), message='A boundary conditions file does not exist.')
         endif
 
         ! Check that the output and restart folders exists
-        if (trim(options%output%output_folder) /= '') then
-            call check_file_exists(trim(options%output%output_folder), message='Output folder does not exist.')
+        if (trim(this%output%output_folder) /= '') then
+            call check_file_exists(trim(this%output%output_folder), message='Output folder does not exist.')
         endif
-        if (trim(options%restart%restart_folder) /= '') then
-            call check_file_exists(trim(options%restart%restart_folder), message='Restart folder does not exist.')
+        if (trim(this%restart%restart_folder) /= '') then
+            call check_file_exists(trim(this%restart%restart_folder), message='Restart folder does not exist.')
         endif
 
         !clean output var list
-        do i=1, size(options%output%vars_for_output)
-            if ((options%output%vars_for_output(i)+options%vars_for_restart(i) > 0) .and. (options%vars_to_allocate(i) <= 0)) then
-                !if (STD_OUT_PE) write(*,*) 'variable ',trim(get_varname(options%vars_to_allocate(i))),' requested for output/restart, but was not allocated by one of the modules'
-                if (options%output%vars_for_output(i) > 0) options%output%vars_for_output(i) = 0
-                if (options%vars_for_restart(i) > 0) options%vars_for_restart(i) = 0
+        do i=1, size(this%output%vars_for_output)
+            if ((this%output%vars_for_output(i)+this%vars_for_restart(i) > 0) .and. (this%vars_to_allocate(i) <= 0)) then
+                !if (STD_OUT_PE) write(*,*) 'variable ',trim(get_varname(this%vars_to_allocate(i))),' requested for output/restart, but was not allocated by one of the modules'
+                if (this%output%vars_for_output(i) > 0) this%output%vars_for_output(i) = 0
+                if (this%vars_for_restart(i) > 0) this%vars_for_restart(i) = 0
             endif
         enddo
 
-        if (options%mp%top_mp_level < 0) options%mp%top_mp_level = options%domain%nz + options%mp%top_mp_level
+        if (this%mp%top_mp_level < 0) this%mp%top_mp_level = this%domain%nz + this%mp%top_mp_level
 
         ! In read wind options, we set update_dt to be the FREQUENCY, not the actual dt. Compute the actual dt here
-        call options%wind%update_dt%set(seconds=options%forcing%input_dt%seconds()/options%wind%update_dt%seconds())
+        call this%wind%update_dt%set(seconds=this%forcing%input_dt%seconds()/this%wind%update_dt%seconds())
 
         !Perform checks
-        if (options%wind%smooth_wind_distance.eq.(-9999)) then
-            options%wind%smooth_wind_distance=options%domain%dx*2
-            if (STD_OUT_PE) write(*,*) "  Default smoothing distance = dx*2 = ", options%wind%smooth_wind_distance
-        elseif (options%wind%smooth_wind_distance<0) then
+        if (this%wind%smooth_wind_distance.eq.(-9999)) then
+            this%wind%smooth_wind_distance=this%domain%dx*2
+            if (STD_OUT_PE) write(*,*) "  Default smoothing distance = dx*2 = ", this%wind%smooth_wind_distance
+        elseif (this%wind%smooth_wind_distance<0) then
             write(*,*) "  Wind smoothing must be a positive number"
-            write(*,*) "  options%wind%smooth_wind_distance = ",options%wind%smooth_wind_distance
-            options%wind%smooth_wind_distance = options%domain%dx*2
+            write(*,*) "  this%wind%smooth_wind_distance = ",this%wind%smooth_wind_distance
+            this%wind%smooth_wind_distance = this%domain%dx*2
         endif
 
         !If user does not define this option, then let's Do The Right Thing
-        if (options%lsm%nmp_opt_sfc == -1) then
+        if (this%lsm%nmp_opt_sfc == -1) then
             !If user has not turned on the surface layer scheme, then we set this to the recommended default value of 1
-            if (options%physics%surfacelayer == 0) then
-                options%lsm%nmp_opt_sfc = 1
+            if (this%physics%surfacelayer == 0) then
+                this%lsm%nmp_opt_sfc = 1
             !If user has turned on the surface layer scheme, then let's opt to use the surface layer scheme's surface exchange coefficients
-            else if (options%physics%surfacelayer == 1) then
-                options%lsm%nmp_opt_sfc = 3
+            else if (this%physics%surfacelayer == 1) then
+                this%lsm%nmp_opt_sfc = 3
             endif
         endif
 
-        if (.not.(options%physics%radiation == kRA_RRTMG)) options%pbl%ysu_topdown_pblmix = 0
+        if (.not.(this%physics%radiation == kRA_RRTMG)) this%pbl%ysu_topdown_pblmix = 0
 
         ! Change z length of snow arrays here, since we need to change their size for the output arrays, which are set in
         ! output_options_namelist
-        if (options%physics%snowmodel==kSM_FSM) then
-            kSNOW_GRID_Z = options%sm%fsm_nsnow_max
+        if (this%physics%snowmodel==kSM_FSM) then
+            kSNOW_GRID_Z = this%sm%fsm_nsnow_max
             kSNOWSOIL_GRID_Z = kSNOW_GRID_Z+kSOIL_GRID_Z
     endif
 
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
-        if ((options%physics%landsurface>0).and.(options%physics%boundarylayer==0)) then
+        if ((this%physics%landsurface>0).and.(this%physics%boundarylayer==0)) then
             if (STD_OUT_PE) write(*,*) "  "
             if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
             if (STD_OUT_PE) write(*,*) "  WARNING, Using surfaces fluxes (lsm>0) without a PBL scheme may overheat the surface and CRASH the model."
@@ -305,23 +263,23 @@ contains
         endif
 
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
-        if ((options%physics%surfacelayer==0).and.(options%physics%boundarylayer>0)) then
+        if ((this%physics%surfacelayer==0).and.(this%physics%boundarylayer>0)) then
             if (STD_OUT_PE) write(*,*) "  "
             if (STD_OUT_PE) write(*,*) "  ERROR, a surface layer scheme is required when using a PBL scheme,"
             if (STD_OUT_PE) write(*,*) "  ERROR, set sfc > 0 in the namelist."
         endif
 
         ! prior to v 0.9.3 this was assumed, so throw a warning now just in case.
-        if ((options%forcing%z_is_geopotential .eqv. .False.).and. &
-            (options%forcing%zvar=="PH")) then
+        if ((this%forcing%z_is_geopotential .eqv. .False.).and. &
+            (this%forcing%zvar=="PH")) then
             if (STD_OUT_PE) write(*,*) "  "
             if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
             if (STD_OUT_PE) write(*,*) "  WARNING z variable is not assumed to be geopotential height when it is 'PH'."
             if (STD_OUT_PE) write(*,*) "  WARNING If z is geopotential, set z_is_geopotential=True in the namelist."
             if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
         endif
-        if ((options%forcing%z_is_geopotential .eqv. .True.).and. &
-            (options%forcing%z_is_on_interface .eqv. .False.)) then
+        if ((this%forcing%z_is_geopotential .eqv. .True.).and. &
+            (this%forcing%z_is_on_interface .eqv. .False.)) then
             if (STD_OUT_PE) write(*,*) "  "
             if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
             if (STD_OUT_PE) write(*,*) "  WARNING geopotential height is no longer assumed to be on model interface levels."
@@ -330,7 +288,7 @@ contains
         endif
         
         !! MJ added
-        if ((options%physics%radiation_downScaling==1).and.(options%physics%radiation==0)) then
+        if ((this%physics%radiation_downScaling==1).and.(this%physics%radiation==0)) then
             if (STD_OUT_PE) write(*,*) "  "
             if (STD_OUT_PE) write(*,*) "  STOP STOP STOP"
             if (STD_OUT_PE) write(*,*) "  STOP, Running radiation_downScaling=1 cannot not be used with rad=0"
@@ -338,124 +296,124 @@ contains
             stop
         endif
         
-        if (options%time%RK3) then
-            if (max(options%adv%h_order,options%adv%v_order)==5 .and. options%time%cfl_reduction_factor > 1.4) then
+        if (this%time%RK3) then
+            if (max(this%adv%h_order,this%adv%v_order)==5 .and. this%time%cfl_reduction_factor > 1.4) then
                 if (STD_OUT_PE) write(*,*) "  CFL reduction factor should be less than 1.4 when horder or vorder = 5, limiting to 1.4"
-                options%time%cfl_reduction_factor = min(1.4,options%time%cfl_reduction_factor)
-            elseif (max(options%adv%h_order,options%adv%v_order)==3 .and. options%time%cfl_reduction_factor > 1.6) then
+                this%time%cfl_reduction_factor = min(1.4,this%time%cfl_reduction_factor)
+            elseif (max(this%adv%h_order,this%adv%v_order)==3 .and. this%time%cfl_reduction_factor > 1.6) then
                 if (STD_OUT_PE) write(*,*) "  CFL reduction factor should be less than 1.6 when horder or vorder = 3, limiting to 1.6"
-                options%time%cfl_reduction_factor = min(1.6,options%time%cfl_reduction_factor)
+                this%time%cfl_reduction_factor = min(1.6,this%time%cfl_reduction_factor)
             endif
         else
-            if (options%time%cfl_reduction_factor > 1.0) then   
+            if (this%time%cfl_reduction_factor > 1.0) then   
                 if (STD_OUT_PE) write(*,*) "  CFL reduction factor should be less than 1.0 when RK3=.False., limiting to 1.0"
-                options%time%cfl_reduction_factor = min(1.0,options%time%cfl_reduction_factor)
+                this%time%cfl_reduction_factor = min(1.0,this%time%cfl_reduction_factor)
             endif
         endif
         
-        if (options%wind%alpha_const > 0) then
-            if (options%wind%alpha_const > 1.0) then
+        if (this%wind%alpha_const > 0) then
+            if (this%wind%alpha_const > 1.0) then
                 if (STD_OUT_PE) write(*,*) "  Alpha currently limited to values between 0.01 and 1.0, setting to 1.0"
-                options%wind%alpha_const = 1.0
-            else if (options%wind%alpha_const < 0.01) then
+                this%wind%alpha_const = 1.0
+            else if (this%wind%alpha_const < 0.01) then
                 if (STD_OUT_PE) write(*,*) "  Alpha currently limited to values between 0.01 and 1.0, setting to 0.01"
-                options%wind%alpha_const = 0.01
+                this%wind%alpha_const = 0.01
             endif
         endif
         
         ! should warn user if lsm is run without radiation
-        if ((options%physics%landsurface>kLSM_BASIC .or. options%physics%snowmodel>0).and.(options%physics%radiation==0)) then
+        if ((this%physics%landsurface>kLSM_BASIC .or. this%physics%snowmodel>0).and.(this%physics%radiation==0)) then
             if (STD_OUT_PE) write(*,*) "  "
             if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
             if (STD_OUT_PE) write(*,*) "  WARNING, Using land surface model without radiation input does not make sense."
             if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
         endif
 
-        if (options%physics%landsurface>0) then
-            options%sfc%isfflx = 1
-            options%sfc%scm_force_flux = 1
+        if (this%physics%landsurface>0) then
+            this%sfc%isfflx = 1
+            this%sfc%scm_force_flux = 1
         endif
         
         !Allow for microphysics precipitation partitioning with NoahMP if using a snow model
-        if (options%physics%snowmodel>0) then
-            options%lsm%nmp_opt_snf = 4
+        if (this%physics%snowmodel>0) then
+            this%lsm%nmp_opt_snf = 4
         endif
 
         ! check if the last entry in dz_levels is zero, which would indicate that nz is larger than the number
         ! of entries in dz_levels, or that the user passed bad data
-        if (options%domain%nz > 1) then
-            if (options%domain%dz_levels(options%domain%nz) == 0) then
+        if (this%domain%nz > 1) then
+            if (this%domain%dz_levels(this%domain%nz) == 0) then
                 if (STD_OUT_PE) write(*,*) "  nz is larger than the number of entries in dz_levels, or the last entry in dz_levels is zero."
                 stop
             endif
         endif
 
         ! check if start time is before end time
-        if (options%general%start_time >= options%general%end_time) then
+        if (this%general%start_time >= this%general%end_time) then
             if (STD_OUT_PE) write(*,*) "  Start time must be before end time"
             stop
         endif
 
         ! check if restart_time is between start and end time
-        if (options%restart%restart) then
-            if (options%restart%restart_time < options%general%start_time .or. &
-                options%restart%restart_time > options%general%end_time) then
+        if (this%restart%restart) then
+            if (this%restart%restart_time < this%general%start_time .or. &
+                this%restart%restart_time > this%general%end_time) then
                 if (STD_OUT_PE) write(*,*) "  Restart time must be between start and end time"
                 stop
             endif
         endif
 
         ! Check if supporting files exist, if they are needed by physics modules
-        if (options%physics%landsurface==kLSM_NOAHMP) then
+        if (this%physics%landsurface==kLSM_NOAHMP) then
             if (STD_OUT_PE) write(*,*) '  NoahMP LSM turned on, checking for supporting files...'
             call check_file_exists('GENPARM.TBL', message='GENPARM.TBL file does not exist. This should be in the same directory as the namelist.')
             call check_file_exists('MPTABLE.TBL', message='MPTABLE.TBL file does not exist. This should be in the same directory as the namelist.')
             call check_file_exists('SOILPARM.TBL', message='SOILPARM.TBL file does not exist. This should be in the same directory as the namelist.')
             call check_file_exists('VEGPARM.TBL', message='VEGPARM.TBL file does not exist. This should be in the same directory as the namelist.')
         endif
-        if (options%physics%radiation==kRA_RRTMG) then
+        if (this%physics%radiation==kRA_RRTMG) then
             if (STD_OUT_PE) write(*,*) '  RRTMG radiation turned on, checking for supporting files...'
             call check_file_exists('rrtmg_support/forrefo_1.nc', message='At least one of the RRTMG supporting files does not exist. These files should be in a folder "rrtmg_support" placed in the same directory as the namelist.')
         endif
-        if (options%physics%microphysics==kMP_ISHMAEL) then
+        if (this%physics%microphysics==kMP_ISHMAEL) then
             if (STD_OUT_PE) write(*,*) '  ISHMAEL microphysics turned on, checking for supporting files...'
             call check_file_exists('mp_support/ishmael_gamma_tab.nc', message='At least one of the ISHMAEL supporting files does not exist. These files should be in a folder "mp_support" placed in the same directory as the namelist.')
         endif
 
         ! check that input variables are specified when relevant physics options are chosen
-        if (options%physics%landsurface > kLSM_BASIC) then
-            call require_var(options%forcing%latvar, 'latvar', 'This variable is required when running with this LSM option')
-            !call require_var(options%forcing%sst_var, 'sst_var')
-            !call require_var(options%forcing%time_var, 'time_var')
+        if (this%physics%landsurface > kLSM_BASIC) then
+            call require_var(this%forcing%latvar, 'latvar', 'This variable is required when running with this LSM option')
+            !call require_var(this%forcing%sst_var, 'sst_var')
+            !call require_var(this%forcing%time_var, 'time_var')
         endif
 
-        if (options%physics%snowmodel == kSM_FSM) then
-            !call require_var(options%forcing%qcvar, 'qcvar', 'This variable is required when running with the FSM snowmodel option')
-            !call require_var(options%forcing%qngvar, 'qngvar')
-            !call require_var(options%forcing%qnsvar, 'qnsvar')
+        if (this%physics%snowmodel == kSM_FSM) then
+            !call require_var(this%forcing%qcvar, 'qcvar', 'This variable is required when running with the FSM snowmodel option')
+            !call require_var(this%forcing%qngvar, 'qngvar')
+            !call require_var(this%forcing%qnsvar, 'qnsvar')
         endif
 
-        if (trim(options%lsm%LU_Categories)=="USGS") then
-            if((options%physics%watersurface==kWATER_LAKE) .AND. (STD_OUT_PE)) then
+        if (trim(this%lsm%LU_Categories)=="USGS") then
+            if((this%physics%watersurface==kWATER_LAKE) .AND. (STD_OUT_PE)) then
                 write(*,*) "  WARNING: Lake model selected (water=2), but USGS LU-categories has no lake category"
             endif
-        elseif (trim(options%lsm%LU_Categories)=="NLCD40") then
-            if(options%physics%watersurface==kWATER_LAKE) write(*,*) "  WARNING: Lake model selected (water=2), but NLCD40 LU-categories has no lake category"
+        elseif (trim(this%lsm%LU_Categories)=="NLCD40") then
+            if(this%physics%watersurface==kWATER_LAKE) write(*,*) "  WARNING: Lake model selected (water=2), but NLCD40 LU-categories has no lake category"
         endif
 
         ! There needs to be a unique domain file for each nest. Additionally, dx needs to be set for each nest. Check for these here.
-        if (trim(options%domain%init_conditions_file)=="") then
+        if (trim(this%domain%init_conditions_file)=="") then
             if (STD_OUT_PE) write(*,*) "  --------------------------------"
             if (STD_OUT_PE) write(*,*) "  Error: 'init_conditions_file' must be set in the domain namelist for each nest"
-            if (STD_OUT_PE) write(*,*) "  Error: missing for nest: ", n_indx
+            if (STD_OUT_PE) write(*,*) "  Error: missing for nest: ", this%nest_indx
             if (STD_OUT_PE) write(*,*) "  --------------------------------"
             stop
         endif
 
-        if (options%domain%dx<=0) then
+        if (this%domain%dx<=0) then
             if (STD_OUT_PE) write(*,*) "  --------------------------------"
             if (STD_OUT_PE) write(*,*) "  Error: 'dx' must be set in the domain namelist for each nest"
-            if (STD_OUT_PE) write(*,*) "  Error: missing for nest: ", n_indx
+            if (STD_OUT_PE) write(*,*) "  Error: missing for nest: ", this%nest_indx
             if (STD_OUT_PE) write(*,*) "  --------------------------------"
             stop
         endif
@@ -466,7 +424,7 @@ contains
         ! -------------------------------------
         ! Check that the restart interval is a multiple of the input interval
 
-    end subroutine options_check
+    end subroutine check
 
     !> -------------------------------
     !! Read physics options to use from a namelist file
@@ -566,7 +524,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        integer :: name_unit, rc, i, j, status
+        integer :: name_unit, rc, i, j, status, var_indx
         integer :: frames_per_outfile(kMAX_NESTS)
         real    :: outputinterval(kMAX_NESTS)
         logical :: file_exists, print_info, gennml
@@ -602,12 +560,11 @@ contains
         endif
 
         do j=1, kMAX_STORAGE_VARS
-            if (trim(output_vars(j, n_indx)) /= "") then
-                do i=1, kMAX_STORAGE_VARS
-                    if (trim(get_varname(i)) == trim(output_vars(j, n_indx))) then
-                        call add_to_varlist(output_options%vars_for_output, [i])
-                    endif
-                enddo
+            if (trim(output_vars(j, n_indx)) /= "" .and. trim(output_vars(j, n_indx)) /= kCHAR_NO_VAL ) then
+
+                !get the var index for this output variable name
+                var_indx = get_varindx(trim(output_vars(j, n_indx)))
+                if (var_indx <= kMAX_STORAGE_VARS) call add_to_varlist(output_options%vars_for_output, [var_indx])
             endif
         enddo        
 

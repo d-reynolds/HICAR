@@ -25,13 +25,12 @@
 !!
 !!----------------------------------------------------------
 module surface_layer
-    use data_structures
     use domain_interface,   only : domain_t
     use options_interface,  only : options_t
     use module_sf_sfclayrev, only : sfclayrevinit, SFCLAYREV
     use mod_wrf_constants,   only : KARMAN, gravity, cp, R_d, rcp, EP_1, EP_2, SVPT0, SVP1, SVP2, SVP3, EOMEG, STBOLT, p1000mb, XLV
     use ieee_arithmetic ! for debugging
-
+    use icar_constants
 
     implicit none
     real,allocatable, dimension(:,:)    ::  windspd, gz1oz0, th2d, regime, flhc, flqc, &

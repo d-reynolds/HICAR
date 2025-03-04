@@ -1,6 +1,5 @@
 !>------------------------------------------------
 !! Contains type definitions for a variety of model data strucutres
-!! Also defines model constants (e.g. gravity, and kMAX_FILE_LENGTH)
 !!
 !!  @author
 !!  Ethan Gutmann (gutmann@ucar.edu)
@@ -8,9 +7,7 @@
 !>------------------------------------------------
 module data_structures
     use, intrinsic :: iso_c_binding ! needed for fftw compatible complex types
-    use time_object,        only : Time_type
-    use time_delta_object,  only : time_delta_t
-    use icar_constants           ! Many constants including things like fixed string lengths
+    use icar_constants
     implicit none
 
 

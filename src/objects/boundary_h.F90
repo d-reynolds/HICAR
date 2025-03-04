@@ -2,7 +2,6 @@ module boundary_interface
 
     use mpi_f08
     use netcdf
-    use icar_constants
     use options_interface,        only : options_t
     use variable_dict_interface,  only : var_dict_t
     use variable_interface,       only : variable_t
@@ -10,6 +9,7 @@ module boundary_interface
     use time_object,              only : Time_type
     use time_delta_object,        only : time_delta_t
     use data_structures,          only : interpolable_type
+    use icar_constants,           only : kMAX_NAME_LENGTH, kMAX_STRING_LENGTH
     use grid_interface,           only : grid_t
     implicit none
 

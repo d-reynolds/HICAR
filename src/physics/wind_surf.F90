@@ -9,7 +9,6 @@
 !!
 !!------------------------------------------------------------
 module wind_surf
-    use data_structures
     use domain_interface,  only : domain_t
     use options_interface, only : options_t
     use io_routines,       only : io_write
@@ -88,19 +87,18 @@ contains
         domain%TPI = domain%neighbor_TPI(domain%grid2d%ims:domain%grid2d%ime,domain%grid2d%jms:domain%grid2d%jme)
         
         
-        if ( STD_OUT_PE ) then
-            !write (*,*) "Saving *_TPI.nc"
-            !Save file
-            !call io_write("neighbor_TPI.nc", "TPI", domain%neighbor_TPI(:,:) ) 
-        endif
+        ! if ( STD_OUT_PE ) then
+        !     write (*,*) "Saving *_TPI.nc"
+        !     !Save file
+        !     call io_write("neighbor_TPI.nc", "TPI", domain%neighbor_TPI(:,:) ) 
+        ! endif
              
     end subroutine calc_TPI
     
-    subroutine calc_Sx(domain, options, filename)
+    subroutine calc_Sx(domain, options)
         implicit none
         class(domain_t), intent(inout) :: domain
         type(options_t),intent(in)    :: options
-        character(len=*),   intent(in) :: filename
         
         real, allocatable    :: Sx_array_temp(:,:,:,:), sheltering_TPI(:,:,:,:), temp_sheltering_TPI(:,:,:,:)
         integer           :: search_max, i, j, k, ang, i_s, j_s, i_start_buff, i_end_buff, j_start_buff, j_end_buff, TPI_i_s, TPI_i_e, TPI_j_s, TPI_j_e
@@ -318,13 +316,13 @@ contains
             end do
         end do
         
-        if ( STD_OUT_PE ) then
-            !write (*,*) "Saving *_Sx.nc"
-            !Save file
-            !call io_write(filename, "Sx", domain%Sx(:,:,:,:) ) 
-            !call io_write("TPI_out.nc", "TPI", domain%neighbor_TPI(:,:) ) 
-            !call io_write("sheltering_TPI.nc", "Sx_shelter", sheltering_TPI(:,:,:,:) ) 
-        endif
+        ! if ( STD_OUT_PE ) then
+        !     write (*,*) "Saving *_Sx.nc"
+        !     !Save file
+        !     call io_write(filename, "Sx", domain%Sx(:,:,:,:) ) 
+        !     call io_write("TPI_out.nc", "TPI", domain%neighbor_TPI(:,:) ) 
+        !     call io_write("sheltering_TPI.nc", "Sx_shelter", sheltering_TPI(:,:,:,:) ) 
+        ! endif
         
         deallocate(Sx_array_temp)
         
@@ -490,11 +488,18 @@ contains
         integer, allocatable                ::  dir_indices(:,:)
         integer ::  i, j, ims, ime, jms, jme
         
+
+
         ims = lbound(v,1)
         ime = ubound(v,1)
         jms = lbound(u,2)
         jme = ubound(u,2)
                 
+        allocate(winddir(ims:ime,jms:jme))
+        allocate(u_m(ims:ime,jms:jme))
+        allocate(v_m(ims:ime,jms:jme))
+        allocate(dir_indices(ims:ime,jms:jme))
+
         u_m = (u(ims:ime,:) + u(ims+1:ime+1,:))/2
         v_m = (v(:,jms:jme) + v(:,jms+1:jme+1))/2
         

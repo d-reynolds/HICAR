@@ -36,8 +36,8 @@ contains
 
         integer :: my_rank, comm_size, some_child_id
         
-        !if (STD_OUT_PE) write(*,*) 'Initializing I/O Clients'
-    
+        if (STD_OUT_PE) write(*,*) 'Initializing I/O Clients'
+        if (STD_OUT_PE) flush(output_unit)
         this%i_s_r = forcing%its; this%i_e_r = forcing%ite
         this%k_s_r = forcing%kts; this%k_e_r = forcing%kte
         this%j_s_r = forcing%jts; this%j_e_r = forcing%jte
@@ -169,10 +169,12 @@ contains
 
         ! This is the buffer for the forcing data. Necesarry so that output data can sit around in its own buffer while the ioserver
         ! is busy distributing the forcing data to the child nests 
-        win_size = n_f*nx_w*ny_w*nz_w
-        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%forcing_win)
-        call C_F_POINTER(tmp_ptr, this%forcing_buffer, [n_f, nx_w, nz_w, ny_w])
-        this%forcing_buffer = kEMPT_BUFF
+        if (n_f > 0) then
+            win_size = n_f*nx_w*ny_w*nz_w
+            call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%forcing_win)
+            call C_F_POINTER(tmp_ptr, this%forcing_buffer, [n_f, nx_w, nz_w, ny_w])
+            this%forcing_buffer = kEMPT_BUFF
+        endif
 
         win_size = n_r*nx_r*nz_r*ny_r
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%read_win)

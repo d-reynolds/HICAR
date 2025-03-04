@@ -20,7 +20,6 @@
 !!
 !!----------------------------------------------------------
 module pbl_simple
-    use data_structures
     use icar_constants,     only : kLC_LAND, kLC_WATER
     use domain_interface,   only : domain_t
     use options_interface,  only : options_t

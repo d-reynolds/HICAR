@@ -44,7 +44,6 @@ module linear_theory_winds
                                           FFTW_FORWARD, FFTW_MEASURE,          &
                                           FFTW_BACKWARD, FFTW_ESTIMATE ! note fft module is defined in fftshift.f90
     use fftshifter,                 only: ifftshift, fftshift
-    use data_structures
     use domain_interface,           only: domain_t
     !use io_routines,                only: io_read, io_write
     use string,                     only: str
@@ -55,7 +54,8 @@ module linear_theory_winds
                                           options_t
     use array_utilities,            only: smooth_array, calc_weight, &
                                           linear_space
-    use icar_constants,             only: kMAX_FILE_LENGTH, DOM_IMG_INDX, kNUM_SERVERS, kNUM_COMPUTE, kNUM_PROC_PER_NODE
+    use icar_constants,             only: kMAX_FILE_LENGTH, DOM_IMG_INDX, kNUM_SERVERS, kNUM_COMPUTE, kNUM_PROC_PER_NODE, PE_RANK_GLOBAL, STD_OUT_PE, kREAL
+    use data_structures,            only: linear_theory_type
     use mod_wrf_constants,          only: piconst
 
     implicit none

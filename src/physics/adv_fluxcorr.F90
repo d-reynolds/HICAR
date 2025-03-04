@@ -6,7 +6,6 @@
 !!
 !! ----------------------------------------------------------------------------
 module adv_fluxcorr
-    use data_structures
     use domain_interface,  only: domain_t
     use mpi_f08, only: MPI_Wtime
     implicit none
@@ -73,7 +72,7 @@ contains
                             else
                                 wsign(i,k,j) = 0
                             end if
-		        elseif (w(i,k-1,j) > 0) then
+                        elseif (w(i,k-1,j) > 0) then
                             wsign(i,k,j) = -1
                         else
                             wsign(i,k,j) = 0

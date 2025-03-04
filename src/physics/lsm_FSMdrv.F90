@@ -6,7 +6,6 @@ module module_sf_FSMdrv
     use module_water_simple, only : water_simple
     use mod_atm_utilities,   only : sat_mr
     use time_object,         only : Time_type
-    use data_structures
     use mod_wrf_constants,   only : piconst, XLS
     use icar_constants
     use options_interface,   only : options_t
