@@ -126,6 +126,10 @@ set (NETCDF_F90 "YES")
 find_package(MPI REQUIRED)
 find_package(OpenMP)
 find_package(FFTW REQUIRED)
+# if FFTW_DIR is empty
+if (NOT DEFINED FFTW_DIR OR FFTW_DIR STREQUAL "")
+	set(FFTW_DIR ${FFTW_INCLUDES})
+endif()
 find_package(NetCDF REQUIRED)
 
 # The installed petsc package on cray machines (piz daint) somehow does not

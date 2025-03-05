@@ -303,14 +303,8 @@ module subroutine exch_var(this, var, do_dqdt, corners)
     if (present(corners)) do_corners=corners
 
     if (do_corners) then
-#ifndef CRAY_PE
-            call MPI_Win_fence(0,this%south_in_win)
-            call MPI_Win_fence(0,this%north_in_win)
-            call MPI_Win_fence(0,this%east_in_win)
-            call MPI_Win_fence(0,this%west_in_win)
-#endif
-            if (.not. this%north_boundary .and. .not.this%west_boundary) call this%put_northeast(var, dqdt)
-            if (.not. this%north_boundary .and. .not.this%east_boundary) call this%put_northwest(var, dqdt)
+            if (.not. this%north_boundary .and. .not.this%east_boundary) call this%put_northeast(var, dqdt)
+            if (.not. this%north_boundary .and. .not.this%west_boundary) call this%put_northwest(var, dqdt)
             if (.not. this%south_boundary .and. .not.this%east_boundary)  call this%put_southeast(var, dqdt)
             if (.not. this%south_boundary .and. .not.this%west_boundary)  call this%put_southwest(var, dqdt)
 
@@ -328,6 +322,12 @@ module subroutine exch_var(this, var, do_dqdt, corners)
             if (.not. this%south_boundary .and. .not.this%east_boundary)  call this%retrieve_southeast_halo(var, dqdt)
             if (.not. this%south_boundary .and. .not.this%west_boundary)  call this%retrieve_southwest_halo(var, dqdt)
 
+#ifndef CRAY_PE
+            call MPI_Win_fence(0,this%south_in_win)
+            call MPI_Win_fence(0,this%north_in_win)
+            call MPI_Win_fence(0,this%east_in_win)
+            call MPI_Win_fence(0,this%west_in_win)
+#endif
             return
     endif
 
@@ -1533,17 +1533,17 @@ module subroutine put_northeast(this,var,do_dqdt)
       if (dqdt) then
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%west_in_3d(1:this%halo_size,1,1:this%halo_size)[this%northeast_neighbor] = var%dqdt_2d(this%ite-this%halo_size:this%ite,this%jte-this%halo_size:this%jte)
+          this%west_in_3d(1:this%halo_size,1,1:this%halo_size)[this%northeast_neighbor] = var%dqdt_2d(var%grid%ite-this%halo_size+1:var%grid%ite,var%grid%jte-this%halo_size+1:var%grid%jte)
 #else
-          call MPI_Put(var%dqdt_2d(var%grid%ite-this%halo_size,var%grid%jte-this%halo_size), msg_size, &
+          call MPI_Put(var%dqdt_2d(var%grid%ite-this%halo_size+1,var%grid%jte-this%halo_size+1), msg_size, &
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
 #endif
       else
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%west_in_3d(1:this%halo_size,1,1:this%halo_size)[this%northeast_neighbor] = var%data_2d(this%ite-this%halo_size:this%ite,this%jte-this%halo_size:this%jte)
+          this%west_in_3d(1:this%halo_size,1,1:this%halo_size)[this%northeast_neighbor] = var%data_2d(var%grid%ite-this%halo_size+1:var%grid%ite,var%grid%jte-this%halo_size+1:var%grid%jte)
 #else
-          call MPI_Put(var%data_2d(var%grid%ite-this%halo_size,var%grid%jte-this%halo_size), msg_size, &
+          call MPI_Put(var%data_2d(var%grid%ite-this%halo_size+1,var%grid%jte-this%halo_size+1), msg_size, &
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
 #endif
       endif
@@ -1551,17 +1551,17 @@ module subroutine put_northeast(this,var,do_dqdt)
       if (dqdt) then
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%northeast_neighbor] = var%dqdt_3d(this%ite-this%halo_size:this%ite,this%kts:this%kte,this%jte-this%halo_size:this%jte)
+          this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%northeast_neighbor] = var%dqdt_3d(var%grid%ite-this%halo_size+1:var%grid%ite,this%kts:this%kte,var%grid%jte-this%halo_size+1:var%grid%jte)
 #else
-          call MPI_Put(var%dqdt_3d(var%grid%ite-this%halo_size,var%grid%kts,var%grid%jte-this%halo_size), msg_size, &
+          call MPI_Put(var%dqdt_3d(var%grid%ite-this%halo_size+1,var%grid%kts,var%grid%jte-this%halo_size+1), msg_size, &
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
 #endif
       else
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%northeast_neighbor] = var%data_3d(this%ite-this%halo_size:this%ite,this%kts:this%kte,this%jte-this%halo_size:this%jte)
+          this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%northeast_neighbor] = var%data_3d(var%grid%ite-this%halo_size+1:var%grid%ite,this%kts:this%kte,var%grid%jte-this%halo_size+1:var%grid%jte)
 #else
-          call MPI_Put(var%data_3d(var%grid%ite-this%halo_size,var%grid%kts,var%grid%jte-this%halo_size), msg_size, &
+          call MPI_Put(var%data_3d(var%grid%ite-this%halo_size+1,var%grid%kts,var%grid%jte-this%halo_size+1), msg_size, &
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
 #endif
       endif
@@ -1581,22 +1581,21 @@ module subroutine put_northwest(this,var,do_dqdt)
   
   disp = 0
   msg_size = 1
-
   if (var%two_d) then
       if (dqdt) then
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%south_in_3d(1:this%halo_size,1,1:this%halo_size)[this%northwest_neighbor] = var%dqdt_2d(this%its:this%its+this%halo_size,this%jte-this%halo_size:this%jte)
+          this%south_in_3d(1:this%halo_size,1,1:this%halo_size)[this%northwest_neighbor] = var%dqdt_2d(var%grid%its:var%grid%its+this%halo_size,var%grid%jte-this%halo_size+1:var%grid%jte)
 #else
-          call MPI_Put(var%dqdt_2d(var%grid%its,var%grid%jte-this%halo_size), msg_size, &
+          call MPI_Put(var%dqdt_2d(var%grid%its,var%grid%jte-this%halo_size+1), msg_size, &
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
 #endif
       else
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%south_in_3d(1:this%halo_size,1,1:this%halo_size)[this%northwest_neighbor] = var%data_2d(this%its:this%its+this%halo_size,this%jte-this%halo_size:this%jte)
+          this%south_in_3d(1:this%halo_size,1,1:this%halo_size)[this%northwest_neighbor] = var%data_2d(var%grid%its:var%grid%its+this%halo_size,var%grid%jte-this%halo_size+1:var%grid%jte)
 #else
-          call MPI_Put(var%data_2d(var%grid%its,var%grid%jte-this%halo_size), msg_size, &
+          call MPI_Put(var%data_2d(var%grid%its,var%grid%jte-this%halo_size+1), msg_size, &
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
 #endif
       endif
@@ -1604,17 +1603,17 @@ module subroutine put_northwest(this,var,do_dqdt)
       if (dqdt) then
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%northwest_neighbor] = var%dqdt_3d(this%its:this%its+this%halo_size,this%kts:this%kte,this%jte-this%halo_size:this%jte)
+          this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%northwest_neighbor] = var%dqdt_3d(var%grid%its:var%grid%its+this%halo_size,this%kts:this%kte,var%grid%jte-this%halo_size+1:var%grid%jte)
 #else
-          call MPI_Put(var%dqdt_3d(var%grid%its,var%grid%kts,var%grid%jte-this%halo_size), msg_size, &
+          call MPI_Put(var%dqdt_3d(var%grid%its,var%grid%kts,var%grid%jte-this%halo_size+1), msg_size, &
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
 #endif
       else
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%northwest_neighbor] = var%data_3d(this%its:this%its+this%halo_size,this%kts:this%kte,this%jte-this%halo_size:this%jte)
+          this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%northwest_neighbor] = var%data_3d(var%grid%its:var%grid%its+this%halo_size,this%kts:this%kte,var%grid%jte-this%halo_size+1:var%grid%jte)
 #else
-          call MPI_Put(var%data_3d(var%grid%its,var%grid%kts,var%grid%jte-this%halo_size), msg_size, &
+          call MPI_Put(var%data_3d(var%grid%its,var%grid%kts,var%grid%jte-this%halo_size+1), msg_size, &
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
 #endif
       endif
@@ -1640,7 +1639,7 @@ module subroutine put_southwest(this,var,do_dqdt)
       if (dqdt) then
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%east_in_3d(1:this%halo_size,1,1:this%halo_size)[this%southwest_neighbor] = var%dqdt_2d(this%its:this%its+this%halo_size,this%jts:this%jts+this%halo_size)
+          this%east_in_3d(1:this%halo_size,1,1:this%halo_size)[this%southwest_neighbor] = var%dqdt_2d(var%grid%its:var%grid%its+this%halo_size,var%grid%jts:var%grid%jts+this%halo_size)
 #else
           call MPI_Put(var%dqdt_2d(var%grid%its,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%east_in_win)
@@ -1648,7 +1647,7 @@ module subroutine put_southwest(this,var,do_dqdt)
       else
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%east_in_3d(1:this%halo_size,1,1:this%halo_size)[this%southwest_neighbor] = var%data_2d(this%its:this%its+this%halo_size,this%jts:this%jts+this%halo_size)
+          this%east_in_3d(1:this%halo_size,1,1:this%halo_size)[this%southwest_neighbor] = var%data_2d(var%grid%its:var%grid%its+this%halo_size,var%grid%jts:var%grid%jts+this%halo_size)
 #else
           call MPI_Put(var%data_2d(var%grid%its,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%east_in_win)
@@ -1658,7 +1657,7 @@ module subroutine put_southwest(this,var,do_dqdt)
       if (dqdt) then
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%southwest_neighbor] = var%dqdt_3d(this%its:this%its+this%halo_size,this%kts:this%kte,this%jts:this%jts+this%halo_size)
+          this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%southwest_neighbor] = var%dqdt_3d(var%grid%its:var%grid%its+this%halo_size,this%kts:this%kte,var%grid%jts:var%grid%jts+this%halo_size)
 #else
           call MPI_Put(var%dqdt_3d(var%grid%its,var%grid%kts,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%east_in_win)
@@ -1666,7 +1665,7 @@ module subroutine put_southwest(this,var,do_dqdt)
       else
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%southwest_neighbor] = var%data_3d(this%its:this%its+this%halo_size,this%kts:this%kte,this%jts:this%jts+this%halo_size)
+          this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%southwest_neighbor] = var%data_3d(var%grid%its:var%grid%its+this%halo_size,this%kts:this%kte,var%grid%jts:var%grid%jts+this%halo_size)
 #else
           call MPI_Put(var%data_3d(var%grid%its,var%grid%kts,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%east_in_win)
@@ -1693,17 +1692,17 @@ module subroutine put_southeast(this,var,do_dqdt)
       if (dqdt) then
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%north_in_3d(1:this%halo_size,1,1:this%halo_size)[this%southeast_neighbor] = var%dqdt_2d(this%ite-this%halo_size:this%ite,this%jts:this%jts+this%halo_size)
+          this%north_in_3d(1:this%halo_size,1,1:this%halo_size)[this%southeast_neighbor] = var%dqdt_2d(var%grid%ite-this%halo_size+1:var%grid%ite,var%grid%jts:var%grid%jts+this%halo_size)
 #else
-          call MPI_Put(var%dqdt_2d(var%grid%ite-this%halo_size,var%grid%jts), msg_size, &
+          call MPI_Put(var%dqdt_2d(var%grid%ite-this%halo_size+1,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
 #endif
       else
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%north_in_3d(1:this%halo_size,1,1:this%halo_size)[this%southeast_neighbor] = var%data_2d(this%ite-this%halo_size:this%ite,this%jts:this%jts+this%halo_size)
+          this%north_in_3d(1:this%halo_size,1,1:this%halo_size)[this%southeast_neighbor] = var%data_2d(var%grid%ite-this%halo_size+1:var%grid%ite,var%grid%jts:var%grid%jts+this%halo_size)
 #else
-          call MPI_Put(var%data_2d(var%grid%ite-this%halo_size,var%grid%jts), msg_size, &
+          call MPI_Put(var%data_2d(var%grid%ite-this%halo_size+1,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
 #endif
       endif
@@ -1711,17 +1710,17 @@ module subroutine put_southeast(this,var,do_dqdt)
       if (dqdt) then
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%southeast_neighbor] = var%dqdt_3d(this%ite-this%halo_size:this%ite,this%kts:this%kte,this%jts:this%jts+this%halo_size)
+          this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%southeast_neighbor] = var%dqdt_3d(var%grid%ite-this%halo_size+1:var%grid%ite,this%kts:this%kte,var%grid%jts:var%grid%jts+this%halo_size)
 #else
-          call MPI_Put(var%dqdt_3d(var%grid%ite-this%halo_size,var%grid%kts,var%grid%jts), msg_size, &
+          call MPI_Put(var%dqdt_3d(var%grid%ite-this%halo_size+1,var%grid%kts,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
 #endif
       else
 #ifdef CRAY_PE
           !DIR$ PGAS DEFER_SYNC
-          this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%southeast_neighbor] = var%data_3d(this%ite-this%halo_size:this%ite,this%kts:this%kte,this%jts:this%jts+this%halo_size)
+          this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)[this%southeast_neighbor] = var%data_3d(var%grid%ite-this%halo_size+1:var%grid%ite,this%kts:this%kte,var%grid%jts:var%grid%jts+this%halo_size)
 #else
-          call MPI_Put(var%data_3d(var%grid%ite-this%halo_size,var%grid%kts,var%grid%jts), msg_size, &
+          call MPI_Put(var%data_3d(var%grid%ite-this%halo_size+1,var%grid%kts,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
 #endif
       endif
@@ -1741,16 +1740,16 @@ module subroutine retrieve_northeast_halo(this,var,do_dqdt)
   
   if (var%two_d) then
       if (dqdt) then
-          var%dqdt_2d(this%ite+1:this%ime,this%jte+1:this%jme) = this%east_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%dqdt_2d(var%grid%ite+1:var%grid%ime,var%grid%jte+1:var%grid%jme) = this%east_in_3d(1:this%halo_size,1,1:this%halo_size)
       else
-          var%data_2d(this%ite+1:this%ime,this%jte+1:this%jme) = this%east_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%data_2d(var%grid%ite+1:var%grid%ime,var%grid%jte+1:var%grid%jme) = this%east_in_3d(1:this%halo_size,1,1:this%halo_size)
       endif
   else
       if (dqdt) then
-          var%dqdt_3d(this%ite+1:this%ime,this%kts:this%kte,this%jte+1:this%jme) = this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%dqdt_3d(var%grid%ite+1:var%grid%ime,this%kts:this%kte,var%grid%jte+1:var%grid%jme) = this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
       else
-          var%data_3d(this%ite+1:this%ime,this%kts:this%kte,this%jte+1:this%jme) = this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
-      endif
+          var%data_3d(var%grid%ite+1:var%grid%ime,this%kts:this%kte,var%grid%jte+1:var%grid%jme) = this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+        endif
   endif
 end subroutine
 
@@ -1766,15 +1765,15 @@ module subroutine retrieve_northwest_halo(this,var,do_dqdt)
   
   if (var%two_d) then
       if (dqdt) then
-          var%dqdt_2d(this%ims:this%its-1,this%jte+1:this%jme) = this%north_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%dqdt_2d(var%grid%ims:var%grid%its-1,var%grid%jte+1:var%grid%jme) = this%north_in_3d(1:this%halo_size,1,1:this%halo_size)
       else
-          var%data_2d(this%ims:this%its-1,this%jte+1:this%jme) = this%north_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%data_2d(var%grid%ims:var%grid%its-1,var%grid%jte+1:var%grid%jme) = this%north_in_3d(1:this%halo_size,1,1:this%halo_size)
       endif
   else
       if (dqdt) then
-          var%dqdt_3d(this%ims:this%its-1,this%kts:this%kte,this%jte+1:this%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%dqdt_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jte+1:var%grid%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
       else
-          var%data_3d(this%ims:this%its-1,this%kts:this%kte,this%jte+1:this%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%data_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jte+1:var%grid%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
       endif
   endif
 end subroutine
@@ -1791,15 +1790,15 @@ module subroutine retrieve_southwest_halo(this,var,do_dqdt)
   
   if (var%two_d) then
       if (dqdt) then
-          var%dqdt_2d(this%ims:this%its-1,this%jms:this%jts-1) = this%west_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%dqdt_2d(var%grid%ims:var%grid%its-1,var%grid%jms:var%grid%jts-1) = this%west_in_3d(1:this%halo_size,1,1:this%halo_size)
       else
-          var%data_2d(this%ims:this%its-1,this%jms:this%jts-1) = this%west_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%data_2d(var%grid%ims:var%grid%its-1,var%grid%jms:var%grid%jts-1) = this%west_in_3d(1:this%halo_size,1,1:this%halo_size)
       endif
   else
       if (dqdt) then
-          var%dqdt_3d(this%ims:this%its-1,this%kts:this%kte,this%jms:this%jts-1) = this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%dqdt_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
       else
-          var%data_3d(this%ims:this%its-1,this%kts:this%kte,this%jms:this%jts-1) = this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%data_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
       endif
   endif
 end subroutine
@@ -1813,18 +1812,17 @@ module subroutine retrieve_southeast_halo(this,var,do_dqdt)
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
-  
   if (var%two_d) then
       if (dqdt) then
-          var%dqdt_2d(this%ite+1:this%ime,this%jms:this%jts-1) = this%south_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%dqdt_2d(var%grid%ite+1:var%grid%ime,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:this%halo_size,1,1:this%halo_size)
       else
-          var%data_2d(this%ite+1:this%ime,this%jms:this%jts-1) = this%south_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%data_2d(var%grid%ite+1:var%grid%ime,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:this%halo_size,1,1:this%halo_size)
       endif
   else
       if (dqdt) then
-          var%dqdt_3d(this%ite+1:this%ime,this%kts:this%kte,this%jms:this%jts-1) = this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%dqdt_3d(var%grid%ite+1:var%grid%ime,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
       else
-          var%data_3d(this%ite+1:this%ime,this%kts:this%kte,this%jms:this%jts-1) = this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%data_3d(var%grid%ite+1:var%grid%ime,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
       endif
   endif
 end subroutine

@@ -142,17 +142,20 @@ contains
     module subroutine set_grid_dimensions(this, nx, ny, nz, image, comms, global_nz, adv_order, nx_extra, ny_extra)
       class(grid_t),   intent(inout) :: this
       integer,         intent(in)    :: nx, ny, nz, image
-      type(MPI_Comm), optional, intent(in)    :: comms
+      type(MPI_Comm), intent(in)    :: comms
       integer, optional, intent(in)    :: global_nz, adv_order, nx_extra, ny_extra
 
-      integer :: halo_size, ierr, tile_size_estimate
+      integer :: halo_size, ierr, tile_size_estimate, comms_size
 
       halo_size = kDEFAULT_HALO_SIZE
       if (present(adv_order)) halo_size = ceiling(adv_order/2.0)
 
+      ! get the number of processes in this communicator
+      call MPI_Comm_size(comms, comms_size, ierr)
+
       !! Check if we have an inefficient number of processors, or are degenerate
       ! get estimate for number of processors per side for a square tile
-      tile_size_estimate = ceiling(sqrt(real(nx*ny)/real(kNUM_COMPUTE)))
+      tile_size_estimate = ceiling(sqrt(real(nx*ny)/real(comms_size)))
 
       ! check if we actually have more halo space than tile space
       if (tile_size_estimate <= halo_size) then
@@ -178,7 +181,7 @@ contains
       if (present(nx_extra)) this%nx_e = nx_extra ! used to add 1 to the u-field staggered grid
       if (present(ny_extra)) this%ny_e = ny_extra ! used to add 1 to the v-field staggered grid
 
-      call this%domain_decomposition(nx, ny, kNUM_COMPUTE, image=image)
+      call this%domain_decomposition(nx, ny, comms_size, image=image)
 
       if (nz<1) then
           this%is2d = .True.
@@ -240,31 +243,29 @@ contains
       this%halo_size = halo_size
       call update_with_halos(this, halo_size)
 
+      this%ns_halo_nx = nx / this%ximages + 1 + 2*this%halo_size  ! number of grid cells in x in the ns halo
+      this%ew_halo_ny = ny / this%yimages + 1 + 2*this%halo_size  ! number of grid cells in y in the ew halo
+
       ! define the halo needed to manage communications between images
       ! perhaps this should be defined in exchangeable instead though?
       !this%ns_halo_nx = this%nx_global / this%ximages + 1 + this%nx_e  ! number of grid cells in x in the ns halo
       !this%ew_halo_ny = this%ny_global / this%yimages + 1 + this%ny_e  ! number of grid cells in y in the ew halo
 
-      if (present(comms)) then
-        if (.not.(comms==MPI_COMM_NULL)) then
-            call MPI_Allreduce(this%nx,this%ns_halo_nx,1,MPI_INT,MPI_MAX,comms,ierr)
-            !this%ns_halo_nx = this%ns_halo_nx !+ this%nx_e  ! number of grid cells in x in the ns halo
+    if (.not.(comms==MPI_COMM_NULL)) then
+        !call MPI_Allreduce(this%nx,this%ns_halo_nx,1,MPI_INT,MPI_MAX,comms,ierr)
+        !call MPI_Allreduce(this%ny,this%ew_halo_ny,1,MPI_INT,MPI_MAX,comms,ierr)
 
-            call MPI_Allreduce(this%ny,this%ew_halo_ny,1,MPI_INT,MPI_MAX,comms,ierr)
-            !this%ew_halo_ny = this%ew_halo_ny !+ this%ny_e  ! number of grid cells in y in the ew halo
-
-            !If we have been passed the global_nz, it means that this grid is not the global, 3D grid. Thus, pass the global_nz to
-            !create_MPI_types so that the window nz is set correctly in accordance with what is done in halo_obj.f90. If this 3D grid's nz
-            !is larger than the global_nz, however, we have a problem, and should not try to make an MPI type for communication. There are
-            !only a few 3D grids with nz's larger than 8, none of which should need to be exchanged, and the model should almost always be 
-            !run with more than 8 z levels. So this should not be an issue.
-            if (present(global_nz)) then
-                if (this%nz <= global_nz) then
-                call create_MPI_types(this, win_nz=global_nz)
-                endif
-            else
-                call create_MPI_types(this)
+        !If we have been passed the global_nz, it means that this grid is not the global, 3D grid. Thus, pass the global_nz to
+        !create_MPI_types so that the window nz is set correctly in accordance with what is done in halo_obj.f90. If this 3D grid's nz
+        !is larger than the global_nz, however, we have a problem, and should not try to make an MPI type for communication. There are
+        !only a few 3D grids with nz's larger than 8, none of which should need to be exchanged, and the model should almost always be 
+        !run with more than 8 z levels. So this should not be an issue.
+        if (present(global_nz)) then
+            if (this%nz <= global_nz) then
+            call create_MPI_types(this, win_nz=global_nz)
             endif
+        else
+            call create_MPI_types(this)
         endif
       else
         !                 global nx           to acommodate staggered grids  
@@ -344,16 +345,16 @@ contains
       if (present(win_nz)) nz_win = win_nz
 
       if (grid%is3d) then
-        call MPI_Type_create_subarray(3, [grid%nx, grid%nz, grid%ny], [(grid%ite-grid%its+1), grid%nz, grid%halo_size+grid%ny_e], &
+        call MPI_Type_create_subarray(3, [grid%nx, grid%nz, grid%ny], [(grid%ite-grid%its+1), grid%nz, grid%halo_size], &
                 [grid%halo_size,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_halo)
-        call MPI_Type_create_subarray(3, [grid%nx, grid%nz, grid%ny], [grid%halo_size+grid%nx_e, grid%nz, (grid%jte-grid%jts+1)], &
+        call MPI_Type_create_subarray(3, [grid%nx, grid%nz, grid%ny], [grid%halo_size, grid%nz, (grid%jte-grid%jts+1)], &
                 [0,0,grid%halo_size], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_halo)
         call MPI_Type_create_subarray(3, [grid%nx, grid%nz, grid%ny], [grid%halo_size, grid%nz, grid%halo_size], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_halo)
 
-        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), grid%nz, grid%halo_size+grid%ny_e], &
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), grid%nz, grid%halo_size], &
                 [grid%halo_size,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_win_halo)
-        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size+grid%nx_e, grid%nz, (grid%jte-grid%jts+1)], &
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size, grid%nz, (grid%jte-grid%jts+1)], &
                 [0,0,grid%halo_size], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_win_halo)
         call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [grid%halo_size, grid%nz, grid%halo_size], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_NS_win_halo)
@@ -368,9 +369,9 @@ contains
         call MPI_Type_create_subarray(2, [grid%nx, grid%ny], [grid%halo_size, grid%halo_size], &
                 [0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_halo)
 
-        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), 1, grid%halo_size+grid%ny_e], &
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), 1, grid%halo_size], &
                 [grid%halo_size,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_win_halo)
-        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size+grid%nx_e, 1, (grid%jte-grid%jts+1)], &
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size, 1, (grid%jte-grid%jts+1)], &
                 [0,0,grid%halo_size], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_win_halo)
         call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [grid%halo_size, 1, grid%halo_size], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_NS_win_halo)

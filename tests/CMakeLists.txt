@@ -9,7 +9,7 @@ find_package(PkgConfig REQUIRED)
 
 # 6. Link to the package libraries
 #set (NETCDF_F90 "YES")
-#find_package(MPI REQUIRED)
+find_package(MPI REQUIRED)
 #find_package(OpenMP)
 #find_package(FFTW REQUIRED)
 #find_package(NetCDF REQUIRED)
@@ -41,7 +41,7 @@ target_link_libraries(
 )
 target_include_directories("${PROJECT_NAME}-tester" PUBLIC ${PROJECT_SOURCE_DIR}/../build)
 
-#target_link_libraries("${PROJECT_NAME}-tester" PUBLIC MPI::MPI_Fortran)
+target_link_libraries("${PROJECT_NAME}-tester" PUBLIC MPI::MPI_Fortran)
 #if(OpenMP_CXX_FOUND)
 #    target_link_libraries("${PROJECT_NAME}-tester" PUBLIC OpenMP::OpenMP_CXX)
 #endif()

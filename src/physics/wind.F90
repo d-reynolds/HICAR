@@ -433,14 +433,14 @@ contains
         ! rotate winds from cardinal directions to grid orientation (e.g. u is grid relative not truly E-W)
         call make_winds_grid_relative(domain%u%dqdt_3d, domain%v%dqdt_3d, domain%sintheta, domain%costheta)
 
-        !call domain%halo%exch_var(domain%u,do_dqdt=.True.)
-        !call domain%halo%exch_var(domain%v,do_dqdt=.True.)
+        call domain%halo%exch_var(domain%u,do_dqdt=.True.,corner=.True.)
+        call domain%halo%exch_var(domain%v,do_dqdt=.True.,corner=.True.)
 
         if (options%wind%Sx) then
             call apply_Sx(domain%Sx,domain%TPI,domain%u%dqdt_3d,domain%v%dqdt_3d,domain%Ri%data_3d,domain%dzdx%data_3d,domain%dzdy%data_3d)
 
-            call domain%halo%exch_var(domain%u,do_dqdt=.True.)
-            call domain%halo%exch_var(domain%v,do_dqdt=.True.)
+            call domain%halo%exch_var(domain%u,do_dqdt=.True.,corner=.True.)
+            call domain%halo%exch_var(domain%v,do_dqdt=.True.,corner=.True.)
 
         endif 
 
@@ -458,8 +458,8 @@ contains
                                      domain%z%data_3d, domain%dz_mass%data_3d,                                                       &
                                      domain%u%dqdt_3d, domain%v%dqdt_3d,domain%dzdx%data_3d,domain%dzdy%data_3d)
             endif
-            call domain%halo%exch_var(domain%u,do_dqdt=.True.)
-            call domain%halo%exch_var(domain%v,do_dqdt=.True.)
+            call domain%halo%exch_var(domain%u,do_dqdt=.True.,corner=.True.)
+            call domain%halo%exch_var(domain%v,do_dqdt=.True.,corner=.True.)
         endif 
 
         ! linear winds
@@ -681,8 +681,8 @@ contains
         endif
 
         !Do an initial exchange to make sure the U and V grids are similar for calculating w
-        call domain%halo%exch_var(domain%u,do_dqdt=.False.)
-        call domain%halo%exch_var(domain%v,do_dqdt=.False.)
+        call domain%halo%exch_var(domain%u,do_dqdt=.False.,corner=.True.)
+        call domain%halo%exch_var(domain%v,do_dqdt=.False.,corner=.True.)
 
         !First call bal_uvw to generate an initial-guess for vertical winds
         call balance_uvw(domain, options, update_in=.False.)
@@ -748,8 +748,8 @@ contains
 
             domain%v%data_3d(its:ite,:,jts+1:jte+1) = domain%v%data_3d(its:ite,:,jts+1:jte+1) - &
                                                         (ADJ(its:ite,:,jts+1:jte+1) * V_cor(its:ite,:,jts+1:jte+1))
-            call domain%halo%exch_var(domain%u,do_dqdt=.False.)
-            call domain%halo%exch_var(domain%v,do_dqdt=.False.)
+            call domain%halo%exch_var(domain%u,do_dqdt=.False.,corner=.True.)
+            call domain%halo%exch_var(domain%v,do_dqdt=.False.,corner=.True.)
 
         enddo
 

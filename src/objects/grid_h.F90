@@ -59,7 +59,7 @@ interface
         implicit none
         class(grid_t),   intent(inout) :: this
         integer,         intent(in)    :: nx, ny, nz, image
-        type(MPI_Comm), optional,  intent(in)    :: comms
+        type(MPI_Comm),  intent(in)    :: comms
         integer,         intent(in), optional :: global_nz, adv_order, nx_extra, ny_extra
 
     end subroutine

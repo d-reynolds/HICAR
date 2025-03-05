@@ -193,7 +193,7 @@ contains
     subroutine check(this)
         ! Minimal error checking on option settings
         implicit none
-        type(options_t), intent(inout)::this
+        class(options_t), intent(inout)::this
 
         integer :: i
 

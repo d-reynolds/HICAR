@@ -540,11 +540,12 @@ contains
     end subroutine destroy_linear_theory_data
 
 
-    subroutine setup_remote_grids(u_grids, v_grids, terrain, nz, halo_size)
+    subroutine setup_remote_grids(u_grids, v_grids, terrain, nz, halo_size, comms)
         implicit none
         type(grid_t), intent(inout), allocatable :: u_grids(:), v_grids(:)
         real,         intent(in)    :: terrain(:,:)
         integer,      intent(in)    :: nz, halo_size
+        type(MPI_Comm), intent(in) :: comms
         
         integer :: nx, ny, i
 
@@ -558,8 +559,8 @@ contains
         ny = size(terrain, 2)
 
         do i=1,kNUM_COMPUTE
-            call u_grids(i)%set_grid_dimensions(nx, ny, nz, image=i, adv_order=halo_size*2, nx_extra=1)
-            call v_grids(i)%set_grid_dimensions(nx, ny, nz, image=i, adv_order=halo_size*2, ny_extra=1)
+            call u_grids(i)%set_grid_dimensions(nx, ny, nz, image=i, comms=comms, adv_order=halo_size*2, nx_extra=1)
+            call v_grids(i)%set_grid_dimensions(nx, ny, nz, image=i, comms=comms, adv_order=halo_size*2, ny_extra=1)
         enddo
 
     end subroutine setup_remote_grids
@@ -712,7 +713,7 @@ contains
 
         if ( (reverse.or.(.not.((options%lt%read_LUT).and.(error==0)))) .and. (.not.module_initialized) ) then
 
-            call setup_remote_grids(u_grids, v_grids, domain%global_terrain, nz, domain%grid%halo_size)
+            call setup_remote_grids(u_grids, v_grids, domain%global_terrain, nz, domain%grid%halo_size, domain%compute_comms)
 
             ! ensure these are at their required size for all images
             nx = maxval(v_grids%nx)
