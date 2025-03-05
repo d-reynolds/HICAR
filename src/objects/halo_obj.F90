@@ -333,7 +333,6 @@ module subroutine exch_var(this, var, do_dqdt, corners)
             call MPI_Win_fence(0,this%east_in_win)
             call MPI_Win_fence(0,this%west_in_win)
 #endif
-            return
     endif
 
     ! if staggered in x direction, we need to carefully call the put and get commands

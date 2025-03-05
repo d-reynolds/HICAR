@@ -23,7 +23,10 @@ set(
   tests
   halo_exch
 )
-
+set(
+  SOURCE_FILES
+  "test_driver.f90"
+)
 foreach(t IN LISTS tests)
   string(MAKE_C_IDENTIFIER ${t} t) 
   list(APPEND SOURCE_FILES "test_${t}.F90")
