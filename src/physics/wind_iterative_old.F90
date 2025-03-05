@@ -130,8 +130,8 @@ contains
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
         
         !Exchange u and v, since the outer points are not updated in above function
-        call domain%halo%exch_var(domain%u,do_dqdt=.True.,corner=.True.)
-        call domain%halo%exch_var(domain%v,do_dqdt=.True.,corner=.True.)
+        call domain%halo%exch_var(domain%u,do_dqdt=.True.,corners=.True.)
+        call domain%halo%exch_var(domain%v,do_dqdt=.True.,corners=.True.)
                                  
     end subroutine calc_iter_winds_old
 
