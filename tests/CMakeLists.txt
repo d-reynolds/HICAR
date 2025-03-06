@@ -21,11 +21,12 @@ endif()
 # Unit testing
 set(
   tests
+  advect
   halo_exch
 )
 set(
   SOURCE_FILES
-  "test_driver.f90"
+  "test_driver.F90"
 )
 foreach(t IN LISTS tests)
   string(MAKE_C_IDENTIFIER ${t} t) 
@@ -42,9 +43,11 @@ target_link_libraries(
   "hicar_lib"
   "test-drive::test-drive"
 )
-target_include_directories("${PROJECT_NAME}-tester" PUBLIC ${PROJECT_SOURCE_DIR}/../build)
 
 target_link_libraries("${PROJECT_NAME}-tester" PUBLIC MPI::MPI_Fortran)
+
+target_include_directories("${PROJECT_NAME}-tester" PUBLIC ${PROJECT_SOURCE_DIR}/../build)
+
 #if(OpenMP_CXX_FOUND)
 #    target_link_libraries("${PROJECT_NAME}-tester" PUBLIC OpenMP::OpenMP_CXX)
 #endif()
@@ -53,8 +56,7 @@ foreach(t IN LISTS tests)
   add_test("test_${t}.F90" "${PROJECT_NAME}-tester" "${t}")
 endforeach()
 
-set(CMAKE_BUILD_TYPE Debug)
-set_target_properties("${PROJECT_NAME}-tester" PROPERTIES OUTPUT_NAME "test")
+# set(CMAKE_BUILD_TYPE Debug)
 
 if (COMPILER STREQUAL "gnu")
   target_compile_options("${PROJECT_NAME}-tester" PUBLIC -c -O0 -g -fopenmp -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion)

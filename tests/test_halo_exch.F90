@@ -207,7 +207,7 @@ module test_halo_exch
             endif
         endif
 
-        if (.not.(corners)) return
+        if (.not.(corners) .or. (grid%yimages == 1 .or. grid%ximages == 1)) return
 
         ! if this image is in the north eastern corner
         if ((grid%yimg == 1 .and. grid%ximg == 1)) then

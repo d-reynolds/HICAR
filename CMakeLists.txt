@@ -44,7 +44,7 @@ option(FSM "Link to the FSM2 snow model, requires separate compilation of the FS
 
 #Set constants for project
 set(BUILD ${PROJECT_SOURCE_DIR}/build)
-add_subdirectory(${PROJECT_SOURCE_DIR}/tests)
+add_subdirectory(${PROJECT_SOURCE_DIR}/tests EXCLUDE_FROM_ALL)
 #######################################
 
 
@@ -93,8 +93,12 @@ add_definitions(-DVERSION=\"$(GIT_VERSION)\")
 #########################################################
 
 
-add_executable(HICAR ${SOURCE_FILES})
+list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
 add_library(hicar_lib STATIC ${SOURCE_FILES})
+add_executable(HICAR ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
+
+set_property(TARGET hicar_lib PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
+set_property(TARGET HICAR PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
 
 ###########################################################
 ############### Find or install dependencies ##############
@@ -149,7 +153,6 @@ if(PKG_CONFIG_FOUND)
 	
 	if(PETSC_FOUND AND NOT (DEFINED ENV{CRAYPE_VERSION} AND (PETSC MATCHES ".*cray.*")))
 		message(STATUS "PETSc found with pkg-config")
-		target_link_libraries(HICAR PUBLIC PkgConfig::PETSC)
 		target_link_libraries(hicar_lib PUBLIC PkgConfig::PETSC)
 	elseif (EXISTS "${PETSC}/lib/petsc/conf/petscvariables")
 		message(STATUS "2. Trying to find PETSc by mimicking the cray-petsc makefile setup...")
@@ -178,7 +181,7 @@ if(PKG_CONFIG_FOUND)
 			if(MATCH_RESULT)
 				string(REGEX REPLACE "PETSC_WITH_EXTERNAL_LIB = " "" PETSC_WITH_EXTERNAL_LIB "${MATCH_RESULT}")
 				message(STATUS "PETSC_WITH_EXTERNAL_LIB: ${PETSC_WITH_EXTERNAL_LIB}")
-				target_link_libraries(HICAR  PUBLIC ${PETSC_WITH_EXTERNAL_LIB})
+				target_link_libraries(hicar_lib  PUBLIC ${PETSC_WITH_EXTERNAL_LIB})
 				break()
 			endif()
 		endforeach()
@@ -193,7 +196,7 @@ if(PKG_CONFIG_FOUND)
 				# the ftn wrapper will automatically link to the correct petsc library
 				list(REMOVE_ITEM PETSC_STATIC_LDFLAGS "-lpetsc")
 				# Link to the petsc library static dependencies
-				target_link_libraries(HICAR  PUBLIC ${PETSC_STATIC_LDFLAGS})
+				target_link_libraries(hicar_lib  PUBLIC ${PETSC_STATIC_LDFLAGS})
 			else()
 				message(FATAL_ERROR "PETSc not found")
 			endif()
@@ -204,45 +207,43 @@ if(PKG_CONFIG_FOUND)
 endif()
 list(POP_BACK CMAKE_MESSAGE_INDENT)
 
-target_link_libraries(HICAR PUBLIC MPI::MPI_Fortran)
+target_link_libraries(hicar_lib PUBLIC MPI::MPI_Fortran)
 if(OpenMP_CXX_FOUND)
-    target_link_libraries(HICAR PUBLIC OpenMP::OpenMP_CXX)
+    target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_CXX)
 endif()
-target_link_libraries(HICAR PUBLIC ${FFTW_LIBRARIES})
+target_link_libraries(hicar_lib PUBLIC ${FFTW_LIBRARIES})
 
 if (NETCDF_FOUND)
 	#This is the most robust way to find the NetCDF flags -- covering both custom installs, static or shared, and cray PEs
 	execute_process(COMMAND nf-config --flibs OUTPUT_VARIABLE NETCDF_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
 	#if the nf-config method worked...
 	if(${NETCDF_FLAGS} MATCHES "-lnetcdff")
-		target_link_libraries(HICAR PUBLIC ${NETCDF_FLAGS})
+		target_link_libraries(hicar_lib PUBLIC ${NETCDF_FLAGS})
 	else()
 	#else hope that the library flags as found by find_package are enough (should be as long as netCDF is a shared library)
-		target_link_libraries(HICAR PUBLIC ${NETCDF_LIBRARIES})
+		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
 	endif()
 endif()
 
 
 if (FSM)
 	find_library(FSM2_LIB NAMES FSM2 REQUIRED)
-	target_include_directories(HICAR PUBLIC ${FSM_DIR}/build)
-	target_link_libraries(HICAR PUBLIC ${FSM2_LIB})
-
 	target_include_directories(hicar_lib PUBLIC ${FSM_DIR}/build)
+	target_link_libraries(hicar_lib PUBLIC ${FSM2_LIB})
 
 endif()
-
-target_include_directories(HICAR PUBLIC ${MPI_INCLUDE_DIR})
-target_include_directories(HICAR PUBLIC ${FFTW_INCLUDES})
-target_include_directories(HICAR PUBLIC ${NETCDF_INCLUDES})
-
-# Add the include directory to the compiler flags
-target_include_directories(HICAR PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
 target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(hicar_lib PUBLIC ${MPI_INCLUDE_DIR})
 target_include_directories(hicar_lib PUBLIC ${FFTW_INCLUDES})
 target_include_directories(hicar_lib PUBLIC ${NETCDF_INCLUDES})
+
+target_link_libraries(
+HICAR
+  PRIVATE
+  hicar_lib
+  MPI::MPI_Fortran
+)
 
 list(POP_BACK CMAKE_MESSAGE_INDENT)
 message(STATUS "...done searching for dependencies")
@@ -332,7 +333,7 @@ message(STATUS "...done auto-detecting the environment")
 ############## Set up the compiler options ###############
 
 if(MODE STREQUAL "debug")
-	set(CMAKE_BUILD_TYPE Debug)
+	# set(CMAKE_BUILD_TYPE Debug)
 	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_debug")
 
     if (COMPILER STREQUAL "gnu")
@@ -343,7 +344,7 @@ if(MODE STREQUAL "debug")
 		target_compile_options(HICAR PUBLIC -h noomp -c -eI -G0 -m2 -rl -R bcdsp) #-R cpbs --cray-print-opts
 	endif()
 elseif(MODE STREQUAL "debugslow")
-	set(CMAKE_BUILD_TYPE Debug)
+	# set(CMAKE_BUILD_TYPE Debug)
 
 	if (COMPILER STREQUAL "gnu")
 		target_compile_options(HICAR PUBLIC -c -g -ffree-line-length-none -Wconversion)
@@ -353,7 +354,7 @@ elseif(MODE STREQUAL "debugslow")
 		target_compile_options(HICAR PUBLIC -c -h noomp -eI -m 2 -O0 -g -R bcs)
 	endif()
 elseif(MODE STREQUAL "profile")
-	set(CMAKE_BUILD_TYPE Profile)
+	# set(CMAKE_BUILD_TYPE Profile)
 
 	if (COMPILER STREQUAL "gnu")
 		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fopt-info-missed=opt_info.txt -mfma -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
@@ -364,11 +365,11 @@ elseif(MODE STREQUAL "profile")
 		target_compile_options(HICAR PUBLIC -c -h noomp -eI -m 2 -O0 -hpl=my_program_debug.pl -g -R bcs)
 	endif()
 elseif(MODE STREQUAL "release")
-	set(CMAKE_BUILD_TYPE Release)
+	# set(CMAKE_BUILD_TYPE Release)
 	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR")
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -O3 -fopenmp -finline-limit=10000 -mfma -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
+		target_compile_options(HICAR PUBLIC -O3 -fopenmp -finline-limit=10000 -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
@@ -418,7 +419,7 @@ message(STATUS "")
 # Add the include directory to the compiler flags
 #target_compile_options(HICAR PRIVATE -I${INCLUDE_DIR})
 
-get_target_property(HICAR_LIBS HICAR LINK_LIBRARIES)
+get_target_property(hicar_lib HICAR LINK_LIBRARIES)
 message(STATUS "Libraries linked against HICAR target: ${HICAR_LIBS}")
 
 # Set the location for library installation -- i.e., /usr/lib in this case
@@ -443,3 +444,12 @@ ADD_CUSTOM_TARGET( distclean make clean
 				   COMMAND ${CMAKE_COMMAND} -E remove ${PROJECT_SOURCE_DIR}/build/cmake_install.cmake ${PROJECT_SOURCE_DIR}/build/install_manifest.txt ${PROJECT_SOURCE_DIR}/build/Makefile ${PROJECT_SOURCE_DIR}/build/CMakeCache.txt
 					)
 
+# Add a custom target for running tests with MPI
+add_custom_target(check
+  COMMAND ${CMAKE_COMMAND} -E echo "Running tests with MPI..."
+  COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 ${CMAKE_BINARY_DIR}/tests/${PROJECT_NAME}-tester
+  DEPENDS ${PROJECT_NAME}-tester 
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  COMMENT "Running test suite with 4 MPI processes"
+  VERBATIM
+)
