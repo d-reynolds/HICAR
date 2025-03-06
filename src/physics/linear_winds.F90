@@ -54,7 +54,7 @@ module linear_theory_winds
                                           options_t
     use array_utilities,            only: smooth_array, calc_weight, &
                                           linear_space
-    use icar_constants,             only: kMAX_FILE_LENGTH, kNUM_SERVERS, kNUM_COMPUTE, kNUM_PROC_PER_NODE, PE_RANK_GLOBAL, STD_OUT_PE, kREAL
+    use icar_constants,             only: kMAX_FILE_LENGTH, STD_OUT_PE, kREAL
     use data_structures,            only: linear_theory_type
     use mod_wrf_constants,          only: piconst
 
@@ -547,18 +547,20 @@ contains
         integer,      intent(in)    :: nz, halo_size
         type(MPI_Comm), intent(in) :: comms
         
-        integer :: nx, ny, i
+        integer :: nx, ny, i, NUM_COMPUTE
 
         if (allocated(u_grids)) deallocate(u_grids)
         if (allocated(v_grids)) deallocate(v_grids)
 
-        allocate(u_grids(kNUM_COMPUTE))
-        allocate(v_grids(kNUM_COMPUTE))
+        call MPI_Comm_Size(comms,NUM_COMPUTE)
+
+        allocate(u_grids(NUM_COMPUTE))
+        allocate(v_grids(NUM_COMPUTE))
 
         nx = size(terrain, 1)
         ny = size(terrain, 2)
 
-        do i=1,kNUM_COMPUTE
+        do i=1,NUM_COMPUTE
             call u_grids(i)%set_grid_dimensions(nx, ny, nz, image=i, comms=comms, adv_order=halo_size*2, nx_extra=1)
             call v_grids(i)%set_grid_dimensions(nx, ny, nz, image=i, comms=comms, adv_order=halo_size*2, ny_extra=1)
         enddo
@@ -573,18 +575,22 @@ contains
         type(MPI_Win),  intent(in)  :: LUT_win
         integer,        intent(in)  :: i, j, k, z, LUT_nx, LUT_nz, LUT_ny
 
-        integer :: img, msg_size, wind_nx, wind_ny
+        integer :: img, msg_size, wind_nx, wind_ny, NUM_COMPUTE
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
         type(MPI_Datatype) :: LUT_type, send_type
-
+        type(MPI_Group) :: win_group
 
         msg_size = 1
         disp = 0
 
         wind_nx = size(wind,1)
         wind_ny = size(wind,2)
-        
-        do img = 1, kNUM_COMPUTE
+
+        !get group using MPI window
+        call MPI_Win_get_group(LUT_win, win_group)
+        call MPI_Group_size(win_group, NUM_COMPUTE)
+
+        do img = 1, NUM_COMPUTE
             associate(ims => grids(img)%ims, &
                       jms => grids(img)%jms, &
                       nx  => grids(img)%nx,  &
@@ -637,7 +643,7 @@ contains
         integer, dimension(3,2) :: LUT_dims
         integer :: loops_completed ! this is just used to measure progress in the LUT creation
         integer :: total_LUT_entries, ijk, start_pos, stop_pos
-        integer :: ims, jms, this_n, my_index, num_PE
+        integer :: ims, jms, this_n, my_index, NUM_COMPUTE
         real, allocatable :: temporary_u(:,:), temporary_v(:,:)
         character(len=kMAX_FILE_LENGTH) :: LUT_file
 
@@ -652,12 +658,12 @@ contains
         type(grid_t), allocatable :: u_grids(:), v_grids(:)
 
         ! append total number of images and the current image number to the LUT filename
-        call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
+        call MPI_Comm_Size(MPI_COMM_WORLD,NUM_COMPUTE)
         call MPI_Comm_rank(domain%compute_comms, my_index)
         ! MPI returns rank, which is 0-indexed
         my_index = my_index + 1
 
-        LUT_file = trim(options%lt%u_LUT_Filename) // "_" // trim(str(num_PE)) // "_" // trim(str(PE_RANK_GLOBAL)) // ".nc"
+        LUT_file = trim(options%lt%u_LUT_Filename) // "_" // trim(str(NUM_COMPUTE)) // "_" // trim(str(my_index)) // ".nc"
 
         ims = lbound(domain%z%data_3d,1)
         jms = lbound(domain%z%data_3d,3)
@@ -697,11 +703,11 @@ contains
             endif
         endif
         
-        start_pos = nint((real(my_index-1) / kNUM_COMPUTE) * total_LUT_entries)
-        if (my_index==kNUM_COMPUTE) then
+        start_pos = nint((real(my_index-1) / NUM_COMPUTE) * total_LUT_entries)
+        if (my_index==NUM_COMPUTE) then
             stop_pos = total_LUT_entries - 1
         else
-            stop_pos  = nint((real(my_index) / kNUM_COMPUTE) * total_LUT_entries) - 1
+            stop_pos  = nint((real(my_index) / NUM_COMPUTE) * total_LUT_entries) - 1
         endif
 
         ! if (options%general%debug) then
@@ -835,7 +841,7 @@ contains
 
             ! If this image doesn't have as many steps to run as some other images might,
             ! then it has to run additional ghost step(s) so that it syncs with the others correctly
-            do i=1, (total_LUT_entries/kNUM_COMPUTE+1) - this_n
+            do i=1, (total_LUT_entries/NUM_COMPUTE+1) - this_n
                 ! the syncs should be outside of the z loop, but this is a little more forgiving with memory requirements
                 do z=1,nz
                     call MPI_Win_fence(0,U_LUT_win)

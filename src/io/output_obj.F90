@@ -5,7 +5,6 @@ submodule(output_interface) output_implementation
   use time_io,                  only : get_output_time, find_timestep_in_filelist
   use string,                   only : str, split_str
   use io_routines,              only : io_newunit
-
   implicit none
 
 contains
@@ -104,15 +103,16 @@ contains
         class(output_t),  intent(in)   :: this
         character(len=*), allocatable, intent(inout):: file_list(:)
         
-        integer :: i, error, nfiles, unit
+        integer :: i, error, nfiles, unit, PE_RANK_GLOBAL
         character(len=kMAX_FILE_LENGTH)  :: file
         character(len=kMAX_FILE_LENGTH), allocatable :: temp_list(:)
         character(len=kMAX_FILE_LENGTH) :: temp_file
         character(len=kMAX_FILE_LENGTH) :: cmd_str
         
         allocate(temp_list(MAX_NUMBER_FILES))
-        
-        temp_file = 'tmp_outfiles'//trim(str(PE_RANK_GLOBAL))//'.txt'
+        call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
+
+        temp_file = '.tmp_outfiles'//trim(str(PE_RANK_GLOBAL))//'.txt'
         cmd_str = 'ls '//trim(this%base_out_file_name)//'*.nc > '//trim(temp_file)
 
         call EXECUTE_COMMAND_LINE( cmd_str, EXITSTAT=error )

@@ -401,18 +401,20 @@ contains
         disps = (/(i, i=0,this%n_children, 1)/)
         disps(this%n_children+1) = disps(this%n_children+1)-1
 
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%iswc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%iewc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%kswc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%kewc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jswc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jewc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%isrc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%ierc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%ksrc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%kerc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jsrc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
-        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jerc, cnts, disps, MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%client_comms)
+        ! The PE of the parent communicator is the last PE in the communicator, i.e. n_children
+
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%iswc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%iewc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%kswc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%kewc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jswc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jewc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%isrc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%ierc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%ksrc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%kerc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jsrc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jerc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
 
         this%ide = 0
         this%kde = 0

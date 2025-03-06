@@ -61,11 +61,11 @@ contains
         type(ioclient_t), intent(inout) :: ioclient(:)
 
         integer :: n, k, name_len, color, ierr, node_name_i, num_PE
-        integer :: num_threads, found
+        integer :: num_threads, found, PE_RANK_GLOBAL, NUM_SERVERS, NUM_COMPUTE, NUM_IO_PER_NODE, NUM_PROC_PER_NODE
 
         character(len=MPI_MAX_PROCESSOR_NAME) :: node_name, ENV_IO_PER_NODE
         integer, allocatable :: node_names(:) 
-        type(MPI_Comm) :: globalComm, splitComm
+        type(MPI_Comm) :: globalComm, splitComm, shared_comm
 
 #if defined(_OPENMP)
         num_threads = omp_get_max_threads()
@@ -79,38 +79,24 @@ contains
 
         ! If the environment variable is not set, then we will use 1
         if (found == 0) then
-            kNUM_IO_PER_NODE = 1
+            NUM_IO_PER_NODE = 1
         else
             ! If the number of IO processes per node is set, then we will use that
-            read(ENV_IO_PER_NODE,*) kNUM_IO_PER_NODE
+            read(ENV_IO_PER_NODE,*) NUM_IO_PER_NODE
         endif
 
         call MPI_Comm_Size(MPI_COMM_WORLD,num_PE)
-    
-        allocate(node_names(num_PE))
+        call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
 
-        node_names = 0
-        node_name_i = 0
-
-        !First, determine information about node/CPU configuration
-        call MPI_Get_processor_name(node_name, name_len, ierr)
-        do n = 1,name_len
-            node_name_i = node_name_i + ichar(node_name(n:n))*n*10
-        enddo
-
-        node_names(PE_RANK_GLOBAL+1) = node_name_i
-
-        !Get list of node names on all processes        
-        call MPI_Allreduce(MPI_IN_PLACE,node_names,num_PE,MPI_INT,MPI_MAX,MPI_COMM_WORLD,ierr)
-        
-        !Set global constants related to resource distribution
-        kNUM_PROC_PER_NODE = count(node_names==node_names(1))
+        !Discover the number of processors per node
+        call MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, shared_comm, ierr)
+        call MPI_Comm_Size(shared_comm,NUM_PROC_PER_NODE)
 
         !Assign one io process per node, this results in best co-array transfer times
-        kNUM_SERVERS = ceiling(num_PE*kNUM_IO_PER_NODE*1.0/kNUM_PROC_PER_NODE)
-        kNUM_COMPUTE = num_PE-kNUM_SERVERS
+        NUM_SERVERS = ceiling(num_PE*NUM_IO_PER_NODE*1.0/NUM_PROC_PER_NODE)
+        NUM_COMPUTE = num_PE-NUM_SERVERS
         
-        if ((mod(kNUM_COMPUTE,2) /= 0) .and. STD_OUT_PE) then
+        if ((mod(NUM_COMPUTE,2) /= 0) .and. STD_OUT_PE) then
             write(*,*) 'WARNING: number of compute processes is odd-numbered.' 
             write(*,*) 'One process per node is used for I/O.'
             write(*,*) 'If the total number of compute processes is odd-numbered,'
@@ -120,7 +106,7 @@ contains
         !-----------------------------------------
         ! Assign Compute and IO processes
         !-----------------------------------------
-        if (mod((PE_RANK_GLOBAL+1),(num_PE/kNUM_SERVERS)) == 0) then
+        if (mod((PE_RANK_GLOBAL+1),(num_PE/NUM_SERVERS)) == 0) then
             exec_team = kIO_TEAM
             color = 1
         else
@@ -147,7 +133,7 @@ contains
         !-----------------------------------------
 
         ! Assign IO clients to the same communicator as their related server process
-        color = (PE_RANK_GLOBAL) / (num_PE/kNUM_SERVERS)
+        color = (PE_RANK_GLOBAL) / (num_PE/NUM_SERVERS)
 
         CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
         ! Group IO clients with their related server process. This is basically just grouping processes by node
@@ -165,10 +151,10 @@ contains
         enddo
         if (STD_OUT_PE) then
             write(*,*) "  Number of processing elements:          ",num_PE
-            write(*,*) "  Number of compute elements:             ",kNUM_COMPUTE
-            write(*,*) "  Number of IO elements:                  ",kNUM_SERVERS
-            write(*,*) "  Number of processing elements per node: ",kNUM_PROC_PER_NODE
-            write(*,*) "  Number of IO processes per node:        ",kNUM_IO_PER_NODE
+            write(*,*) "  Number of compute elements:             ",NUM_COMPUTE
+            write(*,*) "  Number of IO elements:                  ",NUM_SERVERS
+            write(*,*) "  Number of processing elements per node: ",NUM_PROC_PER_NODE
+            write(*,*) "  Number of IO processes per node:        ",NUM_IO_PER_NODE
 
 #if defined(_OPENMP)
             write(*,*) "  Max number of OpenMP Threads:           ",num_threads

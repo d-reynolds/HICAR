@@ -54,7 +54,7 @@ program icar
     type(Time_type) :: end_of_nest_loop
     type(time_delta_t) :: small_time_delta
     
-    integer :: i, ierr, exec_team, n_nests, n, old_nest
+    integer :: i, ierr, exec_team, n_nests, n, old_nest, PE_RANK_GLOBAL
     real :: t_val, t_val2, t_val3
     logical :: init_flag, new_input, info_only, gen_nml, only_namelist_check
     logical :: start_time_match = .False.
@@ -517,11 +517,12 @@ contains
         type(MPI_Comm), intent(in) :: comms
 
         real :: mean_t, t_sum
-        integer :: ierr
+        integer :: ierr, NUM_COMPUTE
             
         t_sum = timer%get_time()
         call MPI_Allreduce(MPI_IN_PLACE,t_sum,1,MPI_REAL,MPI_SUM,comms,ierr)
-        mean_t = t_sum/kNUM_COMPUTE
+        call MPI_Comm_Size(comms,NUM_COMPUTE)
+        mean_t = t_sum/NUM_COMPUTE
     
     end function
 

@@ -2,7 +2,7 @@ module namelist_utils
     use netcdf
     use string,           only  : str
     use ieee_arithmetic
-    use icar_constants,    only : PE_RANK_GLOBAL, STD_OUT_PE, MAXLEVELS, kMAX_NESTS, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH, kVERSION_STRING, &
+    use icar_constants,    only : STD_OUT_PE, MAXLEVELS, kMAX_NESTS, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH, kVERSION_STRING, &
                                   kREAL_NO_VAL, kINT_NO_VAL, kCHAR_NO_VAL
     use mod_wrf_constants, only : piconst
     use options_types,     only : forcing_options_type, domain_options_type

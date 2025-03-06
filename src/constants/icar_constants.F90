@@ -12,12 +12,6 @@ module icar_constants
     integer, parameter :: kCOMPUTE_TEAM = 1
     integer, parameter :: kIO_TEAM = 2
     logical :: STD_OUT_PE = .False.
-    integer :: PE_RANK_GLOBAL = -1
-
-    integer :: kNUM_SERVERS = 0
-    integer :: kNUM_COMPUTE = 0
-    integer :: kNUM_PROC_PER_NODE = 0
-    integer :: kNUM_IO_PER_NODE = 1
     
     character(len=5), parameter :: kCHAR_NO_VAL = "-9999"
     integer,          parameter :: kINT_NO_VAL = -9999

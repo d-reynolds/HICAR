@@ -16,7 +16,7 @@ submodule(boundary_interface) boundary_implementation
     use timer_interface,    only : timer_t
     use debug_module,           only : check_ncdf
     use mod_wrf_constants,      only : gravity
-    use icar_constants,         only : PE_RANK_GLOBAL, STD_OUT_PE, kMAX_FILE_LENGTH
+    use icar_constants,         only : STD_OUT_PE, kMAX_FILE_LENGTH
     implicit none
 contains
 
@@ -103,7 +103,7 @@ contains
         type(variable_t)  :: test_variable
         real, allocatable :: temp_z(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:)
 
-        integer :: i, nx, ny, nz
+        integer :: i, nx, ny, nz, PE_RANK_GLOBAL
 
         ! figure out while file and timestep contains the requested start_time
         call set_firstfile_firststep(this, start_time, file_list, time_var)
@@ -112,6 +112,8 @@ contains
         !  read in latitude and longitude coordinate data
         call io_read(this%firstfile, lat_var, temp_lat, this%firststep)
         call io_read(this%firstfile, lon_var, temp_lon, this%firststep)
+
+        call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
 
         if (minval(domain_lat) < minval(temp_lat) .or. maxval(domain_lat) > maxval(temp_lat)) then
             write(*,*) 'ERROR: First domain not contained within forcing data'
@@ -216,13 +218,13 @@ contains
 
         if (minval(domain_lat) < minval(parent_nest_lat) .or. maxval(domain_lat) > maxval(parent_nest_lat)) then
             write(*,*) 'ERROR: Nested domain not contained within parent domain: ',trim(parent_options%domain%init_conditions_file)
-            write(*,*) 'Lat min/max of nested domain on process ',PE_RANK_GLOBAL+1,': ',minval(domain_lat),' ',maxval(domain_lat)
+            write(*,*) 'Lat min/max of nested domain: ',minval(domain_lat),' ',maxval(domain_lat)
             write(*,*) 'Lat min/max of parent domain:               ',minval(parent_nest_lat),' ',maxval(parent_nest_lat)
             stop
         endif
         if (minval(domain_lon) < minval(parent_nest_lon) .or. maxval(domain_lon) > maxval(parent_nest_lon)) then
             write(*,*) 'ERROR: Nested domain not contained within parent domain: ',trim(parent_options%domain%init_conditions_file)
-            write(*,*) 'Lon min/max of nested domain on process ',PE_RANK_GLOBAL+1,': ',minval(domain_lon),' ',maxval(domain_lon)
+            write(*,*) 'Lon min/max of nested domain: ',minval(domain_lon),' ',maxval(domain_lon)
             write(*,*) 'Lon min/max of parent domain:               ',minval(parent_nest_lon),' ',maxval(parent_nest_lon)
             stop
         endif
@@ -246,9 +248,9 @@ contains
         ! Set this flag here so that we will set z later in domain%setup_geo_interpolation to be the z data read from forcing data
         this%z_is_set = .False.
 
-        if (this%ite < this%its) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        if (this%kte < this%kts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        if (this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        ! if (this%ite < this%its) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        ! if (this%kte < this%kts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        ! if (this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
 
         ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
         do i=1, size(var_list)
@@ -348,12 +350,12 @@ contains
         this%jts = max(this%jts - 8,1)
         this%jte = min(this%jte + 8,ny)
 
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  d_ims: ',d_ims,'  d_ime: ',d_ime,'  d_jms: ',d_jms,'  d_jme: ',d_jme
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  LLlat: ',LLlat,'  LLlon: ',LLlon,'  URlat: ',URlat,'  URlon: ',URlon
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  min_loc: ',minloc(LL_d),'  max_loc: ',minloc(UR_d)
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  min_lat: ',minval(domain_lat),'  max_lat: ',maxval(domain_lat)
-        if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  lat_corners: ',lat_corners,'  lon_corners: ',lon_corners
+        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  d_ims: ',d_ims,'  d_ime: ',d_ime,'  d_jms: ',d_jms,'  d_jme: ',d_jme
+        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  LLlat: ',LLlat,'  LLlon: ',LLlon,'  URlat: ',URlat,'  URlon: ',URlon
+        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  min_loc: ',minloc(LL_d),'  max_loc: ',minloc(UR_d)
+        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  min_lat: ',minval(domain_lat),'  max_lat: ',maxval(domain_lat)
+        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  lat_corners: ',lat_corners,'  lon_corners: ',lon_corners
         if (this%ite < this%its .or. this%jte < this%jts) call io_write('domain_lat.nc',"domain_lat",domain_lat)
         if (this%ite < this%its .or. this%jte < this%jts) call io_write('domain_lon.nc',"domain_lon",domain_lon)
         if (this%ite < this%its .or. this%jte < this%jts) call io_write('boundary_lat.nc',"lat",temp_lat)

@@ -84,32 +84,36 @@ contains
         implicit none
         class(ioclient_t),   intent(inout) :: this
 
-        integer :: ierr
+        integer :: ierr, PE_parent_comm
+
+        ! The PE of the parent communicator is the last PE in the communicator
+        call MPI_Comm_Size(this%parent_comms,PE_parent_comm)
+        PE_parent_comm = PE_parent_comm - 1
 
         call MPI_Gatherv(this%i_s_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%i_e_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%k_s_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%k_e_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%j_s_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%j_e_w, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%i_s_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%i_e_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%k_s_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%k_e_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%j_s_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%j_e_r, 1, MPI_INTEGER, 0, [0], [0], &
-            MPI_INTEGER, (kNUM_PROC_PER_NODE/kNUM_IO_PER_NODE)-1, this%parent_comms)
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
 
         call MPI_Allreduce(MPI_IN_PLACE,this%ide,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,this%kde,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)

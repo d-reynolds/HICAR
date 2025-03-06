@@ -120,7 +120,7 @@ module subroutine init(this, exch_vars, adv_vars, grid, comms)
 
 ! if current = 1 then all of the boundaries were set, just store ourself as our "neighbor"
     if (current == 1) then
-        this%corner_neighbors(current) = PE_RANK_GLOBAL+1
+        this%corner_neighbors(current) = this%halo_rank
     endif
     ! Detect if neighbors are on shared memory hardware
     call detect_shared_memory(this, comms)

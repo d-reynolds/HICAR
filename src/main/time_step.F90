@@ -27,7 +27,7 @@ module time_step
     use timer_interface,            only : timer_t
     use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
-    use icar_constants,             only : STD_OUT_PE, PE_RANK_GLOBAL
+    use icar_constants,             only : STD_OUT_PE
     implicit none
     private
     double precision, parameter  :: DT_BIG = 36000.0
@@ -335,7 +335,7 @@ contains
 
             if (real(dt%seconds()) > 1e-3) then
 
-                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" init", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "init", fix=.True.)
 
                 call send_timer%start()
                 call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
@@ -345,14 +345,14 @@ contains
     
                 call rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
-                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" rad(domain", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "rad(domain", fix=.True.)
                 call rad_timer%stop()
 
 
                 call lsm_timer%start()
                 call sfc(domain, options, real(dt%seconds()))!, halo=1)
                 call lsm(domain, options, real(dt%seconds()))!, halo=1)
-                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" lsm")
+                if (options%general%debug) call domain_check(domain, "lsm")
                 call lsm_timer%stop()
 
                 call pbl_timer%start()
@@ -378,16 +378,16 @@ contains
                 !         dt = end_time - domain%model_time
                 !     endif
                 ! endif
-                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" pbl")
+                if (options%general%debug) call domain_check(domain, "pbl")
 
                 call convect(domain, options, real(dt%seconds()))!, halo=1)
-                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" convect")
+                if (options%general%debug) call domain_check(domain, "convect")
 
                 
 
                 call adv_timer%start()
                 call advect(domain, options, real(dt%seconds()),flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
-                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" advect(domain", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "advect(domain", fix=.True.)
                 call adv_timer%stop()
 
                 
@@ -395,10 +395,10 @@ contains
                 call mp_timer%start()
 
                 call mp(domain, options, real(dt%seconds()))
-                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" mp_halo", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "mp_halo", fix=.True.)
                 call mp_timer%stop()
                 
-                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%halo_send", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "domain%halo_send", fix=.True.)
 
 
                 !If we are in the last ~10 updates of a time step and a variable drops below 0, we have probably over-shot a value of 0. Force back to 0
@@ -407,7 +407,7 @@ contains
                 endif
 
 
-                if (options%general%debug) call domain_check(domain, "img: "//trim(str(PE_RANK_GLOBAL+1))//" domain%apply_forcing", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "domain%apply_forcing", fix=.True.)
 
             endif
             ! step model_time forward
