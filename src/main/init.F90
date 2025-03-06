@@ -117,15 +117,6 @@ contains
             write(*,*) 'this may lead to errors with domain decomposition'
         endif
 
-        k = 1
-        allocate(DOM_IMG_INDX(kNUM_COMPUTE))
-        do n = 1,kNUM_COMPUTE
-            if (mod(k,(num_PE/kNUM_SERVERS)) == 0) k = k+1
-            DOM_IMG_INDX(n) = k
-            k = k+1
-        enddo
-
-
         !-----------------------------------------
         ! Assign Compute and IO processes
         !-----------------------------------------

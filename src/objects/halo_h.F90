@@ -40,17 +40,6 @@ module halo_interface
 
         type(MPI_Group)    :: north_neighbor_grp, south_neighbor_grp, east_neighbor_grp, west_neighbor_grp
 
-#ifdef CRAY_PE
-    	real, allocatable :: south_batch_in_3d(:,:,:,:)[:]
-    	real, allocatable :: north_batch_in_3d(:,:,:,:)[:]
-    	real, allocatable :: west_batch_in_3d(:,:,:,:)[:]
-    	real, allocatable :: east_batch_in_3d(:,:,:,:)[:]
-
- 	    real, allocatable :: south_batch_in_2d(:,:,:)[:]
- 	    real, allocatable :: north_batch_in_2d(:,:,:)[:]
-        real, allocatable :: west_batch_in_2d(:,:,:)[:]
-   	    real, allocatable :: east_batch_in_2d(:,:,:)[:]
-#else
         real, contiguous, pointer :: south_batch_in_3d(:,:,:,:)
         real, contiguous, pointer :: north_batch_in_3d(:,:,:,:)
         real, contiguous, pointer :: west_batch_in_3d(:,:,:,:)
@@ -60,19 +49,10 @@ module halo_interface
         real, contiguous, pointer :: north_batch_in_2d(:,:,:)
         real, contiguous, pointer :: west_batch_in_2d(:,:,:)
         real, contiguous, pointer :: east_batch_in_2d(:,:,:)
-#endif
-
-#ifdef CRAY_PE
-        real, allocatable :: south_in_3d(:,:,:)[:]
-        real, allocatable :: north_in_3d(:,:,:)[:]
-        real, allocatable :: west_in_3d(:,:,:)[:]
-        real, allocatable :: east_in_3d(:,:,:)[:]
-#else
         real, pointer     :: south_in_3d(:,:,:)
         real, pointer     :: north_in_3d(:,:,:)
         real, pointer     :: west_in_3d(:,:,:)
         real, pointer     :: east_in_3d(:,:,:)
-#endif
       real, contiguous, pointer :: north_buffer_3d(:,:,:,:)
    	  real, contiguous, pointer :: south_buffer_3d(:,:,:,:)
       real, contiguous, pointer :: east_buffer_3d(:,:,:,:)

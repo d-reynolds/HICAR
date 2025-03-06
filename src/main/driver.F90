@@ -404,11 +404,6 @@ program icar
 
     case(kIO_TEAM)
     
-        !This is, unfortunately, stupidly, needed to allow coarrays to work. 
-        !Perhaps on later releases with better team support it can be removed?
-#ifdef  CRAY_PE
-        call domain(1)%init(options(1))
-#endif
         do i = 1, n_nests
             call ioserver(i)%init(options,i)
         enddo

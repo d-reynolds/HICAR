@@ -54,7 +54,7 @@ module linear_theory_winds
                                           options_t
     use array_utilities,            only: smooth_array, calc_weight, &
                                           linear_space
-    use icar_constants,             only: kMAX_FILE_LENGTH, DOM_IMG_INDX, kNUM_SERVERS, kNUM_COMPUTE, kNUM_PROC_PER_NODE, PE_RANK_GLOBAL, STD_OUT_PE, kREAL
+    use icar_constants,             only: kMAX_FILE_LENGTH, kNUM_SERVERS, kNUM_COMPUTE, kNUM_PROC_PER_NODE, PE_RANK_GLOBAL, STD_OUT_PE, kREAL
     use data_structures,            only: linear_theory_type
     use mod_wrf_constants,          only: piconst
 

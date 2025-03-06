@@ -11,7 +11,6 @@ module icar_constants
     ! Define process info and team info
     integer, parameter :: kCOMPUTE_TEAM = 1
     integer, parameter :: kIO_TEAM = 2
-    integer, allocatable :: DOM_IMG_INDX(:)
     logical :: STD_OUT_PE = .False.
     integer :: PE_RANK_GLOBAL = -1
 
