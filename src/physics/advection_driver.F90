@@ -79,17 +79,6 @@ contains
         real, dimension(ims:ime,kms:kme,jms:jme) :: temp
 
         real, allocatable :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
-        ! integer :: nx, nz, ny
-        !
-        ! nx=size(domain%p,1)
-        ! nz=size(domain%p,2)
-        ! ny=size(domain%p,3)
-        !
-        ! if (.not.allocated(domain%tend%qv_adv)) then
-        !     allocate(domain%tend%qv_adv(nx,nz,ny))
-        !     domain%tend%qv_adv=0
-        ! endif
-        
         call adv_wind_time%start()
         if (options%physics%advection==kADV_STD) then
             call adv_std_compute_wind(domain,options,dt, U_m, V_m, W_m, denom)

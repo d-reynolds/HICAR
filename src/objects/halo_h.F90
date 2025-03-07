@@ -26,7 +26,11 @@ module halo_interface
         type(MPI_win)     :: south_3d_win
         type(MPI_win)     :: east_3d_win
         type(MPI_win)     :: west_3d_win
-
+        type(MPI_win)     :: northwest_3d_win
+        type(MPI_win)     :: southwest_3d_win
+        type(MPI_win)     :: northeast_3d_win
+        type(MPI_win)     :: southeast_3d_win
+        
         type(MPI_win)     :: north_2d_win
         type(MPI_win)     :: south_2d_win
         type(MPI_win)     :: east_2d_win
@@ -34,58 +38,75 @@ module halo_interface
 
         type(MPI_Datatype) :: NS_3d_win_halo_type
         type(MPI_Datatype) :: EW_3d_win_halo_type
+        type(MPI_Datatype) :: corner_3d_win_halo_type
 
         type(MPI_Datatype) :: NS_2d_win_halo_type
         type(MPI_Datatype) :: EW_2d_win_halo_type
 
         type(MPI_Group)    :: north_neighbor_grp, south_neighbor_grp, east_neighbor_grp, west_neighbor_grp
+        type(MPI_Group)    :: northwest_neighbor_grp, southwest_neighbor_grp, northeast_neighbor_grp, southeast_neighbor_grp
 
         real, contiguous, pointer :: south_batch_in_3d(:,:,:,:)
         real, contiguous, pointer :: north_batch_in_3d(:,:,:,:)
         real, contiguous, pointer :: west_batch_in_3d(:,:,:,:)
         real, contiguous, pointer :: east_batch_in_3d(:,:,:,:)
+        real, contiguous, pointer :: northwest_batch_in_3d(:,:,:,:)
+        real, contiguous, pointer :: southwest_batch_in_3d(:,:,:,:)
+        real, contiguous, pointer :: northeast_batch_in_3d(:,:,:,:)
+        real, contiguous, pointer :: southeast_batch_in_3d(:,:,:,:)
+
+        real, contiguous, pointer :: north_buffer_3d(:,:,:,:)
+        real, contiguous, pointer :: south_buffer_3d(:,:,:,:)
+        real, contiguous, pointer :: east_buffer_3d(:,:,:,:)
+        real, contiguous, pointer :: west_buffer_3d(:,:,:,:)
+        real, contiguous, pointer :: northwest_buffer_3d(:,:,:,:)
+        real, contiguous, pointer :: southwest_buffer_3d(:,:,:,:)
+        real, contiguous, pointer :: northeast_buffer_3d(:,:,:,:)
+        real, contiguous, pointer :: southeast_buffer_3d(:,:,:,:)
+
+        real, pointer     :: south_in_3d(:,:,:)
+        real, pointer     :: north_in_3d(:,:,:)
+        real, pointer     :: west_in_3d(:,:,:)
+        real, pointer     :: east_in_3d(:,:,:)
 
         real, contiguous, pointer :: south_batch_in_2d(:,:,:)
         real, contiguous, pointer :: north_batch_in_2d(:,:,:)
         real, contiguous, pointer :: west_batch_in_2d(:,:,:)
         real, contiguous, pointer :: east_batch_in_2d(:,:,:)
-        real, pointer     :: south_in_3d(:,:,:)
-        real, pointer     :: north_in_3d(:,:,:)
-        real, pointer     :: west_in_3d(:,:,:)
-        real, pointer     :: east_in_3d(:,:,:)
-      real, contiguous, pointer :: north_buffer_3d(:,:,:,:)
-   	  real, contiguous, pointer :: south_buffer_3d(:,:,:,:)
-      real, contiguous, pointer :: east_buffer_3d(:,:,:,:)
-   	  real, contiguous, pointer :: west_buffer_3d(:,:,:,:)
 
-      real, contiguous, pointer :: north_buffer_2d(:,:,:)
-      real, contiguous, pointer :: south_buffer_2d(:,:,:)
-      real, contiguous, pointer :: east_buffer_2d(:,:,:)
-      real, contiguous, pointer :: west_buffer_2d(:,:,:)
+        real, contiguous, pointer :: north_buffer_2d(:,:,:)
+        real, contiguous, pointer :: south_buffer_2d(:,:,:)
+        real, contiguous, pointer :: east_buffer_2d(:,:,:)
+        real, contiguous, pointer :: west_buffer_2d(:,:,:)
 
-    	  ! Neighboring images of this image
-    	  integer, allocatable :: neighbors(:)
-    	  integer, allocatable :: corner_neighbors(:)
+        integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor, halo_rank
+        integer :: northwest_neighbor, southwest_neighbor, northeast_neighbor, southeast_neighbor
 
-  	  integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor, halo_rank
-      integer :: northwest_neighbor, southwest_neighbor, northeast_neighbor, southeast_neighbor
+        logical :: north_boundary = .True.
+        logical :: south_boundary = .True.
+        logical :: east_boundary = .True.
+        logical :: west_boundary = .True.
 
-  	  logical :: north_boundary = .True.
-  	  logical :: south_boundary = .True.
-   	  logical :: east_boundary = .True.
-      logical :: west_boundary = .True.
+        logical :: northwest_boundary = .True.
+        logical :: southwest_boundary = .True.
+        logical :: northeast_boundary = .True.
+        logical :: southeast_boundary = .True.
 
-  	  ! store the start (s) and end (e) for the i,j,k dimensions
-  	  integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
+        ! store the start (s) and end (e) for the i,j,k dimensions
+        integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
                 ims,ime, jms,jme, kms,kme, & ! for the memory in these arrays (m)
                 its,ite, jts,jte, kts,kte ! for the data tile to process   (t)
 
-    ! Flags indicating if shared memory communication is used for each direction
-    logical :: north_shared = .false.
-    logical :: south_shared = .false.
-    logical :: east_shared = .false.
-    logical :: west_shared = .false.
-    logical :: use_shared_windows = .false.
+        ! Flags indicating if shared memory communication is used for each direction
+        logical :: north_shared = .false.
+        logical :: south_shared = .false.
+        logical :: east_shared = .false.
+        logical :: west_shared = .false.
+        logical :: northwest_shared = .false.
+        logical :: southwest_shared = .false.
+        logical :: northeast_shared = .false.
+        logical :: southeast_shared = .false.
+        logical :: use_shared_windows = .false.
 
     contains
         procedure, public :: init
@@ -115,8 +136,6 @@ module halo_interface
 
         procedure :: halo_2d_send_batch
         procedure :: halo_2d_retrieve_batch
-        !procedure :: halo_3d_send_batch
-        !procedure :: halo_3d_retrieve_batch
 
     end type
 

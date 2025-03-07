@@ -41,6 +41,7 @@ contains
 
         this%max_vars = kMIN_VAR_DICT_SIZE
         this%n_vars = 0
+        this%current_variable = 1
 
         this%initialized = .True.
 
@@ -208,6 +209,10 @@ contains
     module subroutine reset_iterator(this)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
+
+        if (.not.this%initialized) then
+            call this%init()
+        endif
 
         this%current_variable = 1
     end subroutine

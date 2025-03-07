@@ -66,7 +66,10 @@ module options_interface
 
     contains
 
-        procedure, public  :: init
+        procedure, public  :: init_test
+        procedure, public  :: init_namelist
+        generic,   public  :: init => init_test
+        generic,   public  :: init => init_namelist
         procedure, public  :: check
         procedure, public  :: setup_synthetic_forcing
         procedure, public  :: alloc_vars
@@ -75,10 +78,14 @@ module options_interface
         procedure, public  :: exch_vars
     end type
 
-
 interface
 
-    module subroutine init(this, namelist_file, n_indx, info_only, gen_nml)
+    module subroutine init_test(this)
+        implicit none
+        class(options_t),   intent(inout)  :: this
+    end subroutine
+
+    module subroutine init_namelist(this, namelist_file, n_indx, info_only, gen_nml)
         implicit none
         class(options_t),   intent(inout)  :: this
         character(len=*),   intent(in)     :: namelist_file
@@ -96,12 +103,12 @@ interface
         type(options_t), intent(inout) :: options(:)
     end subroutine
 
-    module subroutine general_namelist(filename, gen_options, n_indx, info_only, gen_nml)
+    module subroutine general_namelist(filename, gen_options, n_indx, read_nml, info_only, gen_nml)
         implicit none
         character(len=*),             intent(in)    :: filename
-        type(general_options_type),   intent(inout) :: gen_options
-        integer,                      intent(in)    :: n_indx
-        logical, intent(in), optional  :: info_only, gen_nml
+        type(general_options_type), intent(inout) :: gen_options
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: read_nml, info_only, gen_nml
     end subroutine
 
     module subroutine alloc_vars(this, input_vars, var_idx, error)

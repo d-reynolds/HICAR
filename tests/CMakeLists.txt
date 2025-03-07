@@ -6,6 +6,23 @@ enable_language (Fortran)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/../cmake")
 
 find_package(PkgConfig REQUIRED)
+include(ExternalProject)
+
+
+# Define test data directory
+set(TEST_DATA_DIR "${CMAKE_CURRENT_BINARY_DIR}/test_data")
+
+# Setup the external project for test data
+ExternalProject_Add(hicar_test_data
+  GIT_REPOSITORY    https://github.com/HICAR-Model/Test-Data.git
+  GIT_TAG           main
+  SOURCE_DIR        "${TEST_DATA_DIR}"
+  CONFIGURE_COMMAND ""  # No configuration needed for data-only repo
+  BUILD_COMMAND     ""  # No build needed
+  INSTALL_COMMAND   ""  # No install needed
+  TEST_COMMAND      ""  # No tests needed
+  UPDATE_DISCONNECTED ${FETCHCONTENT_UPDATES_DISCONNECTED}
+)
 
 # 6. Link to the package libraries
 #set (NETCDF_F90 "YES")
@@ -65,3 +82,19 @@ elseif (COMPILER STREQUAL "intel")
 elseif (COMPILER STREQUAL "cray")
   target_compile_options("${PROJECT_NAME}-tester" PUBLIC -h noomp -c -eI -G0 -m2 -rl -R bcdsp) #-R cpbs --cray-print-opts
 endif()
+
+# Create a custom target for downloading test data
+add_custom_target(download_test_data
+  DEPENDS hicar_test_data
+  COMMENT "Downloading HICAR test data from GitHub"
+)
+
+# Make the HICAR-tester target depend on the test data
+add_dependencies("${PROJECT_NAME}-tester" download_test_data)
+
+# Add test data directory to compile definitions
+target_compile_definitions(
+  "${PROJECT_NAME}-tester"
+  PRIVATE
+  TEST_DATA_DIR="${TEST_DATA_DIR}"
+)

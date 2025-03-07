@@ -39,7 +39,7 @@ contains
         nml_file = namelist_file
 
         ! Open the namelist file
-        open(UNIT=io_newunit(nml_unit), FILE=nml_file, STATUS='NEW', ACTION='WRITE')
+        if (STD_OUT_PE) open(UNIT=io_newunit(nml_unit), FILE=nml_file, STATUS='NEW', ACTION='WRITE')
 
     end subroutine set_namelist
 

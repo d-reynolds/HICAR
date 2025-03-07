@@ -4,19 +4,21 @@
 
 module test_advect
           
-    use variable_dict_interface, only: var_dict_t
     use variable_interface,      only: variable_t
     use mpi_f08
-    use grid_interface, only: grid_t
-    use halo_interface, only: halo_t
     use icar_constants
     use testdrive, only : new_unittest, unittest_type, error_type, check, test_failed
-
+    use domain_interface, only: domain_t
+    use options_interface, only: options_t
+    use advection, only: adv_init, advect, adv_var_request
+    use timer_interface, only: timer_t
+    use io_routines,     only : check_file_exists
+    use time_step, only: compute_dt
     implicit none
     private
     
-    ! Hard coded time step factor to be used with RK3 time stepping for 5th and 3rd order advection
-    real :: time_step_factor(2) = (/ 1.6, 1.4/)
+    ! Hard coded time step factor to be used with RK3 time stepping for 3rd and 5th order advection
+    real :: time_step_factor(2) = (/ 1.4, 1.6/)
     integer :: h_order(3) = (/ 1, 3, 5/)
     integer :: v_order(3) = (/ 1, 3, 5/)
     integer :: i, j, k, l
@@ -33,10 +35,12 @@ module test_advect
         type(unittest_type), allocatable, intent(out) :: testsuite(:)
         
         testsuite = [ &
-            new_unittest("adv_h1_v1", test_adv_h1_v1) &
-            ! new_unittest("adv_h3_v3", test_adv_h3_v3), &
-            ! new_unittest("adv_h3_v3", test_adv_h5_v3), &
-            ! new_unittest("adv_h3_v3", test_adv_h5_v5), &
+            new_unittest("adv_h1_v1", test_adv_h1_v1), &
+            ! new_unittest("adv_h3_v1", test_adv_h3_v1), &
+            ! new_unittest("adv_h5_v1", test_adv_h5_v1), &
+            new_unittest("adv_h3_v3", test_adv_h3_v3), &
+            ! new_unittest("adv_h5_v3", test_adv_h5_v3), &
+            new_unittest("adv_h5_v5", test_adv_h5_v5)  &
             ]
     
     end subroutine collect_advect_suite
@@ -44,36 +48,160 @@ module test_advect
     subroutine test_adv_h1_v1(error)
         type(error_type), allocatable, intent(out) :: error
 
-        integer :: my_index, ierr
-        type(grid_t) :: grid
-        type(MPI_Comm) :: comms
-
-        call MPI_Comm_Rank(MPI_COMM_WORLD,my_index,ierr)
-        my_index = my_index + 1
-
-        !set the comm MPI_com type to be MPI_COMM_WORLD
-        CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
-
         call advect_standard(h_order=1,v_order=1,error=error)
 
     end subroutine test_adv_h1_v1
     
+    subroutine test_adv_h3_v1(error)
+        type(error_type), allocatable, intent(out) :: error
+
+        call advect_standard(h_order=3,v_order=1,error=error)
+
+    end subroutine test_adv_h3_v1
+
+    subroutine test_adv_h5_v1(error)
+        type(error_type), allocatable, intent(out) :: error
+
+        call advect_standard(h_order=5,v_order=1,error=error)
+
+    end subroutine test_adv_h5_v1
+
+    subroutine test_adv_h3_v3(error)
+        type(error_type), allocatable, intent(out) :: error
+
+        call advect_standard(h_order=3,v_order=3,error=error)
+
+    end subroutine test_adv_h3_v3
+
+    subroutine test_adv_h5_v3(error)
+        type(error_type), allocatable, intent(out) :: error
+
+        call advect_standard(h_order=5,v_order=3,error=error)
+
+    end subroutine test_adv_h5_v3
+
+    subroutine test_adv_h3_v5(error)
+        type(error_type), allocatable, intent(out) :: error
+
+        call advect_standard(h_order=3,v_order=5,error=error)
+
+    end subroutine test_adv_h3_v5
+
+    subroutine test_adv_h5_v5(error)
+        type(error_type), allocatable, intent(out) :: error
+
+        call advect_standard(h_order=5,v_order=5,error=error)
+
+    end subroutine test_adv_h5_v5
+
     subroutine advect_standard(h_order,v_order,error)
         integer, intent(in) :: h_order,v_order
         type(error_type), allocatable, intent(out) :: error
 
-        integer :: my_index, ierr
-        type(grid_t) :: grid
-        type(MPI_Comm) :: comms
+        type(domain_t) :: domain
+        type(options_t) :: options
+        type(variable_t) :: var
+        type(timer_t) :: flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time
+        real :: max_u, max_v, max_w, max_wind
+        real :: dt, t_step_f, initial_val, spatial_constraint
+        integer :: fluxcorr
+        integer :: i,j,k,l
 
-        call MPI_Comm_Rank(MPI_COMM_WORLD,my_index,ierr)
-        my_index = my_index + 1
+        initial_val = 273.0
+        STD_OUT_PE = .False.
 
-        !set the comm MPI_com type to be MPI_COMM_WORLD
-        CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
+        call options%init()
+        options%domain%init_conditions_file = 'tests/test_data/static_data/flat_plane_250m.nc'
 
-        !initialize grids
-        call grid%set_grid_dimensions( 20, 20, 20, image=my_index, comms=comms, adv_order=3)
+        ! check that the init_conditions_file exists
+        if (trim(options%domain%init_conditions_file) /= '') then
+            call check_file_exists(trim(options%domain%init_conditions_file), message='The test domain file does not exist. Ensure that the HICAR_test repo was installed to build/test when building HICAR.')
+        endif
+
+        options%domain%dx = 250.0
+        options%domain%nz = 20
+        options%domain%dz_levels = 50.0
+        options%domain%sleve = .True.
+
+        options%domain%lat_hi = 'lat'
+        options%domain%lon_hi = 'lon'
+        options%domain%hgt_hi = 'topo'
+        options%physics%advection = kADV_STD
+
+        ! setup t_step and fluxcorr based on the horizontal and vertical orders
+        if (h_order == 1) then
+            options%time%cfl_reduction_factor = 1.0
+            options%adv%flux_corr = 0
+            options%time%RK3 = .False.
+        else if (h_order == 3) then
+            options%time%cfl_reduction_factor = time_step_factor(1)
+            options%adv%flux_corr = 1
+            options%time%RK3 = .true.
+        else if (h_order == 5) then
+            options%time%cfl_reduction_factor = time_step_factor(2)
+            options%adv%flux_corr = 1
+            options%time%RK3 = .true.
+        end if
+
+        options%adv%h_order = h_order
+        options%adv%v_order = v_order
+        options%adv%advect_density = .False.
+
+        ! Initialize domain and advection modules
+        domain%compute_comms = MPI_COMM_WORLD
+
+        call adv_var_request(options)
+        call domain%init(options,1)
+
+        call adv_init(domain,options)
+
+        ! Set values for u,v,w and the tracer to advect
+        domain%u%data_3d =  10.0
+        domain%v%data_3d =  -10.0
+        domain%w%data_3d =  0.0
+
+        do i = 1, domain%adv_vars%n_vars
+            var = domain%adv_vars%var_list(i)%var
+
+            var%data_3d = -99999.0
+            var%data_3d(var%grid%its:var%grid%ite,:,var%grid%jts:var%grid%jte) = initial_val
+
+            !copy over initial value like "forcing" at the domain edges
+            if (domain%north_boundary) var%data_3d(:,:,var%grid%jte+1:var%grid%jme) = initial_val
+            if (domain%south_boundary) var%data_3d(:,:,var%grid%jms:var%grid%jts-1) = initial_val
+            if (domain%east_boundary) var%data_3d(var%grid%ite+1:var%grid%ime,:,:) = initial_val
+            if (domain%west_boundary) var%data_3d(var%grid%ims:var%grid%its-1,:,:) = initial_val
+        end do
+
+        ! exchange to get each others values in the halo regions
+        call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars)
+
+        dt = compute_dt(domain%dx, domain%u%data_3d, domain%v%data_3d, &
+                domain%w%data_3d, domain%density%data_3d, options%domain%dz_levels, &
+                domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
+                domain%its, domain%ite, domain%jts, domain%jte, &
+                options%time%cfl_reduction_factor, &
+                use_density=.false.)
+
+        STD_OUT_PE = .True.
+
+        ! loop 10 times, calling advect and halo_exchange
+        do l = 1, 100
+            call advect(domain, options, dt, flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
+            call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars)
+        end do
+
+        ! test that all of the tile indices of temperature for the domain object are the same as the intial value
+        do i = 1, domain%adv_vars%n_vars
+            var = domain%adv_vars%var_list(i)%var
+            if (.not.(ALL(var%data_3d(var%grid%its:var%grid%ite,:,var%grid%jts:var%grid%jte) == initial_val))) then
+                write(*,*) "Initial value (expected) is: ", initial_val
+                write(*,*) "Max val of advected variable in tile: ", maxval(var%data_3d(var%grid%its:var%grid%ite,:,var%grid%jts:var%grid%jte))
+                write(*,*) "Min val of advected variable in tile: ", minval(var%data_3d(var%grid%its:var%grid%ite,:,var%grid%jts:var%grid%jte))    
+                call test_failed(error,"advect_standard","Tile data is not equal to initial value")
+                return
+            end if
+        end do
 
     end subroutine advect_standard
 

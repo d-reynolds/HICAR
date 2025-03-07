@@ -34,7 +34,7 @@ module time_step
     double precision  :: future_dt_seconds = DT_BIG
     integer :: max_i, max_j, max_k
 
-    public :: step
+    public :: step, compute_dt
 
 contains
 

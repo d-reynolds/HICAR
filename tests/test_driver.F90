@@ -11,6 +11,7 @@ program test_driver
     use test_advect, only : collect_advect_suite
     use mpi_f08
     use iso_fortran_env
+    use icar_constants, only: STD_OUT_PE
     use string, only: to_lower
     implicit none
     integer :: stat, is, ierr, my_index, null_unit
@@ -45,6 +46,8 @@ program test_driver
         ! Redirect error output
         close(error_unit)
         open(error_unit, file=file, status='replace')
+    else
+        STD_OUT_PE = .False.
     end if
 
   
