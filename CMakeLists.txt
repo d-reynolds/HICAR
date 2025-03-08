@@ -116,6 +116,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${PETSC
 set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${PETSC}/lib/pkgconfig/" ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR})
 
 find_package(PkgConfig REQUIRED)
+include(FetchContent)
 
 # 1. Check if not already included via Cray Module and ftn
 # 2. If not included via Cray module, link to the package libraries manually
@@ -232,7 +233,6 @@ if (FSM)
 	find_library(FSM2_LIB NAMES FSM2 REQUIRED)
 	target_include_directories(hicar_lib PUBLIC ${FSM_DIR}/build)
 	target_link_libraries(hicar_lib PUBLIC ${FSM2_LIB})
-
 endif()
 
 target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
@@ -246,6 +246,25 @@ HICAR
   hicar_lib
   MPI::MPI_Fortran
 )
+
+# Fetch specific folders from icar_supporting_files repo
+FetchContent_Declare(
+	icar_supporting_files
+	GIT_REPOSITORY    https://github.com/NCAR/icar_supporting_files.git
+	GIT_TAG           main
+)
+
+# Download the repo but don't build it
+FetchContent_MakeAvailable(icar_supporting_files)
+
+# Copy only specific folders to the run directory
+file(COPY "${icar_supporting_files_SOURCE_DIR}/mp_support" DESTINATION "${PROJECT_SOURCE_DIR}/run")
+file(COPY "${icar_supporting_files_SOURCE_DIR}/rrtmg_support" DESTINATION "${PROJECT_SOURCE_DIR}/run")
+
+# Clean up downloaded repo to save space
+file(REMOVE_RECURSE "${icar_supporting_files_SOURCE_DIR}")
+file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/icar_supporting_files-subbuild")
+file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/icar_supporting_files-build")
 
 list(POP_BACK CMAKE_MESSAGE_INDENT)
 message(STATUS "...done searching for dependencies")
@@ -335,7 +354,7 @@ message(STATUS "...done auto-detecting the environment")
 ############## Set up the compiler options ###############
 
 if(MODE STREQUAL "debug")
-	# set(CMAKE_BUILD_TYPE Debug)
+	set(CMAKE_BUILD_TYPE Debug)
 	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_debug")
 
     if (COMPILER STREQUAL "gnu")
@@ -346,7 +365,7 @@ if(MODE STREQUAL "debug")
 		target_compile_options(HICAR PUBLIC -h noomp -c -eI -G0 -m2 -rl -R bcdsp) #-R cpbs --cray-print-opts
 	endif()
 elseif(MODE STREQUAL "debugslow")
-	# set(CMAKE_BUILD_TYPE Debug)
+	set(CMAKE_BUILD_TYPE Debug)
 
 	if (COMPILER STREQUAL "gnu")
 		target_compile_options(HICAR PUBLIC -c -g -ffree-line-length-none -Wconversion)
@@ -356,7 +375,7 @@ elseif(MODE STREQUAL "debugslow")
 		target_compile_options(HICAR PUBLIC -c -h noomp -eI -m 2 -O0 -g -R bcs)
 	endif()
 elseif(MODE STREQUAL "profile")
-	# set(CMAKE_BUILD_TYPE Profile)
+	set(CMAKE_BUILD_TYPE Profile)
 
 	if (COMPILER STREQUAL "gnu")
 		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fopt-info-missed=opt_info.txt -mfma -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
@@ -367,7 +386,7 @@ elseif(MODE STREQUAL "profile")
 		target_compile_options(HICAR PUBLIC -c -h noomp -eI -m 2 -O0 -hpl=my_program_debug.pl -g -R bcs)
 	endif()
 elseif(MODE STREQUAL "release")
-	# set(CMAKE_BUILD_TYPE Release)
+	set(CMAKE_BUILD_TYPE Release)
 	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR")
 
 	if (COMPILER STREQUAL "gnu")

@@ -53,39 +53,19 @@ fi
 # See if the uesr has already cloned the supporting files
 if [ ! -d ./rrtmg_support -o ! -d ./mp_support ]; then
 
-# Fetch HICAR supporting files from git repo:
-# Ask user if they want us to fetch supporting files
-echo
-echo Would you like to install supporting files needed 
-echo for the RRTMG radiaiton scheme
-echo and the ISHMAEL microphysics scheme?
-echo 
-echo This will clone the icar_supporting_files git
-echo repo to the parent directory of the HICAR repo
-echo
-read -p '>>(y/n):' ans
+	# Fetch HICAR supporting files from run to the input dir:
+	echo
+	echo 'Copying supporting files from the HICAR repo /run'
+	echo 'directory to ./input'
+	echo
+	echo 'These files were downloaded at configure time from the repo:'
+	echo 'https://github.com/NCAR/icar_supporting_files.git'
+	echo 
 
-if [ "$ans" = "y" ];then
 	cd $HICAR_dir
-	cd ..
-	if [ ! -d ./icar_supporting_files ]; then
-		git clone https://github.com/NCAR/icar_supporting_files.git
-	fi
-	cp -r icar_supporting_files/rrtmg_support $parent_dir/HICAR/input
-	cp -r icar_supporting_files/mp_support $parent_dir/HICAR/input
+	cp -r run/rrtmg_support $parent_dir/HICAR/input
+	cp -r run/mp_support $parent_dir/HICAR/input
 
-	echo
-	echo Supporting directories installed to ./input/mp_support and
-	echo ./input/rrtmg_support. 
-	echo They need to be in the same directory as the namelist 
-	echo used for a HICAR run to be found.
-else
-	#If the user decided not to...
-	echo
-	echo OK, you can always find them later at: 
-	echo https://github.com/NCAR/icar_supporting_files.git
-fi
-echo
 fi
 ####################################
 cd $parent_dir/HICAR

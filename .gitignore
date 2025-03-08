@@ -21,6 +21,7 @@ docs/doxygen_sqlite3.db
 */.vscode/*
 build/*
 bin/*
+run/*_support
 *code-workspace
 FSM2trans/build/*
 FSM2trans/lib/*
