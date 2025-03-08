@@ -325,7 +325,7 @@ contains
                 do i = i_s,i_e
                     u = W_m(i,kms+1,j)
                     q0  = q(i,kms+2,j);   q1  = q(i,kms+3,j)
-                    qn1 = q(i,kms-1,j);   qn2 = q(i,kms,j)
+                    qn1 = q(i,kms+1,j);   qn2 = q(i,kms,j)
                     
                     tmp = 7*(q0+qn1) - (q1+qn2)
                     tmp = u*tmp
@@ -583,7 +583,6 @@ contains
                enddo
             enddo
         else if (vorder==3) then
-        !else if (vorder==3) then
             coef = (1./12)
             do concurrent (j = j_s:j_e, k = kms+2:kme-1, i = i_s:i_e)
                 u = W_m(i,k-1,j)
@@ -632,7 +631,7 @@ contains
                 do i = i_s,i_e
                     u = W_m(i,kms+1,j)
                     q0  = q(i,kms+2,j);   q1  = q(i,kms+3,j)
-                    qn1 = q(i,kms-1,j);   qn2 = q(i,kms,j)
+                    qn1 = q(i,kms+1,j);   qn2 = q(i,kms,j)
                     
                     tmp = 7*(q0+qn1) - (q1+qn2)
                     tmp = u*tmp

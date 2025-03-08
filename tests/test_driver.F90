@@ -47,7 +47,7 @@ program test_driver
         close(error_unit)
         open(error_unit, file=file, status='replace')
     else
-        STD_OUT_PE = .False.
+        STD_OUT_PE = .True.
     end if
 
   

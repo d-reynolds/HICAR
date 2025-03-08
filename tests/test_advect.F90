@@ -112,7 +112,9 @@ module test_advect
 
         call options%init()
         options%domain%init_conditions_file = 'tests/test_data/static_data/flat_plane_250m.nc'
-
+        options%domain%hgt_hi = 'topo'
+        options%domain%lat_hi = 'lat'
+        options%domain%lon_hi = 'lon'
         ! check that the init_conditions_file exists
         if (trim(options%domain%init_conditions_file) /= '') then
             call check_file_exists(trim(options%domain%init_conditions_file), message='The test domain file does not exist. Ensure that the HICAR_test repo was installed to build/test when building HICAR.')

@@ -1233,13 +1233,26 @@ contains
 
         allocate(domain_options%dz_levels(domain_options%nz))
         
-        if (.not.(read_namelist)) return
+        ! These two variables are required to be set. See if they have been set. If we read the namelist, stop and warn the user. If we
+        ! didn't read the  namelist, this is by design (probably a test), so continue.
         
-        ! These two variables are required to be set. If we are not reading the namelist, we are doing a test run/have called this from init_test,
-        ! which will initialize these to some default value.
-        call set_nml_var(domain_options%init_conditions_file, init_conditions_file(n_indx), 'init_conditions_file', init_conditions_file(1))
-        call set_nml_var(domain_options%dx, dx(n_indx), 'dx', dx(1))
+        if (trim(init_conditions_file(n_indx)) /= kCHAR_NO_VAL) then
+            call set_nml_var(domain_options%init_conditions_file, init_conditions_file(n_indx), 'init_conditions_file', init_conditions_file(1))
+        else if (read_namelist) then
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            if (STD_OUT_PE) write(*,*) "  Error: init_conditions_file for nest ",n_indx, " not set in namelist"
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            stop
+        endif
 
+        if (dx(n_indx) /= kREAL_NO_VAL) then
+            call set_nml_var(domain_options%dx, dx(n_indx), 'dx', dx(1))
+        else if (read_namelist) then
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            if (STD_OUT_PE) write(*,*) "  Error: dx for nest ",n_indx, " not set in namelist"
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            stop
+        endif
         ! NOTE: hgt_hi has to be the first of the variables read
         call set_nml_var(domain_options%hgt_hi, hgt_hi(n_indx), 'hgt_hi',domain_options, hgt_hi(1))
         call set_nml_var(domain_options%landvar, landvar(n_indx), 'landvar',domain_options, landvar(1))
@@ -1274,7 +1287,8 @@ contains
         call set_nml_var(domain_options%aspect_angle_var, aspect_angle_var(n_indx), 'aspect_angle_var',domain_options, aspect_angle_var(1))
         call set_nml_var(domain_options%shd_var, shd_var(n_indx), 'shd_var',domain_options, shd_var(1))
 
-
+        if (.not.(read_namelist)) return
+        
         ! if nz wasn't specified in the namelist, we assume a HUGE number of levels
         ! so now we have to figure out what the actual number of levels read was
         if (ALL(dz_levels(:,n_indx)==kREAL_NO_VAL)) then
