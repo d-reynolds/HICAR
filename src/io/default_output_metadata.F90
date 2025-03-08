@@ -241,7 +241,7 @@ contains
     !!------------------------------------------------------------
     function get_varindx(var_name) result(indx)
         implicit none
-        character(len=kMAX_NAME_LENGTH), intent(in) :: var_name       
+        character(len=*), intent(in) :: var_name       
         integer                                     :: indx  ! function result
         type(variable_t)                            :: var
 
@@ -254,7 +254,7 @@ contains
         enddo
 
         if (indx>kMAX_STORAGE_VARS) then
-            if (STD_OUT_PE) write(*,*) "Invalid variable metadata requested, no metadata entry for var_name: ", var_name
+            if (STD_OUT_PE) write(*,*) "Invalid variable metadata requested, no metadata entry for var_name: ", trim(var_name)
         endif
 
     end function get_varindx

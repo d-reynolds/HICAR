@@ -208,8 +208,10 @@ endif()
 list(POP_BACK CMAKE_MESSAGE_INDENT)
 
 target_link_libraries(hicar_lib PUBLIC MPI::MPI_Fortran)
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_CXX)
+if(OpenMP_Fortran_FOUND)
+	target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_Fortran)
+elseif(OpenMP_CXX_FOUND)
+	target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_CXX)
 endif()
 target_link_libraries(hicar_lib PUBLIC ${FFTW_LIBRARIES})
 
@@ -378,6 +380,12 @@ elseif(MODE STREQUAL "release")
 	endif()
 endif()
 
+# Apply the same compile options to hicar_lib as are set on HICAR
+get_target_property(COMPILER_OPTIONS HICAR COMPILE_OPTIONS)
+if(COMPILER_OPTIONS)
+	target_compile_options(hicar_lib PUBLIC ${COMPILER_OPTIONS})
+endif()
+
 #set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${FFLAGS}")
 #set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LFLAGS}")
 
@@ -386,7 +394,7 @@ endif()
 
 ######################################################k#
 ############## Print User Information #################
-get_target_property(MAIN_CFLAGS HICAR COMPILE_OPTIONS)
+get_target_property(MAIN_CFLAGS hicar_lib COMPILE_OPTIONS)
 string(REGEX REPLACE ";" " " MAIN_CFLAGS "${MAIN_CFLAGS}")
 
 message(STATUS "")
