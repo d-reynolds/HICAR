@@ -788,7 +788,7 @@ contains
             !call init_iter_winds(domain)
         endif
 
-        if (options%wind%Sx) then
+        if (options%wind%Sx .and. .not.(allocated(domain%Sx))) then
             if (STD_OUT_PE) write(*,*) "    Calculating Sx and TPI for wind modification"
             call calc_TPI(domain, options)
             call calc_Sx(domain, options)
