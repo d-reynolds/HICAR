@@ -15,10 +15,10 @@ program test_driver
     use string, only: to_lower
     implicit none
     integer :: stat, is, ierr, my_index, null_unit
-    character(len=:), allocatable :: suite_name, test_name
+    character(len=:), allocatable :: suite_name, test_name, first_arg
     type(testsuite_type), allocatable :: testsuites(:)
     character(len=*), parameter :: fmt = '("#", *(1x, a))'
-    logical :: init_flag
+    logical :: init_flag, verbose
     logical :: no_test_run = .True.
     character(len=9) :: file
 
@@ -36,22 +36,6 @@ program test_driver
     call MPI_Comm_Rank(MPI_COMM_WORLD,my_index,ierr)
     my_index = my_index + 1
 
-    if (my_index /= 1) then
-        ! Redirect stdout and stderr to /dev/null for non-root processes
-        file = '.tmp_dupplicate_test_output'
-        open(newunit=null_unit, file=file, status='replace')
-        ! Redirect standard output
-        close(output_unit)
-        open(output_unit, file=file, status='replace')
-        ! Redirect error output
-        close(error_unit)
-        open(error_unit, file=file, status='replace')
-    else
-        STD_OUT_PE = .True.
-    end if
-
-  
-
 
     ! -------------------------------------------------------------------------------------------------
     ! -------------------------------------------------------------------------------------------------
@@ -67,14 +51,36 @@ program test_driver
     ! -------------------------------------------------------------------------------------------------
     ! -------------------------------------------------------------------------------------------------
 
+    verbose = .False.
+    call get_argument(1, first_arg)
 
-
-
-
-
-
-    call get_argument(1, suite_name)
-    call get_argument(2, test_name)
+    if (allocated(first_arg)) then
+        if (to_lower(first_arg) == '-v') then
+            verbose = .True.
+            call get_argument(2, suite_name)
+            call get_argument(3, test_name)
+        else
+            verbose = .False.
+            suite_name = first_arg
+            call get_argument(2, test_name)
+        endif
+    endif
+    if (.not.(verbose)) then
+        ! Check if the first argument is a test suite name
+        if (my_index /= 1) then
+            ! Redirect stdout and stderr to /dev/null for non-root processes
+            file = '.tmp_dupplicate_test_output'
+            open(newunit=null_unit, file=file, status='replace')
+            ! Redirect standard output
+            close(output_unit)
+            open(output_unit, file=file, status='replace')
+            ! Redirect error output
+            close(error_unit)
+            open(error_unit, file=file, status='replace')
+        else
+            STD_OUT_PE = .True.
+        endif
+    endif
 
     if (allocated(suite_name)) then
         if (.not.(to_lower(suite_name) == 'all')) then
