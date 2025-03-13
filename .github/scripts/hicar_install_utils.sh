@@ -17,6 +17,7 @@ if [ $# -eq 0 ] || [ $# -eq 1 -a \( "$1" == "-h" -o "$1" == "--help" \) ]; then
     echo "  ${bold}hicar_dependencies${normal}: install dependencies for HICAR"
     echo "  ${bold}install_zlib${normal}: install zlib"
     echo "  ${bold}install_hdf5${normal}: install hdf5"
+    echo "  ${bold}install_PETSc${normal}: install PETSc"
     echo "  ${bold}install_PnetCDF${normal}: install PnetCDF"
     echo "  ${bold}install_netcdf_c${normal}: install netcdf-c"
     echo "  ${bold}install_netcdf_fortran${normal}: install netcdf-fortran"
@@ -196,7 +197,7 @@ function install_netcdf_fortran {
     make install
 }
 
-function install_petsc {
+function install_PETSc {
     cd $WORKDIR
 
     if [ ! -d "$WORKDIR/petsc" ]; then
@@ -298,6 +299,8 @@ do
             install_zlib;;
         install_hdf5)
             install_hdf5;;
+        install_PETSc)
+	    install_PETSc;;
         install_PnetCDF)
             install_PnetCDF;;
         install_netcdf_c)

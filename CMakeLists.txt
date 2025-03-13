@@ -131,90 +131,25 @@ set (NETCDF_F90 "YES")
 find_package(MPI REQUIRED)
 find_package(OpenMP)
 find_package(FFTW REQUIRED)
-# if FFTW_DIR is empty
-if (NOT DEFINED FFTW_DIR OR FFTW_DIR STREQUAL "")
-	set(FFTW_DIR ${FFTW_INCLUDES})
-endif()
 find_package(NetCDF REQUIRED)
+find_package(PETSc REQUIRED)
 
-# The installed petsc package on cray machines (piz daint) somehow does not
-# automatically link to some dependencies of the petsc library, so we need to
-# manually link to them. This could be done by compiling the whole model with the
-# cray compiler flag --static, but this would also link to the static version of the
-# other libraries, which is not what we want. So we manually link to the petsc library
-# dependencies here.
-message(STATUS "Looking for PETSc...")
-list(APPEND CMAKE_MESSAGE_INDENT "  ")
-
-#First, try to find Petsc with just find_package
-if(PKG_CONFIG_FOUND)
-	message(STATUS "1. Trying to find PETSc with pkg-config...")
-
-	pkg_search_module(PETSC IMPORTED_TARGET PETSc)
-	
-	if(PETSC_FOUND AND NOT (DEFINED ENV{CRAYPE_VERSION} AND (PETSC MATCHES ".*cray.*")))
-		message(STATUS "PETSc found with pkg-config")
-		target_link_libraries(hicar_lib PUBLIC PkgConfig::PETSC)
-	elseif (EXISTS "${PETSC}/lib/petsc/conf/petscvariables")
-		message(STATUS "2. Trying to find PETSc by mimicking the cray-petsc makefile setup...")
-
-		# try to find PETSc by mimicking the makefile setup
-		# this is recommended on the PETSc site for makefiles:
-		# https://petsc.org/main/manual/getting_started/#writing-c-c-or-fortran-applications
-		# and the cray_PE currently does not robustly support using CMake for PETSc
-		# issue: (https://lists.mcs.anl.gov/pipermail/petsc-users/2020-March/040491.html)
-		file(READ "${PETSC}/lib/petsc/conf/petscvariables" MAKEFILE_CONTENTS)
-
-		# Convert the MAKEFILE_CONTENTS to a list of lines
-		string(REGEX REPLACE ";\\ ?" ";" MAKEFILE_CONTENTS "${MAKEFILE_CONTENTS}")
-		string(REPLACE "\n" ";" MAKEFILE_CONTENTS "${MAKEFILE_CONTENTS}")
-		list(REMOVE_DUPLICATES MAKEFILE_CONTENTS)
-		
-		# Initialize the PETSC_WITH_EXTERNAL_LIB variable
-		set(PETSC_WITH_EXTERNAL_LIB "")
-		
-		# Iterate through the list of lines
-		foreach(LINE ${MAKEFILE_CONTENTS})
-			# Try to match the PETSC_WITH_EXTERNAL_LIB definition
-			string(REGEX MATCH "PETSC_WITH_EXTERNAL_LIB = (.+)" MATCH_RESULT "${LINE}")
-		
-			# If a match is found, extract the value and break out of the loop
-			if(MATCH_RESULT)
-				string(REGEX REPLACE "PETSC_WITH_EXTERNAL_LIB = " "" PETSC_WITH_EXTERNAL_LIB "${MATCH_RESULT}")
-				message(STATUS "PETSC_WITH_EXTERNAL_LIB: ${PETSC_WITH_EXTERNAL_LIB}")
-				target_link_libraries(hicar_lib  PUBLIC ${PETSC_WITH_EXTERNAL_LIB})
-				break()
-			endif()
-		endforeach()
-
-		#If this doesn't work, and pkg-config was found, then just force linking to static libraries
-		if(PETSC_WITH_EXTERNAL_LIB STREQUAL "" AND PKG_CONFIG_FOUND)
-			message(WARNING "Failed to extract PETSC_WITH_EXTERNAL_LIB from Makefile")
-			message(STATUS "3. Trying to find PETSc by linking to static libraries...")
-			pkg_search_module(PETSC REQUIRED IMPORTED_TARGET PETSc)
-			if(PETSC_FOUND)
-				# Remove the petsc library from the list of libraries to link to
-				# the ftn wrapper will automatically link to the correct petsc library
-				list(REMOVE_ITEM PETSC_STATIC_LDFLAGS "-lpetsc")
-				# Link to the petsc library static dependencies
-				target_link_libraries(hicar_lib  PUBLIC ${PETSC_STATIC_LDFLAGS})
-			else()
-				message(FATAL_ERROR "PETSc not found")
-			endif()
-		endif()
-	else()
-                message(FATAL_ERROR "PETSc not found")
-	endif()
+if (PETSC_FOUND)
+	target_link_libraries(hicar_lib PUBLIC ${PETSC_LIBRARIES})
+	target_include_directories(hicar_lib PUBLIC ${PETSC_INCLUDES})
 endif()
-list(POP_BACK CMAKE_MESSAGE_INDENT)
 
-target_link_libraries(hicar_lib PUBLIC MPI::MPI_Fortran)
-if(OpenMP_Fortran_FOUND)
+
+if(OpenMP_CXX_FOUND)
+        target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_CXX)
+elseif(OpenMP_Fortran_FOUND)
 	target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_Fortran)
-elseif(OpenMP_CXX_FOUND)
-	target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_CXX)
 endif()
-target_link_libraries(hicar_lib PUBLIC ${FFTW_LIBRARIES})
+
+if (FFTW_FOUND)
+	target_link_libraries(hicar_lib PUBLIC ${FFTW_LIBRARIES})
+	target_include_directories(hicar_lib PUBLIC ${FFTW_INCLUDES})
+endif()
 
 if (NETCDF_FOUND)
 	#This is the most robust way to find the NetCDF flags -- covering both custom installs, static or shared, and cray PEs
@@ -226,6 +161,7 @@ if (NETCDF_FOUND)
 	#else hope that the library flags as found by find_package are enough (should be as long as netCDF is a shared library)
 		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
 	endif()
+	target_include_directories(hicar_lib PUBLIC ${NETCDF_INCLUDES})
 endif()
 
 
@@ -235,17 +171,20 @@ if (FSM)
 	target_link_libraries(hicar_lib PUBLIC ${FSM2_LIB})
 endif()
 
-target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(hicar_lib PUBLIC MPI::MPI_Fortran)
 target_include_directories(hicar_lib PUBLIC ${MPI_INCLUDE_DIR})
-target_include_directories(hicar_lib PUBLIC ${FFTW_INCLUDES})
-target_include_directories(hicar_lib PUBLIC ${NETCDF_INCLUDES})
 
-target_link_libraries(
-HICAR
-  PRIVATE
-  hicar_lib
-  MPI::MPI_Fortran
-)
+# add include directory for the model itself
+target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
+
+
+# link the hicar_lib library to the HICAR executable
+target_link_libraries(HICAR PUBLIC hicar_lib)
+###########################################################
+
+
+###########################################################
+############### Download supporting run files ##############
 
 # Fetch specific folders from icar_supporting_files repo
 FetchContent_Declare(
@@ -416,6 +355,11 @@ endif()
 get_target_property(MAIN_CFLAGS hicar_lib COMPILE_OPTIONS)
 string(REGEX REPLACE ";" " " MAIN_CFLAGS "${MAIN_CFLAGS}")
 
+# if FFTW_DIR is empty
+if (NOT DEFINED FFTW_DIR OR FFTW_DIR STREQUAL "")
+	set(FFTW_DIR ${FFTW_INCLUDES})
+endif()
+
 message(STATUS "")
 message(STATUS "--------------------------------------------------------------------------------------------------------------------")
 message(STATUS "")
@@ -425,7 +369,7 @@ message(STATUS "  ${CMAKE_Fortran_COMPILER} ${MAIN_CFLAGS}")
 message(STATUS "")
 message(STATUS "Libraries were searched for in the following directories:")
 message(STATUS "  NetCDF: ${NETCDF_DIR}")
-message(STATUS "  PETSc:  ${PETSC}")
+message(STATUS "  PETSc:  ${PETSC_DIR}/${PETSC_ARCH}")
 message(STATUS "  FFTW:   ${FFTW_DIR}")
 message(STATUS "  MPI:    ${MPI_DIR}")
 if (FSM)
