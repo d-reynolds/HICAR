@@ -136,7 +136,10 @@ module test_halo_exch
         integer :: my_index
         integer :: ierr
         type(MPI_Comm) :: comms
-        logical :: batch, corners
+        logical :: batch, corners, interior
+        logical :: north, south, east, west
+        logical :: northeast, northwest, southeast, southwest
+        integer :: i, j, k
         character(len=100) :: test_str
     
         batch = .false.
@@ -162,17 +165,72 @@ module test_halo_exch
         call halo%init(exch_vars, adv_vars, grid, comms)
         
         ! Initialize fields with my_index values
-        var%data_3d = my_index
+        !var%data_3d = my_index
 
+        do i = grid%its, grid%ite-grid%nx_e
+            do j = grid%jts, grid%jte-grid%ny_e
+                do k = 1, grid%kts
+                    ! Set the interior values to the index values
+                    var%data_3d(i,k,j) = i+(j-1)*grid%nx_global
+                end do
+            end do
+        end do
         if (batch) then
             call halo%batch_exch(exch_vars, adv_vars)
         else
             call halo%exch_var(var, corners=corners)
         endif
 
+        ! now loop through all memory indices and check that the value in var%data_3d
+        ! is equal to the expected value. If the value is not equal to the expected value
+        ! check where we are (if we are in the middle, edge, or corner) and set the appropriate
+        ! flag to false.
+
+        interior = .True.
+        north = .True.
+        south = .True.
+        east = .True.
+        west = .True.
+        northeast = .True.
+        northwest = .True.
+        southeast = .True.
+        southwest = .True.
+
+        do i = grid%ims, grid%ime
+            do j = grid%jms, grid%jme
+                do k = 1, grid%kms
+                    if (var%data_3d(i,k,j) /= i+(j-1)*grid%nx_global) then
+                        if (i < grid%its) then
+                            if (j < grid%jts) then
+                                southwest = .False.
+                            elseif (j > grid%jte-grid%ny_e) then
+                                northwest = .False.
+                            else
+                                west = .False.
+                            endif
+                        elseif (i > grid%ite-grid%nx_e) then
+                            if (j < grid%jts) then
+                                southeast = .False.
+                            elseif (j > grid%jte-grid%ny_e) then
+                                northeast = .False.
+                            else
+                                east = .False.
+                            endif
+                        elseif (j < grid%jts) then
+                            south = .False.
+                        elseif (j > grid%jte-grid%ny_e) then
+                            north = .False.
+                        else
+                            interior = .False.
+                        endif
+                    endif
+                end do
+            end do
+        end do
+
         ! Verify exchange worked
         ! check that all of the interior values remained unchanged
-        if (.not.(ALL(var%data_3d(grid%its:grid%ite,:,grid%jts:grid%jte) == my_index))) then
+        if (.not.(interior)) then
             call test_failed(error, "Halo exch failed", "variable interior overwritten, "//trim(test_str))
             return
         endif
@@ -180,7 +238,7 @@ module test_halo_exch
         ! check if this image is not on the eastern boundary
         if (.not.(grid%ximg == grid%ximages)) then
             !check that the eastern halo is filled with the value of my_index for the eastern neighbor
-            if (.not.(ALL(var%data_3d((grid%ite+1):grid%ime,:,grid%jts:grid%jte) == my_index+1))) then
+            if (.not.(east)) then
                 call test_failed(error, "Halo exch failed", "Failed for eastern halo exchange, "//trim(test_str))
                 return
             endif
@@ -189,7 +247,7 @@ module test_halo_exch
         ! check if this image is not on the western boundary
         if (.not.(grid%ximg == 1)) then
             !check that the western halo is filled with the value of my_index for the western neighbor
-            if (.not.(ALL(var%data_3d(grid%ims:grid%its-1,:,grid%jts:grid%jte) == my_index-1))) then
+            if (.not.(west)) then
                 call test_failed(error, "Halo exch failed", "Failed for western halo exchange, "//trim(test_str))
                 return
             endif
@@ -198,7 +256,7 @@ module test_halo_exch
         ! check if this image is not on the southern boundary
         if (.not.(grid%yimg == 1)) then
             !check that the southern halo is filled with the value of my_index for the southern neighbor
-            if (.not.(ALL(var%data_3d(grid%its:grid%ite,:,grid%jms:grid%jts-1) == my_index-grid%ximages))) then
+            if (.not.(south)) then
                 call test_failed(error, "Halo exch failed", "Failed for southern halo exchange, "//trim(test_str))
                 return
             endif
@@ -207,7 +265,7 @@ module test_halo_exch
         ! check if this image is not on the northern boundary
         if (.not.(grid%yimg == grid%yimages)) then
             !check that the northern halo is filled with the value of my_index for the northern neighbor
-            if (.not.(ALL(var%data_3d(grid%its:grid%ite,:,grid%jte+1:grid%jme) == my_index+grid%ximages))) then
+            if (.not.(north)) then
                 call test_failed(error, "Halo exch failed", "Failed for northern halo exchange, "//trim(test_str))
                 return
             endif
@@ -218,10 +276,10 @@ module test_halo_exch
         ! if this image is in the north eastern corner
         if ((grid%yimg == 1 .and. grid%ximg == 1)) then
             !check that the north eastern corner halo is filled with the value of my_index for the north eastern neighbor
-            if (.not.(ALL(var%data_3d(grid%ite+1:grid%ime,:,grid%jte+1:grid%jme) == my_index+grid%ximages+1))) then
-                write(*,*) "my_index is: ", my_index
-                write(*,*) "expected value is: ", my_index+grid%ximages+1
-                write(*,*) "corner data is: ", var%data_3d(grid%ite+1:grid%ime,1,grid%jte+1:grid%jme)
+            if (.not.(northeast)) then
+                ! write(*,*) "my_index is: ", my_index
+                ! write(*,*) "expected value is: ", my_index+grid%ximages+1
+                write(*,*) "corner data is: ", var%data_3d(grid%ite:grid%ime,1,grid%jte:grid%jme)
                 call test_failed(error, "Halo exch failed", "Failed for north eastern halo exchange, "//trim(test_str))
                 return
             endif
@@ -230,9 +288,9 @@ module test_halo_exch
         ! if this image is in the north western corner
         if ((grid%yimg == 1 .and. grid%ximg == grid%ximages)) then
             !check that the north western corner halo is filled with the value of my_index for the north western neighbor
-            if (.not.(ALL(var%data_3d(grid%ims:grid%its-1,:,grid%jte+1:grid%jme) == my_index+grid%ximages-1))) then
-                write(*,*) "my_index is: ", my_index
-                write(*,*) "expected value is: ", my_index+grid%ximages-1
+            if (.not.(northwest)) then
+                ! write(*,*) "my_index is: ", my_index
+                ! write(*,*) "expected value is: ", my_index+grid%ximages-1
                 write(*,*) "corner data is: ", var%data_3d(grid%ims:grid%its-1,1,grid%jte+1:grid%jme)
                 call test_failed(error, "Halo exch failed", "Failed for north western halo exchange, "//trim(test_str))
                 return
@@ -242,22 +300,21 @@ module test_halo_exch
         ! if this image is in the south eastern corner
         if ((grid%yimg == grid%yimages .and. grid%ximg == 1)) then
             !check that the south eastern corner halo is filled with the value of my_index for the south eastern neighbor
-            if (.not.(ALL(var%data_3d(grid%ite+1:grid%ime,:,grid%jms:grid%jts-1) == my_index-grid%ximages+1))) then
-                write(*,*) "my_index is: ", my_index
-                write(*,*) "expected value is: ", my_index-grid%ximages+1
+            if (.not.(southeast)) then
+                ! write(*,*) "my_index is: ", my_index
+                ! write(*,*) "expected value is: ", my_index-grid%ximages+1
                 write(*,*) "corner data is: ", var%data_3d(grid%ite+1:grid%ime,1,grid%jms:grid%jts-1)
                 call test_failed(error, "Halo exch failed", "Failed for south eastern halo exchange, "//trim(test_str))
                 return
-                stop
             endif
         endif
 
         ! if this image is in the south western corner
         if ((grid%yimg == grid%yimages .and. grid%ximg == grid%ximages)) then
             !check that the south western corner halo is filled with the value of my_index for the south western neighbor
-            if (.not.(ALL(var%data_3d(grid%ims:grid%its-1,:,grid%jms:grid%jts-1) == my_index-grid%ximages-1))) then
-                write(*,*) "my_index is: ", my_index
-                write(*,*) "expected value is: ", my_index-grid%ximages-1
+            if (.not.(southwest)) then
+                ! write(*,*) "my_index is: ", my_index
+                ! write(*,*) "expected value is: ", my_index-grid%ximages-1
                 write(*,*) "corner data is: ", var%data_3d(grid%ims:grid%its-1,1,grid%jms:grid%jts-1)
                 call test_failed(error, "Halo exch failed", "Failed for south western halo exchange, "//trim(test_str))
                 return

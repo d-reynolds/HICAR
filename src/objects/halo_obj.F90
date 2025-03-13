@@ -978,7 +978,7 @@ module subroutine put_north(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=0!var%ystag
+  offs=var%ystag
   disp = 0
   msg_size = 1
 
@@ -1018,7 +1018,7 @@ module subroutine put_south(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=0!var%ystag
+  offs=var%ystag
   
   disp = 0
   msg_size = 1
@@ -1057,7 +1057,7 @@ module subroutine put_east(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=0!var%xstag
+  offs=var%xstag
   disp = 0
   msg_size = 1
 
@@ -1098,7 +1098,7 @@ module subroutine put_west(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=0!var%xstag
+  offs=var%xstag
   disp = 0
   msg_size = 1
 
@@ -1129,29 +1129,30 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
-  integer :: n, nx, offs
+  integer :: n, nx, offs_x, offs_y
   logical :: dqdt
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=0!var%ystag
+  offs_y=var%ystag
+  offs_x=var%xstag
   
   if (var%two_d) then
       n = ubound(var%data_2d,2)
       nx = size(var%data_2d,1)
       if (dqdt) then
-          var%dqdt_2d(var%grid%its:var%grid%ite,n-this%halo_size+1:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size,1,1:this%halo_size)
+          var%dqdt_2d(var%grid%its:var%grid%ite-offs_x,n-this%halo_size+1-offs_y:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,1,1:(this%halo_size+offs_y))
       else
-          var%data_2d(var%grid%its:var%grid%ite,n-this%halo_size+1:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size,1,1:this%halo_size)
+          var%data_2d(var%grid%its:var%grid%ite-offs_x,n-this%halo_size+1-offs_y:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,1,1:(this%halo_size+offs_y))
       endif
   else
       n = ubound(var%data_3d,3)
       nx = size(var%data_3d,1)
       if (dqdt) then
-          var%dqdt_3d(var%grid%its:var%grid%ite,var%grid%kts:var%grid%kte,n-this%halo_size+1:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size,var%grid%kts:var%grid%kte,1:this%halo_size)
+          var%dqdt_3d(var%grid%its:var%grid%ite-offs_x,var%grid%kts:var%grid%kte,n-this%halo_size+1-offs_y:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,var%grid%kts:var%grid%kte,1:(this%halo_size+offs_y))
       else
-          var%data_3d(var%grid%its:var%grid%ite,var%grid%kts:var%grid%kte,n-this%halo_size+1:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size,var%grid%kts:var%grid%kte,1:this%halo_size)
+          var%data_3d(var%grid%its:var%grid%ite-offs_x,var%grid%kts:var%grid%kte,n-this%halo_size+1-offs_y:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,var%grid%kts:var%grid%kte,1:(this%halo_size+offs_y))
       endif
   endif
 end subroutine
@@ -1160,30 +1161,31 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
-  integer :: start, nx, offs
+  integer :: start, nx, offs_y, offs_x
   logical :: dqdt
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=0!var%ystag
- 
+  offs_y=var%ystag
+  offs_x=var%xstag
+
   
   if (var%two_d) then
       start = lbound(var%data_2d,2)
       nx = size(var%data_2d,1)
       if (dqdt) then
-          var%dqdt_2d(var%grid%its:var%grid%ite,start:start+this%halo_size-1+offs) = this%south_in_3d(1+this%halo_size:nx-this%halo_size,1,1:(this%halo_size+offs))
+          var%dqdt_2d(var%grid%its:var%grid%ite-offs_x,start:start+this%halo_size-1) = this%south_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,1,1:this%halo_size)
       else
-          var%data_2d(var%grid%its:var%grid%ite,start:start+this%halo_size-1+offs) = this%south_in_3d(1+this%halo_size:nx-this%halo_size,1,1:(this%halo_size+offs))
+          var%data_2d(var%grid%its:var%grid%ite-offs_x,start:start+this%halo_size-1) = this%south_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,1,1:this%halo_size)
       endif
   else
       start = lbound(var%data_3d,3)
       nx = size(var%data_3d,1)
       if (dqdt) then
-          var%dqdt_3d(var%grid%its:var%grid%ite,var%grid%kts:var%grid%kte,start:start+this%halo_size-1+offs) = this%south_in_3d(1+this%halo_size:nx-this%halo_size,var%grid%kts:var%grid%kte,1:(this%halo_size+offs))
+          var%dqdt_3d(var%grid%its:var%grid%ite-offs_x,var%grid%kts:var%grid%kte,start:start+this%halo_size-1) = this%south_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,var%grid%kts:var%grid%kte,1:this%halo_size)
       else
-          var%data_3d(var%grid%its:var%grid%ite,var%grid%kts:var%grid%kte,start:start+this%halo_size-1+offs) = this%south_in_3d(1+this%halo_size:nx-this%halo_size,var%grid%kts:var%grid%kte,1:(this%halo_size+offs))
+          var%data_3d(var%grid%its:var%grid%ite-offs_x,var%grid%kts:var%grid%kte,start:start+this%halo_size-1) = this%south_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,var%grid%kts:var%grid%kte,1:this%halo_size)
       endif
   endif
 end subroutine
@@ -1192,29 +1194,30 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
-  integer :: n, ny, offs
+  integer :: n, ny, offs_x, offs_y
   logical :: dqdt
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=0!var%xstag
+  offs_y=var%ystag
+  offs_x=var%xstag
 
   if (var%two_d) then
       n = ubound(var%data_2d,1)
       ny = size(var%data_2d,2)
       if (dqdt) then
-          var%dqdt_2d(n-this%halo_size+1:n,var%grid%jts:var%grid%jte) = this%east_in_3d(1:this%halo_size,1,1+this%halo_size:ny-this%halo_size)
+          var%dqdt_2d(n-this%halo_size+1-offs_x:n,var%grid%jts:var%grid%jte-offs_y) = this%east_in_3d(1:(this%halo_size+offs_x),1,1+this%halo_size:ny-this%halo_size-offs_y)
       else
-          var%data_2d(n-this%halo_size+1:n,var%grid%jts:var%grid%jte) = this%east_in_3d(1:this%halo_size,1,1+this%halo_size:ny-this%halo_size)
+          var%data_2d(n-this%halo_size+1-offs_x:n,var%grid%jts:var%grid%jte-offs_y) = this%east_in_3d(1:(this%halo_size+offs_x),1,1+this%halo_size:ny-this%halo_size-offs_y)
       endif
   else
       n = ubound(var%data_3d,1)
       ny = size(var%data_3d,3)
       if (dqdt) then
-          var%dqdt_3d(n-this%halo_size+1:n,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte) = this%east_in_3d(1:this%halo_size,var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size)
+          var%dqdt_3d(n-this%halo_size+1-offs_x:n,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte-offs_y) = this%east_in_3d(1:(this%halo_size+offs_x),var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size-offs_y)
       else
-          var%data_3d(n-this%halo_size+1:n,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte) = this%east_in_3d(1:this%halo_size,var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size)
+          var%data_3d(n-this%halo_size+1-offs_x:n,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte-offs_y) = this%east_in_3d(1:(this%halo_size+offs_x),var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size-offs_y)
       endif
   endif
 end subroutine
@@ -1223,29 +1226,30 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
-  integer :: start, ny, offs
+  integer :: start, ny, offs_x, offs_y
   logical :: dqdt
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs=0!var%xstag
+  offs_y=var%ystag
+  offs_x=var%xstag
   
   if (var%two_d) then
       start = lbound(var%data_2d,1)
       ny = size(var%data_2d,2)
       if (dqdt) then
-          var%dqdt_2d(start:start+this%halo_size-1+offs,var%grid%jts:var%grid%jte) = this%west_in_3d(1:(this%halo_size+offs),1,1+this%halo_size:ny-this%halo_size)
+          var%dqdt_2d(start:start+this%halo_size-1,var%grid%jts:var%grid%jte-offs_y) = this%west_in_3d(1:this%halo_size,1,1+this%halo_size:ny-this%halo_size-offs_y)
       else
-          var%data_2d(start:start+this%halo_size-1+offs,var%grid%jts:var%grid%jte) = this%west_in_3d(1:(this%halo_size+offs),1,1+this%halo_size:ny-this%halo_size)
+          var%data_2d(start:start+this%halo_size-1,var%grid%jts:var%grid%jte-offs_y) = this%west_in_3d(1:this%halo_size,1,1+this%halo_size:ny-this%halo_size-offs_y)
       endif
   else
       start = lbound(var%data_3d,1)
       ny = size(var%data_3d,3)
       if (dqdt) then
-          var%dqdt_3d(start:start+this%halo_size-1+offs,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte) = this%west_in_3d(1:(this%halo_size+offs),var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size)
+          var%dqdt_3d(start:start+this%halo_size-1,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte-offs_y) = this%west_in_3d(1:this%halo_size,var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size-offs_y)
       else
-          var%data_3d(start:start+this%halo_size-1+offs,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte) = this%west_in_3d(1:(this%halo_size+offs),var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size)
+          var%data_3d(start:start+this%halo_size-1,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte-offs_y) = this%west_in_3d(1:this%halo_size,var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size-offs_y)
       endif
   endif
 end subroutine
@@ -1257,29 +1261,31 @@ module subroutine put_northeast(this,var,do_dqdt)
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
   logical :: dqdt
-  integer :: msg_size
+  integer :: msg_size, offs_x, offs_y
   INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
+  offs_x=var%xstag
+  offs_y=var%ystag
   disp = 0
   msg_size = 1
 
   if (var%two_d) then
       if (dqdt) then
-          call MPI_Put(var%dqdt_2d(var%grid%ite-this%halo_size+1,var%grid%jte-this%halo_size+1), msg_size, &
+          call MPI_Put(var%dqdt_2d(var%grid%ite-this%halo_size+1-offs_x,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
       else
-          call MPI_Put(var%data_2d(var%grid%ite-this%halo_size+1,var%grid%jte-this%halo_size+1), msg_size, &
+          call MPI_Put(var%data_2d(var%grid%ite-this%halo_size+1-offs_x,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
       endif
   else
       if (dqdt) then
-          call MPI_Put(var%dqdt_3d(var%grid%ite-this%halo_size+1,var%grid%kts,var%grid%jte-this%halo_size+1), msg_size, &
+          call MPI_Put(var%dqdt_3d(var%grid%ite-this%halo_size+1-offs_x,var%grid%kts,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
       else
-          call MPI_Put(var%data_3d(var%grid%ite-this%halo_size+1,var%grid%kts,var%grid%jte-this%halo_size+1), msg_size, &
+          call MPI_Put(var%data_3d(var%grid%ite-this%halo_size+1-offs_x,var%grid%kts,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
       endif
   endif
@@ -1290,28 +1296,31 @@ module subroutine put_northwest(this,var,do_dqdt)
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
   logical :: dqdt
-  integer :: msg_size
+  integer :: msg_size, offs_x, offs_y
   INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
+  offs_x=var%xstag
+  offs_y=var%ystag
   disp = 0
   msg_size = 1
+
   if (var%two_d) then
       if (dqdt) then
-          call MPI_Put(var%dqdt_2d(var%grid%its,var%grid%jte-this%halo_size+1), msg_size, &
+          call MPI_Put(var%dqdt_2d(var%grid%its,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
       else
-          call MPI_Put(var%data_2d(var%grid%its,var%grid%jte-this%halo_size+1), msg_size, &
+          call MPI_Put(var%data_2d(var%grid%its,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
       endif
   else
       if (dqdt) then
-          call MPI_Put(var%dqdt_3d(var%grid%its,var%grid%kts,var%grid%jte-this%halo_size+1), msg_size, &
+          call MPI_Put(var%dqdt_3d(var%grid%its,var%grid%kts,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
       else
-          call MPI_Put(var%data_3d(var%grid%its,var%grid%kts,var%grid%jte-this%halo_size+1), msg_size, &
+          call MPI_Put(var%data_3d(var%grid%its,var%grid%kts,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
       endif
   endif
@@ -1356,29 +1365,31 @@ module subroutine put_southeast(this,var,do_dqdt)
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
   logical :: dqdt
-  integer :: msg_size
+  integer :: msg_size, offs_x, offs_y
   INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
+  offs_x=var%xstag
+  offs_y=var%ystag
   disp = 0
   msg_size = 1
 
   if (var%two_d) then
       if (dqdt) then
-          call MPI_Put(var%dqdt_2d(var%grid%ite-this%halo_size+1,var%grid%jts), msg_size, &
+          call MPI_Put(var%dqdt_2d(var%grid%ite-this%halo_size+1-offs_x,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
       else
-          call MPI_Put(var%data_2d(var%grid%ite-this%halo_size+1,var%grid%jts), msg_size, &
+          call MPI_Put(var%data_2d(var%grid%ite-this%halo_size+1-offs_x,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
       endif
   else
       if (dqdt) then
-          call MPI_Put(var%dqdt_3d(var%grid%ite-this%halo_size+1,var%grid%kts,var%grid%jts), msg_size, &
+          call MPI_Put(var%dqdt_3d(var%grid%ite-this%halo_size+1-offs_x,var%grid%kts,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
       else
-          call MPI_Put(var%data_3d(var%grid%ite-this%halo_size+1,var%grid%kts,var%grid%jts), msg_size, &
+          call MPI_Put(var%data_3d(var%grid%ite-this%halo_size+1-offs_x,var%grid%kts,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
       endif
   endif
@@ -1389,23 +1400,26 @@ module subroutine retrieve_northeast_halo(this,var,do_dqdt)
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
-
+  integer :: offs_x, offs_y
   logical :: dqdt
+
+  offs_x=var%xstag
+  offs_y=var%ystag
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
   if (var%two_d) then
       if (dqdt) then
-          var%dqdt_2d(var%grid%ite+1:var%grid%ime,var%grid%jte+1:var%grid%jme) = this%east_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%dqdt_2d(var%grid%ite+1-offs_x:var%grid%ime,var%grid%jte+1-offs_y:var%grid%jme) = this%east_in_3d(1:(this%halo_size+offs_x),1,1:(this%halo_size+offs_y))
       else
-          var%data_2d(var%grid%ite+1:var%grid%ime,var%grid%jte+1:var%grid%jme) = this%east_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%data_2d(var%grid%ite+1-offs_x:var%grid%ime,var%grid%jte+1-offs_y:var%grid%jme) = this%east_in_3d(1:(this%halo_size+offs_x),1,1:(this%halo_size+offs_y))
       endif
   else
       if (dqdt) then
-          var%dqdt_3d(var%grid%ite+1:var%grid%ime,this%kts:this%kte,var%grid%jte+1:var%grid%jme) = this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%dqdt_3d(var%grid%ite+1-offs_x:var%grid%ime,this%kts:this%kte,var%grid%jte+1-offs_y:var%grid%jme) = this%east_in_3d(1:(this%halo_size+offs_x),this%kts:this%kte,1:(this%halo_size+offs_y))
       else
-          var%data_3d(var%grid%ite+1:var%grid%ime,this%kts:this%kte,var%grid%jte+1:var%grid%jme) = this%east_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%data_3d(var%grid%ite+1-offs_x:var%grid%ime,this%kts:this%kte,var%grid%jte+1-offs_y:var%grid%jme) = this%east_in_3d(1:(this%halo_size+offs_x),this%kts:this%kte,1:(this%halo_size+offs_y))
         endif
   endif
 end subroutine
@@ -1414,23 +1428,26 @@ module subroutine retrieve_northwest_halo(this,var,do_dqdt)
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
-
+  integer :: offs_x, offs_y
   logical :: dqdt
+
+  offs_x=var%xstag
+  offs_y=var%ystag
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
   if (var%two_d) then
       if (dqdt) then
-          var%dqdt_2d(var%grid%ims:var%grid%its-1,var%grid%jte+1:var%grid%jme) = this%north_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%dqdt_2d(var%grid%ims:var%grid%its-1,var%grid%jte+1-offs_y:var%grid%jme) = this%north_in_3d(1:this%halo_size,1,1:(this%halo_size+offs_y))
       else
-          var%data_2d(var%grid%ims:var%grid%its-1,var%grid%jte+1:var%grid%jme) = this%north_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%data_2d(var%grid%ims:var%grid%its-1,var%grid%jte+1-offs_y:var%grid%jme) = this%north_in_3d(1:this%halo_size,1,1:(this%halo_size+offs_y))
       endif
   else
       if (dqdt) then
-          var%dqdt_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jte+1:var%grid%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%dqdt_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jte+1-offs_y:var%grid%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:(this%halo_size+offs_y))
       else
-          var%data_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jte+1:var%grid%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%data_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jte+1-offs_y:var%grid%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:(this%halo_size+offs_y))
       endif
   endif
 end subroutine
@@ -1464,22 +1481,25 @@ module subroutine retrieve_southeast_halo(this,var,do_dqdt)
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
-
+  integer :: offs_x, offs_y
   logical :: dqdt
+
+  offs_x=var%xstag
+  offs_y=var%ystag
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   if (var%two_d) then
       if (dqdt) then
-          var%dqdt_2d(var%grid%ite+1:var%grid%ime,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%dqdt_2d(var%grid%ite+1-offs_x:var%grid%ime,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:(this%halo_size+offs_x),1,1:this%halo_size)
       else
-          var%data_2d(var%grid%ite+1:var%grid%ime,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:this%halo_size,1,1:this%halo_size)
+          var%data_2d(var%grid%ite+1-offs_x:var%grid%ime,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:(this%halo_size+offs_x),1,1:this%halo_size)
       endif
   else
       if (dqdt) then
-          var%dqdt_3d(var%grid%ite+1:var%grid%ime,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%dqdt_3d(var%grid%ite+1-offs_x:var%grid%ime,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:(this%halo_size+offs_x),this%kts:this%kte,1:this%halo_size)
       else
-          var%data_3d(var%grid%ite+1:var%grid%ime,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          var%data_3d(var%grid%ite+1-offs_x:var%grid%ime,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:(this%halo_size+offs_x),this%kts:this%kte,1:this%halo_size)
       endif
   endif
 end subroutine
