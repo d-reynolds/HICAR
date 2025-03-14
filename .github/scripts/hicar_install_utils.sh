@@ -209,7 +209,7 @@ function install_PETSc {
 
     # check if make file exists and if not, run configure
     if [ ! -f "Makefile" ]; then
-        ./configure --prefix=$INSTALLDIR --with-debugging=0 #&> config.log
+        ./configure --prefix=$INSTALLDIR --with-debugging=0 --download-fblaslapack=1 #&> config.log
     fi
 
     make -j 8
@@ -271,11 +271,15 @@ function gen_test_run_data {
 }
 
 function execute_test_run {
+    if [ ! -d "${GITHUB_WORKSPACE}/../Model_runs/" ]; then
+        gen_test_run_data
+    fi
     cd ${GITHUB_WORKSPACE}/../Model_runs/HICAR/input
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     export np=$(nproc --all)
     np=$((np/2))
     np=$((np>2?np:2))
+    np=$((np<2?np:21))
     echo "Starting HICAR run using ${np} processors"
     export OMP_NUM_THREADS=1
 
