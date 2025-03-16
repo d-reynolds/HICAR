@@ -89,8 +89,8 @@ function install_zlib {
     fi
 
     make -j 8 &> make.log
-    make check
     make install
+    make check
 }
 
 function install_hdf5 {
@@ -213,8 +213,8 @@ function install_PETSc {
     fi
 
     make -j 8
-    make check
     make install
+    make check
 
 }
 
