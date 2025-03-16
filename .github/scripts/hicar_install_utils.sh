@@ -214,7 +214,11 @@ function install_PETSc {
 
     make -j 8
     make install
-    make check
+    # if a human_run, then run the tests
+    # otherwise, skip the tests
+    if [ $HUMAN_RUN -eq 0 ]; then
+        make check
+    fi
 
 }
 

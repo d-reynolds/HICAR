@@ -370,7 +370,7 @@ contains
             var%attributes  = [attribute_t("standard_name", "grid_eastward_wind"),              &
                                attribute_t("long_name",     "Grid relative eastward wind"),     &
                                attribute_t("units",         "m s-1"),                           &
-                               attribute_t("coordinates",   "lat u_lon")]
+                               attribute_t("coordinates",   "u_lat u_lon")]
         
         !>------------------------------------------------------------
         !!  V  North South Winds
@@ -381,7 +381,7 @@ contains
             var%attributes  = [attribute_t("standard_name", "grid_northward_wind"),             &
                                attribute_t("long_name",     "Grid relative northward wind"),    &
                                attribute_t("units",         "m s-1"),                           &
-                               attribute_t("coordinates",   "v_lat lon")]
+                               attribute_t("coordinates",   "v_lat v_lon")]
         
         !>------------------------------------------------------------
         !!  W  Vertical Winds
@@ -2889,8 +2889,9 @@ contains
             var%name        = "u_lat"
             var%dimensions  = two_d_u_dimensions
             var%attributes  = [attribute_t("non_standard_name", "latitude_on_u_grid"),              &
-                               attribute_t("units",         "degrees_north")]
-        
+                               attribute_t("units",         "degrees_north"),                       &
+                               attribute_t("axis","Y")]
+
         !>------------------------------------------------------------
         !!  Longitude x coordinate on the U-grid
         !!------------------------------------------------------------
@@ -2898,8 +2899,9 @@ contains
             var%name        = "u_lon"
             var%dimensions  = two_d_u_dimensions
             var%attributes  = [attribute_t("non_standard_name", "longitude_on_u_grid"),             &
-                               attribute_t("units",         "degrees_east")]
-        
+                               attribute_t("units",         "degrees_east"),                        &
+                               attribute_t("axis","X")]
+
         !>------------------------------------------------------------
         !!  Latitude y coordinate on the V-grid
         !!------------------------------------------------------------
@@ -2907,8 +2909,9 @@ contains
             var%name        = "v_lat"
             var%dimensions  = two_d_v_dimensions
             var%attributes  = [attribute_t("non_standard_name", "latitude_on_v_grid"),              &
-                               attribute_t("units",         "degrees_north")]
-        
+                               attribute_t("units",         "degrees_north"),                       &
+                               attribute_t("axis","Y")]
+
         !>------------------------------------------------------------
         !!  Longitude x coordinate on the V-grid
         !!------------------------------------------------------------
@@ -2916,8 +2919,9 @@ contains
             var%name        = "v_lon"
             var%dimensions  = two_d_v_dimensions
             var%attributes  = [attribute_t("non_standard_name", "longitude_on_v_grid"),             &
-                               attribute_t("units",         "degrees_east")]
-        
+                               attribute_t("units",         "degrees_east"),                        &
+                               attribute_t("axis","X")]
+
 
         !! MJ added for needed new vars for FSM
         !>------------------------------------------------------------
@@ -3084,7 +3088,7 @@ contains
             if (var%dimensions(j) == "lon_u") then
                 var%xstag = 1
             endif
-            if (var%dimensions(j) == "lon_v") then
+            if (var%dimensions(j) == "lat_v") then
                 var%ystag = 1
             endif
         enddo
