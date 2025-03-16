@@ -227,7 +227,7 @@ function hicar_dependencies {
     sudo apt-get install libfftw3-dev
     # sudo apt-get install petsc-dev
 
-    install_petsc
+    install_PETSc
     install_zlib
     install_hdf5
     install_PnetCDF
