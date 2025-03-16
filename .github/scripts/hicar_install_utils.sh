@@ -216,7 +216,7 @@ function install_PETSc {
     make install
     # if a human_run, then run the tests
     # otherwise, skip the tests
-    if [ $HUMAN_RUN -eq 0 ]; then
+    if [ $HUMAN_RUN -eq 1 ]; then
         make check
     fi
 

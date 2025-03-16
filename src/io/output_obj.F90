@@ -25,15 +25,9 @@ contains
         this%n_vars = 0
         this%n_dims      = 0
         this%is_initialized = .True.
-        ! if this is a restart run, then there will be no initial call to save_out_file, meaning
-        ! that the output counter should be auto-incremented to 2 (1 + 1) here 
-        if (options%restart%restart) then
-            this%output_counter = 2
-            this%restart_counter = 2
-        else
-            this%output_counter = 1
-            this%restart_counter = 1
-        endif
+
+        this%output_counter = 1
+        this%restart_counter = 1
         
         this%its = its; this%ite = ite; this%kts = kts; this%kte = kte; this%jts = jts; this%jte = jte
         this%global_dim_len = (/ide, jde, kde/)
@@ -85,11 +79,19 @@ contains
             this%output_counter = find_timestep_in_filelist(file_list, 'time', options%general%start_time,this%output_fn,error=error)
         endif
         
+        !If there was no error getting output step, then a file already exists which contains our time step
         if (error == 0) then
             !Open output file, setting out_ncfile_id
             call open_file(this, this%output_fn, options%general%start_time, par_comms, out_var_indices)
             this%out_ncfile_id = this%active_nc_id
+
+            ! if this is a restart run, then there will be no initial call to save_out_file, meaning
+            ! that the output counter should be auto-incremented to 2 (1 + 1) here 
+            this%output_counter = this%output_counter + 1
+            this%restart_counter = this%restart_counter + 1
+        ! if there was an error getting the output step, then we assume that there is no file for the current output time step
         else
+            ! set back to 1, in case this was set when calling find_timestep_in_filelist
             this%output_counter = 1
             write(this%output_fn, '(A,A,".nc")')    &
                 trim(this%base_out_file_name),   &
