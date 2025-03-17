@@ -98,6 +98,12 @@ contains
                 call check_numeric_var_entry_type(default_val,var,name)
             endif
         endif
+
+        ! Check if the variable was not set. This would be an error
+        if (var == kREAL_NO_VAL .and. default_val /= kREAL_NO_VAL) then
+            if (STD_OUT_PE) write(*,*) "Error: '", trim(name), "' is not set to any value (i.e. is still ",trim(str(kREAL_NO_VAL)),")"
+            error stop
+        endif
     end subroutine set_real_nml_var
 
     subroutine set_real_list_nml_var(var, var_val, name, usr_default)
@@ -107,12 +113,11 @@ contains
         character(len=*), intent(in) :: name
         real, optional, intent(in) :: usr_default(:)
 
-        real :: minmax(2), scalar_default
-
         character(len=kMAX_STRING_LENGTH) :: default
+        real :: minmax(2), default_val
 
         default = trim(get_nml_var_default(name))
-        read(default,*) scalar_default
+        read(default,*) default_val
 
         if (present(usr_default)) then
             ! If the user set the first value, but not the rest, then they want this first value to apply to all nests
@@ -120,7 +125,7 @@ contains
                 var = usr_default
             elseif ( ALL(usr_default == kREAL_NO_VAL) ) then
                 ! If the user did not set the first value, then there is no entry at all, so set it to the default
-                var = scalar_default
+                var = default_val
             else
                 var = var_val
             endif
@@ -128,7 +133,7 @@ contains
         else
             var = var_val
             where (var == kREAL_NO_VAL)
-                var = scalar_default
+                var = default_val
             end where
         endif
 
@@ -149,6 +154,12 @@ contains
         endif
         if (any(var > minmax(2))) then
             if (STD_OUT_PE) write(*,*) "Error: '", trim(name), "' is greater than ", minmax(2), " : ", maxval(var)
+            error stop
+        endif
+
+        ! Check if the variable was not set. This would be an error
+        if (ALL(var == kREAL_NO_VAL .and. default_val /= kREAL_NO_VAL)) then
+            if (STD_OUT_PE) write(*,*) "Error: '", trim(name), "' is not set to any value (i.e. is still ",trim(str(kREAL_NO_VAL)),")"
             error stop
         endif
 
@@ -216,6 +227,12 @@ contains
             else
                 call check_numeric_var_entry_type((default_val*1.0),(var*1.0),name)
             endif
+        endif
+
+        ! Check if the variable was not set. This would be an error
+        if (var == kINT_NO_VAL .and. default_val /= kINT_NO_VAL) then
+            if (STD_OUT_PE) write(*,*) "Error: '", trim(name), "' is not set to any value (i.e. is still ",trim(str(kREAL_NO_VAL)),")"
+            error stop
         endif
 
     end subroutine set_integer_nml_var
@@ -334,7 +351,11 @@ contains
         endif
         var = var_val
 
-        !call check_var_entry_type("",var_val,name)
+        ! Check if the variable was not set. This would be an error
+        if (var == kCHAR_NO_VAL .and. default /= kCHAR_NO_VAL) then
+            if (STD_OUT_PE) write(*,*) "Error: '", trim(name), "' is not set to any value (i.e. is still ",(kCHAR_NO_VAL),")"
+            error stop
+        endif
 
     end subroutine set_char_forcing_nml_var
 
@@ -439,6 +460,14 @@ contains
                 call check_var_entry_type(default,var,name)
             endif
         endif
+
+
+        ! Check if the variable was not set. This would be an error
+        if (var == kCHAR_NO_VAL .and. default /= kCHAR_NO_VAL) then
+            if (STD_OUT_PE) write(*,*) "Error: '", trim(name), "' is not set to any value (i.e. is still ",(kCHAR_NO_VAL),")"
+            error stop
+        endif
+
     end subroutine set_char_domain_nml_var
 
     subroutine set_char_nml_var(var, var_val, name, usr_default)
@@ -483,6 +512,12 @@ contains
             else
                 call check_var_entry_type(default,var,name)
             endif
+        endif
+
+        ! Check if the variable was not set. This would be an error
+        if (var == kCHAR_NO_VAL .and. default /= kCHAR_NO_VAL) then
+            if (STD_OUT_PE) write(*,*) "Error: '", trim(name), "' is not set to any value (i.e. is still ",(kCHAR_NO_VAL),")"
+            error stop
         endif
 
     end subroutine set_char_nml_var

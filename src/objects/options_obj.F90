@@ -622,7 +622,7 @@ contains
 
         call set_nml_var(output_options%output_folder, output_folder(n_indx), 'output_folder', output_folder(1))
         call set_nml_var(output_options%outputinterval, outputinterval(n_indx), 'outputinterval', outputinterval(1))
-        call output_options%output_dt%set(seconds=outputinterval(n_indx))
+        call output_options%output_dt%set(seconds=output_options%outputinterval)
         call set_nml_var(output_options%frames_per_outfile, frames_per_outfile(n_indx), 'frames_per_outfile', frames_per_outfile(1))
 
     end subroutine output_namelist

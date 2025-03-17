@@ -14,8 +14,8 @@ module icar_constants
     logical :: STD_OUT_PE = .False.
     
     character(len=5), parameter :: kCHAR_NO_VAL = "-9999"
-    integer,          parameter :: kINT_NO_VAL = -9999
-    real,             parameter :: kREAL_NO_VAL = -9999.0
+    integer,          parameter :: kINT_NO_VAL = -123456
+    real,             parameter :: kREAL_NO_VAL = -123456.0
 
     !Flag-value to indicate a part of a read-write buffer which was never filled
     real, parameter :: kEMPT_BUFF = -123456789.0
