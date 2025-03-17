@@ -22,7 +22,8 @@
 # For details see the accompanying COPYING-CMAKE-SCRIPTS file.
 #
 
-cmake_policy(VERSION 3.3)
+# Always set the cmake min version.
+cmake_minimum_required(VERSION 3.20)
 
 set(PETSC_VALID_COMPONENTS
   C
