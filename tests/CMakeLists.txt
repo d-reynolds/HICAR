@@ -10,7 +10,7 @@ include(ExternalProject)
 
 
 # Define test data directory
-set(TEST_DATA_DIR "${CMAKE_CURRENT_BINARY_DIR}/test_data")
+set(TEST_DATA_DIR "${PROJECT_SOURCE_DIR}/Test_Cases")
 
 # Setup the external project for test data
 ExternalProject_Add(hicar_test_data

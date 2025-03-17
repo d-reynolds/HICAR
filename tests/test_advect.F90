@@ -111,7 +111,7 @@ module test_advect
         STD_OUT_PE = .False.
 
         call options%init()
-        options%domain%init_conditions_file = 'tests/test_data/static_data/flat_plane_250m.nc'
+        options%domain%init_conditions_file = '../tests/Test_Cases/domains/flat_plane_250m.nc'
         options%domain%hgt_hi = 'topo'
         options%domain%lat_hi = 'lat'
         options%domain%lon_hi = 'lon'

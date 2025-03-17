@@ -12,8 +12,6 @@ if [ $# -eq 0 ] || [ $# -eq 1 -a \( "$1" == "-h" -o "$1" == "--help" \) ]; then
     echo ""
     echo "Available functions:"
     echo "  ${bold}hicar_install${normal}: install HICAR"
-    echo "  ${bold}gen_test_run_data${normal}: generate test run data"
-    echo "  ${bold}execute_test_run${normal}: execute a test run"
     echo "  ${bold}hicar_dependencies${normal}: install dependencies for HICAR"
     echo "  ${bold}install_zlib${normal}: install zlib"
     echo "  ${bold}install_hdf5${normal}: install hdf5"
@@ -266,34 +264,6 @@ function hicar_install {
 
 }
 
-function gen_test_run_data {
-    cd ${GITHUB_WORKSPACE}/helpers
-    if [ ! -d "${GITHUB_WORKSPACE}/../Model_runs/" ]; then
-        mkdir ${GITHUB_WORKSPACE}/../Model_runs/
-    fi
-    printf 'y\ny\n' | ./gen_HICAR_dir.sh ${GITHUB_WORKSPACE}/../Model_runs/ ${GITHUB_WORKSPACE}
-}
-
-function execute_test_run {
-    if [ ! -d "${GITHUB_WORKSPACE}/../Model_runs/" ]; then
-        gen_test_run_data
-    fi
-    cd ${GITHUB_WORKSPACE}/../Model_runs/HICAR/input
-    export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
-    export np=$(nproc --all)
-    np=$((np/2))
-    np=$((np>2?np:2))
-    np=$((np<2?np:21))
-    echo "Starting HICAR run using ${np} processors"
-    export OMP_NUM_THREADS=1
-
-    if [ $HUMAN_RUN -eq 0 ]; then
-        mpirun -np $np ${GITHUB_WORKSPACE}/bin/HICAR HICAR_Test_Case.nml
-    else
-        mpirun -np $np ${GITHUB_WORKSPACE}/bin/HICAR HICAR_Test_Case.nml 2>hicar.err
-    fi
-}
-
 for func in "$@"
 do
     case $func in
@@ -315,8 +285,6 @@ do
             install_netcdf_c;;
         install_netcdf_fortran)
             install_netcdf_fortran;;
-        execute_test_run)
-            execute_test_run;;
         *)
             echo "$func unknown";;
     esac
