@@ -422,6 +422,7 @@ program icar
                 else
                     call ioserver(i)%write_file(ioserver(i)%io_time)
                 endif
+                next_output(i) = ioserver(i)%io_time + options(i)%output%output_dt
 
                 if ((size(options(i)%general%child_nests) > 0)) then
                     ! This call will gather the model state of the forcing fields from the nest parent
@@ -450,7 +451,8 @@ program icar
                     if (ioserver(i)%io_time - small_time_delta <= ioserver(options(i)%general%parent_nest)%io_time) then
                         ! ...then initialize ourselves here
                         call ioserver(i)%write_file(ioserver(i)%io_time)
-        
+                        next_output(i) = ioserver(i)%io_time + options(i)%output%output_dt
+
                         if ((size(options(i)%general%child_nests) > 0)) then
                             ! This call will gather the model state of the forcing fields from the nest parent
                             call ioserver(i)%gather_forcing(ioserver(options(i)%general%child_nests))
@@ -473,7 +475,6 @@ program icar
                 endif
 
                 next_input(i) = ioserver(i)%io_time + options(i)%forcing%input_dt
-                next_output(i) = ioserver(i)%io_time + options(i)%output%output_dt
 
                 end_of_nest_loop = step_end(next_input(i), options(i)%general%end_time)
 
