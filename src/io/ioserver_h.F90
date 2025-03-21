@@ -21,7 +21,8 @@ module ioserver_interface
   use time_object,        only : Time_type
   use time_delta_object,  only : time_delta_t
   use boundary_interface, only : boundary_t
-
+  use flow_object_interface, only : flow_obj_t
+  
   implicit none
 
   private
@@ -32,7 +33,7 @@ module ioserver_interface
   !!
   !!----------------------------------------------------------
 
-  type :: ioserver_t
+  type , extends(flow_obj_t) :: ioserver_t
 
         ! all components are private and should only be modified through procedures
         private
@@ -40,7 +41,7 @@ module ioserver_interface
         ! Store the variables to be written
         ! Note n_variables may be smaller then size(variables) so that it doesn't
         ! have to keep reallocating variables whenever something is added or removed
-        integer, public :: n_input_variables, n_output_variables, n_children
+        integer, public :: n_input_variables, n_output_variables, n_servers, n_children, n_child_ioservers
         type(MPI_Comm), public :: client_comms, IO_comms
         logical, public :: files_to_read
 
@@ -48,9 +49,7 @@ module ioserver_interface
         type(output_t) :: outputer
         type(reader_t) :: reader
         
-        type(Time_type), public :: io_time
-
-        real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer_3d, parent_write_buffer_3d, parent_forcing_buffer
+        real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer_3d, parent_write_buffer_3d, parent_forcing_buffer, gather_buffer
         real, dimension(:,:,:),   pointer :: write_buffer_2d, parent_write_buffer_2d
 
         type(MPI_Win) :: write_win_3d, write_win_2d, read_win, nest_win
@@ -61,11 +60,7 @@ module ioserver_interface
         type(MPI_Datatype), allocatable, dimension(:) :: get_types_3d, get_types_2d, put_types, child_get_types_3d, child_get_types_2d, &
                                                         child_put_types, force_types, child_force_types
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types, buffer_nest_types
-
-        ! store status of the object -- are we a parent or child process
-        logical :: creating = .false.
-        logical, public :: started = .false.
-        logical, public :: ended = .false.
+        
         ! coarray-indices of child io processes, indexed according to the COMPUTE_TEAM
         integer, allocatable :: children_ranks(:)
         
@@ -115,6 +110,7 @@ module ioserver_interface
         procedure, public  :: init
         procedure, private  :: setup_nest_types
         procedure, public  :: gather_forcing
+        procedure, public  :: distribute_forcing
         procedure, private  :: scatter_forcing
   end type
 
@@ -136,10 +132,9 @@ module ioserver_interface
         !! Increase the size of the variables array if necessary
         !!
         !!----------------------------------------------------------
-        module subroutine write_file(this, time)
+        module subroutine write_file(this)
             implicit none
             class(ioserver_t),   intent(inout)  :: this
-            type(Time_type),  intent(in)        :: time
         end subroutine
 
         !>----------------------------------------------------------
@@ -171,9 +166,15 @@ module ioserver_interface
         !! Gather the forcing data from the parent domain ioservers, and pass to child processes ioservers 
         !!
         !!----------------------------------------------------------
-        module subroutine gather_forcing(this, child_ioservers)
+        module subroutine gather_forcing(this)
             class(ioserver_t), intent(inout) :: this
-            class(ioserver_t), intent(in) :: child_ioservers(:)
+        end subroutine
+
+        module subroutine distribute_forcing(this, child_ioserver, child_indx, setup)
+            class(ioserver_t), intent(inout) :: this
+            class(ioserver_t), intent(inout) :: child_ioserver
+            integer, intent(in) :: child_indx
+            logical, optional, intent(in) :: setup
         end subroutine
 
         !>----------------------------------------------------------
@@ -181,7 +182,7 @@ module ioserver_interface
         !!
         !!----------------------------------------------------------
         module subroutine scatter_forcing(this, forcing_buffer)
-            class(ioserver_t), intent(in) :: this
+            class(ioserver_t), intent(inout) :: this
             real, dimension(:,:,:,:), intent(in) :: forcing_buffer
         end subroutine
 

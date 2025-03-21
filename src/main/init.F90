@@ -118,7 +118,7 @@ contains
         ! Assign all images in the IO team to the IO_comms MPI communicator. Use image indexing within initial team to get indexing of global MPI ranks
         CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, splitComm, ierr )
 
-        do n = 1, size(ioclient)
+        do n = 1, size(domain)
             select case (exec_team)
             case (kCOMPUTE_TEAM)
                     CALL MPI_Comm_dup( splitComm, domain(n)%compute_comms, ierr )
@@ -139,7 +139,7 @@ contains
         ! Group IO clients with their related server process. This is basically just grouping processes by node
         CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, splitComm, ierr )
 
-        do n = 1, size(ioclient)
+        do n = 1, size(domain)
             select case (exec_team)
             case (kCOMPUTE_TEAM)
                 CALL MPI_Comm_dup( splitComm, ioclient(n)%parent_comms, ierr )
@@ -240,11 +240,10 @@ contains
         type(domain_t),  intent(inout) :: domain
         type(boundary_t),intent(inout) :: boundary ! forcing file for init conditions
         type(ioclient_t),intent(inout) :: ioclient
-        integer :: nest_indx
 
         if (STD_OUT_PE) write(*,*) "Receiving initial data"
         if (STD_OUT_PE) flush(output_unit)
-        call ioclient%receive(boundary)
+        call ioclient%receive(boundary, domain)
 
         if (STD_OUT_PE) write(*,*) "Populating boundary object"
         if (STD_OUT_PE) flush(output_unit)

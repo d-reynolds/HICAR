@@ -24,8 +24,9 @@ program icar
     use boundary_interface, only : boundary_t
     use output_interface,   only : output_t
     use time_step,          only : step                ! Advance the model forward in time
-    use initialization,     only : split_processes, welcome_message, init_options, init_model, init_physics, init_model_state
-    use nest_manager,       only : start_nest_context, end_nest_context
+    use initialization,     only : split_processes, welcome_message, init_options, init_model, init_physics
+    use nest_manager,      only : nest_next_up, should_update_nests, can_update_child_nest, all_nests_not_done, initialize_at_start, &
+                                end_nest_context, wake_nest, switch_nest_context
     use timer_interface,    only : timer_t
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
@@ -49,10 +50,6 @@ program icar
                                                 output_timer, physics_timer, wind_timer, mp_timer, &
                                                 adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, &
                                                 send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer,flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time
-
-    type(Time_type), allocatable, dimension(:) :: next_output, next_input
-    type(Time_type) :: end_of_nest_loop
-    type(time_delta_t) :: small_time_delta
     
     integer :: i, ierr, exec_team, n_nests, n, old_nest, PE_RANK_GLOBAL
     real :: t_val, t_val2, t_val3
@@ -71,8 +68,6 @@ program icar
 
     call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
     STD_OUT_PE = (PE_RANK_GLOBAL==0)
-
-    call small_time_delta%set(1)
 
     !-----------------------------------------
     !  Model Initialization
@@ -102,8 +97,6 @@ program icar
     allocate(boundary(n_nests))
     allocate(ioclient(n_nests))
     allocate(ioserver(n_nests))
-    allocate(next_input(n_nests))
-    allocate(next_output(n_nests))
     allocate(total_timer(n_nests), initialization_timer(n_nests), input_timer(n_nests), &
              output_timer(n_nests), physics_timer(n_nests), wind_timer(n_nests), &
              mp_timer(n_nests), adv_timer(n_nests), rad_timer(n_nests), &
@@ -134,27 +127,15 @@ program icar
         if (STD_OUT_PE) write(*,'(/ A)') "----------------------------------------------------------------"
         if (STD_OUT_PE) write(*,'(A)')   "Finished domain initialization, beginning physics initialization"
         if (STD_OUT_PE) write(*,'(A)')   "----------------------------------------------------------------"
-        old_nest = 1
 
         ! Need to break the loop here to ensure that the boundary object is first initilaized for all nests
         do i = 1, n_nests
-            if (options(i)%general%parent_nest > 0) then
-                start_time_match = options(i)%general%start_time == options(options(i)%general%parent_nest)%general%start_time
-            endif
-            if (options(i)%general%parent_nest == 0 .or. options(i)%restart%restart .or. start_time_match) then
+            if (initialize_at_start(options,i)) then
                 call total_timer(i)%start()
                 call initialization_timer(i)%start()    
 
-                if (old_nest /= i) then
-                    call end_nest_context(domain(old_nest), options(old_nest))
-                    old_nest = i
-                endif
-
                 if (STD_OUT_PE) write(*,"(/ A22,I2,A2,A,A16)") "-------------- Domain ",i," (",trim(options(i)%domain%init_conditions_file),") --------------"
-                call init_model_state(options(i), domain(i), boundary(i), ioclient(i))
-                next_output(i) = options(i)%general%start_time + options(i)%output%output_dt
-                next_input(i) = options(i)%general%start_time !+ options(1)%forcing%input_dt
-                old_nest = i
+                call wake_nest(options, domain, boundary(i), ioclient(i), i)
 
                 call total_timer(i)%stop()
                 call initialization_timer(i)%stop() 
@@ -167,50 +148,36 @@ program icar
         if (STD_OUT_PE) write(*,'(A)')   "Initialization complete, beginning physics integration"
         if (STD_OUT_PE) write(*,'(A)')   "------------------------------------------------------"
 
-        do while (ANY(domain(1:n_nests)%ended .eqv. .False.))
+        do while (all_nests_not_done(domain(1:n_nests)))
             do i = 1, n_nests
-
                 ! -----------------------------------------------------------
                 !  Initialization of child nests, or cycling a completed nest
                 ! -----------------------------------------------------------
                 ! If we are a child nest, and the domain has not yet been initialized with data...
-                if (.not.(domain(i)%started)) then
-                    ! ... and if we will be running on the next iteration...
-                    if (options(i)%general%start_time - small_time_delta <= domain(options(i)%general%parent_nest)%model_time) then
-                        ! ...then initialize ourselves here
-                        call total_timer(i)%start()
-                        call initialization_timer(i)%start()
+                if (nest_next_up(domain,options(i), i)) then
+                    ! ...then initialize ourselves here
+                    call total_timer(i)%start()
+                    call initialization_timer(i)%start()
+        
+                    if (STD_OUT_PE) write(*,"(/ A22,I2,A2,A,A16)") "-------------- Domain ",i," (",trim(options(i)%domain%init_conditions_file),") --------------"
+                    if (STD_OUT_PE) write(*,'(/ A)') "---------------------"
+                    if (STD_OUT_PE) write(*,'(A)')   "Waking Domain"
+                    if (STD_OUT_PE) write(*,'(A)')   "---------------------"
+            
+            
+                    call wake_nest(options, domain, boundary(i), ioclient(i), i)
 
-                        call end_nest_context(domain(old_nest), options(old_nest))
-                        old_nest = i
-    
-                        if (STD_OUT_PE) write(*,"(/ A22,I2,A2,A,A16)") "-------------- Domain ",i," (",trim(options(i)%domain%init_conditions_file),") --------------"
-                        if (STD_OUT_PE) write(*,'(/ A)') "---------------------"
-                        if (STD_OUT_PE) write(*,'(A)')   "Waking Domain"
-                        if (STD_OUT_PE) write(*,'(A)')   "---------------------"
-                
-                
-                        call init_model_state(options(i), domain(i), boundary(i), ioclient(i))
-                        next_output(i) = options(i)%general%start_time + options(i)%output%output_dt
-                        next_input(i) = options(i)%general%start_time !+ options(1)%forcing%input_dt
-
-                        call total_timer(i)%stop()
-                        call initialization_timer(i)%stop()
-                        cycle
-                    endif
+                    call total_timer(i)%stop()
+                    call initialization_timer(i)%stop()
+                    cycle
                 endif
 
-                if (domain(i)%ended .or. (domain(i)%started .eqv. .False.)) cycle
+                if (domain(i)%dead_or_asleep()) cycle
 
                 call total_timer(i)%start()
 
                 !Switch nest contexts if needed
-                if (old_nest /= i) then
-                    call end_nest_context(domain(old_nest), options(old_nest))
-                    call start_nest_context(domain(i), options(i))
-                    old_nest = i
-                endif
-
+                call switch_nest_context(domain,options, i)
 
                 ! -----------------------------------------------------
                 !
@@ -219,40 +186,38 @@ program icar
                 ! -----------------------------------------------------
                 if (STD_OUT_PE) write(*,"(/ A22,I2,A2,A,A16)") "-------------- Domain ",i," (",trim(options(i)%domain%init_conditions_file),") --------------"
                 if (STD_OUT_PE) write(*,*) "Updating Boundary conditions"
-                next_input(i) = next_input(i) + options(i)%forcing%input_dt
+
                 new_input = .True.
                 call input_timer(i)%start()
 
-                call ioclient(i)%receive(boundary(i))
+                call ioclient(i)%receive(boundary(i), domain(i))
                 
                 ! after reading all variables that can be read, not compute any remaining variables (e.g. z from p+ps)
                 call boundary(i)%update_computed_vars(options(i), update=.True.)
                 call domain(i)%interpolate_forcing(boundary(i), update=.True.)
 
                 ! Make the boundary condition dXdt values into units of [X]/s
-                call boundary(i)%update_delta_fields(next_input(i) - domain(i)%model_time)
-                call domain(i)%update_delta_fields(next_input(i) - domain(i)%model_time)
+                call boundary(i)%update_delta_fields(domain(i)%next_input - domain(i)%sim_time)
+                call domain(i)%update_delta_fields(domain(i)%next_input - domain(i)%sim_time)
 
                 call input_timer(i)%stop()
 
-                end_of_nest_loop = step_end(next_input(i), options(i)%general%end_time)
-
-                do while (domain(i)%model_time + small_time_delta < end_of_nest_loop)
+                do while ( .not.(domain(i)%time_for_input()) .and. .not.(domain(i)%ended) )
                     ! -----------------------------------------------------
                     !
                     !  Integrate physics forward in time
                     !
                     ! -----------------------------------------------------
                     if (STD_OUT_PE) write(*,*) "Running Physics"
-                    if (STD_OUT_PE) write(*,*) "  Model time = ", trim(domain(i)%model_time%as_string())
-                    if (STD_OUT_PE) write(*,*) "   End  time = ", trim(options(i)%general%end_time%as_string())
-                    if (STD_OUT_PE) write(*,*) "  Next Input = ", trim(next_input(i)%as_string())
-                    if (STD_OUT_PE) write(*,*) "  Next Output= ", trim(next_output(i)%as_string())
+                    if (STD_OUT_PE) write(*,*) "  Model time = ", trim(domain(i)%sim_time%as_string())
+                    if (STD_OUT_PE) write(*,*) "   End  time = ", trim(domain(i)%end_time%as_string())
+                    if (STD_OUT_PE) write(*,*) "  Next Input = ", trim(domain(i)%next_input%as_string())
+                    if (STD_OUT_PE) write(*,*) "  Next Output= ", trim(domain(i)%next_output%as_string())
                     if (STD_OUT_PE) flush(output_unit)
                     
                     ! this is the meat of the model physics, run all the physics for the current time step looping over internal timesteps
                     call physics_timer(i)%start()
-                    call step(domain(i), boundary(i), step_end(end_of_nest_loop, next_output(i)), new_input, options(i),           &
+                    call step(domain(i), boundary(i), domain(i)%next_flow_event(), new_input, options(i),           &
                                     mp_timer(i), adv_timer(i), rad_timer(i), lsm_timer(i), pbl_timer(i), exch_timer(i), &
                                     send_timer(i), ret_timer(i), wait_timer(i), forcing_timer(i), diagnostic_timer(i), wind_bal_timer(i), wind_timer(i), &
                                     flux_time(i), flux_up_time(i), flux_corr_time(i), sum_time(i), adv_wind_time(i))
@@ -261,23 +226,22 @@ program icar
                     ! -----------------------------------------------------
                     !  Write output data if it is time
                     ! -----------------------------------------------------
-                    if ((domain(i)%model_time + small_time_delta) >= next_output(i)) then
+                    if (domain(i)%time_for_output()) then
                         if (STD_OUT_PE) write(*,*) "Writing output file"
                         call output_timer(i)%start()
                         call ioclient(i)%push(domain(i))
-                        next_output(i) = next_output(i) + options(i)%output%output_dt
                         call output_timer(i)%stop()
                     endif
                 enddo
+
                 ! If we have children, who are not yet done, then we need to push our data to them
-                if (size(options(i)%general%child_nests) > 0 .and. &
-                    ANY(domain(options(i)%general%child_nests)%ended .eqv. .False.)) then
-                        call ioclient(i)%update_nest(domain(i))
+                if (should_update_nests(domain, options(i), i)) then
+                    call ioclient(i)%update_nest(domain(i))
                 endif
 
                 call total_timer(i)%stop()
 
-                if(domain(i)%model_time + small_time_delta > options(i)%general%end_time) then
+                if (domain(i)%ended) then
                     call end_nest_context(domain(i), options(i))
                     call domain(i)%release()
                     if (STD_OUT_PE) write(*,*) "Domain ",i," has reached the end of its run time."
@@ -409,10 +373,7 @@ program icar
         enddo
 
         do i = 1, n_nests
-            if (options(i)%general%parent_nest > 0) then
-                start_time_match = (options(i)%general%start_time == options(options(i)%general%parent_nest)%general%start_time)
-            endif
-            if (options(i)%general%parent_nest == 0 .or. options(i)%restart%restart .or. start_time_match) then
+            if (initialize_at_start(options,i)) then
 
                 !Get initial conditions
                 if (options(i)%general%parent_nest == 0) call ioserver(i)%read_file()
@@ -420,16 +381,23 @@ program icar
                 if (options(i)%restart%restart) then
                     call ioserver(i)%read_restart_file(options(i))
                 else
-                    call ioserver(i)%write_file(ioserver(i)%io_time)
+                    call ioserver(i)%write_file()
                 endif
-                next_output(i) = ioserver(i)%io_time + options(i)%output%output_dt
 
-                if ((size(options(i)%general%child_nests) > 0)) then
+                !See if any nests needs updating
+                if (should_update_nests(ioserver,options(i),i)) then
                     ! This call will gather the model state of the forcing fields from the nest parent
-                    call ioserver(i)%gather_forcing(ioserver(options(i)%general%child_nests))
-                endif
+                    call ioserver(i)%gather_forcing()
 
-                ioserver(i)%started = .True.
+                    ! now loop over all child nests
+                    do n = 1, size(options(i)%general%child_nests)
+                        !Test if we can update the child nest
+                        if ( can_update_child_nest(ioserver(i),ioserver(options(i)%general%child_nests(n))) ) then
+                            ! This call will distribute the model state of the forcing fields to the child nest
+                            call ioserver(i)%distribute_forcing(ioserver(options(i)%general%child_nests(n)), n, setup=.True.)
+                        endif
+                    enddo
+                endif
             end if
         end do
 
@@ -442,68 +410,64 @@ program icar
         !  End IO-Side Initialization
         !--------------------------------------------------------
 
-        do while (ANY(ioserver(1:n_nests)%ended .eqv. .False.))
+        do while (all_nests_not_done(ioserver(1:n_nests)))
             do i = 1, n_nests
+                if (nest_next_up(ioserver,options(i),i)) then
+                    ! ...then initialize ourselves here                    
+                    call ioserver(i)%write_file()
 
-                ! If we are a child nest, not at the end of our run time...
-                if (ioserver(i)%started .eqv. .False.) then
-                    ! ... and if we will be running on the next iteration...
-                    if (ioserver(i)%io_time - small_time_delta <= ioserver(options(i)%general%parent_nest)%io_time) then
-                        ! ...then initialize ourselves here
-                        call ioserver(i)%write_file(ioserver(i)%io_time)
-                        next_output(i) = ioserver(i)%io_time + options(i)%output%output_dt
-
-                        if ((size(options(i)%general%child_nests) > 0)) then
-                            ! This call will gather the model state of the forcing fields from the nest parent
-                            call ioserver(i)%gather_forcing(ioserver(options(i)%general%child_nests))
-                        endif
-        
-                        ioserver(i)%started = .True.
-                        cycle
+                    !See if any nests needs updating
+                    if (should_update_nests(ioserver,options(i),i)) then
+                        ! This call will gather the model state of the forcing fields from the nest parent
+                        call ioserver(i)%gather_forcing()
+    
+                        ! now loop over all child nests
+                        do n = 1, size(options(i)%general%child_nests)
+                            !Test if we can update the child nest
+                            if ( can_update_child_nest(ioserver(i),ioserver(options(i)%general%child_nests(n))) ) then
+                                ! This call will distribute the model state of the forcing fields to the child nest
+                                call ioserver(i)%distribute_forcing(ioserver(options(i)%general%child_nests(n)), n, setup=.True.)
+                            endif
+                        enddo
                     endif
+                    cycle
                 endif
 
-                if (ioserver(i)%ended .or. (ioserver(i)%started .eqv. .False.)) cycle
-
+                if (ioserver(i)%dead_or_asleep()) cycle
 
                 !See if we even have files to read
                 if (ioserver(i)%files_to_read) then
-                    !See of it is time to read.
-                    ! if (ioserver(i)%io_time + options(i)%forcing%input_dt + small_time_delta >= next_input(i)) then
-                        call ioserver(i)%read_file()
-                    ! endif
+                    call ioserver(i)%read_file()
                 endif
 
-                next_input(i) = ioserver(i)%io_time + options(i)%forcing%input_dt
+                do while ( .not.(ioserver(i)%time_for_input()) .and. .not.(ioserver(i)%ended) )
 
-                end_of_nest_loop = step_end(next_input(i), options(i)%general%end_time)
+                    call ioserver(i)%set_sim_time(ioserver(i)%next_flow_event())
 
-                do while (ioserver(i)%io_time + small_time_delta < end_of_nest_loop)
-
-                    ioserver(i)%io_time = step_end(next_input(i),next_output(i))
-
-                    ! If the next event is a change is nest scope, then we need to wait on this, as the compute team will wait for us
-                    if ( (size(options(i)%general%child_nests) > 0) .and. ioserver(i)%io_time + small_time_delta >= end_of_nest_loop) then
-                        if (ANY(ioserver(options(i)%general%child_nests)%ended .eqv. .False.)) then
-                            ! This call will gather the model state of the forcing fields from the nest parent
-                            call ioserver(i)%gather_forcing(ioserver(options(i)%general%child_nests))
-                        endif
+                    !See if any nests needs updating
+                    if (should_update_nests(ioserver,options(i),i)) then
+                        ! This call will gather the model state of the forcing fields from the nest parent
+                        call ioserver(i)%gather_forcing()
+    
+                        ! now loop over all child nests
+                        do n = 1, size(options(i)%general%child_nests)
+                            !Test if we can update the child nest
+                            if ( can_update_child_nest(ioserver(i),ioserver(options(i)%general%child_nests(n))) ) then
+                                ! This call will distribute the model state of the forcing fields to the child nest
+                                call ioserver(i)%distribute_forcing(ioserver(options(i)%general%child_nests(n)), n)
+                            endif
+                        enddo
                     endif
 
                     ! If we aren't yet done, then wait for an output
                     ! If we are at an output step, do it now
-                    if (ioserver(i)%io_time+small_time_delta >= next_output(i) .and. ioserver(i)%io_time <= options(i)%general%end_time) then
-                        call ioserver(i)%write_file(ioserver(i)%io_time)
-                        next_output(i) = ioserver(i)%io_time + options(i)%output%output_dt
+                    if (ioserver(i)%time_for_output()) then
+                        call ioserver(i)%write_file()
                     endif
                 end do
-
-                if (ioserver(i)%io_time + small_time_delta >= options(i)%general%end_time) then
-                    ioserver(i)%ended = .True.
-                endif
             enddo
-            !if (.not.(ioserver(1)%files_to_read) .and. ioserver(n_nests)%io_time + small_time_delta >= options(1)%general%end_time) io_loop = .False.
         enddo
+        
         !If we are done with the program
         call ioserver(1)%close_files()
     end select
@@ -553,25 +517,6 @@ contains
     
     end function
 
-
-    function step_end(time1, time2, end_time) result(min_time)
-        implicit none
-        type(Time_type), intent(in) :: time1, time2
-        type(Time_type), optional, intent(in) :: end_time
-        type(Time_type) :: min_time
-
-        if (time1 <= time2 ) then
-            min_time = time1
-        else
-            min_time = time2
-        endif
-
-        if (present(end_time)) then
-            if (end_time < min_time) then
-                min_time = end_time
-            endif
-        endif
-    end function
     
     subroutine read_co(nml_file, info, gen_nml, only_namelist_check)
         implicit none

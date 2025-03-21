@@ -255,7 +255,7 @@ contains
             !! giving feedback to HICAR
             Tsrf = TRANSPOSE(domain%skin_temperature%data_2d(its:ite,jts:jte))
             if (options%lsm%monthly_albedo) then
-                albs = TRANSPOSE(domain%albedo%data_3d(its:ite, domain%model_time%month, jts:jte))
+                albs = TRANSPOSE(domain%albedo%data_3d(its:ite, domain%sim_time%month, jts:jte))
             else
                 albs = TRANSPOSE(domain%albedo%data_3d(its:ite, 1, jts:jte))
             endif
@@ -333,10 +333,10 @@ contains
         
         !!
         !! giving the required input from HICAR to FSM
-        year=real(domain%model_time%year)
-        month=real(domain%model_time%month)
-        day=real(domain%model_time%day)
-        hour=real(domain%model_time%hour)
+        year=real(domain%sim_time%year)
+        month=real(domain%sim_time%month)
+        day=real(domain%sim_time%day)
+        hour=real(domain%sim_time%hour)
         dt=lsm_dt
         
         LW=TRANSPOSE(domain%longwave%data_2d(its:ite,jts:jte))
@@ -364,8 +364,8 @@ contains
         Udir = 90 - (Udir * 180/piconst + 180)
         where(Udir<0) Udir=Udir+360
         
-        if ((domain%model_time%seconds() - dt <= last_output%seconds()) .and. &
-            (domain%model_time%seconds()   >=    last_output%seconds())) then
+        if ((domain%sim_time%seconds() - dt <= last_output%seconds()) .and. &
+            (domain%sim_time%seconds()   >=    last_output%seconds())) then
             !If we are the first call since the last output, reset the per-output counters
             domain%dSWE_slide%data_2d = 0.
             domain%dSWE_salt%data_2d  = 0.
@@ -497,7 +497,7 @@ contains
                     domain%latent_heat%data_2d(hi,hj)=LE_(j,i)
                     domain%snow_water_equivalent%data_2d(hi,hj)=SWE_(j,i)
                     if (options%lsm%monthly_albedo) then
-                        domain%albedo%data_3d(hi, domain%model_time%month, hj) = albs(j,i)
+                        domain%albedo%data_3d(hi, domain%sim_time%month, hj) = albs(j,i)
                     else
                         domain%albedo%data_3d(hi, 1, hj) = albs(j,i)
                     endif
@@ -556,7 +556,7 @@ contains
         !meltflux_out_sum=meltflux_out_sum+meltflux_out_
         
 
-        !Delta_t=mod(domain%model_time%seconds(),options%output%out_dt)
+        !Delta_t=mod(domain%sim_time%seconds(),options%output%out_dt)
         !if ( abs(options%output%out_dt-(Delta_t+dt)) <= 1.e-3 ) then
         !    if (STD_OUT_PE) write(*,*) "resetting/aggregating vars e.g. runoff during t-1->t"!, Delta_t,Delta_t+dt
         !    !!

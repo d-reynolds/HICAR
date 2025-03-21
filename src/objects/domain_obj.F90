@@ -41,9 +41,12 @@ contains
         type(options_t), intent(inout) :: options
         integer, intent(in) :: nest_indx
 
-        this%dx = options%domain%dx
-        this%nest_indx = nest_indx
         
+        ! Call the parent type's init procedure
+        call this%init_flow_obj(options, nest_indx)
+
+        this%dx = options%domain%dx
+
         call read_domain_shape(this, options)
         
         call create_variables(this, options)
@@ -67,7 +70,6 @@ contains
     module subroutine release(this)
         class(domain_t), intent(inout) :: this
 
-        this%ended = .True.
         call this%halo%finalize()
 
     end subroutine
@@ -380,9 +382,6 @@ contains
       if (allocated(this%znw).or.allocated(this%znu)) call init_znu(this)
 
       call this%enforce_limits()
-
-      this%model_time = options%general%start_time
-      this%started = .True.
 
     end subroutine
 

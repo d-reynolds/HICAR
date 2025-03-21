@@ -12,13 +12,14 @@ module domain_interface
   use data_structures,          only : interpolable_type, tendencies_type
   use halo_interface,           only : halo_t
   use timer_interface,          only : timer_t
+  use flow_object_interface,    only : flow_obj_t
 
   implicit none
 
   private
   public :: domain_t
 
-  type domain_t
+  type , extends(flow_obj_t) :: domain_t
     type(grid_t)         :: grid,   grid8w,  u_grid,   v_grid
     type(grid_t)         :: grid2d, u_grid2d, v_grid2d
     type(grid_t)         :: grid_monthly, grid_soil
@@ -27,8 +28,6 @@ module domain_interface
     type(grid_t)         :: grid_hlm !! MJ added
     type(grid_t)         :: grid_lake , grid_lake_soisno, grid_lake_soi, grid_lake_soisno_1
     type(halo_t)         :: halo
-
-    type(Time_type) :: model_time
 
     ! note that not all variables are allocated at runtime, physics packages must request a variable be created
     ! though variables considered "required" are requested by the domain object itself (e.g. terrain)
@@ -332,8 +331,6 @@ module domain_interface
 
     real :: smooth_height, dx
     integer :: nsmooth
-    logical :: started = .false.
-    logical :: ended = .false.
 
     complex(C_DOUBLE_COMPLEX),  allocatable :: terrain_frequency(:,:) ! FFT(terrain)
     double precision,           allocatable :: costheta(:,:)
@@ -383,7 +380,6 @@ module domain_interface
     ! contains the size of the domain (or the local tile?)
     integer :: nx, ny, nz, nx_global, ny_global
     integer :: ximg, ximages, yimg, yimages
-    integer :: nest_indx
     logical :: north_boundary = .True.
     logical :: south_boundary = .True.
     logical :: east_boundary = .True.

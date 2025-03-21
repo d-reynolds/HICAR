@@ -684,15 +684,15 @@ contains
 
         ! if this is the first time mp is called, set last time such that mp will update
         if (last_model_time==-999) then
-            last_model_time = (domain%model_time%seconds() - max(real(update_interval), dt_in))
+            last_model_time = (domain%sim_time%seconds() - max(real(update_interval), dt_in))
         endif
 
 
         ! only run the microphysics if the next time step would put it over the update_interval time
-        if (((domain%model_time%seconds() + dt_in)-last_model_time)>=update_interval) then
+        if (((domain%sim_time%seconds() + dt_in)-last_model_time)>=update_interval) then
 
             ! calculate the actual time step for the microphysics
-            mp_dt = domain%model_time%seconds()-last_model_time
+            mp_dt = domain%sim_time%seconds()-last_model_time
 
 
             ! set the current tile to the top layer to process microphysics for
@@ -702,7 +702,7 @@ contains
 
             ! reset the counter so we know that *this* is the last time we've run the microphysics
             ! NOTE, ONLY reset this when running the inner subset... ideally probably need a separate counter for the halo and subset
-            !last_model_time = domain%model_time%seconds()
+            !last_model_time = domain%sim_time%seconds()
             
             call calc_w_real(domain% u %data_3d,      &
                          domain% v %data_3d,      &
@@ -713,7 +713,7 @@ contains
                              
 
             if (present(subset)) then
-                last_model_time = domain%model_time%seconds()
+                last_model_time = domain%sim_time%seconds()
                 call process_subdomain(domain, options, mp_dt,                 &
                                        its = its + subset, ite = ite - subset, &
                                        jts = jts + subset, jte = jte - subset, &
@@ -741,7 +741,7 @@ contains
             endif
 
             if ((.not.present(halo)).and.(.not.present(subset))) then
-                last_model_time = domain%model_time%seconds()                             
+                last_model_time = domain%sim_time%seconds()                             
                 call process_subdomain(domain, options, mp_dt,  &
                                         its = its, ite = ite,    &
                                         jts = jts, jte = jte,    &

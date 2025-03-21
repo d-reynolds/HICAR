@@ -271,14 +271,16 @@ contains
         last_print_time = 0.0
         call dt_saver%set(seconds=0.0)
         
-        time_step_size = end_time - domain%model_time
+        time_step_size = end_time - domain%sim_time
         
         ! Initialize to just over update_dt to force an update on first loop after input ingestion
-        if (new_input) last_wind_update = options%wind%update_dt%seconds() + 1
-
+        if (new_input) then
+            last_wind_update = options%wind%update_dt%seconds() + 1
+        endif
+        
         last_loop = .False.
         ! now just loop over internal timesteps computing all physics in order (operator splitting...)
-        do while (domain%model_time < end_time .and. .not.(last_loop))
+        do while (domain%sim_time < end_time .and. .not.(last_loop))
             
             !Determine dt
             if (last_wind_update >= options%wind%update_dt%seconds() .or. options%wind%wind_only) then
@@ -296,15 +298,15 @@ contains
                 last_wind_update = 0.0
 
                 if (options%wind%wind_only) then
-                    domain%model_time = end_time
+                    domain%sim_time = end_time
                     return
                 endif
             endif
             !call update_dt(dt, options, domain, end_time)
             ! Make sure we don't over step the forcing or output period
-            if ((domain%model_time + dt) > end_time) then
+            if ((domain%sim_time + dt) > end_time) then
                 dt_saver = dt
-                dt = end_time - domain%model_time
+                dt = end_time - domain%sim_time
 
                 ! Sometimes, due to very small time differences, in the inequality controling the loop,
                 ! the physics loop can run again. Stop that from happening here
@@ -329,7 +331,7 @@ contains
 
             ! if an interactive run was requested than print status updates everytime at least 5% of the progress has been made
             if (options%general%interactive .and. (STD_OUT_PE)) then
-                call print_progress(domain%model_time, end_time, time_step_size, dt, last_print_time)
+                call print_progress(domain%sim_time, end_time, time_step_size, dt, last_print_time)
             endif
             ! this if is to avoid round off errors causing an additional physics call that won't really do anything
 
@@ -366,18 +368,6 @@ contains
                 !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
                 call ret_timer%stop()
 
-                ! balance u/v and re-calculate dt after winds have been modified by pbl:
-                ! if (options%physics%boundarylayer==kPBL_YSU) then
-                !     call balance_uvw(   domain%u%data_3d,   domain%v%data_3d,   domain%w%data_3d,       &
-                !                         domain%jacobian_u,  domain%jacobian_v,  domain%jacobian_w,      &
-                !                         domain%advection_dz, domain%dx, domain%jacobian, options    )
-                !
-                !     call update_dt(dt, options, domain, end_time)
-                !
-                !     if ((domain%model_time + dt) > end_time) then
-                !         dt = end_time - domain%model_time
-                !     endif
-                ! endif
                 if (options%general%debug) call domain_check(domain, "pbl")
 
                 call convect(domain, options, real(dt%seconds()))!, halo=1)
@@ -402,7 +392,7 @@ contains
 
 
                 !If we are in the last ~10 updates of a time step and a variable drops below 0, we have probably over-shot a value of 0. Force back to 0
-                if ((end_time%seconds() - domain%model_time%seconds()) < (dt%seconds()*10)) then
+                if ((end_time%seconds() - domain%sim_time%seconds()) < (dt%seconds()*10)) then
                     call domain%enforce_limits()
                 endif
 
@@ -411,7 +401,7 @@ contains
 
             endif
             ! step model_time forward
-            domain%model_time = domain%model_time + dt
+            call domain%increment_sim_time(dt)
             
             last_wind_update = last_wind_update + dt%seconds()
         enddo
