@@ -8,6 +8,12 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 enable_language (Fortran)
 
+#Do not use any conda packages
+if(DEFINED ENV{CONDA_PREFIX})
+  set(CMAKE_IGNORE_PATH $ENV{CONDA_PREFIX} ${CMAKE_IGNORE_PATH})
+  message(STATUS "Ignoring Conda environment path: $ENV{CONDA_PREFIX}")
+endif()
+
 #########################################
 ####### Set up the user variables #######
 set(MODE "release" CACHE STRING "Set compilation flags, useful for debugging")
