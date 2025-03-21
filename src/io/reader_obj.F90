@@ -42,7 +42,7 @@ contains
 
         this%ncfile_id = -1
         ! figure out while file and timestep contains the requested start_time
-        call set_curfile_curstep(this, options%general%start_time, this%file_list, this%time_var)
+        call set_curfile_curstep(this, options%general%start_time, this%file_list, this%time_var, options%restart%restart)
         !Now setup dimensions of reader_object so we know what part of input file that we should read
         this%its = its; this%ite = ite
         this%kts = kts; this%kte = kte
@@ -220,17 +220,24 @@ contains
     !!
     !! Reads the time_var from each file successively until it finds a timestep that matches time
     !!------------------------------------------------------------
-    subroutine set_curfile_curstep(this, time, file_list, time_var)
+    subroutine set_curfile_curstep(this, time, file_list, time_var, restart)
         implicit none
         class(reader_t), intent(inout) :: this
         type(Time_type),    intent(in) :: time
         character(len=*),   intent(in) :: file_list(:)
         character(len=*),   intent(in) :: time_var
+        logical,            intent(in) :: restart
 
         character(len=kMAX_FILE_LENGTH) :: filename
         integer          :: error, n
 
-        this%curstep = find_timestep_in_filelist(file_list, time_var, time, filename, error)
+        ! if this is a restart run, it is acceptable to find a non-exact first file time, 
+        ! in which case we take the forward time (assuming restart was written between input steps)
+        if (restart) then
+            this%curstep = find_timestep_in_filelist(file_list, time_var, time, filename, forward=.True., error=error)
+        else
+            this%curstep = find_timestep_in_filelist(file_list, time_var, time, filename, error=error)
+        endif
 
         if (error==1) then
             stop "Ran out of files to process while searching for matching time variable!"

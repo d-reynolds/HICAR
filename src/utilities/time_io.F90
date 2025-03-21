@@ -11,13 +11,14 @@ module time_io
 
 contains
 
-    function find_timestep_in_file(filename, time_var, time, time_at_step, precision, error) result(step)
+    function find_timestep_in_file(filename, time_var, time, time_at_step, precision, forward, error) result(step)
         implicit none
         character(len=*),  intent(in) :: filename
         character(len=*),  intent(in) :: time_var
         type(Time_type),   intent(in) :: time
         type(Time_type),   intent(inout), optional :: time_at_step
         type(time_delta_t),intent(in),    optional :: precision
+        logical,           intent(in),    optional :: forward
         integer,           intent(inout), optional :: error
         integer :: step
 
@@ -43,9 +44,15 @@ contains
                 if (times_in_file(i)%equals(time, precision=max_dt)) then
                     step = i
                     found=.True.
-                elseif (times_in_file(i) > time) then
-                    step = i-1
-                    found=.True.
+                elseif (i > 1) then
+                    if ((times_in_file(i) > time) .and. (times_in_file(i-1) < time) .and. present(forward)) then
+                        if (forward) then
+                            step = i
+                        else
+                            step = i-1
+                        endif
+                        found=.True.
+                    endif
                 endif
             endif
         enddo
@@ -54,11 +61,11 @@ contains
             if (present(error)) then
                 error = 1
             else
-                write(*,*) "ERROR: Unable to find requested date in file."
-                write(*,*) "Filename: ",trim(filename)
-                write(*,*) "  time  : ",trim(time%as_string())
-                write(*,*) "First time in file : ", trim(times_in_file(1)%as_string())
-                write(*,*) " Last time in file : ", trim(times_in_file(n)%as_string())
+                if (STD_OUT_PE) write(*,*) "ERROR: Unable to find requested date in file."
+                if (STD_OUT_PE) write(*,*) "Filename: ",trim(filename)
+                if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
+                if (STD_OUT_PE) write(*,*) "First time in file : ", trim(times_in_file(1)%as_string())
+                if (STD_OUT_PE) write(*,*) " Last time in file : ", trim(times_in_file(n)%as_string())
                 stop "Unable to find date in file"
             endif
         endif
@@ -84,7 +91,7 @@ contains
         else if ((units(1:3)=="sec").or.(units(1:3)=="Sec")) then
             gain = 86400.0Q0
         else
-            write(*,*) trim(units)
+            if (STD_OUT_PE) write(*,*) trim(units)
             stop "Error: unknown units"
         endif
 
@@ -165,19 +172,20 @@ contains
 
     end function hour_from_units
 
-    function find_timestep_in_filelist(filelist, time_var, time, filename, error) result(step)
+    function find_timestep_in_filelist(filelist, time_var, time, filename, forward, error) result(step)
         implicit none
         character(len=*),  intent(in) :: filelist(:)
         character(len=*),  intent(in) :: time_var
         type(Time_type),   intent(in) :: time
         character(len=*),  intent(inout), optional :: filename
+        logical,           intent(in), optional :: forward
         integer,           intent(inout), optional :: error
-        integer :: step
+        integer :: step, err
 
         type(Time_type), allocatable :: times_in_file_up(:), times_in_file_down(:)
         type(time_delta_t) :: max_dt
         integer :: i, n_t_down, n_t_up, nup, ndown, nup_o, ndown_o, ierr
-        logical :: found, fileExists
+        logical :: found, fileExists, limit_loop
 
         call max_dt%set(seconds=1.0)
         if (present(error)) error=0
@@ -217,69 +225,55 @@ contains
                 error = 1
                 found = .True.
             else
-                write(*,*) "ERROR: Requested date lays outside of filelist"
-                write(*,*) "First filename:           ",trim(filelist(1))
-                write(*,*) "Last (existing) filename: ",trim(filelist(nup))
-                write(*,*) "  time  : ",trim(time%as_string())
+                if (STD_OUT_PE) write(*,*) "ERROR: Requested date lays outside of filelist"
+                if (STD_OUT_PE) write(*,*) "First filename:           ",trim(filelist(1))
+                if (STD_OUT_PE) write(*,*) "Last (existing) filename: ",trim(filelist(nup))
+                if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
+                if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
                 stop "Unable to find date in file"
             endif
         endif
+        limit_loop = .False.
 
         do while(.not.(found))
             ! read the times for all timesteps in the specified file
-            if (.not.(ndown==ndown_o)) call read_times(filelist(ndown), time_var, times_in_file_down)
 
-            n_t_down  = size(times_in_file_down)
-            ! loop through times looking for a time that matches the input time to within
-            ! a specified maximum delta t
-            do i = 1, n_t_down
-                if (.not.found) then
-                    if (times_in_file_down(i)%equals(time, precision=max_dt)) then
-                        step = i
-                        found=.True.
-                        filename = filelist(ndown)
-                    elseif (i > 1) then
-                        if ((times_in_file_down(i) > time) .and. (times_in_file_down(i-1) < time)) then
-                            step = i-1
-                            found=.True.
-                            filename = filelist(ndown)
-                        endif
-                    endif
-                endif
-            enddo
-                
-            ! read the times for all timesteps in the specified file
-            if (.not.(nup==nup_o)) call read_times(filelist(nup), time_var, times_in_file_up)
+            if (present(forward)) then
+                step = find_timestep_in_file(filelist(ndown), time_var, time, precision=max_dt, forward=forward, error=err)
+            else
+                step = find_timestep_in_file(filelist(ndown), time_var, time, precision=max_dt, error=err)
+            endif
 
-            n_t_up  = size(times_in_file_up)
-            ! loop through times looking for a time that matches the input time to within
-            ! a specified maximum delta t
-            do i = 1, n_t_up
-                if (.not.found) then
-                    if (times_in_file_up(i)%equals(time, precision=max_dt)) then
-                        step = i
-                        found=.True.
-                        filename = filelist(nup)
-                    elseif (i > 1) then
-                        if ((times_in_file_up(i) > time) .and. (times_in_file_up(i-1) < time)) then
-                            step = i-1
-                            found=.True.
-                            filename = filelist(nup)
-                        endif
-                    endif
+            if (step > 0) then
+                found = .True.
+                filename = filelist(ndown)
+            else
+                if (present(forward)) then
+                    step = find_timestep_in_file(filelist(nup), time_var, time, precision=max_dt, forward=forward, error=err)
+                else
+                    step = find_timestep_in_file(filelist(nup), time_var, time, precision=max_dt, error=err)
                 endif
-            enddo
-            
+
+                if (step > 0) then
+                    found = .True.
+                    filename = filelist(nup)
+                endif    
+            endif
+
             if (.not.found) then
-                !Either it is bounded
-                if (times_in_file_down(n_t_down) < time .and. times_in_file_up(1) > time) then
-                    !If bounded, save these positions
-                    ndown_o = ndown
-                    nup_o = nup
-                    !Advance ndown by half of distance between nup and ndown
-                    ndown = ndown + nint((nup-ndown)/2.0)
-                ! or we overshot (since on the bounded condition we advance up)
-                elseif(times_in_file_down(1) > time .and. times_in_file_up(1) > time) then
+                !Pincer-move to tighten search
+                !Time must be bounded, save these positions
+                ndown_o = ndown
+                nup_o = nup
+                !Advance ndown by half of distance between nup and ndown
+                ndown = ndown + nint((nup-ndown)/2.0)
+
+                ! read the times for all timesteps in the specified file
+                if (.not.(nup==nup_o)) call read_times(filelist(nup), time_var, times_in_file_up)
+                if (.not.(ndown==ndown_o)) call read_times(filelist(ndown), time_var, times_in_file_down)
+
+                ! See if we overshot (since we advance up)
+                if(times_in_file_down(1) > time .and. times_in_file_up(1) > time) then
                     !set upper bound to former lower bound
                     nup = ndown
                     times_in_file_up = times_in_file_down
@@ -287,22 +281,61 @@ contains
                     !Set lower bound to last bounding lower bound
                     ndown = ndown_o
                     ndown_o = 0
-                ! only other option is that the requested time is not included in the filelist
-                else
-                    if (present(error)) then
-                        error = 1
-                        found = .True.
-                    else
-                        write(*,*) "ERROR: Unable to find requested date in filelist."
-                        write(*,*) "First filename: ",trim(filelist(1))
-                        write(*,*) "  time  : ",trim(time%as_string())
-                        stop "Unable to find date in file"
+                endif
+
+                !Handle the limiting case
+                if (ndown==nup) then
+                    ndown=nup-1
+                    if (limit_loop) then
+                        if (present(forward)) then
+                            if (STD_OUT_PE) write(*,*) "ERROR: Unable to find requested date in filelist."
+                            if (STD_OUT_PE) write(*,*) "We have collapsed onto two files, but no time was found."
+                            if (STD_OUT_PE) write(*,*) "This, despite a non-exact time search. Gnarly bug."
+                            if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
+                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
+                            if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
+                            stop "Unable to find date in file"
+                        else
+                            if (STD_OUT_PE) write(*,*) "WARNING: Unable to find requested date in filelist."
+                            if (STD_OUT_PE) write(*,*) "We have collapsed onto two files, but no time was found."
+                            if (STD_OUT_PE) write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
+                            if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
+                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
+                            if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
+                            stop "Unable to find date in file"
+                        endif
+                    endif    
+                    limit_loop = .True.
+                endif    
+                if (ndown==(nup-1)) then
+
+                    call read_times(filelist(nup), time_var, times_in_file_up)
+                    call read_times(filelist(ndown), time_var, times_in_file_down)
+
+                    if (times_in_file_down(size(times_in_file_down)) < time .and. times_in_file_up(1) > time) then
+                        !Time is between the two
+                        if (present(forward)) then
+                            if (forward) then
+                                step = 1
+                                filename = filelist(nup)
+                                found = .True.
+                            else
+                                step = size(times_in_file_down)
+                                filename = filelist(ndown)
+                                found = .True.
+                            endif
+                        else
+                            if (STD_OUT_PE) write(*,*) "WARNING: Unable to find requested date in filelist."
+                            if (STD_OUT_PE) write(*,*) "Time appears to lay between two files."
+                            if (STD_OUT_PE) write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
+                            if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
+                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
+                            if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
+                            stop "Unable to find date in file"
+                        endif
                     endif
                 endif
             endif
-            
-            !Handle the limiting case
-            if (ndown==nup) ndown=nup-1
         enddo
         
         deallocate(times_in_file_down)
