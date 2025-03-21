@@ -506,7 +506,7 @@ contains
             end do ! k
             end do ! j
 
-            ! write(*,*) MINVAL(lhdQV), MAXVAL(lhdQV), 'kg/kg (min/max) added to QV at', domain%model_time%hour
+            ! write(*,*) MINVAL(lhdQV), MAXVAL(lhdQV), 'kg/kg (min/max) added to QV at', domain%sim_time%hour
 
             ! enforce some minimum water vapor content... just in case
             where(qv < SMALL_QV) qv = SMALL_QV
@@ -725,16 +725,16 @@ contains
                     print*, "ERROR, monthly albedo requires monthly vegfrac"
                     error stop
                 endif
-                ALBEDO = domain%albedo%data_3d(:, domain%model_time%month, :)
+                ALBEDO = domain%albedo%data_3d(:, domain%sim_time%month, :)
             else
                 ALBEDO = domain%albedo%data_3d(:, 1, :)
             endif
             if (options%lsm%monthly_vegfrac) then
-                VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%model_time%month, :)
+                VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%sim_time%month, :)
             else
                 VEGFRAC = domain%vegetation_fraction%data_3d(:, 1, :)
             endif
-            cur_vegmonth = domain%model_time%month
+            cur_vegmonth = domain%sim_time%month
 
             ! save the canopy water in a temporary variable in case this is a restart run because lsm_init resets it to 0
             domain%cqs2%data_2d = domain%canopy_water%data_2d
@@ -796,16 +796,16 @@ contains
                     print*, "ERROR, monthly albedo requires monthly vegfrac"
                     error stop
                 endif
-                ALBEDO = domain%albedo%data_3d(:, domain%model_time%month, :)
+                ALBEDO = domain%albedo%data_3d(:, domain%sim_time%month, :)
             else
                 ALBEDO = domain%albedo%data_3d(:, 1, :)
             endif
             if (options%lsm%monthly_vegfrac) then
-                VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%model_time%month, :)
+                VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%sim_time%month, :)
             else
                 VEGFRAC = domain%vegetation_fraction%data_3d(:, 1, :)
             endif
-            cur_vegmonth = domain%model_time%month
+            cur_vegmonth = domain%sim_time%month
 
             ! save the canopy water in a temporary variable in case this is a restart run because lsm_init resets it to 0
             domain%cqs2%data_2d = domain%canopy_water%data_2d
@@ -1083,15 +1083,15 @@ contains
 
         if (last_model_time==-999) then
             if (update_interval<=dt) then
-                last_model_time = domain%model_time%seconds()-dt
+                last_model_time = domain%sim_time%seconds()-dt
             else
-                last_model_time = domain%model_time%seconds()-update_interval
+                last_model_time = domain%sim_time%seconds()-update_interval
             endif
         endif
 
-        if ((domain%model_time%seconds() - last_model_time) >= update_interval) then
-            lsm_dt = domain%model_time%seconds() - last_model_time
-            last_model_time = domain%model_time%seconds()
+        if ((domain%sim_time%seconds() - last_model_time) >= update_interval) then
+            lsm_dt = domain%sim_time%seconds() - last_model_time
+            last_model_time = domain%sim_time%seconds()
 
             if (options%physics%radiation_downScaling==1  .and. options%physics%radiation>1) then
                 SW = domain%shortwave_total%data_2d
@@ -1226,14 +1226,14 @@ contains
                     enddo
                 enddo
                 if (options%lsm%monthly_albedo) then
-                    if (cur_vegmonth /= domain%model_time%month) then
-                        ALBEDO = domain%albedo%data_3d(:, domain%model_time%month, :)
+                    if (cur_vegmonth /= domain%sim_time%month) then
+                        ALBEDO = domain%albedo%data_3d(:, domain%sim_time%month, :)
                     endif
                 endif
                 if (options%lsm%monthly_vegfrac) then
-                    if (cur_vegmonth /= domain%model_time%month) then
-                        VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%model_time%month, :)
-                        cur_vegmonth = domain%model_time%month
+                    if (cur_vegmonth /= domain%sim_time%month) then
+                        VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%sim_time%month, :)
+                        cur_vegmonth = domain%sim_time%month
                     endif
                 endif
 
@@ -1335,14 +1335,14 @@ contains
                     enddo
                 enddo
                 if (options%lsm%monthly_albedo) then
-                    ALBEDO = domain%albedo%data_3d(:, domain%model_time%month, :)
+                    ALBEDO = domain%albedo%data_3d(:, domain%sim_time%month, :)
                 else
                     ALBEDO = domain%albedo%data_3d(:, 1, :)
                 endif
                 if (options%lsm%monthly_vegfrac) then
-                    if (cur_vegmonth /= domain%model_time%month) then
-                        VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%model_time%month, :)
-                        cur_vegmonth = domain%model_time%month
+                    if (cur_vegmonth /= domain%sim_time%month) then
+                        VEGFRAC = domain%vegetation_fraction%data_3d(:, domain%sim_time%month, :)
+                        cur_vegmonth = domain%sim_time%month
                     endif
                 endif
 
@@ -1359,7 +1359,7 @@ contains
 
 !                do I = ims,ime
 !                  do J = jms,jme
-!                    call calc_declin(domain%model_time%day_of_year(),real(domain%model_time%hour),real(domain%model_time%minute),real(domain%model_time%second),domain%latitude%data_2d(I,J),domain%longitude%data_2d(I,J),domain%cos_zenith%data_2d(I,J))
+!                    call calc_declin(domain%sim_time%day_of_year(),real(domain%sim_time%hour),real(domain%sim_time%minute),real(domain%sim_time%second),domain%latitude%data_2d(I,J),domain%longitude%data_2d(I,J),domain%cos_zenith%data_2d(I,J))
 !                  enddo
 !                enddo
 
@@ -1367,7 +1367,7 @@ contains
 
                 do j = jms,jme
 
-                    solar_elevation  = calc_solar_elevation(date=domain%model_time, tzone=options%rad%tzone, &
+                    solar_elevation  = calc_solar_elevation(date=domain%sim_time, tzone=options%rad%tzone, &
                         lon=domain%longitude%data_2d, lat=domain%latitude%data_2d, j=j, &
                         ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite)
                     domain%cosine_zenith_angle%data_2d(ims:ime,j)=sin(solar_elevation(ims:ime))
@@ -1386,8 +1386,8 @@ contains
                 endif
 
                 call noahmplsm(ITIMESTEP,                              &
-                             domain%model_time%year,                   &
-                             domain%model_time%day_of_year(),          &
+                             domain%sim_time%year,                   &
+                             domain%sim_time%day_of_year(),          &
                              domain%cosine_zenith_angle%data_2d,       &
                              domain%latitude%data_2d,                  &
                              domain%longitude%data_2d,                 &
@@ -1555,7 +1555,7 @@ contains
                              
                              
                 if (options%lsm%monthly_albedo) then
-                    domain%albedo%data_3d(:, domain%model_time%month, :) = ALBEDO
+                    domain%albedo%data_3d(:, domain%sim_time%month, :) = ALBEDO
                 else
                     domain%albedo%data_3d(:, 1, :) = ALBEDO
                 endif

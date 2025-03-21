@@ -30,13 +30,16 @@ contains
         integer,            intent(in)     :: nest_indx
 
         type(variable_t) :: var
-        integer ::  n, n_3d, n_2d, var_indx, out_i, rst_i, some_child_id
+        integer ::  n, n_3d, n_2d, var_indx, out_i, rst_i, some_child_id, ierr
         
-        
-        this%io_time = options(nest_indx)%general%start_time
+        ! Call the parent type's init procedure
+        call this%init_flow_obj(options(nest_indx),nest_indx)
 
         ! Perform a series of MPI Gather/reduction to communicate the grid dimensions of the children clients to the parent server
         call init_with_clients(this)
+
+        !Determine number of IOServers in the this%IO_Comms communicator, i.e. size of communicator
+        call MPI_Comm_size(this%IO_Comms, this%n_servers, ierr)
 
         !Setup reading capability
         if (options(nest_indx)%general%parent_nest == 0) then
@@ -48,9 +51,18 @@ contains
             this%n_r = count(options(nest_indx)%forcing%vars_to_read /= "")
             this%files_to_read = .False.
         endif
+
+        this%n_child_ioservers = size(options(nest_indx)%general%child_nests)
+
         if (size(options(nest_indx)%general%child_nests) > 0) then
             some_child_id = options(nest_indx)%general%child_nests(1)
             this%n_f = count(options(some_child_id)%forcing%vars_to_read /= "")
+            if (this%n_f > 0) then
+                allocate(this%gather_buffer(this%n_f,this%i_s_w:this%i_e_w+1,this%k_s_w:this%k_e_w,this%j_s_w:this%j_e_w+1))
+            endif
+
+            allocate(this%send_nest_types(this%n_child_ioservers,this%n_servers))
+            allocate(this%buffer_nest_types(this%n_child_ioservers,this%n_servers))    
         endif
 
         !Setup writing capability
@@ -126,7 +138,7 @@ contains
         type(MPI_Datatype), intent(out) :: send_nest_types(:), buffer_nest_types(:)
 
 
-        integer :: n, my_rank, i, j, k, n_servers, v, mask_size
+        integer :: n, my_rank, i, j, k, v, mask_size
         integer :: ierr, i_start, i_end, j_start, j_end, counter
 
         integer, allocatable, dimension(:) :: parent_ims, parent_ime, parent_jms, parent_jme
@@ -135,10 +147,9 @@ contains
         !Determine our rank in the this%IO_Comms communicator
         call MPI_Comm_rank(this%IO_Comms, my_rank, ierr)
         !Determine number of IOServers in the this%IO_Comms communicator, i.e. size of communicator
-        call MPI_Comm_size(this%IO_Comms, n_servers, ierr)
 
-        allocate(parent_ims(n_servers), parent_ime(n_servers), parent_jms(n_servers), parent_jme(n_servers))
-        allocate(child_isr(n_servers), child_ier(n_servers), child_jsr(n_servers), child_jer(n_servers))
+        allocate(parent_ims(this%n_servers), parent_ime(this%n_servers), parent_jms(this%n_servers), parent_jme(this%n_servers))
+        allocate(child_isr(this%n_servers), child_ier(this%n_servers), child_jsr(this%n_servers), child_jer(this%n_servers))
 
         parent_ims = 0; parent_ime = 0; parent_jms = 0; parent_jme = 0
         child_isr = 0; child_ier = 0; child_jsr = 0; child_jer = 0
@@ -154,19 +165,19 @@ contains
         child_jer(my_rank+1) = child_ioserver%j_e_r
 
         !Need access to all children ioservers -- then I can construct the send_nest_types based on my domain extent and their domain extents
-        call MPI_Allreduce(MPI_IN_PLACE,child_isr,n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,child_ier,n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,child_jsr,n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,child_jer,n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,child_isr,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,child_ier,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,child_jsr,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,child_jer,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
 
         !Need access to all ioservers -- then I can construct the buffer_nest_types, based on my child ioserver domain extents and all the parent domain extents
-        call MPI_Allreduce(MPI_IN_PLACE,parent_ims,n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,parent_ime,n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,parent_jms,n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
-        call MPI_Allreduce(MPI_IN_PLACE,parent_jme,n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,parent_ims,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,parent_ime,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,parent_jms,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,parent_jme,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
 
-        call MPI_Allreduce(MPI_IN_PLACE,parent_ims,n_servers,MPI_INT,MPI_MIN,this%IO_Comms,ierr)
-        do n = 1,n_servers
+        call MPI_Allreduce(MPI_IN_PLACE,parent_ims,this%n_servers,MPI_INT,MPI_MIN,this%IO_Comms,ierr)
+        do n = 1,this%n_servers
             ! find where we have a "block" (hole) in the domain, since the child ioclients may not give us a perfect rectangle
             
             i_start = max(child_isr(n),this%i_s_w)
@@ -454,10 +465,9 @@ contains
     
     ! This subroutine gathers the write buffers of its children 
     ! compute processes and then writes them to the output file
-    module subroutine write_file(this, time)
+    module subroutine write_file(this)
         implicit none
         class(ioserver_t), intent(inout)  :: this
-        type(Time_type),  intent(in)      :: time
 
         integer :: i, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, msg_size
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
@@ -487,7 +497,9 @@ contains
             stop 'Error, all of write buffer used for output was still set to empty buffer flag at time of writing.'
         endif
 
-        call this%outputer%save_out_file(time,this%IO_Comms,this%out_var_indices,this%rst_var_indices)        
+        call this%outputer%save_out_file(this%sim_time,this%IO_Comms,this%out_var_indices,this%rst_var_indices)        
+        
+        call this%increment_output_time()
 
     end subroutine 
 
@@ -508,92 +520,90 @@ contains
 
     end subroutine 
 
-    module subroutine gather_forcing(this, child_ioservers)
+    module subroutine gather_forcing(this)
         class(ioserver_t), intent(inout) :: this
-        class(ioserver_t), intent(in)    :: child_ioservers(:)
 
-        integer :: i, nx, ny, n, n_servers, ierr, msg_size, real_size, my_rank
-        integer, allocatable :: send_msg_size_alltoall(:), buff_msg_size_alltoall(:), disp_alltoall(:)
-        INTEGER(KIND=MPI_ADDRESS_KIND) :: disp, lowerbound, extent
-        real, allocatable, dimension(:,:,:,:) :: forcing_buffer, gather_buffer
-        logical :: first_pass = .False.
-        type(time_delta_t) :: small_time_delta
-
-        call MPI_Comm_rank(this%IO_Comms, my_rank, ierr)
-        call MPI_Comm_size(this%IO_Comms, n_servers, ierr)
-        allocate(send_msg_size_alltoall(n_servers))
-        allocate(buff_msg_size_alltoall(n_servers))
-        allocate(disp_alltoall(n_servers))
+        integer :: i, msg_size
+        INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
         msg_size = 1
         disp = 0
-        disp_alltoall = 0
-        call small_time_delta%set(1)
 
         if (this%n_f <= 0) then
             if (STD_OUT_PE) write(*,*) 'No forcing fields to gather, but we entered gather_forcing. This is a bug.'
             return
         endif
         
-        allocate(gather_buffer(this%n_f,this%i_s_w:this%i_e_w+1,this%k_s_w:this%k_e_w,this%j_s_w:this%j_e_w+1))
-
         ! Do MPI_Win_Start on nest_win to initiate get
         call MPI_Win_Start(this%children_group,0,this%nest_win)
 
         ! Loop through child images and get chunks of buffer array from each one
         do i=1,this%n_children
-            call MPI_Get(gather_buffer(1,this%iswc(i),1,this%jswc(i)), msg_size, &
+            call MPI_Get(this%gather_buffer(1,this%iswc(i),1,this%jswc(i)), msg_size, &
                 this%force_types(i), this%children_ranks(i), disp, msg_size, this%child_force_types(i), this%nest_win)
         enddo
 
         ! Do MPI_Win_Complete on read_win to end put
         call MPI_Win_Complete(this%nest_win)
 
-        if (.not.allocated(this%send_nest_types)) then
-            allocate(this%send_nest_types(size(child_ioservers),n_servers))
-            allocate(this%buffer_nest_types(size(child_ioservers),n_servers))
-            first_pass = .True.
+    end subroutine gather_forcing
+
+    module subroutine distribute_forcing(this, child_ioserver, child_indx, setup)
+        class(ioserver_t), intent(inout) :: this
+        class(ioserver_t), intent(inout)    :: child_ioserver
+        integer, intent(in) :: child_indx
+        logical, optional, intent(in) :: setup
+        logical :: setup_in = .False.
+
+        integer :: i, nx, ny, n, ierr, msg_size, real_size
+        integer, allocatable :: send_msg_size_alltoall(:), buff_msg_size_alltoall(:), disp_alltoall(:)
+        INTEGER(KIND=MPI_ADDRESS_KIND) :: lowerbound, extent
+        real, allocatable, dimension(:,:,:,:) :: forcing_buffer
+
+        allocate(send_msg_size_alltoall(this%n_servers))
+        allocate(buff_msg_size_alltoall(this%n_servers))
+        allocate(disp_alltoall(this%n_servers))
+
+        disp_alltoall = 0
+    
+        allocate(forcing_buffer(this%n_f,child_ioserver%i_s_r:child_ioserver%i_e_r,child_ioserver%k_s_r:child_ioserver%k_e_r, child_ioserver%j_s_r:child_ioserver%j_e_r))
+
+        if (present(setup)) setup_in = setup
+        ! If this is the first time calling gather_forcing, we are still in initialization. Call setup_nest_types now, passing in the child ioserver
+        if (setup_in) then
+            call this%setup_nest_types(child_ioserver, this%send_nest_types(child_indx,:), this%buffer_nest_types(child_indx,:))
         endif
 
-        do i = 1, size(child_ioservers)
-            if (allocated(forcing_buffer)) deallocate(forcing_buffer)
-            allocate(forcing_buffer(this%n_f,child_ioservers(i)%i_s_r:child_ioservers(i)%i_e_r,child_ioservers(i)%k_s_r:child_ioservers(i)%k_e_r, child_ioservers(i)%j_s_r:child_ioservers(i)%j_e_r))
+        ! What would be smart here, is to send our forcing buffer to only the processes, on which the child ioservers need the data
+        ! The forcing array that we need has the extent child_ioserver%i_r_s:child_ioserver%i_r_e, child_ioserver%j_r_s:child_ioserver%j_r_e
+        ! As a good parent, we will provide for our child, and gather this data from all ioservers
 
-            ! If this is the first time calling gather_forcing, we are still in initialization. Call setup_nest_types now, passing in the child ioserver
-            if (first_pass) then
-                call this%setup_nest_types(child_ioservers(i), this%send_nest_types(i,:), this%buffer_nest_types(i,:))
+        ! Get size of an MPI_REAL
+        call MPI_Type_size(MPI_REAL, real_size, ierr)
+        do n = 1, this%n_servers
+            call MPI_Type_get_extent(this%send_nest_types(child_indx,n), lowerbound, extent)
+            if (extent > real_size) then
+                send_msg_size_alltoall(n) = 1
+            else
+                send_msg_size_alltoall(n) = 0
             endif
-
-            ! What would be smart here, is to send our forcing buffer to only the processes, on which the child ioservers need the data
-            ! The forcing array that we need has the extent child_ioserver%i_r_s:child_ioserver%i_r_e, child_ioserver%j_r_s:child_ioserver%j_r_e
-            ! As a good parent, we will provide for our child, and gather this data from all ioservers
-
-            ! Get size of an MPI_REAL
-            call MPI_Type_size(MPI_REAL, real_size, ierr)
-            do n = 1, n_servers
-                call MPI_Type_get_extent(this%send_nest_types(i,n), lowerbound, extent)
-                if (extent > real_size) then
-                    send_msg_size_alltoall(n) = 1
-                else
-                    send_msg_size_alltoall(n) = 0
-                endif
-                call MPI_Type_get_extent(this%buffer_nest_types(i,n), lowerbound, extent)
-                if (extent > real_size) then
-                    buff_msg_size_alltoall(n) = 1
-                else
-                    buff_msg_size_alltoall(n) = 0
-                endif
-            enddo
-            call MPI_Alltoallw(gather_buffer,  send_msg_size_alltoall, disp_alltoall, this%send_nest_types(i,:), &
-                            forcing_buffer, buff_msg_size_alltoall, disp_alltoall, this%buffer_nest_types(i,:), this%IO_Comms)
-            ! This call will scatter the forcing fields to the ioclients of the nest child
-            if (this%io_time >= child_ioservers(i)%io_time - small_time_delta .and. .not.(child_ioservers(i)%ended)) call child_ioservers(i)%scatter_forcing(forcing_buffer)
+            call MPI_Type_get_extent(this%buffer_nest_types(child_indx,n), lowerbound, extent)
+            if (extent > real_size) then
+                buff_msg_size_alltoall(n) = 1
+            else
+                buff_msg_size_alltoall(n) = 0
+            endif
         enddo
+
+        call MPI_Alltoallw(this%gather_buffer,  send_msg_size_alltoall, disp_alltoall, this%send_nest_types(child_indx,:), &
+                        forcing_buffer, buff_msg_size_alltoall, disp_alltoall, this%buffer_nest_types(child_indx,:), this%IO_Comms)
+        ! This call will scatter the forcing fields to the ioclients of the nest child
+        call child_ioserver%scatter_forcing(forcing_buffer)
 
     end subroutine
 
     module subroutine scatter_forcing(this, forcing_buffer)
-        class(ioserver_t), intent(in) :: this
+        class(ioserver_t), intent(inout) :: this
         real, dimension(:,:,:,:), intent(in) :: forcing_buffer
 
         integer :: i, msg_size
@@ -613,6 +623,7 @@ contains
 
         ! Do MPI_Win_Complete on read_win to end put
         call MPI_Win_Complete(this%read_win)
+        call this%increment_input_time()
 
     end subroutine
 
@@ -727,6 +738,10 @@ contains
         call MPI_Win_fence(0,this%write_win_3d)
         call MPI_Win_fence(0,this%write_win_2d)
 
+        ! If we read restart data, we will not need to output on the first time step.
+        ! Increment next_output here so we are ready for the next time step
+        call this%increment_output_time()
+
     end subroutine 
 
 
@@ -734,9 +749,7 @@ contains
     ! to minimize I/O calls. When the program exits, this must be called
     module subroutine close_files(this)
         class(ioserver_t), intent(inout) :: this
-        
-        this%creating = .false.
-        
+                
         ! close files
         call this%reader%close_file()
         call this%outputer%close_files()

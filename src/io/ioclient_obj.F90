@@ -204,9 +204,8 @@ contains
         !This is false only when it is the first call to push (i.e. first write call)
         if (this%written) then
             ! Do MPI_Win_Wait on write_buffer to make sure that server process has completed writing of previous data
-            call MPI_Win_Wait(this%write_win_3d)
-            call MPI_Win_Wait(this%write_win_2d)
-
+            call smart_wait(this%write_win_3d, 'Error: Timeout waiting for write_win_3d completion')
+            call smart_wait(this%write_win_2d, 'Error: Timeout waiting for write_win_2d completion')
         endif
         this%written = .False.
 
@@ -241,6 +240,8 @@ contains
         enddo
         
         this%written = .True.
+        call domain%increment_output_time()
+
         ! Do MPI_Win_Post on write_win to inform that server process can begin writing of data
         call MPI_Win_Post(this%parent_group,0,this%write_win_3d)
         call MPI_Win_Post(this%parent_group,0,this%write_win_2d)
@@ -261,8 +262,9 @@ contains
         ! Do MPI_Win_Wait on forcing_win. This is mostly unnecesarry, since the server process is what will be waiting on us, which is handeled by the MPI_Win_Start call
         ! in ioserver%gather_foring. Still, MPI_Win_Wait is called here for completeness of PSCW model
         if (this%nest_updated) then
-            call MPI_Win_Wait(this%forcing_win)
+            call smart_wait(this%forcing_win, 'Error: Timeout waiting for forcing_win completion')
         endif
+
         this%nest_updated = .False.
         !This is false only when it is the first call to push (i.e. first write call)
 
@@ -296,10 +298,11 @@ contains
     
     ! This subroutine receives the input fields from the IO buffer
     ! for assignment to the forcing object
-    module subroutine receive(this, forcing)
+    module subroutine receive(this, forcing, domain)
         implicit none
         class(ioclient_t), intent(inout) :: this
         type(boundary_t), intent(inout)  :: forcing
+        type(domain_t),   intent(inout)  :: domain
 
         type(variable_t)     :: var
         integer :: i, n, nx, ny
@@ -309,7 +312,7 @@ contains
         ny = this%j_e_r - this%j_s_r + 1
 
         ! Do MPI_Win_Wait on read_buffer to make sure that server process has completed data transfer
-        call MPI_Win_Wait(this%read_win)
+        call smart_wait(this%read_win, 'Error: Timeout waiting for read_win completion')
 
         ! loop through the list of variables that need to be read in
         call forcing%variables%reset_iterator()
@@ -337,6 +340,7 @@ contains
     
         ! Do MPI_Win_Post on read_buffer to indicate that we are open for delivery of new input data
         call MPI_Win_Post(this%parent_group,0,this%read_win)
+        call domain%increment_input_time()
 
 
     end subroutine 
@@ -397,6 +401,9 @@ contains
             endif
         enddo
 
+        ! If we receive restart data, we will not need to output on the first time step.
+        ! Increment next_output here so we are ready for the next time step
+        call domain%increment_output_time()
 
     end subroutine 
 
@@ -407,5 +414,34 @@ contains
         class(ioclient_t), intent(inout) :: this
 
     end subroutine close_client
+
+    subroutine smart_wait(window, err_msg)
+        implicit none
+        type(MPI_Win), intent(in) :: window
+        character(len=*), intent(in) :: err_msg
+
+        integer :: wait_count, ierr
+        logical :: flag
+        
+        wait_count = 0
+        flag = .False.
+
+        call MPI_Win_Test(window, flag, ierr)
+        do while (.not.(flag))
+            
+            ! Check if we've waited too long
+            wait_count = wait_count + 1
+
+            if (wait_count > 60.0) then
+                write(*,*) err_msg
+                stop
+            endif
+            
+            ! Small sleep to avoid busy waiting
+            call sleep(1)
+
+            call MPI_Win_Test(window, flag, ierr)
+        end do
+    end subroutine
 
 end submodule

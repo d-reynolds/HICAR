@@ -9,6 +9,7 @@ program test_driver
                             select_suite, run_selected, get_argument
     use test_halo_exch, only : collect_halo_exch_suite
     use test_advect, only : collect_advect_suite
+    use test_control_flow, only : collect_control_flow_suite
     use mpi_f08
     use iso_fortran_env
     use icar_constants, only: STD_OUT_PE
@@ -45,6 +46,7 @@ program test_driver
     ! -------------------------------------------------------------------------------------------------
     testsuites = [ &
         new_testsuite("halo_exch", collect_halo_exch_suite), &
+        new_testsuite("control_flow", collect_control_flow_suite), &
         new_testsuite("advection", collect_advect_suite) &
         ]
     ! -------------------------------------------------------------------------------------------------

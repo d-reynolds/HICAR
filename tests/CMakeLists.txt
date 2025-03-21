@@ -41,6 +41,7 @@ endif()
 set(
   tests
   advect
+  control_flow
   halo_exch
 )
 set(

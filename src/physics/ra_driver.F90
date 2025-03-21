@@ -89,9 +89,9 @@ contains
 
         !Saftey bound, in case update_interval is 0, or very small
         if (update_interval<=10) then
-            last_model_time = domain%model_time%seconds()-10
+            last_model_time = domain%sim_time%seconds()-10
         else
-            last_model_time = domain%model_time%seconds()-update_interval
+            last_model_time = domain%sim_time%seconds()-update_interval
         endif
 
         !! MJ added to aggregate radiation over output interval
@@ -270,10 +270,10 @@ contains
         
         !We only need to calculate these variables if we are using terrain shading, otherwise only call on each radiation update
         if (options%physics%radiation_downScaling == 1 .or. &
-            ((domain%model_time%seconds() - last_model_time) >= update_interval)) then
+            ((domain%sim_time%seconds() - last_model_time) >= update_interval)) then
             do j = jms,jme
                !! MJ used corr version, as other does not work in Erupe
-                solar_elevation  = calc_solar_elevation(date=domain%model_time, tzone=options%rad%tzone, &
+                solar_elevation  = calc_solar_elevation(date=domain%sim_time, tzone=options%rad%tzone, &
                     lon=domain%longitude%data_2d, lat=domain%latitude%data_2d, j=j, &
                     ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite, solar_azimuth=solar_azimuth)
                 domain%cosine_zenith_angle%data_2d(its:ite,j)=sin(solar_elevation(its:ite))
@@ -290,10 +290,10 @@ contains
             enddo
         endif
         !If we are not over the update interval, don't run any of this, since it contains allocations, etc...
-        if ((domain%model_time%seconds() - last_model_time) >= update_interval) then
+        if ((domain%sim_time%seconds() - last_model_time) >= update_interval) then
 
-            ra_dt = domain%model_time%seconds() - last_model_time
-            last_model_time = domain%model_time%seconds()
+            ra_dt = domain%sim_time%seconds() - last_model_time
+            last_model_time = domain%sim_time%seconds()
 
             allocate(t_1d(kms:kme))
             allocate(p_1d(kms:kme))
@@ -378,7 +378,7 @@ contains
             mp_options=0
 
             !Calculate solar constant
-            call radconst(domain%model_time%day_of_year(), declin, solar_constant)
+            call radconst(domain%sim_time%day_of_year(), declin, solar_constant)
            
             if (options%physics%radiation==kRA_SIMPLE) then
                 call ra_simple(theta = domain%potential_temperature%data_3d,         &
@@ -393,7 +393,7 @@ contains
                                cloud_cover =  domain%cloud_fraction%data_2d,         &
                                lat = domain%latitude%data_2d,                        &
                                lon = domain%longitude%data_2d,                       &
-                               date = domain%model_time,                             &
+                               date = domain%sim_time,                             &
                                options = options,                                    &
                                dt = ra_dt,                                           &
                                ims=ims, ime=ime, jms=jms, jme=jme, kms=kms, kme=kme, &
@@ -403,7 +403,7 @@ contains
             if (options%physics%radiation==kRA_RRTMG) then
 
                 if (options%lsm%monthly_albedo) then
-                    ALBEDO = domain%albedo%data_3d(:, domain%model_time%month, :)
+                    ALBEDO = domain%albedo%data_3d(:, domain%sim_time%month, :)
                 else
                     ALBEDO = domain%albedo%data_3d(:, 1, :)
                 endif
@@ -527,8 +527,8 @@ contains
 !                   swddnic = domain%skin_temperature%data_2d,            &
 !                   swddirc = domain%skin_temperature%data_2d,            &   ! PAJ
                     xcoszen = domain%cosine_zenith_angle%data_2d,         &  ! NEED TO CALCULATE THIS.
-                    yr=domain%model_time%year,                            &
-                    julian=domain%model_time%day_of_year(),               &
+                    yr=domain%sim_time%year,                            &
+                    julian=domain%sim_time%day_of_year(),               &
                     mp_options=mp_options                               )
                     
                     
@@ -594,8 +594,8 @@ contains
 !                            qndrop3d=domain%cloud_number%data_3d,                 & ! used with icould > 0
                             f_qndrop=f_qndrop,                                    & ! if icloud > 0, use this
                         !ccc added for time varying gases.
-                            yr=domain%model_time%year,                             &
-                            julian=domain%model_time%day_of_year(),                &
+                            yr=domain%sim_time%year,                             &
+                            julian=domain%sim_time%day_of_year(),                &
                         !ccc
                             mp_physics=0,                                          &
                             ids=ids, ide=ide, jds=jds, jde=jde, kds=kds, kde=kde,  &

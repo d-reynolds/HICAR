@@ -44,10 +44,7 @@ module ioclient_interface
 
       type(variable_t), public, allocatable :: variables(:)
       ! time variable , publicis stored outside of the variable list... probably need to think about that some
-      
-      ! store status of the object -- are we a parent or child process
-      logical :: creating = .false.
-            
+                  
       integer, public :: server
       
       integer, public ::  i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, n_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_r, ide, kde, jde
@@ -102,10 +99,11 @@ module ioclient_interface
       !! Receive input data
       !!
       !!----------------------------------------------------------
-      module subroutine receive(this, forcing)
+      module subroutine receive(this, forcing, domain)
           implicit none
           class(ioclient_t), intent(inout) :: this
           type(boundary_t), intent(inout)  :: forcing
+          type(domain_t),   intent(inout)  :: domain
       end subroutine
 
       !>----------------------------------------------------------
