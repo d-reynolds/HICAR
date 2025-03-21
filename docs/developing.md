@@ -1,4 +1,13 @@
 ## Developing
+
+This section is dated and needs to be updated for HICAR's changed compilation routine and code structure. For now, to all developers, please run:
+
+```bash
+git config --local core.hooksPath .githooks/
+```
+
+After cloning, so that any pushes to the master branch will be tested locally prior to being published
+
 Users are encouraged to modify ICAR for their own specific purposes, and to make those changes available for others by submitting them back to the main repository.  The ICAR code base have been set up to make some additions (e.g. a new physics package) very easy to add, and the developers will do their best to work with anyone who wishes to add more sophisticated changes.
 
 It is worth reading a discussion of the [git workflow](howto/icar_git_workflow.md) used with ICAR.
@@ -21,3 +30,5 @@ ICAR main is now a significant change to the internal workings of ICAR, and has 
 I know that ended up being more complicated than it could be.  Once a variable is in that format, it is really easy to add and remove variables (and for that matter create multiple output files with different variable lists in each, it is almost magical), but the initial setup is non-trivial to get there.
 
 A few of the steps above should be simplified drastically eventually… it is just complicated by the use of co-arrays, because of that the compiler doesn’t permit a more dynamic specification of these variables (at least the exchangeable variables).  I have a few ways around that, so it is on my list of things to do… it is just much lower priority than, say, making the model work better at the moment. In particular, the add_variables and create_variables steps should be more dynamic and not require this step. The intention of that whole complicated process was to make it easier… but it hasn’t quite had that effect yet.
+
+

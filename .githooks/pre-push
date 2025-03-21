@@ -1,0 +1,50 @@
+#!/bin/bash
+# filepath: .git/hooks/pre-push
+
+# Get the current branch
+BRANCH=$(git symbolic-ref HEAD | sed -e 's,.*/\(.*\),\1,')
+PUSH_COMMAND=$(ps -ocommand= -p $PPID)
+PROTECTED_BRANCH="test_control_flow"
+
+# Only run tests when pushing to master branch
+if [[ $PUSH_COMMAND == *$PROTECTED_BRANCH* ]] || [[ $BRANCH == $PROTECTED_BRANCH ]]; then
+    echo "Pushing to $PROTECTED_BRANCH branch - running test cases..."
+    
+    # Store the current directory
+    REPO_ROOT=$(git rev-parse --show-toplevel)
+    
+    # Create and move to build directory if not there
+    if [ ! -d "$REPO_ROOT/build" ]; then
+        echo "Creating build directory..."
+        mkdir -p "$REPO_ROOT/build"
+    fi
+    
+    cd "$REPO_ROOT/build"
+    
+    # If not already configured, run cmake
+    if [ ! -f "$REPO_ROOT/build/Makefile" ]; then
+        echo "Configuring project with CMake..."
+        cmake ..
+    fi
+
+    if [ ! -f "$REPO_ROOT/bin/HICAR" ]; then
+	echo "Building and installing HICAR..."
+	make -j 4
+	make install
+    fi
+    
+    # Run the test cases
+    echo "Running test cases..."
+    make test_cases
+    
+    # Check if tests passed
+    TEST_RESULT=$?
+    if [ $TEST_RESULT -ne 0 ]; then
+        echo "ERROR: Test cases failed. Push aborted."
+        exit 1
+    fi
+    
+    echo "All tests passed. Proceeding with push."
+fi
+
+exit 0
