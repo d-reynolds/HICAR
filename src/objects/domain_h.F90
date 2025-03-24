@@ -377,6 +377,13 @@ module domain_interface
     ! MPI communicator object for doing parallel communications among domain objects
     type(MPI_Comm), public :: compute_comms
 
+    ! timers used to track the time spent doing various operations
+    type(timer_t) :: initialization_timer, total_timer, input_timer, &
+                        output_timer, physics_timer, wind_timer, mp_timer, &
+                        adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, &
+                        send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, &
+                        flux_timer, flux_up_timer, flux_corr_timer, sum_timer, adv_wind_timer
+
     ! contains the size of the domain (or the local tile?)
     integer :: nx, ny, nz, nx_global, ny_global
     integer :: ximg, ximages, yimg, yimages

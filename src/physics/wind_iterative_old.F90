@@ -702,15 +702,17 @@ contains
         if (allocated(sigma)) deallocate(sigma)
         if (allocated(alpha)) deallocate(alpha)
         if (allocated(xl)) deallocate(xl)
-        if (allocated(yl)) deallocate(yl)
+
+        ! because if yl is allocated, then the rest of the da variables would be allocated
+        if (allocated(yl)) then
+             deallocate(yl)
         
-        call VecDestroy(localX,ierr)
-        call VecDestroy(b, ierr)
-        call MatDestroy(arr_A,ierr)
-        call MatDestroy(arr_B,ierr)
-        call DMDestroy(da,ierr)
-        ! call KSPDestroy(ksp,ierr)
-        ! call PetscFinalize(ierr)
+            call VecDestroy(localX,ierr)
+            call VecDestroy(b, ierr)
+            call MatDestroy(arr_A,ierr)
+            call MatDestroy(arr_B,ierr)
+            call DMDestroy(da,ierr)
+        endif
 
     end subroutine
 
@@ -754,6 +756,10 @@ contains
 
         PetscInt       one, iter
         PetscErrorCode ierr
+
+        ! call finalize routine to deallocate any arrays that are already allocated. 
+        ! This would only occur if another nest was using this module previously. 
+        call finalize_iter_winds_old()
 
         if (.not.(initialized)) then
             call init_petsc_comms(domain, options)

@@ -150,4 +150,52 @@ contains
 
     end function as_string
 
+    module function timer_mean(this,comms) result(mean_t)
+        implicit none
+        class(timer_t), intent(inout) :: this
+        type(MPI_Comm), intent(in) :: comms
+
+        real :: mean_t, t_sum
+        integer :: ierr, NUM_COMPUTE
+            
+        call this%stop()
+
+        t_sum = this%get_time()
+        call MPI_Allreduce(MPI_IN_PLACE,t_sum,1,MPI_REAL,MPI_SUM,comms,ierr)
+        call MPI_Comm_Size(comms,NUM_COMPUTE)
+        mean_t = t_sum/NUM_COMPUTE
+    
+    end function
+
+    module function timer_max(this,comms) result(max_t)
+        implicit none
+        class(timer_t), intent(inout) :: this
+        type(MPI_Comm), intent(in) :: comms
+
+        real :: max_t
+        integer :: ierr
+            
+        call this%stop()
+
+        max_t = this%get_time()
+        call MPI_Allreduce(MPI_IN_PLACE,max_t,1,MPI_REAL,MPI_MAX,comms,ierr)
+    
+    end function
+
+    module function timer_min(this,comms) result(min_t)
+        implicit none
+        class(timer_t), intent(inout) :: this
+        type(MPI_Comm), intent(in) :: comms
+
+        real :: min_t
+        integer :: ierr
+            
+        call this%stop()
+
+        min_t = this%get_time()
+        call MPI_Allreduce(MPI_IN_PLACE,min_t,1,MPI_REAL,MPI_MIN,comms,ierr)
+    
+    end function
+
+
 end submodule timer_implementation

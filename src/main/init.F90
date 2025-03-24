@@ -21,6 +21,7 @@ module initialization
     use options_types,      only : general_options_type
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
+    use flow_object_interface, only : flow_obj_t
     use microphysics,               only : mp_init, mp_var_request
     use advection,                  only : adv_init, adv_var_request
     use radiation,                  only : radiation_init, ra_var_request
@@ -53,12 +54,11 @@ module initialization
 contains
 
 
-    subroutine split_processes(exec_team, domain, ioserver, ioclient)
+    subroutine split_processes(components, ioclient, n_nests)
         implicit none
-        integer, intent(inout) :: exec_team
-        type(domain_t), intent(inout) :: domain(:)
-        type(ioserver_t), intent(inout) :: ioserver(:)
+        class(flow_obj_t), allocatable, intent(inout) :: components(:)
         type(ioclient_t), intent(inout) :: ioclient(:)
+        integer, intent(in) :: n_nests
 
         integer :: n, k, name_len, color, ierr, node_name_i, num_PE
         integer :: num_threads, found, PE_RANK_GLOBAL, NUM_SERVERS, NUM_COMPUTE, NUM_IO_PER_NODE, NUM_PROC_PER_NODE
@@ -107,26 +107,26 @@ contains
         ! Assign Compute and IO processes
         !-----------------------------------------
         if (mod((PE_RANK_GLOBAL+1),(num_PE/NUM_SERVERS)) == 0) then
-            exec_team = kIO_TEAM
             color = 1
+            allocate(ioserver_t::components(n_nests))
         else
-            exec_team = kCOMPUTE_TEAM
             color = 0
+            allocate(domain_t::components(n_nests))
         endif
     
         CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
         ! Assign all images in the IO team to the IO_comms MPI communicator. Use image indexing within initial team to get indexing of global MPI ranks
         CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, splitComm, ierr )
 
-        do n = 1, size(domain)
-            select case (exec_team)
-            case (kCOMPUTE_TEAM)
-                    CALL MPI_Comm_dup( splitComm, domain(n)%compute_comms, ierr )
-                    ioserver(n)%IO_comms = MPI_COMM_NULL
-            case (kIO_TEAM)
-                CALL MPI_Comm_dup( splitComm, ioserver(n)%IO_comms, ierr )
-                domain(n)%compute_comms = MPI_COMM_NULL
-            end select
+        do n = 1, n_nests
+            associate(current_component => components(n))
+                select type (current_component)
+                    type is (domain_t)
+                        CALL MPI_Comm_dup( splitComm, current_component%compute_comms, ierr )
+                    type is (ioserver_t)
+                        CALL MPI_Comm_dup( splitComm, current_component%IO_comms, ierr )
+                end select
+            end associate
         enddo
         !-----------------------------------------
         ! Group server and client processes
@@ -139,15 +139,15 @@ contains
         ! Group IO clients with their related server process. This is basically just grouping processes by node
         CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, splitComm, ierr )
 
-        do n = 1, size(domain)
-            select case (exec_team)
-            case (kCOMPUTE_TEAM)
-                CALL MPI_Comm_dup( splitComm, ioclient(n)%parent_comms, ierr )
-                ioserver(n)%client_comms = MPI_COMM_NULL
-            case (kIO_TEAM)
-                CALL MPI_Comm_dup( splitComm, ioserver(n)%client_comms, ierr )
-                ioclient(n)%parent_comms = MPI_COMM_NULL
-            end select
+        do n = 1, n_nests
+            associate(current_component => components(n))
+                select type (current_component)
+                    type is (domain_t)
+                        CALL MPI_Comm_dup( splitComm, ioclient(n)%parent_comms, ierr )
+                    type is (ioserver_t)
+                        CALL MPI_Comm_dup( splitComm, current_component%client_comms, ierr )
+                end select
+            end associate
         enddo
         if (STD_OUT_PE) then
             write(*,*) "  Number of processing elements:          ",num_PE

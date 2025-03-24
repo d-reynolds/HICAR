@@ -18,7 +18,8 @@ docs/doxygen_sqlite3.db
 *.stamp
 */.ipynb_checkpoints/*
 */build/*
-*/.vscode/*
+.vscode/*
+*.vscode/*
 build/*
 bin/*
 run/*_support

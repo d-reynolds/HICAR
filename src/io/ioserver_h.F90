@@ -44,6 +44,7 @@ module ioserver_interface
         integer, public :: n_input_variables, n_output_variables, n_servers, n_children, n_child_ioservers
         type(MPI_Comm), public :: client_comms, IO_comms
         logical, public :: files_to_read
+        logical, public :: nest_types_initialized = .false.
 
         ! time variable , publicis stored outside of the variable list... probably need to think about that some
         type(output_t) :: outputer
@@ -123,7 +124,7 @@ module ioserver_interface
         module subroutine init(this, options, nest_indx)
             implicit none
             class(ioserver_t),   intent(inout) :: this
-            type(options_t), allocatable, intent(in)    :: options(:)
+            type(options_t), intent(in)    :: options(:)
             integer,             intent(in)    :: nest_indx
 
         end subroutine
@@ -170,11 +171,10 @@ module ioserver_interface
             class(ioserver_t), intent(inout) :: this
         end subroutine
 
-        module subroutine distribute_forcing(this, child_ioserver, child_indx, setup)
+        module subroutine distribute_forcing(this, child_ioserver, child_indx)
             class(ioserver_t), intent(inout) :: this
             class(ioserver_t), intent(inout) :: child_ioserver
             integer, intent(in) :: child_indx
-            logical, optional, intent(in) :: setup
         end subroutine
 
         !>----------------------------------------------------------
