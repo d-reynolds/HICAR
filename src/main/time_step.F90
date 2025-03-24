@@ -24,7 +24,6 @@ module time_step
     use options_interface,          only : options_t
     use debug_module,               only : domain_check
     use string,                     only : str
-    use timer_interface,            only : timer_t
     use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
     use icar_constants,             only : STD_OUT_PE
@@ -252,29 +251,30 @@ contains
     !! @param next_output   Next time to write an output file (in "model_time")
     !!
     !!------------------------------------------------------------
-    subroutine step(domain, forcing, end_time, new_input, options, mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer,flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
+    subroutine step(domain, forcing, end_time, options)
         implicit none
         type(domain_t),     intent(inout)   :: domain
         type(boundary_t),   intent(inout)   :: forcing
         type(Time_type),    intent(in)      :: end_time
         type(options_t),    intent(in)      :: options
-        logical,            intent(in)      :: new_input
-        type(timer_t),      intent(inout)   :: mp_timer, adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, wind_timer,flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time
 
         real            :: last_print_time
         real, save      :: last_wind_update
         logical         :: last_loop
 
-        type(time_delta_t) :: time_step_size, dt_saver
+        type(time_delta_t) :: time_step_size, dt_saver, max_dt
+        type(Time_type) :: next_input_tmp
         type(time_delta_t), save      :: dt
 
         last_print_time = 0.0
         call dt_saver%set(seconds=0.0)
         
         time_step_size = end_time - domain%sim_time
-        
+
+        next_input_tmp = domain%next_input - domain%input_dt
+        call max_dt%set(seconds=1.0)
         ! Initialize to just over update_dt to force an update on first loop after input ingestion
-        if (new_input) then
+        if  ( domain%sim_time%equals(next_input_tmp, precision=max_dt) ) then
             last_wind_update = options%wind%update_dt%seconds() + 1
         endif
         
@@ -284,9 +284,9 @@ contains
             
             !Determine dt
             if (last_wind_update >= options%wind%update_dt%seconds() .or. options%wind%wind_only) then
-                call wind_timer%start()
+                call domain%wind_timer%start()
                 call update_winds(domain, forcing, options)
-                call wind_timer%stop()
+                call domain%wind_timer%stop()
 
                 !Now that new winds have been calculated, get new time step in seconds, and see if they require adapting the time step
                 ! Note that there will currently be some discrepancy between using the current density and whatever density will be at 
@@ -314,19 +314,19 @@ contains
             endif
             
             ! ! apply/update boundary conditions including internal wind and pressure changes.
-            call forcing_timer%start()
+            call domain%forcing_timer%start()
             call domain%apply_forcing(forcing,options,real(dt%seconds()))
-            call forcing_timer%stop()
+            call domain%forcing_timer%stop()
 
-            call diagnostic_timer%start()
+            call domain%diagnostic_timer%start()
             call domain%diagnostic_update()
-            call diagnostic_timer%stop()
+            call domain%diagnostic_timer%stop()
 
             if (options%adv%advect_density) then
                 ! if using advect_density winds need to be balanced at each update
-                call wind_bal_timer%start()
+                call domain%wind_bal_timer%start()
                 call balance_uvw(domain,options)
-                call wind_bal_timer%stop()
+                call domain%wind_bal_timer%stop()
             endif
 
             ! if an interactive run was requested than print status updates everytime at least 5% of the progress has been made
@@ -339,34 +339,33 @@ contains
 
                 if (options%general%debug) call domain_check(domain, "init", fix=.True.)
 
-                call send_timer%start()
+                call domain%send_timer%start()
                 call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
                 call domain%halo%halo_2d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
-
-                call send_timer%stop()
+                call domain%send_timer%stop()
     
-                call rad_timer%start()
+                call domain%rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
                 if (options%general%debug) call domain_check(domain, "rad(domain", fix=.True.)
-                call rad_timer%stop()
+                call domain%rad_timer%stop()
 
 
-                call lsm_timer%start()
+                call domain%lsm_timer%start()
                 call sfc(domain, options, real(dt%seconds()))!, halo=1)
                 call lsm(domain, options, real(dt%seconds()))!, halo=1)
                 if (options%general%debug) call domain_check(domain, "lsm")
-                call lsm_timer%stop()
+                call domain%lsm_timer%stop()
 
-                call pbl_timer%start()
+                call domain%pbl_timer%start()
                 call pbl(domain, options, real(dt%seconds()))!, halo=1)
-                call pbl_timer%stop()
+                call domain%pbl_timer%stop()
 
-                call ret_timer%start()
+                call domain%ret_timer%start()
                 call domain%halo%halo_3d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
                 call domain%halo%halo_2d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
                 call integrate_physics_tendencies(domain, options, real(dt%seconds()))
                 !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
-                call ret_timer%stop()
+                call domain%ret_timer%stop()
 
                 if (options%general%debug) call domain_check(domain, "pbl")
 
@@ -375,18 +374,18 @@ contains
 
                 
 
-                call adv_timer%start()
-                call advect(domain, options, real(dt%seconds()),flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
+                call domain%adv_timer%start()
+                call advect(domain, options, real(dt%seconds()),domain%flux_timer, domain%flux_up_timer, domain%flux_corr_timer, domain%sum_timer, domain%adv_wind_timer)
                 if (options%general%debug) call domain_check(domain, "advect(domain", fix=.True.)
-                call adv_timer%stop()
+                call domain%adv_timer%stop()
 
                 
                                 
-                call mp_timer%start()
+                call domain%mp_timer%start()
 
                 call mp(domain, options, real(dt%seconds()))
                 if (options%general%debug) call domain_check(domain, "mp_halo", fix=.True.)
-                call mp_timer%stop()
+                call domain%mp_timer%stop()
                 
                 if (options%general%debug) call domain_check(domain, "domain%halo_send", fix=.True.)
 

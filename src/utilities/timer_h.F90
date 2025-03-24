@@ -9,6 +9,8 @@
 !! ------------------------
 module timer_interface
 
+    use mpi_f08
+
     implicit none
     private
     public :: timer_t
@@ -29,6 +31,9 @@ module timer_interface
         procedure :: as_string
         procedure :: get_time
         procedure :: reset
+        procedure :: mean => timer_mean
+        procedure :: min => timer_min
+        procedure :: max => timer_max
     end type
 interface
 
@@ -94,5 +99,41 @@ interface
         character(len=25) :: time ! return value
     end function as_string
 
+    !> -----------------------------------
+    !! Return the mean time as a real
+    !!
+    !! If the timer is running, it includes the current time in the total reported
+    !!
+    !! ------------------------------------
+    module function timer_mean(this,comms) result(mean_t)
+        implicit none
+        class(timer_t), intent(inout) :: this
+        type(MPI_Comm), intent(in) :: comms
+        real :: mean_t
+    end function timer_mean
+    !> -----------------------------------
+    !! Return the min time as a real
+    !!
+    !! If the timer is running, it includes the current time in the total reported
+    !!
+    !! ------------------------------------
+    module function timer_min(this,comms) result(min_t)
+        implicit none
+        class(timer_t), intent(inout) :: this
+        type(MPI_Comm), intent(in) :: comms
+        real :: min_t
+    end function timer_min
+    !> -----------------------------------
+    !! Return the max time as a real
+    !!
+    !! If the timer is running, it includes the current time in the total reported
+    !!
+    !! ------------------------------------
+    module function timer_max(this,comms) result(max_t)
+        implicit none
+        class(timer_t), intent(inout) :: this
+        type(MPI_Comm), intent(in) :: comms
+        real :: max_t
+    end function timer_max
 end interface
 end module timer_interface

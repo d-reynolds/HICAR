@@ -93,89 +93,15 @@ module test_control_flow
                 call flow_obj(i)%increment_input_time()
                 call flow_obj(i)%increment_output_time()
             enddo
-            !> This is the compute team, so we will run the compute loop
-            do while (all_nests_not_done(flow_obj(1:n_nests)))
-                do i = 1, n_nests
-                    ! -----------------------------------------------------------
-                    !  Initialization of child nests, or cycling a completed nest
-                    ! -----------------------------------------------------------
-                    ! If we are a child nest, and the domain has not yet been initialized with data...
-                    if (nest_next_up(flow_obj,options(i), i)) then
-                        ! ...then initialize ourselves here
-                        call MPI_Barrier(MPI_COMM_WORLD, ierr)
-                        call flow_obj(i)%increment_output_time()
-                    endif
-    
-                    if (flow_obj(i)%dead_or_asleep()) cycle
-        
-                    call MPI_Barrier(MPI_COMM_WORLD, ierr)
-                    call flow_obj(i)%increment_input_time()
-
-                    do while ( .not.(flow_obj(i)%time_for_input()) .and. .not.(flow_obj(i)%ended) )
-    
-                        call flow_obj(i)%set_sim_time(flow_obj(i)%next_flow_event())
-
-                        if (flow_obj(i)%time_for_output()) then
-                            call MPI_Barrier(MPI_COMM_WORLD, ierr)
-                            call flow_obj(i)%increment_output_time()
-                        endif
-                    enddo
-    
-                    ! If we have children, who are not yet done, then we need to push our data to them
-                    if (should_update_nests(flow_obj, options(i), i)) then
-                        call MPI_Barrier(MPI_COMM_WORLD, ierr)
-                    endif
-                enddo
-            enddo
         else if (my_io_rank >= 0) then
 
             do i = 1, n_nests
                 call flow_obj(i)%increment_input_time()
                 call flow_obj(i)%increment_output_time()
             enddo
-            !> This is the IO team, so we will run the IO loop
-            do i = 1, n_nests
-                if (options(i)%general%parent_nest == 0) call flow_obj(i)%increment_input_time()
-            end do
-            do while (all_nests_not_done(flow_obj(1:n_nests)))
-                do i = 1, n_nests
-                    if (nest_next_up(flow_obj,options(i),i)) then
-                        ! ...then initialize ourselves here
-                        call MPI_Barrier(MPI_COMM_WORLD, ierr)
-                        call flow_obj(i)%increment_output_time()
-                    endif
-    
-                    if (flow_obj(i)%dead_or_asleep()) cycle
-
-                    call MPI_Barrier(MPI_COMM_WORLD, ierr)
-                    call flow_obj(i)%increment_input_time()
-
-                    do while ( .not.(flow_obj(i)%time_for_input()) .and. .not.(flow_obj(i)%ended) )
-
-                        call flow_obj(i)%set_sim_time(flow_obj(i)%next_flow_event())
-    
-                        ! now loop over all child nests
-                        if (should_update_nests(flow_obj,options(i),i)) then
-                            call MPI_Barrier(MPI_COMM_WORLD, ierr)
-                            do n = 1, size(options(i)%general%child_nests)
-                                !Test if we can update the child nest
-                                if ( can_update_child_nest(flow_obj(i),flow_obj(options(i)%general%child_nests(n))) ) then
-                                    ! This call will distribute the model state of the forcing fields to the child nest
-                                    call MPI_Barrier(io_team, ierr)
-                                endif
-                            enddo
-                        endif
-                        if (flow_obj(i)%time_for_output()) then
-                            call MPI_Barrier(MPI_COMM_WORLD, ierr)
-                            call flow_obj(i)%increment_output_time()
-                        endif
-                    enddo
-                enddo
-            enddo
         end if
 
-        write(*,*) "All nests are done."
-
     end subroutine test_ctrl_flow
+
 
 end module test_control_flow

@@ -48,7 +48,6 @@ module nest_manager
 
     public:: end_nest_context, start_nest_context, wake_nest
     public:: switch_nest_context
-    public:: initialize_at_start
     public:: all_nests_not_done
     public:: nest_next_up
     public:: should_update_nests
@@ -57,19 +56,20 @@ module nest_manager
 
 contains
 
-    subroutine switch_nest_context(domain, options, nest_index)
+    subroutine switch_nest_context(domain, options)
         implicit none
-        type(domain_t), intent(inout) :: domain(:)
-        type(options_t), allocatable, intent(inout) :: options(:)
-        integer, intent(in) :: nest_index
+        type(domain_t), intent(inout) :: domain
+        type(options_t), intent(inout) :: options
 
         if (current_nest == -1) then
-            call start_nest_context(domain(nest_index), options(nest_index))
+            call start_nest_context(domain, options)
+        elseif (current_nest == domain%nest_indx) then
+            return
         endif
 
-        if (current_nest /= nest_index) then
-            call end_nest_context(domain(current_nest), options(current_nest))
-            call start_nest_context(domain(nest_index), options(nest_index))
+        if (current_nest /= domain%nest_indx) then
+            call end_nest_context()
+            call start_nest_context(domain, options)
         end if
 
     end subroutine switch_nest_context
@@ -90,6 +90,11 @@ contains
         type(domain_t), intent(inout) :: domain
         type(options_t), intent(inout) :: options
 
+        if (current_nest == domain%nest_indx) then
+            if (STD_OUT_PE) write(*,*) "WARNING: Nest context already active for nest ", current_nest
+            return
+        endif
+
         call init_winds(domain,options)
 
         ! initialize microphysics code (e.g. compute look up tables in Thompson et al)
@@ -104,75 +109,31 @@ contains
         current_nest = domain%nest_indx
     end subroutine start_nest_context
 
-    subroutine end_nest_context(domain, options)
+    subroutine end_nest_context()
         implicit none
-        type(domain_t), intent(in) :: domain
-        type(options_t), intent(in) :: options
-
-        if (domain%nest_indx /= current_nest) then
-            if (STD_OUT_PE) write(*,*) 'WARNING: Attempting to end nest context for nest ID: ', domain%nest_indx, ' but current nest ID is: ', current_nest
-            return
-        end if
-
-        if (options%physics%windtype == kITERATIVE_WINDS .or. &
-            options%physics%windtype == kLINEAR_ITERATIVE_WINDS) then
-                call finalize_iter_winds_old()
-        end if
 
         current_nest = -1
         
     end subroutine  end_nest_context
 
-    subroutine wake_nest(options, domain, boundary, ioclient, nest_index)
+    subroutine wake_nest(options, domain, boundary, ioclient)
         implicit none
-        type(options_t), allocatable, intent(inout) :: options(:)
-        type(domain_t), intent(inout) :: domain(:)
+        type(options_t), intent(inout) :: options
+        type(domain_t), intent(inout) :: domain
         type(boundary_t), intent(inout) :: boundary
         type(ioclient_t), intent(inout) :: ioclient
-        integer, intent(in) :: nest_index
 
 
         ! If we have an active context and it is not us, end the context
-        if ( (current_nest > 0) .and. (current_nest /= nest_index) ) then
-            call end_nest_context(domain(current_nest), options(current_nest))
+        if ( (current_nest > 0) .and. (current_nest /= domain%nest_indx) ) then
+            call end_nest_context()
         endif
 
-        call init_model_state(options(nest_index), domain(nest_index), boundary, ioclient)
+        call init_model_state(options, domain, boundary, ioclient)
 
-        current_nest = nest_index
+        current_nest = domain%nest_indx
 
     end subroutine wake_nest
-
-    !> ----------------------------------------------------------------------------
-    !!  @function initialize_at_start(options)
-    !!
-    !!  @brief
-    !!  Determines if we should intialize the nest context at the start of the simulation.
-    !!
-    !!  @param options
-    !!  The options_t object for the nest context.
-    !!  @return
-    !!  Returns .true. if the nest context is initialized at the start of the simulation.
-    !! ----------------------------------------------------------------------------
-    function initialize_at_start(options, nest_indx) result(init)
-        implicit none
-        type(options_t), allocatable, intent(in) :: options(:)
-        integer, intent(in) :: nest_indx
-        logical :: init, start_time_match
-
-        ! Initialize the nest context
-        init = .false.
-        start_time_match = .false.
-
-        if (options(nest_indx)%general%parent_nest > 0) then
-            start_time_match = (options(nest_indx)%general%start_time == options(options(nest_indx)%general%parent_nest)%general%start_time)
-        endif
-
-        if (options(nest_indx)%general%parent_nest == 0 .or. options(nest_indx)%restart%restart .or. start_time_match) then
-            init = .true.
-        end if
-
-    end function initialize_at_start
 
     function all_nests_not_done(flow_objs) result(all_done)
         implicit none
@@ -184,49 +145,69 @@ contains
 
     end function all_nests_not_done
 
-    function nest_next_up(flow_objs, options, nest_indx) result(next)
+    function nest_next_up(flow_objs, options) result(next)
         implicit none
         class(flow_obj_t), intent(in) :: flow_objs(:)
         type(options_t), intent(in) :: options
-        integer, intent(in) :: nest_indx
         logical :: next
 
         next = .false.
 
         ! If we are a child nest, not at the end of our run time...
-        if (flow_objs(nest_indx)%started .eqv. .False.) then
+        if (flow_objs(options%nest_indx)%started .eqv. .False.) then
             ! ... and if we will be running on the next iteration...
             !safety check before indexing into flow_obj
-            if (options%general%parent_nest > 0) then
-                if (flow_objs(nest_indx)%sim_time - flow_objs(nest_indx)%small_time_delta <= flow_objs(options%general%parent_nest)%sim_time) then
-                    next = .true.
-                end if
+            if (options%general%parent_nest == 0 .or. options%restart%restart) then
+                next = .true.
+            else if (flow_objs(options%nest_indx)%sim_time - flow_objs(options%nest_indx)%small_time_delta <= flow_objs(options%general%parent_nest)%sim_time) then
+                next = .true.
             endif
         end if
 
     end function nest_next_up
 
-    function should_update_nests(flow_objs, options, nest_indx) result(can_update)
+    function should_update_nests(flow_objs, options) result(can_update)
         implicit none
         class(flow_obj_t), intent(in) :: flow_objs(:)
         type(options_t), intent(in) :: options
-        integer, intent(in) :: nest_indx
         logical :: can_update
+        integer :: n, num_children
 
         can_update = .false.
 
+        num_children = size(options%general%child_nests)
         ! if we even have nests
-        if (size(options%general%child_nests) > 0) then
+        if (num_children > 0) then
             ! if we are at the end of our time step, or we have just ended
-            if (flow_objs(nest_indx)%time_for_input() .or. flow_objs(nest_indx)%last_loop) then
-                ! if all of our children are not done
-                if (ANY(flow_objs(options%general%child_nests)%ended .eqv. .False.)) then
-                    can_update = .true.
-                end if
+            if (flow_objs(options%nest_indx)%time_for_input() .or. flow_objs(options%nest_indx)%last_loop) then
+                ! loop over children
+                do n = 1, num_children
+                    ! If we are at or ahead of our child's time, and the child has not ended, then our child needs to be updated
+                    if ( ahead_or_at_child(flow_objs(options%nest_indx),flow_objs(options%general%child_nests(n))) ) then
+                        if (flow_objs(options%general%child_nests(n))%ended .eqv. .False.) then
+                            can_update = .true.
+                            return
+                        end if
+                    end if
+                end do
             end if
         endif
 
     end function should_update_nests
+
+    function ahead_or_at_child(flow_obj, child_flow_obj) result(ahead)
+        implicit none
+        class(flow_obj_t), intent(in) :: flow_obj
+        class(flow_obj_t), intent(in) :: child_flow_obj
+        logical :: ahead
+
+        ahead = .false.
+
+        if (flow_obj%sim_time >= child_flow_obj%sim_time - flow_obj%small_time_delta) then
+            ahead = .true.
+        end if
+
+    end function ahead_or_at_child
 
     function can_update_child_nest(flow_obj, child_flow_obj)
         implicit none

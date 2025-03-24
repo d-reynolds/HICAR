@@ -433,7 +433,7 @@ add_custom_target(check
 
 add_custom_target(test_cases
   COMMAND ${CMAKE_COMMAND} -E echo "Running test cases..."
-  COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_case_runner.sh ${PROJECT_SOURCE_DIR} Standard,Standard_nested
+  COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_case_runner.sh ${PROJECT_SOURCE_DIR} Standard,Standard_restart
   DEPENDS ${PROJECT_NAME}-tester 
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
   COMMENT "Running test case suite"

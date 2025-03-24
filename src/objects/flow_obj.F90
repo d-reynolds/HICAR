@@ -46,6 +46,11 @@ contains
         ! Because the output time also changes the end condition, we need to check if the end condition is now true
         call this%check_ended()
 
+        !If we have already input, then we have now done one input and one output, so switch to started
+        if (this%started .eqv. .False. .and. this%next_input >= this%sim_time) then
+            this%started = .true.
+        endif
+
     end subroutine increment_output_time
 
     ! increment the input time
@@ -69,8 +74,12 @@ contains
         ! to log an increment to next_input, since we need to interpolate temporally,
         ! and therefore need the next input time already.
         if (this%started .eqv. .False.) then
-            this%started = .true.
             this%next_input = this%next_input - this%input_dt
+
+            !If we have already output, then we have now done one output and one input, so switch to started
+            if (this%next_output > this%sim_time) then
+                this%started = .true.
+            endif
         endif
 
     end subroutine increment_input_time
@@ -148,7 +157,6 @@ contains
         time_for_input = .false.
 
         if (this%ended) then
-            if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the input time, but this nest has ended."
             time_for_input = .false.
             return
         end if
@@ -166,13 +174,6 @@ contains
         time_for_output = .false.
 
         if (this%ended) then
-            if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the output time, but this nest has ended."
-            time_for_output = .false.
-            return
-        end if
-
-        if (.not.(this%started)) then
-            if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the output time, but this nest has not started."
             time_for_output = .false.
             return
         end if

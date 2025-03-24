@@ -26,7 +26,7 @@ contains
 
     module subroutine init(this, options, nest_indx)
         class(ioserver_t),  intent(inout)  :: this
-        type(options_t), allocatable, intent(in)     :: options(:)
+        type(options_t), intent(in)     :: options(:)
         integer,            intent(in)     :: nest_indx
 
         type(variable_t) :: var
@@ -263,6 +263,9 @@ contains
             endif
             call MPI_Type_commit(buffer_nest_types(n))
         enddo
+
+        this%nest_types_initialized = .true.
+
     end subroutine setup_nest_types
     
     subroutine setup_MPI_windows(this)
@@ -548,12 +551,10 @@ contains
 
     end subroutine gather_forcing
 
-    module subroutine distribute_forcing(this, child_ioserver, child_indx, setup)
+    module subroutine distribute_forcing(this, child_ioserver, child_indx)
         class(ioserver_t), intent(inout) :: this
         class(ioserver_t), intent(inout)    :: child_ioserver
         integer, intent(in) :: child_indx
-        logical, optional, intent(in) :: setup
-        logical :: setup_in = .False.
 
         integer :: i, nx, ny, n, ierr, msg_size, real_size
         integer, allocatable :: send_msg_size_alltoall(:), buff_msg_size_alltoall(:), disp_alltoall(:)
@@ -568,9 +569,8 @@ contains
     
         allocate(forcing_buffer(this%n_f,child_ioserver%i_s_r:child_ioserver%i_e_r,child_ioserver%k_s_r:child_ioserver%k_e_r, child_ioserver%j_s_r:child_ioserver%j_e_r))
 
-        if (present(setup)) setup_in = setup
         ! If this is the first time calling gather_forcing, we are still in initialization. Call setup_nest_types now, passing in the child ioserver
-        if (setup_in) then
+        if (this%nest_types_initialized .eqv. .False.) then
             call this%setup_nest_types(child_ioserver, this%send_nest_types(child_indx,:), this%buffer_nest_types(child_indx,:))
         endif
 

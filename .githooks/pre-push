@@ -4,7 +4,7 @@
 # Get the current branch
 BRANCH=$(git symbolic-ref HEAD | sed -e 's,.*/\(.*\),\1,')
 PUSH_COMMAND=$(ps -ocommand= -p $PPID)
-PROTECTED_BRANCH="test_control_flow"
+PROTECTED_BRANCH="master"
 
 # Only run tests when pushing to master branch
 if [[ $PUSH_COMMAND == *$PROTECTED_BRANCH* ]] || [[ $BRANCH == $PROTECTED_BRANCH ]]; then
