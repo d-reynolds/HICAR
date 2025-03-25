@@ -376,9 +376,11 @@ contains
       ! create geographic lookup table for domain
       call setup_geo_interpolation(this, forcing, options)
 
-      ! for all variables with a forcing_var /= "", get forcing, interpolate to local domain
-      call this%interpolate_forcing(forcing)
-
+      if (.not.options%restart%restart) then
+        ! for all variables with a forcing_var /= "", get forcing, interpolate to local domain
+        call this%interpolate_forcing(forcing)
+      endif
+      
       if (allocated(this%znw).or.allocated(this%znu)) call init_znu(this)
 
       call this%enforce_limits()

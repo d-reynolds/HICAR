@@ -39,10 +39,15 @@ contains
         this%file_list = options%forcing%boundary_files
         this%time_var  = options%forcing%time_var
         this%model_end_time = options%general%end_time
+        this%input_dt   = options%forcing%input_dt
 
         this%ncfile_id = -1
-        ! figure out while file and timestep contains the requested start_time
-        call set_curfile_curstep(this, options%general%start_time, this%file_list, this%time_var, options%restart%restart)
+
+        if (options%restart%restart) then
+            call set_curfile_curstep(this, options%restart%restart_time, this%file_list, this%time_var, options%restart%restart)
+        else
+            call set_curfile_curstep(this, options%general%start_time, this%file_list, this%time_var, options%restart%restart)
+        endif
         !Now setup dimensions of reader_object so we know what part of input file that we should read
         this%its = its; this%ite = ite
         this%kts = kts; this%kte = kte
@@ -144,6 +149,7 @@ contains
         this%curstep = this%curstep + 1 ! this may be all we have to do most of the time
         ! check that we haven't stepped passed the end of the current file
         steps_in_file = get_n_timesteps(this, this%time_var, 0)
+        this%input_time = this%input_time + this%input_dt
 
         if (steps_in_file < this%curstep) then
             ! close current file
@@ -169,8 +175,16 @@ contains
             !Get time step of the next input step
             call read_times(this%file_list(this%curfile), this%time_var, times_in_file)
 
-            if (times_in_file(this%curstep) > this%model_end_time) then
+            if ((times_in_file(this%curstep) - this%input_dt) >= this%model_end_time) then
                 this%eof = .True.
+            !Check if the next time step in the file is equal to the input time 
+            else if (.not.(times_in_file(this%curstep) == this%input_time)) then
+                ! warn the user and exit
+                write(*,*) "Warning: The next time step in the file is not equal to the input time.  The next time step in the file is: ", times_in_file(this%curstep)%as_string()
+                write(*,*) "The input time is: ", this%input_time%as_string()
+                write(*,*) "The current file is: ", this%file_list(this%curfile)
+                write(*,*) "The current step is: ", this%curstep
+                stop
             endif
         endif
 
@@ -228,6 +242,7 @@ contains
         character(len=*),   intent(in) :: time_var
         logical,            intent(in) :: restart
 
+        type(Time_type), allocatable :: times_in_file(:)
         character(len=kMAX_FILE_LENGTH) :: filename
         integer          :: error, n
 
@@ -246,6 +261,9 @@ contains
         do n = 1,size(file_list)
             if (trim(file_list(n))==trim(filename)) this%curfile = n
         enddo
+
+        call read_times(file_list(this%curfile), time_var, times_in_file)
+        this%input_time = times_in_file(this%curstep)
 
         this%eof = .False.
     end subroutine

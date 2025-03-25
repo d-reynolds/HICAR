@@ -401,10 +401,6 @@ contains
             endif
         enddo
 
-        ! If we receive restart data, we will not need to output on the first time step.
-        ! Increment next_output here so we are ready for the next time step
-        call domain%increment_output_time()
-
     end subroutine 
 
 

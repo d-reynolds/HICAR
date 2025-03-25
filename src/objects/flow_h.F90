@@ -4,6 +4,7 @@ module flow_object_interface
     use time_delta_object,  only : time_delta_t
     use options_interface,     only : options_t
     use icar_constants,     only : STD_OUT_PE
+    use iso_fortran_env,    only : output_unit
 implicit none
 
 private
@@ -13,7 +14,7 @@ public :: flow_obj_t
 type flow_obj_t
 !   private
     type(Time_type), public :: sim_time, end_time
-    type(Time_type), public :: next_output, next_input
+    type(Time_type), public :: next_output, next_input, output_start, input_start
     type(time_delta_t) :: output_dt, input_dt
 
     logical :: started = .false.
@@ -25,6 +26,7 @@ type flow_obj_t
 
     contains
         procedure, public :: init_flow_obj
+        procedure, public :: reset_flow_obj_times
         procedure, public :: increment_input_time
         procedure, public :: increment_output_time
         procedure, public :: increment_sim_time
@@ -33,7 +35,8 @@ type flow_obj_t
         procedure, public :: time_for_output
         procedure, public :: next_flow_event
         procedure, public :: dead_or_asleep
-        procedure, private :: check_ended
+        procedure, public :: check_ended
+        procedure, public :: check_started
     end type
 
     interface
@@ -43,6 +46,12 @@ type flow_obj_t
             class(flow_obj_t), intent(inout) :: this
             type(options_t), intent(in) :: options
             integer, intent(in) :: nest_indx
+        end subroutine
+
+        module subroutine reset_flow_obj_times(this, input, output)
+            implicit none
+            class(flow_obj_t), intent(inout) :: this
+            logical, optional, intent(in) :: input, output
         end subroutine
 
         module subroutine increment_output_time(this)
@@ -87,11 +96,16 @@ type flow_obj_t
 
         module function dead_or_asleep(this) result(doa)
             implicit none
-            class(flow_obj_t), intent(in) :: this
+            class(flow_obj_t), intent(inout) :: this
             logical :: doa
         end function
 
         module subroutine check_ended(this)
+            implicit none
+            class(flow_obj_t), intent(inout) :: this
+        end subroutine
+
+        module subroutine check_started(this)
             implicit none
             class(flow_obj_t), intent(inout) :: this
         end subroutine

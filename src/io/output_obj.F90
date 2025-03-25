@@ -76,13 +76,13 @@ contains
         
         if (size(file_list) > 0) then
             !Find output file and step in output filelist
-            this%output_counter = find_timestep_in_filelist(file_list, 'time', options%general%start_time,this%output_fn,error=error)
+            this%output_counter = find_timestep_in_filelist(file_list, 'time', options%restart%restart_time,this%output_fn,error=error)
         endif
         
         !If there was no error getting output step, then a file already exists which contains our time step
         if (error == 0) then
             !Open output file, setting out_ncfile_id
-            call open_file(this, this%output_fn, options%general%start_time, par_comms, out_var_indices)
+            call open_file(this, this%output_fn, options%restart%restart_time, par_comms, out_var_indices)
             this%out_ncfile_id = this%active_nc_id
 
             ! if this is a restart run, then there will be no initial call to save_out_file, meaning
@@ -91,11 +91,15 @@ contains
             this%restart_counter = this%restart_counter + 1
         ! if there was an error getting the output step, then we assume that there is no file for the current output time step
         else
+            write(*,*) "No existing output file found for restart run. Technically, this should never happen."
+            write(*,*) "If you wanted to restart on purpose without any existing output files, just be aware."
+            write(*,*) "We will set the output counter to 1 and start producing a new output file."
+
             ! set back to 1, in case this was set when calling find_timestep_in_filelist
             this%output_counter = 1
             write(this%output_fn, '(A,A,".nc")')    &
                 trim(this%base_out_file_name),   &
-                trim(options%general%start_time%as_string(this%file_date_format))
+                trim(options%restart%restart_time%as_string(this%file_date_format))
         endif
 
     end subroutine init_restart
@@ -725,7 +729,7 @@ contains
         
         call check_ncdf( nf90_var_par_access(this%active_nc_id, this%time%var_id, nf90_collective))
 
-        output_time = get_output_time(time, units=this%time_units, round_seconds=.True.)
+        output_time = get_output_time(time, units=this%time_units, round_seconds=.False.)
 
         call check_ncdf( nf90_put_var(this%active_nc_id, this%time%var_id, dble(output_time%mjd()), [current_step] ),   &
                     "saving:"//trim(this%time%name) )
