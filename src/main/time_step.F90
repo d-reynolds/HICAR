@@ -260,7 +260,7 @@ contains
 
         real            :: last_print_time
         real, save      :: last_wind_update
-        logical         :: last_loop
+        logical         :: last_loop, force_update_winds
 
         type(time_delta_t) :: time_step_size, dt_saver, max_dt
         type(Time_type) :: next_input_tmp
@@ -268,13 +268,18 @@ contains
 
         last_print_time = 0.0
         call dt_saver%set(seconds=0.0)
-        
+        call max_dt%set(seconds=1.0)
+
         time_step_size = end_time - domain%sim_time
 
+        force_update_winds = domain%sim_time%equals(options%general%start_time, precision=max_dt)
+        if (options%restart%restart) force_update_winds = domain%sim_time%equals(options%restart%restart_time, precision=max_dt)
+
         next_input_tmp = domain%next_input - domain%input_dt
-        call max_dt%set(seconds=1.0)
+
+        force_update_winds = (force_update_winds .or. domain%sim_time%equals(next_input_tmp, precision=max_dt) )
         ! Initialize to just over update_dt to force an update on first loop after input ingestion
-        if  ( domain%sim_time%equals(next_input_tmp, precision=max_dt) ) then
+        if  (force_update_winds) then
             last_wind_update = options%wind%update_dt%seconds() + 1
         endif
         

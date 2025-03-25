@@ -46,7 +46,7 @@ contains
             call this%reader%init(this%i_s_r,this%i_e_r,this%k_s_r,this%k_e_r,this%j_s_r,this%j_e_r,options(nest_indx))
             !this%n_children = size(this%children)
             this%n_r = this%reader%n_vars
-            this%files_to_read = this%reader%eof
+            this%files_to_read = .not.(this%reader%eof)
         else
             this%n_r = count(options(nest_indx)%forcing%vars_to_read /= "")
             this%files_to_read = .False.
@@ -514,13 +514,21 @@ contains
 
         real, allocatable, dimension(:,:,:,:) :: parent_read_buffer
 
-        ! read file into buffer array
-        call this%reader%read_next_step(parent_read_buffer,this%IO_Comms)
-        this%files_to_read = .not.(this%reader%eof)
+        !See if we even have files to read
+        if (this%files_to_read) then
+            ! read file into buffer array
+            call this%reader%read_next_step(parent_read_buffer,this%IO_Comms)
+            this%files_to_read = .not.(this%reader%eof)
 
-        ! Loop through child images and send chunks of buffer array to each one
-        call this%scatter_forcing(parent_read_buffer)
+            ! Loop through child images and send chunks of buffer array to each one
+            call this%scatter_forcing(parent_read_buffer)
+        endif
 
+        ! increment input time whether we have files to read or not
+        ! this is because input time is just controlling if we are at an input event -- not necessarily
+        ! if we read in data or not
+        ! the reader object will handle if we try to read a time step which doesn't exist in the forcing
+        call this%increment_input_time()
     end subroutine 
 
     module subroutine gather_forcing(this)
@@ -599,7 +607,7 @@ contains
                         forcing_buffer, buff_msg_size_alltoall, disp_alltoall, this%buffer_nest_types(child_indx,:), this%IO_Comms)
         ! This call will scatter the forcing fields to the ioclients of the nest child
         call child_ioserver%scatter_forcing(forcing_buffer)
-
+        call child_ioserver%increment_input_time()
     end subroutine
 
     module subroutine scatter_forcing(this, forcing_buffer)
@@ -623,7 +631,6 @@ contains
 
         ! Do MPI_Win_Complete on read_win to end put
         call MPI_Win_Complete(this%read_win)
-        call this%increment_input_time()
 
     end subroutine
 
@@ -737,10 +744,6 @@ contains
         enddo
         call MPI_Win_fence(0,this%write_win_3d)
         call MPI_Win_fence(0,this%write_win_2d)
-
-        ! If we read restart data, we will not need to output on the first time step.
-        ! Increment next_output here so we are ready for the next time step
-        call this%increment_output_time()
 
     end subroutine 
 

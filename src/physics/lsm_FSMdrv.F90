@@ -127,7 +127,12 @@ contains
         Ny_HICAR=ite-its+1
         Nx_HICAR=jte-jts+1
         
-        last_output = options%general%start_time
+        if (options%restart%restart) then
+            last_output = options%restart%restart_time
+        else
+            last_output = options%general%start_time
+        endif
+        
         last_snowslide = 4000
 
         !!

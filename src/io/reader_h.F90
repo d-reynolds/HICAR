@@ -20,7 +20,7 @@ module reader_interface
   use boundary_interface, only : boundary_t
   use meta_data_interface,only : meta_data_t
   use time_object,        only : Time_type
-
+  use time_delta_object,  only : time_delta_t
   implicit none
 
   private
@@ -41,7 +41,8 @@ module reader_interface
       integer, public :: n_vars = 0
       logical, public :: eof      
       type(var_dict_t)    :: variables      ! a dictionary with all forcing data
-      type(Time_type) :: model_end_time
+      type(Time_type) :: model_end_time, input_time
+      type(time_delta_t) :: input_dt
       ! list of input files
       character (len=kMAX_FILE_LENGTH), allocatable :: file_list(:)
       character (len=kMAX_NAME_LENGTH)   :: time_var

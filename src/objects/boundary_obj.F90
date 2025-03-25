@@ -35,7 +35,7 @@ contains
         type(var_dict_t),     intent(inout) :: domain_vars
         type(options_t), optional, intent(in)    :: parent_options
 
-
+        type(Time_type) :: strt_time
         character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
         integer,                         allocatable :: var_dimensions(:)
 
@@ -43,6 +43,9 @@ contains
         ! the parameters option type can't contain allocatable arrays because it is a coarray
         ! so we need to allocate the vars_to_read and var_dimensions outside of the options type
         call setup_variable_lists(options%forcing%vars_to_read, options%forcing%dim_list, vars_to_read, var_dimensions)
+
+        strt_time = options%general%start_time
+        if (options%restart%restart) strt_time = options%restart%restart_time
 
         ! Read through forcing variable names stored in "options"
         ! needs to read each one to find the grid information for it
@@ -59,7 +62,7 @@ contains
             call this%init_local(options,                           &
                                     options%forcing%boundary_files, &
                                     vars_to_read, var_dimensions,   &
-                                    options%general%start_time,     &
+                                    strt_time,                      &
                                     options%forcing%latvar,         &
                                     options%forcing%lonvar,         &
                                     options%forcing%zvar,           &
