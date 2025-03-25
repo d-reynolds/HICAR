@@ -47,6 +47,10 @@ contains
         this%i_s_w = domain%its; this%i_e_w = domain%ite
         this%k_s_w = domain%kts; this%k_e_w = domain%kte+1
         this%j_s_w = domain%jts; this%j_e_w = domain%jte
+
+        this%i_s_re = domain%ims; this%i_e_re = domain%ime
+        this%j_s_re = domain%jms; this%j_e_re = domain%jme
+
         this%ide = domain%ide; this%kde = domain%kde; this%jde = domain%jde
 
         if (domain%ims == domain%ids) this%i_s_w = domain%ids
@@ -102,6 +106,14 @@ contains
             MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%j_e_w, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, PE_parent_comm, this%parent_comms)
+        call MPI_Gatherv(this%i_s_re, 1, MPI_INTEGER, 0, [0], [0], &
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
+        call MPI_Gatherv(this%i_e_re, 1, MPI_INTEGER, 0, [0], [0], &
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
+        call MPI_Gatherv(this%j_s_re, 1, MPI_INTEGER, 0, [0], [0], &
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
+        call MPI_Gatherv(this%j_e_re, 1, MPI_INTEGER, 0, [0], [0], &
+            MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%i_s_r, 1, MPI_INTEGER, 0, [0], [0], &
             MPI_INTEGER, PE_parent_comm, this%parent_comms)
         call MPI_Gatherv(this%i_e_r, 1, MPI_INTEGER, 0, [0], [0], &
@@ -127,7 +139,7 @@ contains
 
         type(c_ptr) :: tmp_ptr
         integer(KIND=MPI_ADDRESS_KIND) :: win_size
-        integer :: nx_w, nz_w, ny_w, n_w_2d, n_f, n_w_3d, ierr
+        integer :: nx_w, nz_w, ny_w, nx_re, ny_re, n_w_2d, n_f, n_w_3d, ierr
         integer :: nx_r, nz_r, ny_r, n_r, real_size
 
         CALL MPI_Type_size(MPI_REAL, real_size)
@@ -138,6 +150,8 @@ contains
         n_w_3d = 0
         n_w_2d = 0
         n_f = 0
+        nx_re = 0
+        ny_re = 0
 
         nx_r = 0
         nz_r = 0
@@ -148,6 +162,9 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,nx_w,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,ny_w,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,nz_w,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+
+        call MPI_Allreduce(MPI_IN_PLACE,nx_re,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,ny_re,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
         call MPI_Allreduce(MPI_IN_PLACE,nx_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,ny_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
@@ -160,15 +177,15 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
         ! +1 added to handle variables on staggered grids
-        win_size = n_w_3d*nx_w*nz_w*ny_w
+        win_size = n_w_3d*nx_re*nz_w*ny_re
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_3d)
-        call C_F_POINTER(tmp_ptr, this%write_buffer_3d, [n_w_3d, nx_w, nz_w, ny_w])
+        call C_F_POINTER(tmp_ptr, this%write_buffer_3d, [n_w_3d, nx_re, nz_w, ny_re])
         this%write_buffer_3d = kEMPT_BUFF
 
         ! +1 added to handle variables on staggered grids
-        win_size = n_w_2d*nx_w*ny_w
+        win_size = n_w_2d*nx_re*ny_re
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_2d)
-        call C_F_POINTER(tmp_ptr, this%write_buffer_2d, [n_w_2d, nx_w, ny_w])
+        call C_F_POINTER(tmp_ptr, this%write_buffer_2d, [n_w_2d, nx_re, ny_re])
         this%write_buffer_2d = kEMPT_BUFF
 
         ! This is the buffer for the forcing data. Necesarry so that output data can sit around in its own buffer while the ioserver
@@ -354,7 +371,7 @@ contains
         type(options_t),  intent(in)     :: options
 
         type(variable_t)     :: var
-        integer :: i, n_2d, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w
+        integer :: i, n_2d, n_3d, nx, ny, i_s_re, i_e_re, j_s_re, j_e_re
 
         ! Because this is for reading restart data, performance is not critical, and 
         ! we use a simple MPI_fence syncronization
@@ -378,23 +395,23 @@ contains
                 cycle
             endif
 
-            i_s_w = this%i_s_w; i_e_w = this%i_e_w
-            j_s_w = this%j_s_w; j_e_w = this%j_e_w
-            i_e_w = i_e_w+var%xstag !Add extra to accomodate staggered vars
-            j_e_w = j_e_w+var%ystag !Add extra to accomodate staggered vars
-            nx = i_e_w - i_s_w + 1
-            ny = j_e_w - j_s_w + 1
+            i_s_re = this%i_s_re; i_e_re = this%i_e_re
+            j_s_re = this%j_s_re; j_e_re = this%j_e_re
+            i_e_re = i_e_re+var%xstag !Add extra to accomodate staggered vars
+            j_e_re = j_e_re+var%ystag !Add extra to accomodate staggered vars
+            nx = i_e_re - i_s_re + 1
+            ny = j_e_re - j_s_re + 1
 
             if (var%three_d) then
-                var%data_3d(i_s_w:i_e_w,1:var%dim_len(2),j_s_w:j_e_w) = &
+                var%data_3d(i_s_re:i_e_re,1:var%dim_len(2),j_s_re:j_e_re) = &
                     this%write_buffer_3d(n_3d,1:nx,1:var%dim_len(2),1:ny)
                 n_3d = n_3d+1
             else
                 if (var%dtype == kREAL) then
-                    var%data_2d(i_s_w:i_e_w,j_s_w:j_e_w) = &
+                    var%data_2d(i_s_re:i_e_re,j_s_re:j_e_re) = &
                         this%write_buffer_2d(n_2d,1:nx,1:ny)
                 elseif (var%dtype == kDOUBLE) then
-                    var%data_2dd(i_s_w:i_e_w,j_s_w:j_e_w) = &
+                    var%data_2dd(i_s_re:i_e_re,j_s_re:j_e_re) = &
                             dble(this%write_buffer_2d(n_2d,1:nx,1:ny))
                 endif                
                 n_2d = n_2d+1

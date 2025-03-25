@@ -47,7 +47,7 @@ module ioclient_interface
                   
       integer, public :: server
       
-      integer, public ::  i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, n_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_r, ide, kde, jde
+      integer, public ::  i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, n_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_r, i_s_re, i_e_re, j_s_re, j_e_re, ide, kde, jde
       integer :: restart_counter = 0
       integer :: output_counter = 0
       integer :: frames_per_outfile, restart_count

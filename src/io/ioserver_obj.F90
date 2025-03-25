@@ -282,6 +282,9 @@ contains
         this%nz_w = this%k_e_w ! this will have been updated in init to reflect the largest z dimension to be output
         this%ny_w = maxval(this%jewc-this%jswc+1)+1
 
+        this%nx_re = maxval(this%ierec-this%isrec+1)+1
+        this%ny_re = maxval(this%jerec-this%jsrec+1)+1
+
         this%nx_r = maxval(this%ierc-this%isrc+1)+1
         this%nz_r = maxval(this%kerc-this%ksrc+1)
         this%ny_r = maxval(this%jerc-this%jsrc+1)+1
@@ -290,6 +293,9 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,this%nx_w,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,this%ny_w,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,this%nz_w,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
+
+        call MPI_Allreduce(MPI_IN_PLACE,this%nx_re,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,this%ny_re,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
 
         call MPI_Allreduce(MPI_IN_PLACE,this%nx_r,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,this%ny_r,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
@@ -301,10 +307,10 @@ contains
 
         call MPI_Allreduce(MPI_IN_PLACE,this%n_r,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
 
-        win_size = this%n_w_3d*this%nx_w*this%nz_w*this%ny_w
+        win_size = this%n_w_3d*this%nx_re*this%nz_w*this%ny_re
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_3d)
 
-        win_size = this%n_w_2d*this%nx_w*this%ny_w
+        win_size = this%n_w_2d*this%nx_re*this%ny_re
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_2d)
 
         if (this%n_f > 0) then
@@ -324,11 +330,15 @@ contains
 
         allocate(this%get_types_3d(this%n_children))
         allocate(this%get_types_2d(this%n_children))
+        allocate(this%rst_types_3d(this%n_children))
+        allocate(this%rst_types_2d(this%n_children))
         allocate(this%put_types(this%n_children))
         allocate(this%force_types(this%n_children))
 
         allocate(this%child_get_types_3d(this%n_children))
         allocate(this%child_get_types_2d(this%n_children))
+        allocate(this%child_rst_types_3d(this%n_children))
+        allocate(this%child_rst_types_2d(this%n_children))
         allocate(this%child_put_types(this%n_children))
         allocate(this%child_force_types(this%n_children))
 
@@ -342,17 +352,33 @@ contains
                 [this%n_w_2d, (this%iewc(i)-this%iswc(i)+2), (this%jewc(i)-this%jswc(i)+2)], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%get_types_2d(i))
 
+            call MPI_Type_create_subarray(4, [this%n_w_3d, (this%i_e_re-this%i_s_re+2), (this%k_e_w-this%k_s_w+1), (this%j_e_re-this%j_s_re+2)], &
+                [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jerec(i)-this%jsrec(i)+2)], &
+                [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%rst_types_3d(i))
+        
+            call MPI_Type_create_subarray(3, [this%n_w_2d, (this%i_e_re-this%i_s_re+2), (this%j_e_re-this%j_s_re+2)], &
+                [this%n_w_2d, (this%ierec(i)-this%isrec(i)+2), (this%jerec(i)-this%jsrec(i)+2)], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%rst_types_2d(i))
+
             call MPI_Type_create_subarray(4, [this%n_r, (this%i_e_r-this%i_s_r+1), (this%k_e_r-this%k_s_r+1), (this%j_e_r-this%j_s_r+1)], &
                 [this%n_r, (this%ierc(i)-this%isrc(i)+1), (this%kerc(i)-this%ksrc(i)+1), (this%jerc(i)-this%jsrc(i)+1)], &
                 [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%put_types(i))
 
-            call MPI_Type_create_subarray(4, [this%n_w_3d, this%nx_w, this%nz_w, this%ny_w], &
+            call MPI_Type_create_subarray(4, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re], &
                 [this%n_w_3d, (this%iewc(i)-this%iswc(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jewc(i)-this%jswc(i)+2)], &
                 [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_get_types_3d(i))
 
-            call MPI_Type_create_subarray(3, [this%n_w_2d, this%nx_w, this%ny_w], &
+            call MPI_Type_create_subarray(3, [this%n_w_2d, this%nx_re, this%ny_re], &
                 [this%n_w_2d, (this%iewc(i)-this%iswc(i)+2), (this%jewc(i)-this%jswc(i)+2)], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_get_types_2d(i))
+
+            call MPI_Type_create_subarray(4, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re], &
+                [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jerec(i)-this%jsrec(i)+2)], &
+                [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_rst_types_3d(i))
+
+            call MPI_Type_create_subarray(3, [this%n_w_2d, this%nx_re, this%ny_re], &
+                [this%n_w_2d, (this%ierec(i)-this%isrec(i)+2), (this%jerec(i)-this%jsrec(i)+2)], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_rst_types_2d(i))
 
             call MPI_Type_create_subarray(4, [this%n_r, this%nx_r, this%nz_r, this%ny_r], &
                 [this%n_r, (this%ierc(i)-this%isrc(i)+1), (this%kerc(i)-this%ksrc(i)+1), (this%jerc(i)-this%jsrc(i)+1)], &
@@ -372,9 +398,13 @@ contains
             endif
             call MPI_Type_commit(this%get_types_3d(i))
             call MPI_Type_commit(this%get_types_2d(i))
+            call MPI_Type_commit(this%rst_types_3d(i))
+            call MPI_Type_commit(this%rst_types_2d(i))
             call MPI_Type_commit(this%put_types(i))
             call MPI_Type_commit(this%child_get_types_3d(i))
             call MPI_Type_commit(this%child_get_types_2d(i))
+            call MPI_Type_commit(this%child_rst_types_3d(i))
+            call MPI_Type_commit(this%child_rst_types_2d(i))
             call MPI_Type_commit(this%child_put_types(i))
         enddo
     end subroutine setup_MPI_types
@@ -399,6 +429,10 @@ contains
         allocate(this%kewc(this%n_children))
         allocate(this%jswc(this%n_children))
         allocate(this%jewc(this%n_children))
+        allocate(this%isrec(this%n_children))
+        allocate(this%ierec(this%n_children))
+        allocate(this%jsrec(this%n_children))
+        allocate(this%jerec(this%n_children))
         allocate(this%isrc(this%n_children))
         allocate(this%ierc(this%n_children))
         allocate(this%ksrc(this%n_children))
@@ -423,6 +457,10 @@ contains
         call MPI_Gatherv(n, 0, MPI_INTEGER, this%kewc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
         call MPI_Gatherv(n, 0, MPI_INTEGER, this%jswc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
         call MPI_Gatherv(n, 0, MPI_INTEGER, this%jewc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%isrec, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%ierec, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jsrec, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
+        call MPI_Gatherv(n, 0, MPI_INTEGER, this%jerec, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
         call MPI_Gatherv(n, 0, MPI_INTEGER, this%isrc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
         call MPI_Gatherv(n, 0, MPI_INTEGER, this%ierc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
         call MPI_Gatherv(n, 0, MPI_INTEGER, this%ksrc, cnts, disps, MPI_INTEGER, this%n_children, this%client_comms)
@@ -453,12 +491,16 @@ contains
         this%i_e_r = maxval(this%ierc)
         this%i_s_w = minval(this%iswc)
         this%i_e_w = maxval(this%iewc)
+        this%i_s_re = minval(this%isrec)
+        this%i_e_re = maxval(this%ierec)
 
         this%j_s_r = minval(this%jsrc)
         this%j_e_r = maxval(this%jerc)
         this%j_s_w = minval(this%jswc)
         this%j_e_w = maxval(this%jewc)
-        
+        this%j_s_re = minval(this%jsrec)
+        this%j_e_re = maxval(this%jerec)
+
         this%k_s_r = minval(this%ksrc)
         this%k_e_r = maxval(this%kerc)
         this%k_s_w = minval(this%kswc)
@@ -640,7 +682,7 @@ contains
         class(ioserver_t),   intent(inout) :: this
         type(options_t),     intent(in)    :: options
 
-        integer :: i, n_3d, n_2d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w
+        integer :: i, n_3d, n_2d, nx, ny, i_s_re, i_e_re, j_s_re, j_e_re
         integer :: ncid, var_id, dimid_3d(4), nz, err, varid, start_3d(4), cnt_3d(4), start_2d(3), cnt_2d(3), msg_size
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
         real, allocatable :: data3d(:,:,:,:)
@@ -685,11 +727,12 @@ contains
         err = nf90_open(restart_in_file, IOR(nf90_nowrite,NF90_NETCDF4), ncid, &
                 comm = this%IO_Comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL)
         
-        ! setup start/count arrays accordingly
-        start_3d = (/ this%i_s_w,this%j_s_w,this%k_s_w,restart_step /)
-        start_2d = (/ this%i_s_w,this%j_s_w,restart_step /)
-        cnt_3d = (/ (this%i_e_w-this%i_s_w+1),(this%j_e_w-this%j_s_w+1),(this%k_e_w-this%k_s_w+1),1 /)
-        cnt_2d = (/ (this%i_e_w-this%i_s_w+1),(this%j_e_w-this%j_s_w+1),1 /)
+        ! setup start/count arrays accordingly. k_s_w and k_e_w forseen to always cover the bounds of what k_s_re and k_e_re would be
+        ! This is because the domain is only decomposed in 2D.
+        start_3d = (/ this%i_s_re,this%j_s_re,this%k_s_w,restart_step /)
+        start_2d = (/ this%i_s_re,this%j_s_re,restart_step /)
+        cnt_3d = (/ (this%i_e_re-this%i_s_re+1),(this%j_e_re-this%j_s_re+1),(this%k_e_w-this%k_s_w+1),1 /)
+        cnt_2d = (/ (this%i_e_re-this%i_s_re+1),(this%j_e_re-this%j_s_re+1),1 /)
 
         this%parent_write_buffer_3d = kEMPT_BUFF
         this%parent_write_buffer_2d = kEMPT_BUFF
@@ -703,7 +746,6 @@ contains
             call check_ncdf( nf90_inq_varid(ncid, name, var_id), " Getting var ID for "//trim(name))
             call check_ncdf( nf90_var_par_access(ncid, var_id, nf90_collective))
             
-            
             nx = cnt_3d(1) + var%xstag
             ny = cnt_3d(2) + var%ystag
 
@@ -716,11 +758,11 @@ contains
                 allocate(data3d(nx,ny,nz,1))
                 call check_ncdf( nf90_get_var(ncid, var_id, data3d, start=start_3d, count=(/ nx, ny, nz /)), " Getting 3D var "//trim(name))
 
-                this%parent_write_buffer_3d(n_3d,this%i_s_w:this%i_e_w+var%xstag,1:nz,this%j_s_w:this%j_e_w+var%ystag) = &
+                this%parent_write_buffer_3d(n_3d,this%i_s_re:this%i_e_re+var%xstag,1:nz,this%j_s_re:this%j_e_re+var%ystag) = &
                         reshape(data3d(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
                 n_3d = n_3d+1
             else if (var%two_d) then
-                call check_ncdf( nf90_get_var(ncid, var_id, this%parent_write_buffer_2d(n_2d,this%i_s_w:this%i_e_w+var%xstag,this%j_s_w:this%j_e_w+var%ystag), &
+                call check_ncdf( nf90_get_var(ncid, var_id, this%parent_write_buffer_2d(n_2d,this%i_s_re:this%i_e_re+var%xstag,this%j_s_re:this%j_e_re+var%ystag), &
                         start=start_2d, count=(/ nx, ny /)), " Getting 2D "//trim(name))
                         n_2d = n_2d+1
             endif
@@ -736,11 +778,11 @@ contains
         ! Loop through child images and send chunks of buffer array to each one
         do i=1,this%n_children
             !Note that the MPI datatypes here are reversed since we are working with the write window
-            call MPI_Put(this%parent_write_buffer_3d(1,this%iswc(i),1,this%jswc(i)), msg_size, &
-                this%get_types_3d(i), this%children_ranks(i), disp, msg_size, this%child_get_types_3d(i), this%write_win_3d)
+            call MPI_Put(this%parent_write_buffer_3d(1,this%isrec(i),1,this%jsrec(i)), msg_size, &
+                this%rst_types_3d(i), this%children_ranks(i), disp, msg_size, this%child_rst_types_3d(i), this%write_win_3d)
 
-            call MPI_Put(this%parent_write_buffer_2d(1,this%iswc(i),this%jswc(i)), msg_size, &
-                this%get_types_2d(i), this%children_ranks(i), disp, msg_size, this%child_get_types_2d(i), this%write_win_2d)
+            call MPI_Put(this%parent_write_buffer_2d(1,this%isrec(i),this%jsrec(i)), msg_size, &
+                this%rst_types_2d(i), this%children_ranks(i), disp, msg_size, this%child_rst_types_2d(i), this%write_win_2d)
         enddo
         call MPI_Win_fence(0,this%write_win_3d)
         call MPI_Win_fence(0,this%write_win_2d)
