@@ -241,21 +241,21 @@ contains
         type(boundary_t),intent(inout) :: boundary ! forcing file for init conditions
         type(ioclient_t),intent(inout) :: ioclient
 
+        if (STD_OUT_PE) write(*,*) "Receiving initial data"
+        if (STD_OUT_PE) flush(output_unit)
+        call ioclient%receive(boundary, domain)
+
+        if (STD_OUT_PE) write(*,*) "Populating boundary object"
+        if (STD_OUT_PE) flush(output_unit)
+        call boundary%update_computed_vars(options, update=options%forcing%time_varying_z)
+
+        if (STD_OUT_PE) write(*,*) "Initializing forcing interpolation"
+        call domain%get_initial_conditions(boundary, options)    
 
         if (options%restart%restart) then
             if (STD_OUT_PE) write(*,*) "Reading restart data"
             call ioclient%receive_rst(domain, options)
-        else
-            if (STD_OUT_PE) write(*,*) "Receiving initial data"
-            if (STD_OUT_PE) flush(output_unit)
-            call ioclient%receive(boundary, domain)
-    
-            if (STD_OUT_PE) write(*,*) "Populating boundary object"
-            if (STD_OUT_PE) flush(output_unit)
-            call boundary%update_computed_vars(options, update=options%forcing%time_varying_z)
         endif
-        if (STD_OUT_PE) write(*,*) "Initializing forcing interpolation"
-        call domain%get_initial_conditions(boundary, options)    
 
         if (STD_OUT_PE) write(*,*) "Initializing physics"
         ! physics drivers need to be initialized after restart data are potentially read in.

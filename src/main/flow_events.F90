@@ -65,13 +65,14 @@ subroutine wake_component(component, options, boundary, ioclient)
             call component(options%nest_indx)%total_timer%stop()
             call component(options%nest_indx)%initialization_timer%stop() 
         type is (ioserver_t)
+
+            !Get initial conditions
+            if (options%general%parent_nest == 0) call component(options%nest_indx)%read_file()
+            call component(options%nest_indx)%reset_flow_obj_times(input=.true., output=.false.)
+
             if (options%restart%restart) then
                 call component(options%nest_indx)%read_restart_file(options)
             else
-                !Get initial conditions
-                if (options%general%parent_nest == 0) call component(options%nest_indx)%read_file()
-                call component(options%nest_indx)%reset_flow_obj_times(input=.true., output=.false.)
-
                 call component(options%nest_indx)%write_file()
             endif
 
@@ -93,12 +94,12 @@ subroutine wake_component(component, options, boundary, ioclient)
                     call MPI_Barrier(MPI_COMM_WORLD)
                 endif
             else
+                if (options%general%parent_nest == 0) then
+                    call component(options%nest_indx)%increment_input_time()
+                    call MPI_Barrier(MPI_COMM_WORLD)
+                    call component(options%nest_indx)%reset_flow_obj_times(input=.true., output=.false.)
+                endif
                 if (.not.(options%restart%restart)) then
-                    if (options%general%parent_nest == 0) then
-                        call component(options%nest_indx)%increment_input_time()
-                        call MPI_Barrier(MPI_COMM_WORLD)
-                        call component(options%nest_indx)%reset_flow_obj_times(input=.true., output=.false.)
-                    endif
                     call component(options%nest_indx)%increment_output_time()
                     call MPI_Barrier(MPI_COMM_WORLD)
                 endif
@@ -298,22 +299,18 @@ subroutine component_loop(components, options, boundary, ioclient)
             if (components(i)%dead_or_asleep()) cycle
 
             call component_read(components(i), options(i), boundary(i), ioclient(i))
-            if (STD_OUT_PE) write(*,*) "  4 Model time = ", trim(components(i)%sim_time%as_string())
 
             do while ( .not.(components(i)%time_for_input()) .and. .not.(components(i)%ended) )
                 call component_main_loop(components(i), options(i), boundary(i))
-                if (STD_OUT_PE) write(*,*) "  1 Model time = ", trim(components(i)%sim_time%as_string())
+
                 ! If it is time for an output, do. But, if we are about to exit this loop, then 
                 ! skip ahead to updating the nest, since this will be a bottleneck for execution.
                 if (components(i)%time_for_output()) then
-                    if (STD_OUT_PE) write(*,*) "  2 Model time = ", trim(components(i)%sim_time%as_string())
-
                     if (.not.(components(i)%time_for_input() )) then
                         call component_write(components(i), options(i), ioclient(i))
                     endif
                 endif
             end do
-            if (STD_OUT_PE) write(*,*) "  3 Model time = ", trim(components(i)%sim_time%as_string())
 
             if (should_update_nests(components,options(i))) then
                 call update_component_nest(components,options(i),ioclient(i))

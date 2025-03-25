@@ -249,7 +249,7 @@ contains
         ! if this is a restart run, it is acceptable to find a non-exact first file time, 
         ! in which case we take the forward time (assuming restart was written between input steps)
         if (restart) then
-            this%curstep = find_timestep_in_filelist(file_list, time_var, time, filename, forward=.True., error=error)
+            this%curstep = find_timestep_in_filelist(file_list, time_var, time, filename, forward=.False., error=error)
         else
             this%curstep = find_timestep_in_filelist(file_list, time_var, time, filename, error=error)
         endif

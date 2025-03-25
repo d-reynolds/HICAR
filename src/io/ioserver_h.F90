@@ -58,8 +58,8 @@ module ioserver_interface
 
         ! These MPI datatypes describe the access patterns between the IO read/write buffers and
         ! the child read/write buffers
-        type(MPI_Datatype), allocatable, dimension(:) :: get_types_3d, get_types_2d, put_types, child_get_types_3d, child_get_types_2d, &
-                                                        child_put_types, force_types, child_force_types
+        type(MPI_Datatype), allocatable, dimension(:) :: get_types_3d, get_types_2d, rst_types_3d, rst_types_2d, put_types, child_get_types_3d, child_get_types_2d, &
+                                                        child_put_types, force_types, child_force_types, child_rst_types_3d, child_rst_types_2d
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types, buffer_nest_types
         
         ! coarray-indices of child io processes, indexed according to the COMPUTE_TEAM
@@ -77,10 +77,10 @@ module ioserver_interface
         ! c -- defines this index as the index of a particular child, 
         ! where the index in this array corresponds to the child image at the same index in the children array
 
-        integer, allocatable, dimension(:) :: isrc, ierc, ksrc, kerc, jsrc, jerc, iswc, iewc, kswc, kewc, jswc, jewc
+        integer, allocatable, dimension(:) :: isrc, ierc, ksrc, kerc, jsrc, jerc, iswc, iewc, kswc, kewc, jswc, jewc, isrec, ierec, jsrec, jerec
         
-        integer :: i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, i_s_r, i_e_r, k_s_r, k_e_r, k_e_f, j_s_r, j_e_r, n_restart
-        integer :: nx_w, nz_w, ny_w, n_w_3d, n_w_2d, nx_r, nz_r, ny_r, n_r, n_f
+        integer :: i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, i_s_r, i_e_r, k_s_r, k_e_r, k_e_f, j_s_r, j_e_r, i_s_re, i_e_re, j_s_re, j_e_re, n_restart
+        integer :: nx_w, nz_w, ny_w, n_w_3d, n_w_2d, nx_r, nz_r, ny_r, n_r, n_f, nx_re, ny_re
         integer         :: ide, kde, jde
         integer :: restart_counter = 0
         integer :: output_counter = 0
