@@ -19,7 +19,6 @@ type flow_obj_t
 
     logical :: started = .false.
     logical :: ended = .false.
-    logical :: last_loop = .false.
     integer :: nest_indx = 0
 
     type(time_delta_t), public :: small_time_delta

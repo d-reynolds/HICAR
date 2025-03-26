@@ -20,7 +20,6 @@ contains
 
         this%started = .false.
         this%ended = .false.
-        this%last_loop = .false.
         this%nest_indx = nest_indx
 
         call this%small_time_delta%set(1)
@@ -36,8 +35,6 @@ contains
             do while(this%next_input < options%restart%restart_time)
                 this%next_input = this%next_input + this%input_dt
             end do
-            ! Go back one so that we read initially
-            this%next_input = this%next_input - this%input_dt
 
             !By definition, a restart time has to lay on an output time, so this is valid
             this%next_output = options%restart%restart_time + this%output_dt
@@ -82,14 +79,21 @@ contains
         class(flow_obj_t), intent(inout) :: this
 
         ! check if the next input time is greater than the end time
-        if (.not.(this%time_for_input())) then
-            if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to increment the input time."
-            if (STD_OUT_PE) write(*,*) "Currently, next_input is: ",trim(this%next_input%as_string()), " and sim_time is: ", trim(this%sim_time%as_string())
-            if (STD_OUT_PE) write(*,*) "At this step, they should be equal."
-            stop "CONTROL FLOW ERROR, EXITING 2"
-        end if
+        ! if (.not.(this%time_for_input())) then
+        !     if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to increment the input time."
+        !     if (STD_OUT_PE) write(*,*) "Currently, next_input is: ",trim(this%next_input%as_string()), " and sim_time is: ", trim(this%sim_time%as_string())
+        !     if (STD_OUT_PE) write(*,*) "At this step, they should be equal."
+        !     stop "CONTROL FLOW ERROR, EXITING 2"
+        ! end if
 
-        this%next_input = this%next_input + this%input_dt
+        if (this%next_input <= this%sim_time)then
+            this%next_input = this%sim_time + this%input_dt
+        endif
+        ! if (this%started) then
+        ! else
+        !     write(*,*) "For nest: ", this%nest_indx, " we were asked to increment the input time."
+        !     write(*,*) "But this nest has not yet started."
+        ! endif
 
     end subroutine increment_input_time
 
@@ -165,9 +169,6 @@ contains
 
         doa = .false.
 
-        call this%check_ended()
-        call this%check_started()
-
         if (this%ended .eqv. .true.) then
             doa = .true.
         else if (this%started .eqv. .false.) then
@@ -189,7 +190,7 @@ contains
             return
         end if
 
-        time_for_input = ((this%sim_time  + this%small_time_delta >= this%next_input)) ! .and. (this%sim_time + this%small_time_delta <= this%next_input + this%input_dt))
+        time_for_input = this%sim_time == this%next_input ! .and. (this%sim_time + this%small_time_delta <= this%next_input + this%input_dt))
 
     end function time_for_input
 
@@ -206,12 +207,7 @@ contains
             return
         end if
 
-        if (this%last_loop) then
-            time_for_output = .true.
-            return
-        end if
-
-        time_for_output = ((this%sim_time + this%small_time_delta >= this%next_output) .and. (this%sim_time + this%small_time_delta <= this%next_output + this%input_dt))
+        time_for_output = this%sim_time == this%next_output
 
     end function time_for_output
 
@@ -226,10 +222,6 @@ contains
             stop "CONTROL FLOW ERROR, EXITING 5"
         end if
 
-        if (.not.(this%started)) then
-            if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but this nest has not started."
-            stop "CONTROL FLOW ERROR, EXITING 6"
-        end if
 
         if (this%next_input < this%next_output) then
             next_flow_event = this%next_input

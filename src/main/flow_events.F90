@@ -10,6 +10,7 @@ module flow_events
         can_update_child_nest, end_nest_context, switch_nest_context, wake_nest
     use time_step, only: step
     use initialization, only: init_model
+    use time_object, only: Time_type
     use iso_fortran_env
     use mpi_f08
 
@@ -68,7 +69,7 @@ subroutine wake_component(component, options, boundary, ioclient)
 
             !Get initial conditions
             if (options%general%parent_nest == 0) call component(options%nest_indx)%read_file()
-            call component(options%nest_indx)%reset_flow_obj_times(input=.true., output=.false.)
+            ! call component(options%nest_indx)%reset_flow_obj_times(input=.true., output=.false.)
 
             if (options%restart%restart) then
                 call component(options%nest_indx)%read_restart_file(options)
@@ -87,17 +88,21 @@ subroutine wake_component(component, options, boundary, ioclient)
 
         type is (flow_obj_t)
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
-                call component(options%nest_indx)%increment_input_time()
+                ! call component(options%nest_indx)%increment_input_time()
                 call MPI_Barrier(MPI_COMM_WORLD)
                 if (.not.(options%restart%restart)) then
                     call component(options%nest_indx)%increment_output_time()
                     call MPI_Barrier(MPI_COMM_WORLD)
                 endif
+                ! "update nest"
+                if (size(options%general%child_nests) > 0) then
+                    call update_component_nest(component,options,ioclient)
+                endif
             else
                 if (options%general%parent_nest == 0) then
-                    call component(options%nest_indx)%increment_input_time()
+                    ! call component(options%nest_indx)%increment_input_time()
                     call MPI_Barrier(MPI_COMM_WORLD)
-                    call component(options%nest_indx)%reset_flow_obj_times(input=.true., output=.false.)
+                    ! call component(options%nest_indx)%reset_flow_obj_times(input=.true., output=.false.)
                 endif
                 if (.not.(options%restart%restart)) then
                     call component(options%nest_indx)%increment_output_time()
@@ -110,7 +115,7 @@ subroutine wake_component(component, options, boundary, ioclient)
                 endif
 
                 if (options%general%parent_nest == 0) then
-                    call component(options%nest_indx)%increment_input_time()
+                    ! call component(options%nest_indx)%increment_input_time()
                     call MPI_Barrier(MPI_COMM_WORLD)
                 endif
             endif
@@ -148,13 +153,17 @@ subroutine update_component_nest(component,options,ioclient)
             enddo
         type is (flow_obj_t)
             ! if ioclient is null, then we are acting as an ioserver
-            if (ioclient%parent_comms==MPI_COMM_NULL) then
+            if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
+                call MPI_Barrier(MPI_COMM_WORLD)
+            else
                 ! now loop over all child nests
+                call MPI_Barrier(MPI_COMM_WORLD)
                 do n = 1, size(options%general%child_nests)
                     !Test if we can update the child nest
                     if ( can_update_child_nest(component(options%nest_indx),component(options%general%child_nests(n))) ) then
                         ! This call will distribute the model state of the forcing fields to the child nest
-                        call component(options%general%child_nests(n))%increment_input_time()
+                        call MPI_Barrier(MPI_COMM_WORLD)
+                        ! call component(options%general%child_nests(n))%increment_input_time()
                     endif
                 enddo
             endif
@@ -226,14 +235,16 @@ subroutine component_read(component, options, boundary, ioclient)
             call component%read_file()
         type is (flow_obj_t)
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
-                call component%increment_input_time()
+                ! call component%increment_input_time()
                 call MPI_Barrier(MPI_COMM_WORLD)
             else
                 ! if ioclient comms is null, then we are acting as an ioserver
-                if (options%general%parent_nest == 0 .and. component%sim_time < (component%end_time-component%input_dt-component%input_dt)) then
-                    call MPI_Barrier(MPI_COMM_WORLD)
+                if (options%general%parent_nest == 0) then
+                    ! call component%increment_input_time()
+                    if (component%sim_time < (component%end_time-component%input_dt-component%input_dt)) then
+                        call MPI_Barrier(MPI_COMM_WORLD)
+                    endif
                 endif
-                call component%increment_input_time()
             endif
     end select
 
@@ -298,6 +309,7 @@ subroutine component_loop(components, options, boundary, ioclient)
 
             if (components(i)%dead_or_asleep()) cycle
 
+            call components(i)%increment_input_time()
             call component_read(components(i), options(i), boundary(i), ioclient(i))
 
             do while ( .not.(components(i)%time_for_input()) .and. .not.(components(i)%ended) )
@@ -306,9 +318,7 @@ subroutine component_loop(components, options, boundary, ioclient)
                 ! If it is time for an output, do. But, if we are about to exit this loop, then 
                 ! skip ahead to updating the nest, since this will be a bottleneck for execution.
                 if (components(i)%time_for_output()) then
-                    if (.not.(components(i)%time_for_input() )) then
-                        call component_write(components(i), options(i), ioclient(i))
-                    endif
+                    call component_write(components(i), options(i), ioclient(i))
                 endif
             end do
 
@@ -317,12 +327,12 @@ subroutine component_loop(components, options, boundary, ioclient)
             endif
 
             !Do a write here which may have been skipped above
-            if (components(i)%time_for_output()) then
-                call component_write(components(i), options(i), ioclient(i))
-            endif
+            ! if (components(i)%time_for_output()) then
+            !     write(*,*) "Writing output file"
+            !     call component_write(components(i), options(i), ioclient(i))
+            ! endif
 
             call component_end_of_nest_loop(components(i), options(i))
-
         enddo
     enddo
 
@@ -480,6 +490,8 @@ subroutine component_program_end(component, options)
             enddo
 
         type is (ioserver_t)
+            write(*,*) "TESTING TO DELETE -- IO PROCESS FINISHED SIM"
+
             call component(1)%close_files()
     end select
 
