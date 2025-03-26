@@ -304,8 +304,6 @@ subroutine component_loop(components, options, boundary, ioclient)
             do while ( .not.(components(i)%time_for_input()) .and. .not.(components(i)%ended) )
                 call component_main_loop(components(i), options(i), boundary(i))
 
-                ! If it is time for an output, do. But, if we are about to exit this loop, then 
-                ! skip ahead to updating the nest, since this will be a bottleneck for execution.
                 if (components(i)%time_for_output()) then
                     call component_write(components(i), options(i), ioclient(i))
                 endif

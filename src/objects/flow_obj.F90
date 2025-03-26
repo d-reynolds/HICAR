@@ -39,8 +39,7 @@ contains
             !By definition, a restart time has to lay on an output time, so this is valid
             this%next_output = options%restart%restart_time + this%output_dt
         endif
-        this%input_start = this%next_input
-        this%output_start = this%next_output
+
     end subroutine init_flow_obj
 
     ! increment the output time
