@@ -14,7 +14,7 @@ public :: flow_obj_t
 type flow_obj_t
 !   private
     type(Time_type), public :: sim_time, end_time
-    type(Time_type), public :: next_output, next_input, output_start, input_start
+    type(Time_type), public :: next_output, next_input
     type(time_delta_t) :: output_dt, input_dt
 
     logical :: started = .false.
