@@ -570,7 +570,7 @@ contains
         ! this is because input time is just controlling if we are at an input event -- not necessarily
         ! if we read in data or not
         ! the reader object will handle if we try to read a time step which doesn't exist in the forcing
-        call this%increment_input_time()
+        ! call this%increment_input_time()
     end subroutine 
 
     module subroutine gather_forcing(this)
@@ -649,7 +649,7 @@ contains
                         forcing_buffer, buff_msg_size_alltoall, disp_alltoall, this%buffer_nest_types(child_indx,:), this%IO_Comms)
         ! This call will scatter the forcing fields to the ioclients of the nest child
         call child_ioserver%scatter_forcing(forcing_buffer)
-        call child_ioserver%increment_input_time()
+        ! call child_ioserver%increment_input_time()
     end subroutine
 
     module subroutine scatter_forcing(this, forcing_buffer)

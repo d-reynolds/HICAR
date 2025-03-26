@@ -59,6 +59,7 @@ program test_driver
     if (allocated(first_arg)) then
         if (to_lower(first_arg) == '-v') then
             verbose = .True.
+            STD_OUT_PE = .True.
             call get_argument(2, suite_name)
             call get_argument(3, test_name)
         else
@@ -79,8 +80,8 @@ program test_driver
             ! Redirect error output
             close(error_unit)
             open(error_unit, file=file, status='replace')
-        else
-            STD_OUT_PE = .True.
+        ! else
+        !     STD_OUT_PE = .True.
         endif
     endif
 

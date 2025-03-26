@@ -357,7 +357,7 @@ contains
     
         ! Do MPI_Win_Post on read_buffer to indicate that we are open for delivery of new input data
         call MPI_Win_Post(this%parent_group,0,this%read_win)
-        call domain%increment_input_time()
+        ! call domain%increment_input_time()
 
 
     end subroutine 
