@@ -587,11 +587,17 @@ contains
         info = .False.
         gen_nml = .False.
         only_namelist_check = .False.
+        first_arg = ""
 
         cnt = command_argument_count()
 
+        if (cnt > 0) then
+            ! get first command line argument
+            call get_command_argument(1,first_arg)
+        endif
+
         ! If there are no command line arguments, throw error
-        if (cnt == 0 .and. STD_OUT_PE) then
+        if ( (cnt == 0 .or. first_arg=='-h' .or. first_arg=='--help') .and. STD_OUT_PE) then
             write(*,*) "Usage: ./HICAR [-v [variable_name ...|--all]] [--check-nml] [--gen-nml] namelist_file"
             write(*,*) "    -v [variable_name ...|--all]: Print information about the namelist variable(s) variable_name, ... "
             write(*,*) "                                  --all prints out information for all namelist variables."
@@ -612,9 +618,6 @@ contains
 
             stop
         endif
-
-        ! get first command line argument
-        call get_command_argument(1, first_arg)
 
         ! test if argument is a '-v' type argument, indicating that we should print namelist info for this variable
         if (first_arg == '-v') then

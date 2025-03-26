@@ -2668,7 +2668,7 @@ contains
                                                      "3 = YSU consistent"
                 allocate(values(3))
                 values = [-1, 1, 2, 3]
-                default = "-1"
+                default = "1"
                 group = "LSM_Parameters"
             case ("nmp_opt_btr")
                 description = "Noah-MP Soil Moisture Factor for Stomatal Resistance"//achar(10)//BLNK_CHR_N// &
