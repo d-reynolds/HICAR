@@ -34,7 +34,9 @@ module test_control_flow
             new_unittest("standard", test_standard_prgm), &
             new_unittest("standard_restart", test_standard_restart_prgm), &
             new_unittest("nested", test_nested_prgm), &
-            new_unittest("nested_restart", test_nested_restart_prgm) &
+            new_unittest("nested_restart", test_nested_restart_prgm), &
+            new_unittest("nested_restart_uneven_start_end", test_nested_restart_uneven_startend_prgm) &
+
           ]
       
     end subroutine collect_control_flow_suite
@@ -48,22 +50,11 @@ module test_control_flow
 
         n_nests = 1
         allocate(in_options(n_nests))
+        call init_options_std(in_options)
 
         do i = 1, n_nests
-            in_options(i)%general%calendar = "gregorian"
-            call in_options(i)%general%start_time%init(in_options(i)%general%calendar)
             call in_options(i)%general%start_time%set("2000-01-01 00:00:00")
-            call in_options(i)%general%end_time%init(in_options(i)%general%calendar)
-            call in_options(i)%general%end_time%set("2000-01-02 00:00:00")
-            call in_options(i)%forcing%input_dt%set(seconds=3600)
-            call in_options(i)%output%output_dt%set(seconds=3600)
-            in_options(i)%general%parent_nest = i - 1
-            if (i<n_nests) then
-                allocate(in_options(i)%general%child_nests(1))
-                in_options(i)%general%child_nests = [i+1]
-            else
-                allocate(in_options(i)%general%child_nests(0))
-            end if
+            call in_options(i)%general%end_time%set("2000-01-01 06:00:00")
         enddo
 
         call test_main_prg(in_options)
@@ -79,25 +70,15 @@ module test_control_flow
 
         n_nests = 1
         allocate(in_options(n_nests))
+        call init_options_std(in_options)
 
         do i = 1, n_nests
-            in_options(i)%general%calendar = "gregorian"
-            call in_options(i)%general%start_time%init(in_options(i)%general%calendar)
             call in_options(i)%general%start_time%set("2000-01-01 00:00:00")
-            call in_options(i)%general%end_time%init(in_options(i)%general%calendar)
-            call in_options(i)%general%end_time%set("2000-01-02 00:00:00")
+            call in_options(i)%general%end_time%set("2000-01-01 06:00:00")
             in_options(i)%restart%restart = .true.
-            call in_options(i)%restart%restart_time%init(in_options(i)%general%calendar)
             call in_options(i)%restart%restart_time%set("2000-01-01 03:30:00")
             call in_options(i)%forcing%input_dt%set(seconds=3600)
             call in_options(i)%output%output_dt%set(seconds=600)
-            in_options(i)%general%parent_nest = i - 1
-            if (i<n_nests) then
-                allocate(in_options(i)%general%child_nests(1))
-                in_options(i)%general%child_nests = [i+1]
-            else
-                allocate(in_options(i)%general%child_nests(0))
-            end if
         enddo
 
         call test_main_prg(in_options)
@@ -113,22 +94,13 @@ module test_control_flow
 
         n_nests = 3
         allocate(in_options(n_nests))
+        call init_options_std(in_options)
 
         do i = 1, n_nests
-            in_options(i)%general%calendar = "gregorian"
-            call in_options(i)%general%start_time%init(in_options(i)%general%calendar)
             call in_options(i)%general%start_time%set("2000-01-01 00:00:00")
-            call in_options(i)%general%end_time%init(in_options(i)%general%calendar)
-            call in_options(i)%general%end_time%set("2000-01-01 00:30:00")
+            call in_options(i)%general%end_time%set("2000-01-01 06:00:00")
             call in_options(i)%forcing%input_dt%set(seconds=3600)
             call in_options(i)%output%output_dt%set(seconds=600)
-            in_options(i)%general%parent_nest = i - 1
-            if (i<n_nests) then
-                allocate(in_options(i)%general%child_nests(1))
-                in_options(i)%general%child_nests = [i+1]
-            else
-                allocate(in_options(i)%general%child_nests(0))
-            end if
         enddo
 
         call test_main_prg(in_options)
@@ -144,30 +116,46 @@ module test_control_flow
 
         n_nests = 3
         allocate(in_options(n_nests))
+        call init_options_std(in_options)
 
         do i = 1, n_nests
-            in_options(i)%general%calendar = "gregorian"
-            call in_options(i)%general%start_time%init(in_options(i)%general%calendar)
             call in_options(i)%general%start_time%set("2000-01-01 00:00:00")
-            call in_options(i)%general%end_time%init(in_options(i)%general%calendar)
-            call in_options(i)%general%end_time%set("2000-01-02 00:00:00")
+            call in_options(i)%general%end_time%set("2000-01-01 06:00:00")
             in_options(i)%restart%restart = .true.
-            call in_options(i)%restart%restart_time%init(in_options(i)%general%calendar)
-            call in_options(i)%restart%restart_time%set("2000-01-01 05:00:00")
-            call in_options(i)%forcing%input_dt%set(seconds=3600)
-            call in_options(i)%output%output_dt%set(seconds=3600)
-            in_options(i)%general%parent_nest = i - 1
-            if (i<n_nests) then
-                allocate(in_options(i)%general%child_nests(1))
-                in_options(i)%general%child_nests = [i+1]
-            else
-                allocate(in_options(i)%general%child_nests(0))
-            end if
+            call in_options(i)%restart%restart_time%set("2000-01-01 03:30:00")
         enddo
 
         call test_main_prg(in_options)
 
     end subroutine test_nested_restart_prgm
+
+        !> Test the control flow of the main driver program
+    subroutine test_nested_restart_uneven_startend_prgm(error)
+        type(error_type), allocatable, intent(out) :: error
+
+        type(options_t), allocatable :: in_options(:)
+        integer :: i, n_nests
+
+        n_nests = 3
+        allocate(in_options(n_nests))
+        call init_options_std(in_options)
+
+        do i = 1, n_nests
+            in_options(i)%restart%restart = .true.
+            call in_options(i)%restart%restart_time%set("2000-01-01 03:30:00")
+        enddo
+        call in_options(1)%general%start_time%set("2000-01-01 00:00:00")
+        call in_options(2)%general%start_time%set("2000-01-01 02:00:00")
+        call in_options(3)%general%start_time%set("2000-01-01 04:00:00")
+
+        call in_options(1)%general%end_time%set("2000-01-01 07:00:00")
+        call in_options(2)%general%end_time%set("2000-01-01 06:00:00")
+        call in_options(3)%general%end_time%set("2000-01-01 05:30:00")
+
+        call test_main_prg(in_options)
+
+    end subroutine test_nested_restart_uneven_startend_prgm
+
 
     subroutine test_main_prg(in_options)
         type(options_t), intent(in) :: in_options(:)
@@ -209,12 +197,10 @@ module test_control_flow
             ioclient%parent_comms = MPI_COMM_WORLD
         end if
 
-        write (*,*) "entering main prog"
 
         ! initialize the objects
         do i = 1, n_nests
             call options(i)%init()
-            write (*,*) "options init"
 
             options(i)%general%nests = n_nests
             options(i)%nest_indx = i
@@ -236,17 +222,41 @@ module test_control_flow
             if (size(in_options(i)%general%child_nests) > 0) then
                 options(i)%general%child_nests = in_options(i)%general%child_nests
             end if
-            write (*,*) "initializing flow obj"
 
             call flow_obj(i)%init_flow_obj(options(i), i)
         end do
-        write (*,*) "Flow objects initialized"
         call component_loop(flow_obj(1:n_nests), options(1:n_nests), boundary(1:n_nests), ioclient(1:n_nests))
-        write (*,*) "Finished test prg for rank ", my_rank
 
         ! Ensure that all processes have really finished the main loop, and sync is completed
         call MPI_Barrier(MPI_COMM_WORLD, ierr)
     end subroutine test_main_prg
 
 
+    !> Initialize the options to some standard values
+    !  Start and end date must be specified
+    !  If a restart run is desired, this must be specified, along with start and end date
+    subroutine init_options_std(options)
+        type(options_t), intent(inout) :: options(:)
+
+        integer :: i, n_nests
+
+        n_nests = size(options)
+
+        do i = 1, n_nests
+            options(i)%general%calendar = "gregorian"
+            call options(i)%general%start_time%init(options(i)%general%calendar)
+            call options(i)%general%end_time%init(options(i)%general%calendar)
+            call options(i)%restart%restart_time%init(options(i)%general%calendar)
+            call options(i)%forcing%input_dt%set(seconds=3600)
+            call options(i)%output%output_dt%set(seconds=3600)
+            options(i)%general%parent_nest = i - 1
+            if (i<n_nests) then
+                allocate(options(i)%general%child_nests(1))
+                options(i)%general%child_nests = [i+1]
+            else
+                allocate(options(i)%general%child_nests(0))
+            end if
+        enddo
+
+    end subroutine init_options_std
 end module test_control_flow

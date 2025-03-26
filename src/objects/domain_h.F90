@@ -491,10 +491,9 @@ module domain_interface
         logical, optional, intent(in)  :: update_in
     end subroutine
 
-    module subroutine update_delta_fields(this, dt)
+    module subroutine update_delta_fields(this)
         implicit none
         class(domain_t),    intent(inout) :: this
-        type(time_delta_t), intent(in)    :: dt
     end subroutine
 
     module subroutine apply_forcing(this, forcing, options, dt)
