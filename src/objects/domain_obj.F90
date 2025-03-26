@@ -2954,14 +2954,16 @@ contains
     !! apply_forcing multiplies that /second value and multiplies it by the current time step before adding it
     !!
     !! -------------------------------
-    module subroutine update_delta_fields(this, dt)
+    module subroutine update_delta_fields(this)
         implicit none
         class(domain_t),    intent(inout) :: this
-        type(time_delta_t), intent(in)    :: dt
 
+        type(time_delta_t)  :: dt
         ! temporary to hold the variable to be interpolated to
         type(variable_t) :: var_to_update
                 
+        dt = this%next_input - this%sim_time
+
         ! make sure the dictionary is reset to point to the first variable
         call this%variables_to_force%reset_iterator()
 

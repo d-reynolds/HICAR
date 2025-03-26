@@ -25,7 +25,6 @@ type flow_obj_t
 
     contains
         procedure, public :: init_flow_obj
-        procedure, public :: reset_flow_obj_times
         procedure, public :: increment_input_time
         procedure, public :: increment_output_time
         procedure, public :: increment_sim_time
@@ -35,7 +34,6 @@ type flow_obj_t
         procedure, public :: next_flow_event
         procedure, public :: dead_or_asleep
         procedure, public :: check_ended
-        procedure, public :: check_started
     end type
 
     interface
@@ -45,12 +43,6 @@ type flow_obj_t
             class(flow_obj_t), intent(inout) :: this
             type(options_t), intent(in) :: options
             integer, intent(in) :: nest_indx
-        end subroutine
-
-        module subroutine reset_flow_obj_times(this, input, output)
-            implicit none
-            class(flow_obj_t), intent(inout) :: this
-            logical, optional, intent(in) :: input, output
         end subroutine
 
         module subroutine increment_output_time(this)
@@ -100,11 +92,6 @@ type flow_obj_t
         end function
 
         module subroutine check_ended(this)
-            implicit none
-            class(flow_obj_t), intent(inout) :: this
-        end subroutine
-
-        module subroutine check_started(this)
             implicit none
             class(flow_obj_t), intent(inout) :: this
         end subroutine

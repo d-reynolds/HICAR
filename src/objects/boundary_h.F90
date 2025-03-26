@@ -11,6 +11,7 @@ module boundary_interface
     use data_structures,          only : interpolable_type
     use icar_constants,           only : kMAX_NAME_LENGTH, kMAX_STRING_LENGTH
     use grid_interface,           only : grid_t
+    use flow_object_interface,     only : flow_obj_t
     implicit none
 
     private
@@ -108,10 +109,10 @@ module boundary_interface
 
 
 
-    module subroutine update_delta_fields(this, dt)
+    module subroutine update_delta_fields(this, flow_obj)
         implicit none
         class(boundary_t),    intent(inout) :: this
-        type(time_delta_t), intent(in)    :: dt
+        class(flow_obj_t),    intent(in)    :: flow_obj
     end subroutine
     
     module subroutine update_computed_vars(this, options, update)

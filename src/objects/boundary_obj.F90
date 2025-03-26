@@ -810,10 +810,12 @@ contains
 
 
 
-    module subroutine update_delta_fields(this, dt)
+    module subroutine update_delta_fields(this, flow_obj)
         implicit none
         class(boundary_t),    intent(inout) :: this
-        type(time_delta_t), intent(in)    :: dt
+        class(flow_obj_t),   intent(in) :: flow_obj
+        
+        type(time_delta_t)  :: advance_dt
 
         ! temporary to hold the variable to be interpolated to
         type(variable_t) :: var_to_update
@@ -827,12 +829,31 @@ contains
             var_to_update = this%variables_hi%next()
 
             if (var_to_update%two_d) then
-                var_to_update%dqdt_2d = (var_to_update%dqdt_2d - var_to_update%data_2d) / dt%seconds()
+                var_to_update%dqdt_2d = (var_to_update%dqdt_2d - var_to_update%data_2d) / flow_obj%input_dt%seconds()
             else if (var_to_update%three_d) then
-                var_to_update%dqdt_3d = (var_to_update%dqdt_3d - var_to_update%data_3d) / dt%seconds()
+                var_to_update%dqdt_3d = (var_to_update%dqdt_3d - var_to_update%data_3d) / flow_obj%input_dt%seconds()
             endif
 
         enddo
+
+        ! check if the difference between the simulation time and next_input is less than an input_dt
+        ! if so, this signals that we are in between two input times, so advance the state of the variables%data_3d
+        ! to the simulation time
+        advance_dt = flow_obj%next_input - flow_obj%sim_time
+        if (advance_dt%seconds() < flow_obj%input_dt%seconds()) then
+
+            call advance_dt%set(seconds= (flow_obj%input_dt%seconds() - advance_dt%seconds()) )
+
+            call this%variables_hi%reset_iterator()
+            do while (this%variables_hi%has_more_elements())
+                var_to_update = this%variables_hi%next()
+                if (var_to_update%three_d) then
+                    var_to_update%data_3d = var_to_update%data_3d + (var_to_update%dqdt_3d * advance_dt%seconds())
+                else if (var_to_update%two_d) then
+                    var_to_update%data_2d = var_to_update%data_2d + (var_to_update%dqdt_2d * advance_dt%seconds())
+                endif
+            enddo
+        endif
 
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.

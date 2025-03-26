@@ -43,16 +43,6 @@ contains
         this%output_start = this%next_output
     end subroutine init_flow_obj
 
-    module subroutine reset_flow_obj_times(this, input, output)
-        implicit none
-        class(flow_obj_t), intent(inout) :: this
-        logical, optional, intent(in) :: input, output
-
-        if (output) this%next_output = this%output_start
-        if (input) this%next_input = this%input_start
-        
-    end subroutine reset_flow_obj_times
-
     ! increment the output time
     module subroutine increment_output_time(this)
         implicit none
@@ -86,14 +76,9 @@ contains
         !     stop "CONTROL FLOW ERROR, EXITING 2"
         ! end if
 
-        if (this%next_input <= this%sim_time)then
+        if (this%next_input <= (this%sim_time + this%small_time_delta))then
             this%next_input = this%sim_time + this%input_dt
         endif
-        ! if (this%started) then
-        ! else
-        !     write(*,*) "For nest: ", this%nest_indx, " we were asked to increment the input time."
-        !     write(*,*) "But this nest has not yet started."
-        ! endif
 
     end subroutine increment_input_time
 
@@ -146,21 +131,6 @@ contains
 
     end subroutine check_ended
 
-    module subroutine check_started(this)
-        implicit none
-        class(flow_obj_t), intent(inout) :: this
-
-        if (this%started) return
-
-        if (this%next_input > this%sim_time) then
-            if (this%next_output > this%sim_time) then
-                this%started = .true.
-            else
-                this%started = .false.
-            end if
-        end if
-
-    end subroutine check_started
 
     function dead_or_asleep(this) result(doa)
         implicit none
@@ -190,7 +160,7 @@ contains
             return
         end if
 
-        time_for_input = this%sim_time == this%next_input ! .and. (this%sim_time + this%small_time_delta <= this%next_input + this%input_dt))
+        time_for_input = this%sim_time == this%next_input
 
     end function time_for_input
 

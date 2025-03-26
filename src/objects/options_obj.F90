@@ -114,8 +114,6 @@ contains
 
         if (this%general%phys_suite /= '') call set_phys_suite(this)
         
-        ! if (this%restart%restart) this%general%start_time = this%restart%restart_time
-
         call default_var_requests(this)
 
         if (n_indx == 1) call version_check(this%general)
@@ -183,6 +181,10 @@ contains
                         stop
                     endif
 
+                    ! from here on, we just want the given simulation start times, not the restart times
+                    child_strt_time = options(child_nest_indx)%general%start_time
+                    loop_strt_time = options(i)%general%start_time
+
                     !! Check that, for a given chain of nests, the time at which restart files are output is the same for all nests
                     !Compute when the first restart time is for the child nest
                     call helper_delta%set(options(child_nest_indx)%restart%restart_count*options(child_nest_indx)%output%outputinterval)
@@ -221,7 +223,7 @@ contains
 
                     ! Should take the difference between child and parent start times, and divide by the input interval
                     ! If this is not an integer, then the start times are not separated by an integer multiple of the input interval
-                    tmp_delta = child_strt_time - loop_strt_time
+                    tmp_delta = options(child_nest_indx)%general%start_time - options(i)%general%start_time
                     if (mod(tmp_delta%seconds(), options(child_nest_indx)%forcing%inputinterval) /= 0) then
                         if (STD_OUT_PE) write(*,*) "  ERROR: Start time for nest ", child_nest_indx, " is not an integer multiple"
                         if (STD_OUT_PE) write(*,*) "  ERROR: of the inputinterval from the start time of the parent nest"
@@ -402,13 +404,19 @@ contains
             if (STD_OUT_PE) write(*,*) "  Start time must be before end time"
             stop
         endif
+        if (this%restart%restart_time >= this%general%end_time) then
+            if (STD_OUT_PE) write(*,*) "  Restart time must be before end time"
+            stop
+        endif
+
 
         ! check if restart_time is between start and end time
         if (this%restart%restart) then
-            if (this%restart%restart_time < this%general%start_time .or. &
-                this%restart%restart_time > this%general%end_time) then
-                if (STD_OUT_PE) write(*,*) "  Restart time must be between start and end time"
-                stop
+            if (this%restart%restart_time < this%general%start_time) then
+                if (STD_OUT_PE) write(*,*) "  Restart time is before start time for nest ", this%nest_indx
+                if (STD_OUT_PE) write(*,*) "  Setting restart to .False."
+                this%restart%restart = .false.
+                this%restart%restart_time = this%general%start_time
             endif
         endif
 
