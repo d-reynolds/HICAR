@@ -12,6 +12,7 @@ module icar_constants
     integer, parameter :: kCOMPUTE_TEAM = 1
     integer, parameter :: kIO_TEAM = 2
     logical :: STD_OUT_PE = .False.
+    logical :: STD_OUT_PE_IO = .False.
     
     character(len=5), parameter :: kCHAR_NO_VAL = "-9999"
     integer,          parameter :: kINT_NO_VAL = -123456
