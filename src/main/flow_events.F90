@@ -68,12 +68,12 @@ subroutine wake_component(component, options, boundary, ioclient)
         type is (ioserver_t)
 
             !Get initial conditions
-            if (options%general%parent_nest == 0) call component(options%nest_indx)%read_file()
+            if (options%general%parent_nest == 0) call component_read(component(options%nest_indx),options,boundary,ioclient)
 
             if (options%restart%restart) then
                 call component(options%nest_indx)%read_restart_file(options)
             else
-                call component(options%nest_indx)%write_file()
+                call component_write(component(options%nest_indx),options,ioclient)
             endif
 
             !See if any nests needs updating
@@ -83,7 +83,7 @@ subroutine wake_component(component, options, boundary, ioclient)
 
             ! Batch off another round of file reads so that we are always one step ahead of the compute team
             ! This is needed to ensure that the compute team does not wait unnescecarily on us
-            if (options%general%parent_nest == 0) call component(options%nest_indx)%read_file()
+            if (options%general%parent_nest == 0) call component_read(component(options%nest_indx),options,boundary,ioclient)
 
         type is (flow_obj_t)
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
@@ -133,14 +133,22 @@ subroutine update_component_nest(component,options,ioclient)
             call ioclient%update_nest(component(options%nest_indx))
         type is (ioserver_t)
             ! This call will gather the model state of the forcing fields from the nest parent
-            call component(options%nest_indx)%gather_forcing()
+            if (STD_OUT_PE_IO) write(*,"(/ A22,I2,A16)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
+            if (STD_OUT_PE_IO) write(*,*) "Gathering forcings"
+            if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(component(options%nest_indx)%sim_time%as_string())
 
+            call component(options%nest_indx)%gather_forcing()
+            if (STD_OUT_PE_IO) write(*,*) "Completed gathering forcings"
+    
             ! now loop over all child nests
             do n = 1, size(options%general%child_nests)
                 !Test if we can update the child nest
                 if ( can_update_child_nest(component(options%nest_indx),component(options%general%child_nests(n))) ) then
                     ! This call will distribute the model state of the forcing fields to the child nest
+                    if (STD_OUT_PE_IO) write(*,*) "Distributing forcings to child nest: ",options%general%child_nests(n)
                     call component(options%nest_indx)%distribute_forcing(component(options%general%child_nests(n)), n)
+                    if (STD_OUT_PE_IO) write(*,*) "Distributed forcings to child nest: ",options%general%child_nests(n)
+
                 endif
             enddo
         type is (flow_obj_t)
@@ -176,7 +184,13 @@ subroutine component_write(component, options, ioclient)
             call ioclient%push(component)
             call component%output_timer%stop()
         type is (ioserver_t)
+            if (STD_OUT_PE_IO) write(*,"(/ A22,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
+            if (STD_OUT_PE_IO) write(*,*) "Writing out domain"
+            if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(component%sim_time%as_string())
+            if (STD_OUT_PE_IO) write(*,*) "  Next Output = ", trim(component%next_output%as_string())
             call component%write_file()
+            if (STD_OUT_PE_IO) write(*,*) "Wrote out domain"
+
         type is (flow_obj_t)
             call component%increment_output_time()
             call MPI_Barrier(MPI_COMM_WORLD)
@@ -223,7 +237,13 @@ subroutine component_read(component, options, boundary, ioclient)
             call component%input_timer%stop()
         type is (ioserver_t)
             !See if we even have files to read
+            if (STD_OUT_PE_IO) write(*,"(/ A22,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
+            if (STD_OUT_PE_IO) write(*,*) "Reading in Boundary conditions"
+            if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(component%sim_time%as_string())
+            if (STD_OUT_PE_IO) write(*,*) "  Next Input = ", trim(component%next_input%as_string())
             call component%read_file()
+            if (STD_OUT_PE_IO) write(*,*) "Read in Boundary conditions"
+
         type is (flow_obj_t)
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
                 call MPI_Barrier(MPI_COMM_WORLD)

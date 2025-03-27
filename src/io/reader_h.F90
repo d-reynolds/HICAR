@@ -18,7 +18,6 @@ module reader_interface
   use options_interface,  only : options_t
   use variable_dict_interface,  only : var_dict_t
   use boundary_interface, only : boundary_t
-  use meta_data_interface,only : meta_data_t
   use time_object,        only : Time_type
   use time_delta_object,  only : time_delta_t
   implicit none
