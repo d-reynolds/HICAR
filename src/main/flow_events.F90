@@ -304,14 +304,14 @@ subroutine component_loop(components, options, boundary, ioclient)
             do while ( .not.(components(i)%time_for_input()) .and. .not.(components(i)%ended) )
                 call component_main_loop(components(i), options(i), boundary(i))
 
+                if (should_update_nests(components,options(i))) then
+                    call update_component_nest(components,options(i),ioclient(i))
+                endif
+    
                 if (components(i)%time_for_output()) then
                     call component_write(components(i), options(i), ioclient(i))
                 endif
             end do
-
-            if (should_update_nests(components,options(i))) then
-                call update_component_nest(components,options(i),ioclient(i))
-            endif
 
             call component_end_of_nest_loop(components(i), options(i))
         enddo

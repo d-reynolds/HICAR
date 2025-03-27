@@ -179,7 +179,7 @@ contains
         ! if we even have nests
         if (num_children > 0) then
             ! if we are at the end of an input step, or we have just ended, or we have not started (this would mean we are in wake_component)
-            if (flow_objs(options%nest_indx)%time_for_input() .or. flow_objs(options%nest_indx)%ended .or. (flow_objs(options%nest_indx)%started .eqv. .False.)) then
+            if (flow_objs(options%nest_indx)%time_for_input() .or. flow_objs(options%nest_indx)%sim_time%equals(flow_objs(options%nest_indx)%end_time) .or. (flow_objs(options%nest_indx)%started .eqv. .False.)) then
                 ! loop over children
                 do n = 1, num_children
                     ! If we are at or ahead of our child's time, and the child has not ended, then our child needs to be updated
