@@ -17,12 +17,18 @@ module grid_interface
         integer :: ns_halo_nx, ew_halo_ny, halo_nz, halo_size
         integer :: nx_e, ny_e
         integer :: nx_global, ny_global
-        integer :: nx, ny, nz
+        integer :: nx = 0
+        integer :: ny = 0
+        integer :: nz = 0
+        integer :: n_4d = 0
+        logical :: is1d = .False.
+        logical :: is2d = .False.
+        logical :: is3d = .False.
+        logical :: is4d = .False.
 
         integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
                     its,ite, jts,jte, kts,kte    ! for the data tile to process   (t)
 
-        logical :: is2d, is3d
         character(len=kMAX_DIM_LENGTH), allocatable :: dimensions(:)
 
         type(MPI_Datatype) :: NS_halo
@@ -55,13 +61,13 @@ interface
         real,           intent(in), optional :: ratio
     end subroutine
 
-    module subroutine set_grid_dimensions(this, nx, ny, nz, image, comms, global_nz, adv_order, nx_extra, ny_extra)
-        implicit none
+    module subroutine set_grid_dimensions(this, nx, ny, nz, n_4d, image, comms, global_nz, adv_order, nx_extra, ny_extra)
         class(grid_t),   intent(inout) :: this
-        integer,         intent(in)    :: nx, ny, nz, image
-        type(MPI_Comm),  intent(in)    :: comms
-        integer,         intent(in), optional :: global_nz, adv_order, nx_extra, ny_extra
-
+        integer,         intent(in)    :: nx, ny, nz
+        integer, optional, intent(in)  :: n_4d, image
+        type(MPI_Comm), optional, intent(in)    :: comms
+        integer, optional, intent(in)    :: global_nz, adv_order, nx_extra, ny_extra
+  
     end subroutine
 end interface
 end module

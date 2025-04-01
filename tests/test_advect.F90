@@ -158,9 +158,9 @@ module test_advect
         call adv_init(domain,options)
 
         ! Set values for u,v,w and the tracer to advect
-        domain%u%data_3d =  10.0
-        domain%v%data_3d =  -10.0
-        domain%w%data_3d =  0.0
+        domain%state_vars(domain%var_indx(kVARS%u))%data_3d =  10.0
+        domain%state_vars(domain%var_indx(kVARS%v))%data_3d =  -10.0
+        domain%state_vars(domain%var_indx(kVARS%w))%data_3d =  0.0
 
         do i = 1, domain%adv_vars%n_vars
             var = domain%adv_vars%var_list(i)%var
@@ -178,8 +178,8 @@ module test_advect
         ! exchange to get each others values in the halo regions
         call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars)
 
-        dt = compute_dt(domain%dx, domain%u%data_3d, domain%v%data_3d, &
-                domain%w%data_3d, domain%density%data_3d, options%domain%dz_levels, &
+        dt = compute_dt(domain%dx, domain%state_vars(domain%var_indx(kVARS%u))%data_3d, domain%state_vars(domain%var_indx(kVARS%v))%data_3d, &
+                domain%state_vars(domain%var_indx(kVARS%w))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, options%domain%dz_levels, &
                 domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                 domain%its, domain%ite, domain%jts, domain%jte, &
                 options%time%cfl_reduction_factor, &

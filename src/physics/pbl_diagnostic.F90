@@ -24,7 +24,7 @@ module pbl_diagnostic
     use options_interface,  only : options_t
     use io_routines,        only : io_write
     use mod_wrf_constants,  only : gravity, KARMAN, cp
-
+    use icar_constants,     only : kVARS
     private
 
     public :: diagnostic_pbl, finalize_diagnostic_pbl, init_diagnostic_pbl
@@ -74,21 +74,21 @@ contains
 
         integer :: i,j,k, nsubsteps, t
 
-        associate(terrain          => domain%terrain%data_2d,              &
-                  pii              => domain%exner%data_3d,                &
-                  lh               => domain%latent_heat%data_2d,          &
-                  sh               => domain%sensible_heat%data_2d,        &
-                  z                => domain%z%data_3d,                    &
-                  adv_dz           => domain%advection_dz,                 &
-                  dz               => domain%dz_mass%data_3d,              &
-                  rho              => domain%density%data_3d,              &
-                  qv               => domain%water_vapor%data_3d,          &       
-                  qc               => domain%cloud_water_mass%data_3d,     &       
-                  qi               => domain%cloud_ice_mass%data_3d,       &       
-                  qr               => domain%rain_mass%data_3d,            &       
-                  um               => domain%u_mass%data_3d,               &
-                  vm               => domain%v_mass%data_3d,               &
-                  th => domain%potential_temperature%data_3d )
+        associate(terrain          => domain%grid_vars(domain%var_indx(kVARS%terrain))%data_2d,              &
+                  pii              => domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d,                &
+                  lh               => domain%diagnostic_vars(domain%var_indx(kVARS%latent_heat))%data_2d,          &
+                  sh               => domain%diagnostic_vars(domain%var_indx(kVARS%sensible_heat))%data_2d,        &
+                  z                => domain%grid_vars(domain%var_indx(kVARS%z))%data_3d,                    &
+                  adv_dz           => domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d,                 &
+                  dz               => domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d,              &
+                  rho              => domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d,              &
+                  qv               => domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,          &       
+                  qc               => domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d,     &       
+                  qi               => domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d,       &       
+                  qr               => domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d,            &       
+                  um               => domain%diagnostic_vars(domain%var_indx(kVARS%u_mass))%data_3d,               &
+                  vm               => domain%diagnostic_vars(domain%var_indx(kVARS%v_mass))%data_3d,               &
+                  th => domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d )
         
         
 
@@ -140,37 +140,37 @@ contains
             enddo
         enddo
 
-        if (associated(domain%latent_heat%data_2d)) th_flux(ims:ime,jms:jme) = ((sh(ims:ime,jms:jme)) * dt/cp) / (pii(ims:ime,kts,jms:jme))    
+        if (domain%var_indx(kVARS%latent_heat) > 0) th_flux(ims:ime,jms:jme) = ((sh(ims:ime,jms:jme)) * dt/cp) / (pii(ims:ime,kts,jms:jme))    
         !Updated to include calculation of LHV based on T
-        if (associated(domain%sensible_heat%data_2d)) qv_flux(ims:ime,jms:jme) = (lh(ims:ime,jms:jme) * dt / (3.1484E6-2370.*(th(ims:ime,kts,jms:jme)*pii(ims:ime,kts,jms:jme))) )
+        if (domain%var_indx(kVARS%sensible_heat) > 0) qv_flux(ims:ime,jms:jme) = (lh(ims:ime,jms:jme) * dt / (3.1484E6-2370.*(th(ims:ime,kts,jms:jme)*pii(ims:ime,kts,jms:jme))) )
 
         end associate
 
 
         ! First water vapor
-        call diffuse_variable(domain%water_vapor%data_3d, domain%density%data_3d, rho_stag, domain%dz_mass%data_3d, &
-                        dz_mass_i, domain%jacobian, domain%jacobian_w, domain%dx, bot_flux_in=qv_flux)
+        call diffuse_variable(domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, rho_stag, domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d, &
+                        dz_mass_i, domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d, domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d, domain%dx, bot_flux_in=qv_flux)
         ! ditto for potential temperature
-        call diffuse_variable(domain%potential_temperature%data_3d, domain%density%data_3d, rho_stag, domain%dz_mass%data_3d, &
-                        dz_mass_i, domain%jacobian, domain%jacobian_w, domain%dx, bot_flux_in=th_flux)
+        call diffuse_variable(domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, rho_stag, domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d, &
+                        dz_mass_i, domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d, domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d, domain%dx, bot_flux_in=th_flux)
         ! and cloud water
-        if (associated(domain%cloud_water_mass%data_3d)) call diffuse_variable(domain%cloud_water_mass%data_3d, domain%density%data_3d, &
-                        rho_stag, domain%dz_mass%data_3d, dz_mass_i, domain%jacobian, domain%jacobian_w, domain%dx)
+        if (domain%var_indx(kVARS%cloud_water_mass) > 0) call diffuse_variable(domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, &
+                        rho_stag, domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d, dz_mass_i, domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d, domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d, domain%dx)
         ! and cloud ice
-        if (associated(domain%cloud_ice_mass%data_3d)) call diffuse_variable(domain%cloud_ice_mass%data_3d, domain%density%data_3d, &
-                        rho_stag, domain%dz_mass%data_3d, dz_mass_i, domain%jacobian, domain%jacobian_w, domain%dx)
+        if (domain%var_indx(kVARS%ice_mass) > 0) call diffuse_variable(domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, &
+                        rho_stag, domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d, dz_mass_i, domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d, domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d, domain%dx)
         ! and snow
-        if (associated(domain%snow_mass%data_3d)) call diffuse_variable(domain%snow_mass%data_3d, domain%density%data_3d, &
-                        rho_stag, domain%dz_mass%data_3d, dz_mass_i, domain%jacobian, domain%jacobian_w, domain%dx)
+        if (domain%var_indx(kVARS%snow_mass) > 0) call diffuse_variable(domain%state_vars(domain%var_indx(kVARS%snow_mass))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, &
+                        rho_stag, domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d, dz_mass_i, domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d, domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d, domain%dx)
         ! and rain
-        if (associated(domain%rain_mass%data_3d)) call diffuse_variable(domain%rain_mass%data_3d, domain%density%data_3d, &
-                        rho_stag, domain%dz_mass%data_3d, dz_mass_i, domain%jacobian, domain%jacobian_w, domain%dx)
+        if (domain%var_indx(kVARS%rain_mass) > 0) call diffuse_variable(domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, &
+                        rho_stag, domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d, dz_mass_i, domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d, domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d, domain%dx)
         ! and ice2
-        if (associated(domain%ice2_mass%data_3d)) call diffuse_variable(domain%ice2_mass%data_3d, domain%density%data_3d, &
-                        rho_stag, domain%dz_mass%data_3d, dz_mass_i, domain%jacobian, domain%jacobian_w, domain%dx)
+        if (domain%var_indx(kVARS%ice2_mass) > 0) call diffuse_variable(domain%state_vars(domain%var_indx(kVARS%ice2_mass))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, &
+                        rho_stag, domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d, dz_mass_i, domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d, domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d, domain%dx)
         ! and ice3
-        if (associated(domain%ice3_mass%data_3d)) call diffuse_variable(domain%ice3_mass%data_3d, domain%density%data_3d, &
-                        rho_stag, domain%dz_mass%data_3d, dz_mass_i, domain%jacobian, domain%jacobian_w, domain%dx)
+        if (domain%var_indx(kVARS%ice3_mass) > 0) call diffuse_variable(domain%state_vars(domain%var_indx(kVARS%ice3_mass))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, &
+                        rho_stag, domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d, dz_mass_i, domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d, domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d, domain%dx)
 
 
     end subroutine diagnostic_pbl

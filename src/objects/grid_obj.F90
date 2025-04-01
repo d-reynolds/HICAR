@@ -13,16 +13,27 @@ contains
         class(grid_t), intent(in) :: this
         integer, allocatable :: dims(:)
 
-        if (this%is2d) then
+        if (this%is1d) then
+            allocate(dims(1))
+            dims(1) = this%kme - this%kms + 1
+        elseif (this%is2d) then
             allocate(dims(2))
             dims(1) = this%ime - this%ims + 1
             dims(2) = this%jme - this%jms + 1
-        endif
-        if (this%is3d) then
+        elseif (this%is3d) then
             allocate(dims(3))
             dims(1) = this%ime - this%ims + 1
             dims(2) = this%kme - this%kms + 1
             dims(3) = this%jme - this%jms + 1
+        elseif (this%is4d) then
+            allocate(dims(4))
+            dims(1) = this%ime - this%ims + 1
+            dims(2) = this%kme - this%kms + 1
+            dims(3) = this%jme - this%jms + 1
+            dims(4) = this%n_4d
+        else
+            write(*,*) "ERROR: grid is not 1D, 2D, 3D or 4D"
+            stop
         endif
     end function
     
@@ -139,16 +150,77 @@ contains
     !! Generate the domain decomposition mapping and compute the indicies for local memory
     !!
     !! -------------------------------
-    module subroutine set_grid_dimensions(this, nx, ny, nz, image, comms, global_nz, adv_order, nx_extra, ny_extra)
+    module subroutine set_grid_dimensions(this, nx, ny, nz, n_4d, image, comms, global_nz, adv_order, nx_extra, ny_extra)
       class(grid_t),   intent(inout) :: this
-      integer,         intent(in)    :: nx, ny, nz, image
-      type(MPI_Comm), intent(in)    :: comms
+      integer,         intent(in)    :: nx, ny, nz
+      integer, optional, intent(in)  :: n_4d, image
+      type(MPI_Comm), optional, intent(in)    :: comms
       integer, optional, intent(in)    :: global_nz, adv_order, nx_extra, ny_extra
 
       integer :: halo_size, ierr, tile_size_estimate, comms_size
 
       halo_size = kDEFAULT_HALO_SIZE
       if (present(adv_order)) halo_size = ceiling(adv_order/2.0)
+
+
+      this%nx_e = 0
+      this%ny_e = 0
+      if (present(nx_extra)) this%nx_e = nx_extra ! used to add 1 to the u-field staggered grid
+      if (present(ny_extra)) this%ny_e = ny_extra ! used to add 1 to the v-field staggered grid
+      this%nz         = nz                                            ! note nz is both global and local
+      this%halo_nz    = this%nz
+
+      this%halo_size = halo_size
+
+      this%kms        = 1
+      this%kme        = this%nz
+
+      ! Now define the tile of data to process in physics routines
+      this%kts = this%kms
+      this%kte = this%kme
+
+      ! The entire model domain begins at 1 and ends at nx,y,z
+      this%ny_global  = ny + this%ny_e                                     ! global model domain grid size
+      this%nx_global  = nx + this%nx_e                                     ! global model domain grid size
+
+      this%ids = 1
+      this%jds = 1
+      this%kds = 1
+      this%ide = this%nx_global
+      this%jde = this%ny_global
+      this%kde = this%nz
+
+      if (nx == 0 .and. ny == 0 .and. nz > 1) then
+        this%is1d = .True.
+        if (allocated(this%dimensions)) deallocate(this%dimensions)
+        allocate(this%dimensions(1))
+        this%dimensions(1) = "height"
+        return ! no need to do domain decomposition
+      else if (nx > 0 .and. ny > 0 .and. nz < 1) then
+        this%is2d = .True.
+        if (allocated(this%dimensions)) deallocate(this%dimensions)
+        allocate(this%dimensions(2))
+        this%dimensions(1) = "lat"
+        this%dimensions(2) = "lon"
+      else if (nx > 0 .and. ny > 0 .and. nz > 0) then
+        if (present(n_4d)) then
+            this%is4d = .True.
+            if (allocated(this%dimensions)) deallocate(this%dimensions)
+            allocate(this%dimensions(4))
+            this%dimensions(1) = "lat"
+            this%dimensions(2) = "height"
+            this%dimensions(3) = "lon"
+            this%dimensions(4) = "azim"
+        else
+            this%is3d = .True.
+            if (allocated(this%dimensions)) deallocate(this%dimensions)
+            allocate(this%dimensions(3))
+            this%dimensions(1) = "lat"
+            this%dimensions(2) = "height"
+            this%dimensions(3) = "lon"
+        endif
+    endif
+    if ( .not.(present(comms) .and. present(image)) ) return
 
       ! get the number of processes in this communicator
       call MPI_Comm_size(comms, comms_size, ierr)
@@ -176,33 +248,13 @@ contains
         stop
       endif
 
-      this%nx_e = 0
-      this%ny_e = 0
-      if (present(nx_extra)) this%nx_e = nx_extra ! used to add 1 to the u-field staggered grid
-      if (present(ny_extra)) this%ny_e = ny_extra ! used to add 1 to the v-field staggered grid
 
       call this%domain_decomposition(nx, ny, comms_size, image=image)
-
-      if (nz<1) then
-          this%is2d = .True.
-          this%is3d = .False.
-          if (allocated(this%dimensions)) deallocate(this%dimensions)
-          allocate(this%dimensions(2))
-          this%dimensions(1) = "lat"
-          this%dimensions(2) = "lon"
-      else
-          this%is2d = .False.
-          this%is3d = .True.
-          if (allocated(this%dimensions)) deallocate(this%dimensions)
-          allocate(this%dimensions(3))
-          this%dimensions(1) = "lat"
-          this%dimensions(2) = "height"
-          this%dimensions(3) = "lon"
-      endif
 
       this%nz         = nz                                            ! note nz is both global and local
       this%nx         = my_n(nx, this%ximg, this%ximages) ! local grid size
       this%ny         = my_n(ny, this%yimg, this%yimages) ! local grid size
+      if (present(n_4d)) this%n_4d       = n_4d
 
       if (this%nx <= halo_size .or. this%ny <= halo_size) then
           write(*,*) 'ERROR: tile size too small for halo size'
@@ -220,27 +272,6 @@ contains
       this%jms        = my_start(ny, this%yimg, this%yimages)
       this%jme        = this%jms + this%ny + this%ny_e - 1
 
-      this%kms        = 1
-      this%kme        = this%nz
-
-      ! Now define the tile of data to process in physics routines
-      this%kts = this%kms
-      this%kte = this%kme
-
-      ! The entire model domain begins at 1 and ends at nx,y,z
-      this%ny_global  = ny + this%ny_e                                     ! global model domain grid size
-      this%nx_global  = nx + this%nx_e                                     ! global model domain grid size
-
-      this%ids = 1
-      this%jds = 1
-      this%kds = 1
-      this%ide = this%nx_global
-      this%jde = this%ny_global
-      this%kde = this%nz
-
-      this%halo_nz    = this%nz
-
-      this%halo_size = halo_size
       call update_with_halos(this, halo_size)
 
       this%ns_halo_nx = nx / this%ximages + 1 + 2*this%halo_size  ! number of grid cells in x in the ns halo

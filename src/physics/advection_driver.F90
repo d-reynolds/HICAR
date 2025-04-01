@@ -98,11 +98,11 @@ contains
                     !Initial advection-tendency calculations
                     temp  = domain%adv_vars%var_list(i)%var%data_3d
 
-                    call adv_std_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%advection_dz,flux_time, flux_up_time, flux_corr_time, sum_time,t_factor_in=0.333)
-                    call adv_std_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%advection_dz,flux_time, flux_up_time, flux_corr_time, sum_time,t_factor_in=0.5)
+                    call adv_std_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time,t_factor_in=0.333)
+                    call adv_std_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time,t_factor_in=0.5)
     
                     !final advection call with tendency-fluxes
-                    call adv_std_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%advection_dz,flux_time, flux_up_time, flux_corr_time, sum_time,flux_corr_in=options%adv%flux_corr)
+                    call adv_std_advect3d(temp,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time,flux_corr_in=options%adv%flux_corr)
     
                     domain%adv_vars%var_list(i)%var%data_3d = temp
                 else if(options%physics%advection==kADV_MPDATA) then
@@ -110,7 +110,7 @@ contains
                 endif
             else
                 if (options%physics%advection==kADV_STD) then
-                    call adv_std_advect3d(domain%adv_vars%var_list(i)%var%data_3d,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%advection_dz,flux_time, flux_up_time, flux_corr_time, sum_time)
+                    call adv_std_advect3d(domain%adv_vars%var_list(i)%var%data_3d,domain%adv_vars%var_list(i)%var%data_3d, U_m, V_m, W_m, denom, domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time)
                 !else if(options%physics%advection==kADV_MPDATA) then                                    
                 !    call mpdata_advect3d(var, rho, jaco, dz, options)
                 endif

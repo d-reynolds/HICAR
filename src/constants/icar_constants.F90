@@ -44,331 +44,355 @@ module icar_constants
                     ! but it can also keep compilers (e.g. ifort) from padding for alignment,
                     ! as long as there is no padding we can test last_var = sizeof(kVARS)
 
-        integer :: u
-        integer :: v
-        integer :: w
-        integer :: w_real
-        integer :: pressure
-        integer :: pressure_interface
-        integer :: potential_temperature
-        integer :: temperature
-        integer :: water_vapor
-        integer :: cloud_water
-        integer :: cloud_number_concentration
-        integer :: cloud_ice
-        integer :: ice_number_concentration
-        integer :: rain_in_air
-        integer :: rain_number_concentration
-        integer :: snow_in_air
-        integer :: snow_number_concentration
-        integer :: graupel_in_air
-        integer :: graupel_number_concentration
-        integer :: ice1_a
-        integer :: ice1_c
-        integer :: ice2_mass
-        integer :: ice2_number
-        integer :: ice2_a
-        integer :: ice2_c
-        integer :: ice3_mass
-        integer :: ice3_number
-        integer :: ice3_a
-        integer :: ice3_c
-        integer :: precipitation
-        integer :: convective_precipitation
-        integer :: snowfall
-        integer :: graupel
-        integer :: snowfall_ground
-        integer :: rainfall_ground
-        integer :: exner
-        integer :: nsquared
-        integer :: density
-        integer :: z
-        integer :: z_interface
-        integer :: dz
-        integer :: dz_interface
-        integer :: dzdx
-        integer :: dzdy
-        integer :: cloud_fraction
-        integer :: shortwave                !! MJ: in OSHD as 'sdra' referring to 'total shortwave radiation, above topography' wich will be used for partionining into direct and diffusive and then accounting for shading and slope effects 
-        integer :: shortwave_direct         !! MJ: in OSHD as 'sdri' referring to 'direct shortwave radiation, per inclined surface area' accounted for shading and slope effects. Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
-        integer :: shortwave_diffuse        !! MJ: in OSHD as 'sdfd' referring to 'diffuse shortwave radiation, per horizontal surface area' accounted for partioning (based on transmisivity) and sky view fraction. Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
-        integer :: shortwave_direct_above   !! MJ: in OSHD as 'sdrd' referring to 'direct shortwave radiation, per horizontal surface area' only accounted for shading but not the slope effects. Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
-        integer :: shortwave_total          !! MJ: 'total shortwave radiation, per inclided surface area' as the summation 
-        integer :: longwave
-        integer :: albedo
-        integer :: vegetation_fraction
-        integer :: vegetation_fraction_max
-        integer :: vegetation_fraction_out
-        integer :: veg_type
-        integer :: mass_leaf
-        integer :: mass_root
-        integer :: mass_stem
-        integer :: mass_wood
-        integer :: soil_type
-        integer :: soil_texture_1
-        integer :: soil_texture_2
-        integer :: soil_texture_3
-        integer :: soil_texture_4
-        integer :: soil_sand_and_clay
-        integer :: soil_carbon_stable
-        integer :: soil_carbon_fast
-        integer :: lai
-        integer :: sai
-        integer :: crop_category
-        integer :: crop_type
-        integer :: date_planting
-        integer :: date_harvest
-        integer :: growing_season_gdd
-        integer :: irr_frac_total
-        integer :: irr_frac_sprinkler
-        integer :: irr_frac_micro
-        integer :: irr_frac_flood
-        integer :: irr_eventno_sprinkler
-        integer :: irr_eventno_micro
-        integer :: irr_eventno_flood
-        integer :: irr_alloc_sprinkler
-        integer :: irr_alloc_micro
-        integer :: irr_alloc_flood
-        integer :: irr_evap_loss_sprinkler
-        integer :: irr_amt_sprinkler
-        integer :: irr_amt_micro
-        integer :: irr_amt_flood
-        integer :: evap_heat_sprinkler
-        integer :: mass_ag_grain
-        integer :: growing_degree_days
-        integer :: plant_growth_stage
-        integer :: net_ecosystem_exchange
-        integer :: gross_primary_prod
-        integer :: net_primary_prod
-        integer :: apar
-        integer :: photosynthesis_total
-        integer :: stomatal_resist_total
-        integer :: stomatal_resist_sun
-        integer :: stomatal_resist_shade
-        integer :: gecros_state
-        integer :: canopy_water
-        integer :: canopy_water_ice
-        integer :: canopy_water_liquid
-        integer :: canopy_vapor_pressure
-        integer :: canopy_temperature
-        integer :: canopy_fwet
-        integer :: veg_leaf_temperature
-        integer :: ground_surf_temperature
-        integer :: frac_between_gap
-        integer :: frac_within_gap
-        integer :: ground_temperature_bare
-        integer :: ground_temperature_canopy
-        integer :: sensible_heat
-        integer :: latent_heat
-        integer :: u_10m
-        integer :: v_10m
-        integer :: windspd_10m !! MJ added as sqrt(u_10m**2.+v_10m**2.)
-        integer :: ustar
-        integer :: coeff_momentum_drag
-        integer :: chs
-        integer :: chs2
-        integer :: cqs2
-        integer :: coeff_heat_exchange_3d
-        integer :: coeff_momentum_exchange_3d
-        integer :: QFX
-        integer :: br
-        integer :: MOL
-        integer :: psim
-        integer :: psih
-        integer :: fm
-        integer :: fh
-        integer :: surface_rad_temperature
-        integer :: temperature_2m
-        integer :: humidity_2m
-        integer :: temperature_2m_veg
-        integer :: temperature_2m_bare
-        integer :: mixing_ratio_2m_veg
-        integer :: mixing_ratio_2m_bare
-        integer :: surface_pressure
-        integer :: rad_absorbed_total
-        integer :: rad_absorbed_veg
-        integer :: rad_absorbed_bare
-        integer :: rad_net_longwave
-        integer :: longwave_up
-        integer :: ground_heat_flux
-        integer :: evap_canopy
-        integer :: evap_soil_surface
-        integer :: transpiration_rate
-        integer :: ch_veg
-        integer :: ch_veg_2m
-        integer :: ch_bare
-        integer :: ch_bare_2m
-        integer :: ch_under_canopy
-        integer :: ch_leaf
-        integer :: sensible_heat_veg
-        integer :: sensible_heat_bare
-        integer :: sensible_heat_canopy
-        integer :: evap_heat_veg
-        integer :: evap_heat_bare
-        integer :: evap_heat_canopy
-        integer :: transpiration_heat
-        integer :: ground_heat_veg
-        integer :: ground_heat_bare
-        integer :: net_longwave_veg
-        integer :: net_longwave_bare
-        integer :: net_longwave_canopy
-        integer :: runoff_surface
-        integer :: runoff_subsurface
-        integer :: soil_totalmoisture
-        integer :: soil_deep_temperature
-        integer :: water_table_depth
-        integer :: water_aquifer
-        integer :: storage_gw
-        integer :: storage_lake
-        integer :: roughness_z0
-        integer :: snow_water_equivalent
-        integer :: snow_water_eq_prev
-        integer :: snow_albedo_prev
-        integer :: snow_temperature
-        integer :: snow_layer_depth
-        integer :: snow_layer_ice
-        integer :: snow_layer_liquid_water
-        integer :: snow_age_factor
-        integer :: snow_height
-        integer :: snow_nlayers
-        integer :: soil_water_content
-        integer :: soil_water_content_liq
-        integer :: eq_soil_moisture
-        integer :: smc_watertable_deep
-        integer :: recharge
-        integer :: recharge_deep
-        integer :: soil_temperature
-        integer :: skin_temperature
-        integer :: sst
-        integer :: land_mask
-        integer :: terrain
-        integer :: latitude
-        integer :: longitude
-        integer :: u_latitude
-        integer :: u_longitude
-        integer :: v_latitude
-        integer :: v_longitude
-        integer :: tend_qv_adv
-        integer :: tend_qv_pbl
-        integer :: tend_qv
-        integer :: tend_th
-        integer :: tend_th_pbl
-        integer :: tend_qc
-        integer :: tend_qc_pbl
-        integer :: tend_qi
-        integer :: tend_qi_pbl
-        integer :: tend_qs
-        integer :: tend_qr
-        integer :: tend_u
-        integer :: tend_v
-        integer :: znu
-        integer :: znw
-        integer :: re_cloud
-        integer :: re_ice
-        integer :: re_snow
-        integer :: ice1_rho
-        integer :: ice1_phi
-        integer :: ice1_vmi
-        integer :: ice2_rho
-        integer :: ice2_phi
-        integer :: ice2_vmi
-        integer :: ice3_rho
-        integer :: ice3_phi
-        integer :: ice3_vmi
-        integer :: wind_alpha
-        integer :: froude
-        integer :: blk_ri
-        integer :: out_longwave_rad
-        integer :: longwave_cloud_forcing
-        integer :: shortwave_cloud_forcing
-        integer :: land_emissivity
-        integer :: temperature_interface
-        integer :: cosine_zenith_angle
-        integer :: tend_swrad
-        integer :: runoff_tstep !! MJ added
-        integer :: Tsnow        !! MJ added
-        integer :: Sice         !! MJ added
-        integer :: Sliq         !! MJ added
-        integer :: Ds           !! MJ added
-        integer :: fsnow        !! MJ added
-        integer :: Nsnow        !! MJ added
-        integer :: dSWE_salt      !! DR added
-        integer :: dSWE_susp      !! DR added
-        integer :: dSWE_subl      !! DR added
-        integer :: dSWE_slide     !! DR added
-        integer :: rainfall_tstep     !! MJ added
-        integer :: snowfall_tstep     !! MJ added
-        integer :: meltflux_out_tstep !! MJ added
-        integer :: slope              !! MJ added
-        integer :: slope_angle        !! MJ added
-        integer :: aspect_angle       !! MJ added
-        integer :: svf                !! MJ added
-        integer :: shd                !! DR added
-        integer :: Sliq_out           !! MJ added
-        integer :: hlm                !! MJ added
-        integer :: kpbl
-        integer :: hpbl
-        integer :: lake_depth
-        integer :: t_lake3d
-        integer :: snl2d
-        integer :: t_grnd2d
-        integer :: lake_icefrac3d
-        integer :: z_lake3d
-        integer :: dz_lake3d
-        integer :: t_soisno3d
-        integer :: h2osoi_ice3d
-        integer :: h2osoi_liq3d! liquid water (kg/m2)
-        integer :: h2osoi_vol3d! volumetric soil water (0<=h2osoi_vol<=watsat)[m3/m3]
-        integer :: z3d ! layer depth for snow & soil (m)
-        integer :: dz3d
-        integer :: watsat3d
-        integer :: csol3d
-        integer :: tkmg3d
-        integer :: lakemask
-        integer :: xice
-        integer :: zi3d
-        integer :: tksatu3d
-        integer :: tkdry3d
-        integer :: savedtke12d
-        integer :: lakedepth2d
-        integer :: ivt
-        integer :: iwv
-        integer :: iwl
-        integer :: iwi
-        integer :: last_var
+        integer :: u = 1
+        integer :: v = 2
+        integer :: w = 3
+        integer :: w_real = 4
+        integer :: pressure = 5
+        integer :: pressure_interface = 6
+        integer :: potential_temperature = 7
+        integer :: temperature = 8
+        integer :: water_vapor = 9
+        integer :: cloud_water_mass = 10
+        integer :: cloud_number = 11
+        integer :: ice_mass = 12
+        integer :: ice_number = 13
+        integer :: rain_mass = 14
+        integer :: rain_number = 15
+        integer :: snow_mass = 16
+        integer :: snow_number = 17
+        integer :: graupel_mass = 18
+        integer :: graupel_number = 19
+        integer :: ice1_a = 20
+        integer :: ice1_c = 21
+        integer :: ice2_mass = 22
+        integer :: ice2_number = 23
+        integer :: ice2_a = 24
+        integer :: ice2_c = 25
+        integer :: ice3_mass = 26
+        integer :: ice3_number = 27
+        integer :: ice3_a = 28
+        integer :: ice3_c = 29
+        integer :: precipitation = 30
+        integer :: convective_precipitation = 31
+        integer :: snowfall = 32
+        integer :: graupel = 33
+        integer :: snowfall_ground = 34
+        integer :: rainfall_ground = 35
+        integer :: exner = 36
+        integer :: nsquared = 37
+        integer :: density = 38
+        integer :: cloud_fraction = 39
+        integer :: shortwave = 40
+        integer :: shortwave_direct = 41
+        integer :: shortwave_diffuse = 42
+        integer :: shortwave_direct_above = 43
+        integer :: shortwave_total = 44
+        integer :: longwave = 45
+        integer :: albedo = 46
+        integer :: vegetation_fraction = 47
+        integer :: vegetation_fraction_max = 48
+        integer :: vegetation_fraction_out = 49
+        integer :: veg_type = 50
+        integer :: mass_leaf = 51
+        integer :: mass_root = 52
+        integer :: mass_stem = 53
+        integer :: mass_wood = 54
+        integer :: soil_type = 55
+        integer :: soil_texture_1 = 56
+        integer :: soil_texture_2 = 57
+        integer :: soil_texture_3 = 58
+        integer :: soil_texture_4 = 59
+        integer :: soil_sand_and_clay = 60
+        integer :: soil_carbon_stable = 61
+        integer :: soil_carbon_fast = 62
+        integer :: lai = 63
+        integer :: sai = 64
+        integer :: crop_category = 65
+        integer :: crop_type = 66
+        integer :: date_planting = 67
+        integer :: date_harvest = 68
+        integer :: growing_season_gdd = 69
+        integer :: irr_frac_total = 70
+        integer :: irr_frac_sprinkler = 71
+        integer :: irr_frac_micro = 72
+        integer :: irr_frac_flood = 73
+        integer :: irr_eventno_sprinkler = 74
+        integer :: irr_eventno_micro = 75
+        integer :: irr_eventno_flood = 76
+        integer :: irr_alloc_sprinkler = 77
+        integer :: irr_alloc_micro = 78
+        integer :: irr_alloc_flood = 79
+        integer :: irr_evap_loss_sprinkler = 80
+        integer :: irr_amt_sprinkler = 81
+        integer :: irr_amt_micro = 82
+        integer :: irr_amt_flood = 83
+        integer :: evap_heat_sprinkler = 84
+        integer :: mass_ag_grain = 85
+        integer :: growing_degree_days = 86
+        integer :: plant_growth_stage = 87
+        integer :: net_ecosystem_exchange = 88
+        integer :: gross_primary_prod = 89
+        integer :: net_primary_prod = 90
+        integer :: apar = 91
+        integer :: photosynthesis_total = 92
+        integer :: stomatal_resist_total = 93
+        integer :: stomatal_resist_sun = 94
+        integer :: stomatal_resist_shade = 95
+        integer :: gecros_state = 96
+        integer :: canopy_water = 97
+        integer :: canopy_water_ice = 98
+        integer :: canopy_water_liquid = 99
+        integer :: canopy_vapor_pressure = 100
+        integer :: canopy_temperature = 101
+        integer :: canopy_fwet = 102
+        integer :: veg_leaf_temperature = 103
+        integer :: ground_surf_temperature = 104
+        integer :: frac_between_gap = 105
+        integer :: frac_within_gap = 106
+        integer :: ground_temperature_bare = 107
+        integer :: ground_temperature_canopy = 108
+        integer :: sensible_heat = 109
+        integer :: latent_heat = 110
+        integer :: u_10m = 111
+        integer :: v_10m = 112
+        integer :: windspd_10m = 113
+        integer :: ustar = 114
+        integer :: coeff_momentum_drag = 115
+        integer :: chs = 116
+        integer :: chs2 = 117
+        integer :: cqs2 = 118
+        integer :: coeff_heat_exchange_3d = 119
+        integer :: coeff_momentum_exchange_3d = 120
+        integer :: QFX = 121
+        integer :: br = 122
+        integer :: mol = 123
+        integer :: psim = 124
+        integer :: psih = 125
+        integer :: fm = 126
+        integer :: fh = 127
+        integer :: surface_rad_temperature = 128
+        integer :: temperature_2m = 129
+        integer :: humidity_2m = 130
+        integer :: temperature_2m_veg = 131
+        integer :: temperature_2m_bare = 132
+        integer :: mixing_ratio_2m_veg = 133
+        integer :: mixing_ratio_2m_bare = 134
+        integer :: surface_pressure = 135
+        integer :: rad_absorbed_total = 136
+        integer :: rad_absorbed_veg = 137
+        integer :: rad_absorbed_bare = 138
+        integer :: rad_net_longwave = 139
+        integer :: longwave_up = 140
+        integer :: ground_heat_flux = 141
+        integer :: evap_canopy = 142
+        integer :: evap_soil_surface = 143
+        integer :: transpiration_rate = 144
+        integer :: ch_veg = 145
+        integer :: ch_veg_2m = 146
+        integer :: ch_bare = 147
+        integer :: ch_bare_2m = 148
+        integer :: ch_under_canopy = 149
+        integer :: ch_leaf = 150
+        integer :: sensible_heat_veg = 151
+        integer :: sensible_heat_bare = 152
+        integer :: sensible_heat_canopy = 153
+        integer :: evap_heat_veg = 154
+        integer :: evap_heat_bare = 155
+        integer :: evap_heat_canopy = 156
+        integer :: transpiration_heat = 157
+        integer :: ground_heat_veg = 158
+        integer :: ground_heat_bare = 159
+        integer :: net_longwave_veg = 160
+        integer :: net_longwave_bare = 161
+        integer :: net_longwave_canopy = 162
+        integer :: runoff_surface = 163
+        integer :: runoff_subsurface = 164
+        integer :: soil_totalmoisture = 165
+        integer :: soil_deep_temperature = 166
+        integer :: water_table_depth = 167
+        integer :: water_aquifer = 168
+        integer :: storage_gw = 169
+        integer :: storage_lake = 170
+        integer :: roughness_z0 = 171
+        integer :: snow_water_equivalent = 172
+        integer :: snow_water_eq_prev = 173
+        integer :: snow_albedo_prev = 174
+        integer :: snow_temperature = 175
+        integer :: snow_layer_depth = 176
+        integer :: snow_layer_ice = 177
+        integer :: snow_layer_liquid_water = 178
+        integer :: snow_age_factor = 179
+        integer :: snow_height = 180
+        integer :: snow_nlayers = 181
+        integer :: soil_water_content = 182
+        integer :: soil_water_content_liq = 183
+        integer :: eq_soil_moisture = 184
+        integer :: smc_watertable_deep = 185
+        integer :: recharge = 186
+        integer :: recharge_deep = 187
+        integer :: soil_temperature = 188
+        integer :: skin_temperature = 189
+        integer :: sst = 190
+        integer :: tend_qv_adv = 191
+        integer :: tend_qv_pbl = 192
+        integer :: tend_qv = 193
+        integer :: tend_th = 194
+        integer :: tend_th_pbl = 195
+        integer :: tend_qc = 196
+        integer :: tend_qc_pbl = 197
+        integer :: tend_qi = 198
+        integer :: tend_qi_pbl = 199
+        integer :: tend_qs = 200
+        integer :: tend_qr = 201
+        integer :: tend_u = 202
+        integer :: tend_v = 203
+        integer :: u_mass = 204
+        integer :: v_mass = 205
+        integer :: re_cloud = 206
+        integer :: re_ice = 207
+        integer :: re_snow = 208
+        integer :: ice1_rho = 209
+        integer :: ice1_phi = 210
+        integer :: ice1_vmi = 211
+        integer :: ice2_rho = 212
+        integer :: ice2_phi = 213
+        integer :: ice2_vmi = 214
+        integer :: ice3_rho = 215
+        integer :: ice3_phi = 216
+        integer :: ice3_vmi = 217
+        integer :: wind_alpha = 218
+        integer :: froude = 219
+        integer :: blk_ri = 220
+        integer :: out_longwave_rad = 221
+        integer :: longwave_cloud_forcing = 222
+        integer :: shortwave_cloud_forcing = 223
+        integer :: land_emissivity = 224
+        integer :: temperature_interface = 225
+        integer :: tend_swrad = 226
+        integer :: runoff_tstep = 227
+        integer :: Tsnow = 228
+        integer :: Sice = 229
+        integer :: Sliq = 230
+        integer :: Ds = 231
+        integer :: fsnow = 232
+        integer :: Nsnow = 233
+        integer :: dSWE_salt = 234
+        integer :: dSWE_susp = 235
+        integer :: dSWE_subl = 236
+        integer :: dSWE_slide = 237
+        integer :: meltflux_out_tstep = 238
+        integer :: Sliq_out = 239
+        integer :: kpbl = 240
+        integer :: hpbl = 241
+        integer :: lake_depth = 242
+        integer :: t_lake3d = 243
+        integer :: snl2d = 244
+        integer :: t_grnd2d = 245
+        integer :: lake_icefrac3d = 246
+        integer :: z_lake3d = 247
+        integer :: dz_lake3d = 248
+        integer :: t_soisno3d = 249
+        integer :: h2osoi_ice3d = 250
+        integer :: h2osoi_liq3d = 251
+        integer :: h2osoi_vol3d = 252
+        integer :: z3d = 253
+        integer :: dz3d = 254
+        integer :: watsat3d = 255
+        integer :: csol3d = 256
+        integer :: tkmg3d = 257
+        integer :: lakemask = 258
+        integer :: xice = 259
+        integer :: zi3d = 260
+        integer :: tksatu3d = 261
+        integer :: tkdry3d = 262
+        integer :: savedtke12d = 263
+        integer :: lakedepth2d = 264
+        integer :: ivt = 265
+        integer :: iwv = 266
+        integer :: iwl = 267
+        integer :: iwi = 268
+        ! GRID VARIABLES
+        integer :: z = 269
+        integer :: z_interface = 270
+        integer :: dzdx = 271
+        integer :: dzdy = 272
+        integer :: dz = 273
+        integer :: dz_interface = 274
+        integer :: advection_dz = 275
+        integer :: dzdy_v = 276
+        integer :: dzdx_u = 277
+        integer :: jacobian = 278
+        integer :: jacobian_u = 279
+        integer :: jacobian_v = 280
+        integer :: jacobian_w = 281
+        integer :: land_mask = 282
+        integer :: terrain = 283
+        integer :: latitude = 284
+        integer :: longitude = 285
+        integer :: global_terrain = 286
+        integer :: global_dz_interface = 287
+        integer :: global_z_interface = 288
+        integer :: u_latitude = 289
+        integer :: u_longitude = 290
+        integer :: v_latitude = 291
+        integer :: v_longitude = 292
+        integer :: Sx = 293
+        integer :: TPI = 294
+        integer :: neighbor_terrain = 295
+        integer :: froude_terrain = 296
+        integer :: relax_filter_2d = 297
+        integer :: relax_filter_3d = 298
+        integer :: costheta = 299
+        integer :: sintheta = 300
+        integer :: cosine_zenith_angle = 301
+        integer :: slope = 302
+        integer :: slope_angle = 303
+        integer :: aspect_angle = 304
+        integer :: svf = 305
+        integer :: shd = 306
+        integer :: hlm = 307
+        integer :: h1 = 308
+        integer :: h2 = 309
+        integer :: h1_u = 310
+        integer :: h1_v = 311
+        integer :: h2_u = 312
+        integer :: h2_v = 313
+        integer :: last_var = 314
     end type var_constants_type
 
 
-    type(var_constants_type) :: kVARS = var_constants_type(   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  &
-                                                             11,  12,  13,  14,  15,  16,  17,  18,  19,  20,  &
-                                                             21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  &
-                                                             31,  32,  33,  34,  35,  36,  37,  38,  39,  40,  &
-                                                             41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  &
-                                                             51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  &
-                                                             61,  62,  63,  64,  65,  66,  67,  68,  69,  70,  &
-                                                             71,  72,  73,  74,  75,  76,  77,  78,  79,  80,  &
-                                                             81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  &
-                                                             91,  92,  93,  94,  95,  96,  97,  98,  99, 100,  &
-                                                            101, 102, 103, 104, 105, 106, 107, 108, 109, 110,  &
-                                                            111, 112, 113, 114, 115, 116, 117, 118, 119, 120,  &
-                                                            121, 122, 123, 124, 125, 126, 127, 128, 129, 130,  &
-                                                            131, 132, 133, 134, 135, 136, 137, 138, 139, 140,  &
-                                                            141, 142, 143, 144, 145, 146, 147, 148, 149, 150,  &
-                                                            151, 152, 153, 154, 155, 156, 157, 158, 159, 160,  &
-                                                            161, 162, 163, 164, 165, 166, 167, 168, 169, 170,  &
-                                                            171, 172, 173, 174, 175, 176, 177, 178, 179, 180,  &
-                                                            181, 182, 183, 184, 185, 186, 187, 188, 189, 190,  &
-                                                            191, 192, 193, 194, 195, 196, 197, 198, 199, 200,  &
-                                                            201, 202, 203, 204, 205, 206, 207, 208, 209, 210,  &
-                                                            211, 212, 213, 214, 215, 216, 217, 218, 219, 220,  &
-                                                            221, 222, 223, 224, 225, 226, 227, 228, 229, 230,  &
-                                                            231, 232, 233, 234, 235, 236, 237, 238, 239, 240,  &
-                                                            241, 242, 243, 244, 245, 246, 247, 248, 249, 250,  &
-                                                            251, 252, 253, 254, 255, 256, 257, 258, 259, 260,  &
-                                                            261, 262, 263, 264, 265, 266, 267, 268, 269, 270,  &
-                                                            271, 272, 273, 274, 275, 276, 277, 278, 279, 280,  &
-                                                            281, 282, 283, 284, 285, 286, 287, 288, 289, 290,  &
-                                                            291, 292)
+    type(var_constants_type) :: kVARS != var_constants_type(   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  &
+    !                                                          11,  12,  13,  14,  15,  16,  17,  18,  19,  20,  &
+    !                                                          21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  &
+    !                                                          31,  32,  33,  34,  35,  36,  37,  38,  39,  40,  &
+    !                                                          41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  &
+    !                                                          51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  &
+    !                                                          61,  62,  63,  64,  65,  66,  67,  68,  69,  70,  &
+    !                                                          71,  72,  73,  74,  75,  76,  77,  78,  79,  80,  &
+    !                                                          81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  &
+    !                                                          91,  92,  93,  94,  95,  96,  97,  98,  99, 100,  &
+    !                                                         101, 102, 103, 104, 105, 106, 107, 108, 109, 110,  &
+    !                                                         111, 112, 113, 114, 115, 116, 117, 118, 119, 120,  &
+    !                                                         121, 122, 123, 124, 125, 126, 127, 128, 129, 130,  &
+    !                                                         131, 132, 133, 134, 135, 136, 137, 138, 139, 140,  &
+    !                                                         141, 142, 143, 144, 145, 146, 147, 148, 149, 150,  &
+    !                                                         151, 152, 153, 154, 155, 156, 157, 158, 159, 160,  &
+    !                                                         161, 162, 163, 164, 165, 166, 167, 168, 169, 170,  &
+    !                                                         171, 172, 173, 174, 175, 176, 177, 178, 179, 180,  &
+    !                                                         181, 182, 183, 184, 185, 186, 187, 188, 189, 190,  &
+    !                                                         191, 192, 193, 194, 195, 196, 197, 198, 199, 200,  &
+    !                                                         201, 202, 203, 204, 205, 206, 207, 208, 209, 210,  &
+    !                                                         211, 212, 213, 214, 215, 216, 217, 218, 219, 220,  &
+    !                                                         221, 222, 223, 224, 225, 226, 227, 228, 229, 230,  &
+    !                                                         231, 232, 233, 234, 235, 236, 237, 238, 239, 240,  &
+    !                                                         241, 242, 243, 244, 245, 246, 247, 248, 249, 250,  &
+    !                                                         251, 252, 253, 254, 255, 256, 257, 258, 259, 260,  &
+    !                                                         261, 262, 263, 264, 265, 266, 267, 268, 269, 270,  &
+    !                                                         271, 272, 273, 274, 275, 276, 277, 278, 279, 280,  &
+    !                                                         281, 282, 283, 284, 285, 286, 287, 288, 289, 290,  &
+    !                                                         291, 289, 293, 294, 295, 296, 297, 298, 299, 300,  &
+    !                                                         301, 302, 303, 304, 305, 306, 307, 308, 309, 310)
 
     integer, parameter :: kINTEGER_BITS     = storage_size(kINTEGER_BITS)
     integer, parameter :: kMAX_STORAGE_VARS = storage_size(kVARS) / kINTEGER_BITS
