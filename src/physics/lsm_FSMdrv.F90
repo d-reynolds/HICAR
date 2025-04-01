@@ -78,16 +78,18 @@ module module_sf_FSMdrv
     integer :: ids,ide,jds,jde,kds,kde ! Domain dimensions
     integer :: ims,ime,jms,jme,kms,kme ! Local Memory dimensions
     integer :: its,ite,jts,jte,kts,kte ! Processing Tile dimensions
-    
+    integer :: hour_old
+
     type(Time_type) :: last_output
     real            :: last_snowslide
    
     real, allocatable :: &
-        z0_bare(:,:)                 !bare ground z0 before getting covered in snow
+        z0_bare(:,:),    &       !bare ground z0 before getting covered in snow
+        Sf24_tracker(:,:,:), &    !24h snow fall tracker
         ! snowfall_sum(:,:),       & !aggregated per output interval
         ! rainfall_sum(:,:),       & !aggregated per output interval
-        ! Roff_sum(:,:),           & !aggregated per output interval
-        ! meltflux_out_sum(:,:)      !aggregated per output interval
+        Roff_sum(:,:),           & !aggregated per output interval
+        meltflux_out_sum(:,:)      !aggregated per output interval
 
 contains
  
@@ -150,16 +152,16 @@ contains
         allocate(shd_HICAR(Nx_HICAR,Ny_HICAR))
         allocate(z0_bare(domain%grid%its:domain%grid%ite,domain%grid%jts:domain%grid%jte))
 
-        lat_HICAR=TRANSPOSE(domain%latitude%data_2d(its:ite,jts:jte))
-        lon_HICAR=TRANSPOSE(domain%longitude%data_2d(its:ite,jts:jte))
-        terrain_HICAR=TRANSPOSE(domain%terrain%data_2d(its:ite,jts:jte))
-        if (associated(domain%slope_angle%data_2d)) then
-            slope_HICAR=TRANSPOSE(domain%slope_angle%data_2d(its:ite,jts:jte))*180.0/piconst !Convert from radians to degrees
+        lat_HICAR=TRANSPOSE(domain%grid_vars(domain%var_indx(kVARS%latitude))%data_2d(its:ite,jts:jte))
+        lon_HICAR=TRANSPOSE(domain%grid_vars(domain%var_indx(kVARS%longitude))%data_2d(its:ite,jts:jte))
+        terrain_HICAR=TRANSPOSE(domain%grid_vars(domain%var_indx(kVARS%terrain))%data_2d(its:ite,jts:jte))
+        if (domain%var_indx(kVARS%slope_angle) > 0) then
+            slope_HICAR=TRANSPOSE(domain%grid_vars(domain%var_indx(kVARS%slope_angle))%data_2d(its:ite,jts:jte))*180.0/piconst !Convert from radians to degrees
         else
             slope_HICAR = 0.
         endif
-        if (associated(domain%shd%data_2d)) then
-            shd_HICAR=TRANSPOSE(domain%shd%data_2d(its:ite,jts:jte))
+        if (domain%var_indx(kVARS%shd) > 0) then
+            shd_HICAR=TRANSPOSE(domain%grid_vars(domain%var_indx(kVARS%shd))%data_2d(its:ite,jts:jte))
         else
             shd_HICAR = 10000.
         endif
@@ -236,13 +238,14 @@ contains
         allocate(dSWE_susp_(Nx_HICAR,Ny_HICAR)); dSWE_susp_=0.
         allocate(dSWE_subl_(Nx_HICAR,Ny_HICAR)); dSWE_subl_=0.
         allocate(dSWE_slide_(Nx_HICAR,Ny_HICAR)); dSWE_slide_=0.
+        allocate(Sf24_tracker(24,Nx_HICAR,Ny_HICAR));Sf24_tracker=0.
         !allocate(Qs_u(Nx_HICAR,Ny_HICAR)); Qs_u=0.
         !allocate(Qs_v(Nx_HICAR,Ny_HICAR)); Qs_v=0.
         !!
         ! allocate(snowfall_sum(Nx_HICAR,Ny_HICAR)); snowfall_sum=0.
         ! allocate(rainfall_sum(Nx_HICAR,Ny_HICAR)); rainfall_sum=0.
-        ! allocate(Roff_sum(Nx_HICAR,Ny_HICAR)); Roff_sum=0.
-        ! allocate(meltflux_out_sum(Nx_HICAR,Ny_HICAR)); meltflux_out_sum=0.   
+        allocate(Roff_sum(Nx_HICAR,Ny_HICAR)); Roff_sum=0.
+        allocate(meltflux_out_sum(Nx_HICAR,Ny_HICAR)); meltflux_out_sum=0.   
         !!
 
         call FSM_SETUP()
@@ -258,32 +261,32 @@ contains
         !! MJ added this block to read in while we use restart file:
         if (options%restart%restart .or. context_change) then
             !! giving feedback to HICAR
-            Tsrf = TRANSPOSE(domain%skin_temperature%data_2d(its:ite,jts:jte))
+            Tsrf = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%skin_temperature))%data_2d(its:ite,jts:jte))
             if (options%lsm%monthly_albedo) then
-                albs = TRANSPOSE(domain%albedo%data_3d(its:ite, domain%sim_time%month, jts:jte))
+                albs = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%albedo))%data_3d(its:ite, domain%sim_time%month, jts:jte))
             else
-                albs = TRANSPOSE(domain%albedo%data_3d(its:ite, 1, jts:jte))
+                albs = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%albedo))%data_3d(its:ite, 1, jts:jte))
             endif
             
-            fsnow = TRANSPOSE(domain%fsnow%data_2d(its:ite,jts:jte))
-            Nsnow = TRANSPOSE(domain%Nsnow%data_2d(its:ite,jts:jte))                        
+            fsnow = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%fsnow))%data_2d(its:ite,jts:jte))
+            Nsnow = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%Nsnow))%data_2d(its:ite,jts:jte))                        
             !!
             do i=1,kSNOW_GRID_Z
-                Tsnow(i,:,:) = TRANSPOSE(domain%snow_temperature%data_3d(its:ite,i,jts:jte))
-                Sice(i,:,:) = TRANSPOSE(domain%Sice%data_3d(its:ite,i,jts:jte))
-                Sliq(i,:,:) = TRANSPOSE(domain%Sliq%data_3d(its:ite,i,jts:jte))
-                Ds(i,:,:) = TRANSPOSE(domain%Ds%data_3d(its:ite,i,jts:jte))
+                Tsnow(i,:,:) = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%snow_temperature))%data_3d(its:ite,i,jts:jte))
+                Sice(i,:,:) = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%Sice))%data_3d(its:ite,i,jts:jte))
+                Sliq(i,:,:) = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%Sliq))%data_3d(its:ite,i,jts:jte))
+                Ds(i,:,:) = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%Ds))%data_3d(its:ite,i,jts:jte))
             enddo
             do i=1,kSOIL_GRID_Z
-                Tsoil(i,:,:) = TRANSPOSE(domain%soil_temperature%data_3d(its:ite,i,jts:jte))
-                theta(i,:,:) = TRANSPOSE(domain%soil_water_content%data_3d(its:ite,i,jts:jte))
+                Tsoil(i,:,:) = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%soil_temperature))%data_3d(its:ite,i,jts:jte))
+                theta(i,:,:) = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%soil_water_content))%data_3d(its:ite,i,jts:jte))
             enddo
         endif
 
         !Test if restart was not succesful, or if we were not passed FSM restart...
         !do j = 1, Ny_HICAR
         !    do i = 1, Nx_HICAR
-        !        if (.not.(fsnow(i,j)*SUM(Ds(:,i,j))==domain%snow_height%data_2d(j-1+domain%its,i-1+domain%jts))) then
+        !        if (.not.(fsnow(i,j)*SUM(Ds(:,i,j))==domain%diagnostic_vars(domain%var_indx(kVARS%snow_height))%data_2d(j-1+domain%its,i-1+domain%jts))) then
         !            albs(i,j) = 0.75
         !            fsnow(i,j) = 1
         !            Nsnow (i,j)= min(6,options%lsm%fsm_nsnow_max)
@@ -291,8 +294,8 @@ contains
         !            Tsoil(:,i,j) = 273
         !            theta(:,i,j) = 0.2
         !            Sliq(:,i,j) = 0.0
-        !            Ds(:,i,j) = domain%snow_height%data_2d(j-1+domain%its,i-1+domain%jts)/Nsnow(i,j)
-        !            Sice(:,i,j) = domain%snow_water_equivalent%data_2d(j-1+domain%its,i-1+domain%jts)/Nsnow(i,j)
+        !            Ds(:,i,j) = domain%diagnostic_vars(domain%var_indx(kVARS%snow_height))%data_2d(j-1+domain%its,i-1+domain%jts)/Nsnow(i,j)
+        !            Sice(:,i,j) = domain%diagnostic_vars(domain%var_indx(kVARS%snow_water_equivalent))%data_2d(j-1+domain%its,i-1+domain%jts)/Nsnow(i,j)
         !        endif
         !    end do
         !end do
@@ -344,17 +347,25 @@ contains
         hour=real(domain%sim_time%hour)
         dt=lsm_dt
         
-        LW=TRANSPOSE(domain%longwave%data_2d(its:ite,jts:jte))
-        Ps=TRANSPOSE(domain%surface_pressure%data_2d(its:ite,jts:jte))
+        LW=TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%longwave))%data_2d(its:ite,jts:jte))
+        Ps=TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%surface_pressure))%data_2d(its:ite,jts:jte))
         Rf=TRANSPOSE(current_rain(its:ite,jts:jte))
-        Sdir=TRANSPOSE(domain%shortwave_direct%data_2d(its:ite,jts:jte))  !Sdir=domain%shortwave%data_2d(its:ite,jts:jte)
-        Sdif=TRANSPOSE(domain%shortwave_diffuse%data_2d(its:ite,jts:jte)) !Sdif=0.0
+        Sdir=TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_direct))%data_2d(its:ite,jts:jte))  !Sdir=domain%diagnostic_vars(domain%var_indx(kVARS%shortwave))%data_2d(its:ite,jts:jte)
+        Sdif=TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_diffuse))%data_2d(its:ite,jts:jte)) !Sdif=0.0
         Sf=TRANSPOSE(current_snow(its:ite,jts:jte))
-        Sf24h=TRANSPOSE(domain%snowfall_tstep%data_2d(its:ite,jts:jte))
+
+        if (hour /= hour_old) then
+            Sf24_tracker(hour,:,:) = Sf
+
+            hour_old = hour
+        else
+            Sf24_tracker(hour,:,:) = Sf24_tracker(hour,:,:) + Sf
+        endif
+        Sf24h=sum(Sf24_tracker,dim=1)
         
         ! This should always be 2m temperature and humidity
-        Ta= TRANSPOSE(domain%temperature_2m%data_2d(its:ite,jts:jte))
-        Qa= TRANSPOSE(domain%humidity_2m%data_2d(its:ite,jts:jte))
+        Ta= TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%temperature_2m))%data_2d(its:ite,jts:jte))
+        Qa= TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%humidity_2m))%data_2d(its:ite,jts:jte))
 
         ! This should always be 10m wind speed
         Ua=TRANSPOSE(windspd(its:ite,jts:jte))
@@ -364,22 +375,22 @@ contains
         ! within the tile indices, which is needed to compute 10m wind speeds. As a cheep work around, and since we are 
         ! only doing simulations with first level thickness =20m, they are hard coded to lowest level of 3d arrays here
         
-        Udir = ATAN2(TRANSPOSE(domain%v%data_3d(its:ite,domain%grid%kms,jts:jte)), &
-                     TRANSPOSE(domain%u%data_3d(its:ite,domain%grid%kms,jts:jte))) 
+        Udir = ATAN2(TRANSPOSE(domain%state_vars(domain%var_indx(kVARS%v))%data_3d(its:ite,domain%grid%kms,jts:jte)), &
+                     TRANSPOSE(domain%state_vars(domain%var_indx(kVARS%u))%data_3d(its:ite,domain%grid%kms,jts:jte))) 
         Udir = 90 - (Udir * 180/piconst + 180)
         where(Udir<0) Udir=Udir+360
         
         if ((domain%sim_time%seconds() - dt <= last_output%seconds()) .and. &
             (domain%sim_time%seconds()   >=    last_output%seconds())) then
             !If we are the first call since the last output, reset the per-output counters
-            domain%dSWE_slide%data_2d = 0.
-            domain%dSWE_salt%data_2d  = 0.
-            domain%dSWE_susp%data_2d  = 0.
-            domain%dSWE_subl%data_2d  = 0.
+            domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_slide))%data_2d = 0.
+            domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_salt))%data_2d  = 0.
+            domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_susp))%data_2d  = 0.
+            domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_subl))%data_2d  = 0.
             last_output = last_output + options%output%output_dt
         endif
         
-        SWE_pre = domain%snow_water_equivalent%data_2d(its:ite,jts:jte)
+        SWE_pre = domain%diagnostic_vars(domain%var_indx(kVARS%snow_water_equivalent))%data_2d(its:ite,jts:jte)
                 !!  
         !! FSM processing      
         call FSM_DRIVE()
@@ -461,8 +472,8 @@ contains
                     aval(j_s:j_e,i_s:i_e) = .False.
                     
                     !Must accumulate slide changes here, since we will loop over calls to snowslide
-                    domain%dSWE_slide%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = &
-                            domain%dSWE_slide%data_2d(domain%its:domain%ite,domain%jts:domain%jte) + TRANSPOSE(dSWE_slide_(j_s:j_e,i_s:i_e))
+                    domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_slide))%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = &
+                            domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_slide))%data_2d(domain%its:domain%ite,domain%jts:domain%jte) + TRANSPOSE(dSWE_slide_(j_s:j_e,i_s:i_e))
 
                     ! trade over buffer to halo cells, in case avalanching snow was passed on previous iteration.
                     SD_0(1,:) = SD_0_buff(1,:)
@@ -493,51 +504,51 @@ contains
             do i=i_s,i_e
                 hj = j-j_s+domain%jts
                 hi = i-i_s+domain%its
-                if ( SWE_(j,i)+SWE_pre(hi,hj) > 0 .and. .not.(options%physics%watersurface==kWATER_SIMPLE .and. domain%land_mask(hi,hj)==kLC_WATER)) then
+                if ( SWE_(j,i)+SWE_pre(hi,hj) > 0 .and. .not.(options%physics%watersurface==kWATER_SIMPLE .and. domain%grid_vars(domain%var_indx(kVARS%land_mask))%data_2di(hi,hj)==kLC_WATER)) then
                     !If we are covering pixel for the first time, save current (bare) roughness length for later
-                    if (domain%snow_water_equivalent%data_2d(hi,hj)==0) then
-                        z0_bare(hi,hj) = domain%roughness_z0%data_2d(hi,hj)
+                    if (domain%diagnostic_vars(domain%var_indx(kVARS%snow_water_equivalent))%data_2d(hi,hj)==0) then
+                        z0_bare(hi,hj) = domain%diagnostic_vars(domain%var_indx(kVARS%roughness_z0))%data_2d(hi,hj)
                     endif    
-                    domain%sensible_heat%data_2d(hi,hj)=H_(j,i)
-                    domain%latent_heat%data_2d(hi,hj)=LE_(j,i)
-                    domain%snow_water_equivalent%data_2d(hi,hj)=SWE_(j,i)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%sensible_heat))%data_2d(hi,hj)=H_(j,i)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%latent_heat))%data_2d(hi,hj)=LE_(j,i)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%snow_water_equivalent))%data_2d(hi,hj)=SWE_(j,i)
                     if (options%lsm%monthly_albedo) then
-                        domain%albedo%data_3d(hi, domain%sim_time%month, hj) = albs(j,i)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%albedo))%data_3d(hi, domain%sim_time%month, hj) = albs(j,i)
                     else
-                        domain%albedo%data_3d(hi, 1, hj) = albs(j,i)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%albedo))%data_3d(hi, 1, hj) = albs(j,i)
                     endif
                     !
-                    domain%skin_temperature%data_2d(hi,hj)=Tsrf(j,i)
-                    domain%snow_height%data_2d(hi,hj)=snowdepth_(j,i)
-                    domain%Sliq_out%data_2d(hi,hj)=Sliq_out_(j,i)
-                    domain%fsnow%data_2d(hi,hj)=fsnow(j,i)
-                    domain%Nsnow%data_2d(hi,hj)=Nsnow(j,i)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%skin_temperature))%data_2d(hi,hj)=Tsrf(j,i)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%snow_height))%data_2d(hi,hj)=snowdepth_(j,i)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%Sliq_out))%data_2d(hi,hj)=Sliq_out_(j,i)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%fsnow))%data_2d(hi,hj)=fsnow(j,i)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%Nsnow))%data_2d(hi,hj)=Nsnow(j,i)
                     !
-                    domain%qfx%data_2d(hi,hj)=Esrf_(j,i)
-                    domain%chs%data_2d(hi,hj)=KH_(j,i)
-                    domain%roughness_z0%data_2d(hi,hj) = z0sn*fsnow(j,i)+(1-fsnow(j,i))*z0_bare(hi,hj)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%qfx))%data_2d(hi,hj)=Esrf_(j,i)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%chs))%data_2d(hi,hj)=KH_(j,i)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%roughness_z0))%data_2d(hi,hj) = z0sn*fsnow(j,i)+(1-fsnow(j,i))*z0_bare(hi,hj)
                     
                     do k=1,kSNOW_GRID_Z
-                        domain%snow_temperature%data_3d(hi,k,hj) = Tsnow(k,j,i)
-                        domain%Sice%data_3d(hi,k,hj) = Sice(k,j,i)
-                        domain%Sliq%data_3d(hi,k,hj) = Sliq(k,j,i)
-                        domain%Ds%data_3d(hi,k,hj) = Ds(k,j,i)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%snow_temperature))%data_3d(hi,k,hj) = Tsnow(k,j,i)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%Sice))%data_3d(hi,k,hj) = Sice(k,j,i)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%Sliq))%data_3d(hi,k,hj) = Sliq(k,j,i)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%Ds))%data_3d(hi,k,hj) = Ds(k,j,i)
                     enddo
                     do k=1,kSOIL_GRID_Z
-                        domain%soil_temperature%data_3d(hi,k,hj) = Tsoil(k,j,i)
-                        domain%soil_water_content%data_3d(hi,k,hj)=theta(k,j,i)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%soil_temperature))%data_3d(hi,k,hj) = Tsoil(k,j,i)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%soil_water_content))%data_3d(hi,k,hj)=theta(k,j,i)
                     enddo
                 
                     if (SNTRAN>0) then
                         ! Convert to rate 1/s
-                        domain%dSWE_salt%data_2d(hi,hj)=domain%dSWE_salt%data_2d(hi,hj) + dSWE_salt_(j,i)
-                        domain%dSWE_susp%data_2d(hi,hj)= domain%dSWE_susp%data_2d(hi,hj) + dSWE_susp_(j,i)
-                        domain%dSWE_subl%data_2d(hi,hj)= domain%dSWE_subl%data_2d(hi,hj) + dSWE_subl_(j,i)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_salt))%data_2d(hi,hj)=domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_salt))%data_2d(hi,hj) + dSWE_salt_(j,i)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_susp))%data_2d(hi,hj)= domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_susp))%data_2d(hi,hj) + dSWE_susp_(j,i)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_subl))%data_2d(hi,hj)= domain%diagnostic_vars(domain%var_indx(kVARS%dSWE_subl))%data_2d(hi,hj) + dSWE_subl_(j,i)
                         !Add sublimated snow to latent heat flux. 
                         !Sometimes FSM returns NaN values for blowing snow sublimation, so mask those out here
                         if (abs(dSWE_subl_(j,i))>1) dSWE_subl_(j,i) = 0.0
-                        domain%latent_heat%data_2d(hi,hj)   = domain%latent_heat%data_2d(hi,hj)   + (-dSWE_subl_(j,i))*XLS/dt 
-                        domain%sensible_heat%data_2d(hi,hj) = domain%sensible_heat%data_2d(hi,hj) + ( dSWE_subl_(j,i))*XLS/dt 
+                        domain%diagnostic_vars(domain%var_indx(kVARS%latent_heat))%data_2d(hi,hj)   = domain%diagnostic_vars(domain%var_indx(kVARS%latent_heat))%data_2d(hi,hj)   + (-dSWE_subl_(j,i))*XLS/dt 
+                        domain%diagnostic_vars(domain%var_indx(kVARS%sensible_heat))%data_2d(hi,hj) = domain%diagnostic_vars(domain%var_indx(kVARS%sensible_heat))%data_2d(hi,hj) + ( dSWE_subl_(j,i))*XLS/dt 
                     endif
                 endif
             enddo
@@ -545,36 +556,36 @@ contains
         
         !If we just melted out the snow in this step, set this variable. This is to ensure good hand-off from snow-covered to not with NoahMP
         where(SWE_pre(domain%its:domain%ite,domain%jts:domain%jte) > 0 .and. &
-                domain%snow_water_equivalent%data_2d(domain%its:domain%ite,domain%jts:domain%jte)==0) 
-            domain%ground_surf_temperature%data_2d(domain%its:domain%ite,domain%jts:domain%jte)=273.15
+                domain%diagnostic_vars(domain%var_indx(kVARS%snow_water_equivalent))%data_2d(domain%its:domain%ite,domain%jts:domain%jte)==0) 
+            domain%diagnostic_vars(domain%var_indx(kVARS%ground_surf_temperature))%data_2d(domain%its:domain%ite,domain%jts:domain%jte)=273.15
         end where
         
         ! Let FSM know that it has done the first iteration 
         if (firstit==1) firstit=0
         
         !These are FSM2 Diagnostic/output vars, so we can update them everywhere
-        !domain%Nsnow%data_2d(its:ite,jts:jte)=Nsnow
+        !domain%diagnostic_vars(domain%var_indx(kVARS%Nsnow))%data_2d(its:ite,jts:jte)=Nsnow
         !!
         !snowfall_sum=snowfall_sum+Sf
         !rainfall_sum=rainfall_sum+Rf
-        !Roff_sum=Roff_sum+Roff_
-        !meltflux_out_sum=meltflux_out_sum+meltflux_out_
+        Roff_sum=Roff_sum+Roff_
+        meltflux_out_sum=meltflux_out_sum+meltflux_out_
         
 
-        !Delta_t=mod(domain%sim_time%seconds(),options%output%out_dt)
-        !if ( abs(options%output%out_dt-(Delta_t+dt)) <= 1.e-3 ) then
+        Delta_t=mod(domain%sim_time%seconds(),options%output%output_dt%seconds())
+        if ( abs(options%output%output_dt%seconds()-(Delta_t+dt)) <= 1.e-3 ) then
         !    if (STD_OUT_PE) write(*,*) "resetting/aggregating vars e.g. runoff during t-1->t"!, Delta_t,Delta_t+dt
         !    !!
-        !    domain%rainfall_tstep%data_2d(its:ite,jts:jte)=rainfall_sum
-        !    domain%snowfall_tstep%data_2d(its:ite,jts:jte)=snowfall_sum
-        !    domain%runoff_tstep%data_2d(its:ite,jts:jte)=Roff_sum
-        !    domain%meltflux_out_tstep%data_2d(its:ite,jts:jte)=meltflux_out_sum
+        !    domain%diagnostic_vars(domain%var_indx(kVARS%rainfall_tstep))%data_2d(its:ite,jts:jte)=rainfall_sum
+        !    domain%diagnostic_vars(domain%var_indx(kVARS%snowfall_tstep))%data_2d(its:ite,jts:jte)=snowfall_sum
+           domain%diagnostic_vars(domain%var_indx(kVARS%runoff_tstep))%data_2d(its:ite,jts:jte)=Roff_sum
+           domain%diagnostic_vars(domain%var_indx(kVARS%meltflux_out_tstep))%data_2d(its:ite,jts:jte)=meltflux_out_sum
         !    !! reseting the container to zero for next output interval
         !    rainfall_sum = 0.
         !    snowfall_sum = 0.                
-        !    Roff_sum = 0.
-        !    meltflux_out_sum = 0.
-        !endif
+           Roff_sum = 0.
+           meltflux_out_sum = 0.
+        endif
         
         !!
         !SYNC ALL  
@@ -593,37 +604,37 @@ contains
         corners=.False.
         if (present(corners_in)) corners=corners_in
         
-        domain%fsnow%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(fsnow(2:Nx_HICAR-1,2:Ny_HICAR-1))
-        domain%Nsnow%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(Nsnow(2:Nx_HICAR-1,2:Ny_HICAR-1))                        
+        domain%diagnostic_vars(domain%var_indx(kVARS%fsnow))%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(fsnow(2:Nx_HICAR-1,2:Ny_HICAR-1))
+        domain%diagnostic_vars(domain%var_indx(kVARS%Nsnow))%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(Nsnow(2:Nx_HICAR-1,2:Ny_HICAR-1))                        
         !!
         do i=1,NNsmax_HICAR
-            domain%snow_temperature%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Tsnow(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
-            domain%Sice%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Sice(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
-            domain%Sliq%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Sliq(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
-            domain%Ds%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Ds(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
+            domain%diagnostic_vars(domain%var_indx(kVARS%snow_temperature))%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Tsnow(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
+            domain%diagnostic_vars(domain%var_indx(kVARS%Sice))%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Sice(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
+            domain%diagnostic_vars(domain%var_indx(kVARS%Sliq))%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Sliq(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
+            domain%diagnostic_vars(domain%var_indx(kVARS%Ds))%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Ds(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
         enddo
 
-        call domain%halo%exch_var(domain%fsnow)
-        call domain%halo%exch_var(domain%Nsnow)
-        call domain%halo%exch_var(domain%snow_temperature)
-        call domain%halo%exch_var(domain%Sice)
-        call domain%halo%exch_var(domain%Sliq)
-        call domain%halo%exch_var(domain%Ds)
+        call domain%halo%exch_var(domain%diagnostic_vars(domain%var_indx(kVARS%fsnow)))
+        call domain%halo%exch_var(domain%diagnostic_vars(domain%var_indx(kVARS%Nsnow)))
+        call domain%halo%exch_var(domain%diagnostic_vars(domain%var_indx(kVARS%snow_temperature)))
+        call domain%halo%exch_var(domain%diagnostic_vars(domain%var_indx(kVARS%Sice)))
+        call domain%halo%exch_var(domain%diagnostic_vars(domain%var_indx(kVARS%Sliq)))
+        call domain%halo%exch_var(domain%diagnostic_vars(domain%var_indx(kVARS%Ds)))
 
         !call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.True.)
         !call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.False.,exch_var_only=.True.)      
 
-        if (corners) call domain%halo%exch_var(domain%Ds,corners=corners)
-        if (corners) call domain%halo%exch_var(domain%fsnow,corners=corners)
+        if (corners) call domain%halo%exch_var(domain%diagnostic_vars(domain%var_indx(kVARS%Ds)),corners=corners)
+        if (corners) call domain%halo%exch_var(domain%diagnostic_vars(domain%var_indx(kVARS%fsnow)),corners=corners)
 
-        fsnow = TRANSPOSE(domain%fsnow%data_2d(its:ite,jts:jte))
-        Nsnow = TRANSPOSE(domain%Nsnow%data_2d(its:ite,jts:jte))                        
+        fsnow = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%fsnow))%data_2d(its:ite,jts:jte))
+        Nsnow = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%Nsnow))%data_2d(its:ite,jts:jte))                        
         !!
         do i=1,NNsmax_HICAR
-            Tsnow(i,:,:) = TRANSPOSE(domain%snow_temperature%data_3d(its:ite,i,jts:jte))
-            Sice(i,:,:) = TRANSPOSE(domain%Sice%data_3d(its:ite,i,jts:jte))
-            Sliq(i,:,:) = TRANSPOSE(domain%Sliq%data_3d(its:ite,i,jts:jte))
-            Ds(i,:,:) = TRANSPOSE(domain%Ds%data_3d(its:ite,i,jts:jte))
+            Tsnow(i,:,:) = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%snow_temperature))%data_3d(its:ite,i,jts:jte))
+            Sice(i,:,:) = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%Sice))%data_3d(its:ite,i,jts:jte))
+            Sliq(i,:,:) = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%Sliq))%data_3d(its:ite,i,jts:jte))
+            Ds(i,:,:) = TRANSPOSE(domain%diagnostic_vars(domain%var_indx(kVARS%Ds))%data_3d(its:ite,i,jts:jte))
         enddo
         
     end subroutine exch_FSM_state_vars

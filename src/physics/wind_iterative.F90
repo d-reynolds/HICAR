@@ -21,7 +21,7 @@ module wind_iterative
 #include <petsc/finclude/petscdm.h>
 #include <petsc/finclude/petscdmda.h>
 
-    use icar_constants,    only : STD_OUT_PE
+    use icar_constants,    only : STD_OUT_PE, kVARS
     use domain_interface,  only : domain_t
     !use options_interface, only : options_t
     !use grid_interface,    only : grid_t
@@ -119,16 +119,12 @@ contains
         call DMGlobalToLocal(da,x,INSERT_VALUES,localX,ierr)
 
         call DMDAVecGetArrayF90(da,localX,lambda, ierr)
-        !write(*,*) 'max_u: ',maxval(domain%u%dqdt_3d)
-        !write(*,*) 'max_v: ',maxval(domain%v%dqdt_3d)
 
         call calc_updated_winds(domain, lambda, update, adv_den)
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
         !Exchange u and v, since the outer points are not updated in above function
-        call domain%halo%exch_var(domain%u,do_dqdt=update)
-        call domain%halo%exch_var(domain%v,do_dqdt=update)
-        !write(*,*) 'POST max_u: ',maxval(domain%u%dqdt_3d)
-        !write(*,*) 'POST max_v: ',maxval(domain%v%dqdt_3d)
+        call domain%halo%exch_var(domain%state_vars(domain%var_indx(kVARS%u)),do_dqdt=update)
+        call domain%halo%exch_var(domain%state_vars(domain%var_indx(kVARS%v)),do_dqdt=update)
 
     end subroutine calc_iter_winds
     
@@ -164,7 +160,7 @@ contains
         rho_u = 1.0
         rho_v = 1.0
         
-        if (adv_den) rho(domain%ims:domain%ime,:,domain%jms:domain%jme)=domain%density%data_3d(domain%ims:domain%ime,:,domain%jms:domain%jme)
+        if (adv_den) rho(domain%ims:domain%ime,:,domain%jms:domain%jme)=domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d(domain%ims:domain%ime,:,domain%jms:domain%jme)
         
         if (i_s==domain%grid%ids .and. i_e==domain%grid%ide) then
             rho_u(i_start+1:i_end-1,:,j_s:j_e) = 0.5*(rho(i_start+1:i_end-1,:,j_s:j_e) + rho(i_start:i_end-2,:,j_s:j_e))
@@ -212,25 +208,25 @@ contains
         !PETSc arrays are zero-indexed
         
         if (update) then
-            domain%u%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%u%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
+            domain%state_vars(domain%var_indx(kVARS%u))%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%state_vars(domain%var_indx(kVARS%u))%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
                                                             0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
                                                             lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
-            (1/domain%jacobian_u(i_start:i_end,:,j_s:j_e))*domain%dzdx_u(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/rho_u(i_start:i_end,:,j_s:j_e)
+            (1/domain%grid_vars(domain%var_indx(kVARS%jacobian_u))%data_3d(i_start:i_end,:,j_s:j_e))*domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/rho_u(i_start:i_end,:,j_s:j_e)
             
-            domain%v%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%v%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
+            domain%state_vars(domain%var_indx(kVARS%v))%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%state_vars(domain%var_indx(kVARS%v))%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
                                                             0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
                                                             lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
-            (1/domain%jacobian_v(i_s:i_e,:,j_start:j_end))*domain%dzdy_v(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/rho_v(i_s:i_e,:,j_start:j_end)
+            (1/domain%grid_vars(domain%var_indx(kVARS%jacobian_v))%data_3d(i_s:i_e,:,j_start:j_end))*domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/rho_v(i_s:i_e,:,j_start:j_end)
         else
-            domain%u%data_3d(i_start:i_end,:,j_s:j_e) = domain%u%data_3d(i_start:i_end,:,j_s:j_e) + &
+            domain%state_vars(domain%var_indx(kVARS%u))%data_3d(i_start:i_end,:,j_s:j_e) = domain%state_vars(domain%var_indx(kVARS%u))%data_3d(i_start:i_end,:,j_s:j_e) + &
                                                             0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
                                                             lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
-            (1/domain%jacobian_u(i_start:i_end,:,j_s:j_e))*domain%dzdx_u(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/rho_u(i_start:i_end,:,j_s:j_e)
+            (1/domain%grid_vars(domain%var_indx(kVARS%jacobian_u))%data_3d(i_start:i_end,:,j_s:j_e))*domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/rho_u(i_start:i_end,:,j_s:j_e)
             
-            domain%v%data_3d(i_s:i_e,:,j_start:j_end) = domain%v%data_3d(i_s:i_e,:,j_start:j_end) + &
+            domain%state_vars(domain%var_indx(kVARS%v))%data_3d(i_s:i_e,:,j_start:j_end) = domain%state_vars(domain%var_indx(kVARS%v))%data_3d(i_s:i_e,:,j_start:j_end) + &
                                                             0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
                                                             lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
-            (1/domain%jacobian_v(i_s:i_e,:,j_start:j_end))*domain%dzdy_v(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/rho_v(i_s:i_e,:,j_start:j_end)
+            (1/domain%grid_vars(domain%var_indx(kVARS%jacobian_v))%data_3d(i_s:i_e,:,j_start:j_end))*domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/rho_v(i_s:i_e,:,j_start:j_end)
         
         endif
 
@@ -555,61 +551,61 @@ contains
         j_s_bnd = j_s
         if (j_s == domain%grid%jds) j_s_bnd = j_s+1
 
-        D_coef(i_s:i_e_bnd,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s+1:i_e_bnd+1,k_s:k_e,j_s:j_e) + &
-            domain%jacobian(i_s:i_e_bnd,k_s:k_e,j_s:j_e))/(2*domain%dx**2) + &
-            (sigma(i_s:i_e_bnd,:,:)**2 - 1)*(dzdx(i_s:i_e_bnd,:,:)+domain%dzdx_u(i_s+1:i_e_bnd+1,:,j_s:j_e))/&
+        D_coef(i_s:i_e_bnd,k_s:k_e,j_s:j_e) = (domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s+1:i_e_bnd+1,k_s:k_e,j_s:j_e) + &
+            domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e_bnd,k_s:k_e,j_s:j_e))/(2*domain%dx**2) + &
+            (sigma(i_s:i_e_bnd,:,:)**2 - 1)*(dzdx(i_s:i_e_bnd,:,:)+domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s+1:i_e_bnd+1,:,j_s:j_e))/&
             mixed_denom(i_s:i_e_bnd,k_s:k_e,j_s:j_e)
-        E_coef(i_s_bnd:i_e,k_s:k_e,j_s:j_e) = (domain%jacobian(i_s_bnd:i_e,k_s:k_e,j_s:j_e) + &
-            domain%jacobian(i_s_bnd-1:i_e-1,k_s:k_e,j_s:j_e))/(2*domain%dx**2) - &
-            (sigma(i_s_bnd:i_e,:,:)**2 - 1)*(dzdx(i_s_bnd:i_e,:,:)+domain%dzdx_u(i_s_bnd:i_e,:,j_s:j_e))/&
+        E_coef(i_s_bnd:i_e,k_s:k_e,j_s:j_e) = (domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s_bnd:i_e,k_s:k_e,j_s:j_e) + &
+            domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s_bnd-1:i_e-1,k_s:k_e,j_s:j_e))/(2*domain%dx**2) - &
+            (sigma(i_s_bnd:i_e,:,:)**2 - 1)*(dzdx(i_s_bnd:i_e,:,:)+domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s_bnd:i_e,:,j_s:j_e))/&
             mixed_denom(i_s_bnd:i_e,k_s:k_e,j_s:j_e)
-        F_coef(i_s:i_e,k_s:k_e,j_s:j_e_bnd) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s+1:j_e_bnd+1) + &
-            domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e_bnd))/(2*domain%dx**2) + &
-            (sigma(:,:,j_s:j_e_bnd)**2 - 1)*(dzdy(:,:,j_s:j_e_bnd)+domain%dzdy_v(i_s:i_e,:,j_s+1:j_e_bnd+1))/&
+        F_coef(i_s:i_e,k_s:k_e,j_s:j_e_bnd) = (domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e,k_s:k_e,j_s+1:j_e_bnd+1) + &
+            domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e,k_s:k_e,j_s:j_e_bnd))/(2*domain%dx**2) + &
+            (sigma(:,:,j_s:j_e_bnd)**2 - 1)*(dzdy(:,:,j_s:j_e_bnd)+domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,:,j_s+1:j_e_bnd+1))/&
             mixed_denom(i_s:i_e,k_s:k_e,j_s:j_e_bnd)
-        G_coef(i_s:i_e,k_s:k_e,j_s_bnd:j_e) = (domain%jacobian(i_s:i_e,k_s:k_e,j_s_bnd:j_e) + &
-            domain%jacobian(i_s:i_e,k_s:k_e,j_s_bnd-1:j_e-1))/(2*domain%dx**2) - &
-            (sigma(:,:,j_s_bnd:j_e)**2 - 1)*(dzdy(:,:,j_s_bnd:j_e)+domain%dzdy_v(i_s:i_e,:,j_s_bnd:j_e))/&
+        G_coef(i_s:i_e,k_s:k_e,j_s_bnd:j_e) = (domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e,k_s:k_e,j_s_bnd:j_e) + &
+            domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e,k_s:k_e,j_s_bnd-1:j_e-1))/(2*domain%dx**2) - &
+            (sigma(:,:,j_s_bnd:j_e)**2 - 1)*(dzdy(:,:,j_s_bnd:j_e)+domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,:,j_s_bnd:j_e))/&
             mixed_denom(i_s:i_e,k_s:k_e,j_s_bnd:j_e)
 
 
         H_coef(i_s:i_e,k_s:k_e-1,:) = &
                 -(sigma(i_s:i_e,k_s:k_e-1,:)**2)* &
-                (dzdx(i_s:i_e,k_s+1:k_e,:)+domain%dzdx_u(i_s+1:i_e+1,k_s:k_e-1,j_s:j_e))&
+                (dzdx(i_s:i_e,k_s+1:k_e,:)+domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s+1:i_e+1,k_s:k_e-1,j_s:j_e))&
                 /mixed_denom(i_s:i_e,k_s:k_e-1,:)
         I_coef(i_s:i_e,k_s:k_e-1,:) = &
                 (sigma(i_s:i_e,k_s:k_e-1,:)**2)* &
                 (dzdx(i_s:i_e,k_s+1:k_e,:)+&
-                domain%dzdx_u(i_s:i_e,k_s:k_e-1,j_s:j_e))/mixed_denom(i_s:i_e,k_s:k_e-1,:)
+                domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s:i_e,k_s:k_e-1,j_s:j_e))/mixed_denom(i_s:i_e,k_s:k_e-1,:)
         J_coef(i_s:i_e,k_s+1:k_e,:) = &
-                (dzdx(i_s:i_e,k_s:k_e-1,:)+domain%dzdx_u(i_s+1:i_e+1,k_s+1:k_e,j_s:j_e))&
+                (dzdx(i_s:i_e,k_s:k_e-1,:)+domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s+1:i_e+1,k_s+1:k_e,j_s:j_e))&
                 /mixed_denom(i_s:i_e,k_s+1:k_e,:)
         K_coef(i_s:i_e,k_s+1:k_e,:) = &
                 -(dzdx(i_s:i_e,k_s:k_e-1,:)+&
-                domain%dzdx_u(i_s:i_e,k_s+1:k_e,j_s:j_e))/mixed_denom(i_s:i_e,k_s+1:k_e,:)
+                domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s:i_e,k_s+1:k_e,j_s:j_e))/mixed_denom(i_s:i_e,k_s+1:k_e,:)
 
         L_coef(:,k_s:k_e-1,j_s:j_e) = &
                 -(sigma(:,k_s:k_e-1,j_s:j_e)**2)* &
-                (dzdy(:,k_s+1:k_e,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s:k_e-1,j_s+1:j_e+1))&
+                (dzdy(:,k_s+1:k_e,j_s:j_e)+domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,k_s:k_e-1,j_s+1:j_e+1))&
                 /mixed_denom(:,k_s:k_e-1,j_s:j_e)
         M_coef(:,k_s:k_e-1,j_s:j_e) = &
                 (sigma(:,k_s:k_e-1,j_s:j_e)**2)* &
-                (dzdy(:,k_s+1:k_e,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s:k_e-1,j_s:j_e))&
+                (dzdy(:,k_s+1:k_e,j_s:j_e)+domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,k_s:k_e-1,j_s:j_e))&
                 /mixed_denom(:,k_s:k_e-1,j_s:j_e)
         N_coef(:,k_s+1:k_e,j_s:j_e) = &
-                (dzdy(:,k_s:k_e-1,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s+1:k_e,j_s+1:j_e+1))&
+                (dzdy(:,k_s:k_e-1,j_s:j_e)+domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,k_s+1:k_e,j_s+1:j_e+1))&
                 /mixed_denom(:,k_s+1:k_e,j_s:j_e)
         O_coef(:,k_s+1:k_e,j_s:j_e) = &
-                -(dzdy(:,k_s:k_e-1,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s+1:k_e,j_s:j_e))&
+                -(dzdy(:,k_s:k_e-1,j_s:j_e)+domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,k_s+1:k_e,j_s:j_e))&
                 /mixed_denom(:,k_s+1:k_e,j_s:j_e)
 
-        J_coef(i_s:i_e,k_s,:) = (dzdx(i_s:i_e,k_s,:)+domain%dzdx_u(i_s+1:i_e+1,k_s,j_s:j_e))&
+        J_coef(i_s:i_e,k_s,:) = (dzdx(i_s:i_e,k_s,:)+domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s+1:i_e+1,k_s,j_s:j_e))&
                                     /mixed_denom(i_s:i_e,k_s,:)
-        K_coef(i_s:i_e,k_s,:) = -(dzdx(i_s:i_e,k_s,:)+domain%dzdx_u(i_s:i_e,k_s,j_s:j_e))&
+        K_coef(i_s:i_e,k_s,:) = -(dzdx(i_s:i_e,k_s,:)+domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s:i_e,k_s,j_s:j_e))&
                                     /mixed_denom(i_s:i_e,k_s,:)
-        N_coef(:,k_s,j_s:j_e) = (dzdy(:,k_s,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s,j_s+1:j_e+1))&
+        N_coef(:,k_s,j_s:j_e) = (dzdy(:,k_s,j_s:j_e)+domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,k_s,j_s+1:j_e+1))&
                                     /mixed_denom(:,k_s,j_s:j_e)
-        O_coef(:,k_s,j_s:j_e) = -(dzdy(:,k_s,j_s:j_e)+domain%dzdy_v(i_s:i_e,k_s,j_s:j_e))&
+        O_coef(:,k_s,j_s:j_e) = -(dzdy(:,k_s,j_s:j_e)+domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,k_s,j_s:j_e))&
                                     /mixed_denom(:,k_s,j_s:j_e)
                             
         if (domain%ims==domain%ids) then
@@ -652,33 +648,33 @@ contains
 
         B_coef(:,k_s:k_e-1,:) = sigma(:,k_s:k_e-1,:) * &
                               ( (alpha(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + dzdy(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + &
-                              dzdx(i_s:i_e,k_s:k_e-1,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s:k_e-1,j_s:j_e)) + &
+                              dzdx(i_s:i_e,k_s:k_e-1,j_s:j_e)**2) * (1./domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e,k_s:k_e-1,j_s:j_e)) + &
                               (alpha(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + dzdy(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + &
-                              dzdx(i_s:i_e,k_s+1:k_e,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s+1:k_e,j_s:j_e))) / &
+                              dzdx(i_s:i_e,k_s+1:k_e,j_s:j_e)**2) * (1./domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e,k_s+1:k_e,j_s:j_e))) / &
                           ((sigma(:,k_s:k_e-1,:)+sigma(:,k_s:k_e-1,:)**2)*dz_if(:,k_s+1:k_e,:)**2)
                           
                           
         C_coef(:,k_s+1:k_e,:) = ( (alpha(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + dzdy(i_s:i_e,k_s:k_e-1,j_s:j_e)**2 + &
-                              dzdx(i_s:i_e,k_s:k_e-1,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s:k_e-1,j_s:j_e)) + &
+                              dzdx(i_s:i_e,k_s:k_e-1,j_s:j_e)**2) * (1./domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e,k_s:k_e-1,j_s:j_e)) + &
                               (alpha(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + dzdy(i_s:i_e,k_s+1:k_e,j_s:j_e)**2 + &
-                              dzdx(i_s:i_e,k_s+1:k_e,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s+1:k_e,j_s:j_e))) / &
+                              dzdx(i_s:i_e,k_s+1:k_e,j_s:j_e)**2) * (1./domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e,k_s+1:k_e,j_s:j_e))) / &
                           ((sigma(:,k_s+1:k_e,:)+sigma(:,k_s+1:k_e,:)**2)*dz_if(:,k_s+2:k_e+1,:)**2)
                 
         C_coef(:,k_s,:) = ( (alpha(i_s:i_e,k_s,j_s:j_e)**2 + dzdy(i_s:i_e,k_s,j_s:j_e)**2 + &
-                              dzdx(i_s:i_e,k_s,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s,j_s:j_e)) + &
+                              dzdx(i_s:i_e,k_s,j_s:j_e)**2) * (1./domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e,k_s,j_s:j_e)) + &
                               (alpha(i_s:i_e,k_s,j_s:j_e)**2 + dzdy(i_s:i_e,k_s,j_s:j_e)**2 + &
-                              dzdx(i_s:i_e,k_s,j_s:j_e)**2) * (1./domain%jacobian(i_s:i_e,k_s,j_s:j_e))) / &
+                              dzdx(i_s:i_e,k_s,j_s:j_e)**2) * (1./domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e,k_s,j_s:j_e))) / &
                           ((sigma(:,k_s,:)+sigma(:,k_s,:)**2)*dz_if(:,k_s+1,:)**2)
                           
         B_coef = B_coef - sigma**2 * &
-                                    (domain%dzdx_u(i_s+1:i_e+1,:,j_s:j_e)-domain%dzdx_u(i_s:i_e,:,j_s:j_e)+ &
-                                     domain%dzdy_v(i_s:i_e,:,j_s+1:j_e+1)-domain%dzdy_v(i_s:i_e,:,j_s:j_e)) &
+                                    (domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s+1:i_e+1,:,j_s:j_e)-domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s:i_e,:,j_s:j_e)+ &
+                                     domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,:,j_s+1:j_e+1)-domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,:,j_s:j_e)) &
                                      /(mixed_denom(i_s:i_e,:,:))
                                                     
         
         C_coef = C_coef + &
-                                    (domain%dzdx_u(i_s+1:i_e+1,:,j_s:j_e)-domain%dzdx_u(i_s:i_e,:,j_s:j_e)+ &
-                                     domain%dzdy_v(i_s:i_e,:,j_s+1:j_e+1)-domain%dzdy_v(i_s:i_e,:,j_s:j_e)) &
+                                    (domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s+1:i_e+1,:,j_s:j_e)-domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d(i_s:i_e,:,j_s:j_e)+ &
+                                     domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,:,j_s+1:j_e+1)-domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d(i_s:i_e,:,j_s:j_e)) &
                                      /(mixed_denom(i_s:i_e,:,:))
                                                     
         ! if (domain%ims==domain%ids) then
@@ -701,12 +697,12 @@ contains
         !     C_coef(:,:,j_e) = C_coef(:,:,j_e-1)
         ! endif
                             
-         A_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) = -((domain%jacobian(i_s_bnd+1:i_e_bnd+1,k_s:k_e,j_s_bnd:j_e_bnd) + &
-                                                2*domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) + &
-                                                domain%jacobian(i_s_bnd-1:i_e_bnd-1,k_s:k_e,j_s_bnd:j_e_bnd))/(2*domain%dx**2)) &
-                                             -((domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd+1:j_e_bnd+1) + &
-                                                2*domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) + &
-                                                domain%jacobian(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd-1:j_e_bnd-1))/(2*domain%dx**2))! - &
+         A_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) = -((domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s_bnd+1:i_e_bnd+1,k_s:k_e,j_s_bnd:j_e_bnd) + &
+                                                2*domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) + &
+                                                domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s_bnd-1:i_e_bnd-1,k_s:k_e,j_s_bnd:j_e_bnd))/(2*domain%dx**2)) &
+                                             -((domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd+1:j_e_bnd+1) + &
+                                                2*domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) + &
+                                                domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd-1:j_e_bnd-1))/(2*domain%dx**2))! - &
                                                 !B_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd) - C_coef(i_s_bnd:i_e_bnd,k_s:k_e,j_s_bnd:j_e_bnd)
                                                
         if (domain%ims==domain%ids) then
@@ -841,20 +837,20 @@ contains
             yl = 0
 
             dx = domain%dx
-            dzdx = domain%dzdx%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) 
-            dzdy = domain%dzdy%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
-            jaco = domain%jacobian(i_s:i_e,k_s:k_e,j_s:j_e)
+            dzdx = domain%grid_vars(domain%var_indx(kVARS%dzdx))%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) 
+            dzdy = domain%grid_vars(domain%var_indx(kVARS%dzdy))%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
+            jaco = domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
             
-            dz_if(:,k_s,:) = domain%advection_dz(i_s:i_e,k_s,j_s:j_e)
-            dz_if(:,k_s+1:k_e,:) = (domain%advection_dz(i_s:i_e,k_s+1:k_e,j_s:j_e) + &
-                                   domain%advection_dz(i_s:i_e,k_s:k_e-1,j_s:j_e))/2
-            dz_if(:,k_e+1,:) = domain%advection_dz(i_s:i_e,k_e,j_s:j_e)
+            dz_if(:,k_s,:) = domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i_s:i_e,k_s,j_s:j_e)
+            dz_if(:,k_s+1:k_e,:) = (domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i_s:i_e,k_s+1:k_e,j_s:j_e) + &
+                                   domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i_s:i_e,k_s:k_e-1,j_s:j_e))/2
+            dz_if(:,k_e+1,:) = domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i_s:i_e,k_e,j_s:j_e)
             sigma = dz_if(:,k_s:k_e,:)/dz_if(:,k_s+1:k_e+1,:)
                                 
             do k = k_s+1, k_e
-                if (domain%advection_dz(i_s,k,j_s) < domain%advection_dz(i_s,k-1,j_s)) then
+                if (domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i_s,k,j_s) < domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i_s,k-1,j_s)) then
                     !if (STD_OUT_PE) write(*,*) 'ERROR: dz levels are not monotonically increasing in k'
-                    !if (STD_OUT_PE) write(*,*) 'ERROR: at level ', k, ' dz inrecases from ', domain%advection_dz(i_s,k-1,j_s), ' to ', domain%advection_dz(i_s,k,j_s)
+                    !if (STD_OUT_PE) write(*,*) 'ERROR: at level ', k, ' dz inrecases from ', domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i_s,k-1,j_s), ' to ', domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i_s,k,j_s)
                     !if (STD_OUT_PE) write(*,*) 'ERROR: to correct, ensure that dz levels increase monotonically '
                     !stop
                 endif

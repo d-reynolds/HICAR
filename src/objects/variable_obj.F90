@@ -20,35 +20,60 @@ contains
 
         integer :: err
 
-        this%dtype = kREAL
-        if (present(dtype)) this%dtype = dtype
 
+        if (present(dtype)) then
+            this%dtype = dtype
+        else
+            this%dtype = kREAL
+        endif
+
+        this%one_d   = grid%is1d
         this%two_d   = grid%is2d
         this%three_d = grid%is3d
-
+        this%four_d  = grid%is4d
         this%dimensions = grid%dimensions
         this%dim_len    = grid%get_dims()
         this%grid       = grid
-        
         if (allocated(this%global_dim_len)) deallocate(this%global_dim_len)
-        if (this%two_d) then
+        if (this%one_d) then
+            allocate(this%global_dim_len(1))
+            this%global_dim_len(1) = grid%kde
+        else if (this%two_d) then
             allocate(this%global_dim_len(2))
             this%global_dim_len(1) = grid%ide
             this%global_dim_len(2) = grid%jde
-        else
+        else if (this%three_d) then
             allocate(this%global_dim_len(3))
             this%global_dim_len(1) = grid%ide
             this%global_dim_len(2) = grid%kde
             this%global_dim_len(3) = grid%jde
+        else if (this%four_d) then
+            allocate(this%global_dim_len(4))
+            this%global_dim_len(1) = grid%ide
+            this%global_dim_len(2) = grid%kde
+            this%global_dim_len(3) = grid%jde
+            this%global_dim_len(4) = grid%n_4d
         endif
         this%forcing_var = ""
         if (present(forcing_var)) this%forcing_var = forcing_var
 
-        this%force_boundaries = .True.
+        ! this%force_boundaries = .True.
         if (present(force_boundaries)) this%force_boundaries = force_boundaries
+
+        if (grid%is1d) then
+            this%n_dimensions = 1
+            this%dimensions = ['x']
+            if (associated(this%data_1d)) deallocate(this%data_1d)
+            allocate(this%data_1d(grid%kms:grid%kme), stat=err)
+            if (err /= 0) stop "variable:grid:1d: Allocation request failed"
+
+            this%data_1d = 0
+
+        endif
 
         if (grid%is2d) then
             this%n_dimensions = 2
+
             if (associated(this%data_2d)) deallocate(this%data_2d)
             if (this%dtype == kREAL) then
                 allocate(this%data_2d(grid%ims:grid%ime,    &
@@ -56,12 +81,12 @@ contains
                 if (err /= 0) stop "variable:grid:2d: Allocation request failed"
 
                 this%data_2d = 0
-            elseif (this%dtype == kDOUBLE) then
-                allocate(this%data_2dd(grid%ims:grid%ime,    &
-                                       grid%jms:grid%jme), stat=err)
-                if (err /= 0) stop "variable:grid:2d: Allocation request failed"
+            ! elseif (this%dtype == kDOUBLE) then
+            !     allocate(this%data_2dd(grid%ims:grid%ime,    &
+            !                            grid%jms:grid%jme), stat=err)
+            !     if (err /= 0) stop "variable:grid:2d: Allocation request failed"
 
-                this%data_2dd = 0
+            !     this%data_2dd = 0
             elseif (this%dtype == kINTEGER) then
                 allocate(this%data_2di(grid%ims:grid%ime,    &
                                        grid%jms:grid%jme), stat=err)
@@ -91,15 +116,25 @@ contains
 
             this%data_3d = 0
 
-            if (trim(this%forcing_var) /= "") then
+            ! if (trim(this%forcing_var) /= "") then
                 allocate(this%dqdt_3d(grid%ims:grid%ime,    &
                                       grid%kms:grid%kme,    &
                                       grid%jms:grid%jme), stat=err)
                 if (err /= 0) stop "variable:grid:dqdt_3d: Allocation request failed"
 
                 this%dqdt_3d = 0
-            endif
+            ! endif
+        endif
+        if (grid%is4d) then
+            this%n_dimensions = 4
+            if (associated(this%data_4d)) deallocate(this%data_4d)
+            allocate(this%data_4d(grid%ims:grid%ime,    &
+                                    grid%kms:grid%kme,    &
+                                    grid%jms:grid%jme,    &
+                                    1:grid%n_4d), stat=err)
+            if (err /= 0) stop "variable:grid:3d: Allocation request failed"
 
+            this%data_4d = 0
         endif
         this%xstag = grid%nx_e
         this%ystag = grid%ny_e

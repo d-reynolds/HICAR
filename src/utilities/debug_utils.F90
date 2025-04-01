@@ -3,7 +3,7 @@ module debug_module
     use domain_interface, only  : domain_t
     use string,           only  : str
     use ieee_arithmetic
-    use icar_constants,    only : STD_OUT_PE
+    use icar_constants,    only : STD_OUT_PE, kVARS
 
     implicit none
 
@@ -19,39 +19,39 @@ contains
         fix_data = .False.
         if (present(fix)) fix_data = fix
 
-        call check_var(domain%potential_temperature%data_3d, name="th",      msg=error_msg, less_than    =100.0, fix=fix_data)
-        call check_var(domain%potential_temperature%data_3d, name="th",      msg=error_msg, greater_than =600.0, fix=fix_data)
-        call check_var(domain%water_vapor%data_3d,           name="qv",      msg=error_msg, less_than    =-1e-10,fix=fix_data)
-        call check_var(domain%cloud_water_mass%data_3d,      name="cloud",   msg=error_msg, less_than    =-1e-10,fix=fix_data)
-        call check_var(domain%cloud_ice_mass%data_3d,        name="ice",     msg=error_msg, less_than    =-1e-10,fix=fix_data)
-        call check_var(domain%cloud_ice_number%data_3d,      name="nice",    msg=error_msg, less_than    =-1e-1, fix=fix_data)
-        call check_var(domain%snow_mass%data_3d,             name="qsnow",   msg=error_msg, less_than    =-1e-10,fix=fix_data)
-        call check_var(domain%snow_number%data_3d,           name="nsnow",   msg=error_msg, less_than    =-1e-1, fix=fix_data)
-        call check_var(domain%rain_mass%data_3d,             name="qrain",   msg=error_msg, less_than    =-1e-10,fix=fix_data)
-        call check_var(domain%rain_number%data_3d,           name="nrain",   msg=error_msg, less_than    =-1e-1, fix=fix_data)
-        call check_var(domain%graupel_mass%data_3d,          name="qgrau",   msg=error_msg, less_than    =-1e-10,fix=fix_data)
-        call check_var(domain%graupel_number%data_3d,        name="ngrau",   msg=error_msg, less_than    =-1e-1, fix=fix_data)
-        call check_var(domain%ice1_a%data_3d,                name="ice1a",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
-        call check_var(domain%ice1_c%data_3d,                name="ice1c",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
-        call check_var(domain%ice2_mass%data_3d,             name="ice2mass",msg=error_msg, less_than    =-1e-10, fix=fix_data)
-        call check_var(domain%ice2_number%data_3d,           name="ice2num", msg=error_msg, less_than    =-1e-1, fix=fix_data)
-        call check_var(domain%ice2_a%data_3d,                name="ice2a",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
-        call check_var(domain%ice2_c%data_3d,                name="ice2c",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
-        call check_var(domain%ice3_mass%data_3d,             name="ice3mass",msg=error_msg, less_than    =-1e-10, fix=fix_data)
-        call check_var(domain%ice3_number%data_3d,           name="ice3num", msg=error_msg, less_than    =-1e-1, fix=fix_data)
-        call check_var(domain%ice3_a%data_3d,                name="ice3a",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
-        call check_var(domain%ice3_c%data_3d,                name="ice3c",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
-        call check_var(domain%w%data_3d,                     name="w",       msg=error_msg, less_than    =-1e5,  fix=fix_data)
-        call check_var(domain%w%data_3d,                     name="w",       msg=error_msg, greater_than =1e5,   fix=fix_data)
-        call check_var2d(domain%sensible_heat%data_2d,       name="hfx",     msg=error_msg) ! check for NaN's only.
-        call check_var2d(domain%latent_heat%data_2d,         name="lfx",     msg=error_msg)
-        call check_var2d(domain%skin_temperature%data_2d,    name="tskin",   msg=error_msg)
-        call check_var2d(domain%roughness_z0%data_2d,        name="z0",      msg=error_msg)
-        call check_var2d(domain%surface_pressure%data_2d,    name="psfc",    msg=error_msg)
+        if (domain%var_indx(kVARS%potential_temperature) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d, name="th",      msg=error_msg, less_than    =100.0, fix=fix_data)
+        if (domain%var_indx(kVARS%potential_temperature) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d, name="th",      msg=error_msg, greater_than =600.0, fix=fix_data)
+        if (domain%var_indx(kVARS%water_vapor) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,           name="qv",      msg=error_msg, less_than    =-1e-10,fix=fix_data)
+        if (domain%var_indx(kVARS%cloud_water_mass) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d,      name="cloud",   msg=error_msg, less_than    =-1e-10,fix=fix_data)
+        if (domain%var_indx(kVARS%ice_mass) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d,        name="ice",     msg=error_msg, less_than    =-1e-10,fix=fix_data)
+        if (domain%var_indx(kVARS%ice_number) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice_number))%data_3d,      name="nice",    msg=error_msg, less_than    =-1e-1, fix=fix_data)
+        if (domain%var_indx(kVARS%snow_mass) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%snow_mass))%data_3d,             name="qsnow",   msg=error_msg, less_than    =-1e-10,fix=fix_data)
+        if (domain%var_indx(kVARS%snow_number) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%snow_number))%data_3d,           name="nsnow",   msg=error_msg, less_than    =-1e-1, fix=fix_data)
+        if (domain%var_indx(kVARS%rain_mass) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d,             name="qrain",   msg=error_msg, less_than    =-1e-10,fix=fix_data)
+        if (domain%var_indx(kVARS%rain_number) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%rain_number))%data_3d,           name="nrain",   msg=error_msg, less_than    =-1e-1, fix=fix_data)
+        if (domain%var_indx(kVARS%graupel_mass) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%graupel_mass))%data_3d,          name="qgrau",   msg=error_msg, less_than    =-1e-10,fix=fix_data)
+        if (domain%var_indx(kVARS%graupel_number) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%graupel_number))%data_3d,        name="ngrau",   msg=error_msg, less_than    =-1e-1, fix=fix_data)
+        if (domain%var_indx(kVARS%ice1_a) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice1_a))%data_3d,                name="ice1a",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
+        if (domain%var_indx(kVARS%ice1_c) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice1_c))%data_3d,                name="ice1c",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
+        if (domain%var_indx(kVARS%ice2_mass) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice2_mass))%data_3d,             name="ice2mass",msg=error_msg, less_than    =-1e-10, fix=fix_data)
+        if (domain%var_indx(kVARS%ice2_number) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice2_number))%data_3d,           name="ice2num", msg=error_msg, less_than    =-1e-1, fix=fix_data)
+        if (domain%var_indx(kVARS%ice2_a) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice2_a))%data_3d,                name="ice2a",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
+        if (domain%var_indx(kVARS%ice2_c) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice2_c))%data_3d,                name="ice2c",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
+        if (domain%var_indx(kVARS%ice3_mass) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice3_mass))%data_3d,             name="ice3mass",msg=error_msg, less_than    =-1e-10, fix=fix_data)
+        if (domain%var_indx(kVARS%ice3_number) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice3_number))%data_3d,           name="ice3num", msg=error_msg, less_than    =-1e-1, fix=fix_data)
+        if (domain%var_indx(kVARS%ice3_a) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice3_a))%data_3d,                name="ice3a",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
+        if (domain%var_indx(kVARS%ice3_c) > 0) call check_var(domain%state_vars(domain%var_indx(kVARS%ice3_c))%data_3d,                name="ice3c",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
+        if (domain%var_indx(kVARS%w) > 0) call check_var(domain%diagnostic_vars(domain%var_indx(kVARS%w))%data_3d,                     name="w",       msg=error_msg, less_than    =-1e5,  fix=fix_data)
+        if (domain%var_indx(kVARS%w) > 0) call check_var(domain%diagnostic_vars(domain%var_indx(kVARS%w))%data_3d,                     name="w",       msg=error_msg, greater_than =1e5,   fix=fix_data)
+        if (domain%var_indx(kVARS%sensible_heat) > 0) call check_var2d(domain%diagnostic_vars(domain%var_indx(kVARS%sensible_heat))%data_2d,       name="hfx",     msg=error_msg) ! check for NaN's only.
+        if (domain%var_indx(kVARS%latent_heat) > 0) call check_var2d(domain%diagnostic_vars(domain%var_indx(kVARS%latent_heat))%data_2d,         name="lfx",     msg=error_msg)
+        if (domain%var_indx(kVARS%skin_temperature) > 0) call check_var2d(domain%diagnostic_vars(domain%var_indx(kVARS%skin_temperature))%data_2d,    name="tskin",   msg=error_msg)
+        if (domain%var_indx(kVARS%roughness_z0) > 0) call check_var2d(domain%diagnostic_vars(domain%var_indx(kVARS%roughness_z0))%data_2d,        name="z0",      msg=error_msg)
+        if (domain%var_indx(kVARS%surface_pressure) > 0) call check_var2d(domain%diagnostic_vars(domain%var_indx(kVARS%surface_pressure))%data_2d,    name="psfc",    msg=error_msg)
         ! call check_var2d(domain%ustar,                       name="ustar", msg=error_msg)
-        call check_var(domain%exner%data_3d,                 name="pii",     msg=error_msg)
-        call check_var(domain%pressure_interface%data_3d,    name="pi",      msg=error_msg)
-        call check_var(domain%pressure%data_3d,              name="p",       msg=error_msg)
+        if (domain%var_indx(kVARS%exner) > 0) call check_var(domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d,                 name="pii",     msg=error_msg)
+        if (domain%var_indx(kVARS%pressure_interface) > 0) call check_var(domain%diagnostic_vars(domain%var_indx(kVARS%pressure_interface))%data_3d,    name="pi",      msg=error_msg)
+        if (domain%var_indx(kVARS%pressure) > 0) call check_var(domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,              name="p",       msg=error_msg)
 
     end subroutine domain_check
 

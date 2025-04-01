@@ -139,7 +139,7 @@ contains
             endif
 
             ! This will capture the highest pressure level of all nests in this simulation
-            p_top = min(p_top, minval(domain%pressure_interface%data_3d(domain%ims:domain%ime,domain%kme+1,domain%jms:domain%jme)))
+            p_top = min(p_top, minval(domain%diagnostic_vars(domain%var_indx(kVARS%pressure_interface))%data_3d(domain%ims:domain%ime,domain%kme+1,domain%jms:domain%jme)))
 
             call rrtmg_lwinit(                           &
                 p_top=p_top,     allowed_to_read=.TRUE. ,                &
@@ -274,15 +274,15 @@ contains
             do j = jms,jme
                !! MJ used corr version, as other does not work in Erupe
                 solar_elevation  = calc_solar_elevation(date=domain%sim_time, tzone=options%rad%tzone, &
-                    lon=domain%longitude%data_2d, lat=domain%latitude%data_2d, j=j, &
+                    lon=domain%grid_vars(domain%var_indx(kVARS%longitude))%data_2d, lat=domain%grid_vars(domain%var_indx(kVARS%latitude))%data_2d, j=j, &
                     ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite, solar_azimuth=solar_azimuth)
-                domain%cosine_zenith_angle%data_2d(its:ite,j)=sin(solar_elevation(its:ite))
+                domain%diagnostic_vars(domain%var_indx(kVARS%cosine_zenith_angle))%data_2d(its:ite,j)=sin(solar_elevation(its:ite))
                 
                 !If we are doing terrain shading, we will need these later!
                 if (options%physics%radiation_downScaling == 1) then
-                    cos_project_angle(its:ite,j)= cos(domain%slope_angle%data_2d(its:ite,j))*sin(solar_elevation(its:ite)) + &
-                                                  sin(domain%slope_angle%data_2d(its:ite,j))*cos(solar_elevation(its:ite))   &
-                                                  *cos(solar_azimuth(its:ite)-domain%aspect_angle%data_2d(its:ite,j))
+                    cos_project_angle(its:ite,j)= cos(domain%grid_vars(domain%var_indx(kVARS%slope_angle))%data_2d(its:ite,j))*sin(solar_elevation(its:ite)) + &
+                                                  sin(domain%grid_vars(domain%var_indx(kVARS%slope_angle))%data_2d(its:ite,j))*cos(solar_elevation(its:ite))   &
+                                                  *cos(solar_azimuth(its:ite)-domain%grid_vars(domain%var_indx(kVARS%aspect_angle))%data_2d(its:ite,j))
 
                     solar_elevation_store(its:ite,j) = solar_elevation(its:ite)
                     solar_azimuth_store(its:ite,j) = solar_azimuth(its:ite)
@@ -348,32 +348,32 @@ contains
             F_REI=0
             F_RES=0
 
-            F_QI=associated(domain%cloud_ice_mass%data_3d )
-            F_QC=associated(domain%cloud_water_mass%data_3d )
-            F_QR=associated(domain%rain_mass%data_3d )
-            F_QS=associated(domain%snow_mass%data_3d )
-            F_QV=associated(domain%water_vapor%data_3d )
-            F_QG=associated(domain%graupel_mass%data_3d )
-            F_QNDROP=associated(domain%cloud_number%data_3d)
-            F_QI2=associated(domain%ice2_mass%data_3d)
-            F_QI3=associated(domain%ice3_mass%data_3d)
+            F_QI=(domain%var_indx(kVARS%ice_mass) > 0)
+            F_QC=(domain%var_indx(kVARS%cloud_water_mass) > 0)
+            F_QR=(domain%var_indx(kVARS%rain_mass) > 0)
+            F_QS=(domain%var_indx(kVARS%snow_mass) > 0)
+            F_QV=(domain%var_indx(kVARS%water_vapor) > 0)
+            F_QG=(domain%var_indx(kVARS%graupel_mass) > 0)
+            F_QNDROP=(domain%var_indx(kVARS%cloud_number) > 0)
+            F_QI2=(domain%var_indx(kVARS%ice2_mass) > 0)
+            F_QI3=(domain%var_indx(kVARS%ice3_mass) > 0)
 
-            if(associated(domain%re_cloud%data_3d)) F_REC = 1
-            if(associated(domain%re_ice%data_3d)) F_REI = 1
-            if(associated(domain%re_snow%data_3d)) F_RES = 1
+            if (domain%var_indx(kVARS%re_cloud) > 0) F_REC = 1
+            if (domain%var_indx(kVARS%re_ice) > 0) F_REI = 1
+            if (domain%var_indx(kVARS%re_snow) > 0) F_RES = 1
 
 
-            if (F_QG) qg(:,:,:) = domain%graupel_mass%data_3d
-            if (F_QC) qc(:,:,:) = domain%cloud_water_mass%data_3d
-            if (F_QI) qi(:,:,:) = domain%cloud_ice_mass%data_3d
-            if (F_QI2) qi(:,:,:) = qi + domain%ice2_mass%data_3d
-            if (F_QI3) qi(:,:,:) = qi + domain%ice3_mass%data_3d
-            if (F_QS) qs(:,:,:) = domain%snow_mass%data_3d
-            if (F_QR) qr(:,:,:) = domain%rain_mass%data_3d
+            if (F_QG) qg(:,:,:) = domain%state_vars(domain%var_indx(kVARS%graupel_mass))%data_3d
+            if (F_QC) qc(:,:,:) = domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d
+            if (F_QI) qi(:,:,:) = domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d
+            if (F_QI2) qi(:,:,:) = qi + domain%state_vars(domain%var_indx(kVARS%ice2_mass))%data_3d
+            if (F_QI3) qi(:,:,:) = qi + domain%state_vars(domain%var_indx(kVARS%ice3_mass))%data_3d
+            if (F_QS) qs(:,:,:) = domain%state_vars(domain%var_indx(kVARS%snow_mass))%data_3d
+            if (F_QR) qr(:,:,:) = domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d
 
-            if (F_REC > 0) re_c(:,:,:) = domain%re_cloud%data_3d
-            if (F_REI > 0) re_i(:,:,:) = domain%re_ice%data_3d
-            if (F_RES > 0) re_s(:,:,:) = domain%re_snow%data_3d
+            if (F_REC > 0) re_c(:,:,:) = domain%diagnostic_vars(domain%var_indx(kVARS%re_cloud))%data_3d
+            if (F_REI > 0) re_i(:,:,:) = domain%diagnostic_vars(domain%var_indx(kVARS%re_ice))%data_3d
+            if (F_RES > 0) re_s(:,:,:) = domain%diagnostic_vars(domain%var_indx(kVARS%re_snow))%data_3d
 
             mp_options=0
 
@@ -381,18 +381,18 @@ contains
             call radconst(domain%sim_time%day_of_year(), declin, solar_constant)
            
             if (options%physics%radiation==kRA_SIMPLE) then
-                call ra_simple(theta = domain%potential_temperature%data_3d,         &
-                               pii= domain%exner%data_3d,                            &
-                               qv = domain%water_vapor%data_3d,                      &
+                call ra_simple(theta = domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d,         &
+                               pii= domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d,                            &
+                               qv = domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,                      &
                                qc = qc,                 &
                                qs = qs + qi + qg,                                    &
                                qr = qr,                        &
-                               p =  domain%pressure%data_3d,                         &
-                               swdown =  domain%shortwave%data_2d,                   &
-                               lwdown =  domain%longwave%data_2d,                    &
-                               cloud_cover =  domain%cloud_fraction%data_2d,         &
-                               lat = domain%latitude%data_2d,                        &
-                               lon = domain%longitude%data_2d,                       &
+                               p =  domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,                         &
+                               swdown =  domain%diagnostic_vars(domain%var_indx(kVARS%shortwave))%data_2d,                   &
+                               lwdown =  domain%diagnostic_vars(domain%var_indx(kVARS%longwave))%data_2d,                    &
+                               cloud_cover =  domain%diagnostic_vars(domain%var_indx(kVARS%cloud_fraction))%data_2d,         &
+                               lat = domain%grid_vars(domain%var_indx(kVARS%latitude))%data_2d,                        &
+                               lon = domain%grid_vars(domain%var_indx(kVARS%longitude))%data_2d,                       &
                                date = domain%sim_time,                             &
                                options = options,                                    &
                                dt = ra_dt,                                           &
@@ -403,29 +403,29 @@ contains
             if (options%physics%radiation==kRA_RRTMG) then
 
                 if (options%lsm%monthly_albedo) then
-                    ALBEDO = domain%albedo%data_3d(:, domain%sim_time%month, :)
+                    ALBEDO = domain%diagnostic_vars(domain%var_indx(kVARS%albedo))%data_3d(:, domain%sim_time%month, :)
                 else
-                    ALBEDO = domain%albedo%data_3d(:, 1, :)
+                    ALBEDO = domain%diagnostic_vars(domain%var_indx(kVARS%albedo))%data_3d(:, 1, :)
                 endif
 
                 domain%tend%th_swrad = 0
-                domain%shortwave%data_2d = 0
+                domain%diagnostic_vars(domain%var_indx(kVARS%shortwave))%data_2d = 0
                 ! Calculate cloud fraction
                 If (options%rad%icloud == 3) THEN
                     IF ( F_QC .AND. F_QI ) THEN
                         gridkm = domain%dx/1000
-                        XLAND = domain%land_mask
-                        domain%cloud_fraction%data_2d = 0
+                        XLAND = domain%grid_vars(domain%var_indx(kVARS%land_mask))%data_2di
+                        domain%diagnostic_vars(domain%var_indx(kVARS%cloud_fraction))%data_2d = 0
                         DO j = jts,jte
                             DO i = its,ite
                                 DO k = kts,kte
-                                    p_1d(k) = domain%pressure%data_3d(i,k,j) !p(i,k,j)
-                                    t_1d(k) = domain%temperature%data_3d(i,k,j)
-                                    qv_1d(k) = domain%water_vapor%data_3d(i,k,j)
+                                    p_1d(k) = domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d(i,k,j) !p(i,k,j)
+                                    t_1d(k) = domain%diagnostic_vars(domain%var_indx(kVARS%temperature))%data_3d(i,k,j)
+                                    qv_1d(k) = domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d(i,k,j)
                                     qc_1d(k) = qc(i,k,j)
                                     qi_1d(k) = qi(i,k,j)
                                     qs_1d(k) = qs(i,k,j)
-                                    Dz_1d(k) = domain%dz_interface%data_3d(i,k,j)
+                                    Dz_1d(k) = domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d(i,k,j)
                                     cf_1d(k) = cldfra(i,k,j)
                                 ENDDO
                                 CALL cal_cldfra3(cf_1d, qv_1d, qc_1d, qi_1d, qs_1d, Dz_1d, &
@@ -438,7 +438,7 @@ contains
                                     qi(i,k,j) = qi_1d(k)
                                     qs(i,k,j) = qs_1d(k)
                                     cldfra(i,k,j) = cf_1d(k)
-                                    domain%cloud_fraction%data_2d(i,j) = max(domain%cloud_fraction%data_2d(i,j), cf_1d(k))
+                                    domain%diagnostic_vars(domain%var_indx(kVARS%cloud_fraction))%data_2d(i,j) = max(domain%diagnostic_vars(domain%var_indx(kVARS%cloud_fraction))%data_2d(i,j), cf_1d(k))
                                 ENDDO
                             ENDDO
                         ENDDO
@@ -449,25 +449,25 @@ contains
 !                swupt, swuptc, swuptcln, swdnt, swdntc, swdntcln, &
 !                swupb, swupbc, swupbcln, swdnb, swdnbc, swdnbcln, &
 !                      swupflx, swupflxc, swdnflx, swdnflxc,      &
-                    swdnb = domain%shortwave%data_2d,                     &
-                    swcf = domain%shortwave_cloud_forcing%data_2d,        &
+                    swdnb = domain%diagnostic_vars(domain%var_indx(kVARS%shortwave))%data_2d,                     &
+                    swcf = domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_cloud_forcing))%data_2d,        &
                     gsw = gsw,                                            &
                     xtime = 0., gmt = 0.,                                 &  ! not used
-                    xlat = domain%latitude%data_2d,                       &  ! not used
-                    xlong = domain%longitude%data_2d,                     &  ! not used
+                    xlat = domain%grid_vars(domain%var_indx(kVARS%latitude))%data_2d,                       &  ! not used
+                    xlong = domain%grid_vars(domain%var_indx(kVARS%longitude))%data_2d,                     &  ! not used
                     radt = 0., degrad = 0., declin = 0.,                  &  ! not used
-                    coszr = domain%cosine_zenith_angle%data_2d,           &
+                    coszr = domain%diagnostic_vars(domain%var_indx(kVARS%cosine_zenith_angle))%data_2d,           &
                     julday = 0,                                           &  ! not used
                     solcon = solar_constant,                              &
                     albedo = albedo,                                      &
-                    t3d = domain%temperature%data_3d,                     &
-                    t8w = domain%temperature_interface%data_3d,           &
-                    tsk = domain%skin_temperature%data_2d,                &
-                    p3d = domain%pressure%data_3d,                        &
-                    p8w = domain%pressure_interface%data_3d,              &
-                    pi3d = domain%exner%data_3d,                          &
-                    rho3d = domain%density%data_3d,                       &
-                    dz8w = domain%dz_interface%data_3d,                   &
+                    t3d = domain%diagnostic_vars(domain%var_indx(kVARS%temperature))%data_3d,                     &
+                    t8w = domain%diagnostic_vars(domain%var_indx(kVARS%temperature_interface))%data_3d,           &
+                    tsk = domain%diagnostic_vars(domain%var_indx(kVARS%skin_temperature))%data_2d,                &
+                    p3d = domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,                        &
+                    p8w = domain%diagnostic_vars(domain%var_indx(kVARS%pressure_interface))%data_3d,              &
+                    pi3d = domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d,                          &
+                    rho3d = domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d,                       &
+                    dz8w = domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d,                   &
                     cldfra3d=cldfra,                                      &
                     !, lradius, iradius,                                  &
                     is_cammgmp_used = .False.,                            &
@@ -483,10 +483,10 @@ contains
                     warm_rain = .False.,                                  & ! when a dding WSM3scheme, add option for .True.
                     cldovrlp=options%rad%cldovrlp,                & ! J. Henderson AER: cldovrlp namelist value
                     !f_ice_phy, f_rain_phy,                               &
-                    xland=real(domain%land_mask),                         &
-                    xice=real(domain%land_mask)*0,                        & ! should add a variable for sea ice fraction
-                    snow=domain%snow_water_equivalent%data_2d,            &
-                    qv3d=domain%water_vapor%data_3d,                      &
+                    xland=real(domain%grid_vars(domain%var_indx(kVARS%land_mask))%data_2di),                         &
+                    xice=real(domain%grid_vars(domain%var_indx(kVARS%land_mask))%data_2di)*0,                        & ! should add a variable for sea ice fraction
+                    snow=domain%diagnostic_vars(domain%var_indx(kVARS%snow_water_equivalent))%data_2d,            &
+                    qv3d=domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,                      &
                     qc3d=qc,                                              &
                     qr3d=qr,                                              &
                     qi3d=qi,                                              &
@@ -509,7 +509,7 @@ contains
 !                   aer_ra_feedback,                                      &
 !jdfcz              progn,prescribe,                                      &
                     calc_clean_atm_diag=0,                                &
-!                    qndrop3d=domain%cloud_number%data_3d,                 &
+!                    qndrop3d=domain%state_vars(domain%var_indx(kVARS%cloud_number))%data_3d,                 &
                     f_qndrop=f_qndrop,                                    & !czhao
                     mp_physics=0,                                         & !wang 2014/12
                     ids=ids, ide=ide, jds=jds, jde=jde, kds=kds, kde=kde, &
@@ -520,13 +520,13 @@ contains
                     tauaer3d_sw=tauaer_sw,                                & ! jararias 2013/11
                     ssaaer3d_sw=ssaaer_sw,                                & ! jararias 2013/11
                     asyaer3d_sw=asyaer_sw,                                &
-                    swddir = domain%shortwave_direct%data_2d,             &
-!                   swddni = domain%skin_temperature%data_2d,             &
-                    swddif = domain%shortwave_diffuse%data_2d,             & ! jararias 2013/08
-!                   swdownc = domain%skin_temperature%data_2d,            &
-!                   swddnic = domain%skin_temperature%data_2d,            &
-!                   swddirc = domain%skin_temperature%data_2d,            &   ! PAJ
-                    xcoszen = domain%cosine_zenith_angle%data_2d,         &  ! NEED TO CALCULATE THIS.
+                    swddir = domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_direct))%data_2d,             &
+!                   swddni = domain%diagnostic_vars(domain%var_indx(kVARS%skin_temperature))%data_2d,             &
+                    swddif = domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_diffuse))%data_2d,             & ! jararias 2013/08
+!                   swdownc = domain%diagnostic_vars(domain%var_indx(kVARS%skin_temperature))%data_2d,            &
+!                   swddnic = domain%diagnostic_vars(domain%var_indx(kVARS%skin_temperature))%data_2d,            &
+!                   swddirc = domain%diagnostic_vars(domain%var_indx(kVARS%skin_temperature))%data_2d,            &   ! PAJ
+                    xcoszen = domain%diagnostic_vars(domain%var_indx(kVARS%cosine_zenith_angle))%data_2d,         &  ! NEED TO CALCULATE THIS.
                     yr=domain%sim_time%year,                            &
                     julian=domain%sim_time%day_of_year(),               &
                     mp_options=mp_options                               )
@@ -536,7 +536,7 @@ contains
                 ! p_top is not fixed throughout the simulation. p_top must be reset for each call of RRTMG_LW, 
                 ! which is what RRTMG_LWINIT does. Pass allowed_to_read=.False.
                 ! to avoid re-reading look up tables (already done in init).
-                CALL RRTMG_LWINIT(minval(domain%pressure_interface%data_3d(:,domain%kme+1,:)), &
+                CALL RRTMG_LWINIT(minval(domain%diagnostic_vars(domain%var_indx(kVARS%pressure_interface))%data_3d(:,domain%kme+1,:)), &
                                   allowed_to_read=.FALSE.,         &
                                   ids=ids, ide=ide, jds=jds, jde=jde, kds=kds, kde=kde, &
                                   ims=ims, ime=ime, jms=jms, jme=jme, kms=kms, kme=kme, &
@@ -545,18 +545,18 @@ contains
                 call RRTMG_LWRAD(rthratenlw=domain%tend%th_lwrad,                 &
 !                           lwupt, lwuptc, lwuptcln, lwdnt, lwdntc, lwdntcln,     &        !if lwupt defined, all MUST be defined
 !                           lwupb, lwupbc, lwupbcln, lwdnb, lwdnbc, lwdnbcln,     &
-                            glw = domain%longwave%data_2d,                        &
-                            olr = domain%out_longwave_rad%data_2d,                &
-                            lwcf = domain%longwave_cloud_forcing%data_2d,         &
-                            emiss = domain%land_emissivity%data_2d,               &
-                            p8w = domain%pressure_interface%data_3d,              &
-                            p3d = domain%pressure%data_3d,                        &
-                            pi3d = domain%exner%data_3d,                          &
-                            dz8w = domain%dz_interface%data_3d,                   &
-                            tsk = domain%skin_temperature%data_2d,                &
-                            t3d = domain%temperature%data_3d,                     &
-                            t8w = domain%temperature_interface%data_3d,           &     ! temperature interface
-                            rho3d = domain%density%data_3d,                       &
+                            glw = domain%diagnostic_vars(domain%var_indx(kVARS%longwave))%data_2d,                        &
+                            olr = domain%diagnostic_vars(domain%var_indx(kVARS%out_longwave_rad))%data_2d,                &
+                            lwcf = domain%diagnostic_vars(domain%var_indx(kVARS%longwave_cloud_forcing))%data_2d,         &
+                            emiss = domain%diagnostic_vars(domain%var_indx(kVARS%land_emissivity))%data_2d,               &
+                            p8w = domain%diagnostic_vars(domain%var_indx(kVARS%pressure_interface))%data_3d,              &
+                            p3d = domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,                        &
+                            pi3d = domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d,                          &
+                            dz8w = domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d,                   &
+                            tsk = domain%diagnostic_vars(domain%var_indx(kVARS%skin_temperature))%data_2d,                &
+                            t3d = domain%diagnostic_vars(domain%var_indx(kVARS%temperature))%data_3d,                     &
+                            t8w = domain%diagnostic_vars(domain%var_indx(kVARS%temperature_interface))%data_3d,           &     ! temperature interface
+                            rho3d = domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d,                       &
                             r = R_d,                                               &
                             g = gravity,                                          &
                             icloud = options%rad%icloud,                  & ! set to nonzero if effective radius is available from microphysics
@@ -566,10 +566,10 @@ contains
 !                            lradius,iradius,                                     & !goes with CAMMGMP (Morrison Gettelman CAM mp)
                             is_cammgmp_used = .False.,                            & !goes with CAMMGMP (Morrison Gettelman CAM mp)
 !                            f_ice_phy, f_rain_phy,                               & !goes with MP option 5 (Ferrier)
-                            xland=real(domain%land_mask),                         &
-                            xice=real(domain%land_mask)*0,                        & ! should add a variable for sea ice fraction
-                            snow=domain%snow_water_equivalent%data_2d,            &
-                            qv3d=domain%water_vapor%data_3d,                      &
+                            xland=real(domain%grid_vars(domain%var_indx(kVARS%land_mask))%data_2di),                         &
+                            xice=real(domain%grid_vars(domain%var_indx(kVARS%land_mask))%data_2di)*0,                        & ! should add a variable for sea ice fraction
+                            snow=domain%diagnostic_vars(domain%var_indx(kVARS%snow_water_equivalent))%data_2d,            &
+                            qv3d=domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,                      &
                             qc3d=qc,                                              &
                             qr3d=qr,                                              &
                             qi3d=qi,                                              &
@@ -591,7 +591,7 @@ contains
 !                           aer_ra_feedback,                                      & !czhao
 !                    !jdfcz progn,prescribe,                                      & !czhao
                             calc_clean_atm_diag=0,                                & ! used with wrf_chem !czhao
-!                            qndrop3d=domain%cloud_number%data_3d,                 & ! used with icould > 0
+!                            qndrop3d=domain%state_vars(domain%var_indx(kVARS%cloud_number))%data_3d,                 & ! used with icould > 0
                             f_qndrop=f_qndrop,                                    & ! if icloud > 0, use this
                         !ccc added for time varying gases.
                             yr=domain%sim_time%year,                             &
@@ -607,11 +607,11 @@ contains
                             
                 ! If the user has provided sky view fraction, then apply this to the diffuse SW now, 
                 ! since svf is time-invariant
-                if (associated(domain%svf%data_2d)) then
-                    domain%shortwave_diffuse%data_2d=domain%shortwave_diffuse%data_2d*domain%svf%data_2d
+                if (domain%var_indx(kVARS%svf) > 0) then
+                    domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_diffuse))%data_2d=domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_diffuse))%data_2d*domain%grid_vars(domain%var_indx(kVARS%svf))%data_2d
                 endif
                 
-                domain%tend_swrad%data_3d = domain%tend%th_swrad
+                domain%diagnostic_vars(domain%var_indx(kVARS%tend_swrad))%data_3d = domain%tend%th_swrad
             endif
         endif
         
@@ -625,7 +625,7 @@ contains
                 ratio_dif=0.            
                 do j = jts,jte
                     do i = its,ite
-                        trans_atm = max(min(domain%shortwave%data_2d(i,j)/&
+                        trans_atm = max(min(domain%diagnostic_vars(domain%var_indx(kVARS%shortwave))%data_2d(i,j)/&
                                 ( solar_constant* (sin(solar_elevation_store(i,j)+1.e-4)) ),1.),0.)   ! atmospheric transmissivity
                         if (trans_atm<=0.22) then
                             ratio_dif=1.-0.09*trans_atm  
@@ -634,20 +634,20 @@ contains
                         elseif (trans_atm>0.8) then
                             ratio_dif=0.165
                         endif
-                        domain%shortwave_diffuse%data_2d(i,j)= &
-                                ratio_dif*domain%shortwave%data_2d(i,j)*domain%svf%data_2d(i,j)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_diffuse))%data_2d(i,j)= &
+                                ratio_dif*domain%diagnostic_vars(domain%var_indx(kVARS%shortwave))%data_2d(i,j)*domain%grid_vars(domain%var_indx(kVARS%svf))%data_2d(i,j)
                     enddo
                 enddo                
             endif
             !!
-            zdx_max = ubound(domain%hlm%data_3d,1)
+            zdx_max = ubound(domain%grid_vars(domain%var_indx(kVARS%hlm))%data_3d,1)
             do j = jts,jte
                 do i = its,ite
-                    domain%shortwave_direct%data_2d(i,j) = max( domain%shortwave%data_2d(i,j) - &
-                                                                    domain%shortwave_diffuse%data_2d(i,j),0.0)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_direct))%data_2d(i,j) = max( domain%diagnostic_vars(domain%var_indx(kVARS%shortwave))%data_2d(i,j) - &
+                                                                    domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_diffuse))%data_2d(i,j),0.0)
 
                     ! determin maximum allowed direct swr
-                    trans_atm_dir = max(min(domain%shortwave_direct%data_2d(i,j)/&
+                    trans_atm_dir = max(min(domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_direct))%data_2d(i,j)/&
                                     (solar_constant*sin(solar_elevation_store(i,j)+1.e-4)),1.),0.)  ! atmospheric transmissivity for direct sw radiation
                     max_dir_1     = solar_constant*exp(log(1.-0.165)/max(sin(solar_elevation_store(i,j)),1.e-4))            
                     max_dir_2     = solar_constant*trans_atm_dir                          
@@ -657,18 +657,18 @@ contains
                     zdx=floor(solar_azimuth_store(i,j)*(180./piconst)/4.0) !! MJ added= we have 90 by 4 deg for hlm ...zidx is the right index based on solar azimuthal angle
 
                     zdx = max(min(zdx,zdx_max),1)
-                    elev_th=(90.-domain%hlm%data_3d(i,zdx,j))*DEGRAD !! MJ added: it is the solar elevation threshold above which we see the sun from the pixel  
+                    elev_th=(90.-domain%grid_vars(domain%var_indx(kVARS%hlm))%data_3d(i,zdx,j))*DEGRAD !! MJ added: it is the solar elevation threshold above which we see the sun from the pixel  
                     if (solar_elevation_store(i,j)>=elev_th) then
-                        domain%shortwave_direct_above%data_2d(i,j)=min(domain%shortwave_direct%data_2d(i,j),max_dir)
-                        domain%shortwave_direct%data_2d(i,j) = min(domain%shortwave_direct%data_2d(i,j)/            &
+                        domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_direct_above))%data_2d(i,j)=min(domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_direct))%data_2d(i,j),max_dir)
+                        domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_direct))%data_2d(i,j) = min(domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_direct))%data_2d(i,j)/            &
                                                                max(sin(solar_elevation_store(i,j)),0.01),max_dir) * &
                                                                max(cos_project_angle(i,j),0.)
                     else
-                        domain%shortwave_direct_above%data_2d(i,j)=0.
-                        domain%shortwave_direct%data_2d(i,j)=0.
+                        domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_direct_above))%data_2d(i,j)=0.
+                        domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_direct))%data_2d(i,j)=0.
                     endif
-                    domain%shortwave_total%data_2d(i,j) = domain%shortwave_diffuse%data_2d(i,j) + &
-                                                          domain%shortwave_direct%data_2d(i,j)
+                    domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_total))%data_2d(i,j) = domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_diffuse))%data_2d(i,j) + &
+                                                          domain%diagnostic_vars(domain%var_indx(kVARS%shortwave_direct))%data_2d(i,j)
                 enddo
             enddo           
         endif
@@ -685,9 +685,9 @@ contains
         !This is done to allow for the halo exchange to be done before the radiation tendencies are applied
         !This is now outside of interval loop, so this will be called every phys timestep
         if (options%physics%radiation==kRA_RRTMG) then
-            domain%potential_temperature%data_3d = domain%potential_temperature%data_3d+domain%tend%th_lwrad*dt+domain%tend%th_swrad*dt
-            domain%temperature%data_3d = domain%potential_temperature%data_3d*domain%exner%data_3d
-            domain%tend_swrad%data_3d = domain%tend%th_swrad
+            domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d = domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d+domain%tend%th_lwrad*dt+domain%tend%th_swrad*dt
+            domain%diagnostic_vars(domain%var_indx(kVARS%temperature))%data_3d = domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d*domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d
+            domain%diagnostic_vars(domain%var_indx(kVARS%tend_swrad))%data_3d = domain%tend%th_swrad
         endif
 
     end subroutine rad_apply_dtheta

@@ -8,7 +8,7 @@
 module adv_mpdata
     use options_interface, only: options_t
     use domain_interface,  only: domain_t
-
+    use icar_constants,    only: kVARS
     implicit none
     private
     real,dimension(:,:,:),allocatable::U_m,V_m,W_m,rho
@@ -486,19 +486,19 @@ contains
 
 
         rho = 1
-        if (options%adv%advect_density) rho = domain%density%data_3d
+        if (options%adv%advect_density) rho = domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d
         
-        U_m = domain%u%data_3d(ims+1:ime,:,:) * dt * (rho(ims+1:ime,:,:)+rho(ims:ime-1,:,:))*0.5 * &
-                    domain%jacobian_u(ims+1:ime,:,:) / dx
-        V_m = domain%v%data_3d(:,:,jms+1:jme) * dt * (rho(:,:,jms+1:jme)+rho(:,:,jms:jme-1))*0.5 * &
-                    domain%jacobian_v(:,:,jms+1:jme) / dx
-        W_m(:,kms:kme-1,:) = domain%w%data_3d(:,kms:kme-1,:) * dt * domain%jacobian_w(:,kms:kme-1,:) * &
+        U_m = domain%state_vars(domain%var_indx(kVARS%u))%data_3d(ims+1:ime,:,:) * dt * (rho(ims+1:ime,:,:)+rho(ims:ime-1,:,:))*0.5 * &
+                    domain%grid_vars(domain%var_indx(kVARS%jacobian_u))%data_3d(ims+1:ime,:,:) / dx
+        V_m = domain%state_vars(domain%var_indx(kVARS%v))%data_3d(:,:,jms+1:jme) * dt * (rho(:,:,jms+1:jme)+rho(:,:,jms:jme-1))*0.5 * &
+                    domain%grid_vars(domain%var_indx(kVARS%jacobian_v))%data_3d(:,:,jms+1:jme) / dx
+        W_m(:,kms:kme-1,:) = domain%diagnostic_vars(domain%var_indx(kVARS%w))%data_3d(:,kms:kme-1,:) * dt * domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d(:,kms:kme-1,:) * &
                     (rho(:,kms+1:kme,:)+rho(:,kms:kme-1,:)) * 0.5
-        W_m(:,kme,:) = domain%w%data_3d(:,kme,:) * dt * domain%jacobian_w(:,kme,:) * rho(:,kme,:)
+        W_m(:,kme,:) = domain%diagnostic_vars(domain%var_indx(kVARS%w))%data_3d(:,kme,:) * dt * domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d(:,kme,:) * rho(:,kme,:)
 
-        if (options%general%debug) then
-            call test_divergence(domain%advection_dz)
-        endif
+        ! if (options%general%debug) then
+        !     call test_divergence(domain%advection_dz)
+        ! endif
     
     end subroutine
     
