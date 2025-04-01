@@ -10,16 +10,20 @@ module variable_interface
     ! have to think about how to handle multiple variable types (int, 2d, etc)
     ! could add multiple "local" variables or create multiple variable types...
     type, extends(meta_data_t) :: variable_t
+        real, pointer :: data_4d(:,:,:,:) => null()
         real, pointer :: data_3d(:,:,:) => null()
         real, pointer :: data_2d(:,:)   => null()
+        real, pointer :: data_1d(:)   => null()
         real(kind=real64), pointer :: data_2dd(:,:) => null()
         integer, pointer ::           data_2di(:,:) => null()
         real, pointer :: dqdt_3d(:,:,:) => null()   ! Note these have to be pointers so they get referenced when variable_t is passed around(?)
         real, pointer :: dqdt_2d(:,:)   => null()   ! Note these have to be pointers so they get referenced when variable_t is passed around(?)
 
         logical                         :: unlimited_dim = .False.
+        logical                         :: one_d = .False.
         logical                         :: three_d = .False.
         logical                         :: two_d = .False.
+        logical                         :: four_d = .False.
         logical                         :: force_boundaries = .True.
         logical                         :: computed = .False.
         character(len=kMAX_NAME_LENGTH) :: forcing_var = ""

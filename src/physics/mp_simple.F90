@@ -58,7 +58,7 @@ module module_mp_simple
 
     implicit none
     private
-    public :: mp_simple_driver, mp_simple_var_request
+    public :: mp_simple_driver
 
     ! parameters should come from atm_utilties or icar_constants modules
     real, parameter :: LH_vapor = 2.26E6 ! J/kg
@@ -97,33 +97,6 @@ module module_mp_simple
 
 contains
 
-    !> ----------------------------------------------
-    !! Communicate to the master process requesting the variables requred to be allocated, used for restart files, and advected
-    !!
-    !! ----------------------------------------------
-    subroutine mp_simple_var_request(options)
-        implicit none
-        type(options_t), intent(inout) :: options
-
-
-        ! List the variables that are required to be allocated for the simple microphysics
-        call options%alloc_vars( &
-                     [kVARS%pressure,    kVARS%potential_temperature,   kVARS%exner,        kVARS%density,      &
-                      kVARS%water_vapor, kVARS%cloud_water,             kVARS%rain_in_air,  kVARS%snow_in_air,  &
-                      kVARS%precipitation, kVARS%snowfall,              kVARS%dz])
-
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water,   &
-                       kVARS%rain_in_air,           kVARS%snow_in_air   ] )
-
-        ! List the variables that are required to be allocated for the simple microphysics
-        call options%restart_vars( &
-                       [kVARS%pressure,     kVARS%potential_temperature,    kVARS%water_vapor,  &
-                        kVARS%cloud_water,  kVARS%rain_in_air,              kVARS%snow_in_air,  &
-                        kVARS%precipitation,kVARS%snowfall,                 kVARS%dz] )
-
-    end subroutine mp_simple_var_request
 
 
 

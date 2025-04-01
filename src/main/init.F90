@@ -227,9 +227,9 @@ contains
         if (options(nest_indx)%general%parent_nest == 0) then
             if (STD_OUT_PE) write(*,*) "Initializing boundary condition data structure"
             if (STD_OUT_PE) flush(output_unit)    
-            call boundary%init(options(nest_indx), domain%latitude%data_2d, domain%longitude%data_2d, domain%variables_to_force)
+            call boundary%init(options(nest_indx), domain%grid_vars(domain%var_indx(kVARS%latitude))%data_2d, domain%grid_vars(domain%var_indx(kVARS%longitude))%data_2d, domain%variables_to_force)
         else
-            call boundary%init(options(nest_indx), domain%latitude%data_2d, domain%longitude%data_2d, domain%variables_to_force, &
+            call boundary%init(options(nest_indx), domain%grid_vars(domain%var_indx(kVARS%latitude))%data_2d, domain%grid_vars(domain%var_indx(kVARS%longitude))%data_2d, domain%variables_to_force, &
                                 parent_options=options(options(nest_indx)%general%parent_nest))
         endif
 

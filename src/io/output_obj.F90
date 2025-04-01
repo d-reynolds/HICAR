@@ -676,7 +676,7 @@ contains
                         endif
                     endif
                 elseif (var%two_d) then
-                    if (var%dtype == kREAL) then
+                    if (var%dtype == kREAL .or. var%dtype == kINTEGER) then
                         if (var%unlimited_dim) then
                             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e), &
                                     start_two_D_t,count=(/ cnt_3d(1), cnt_3d(2), 1/)), "saving:"//trim(var%name) )
@@ -698,30 +698,30 @@ contains
                                         start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
                                         count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
                             endif
-                        endif
-                    elseif (var%dtype == kDOUBLE) then
-                        if (var%unlimited_dim) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
-                                    start_two_D_t,count=(/ cnt_3d(1), cnt_3d(2), 1/)), "saving:"//trim(var%name) )
-                            if (this%blocked_UR .or. this%blocked_LL) then
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
-                                    start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
-                                    start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
-                            endif
-                        elseif (this%creating) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
-                                        start=(/ this%start_3d(1), this%start_3d(2) /), &
-                                        count=(/ cnt_3d(1), cnt_3d(2) /)), "saving:"//trim(var%name) )
-                            if (this%blocked_UR .or. this%blocked_LL) then
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
-                                        start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
-                                        count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
-                                        start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
-                                        count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
-                            endif
-                        endif
+                        endif    
+                    ! elseif (var%dtype == kDOUBLE) then
+                    !     if (var%unlimited_dim) then
+                    !         call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
+                    !                 start_two_D_t,count=(/ cnt_3d(1), cnt_3d(2), 1/)), "saving:"//trim(var%name) )
+                    !         if (this%blocked_UR .or. this%blocked_LL) then
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                    !                 start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                    !                 start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
+                    !         endif
+                    !     elseif (this%creating) then
+                    !         call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
+                    !                     start=(/ this%start_3d(1), this%start_3d(2) /), &
+                    !                     count=(/ cnt_3d(1), cnt_3d(2) /)), "saving:"//trim(var%name) )
+                    !         if (this%blocked_UR .or. this%blocked_LL) then
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                    !                     start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
+                    !                     count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                    !                     start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
+                    !                     count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
+                    !         endif
+                    !     endif
                     endif
                 endif
             end associate
@@ -786,6 +786,9 @@ contains
             if (var%dtype == kREAL) then
                 call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_REAL, var%dim_ids, var%var_id), &
                         "Defining variable:"//trim(var%name) )
+            elseif (var%dtype == kINTEGER) then
+                call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_INT, var%dim_ids, var%var_id), &
+                        "Defining variable:"//trim(var%name) )
             elseif (var%dtype == kDOUBLE) then
                 call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_DOUBLE, var%dim_ids, var%var_id), &
                         "Defining variable:"//trim(var%name) )
@@ -797,7 +800,7 @@ contains
                                          var%var_id,                    &
                                          trim(var%attributes(i)%name),        &
                                          trim(var%attributes(i)%value)),      &
-                            "saving attribute"//trim(var%attributes(i)%name))
+                            "saving attribute "//trim(var%attributes(i)%name)//" for "//trim(var%name))
             enddo
         endif
         

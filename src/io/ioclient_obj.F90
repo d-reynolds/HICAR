@@ -240,12 +240,17 @@ contains
             nx = i_e_w - i_s_w + 1
             ny = j_e_w - j_s_w + 1
             if (var%two_d) then
+
                 if (var%dtype == kREAL) then
                     this%write_buffer_2d(n_2d,1:nx,1:ny) = &
                         var%data_2d(i_s_w:i_e_w,j_s_w:j_e_w)
-                elseif (var%dtype == kDOUBLE) then
+                elseif (var%dtype == kINTEGER) then
                     this%write_buffer_2d(n_2d,1:nx,1:ny) = &
-                        real(var%data_2dd(i_s_w:i_e_w,j_s_w:j_e_w))
+                        real(var%data_2di(i_s_w:i_e_w,j_s_w:j_e_w))
+
+                ! elseif (var%dtype == kDOUBLE) then
+                !     this%write_buffer_2d(n_2d,1:nx,1:ny) = &
+                !         real(var%data_2dd(i_s_w:i_e_w,j_s_w:j_e_w))
                 endif
                 n_2d = n_2d+1
 
@@ -345,8 +350,8 @@ contains
                 if (var%two_d) then
                     if (var%dtype == kREAL) then
                         var%data_2d = this%read_buffer(n,1:nx,1,1:ny)
-                    elseif (var%dtype == kDOUBLE) then
-                        var%data_2dd = dble(this%read_buffer(n,1:nx,1,1:ny))
+                    ! elseif (var%dtype == kDOUBLE) then
+                    !     var%data_2dd = dble(this%read_buffer(n,1:nx,1,1:ny))
                     endif
                 else
                     var%data_3d = this%read_buffer(n,1:nx,1:var%dim_len(2),1:ny)
@@ -410,9 +415,9 @@ contains
                 if (var%dtype == kREAL) then
                     var%data_2d(i_s_re:i_e_re,j_s_re:j_e_re) = &
                         this%write_buffer_2d(n_2d,1:nx,1:ny)
-                elseif (var%dtype == kDOUBLE) then
-                    var%data_2dd(i_s_re:i_e_re,j_s_re:j_e_re) = &
-                            dble(this%write_buffer_2d(n_2d,1:nx,1:ny))
+                ! elseif (var%dtype == kDOUBLE) then
+                !     var%data_2dd(i_s_re:i_e_re,j_s_re:j_e_re) = &
+                !             dble(this%write_buffer_2d(n_2d,1:nx,1:ny))
                 endif                
                 n_2d = n_2d+1
             endif

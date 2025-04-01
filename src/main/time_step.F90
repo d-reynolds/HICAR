@@ -26,7 +26,7 @@ module time_step
     use string,                     only : str
     use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
-    use icar_constants,             only : STD_OUT_PE
+    use icar_constants,             only : STD_OUT_PE, kVARS
     implicit none
     private
     double precision, parameter  :: DT_BIG = 36000.0
@@ -192,8 +192,8 @@ contains
                 
         ! If this is the first step (future_dt_seconds has not yet been set)
         !if (future_dt_seconds == DT_BIG) then
-        present_dt_seconds = compute_dt(domain%dx, domain%u%data_3d, domain%v%data_3d, &
-                        domain%w%data_3d, domain%density%data_3d, options%domain%dz_levels, &
+        present_dt_seconds = compute_dt(domain%dx, domain%state_vars(domain%var_indx(kVARS%u))%data_3d, domain%state_vars(domain%var_indx(kVARS%v))%data_3d, &
+                        domain%diagnostic_vars(domain%var_indx(kVARS%w))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, options%domain%dz_levels, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
@@ -202,8 +202,8 @@ contains
         !    present_dt_seconds = future_dt_seconds
         !endif
         
-        future_dt_seconds = compute_dt(domain%dx, domain%u%dqdt_3d, domain%v%dqdt_3d, &
-                        domain%w%dqdt_3d, domain%density%data_3d, options%domain%dz_levels, &
+        future_dt_seconds = compute_dt(domain%dx, domain%state_vars(domain%var_indx(kVARS%u))%dqdt_3d, domain%state_vars(domain%var_indx(kVARS%v))%dqdt_3d, &
+                        domain%diagnostic_vars(domain%var_indx(kVARS%w))%dqdt_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, options%domain%dz_levels, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
@@ -217,18 +217,18 @@ contains
             write(*,*) 'time_step determining j:      ',max_j
             write(*,*) 'time_step determining k:      ',max_k
             if (future_dt_seconds<present_dt_seconds) then
-                write(*,*) 'time_step determining w_grid: ',domain%w%dqdt_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining u: ',domain%u%dqdt_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining v: ',domain%v%dqdt_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining w_grid: ',domain%diagnostic_vars(domain%var_indx(kVARS%w))%dqdt_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining u: ',domain%state_vars(domain%var_indx(kVARS%u))%dqdt_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining v: ',domain%state_vars(domain%var_indx(kVARS%v))%dqdt_3d(max_i,max_k,max_j)
             else
-                write(*,*) 'time_step determining w_grid: ',domain%w%data_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining u: ',domain%u%data_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining v: ',domain%v%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining w_grid: ',domain%diagnostic_vars(domain%var_indx(kVARS%w))%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining u: ',domain%state_vars(domain%var_indx(kVARS%u))%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining v: ',domain%state_vars(domain%var_indx(kVARS%v))%data_3d(max_i,max_k,max_j)
             endif
-            write(*,*) 'time_step determining w_real: ',domain%w_real%data_3d(max_i,max_k,max_j)
-            write(*,*) 'time_step determining jaco: ',domain%jacobian(max_i,max_k,max_j)
-            write(*,*) 'time_step determining dzdx: ',domain%dzdx%data_3d(max_i,max_k,max_j)
-            write(*,*) 'time_step determining dzdy: ',domain%dzdy%data_3d(max_i,max_k,max_j)
+            write(*,*) 'time_step determining w_real: ',domain%diagnostic_vars(domain%var_indx(kVARS%w_real))%data_3d(max_i,max_k,max_j)
+            write(*,*) 'time_step determining jaco: ',domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(max_i,max_k,max_j)
+            write(*,*) 'time_step determining dzdx: ',domain%grid_vars(domain%var_indx(kVARS%dzdx))%data_3d(max_i,max_k,max_j)
+            write(*,*) 'time_step determining dzdy: ',domain%grid_vars(domain%var_indx(kVARS%dzdy))%data_3d(max_i,max_k,max_j)
             flush(output_unit)
         endif
         ! Set dt to the outcome of reduce

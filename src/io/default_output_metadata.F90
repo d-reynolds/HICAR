@@ -7,16 +7,26 @@ module output_metadata
     use iso_fortran_env, only : output_unit
     implicit none
 
-    character(len=18) :: three_d_u_t_dimensions(4)          = [character(len=18) :: "lon_u","lat_y","level","time"]
-    character(len=18) :: three_d_v_t_dimensions(4)          = [character(len=18) :: "lon_x","lat_v","level","time"]
-    character(len=18) :: three_d_dimensions(3)              = [character(len=18) :: "lon_x","lat_y","level"]
-    character(len=18) :: three_d_t_dimensions(4)            = [character(len=18) :: "lon_x","lat_y","level","time"]
-    character(len=18) :: three_d_interface_dimensions(3)    = [character(len=18) :: "lon_x","lat_y","level_i"]
-    character(len=18) :: three_d_t_interface_dimensions(4)  = [character(len=18) :: "lon_x","lat_y","level_i","time"]
+    character(len=18) :: one_d_column_dimensions(1)         = [character(len=18) :: "level"]
     character(len=18) :: two_d_dimensions(2)                = [character(len=18) :: "lon_x","lat_y"]
     character(len=18) :: two_d_t_dimensions(3)              = [character(len=18) :: "lon_x","lat_y","time"]
     character(len=18) :: two_d_u_dimensions(2)              = [character(len=18) :: "lon_u","lat_y"]
     character(len=18) :: two_d_v_dimensions(2)              = [character(len=18) :: "lon_x","lat_v"]
+    character(len=18) :: two_d_global_dimensions(2)         = [character(len=18) :: "lon_x_global","lat_y_global"]
+    character(len=18) :: two_d_neighbor_dimensions(2)       = [character(len=18) :: "lon_x_neighbor","lat_y_neighbor"]
+    character(len=18) :: three_d_u_t_dimensions(4)          = [character(len=18) :: "lon_u","lat_y","level","time"]
+    character(len=18) :: three_d_v_t_dimensions(4)          = [character(len=18) :: "lon_x","lat_v","level","time"]
+    character(len=18) :: three_d_u_dimensions(3)            = [character(len=18) :: "lon_u","lat_y","level"]
+    character(len=18) :: three_d_v_dimensions(3)            = [character(len=18) :: "lon_x","lat_v","level"]
+    character(len=18) :: three_d_dimensions(3)              = [character(len=18) :: "lon_x","lat_y","level"]
+    character(len=18) :: three_d_global_dimensions(3)       = [character(len=18) :: "lon_x_global","lat_y_global","level"]
+    character(len=18) :: three_d_neighbor_dimensions(3)     = [character(len=18) :: "lon_x_neighbor","lat_y_neighbor","level"]
+    character(len=18) :: three_d_global_interface_dimensions(3)       = [character(len=18) :: "lon_x_global","lat_y_global","level_i"]
+    character(len=18) :: three_d_neighbor_interface_dimensions(3)     = [character(len=18) :: "lon_x_neighbor","lat_y_neighbor","level_i"]
+    character(len=18) :: three_d_t_dimensions(4)            = [character(len=18) :: "lon_x","lat_y","level","time"]
+    character(len=18) :: three_d_interface_dimensions(3)    = [character(len=18) :: "lon_x","lat_y","level_i"]
+    character(len=18) :: three_d_t_interface_dimensions(4)  = [character(len=18) :: "lon_x","lat_y","level_i","time"]
+    character(len=18) :: three_d_hlm_dimensions(3)          = [character(len=18) :: "lon_x","lat_v","azimuth"]
     character(len=18) :: three_d_t_soil_dimensions(4)       = [character(len=18) :: "lon_x","lat_y","nsoil","time"]
     character(len=18) :: three_d_t_snow_dimensions(4)       = [character(len=18) :: "lon_x","lat_y","nsnow","time"]
     character(len=18) :: three_d_t_snowsoil_dimensions(4)   = [character(len=18) :: "lon_x","lat_y","nsnowsoil","time"]
@@ -28,6 +38,7 @@ module output_metadata
     character(len=18) :: three_d_t_lake_soisno_dimensions(4)    = [character(len=18) :: "lon_x","lat_y","nlevsoisno","time"] !grid_lake_soisno
     character(len=18) :: three_d_t_lake_soisno_1_dimensions(4)  = [character(len=18) :: "lon_x","lat_y","nlevsoisno_1","time"]
     character(len=18) :: three_d_t_lake_soi_dimensions(4)       = [character(len=18) :: "lon_x","lat_y","nlevsoi_lake","time"] !grid_lake_soi
+    character(len=18) :: four_d_azim_dimensions(4)                = [character(len=18) :: "lon_x","lat_v","level","Sx_azimuth"]
 
     ! type(variable_t), allocatable, target :: var_meta(:)
 
@@ -371,6 +382,7 @@ contains
                                attribute_t("long_name",     "Grid relative eastward wind"),     &
                                attribute_t("units",         "m s-1"),                           &
                                attribute_t("coordinates",   "u_lat u_lon")]
+            var%force_boundaries = .False.
         
         !>------------------------------------------------------------
         !!  V  North South Winds
@@ -382,7 +394,8 @@ contains
                                attribute_t("long_name",     "Grid relative northward wind"),    &
                                attribute_t("units",         "m s-1"),                           &
                                attribute_t("coordinates",   "v_lat v_lon")]
-        
+            var%force_boundaries = .False.
+
         !>------------------------------------------------------------
         !!  W  Vertical Winds
         !!------------------------------------------------------------
@@ -404,7 +417,8 @@ contains
                                attribute_t("description",   "Vertical wind including u/v"),     &
                                attribute_t("units",         "m s-1"),                           &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%force_boundaries = .False.
+
         !>------------------------------------------------------------
         !!  Brunt Vaisala frequency (squared)
         !!------------------------------------------------------------
@@ -426,7 +440,8 @@ contains
                                attribute_t("long_name",     "Pressure"),                        &
                                attribute_t("units",         "Pa"),                              &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%force_boundaries = .False.
+
         !>------------------------------------------------------------
         !!  Air Pressure on interfaces between mass levels
         !!------------------------------------------------------------
@@ -485,7 +500,7 @@ contains
         !>------------------------------------------------------------
         !!  Cloud water (liquid) mixing ratio
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%cloud_water) then
+        else if (var_idx==kVARS%cloud_water_mass) then
             var%name        = "qc"
             var%dimensions  = three_d_t_dimensions
             var%attributes  = [attribute_t("standard_name", "cloud_liquid_water_mixing_ratio"),     &
@@ -495,7 +510,7 @@ contains
         !>------------------------------------------------------------
         !!  Cloud water (liquid) number concentration
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%cloud_number_concentration) then
+        else if (var_idx==kVARS%cloud_number) then
             var%name        = "nc"
             var%dimensions  = three_d_t_dimensions
             var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_cloud_droplets_in_air"), &
@@ -505,7 +520,7 @@ contains
         !>------------------------------------------------------------
         !!  Cloud ice mixing ratio
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%cloud_ice) then
+        else if (var_idx==kVARS%ice_mass) then
             var%name        = "qi"
             var%dimensions  = three_d_t_dimensions
             var%attributes  = [attribute_t("standard_name", "cloud_ice_mixing_ratio"),              &
@@ -515,7 +530,7 @@ contains
         !>------------------------------------------------------------
         !!  Cloud ice number concentration
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%ice_number_concentration) then
+        else if (var_idx==kVARS%ice_number) then
             var%name        = "ni"
             var%dimensions  = three_d_t_dimensions
             var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_ice_crystals_in_air"), &
@@ -525,7 +540,7 @@ contains
         !>------------------------------------------------------------
         !!  Rain water mixing ratio
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%rain_in_air) then
+        else if (var_idx==kVARS%rain_mass) then
             var%name        = "qr"
             var%dimensions  = three_d_t_dimensions
             var%attributes  = [attribute_t("standard_name", "mass_fraction_of_rain_in_air"),        &
@@ -535,7 +550,7 @@ contains
         !>------------------------------------------------------------
         !!  Rain water number concentration
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%rain_number_concentration) then
+        else if (var_idx==kVARS%rain_number) then
             var%name        = "nr"
             var%dimensions  = three_d_t_dimensions
             var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_rain_particles_in_air"), &
@@ -545,7 +560,7 @@ contains
         !>------------------------------------------------------------
         !!  Snow in air mixing ratio
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%snow_in_air) then
+        else if (var_idx==kVARS%snow_mass) then
             var%name        = "qs"
             var%dimensions  = three_d_t_dimensions
             var%attributes  = [attribute_t("standard_name", "mass_fraction_of_snow_in_air"),        &
@@ -555,7 +570,7 @@ contains
         !>------------------------------------------------------------
         !!  Snow in air number concentration
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%snow_number_concentration) then
+        else if (var_idx==kVARS%snow_number) then
             var%name        = "ns"
             var%dimensions  = three_d_t_dimensions
             var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_snow_particles_in_air"), &
@@ -565,7 +580,7 @@ contains
         !>------------------------------------------------------------
         !!  Graupel mixing ratio
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%graupel_in_air) then
+        else if (var_idx==kVARS%graupel_mass) then
             var%name        = "qg"
             var%dimensions  = three_d_t_dimensions
             var%attributes  = [attribute_t("standard_name", "mass_fraction_of_graupel_in_air"),     &
@@ -575,7 +590,7 @@ contains
         !>------------------------------------------------------------
         !!  Graupel number concentration
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%graupel_number_concentration) then
+        else if (var_idx==kVARS%graupel_number) then
             var%name        = "ng"
             var%dimensions  = three_d_t_dimensions
             var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_graupel_particles_in_air"), &
@@ -773,14 +788,23 @@ contains
             var%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-        
+        !>------------------------------------------------------------
+        !!  Vertical coordinate on the interface between mass levels on global grid
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%global_z_interface) then
+            var%name        = "global_z_i"
+            var%dimensions  = three_d_neighbor_interface_dimensions
+            var%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+                    
         !>------------------------------------------------------------
         !!  Vertical layer thickness
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dz) then
             var%name        = "dz"
             var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "layer_thickness"),                 &
+            var%attributes  = [attribute_t("non_standard_name", "layer_thickness between mass points"),                 &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -790,12 +814,21 @@ contains
         else if (var_idx==kVARS%dz_interface) then
             var%name        = "dz_i"
             var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "layer_thickness"),                 &
+            var%attributes  = [attribute_t("non_standard_name", "layer_thickness between k half-levels"),                 &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-        
         !>------------------------------------------------------------
-        !!  Thickness of layers between interfaces
+        !!  Thickness of layers between interfaces for global grid
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%global_dz_interface) then
+            var%name        = "global_dz_i"
+            var%dimensions  = three_d_neighbor_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "layer_thickness between k half-levels"),                 &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+                    
+        !>------------------------------------------------------------
+        !!  Change in height in x direction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dzdx) then
             var%name        = "dzdx"
@@ -805,16 +838,242 @@ contains
                                attribute_t("coordinates",   "lat lon")]
         
         !>------------------------------------------------------------
-        !!  Thickness of layers between interfaces
+        !!  Change in height in y direction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dzdy) then
             var%name        = "dzdy"
             var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "dzdx of domain mesh"),                 &
+            var%attributes  = [attribute_t("non_standard_name", "dzdy of domain mesh"),                 &
                                attribute_t("units",         "-"),                                   &
                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Change in height in x direction on the staggered u grid
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%dzdx_u) then
+            var%name        = "dzdx_u"
+            var%dimensions  = three_d_u_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "dzdx of domain mesh on staggered u grid"),                 &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
         
-
+        !>------------------------------------------------------------
+        !!  Change in height in y direction on the staggered v grid
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%dzdy_v) then
+            var%name        = "dzdy_v"
+            var%dimensions  = three_d_v_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "dzdy of domain mesh on staggered v grid"),                 &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  High-frequency terrain component
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%h1) then
+            var%name        = "h1"
+            var%dimensions  = two_d_neighbor_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "High-frequency terrain component"),                 &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Low-frequency terrain component
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%h2) then
+            var%name        = "h2"
+            var%dimensions  = two_d_neighbor_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Low-frequency terrain component"),                 &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  High-frequency terrain component on the staggered u grid
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%h1_u) then
+            var%name        = "h1_u"
+            var%dimensions  = two_d_u_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "High-frequency terrain component on staggered u grid"),                 &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Low-frequency terrain component on the staggered u grid
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%h2_u) then
+            var%name        = "h2_u"
+            var%dimensions  = two_d_u_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Low-frequency terrain component on staggered u grid"),                 &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  High-frequency terrain component on staggered v grid
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%h1_v) then
+            var%name        = "h1_v"
+            var%dimensions  = two_d_v_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "High-frequency terrain component on staggered v grid"),                 &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Low-frequency terrain component on staggered v grid
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%h2_v) then
+            var%name        = "h2_v"
+            var%dimensions  = two_d_v_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Low-frequency terrain component on staggered v grid"),                 &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  The Jacobian of the z-coordinate transform
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%jacobian) then
+            var%name        = "jacobian"
+            var%dimensions  = three_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform"),                 &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  The Jacobian of the z-coordinate transform
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%jacobian_u) then
+            var%name        = "jacobian_u on staggered u grid"
+            var%dimensions  = three_d_u_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on staggered u grid"),                 &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  The Jacobian of the z-coordinate transform on staggered v grid
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%jacobian_v) then
+            var%name        = "jacobian_v"
+            var%dimensions  = three_d_v_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on staggered v grid"),                 &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  The Jacobian of the z-coordinate transform on k half-levels
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%jacobian_w) then
+            var%name        = "jacobian_w"
+            var%dimensions  = three_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on k half-levels"),                 &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  sin of grid rotation from true north
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%sintheta) then
+            var%name        = "sintheta"
+            var%dimensions  = two_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "sin of grid rotation from true north"),                 &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  cos of grid rotation from true north
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%costheta) then
+            var%name        = "costheta"
+            var%dimensions  = two_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "cos of grid rotation from true north"),                 &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Relaxation filter used for attenuating forcing of boundary forcing variables
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%relax_filter_2d) then
+            var%name        = "relax_filter_2d"
+            var%dimensions  = two_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "2D relaxation filter used for attenuating forcing of boundary forcing variables"),                 &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Relaxation filter used for attenuating forcing of boundary forcing variables
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%relax_filter_3d) then
+            var%name        = "relax_filter_3d"
+            var%dimensions  = three_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "3D relaxation filter used for attenuating forcing of boundary forcing variables"),                 &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  dz used for calculating advection
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%advection_dz) then
+            var%name        = "advection_dz"
+            var%dimensions  = three_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "dz used for calculating advection"),                 &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]                    
+        !>------------------------------------------------------------
+        !!  Global Terrain for the domain
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%global_terrain) then
+            var%name        = "global_terrain"
+            var%dimensions  = two_d_global_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Domain terrain"),                 &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Neighbor Terrain for the domain
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%neighbor_terrain) then
+            var%name        = "neighbor_terrain"
+            var%dimensions  = two_d_neighbor_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Domain terrain"),                 &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+                    
+        !>------------------------------------------------------------
+        !!  Terrain slope
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%slope) then
+            var%name        = "slope"
+            var%dimensions  = two_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "slope of the terrain"),                 &
+                                attribute_t("units",         "rad"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Terrain slope in degrees
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%slope_angle) then
+            var%name        = "slope_angle"
+            var%dimensions  = two_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "slope of the terrain"),                 &
+                                attribute_t("units",         "degrees"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Terrain aspect
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%aspect_angle) then
+            var%name        = "aspect_angle"
+            var%dimensions  = two_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Aspect of the terrain"),                 &
+                                attribute_t("units",         "degrees"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Sky view fraction
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%svf) then
+            var%name        = "svf"
+            var%dimensions  = two_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "sky view fraction"),                 &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Horizon line matrix
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%hlm) then
+            var%name        = "hlm"
+            var%dimensions  = three_d_hlm_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Horizon line matrix"),                 &
+                                attribute_t("units",         "degrees"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Snow holding depth of terrain
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%shd) then
+            var%name        = "shd"
+            var%dimensions  = two_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Snow holding depth of terrain"),                 &
+                                attribute_t("units",         "m"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+                                       
         !>------------------------------------------------------------
         !!  Cloud cover fraction
         !!------------------------------------------------------------
@@ -972,7 +1231,7 @@ contains
         
 
         !>------------------------------------------------------------
-        !!  Number-weighted aspect ratio of ice3 category
+        !!  Froude number
         !!------------------------------------------------------------
         else if (var_idx==kVARS%froude) then
             var%name        = "froude"
@@ -983,7 +1242,7 @@ contains
         
 
         !>------------------------------------------------------------
-        !!  Number-weighted aspect ratio of ice3 category
+        !!  Bulk richardson number
         !!------------------------------------------------------------
         else if (var_idx==kVARS%blk_ri) then
             var%name        = "blk_ri"
@@ -991,7 +1250,34 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "Bulk richardson number used to calculate Sx sheltering"), &
                                attribute_t("units",         "-"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+        !>------------------------------------------------------------
+        !!  blocking terrain from froude number calculation
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%froude_terrain) then
+            var%name        = "froude_terrain"
+            var%dimensions  = four_d_azim_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Blocking terrain height used in calculation of froude number"), &
+                                attribute_t("units",         "m"),                                                 &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Sx
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%Sx) then
+            var%name        = "Sx"
+            var%dimensions  = four_d_azim_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Maximum upwind slope"), &
+                                attribute_t("units",         "-"),                                                 &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  TPI
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%TPI) then
+            var%name        = "TPI"
+            var%dimensions  = two_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Topographic position index"), &
+                                attribute_t("units",         "-"),                                                 &
+                                attribute_t("coordinates",   "lat lon")]
+                                                                                                                                                                                                        
 
         !>------------------------------------------------------------
         !!  Outgoing longwave radiation
@@ -1083,7 +1369,8 @@ contains
             var%attributes  = [attribute_t("standard_name", "surface_downwelling_shortwave_flux_in_air"), &
                                attribute_t("units",         "W m-2"),                                     &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%force_boundaries = .False.
+
         !>------------------------------------------------------------
         !!  MJ: in OSHD as 'sdri' referring to 'direct shortwave radiation, per inclined surface area' accounted for shading and slope effects. Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
         !!------------------------------------------------------------
@@ -1133,7 +1420,8 @@ contains
             var%attributes  = [attribute_t("standard_name", "incoming direct longwave radiation"), &
                                attribute_t("units",         "W m-2"),                                    &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%force_boundaries = .False.
+
         !>------------------------------------------------------------
         !!  Total Absorbed Solar Radiation
         !!------------------------------------------------------------
@@ -1234,7 +1522,18 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "vegetation_type"),                 &
                                attribute_t("units",      "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%dtype = kINTEGER
+        !>------------------------------------------------------------
+        !!  Land cover type
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%soil_type) then
+            var%name        = "soil_type"
+            var%dimensions  = two_d_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "soil_type"),                 &
+                               attribute_t("units",      "1"),                                      &
+                               attribute_t("coordinates",   "lat lon")]
+            var%dtype = kINTEGER
+
         !>------------------------------------------------------------
         !!  Leaf Mass
         !!------------------------------------------------------------
@@ -1324,7 +1623,8 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "crop_category"),                   &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%dtype = kINTEGER
+
         !>------------------------------------------------------------
         !!  Crop Type (Noah-MP initialization variable)
         !!------------------------------------------------------------
@@ -1335,7 +1635,8 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "crop_type"),                       &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%dtype = kINTEGER
+
         !>------------------------------------------------------------
         !!  Growing Season Growing Degree Days
         !!------------------------------------------------------------
@@ -1355,7 +1656,8 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "irr_eventno_sprinkler"),           &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%dtype = kINTEGER
+
         !>------------------------------------------------------------
         !!  Irrigation Fraction
         !!------------------------------------------------------------
@@ -1405,7 +1707,8 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "irr_eventno_micro"),               &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%dtype = kINTEGER
+
         !>------------------------------------------------------------
         !!  Irrigation Event Number, Flood
         !!------------------------------------------------------------
@@ -1415,7 +1718,8 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "irr_eventno_flood"),               &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%dtype = kINTEGER
+
         !>------------------------------------------------------------
         !!  Irrigation Water Amount to be Applied, Sprinkler
         !!------------------------------------------------------------
@@ -1485,7 +1789,16 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "irr_amt_flood"),                   &
                                attribute_t("units",         "mm"),                                  &
                                attribute_t("coordinates",   "lat lon")]
-        
+        !>------------------------------------------------------------
+        !!  latent heating from sprinkler evaporation
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%evap_heat_sprinkler) then
+            var%name        = "evap_heat_sprinkler"
+            var%dimensions  = two_d_t_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "latent heating from sprinkler evaporation"),                   &
+                                attribute_t("units",         "W/m^2"),                                  &
+                                attribute_t("coordinates",   "lat lon")]
+                    
         
         !>------------------------------------------------------------
         !!  Mass of Agricultural Grain Produced
@@ -1516,7 +1829,8 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "plant_growth_stage"),              &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%dtype = kINTEGER
+
         !>------------------------------------------------------------
         !!  Net Ecosystem Exchange
         !!------------------------------------------------------------
@@ -1860,6 +2174,7 @@ contains
         else if (var_idx==kVARS%snow_nlayers) then
             var%name        = "snow_nlayers"
             var%dimensions  = two_d_t_dimensions
+            var%dtype      = kINTEGER
             var%attributes  = [attribute_t("non_standard_name", "snow_nlayers"),                    &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -1958,7 +2273,7 @@ contains
                                attribute_t("coordinates",   "lat lon")]
         
         !>------------------------------------------------------------
-        !!  Sensible Heat Exchange Coefficient, Vegetated
+        !!  Monin-Obukhov Length
         !!------------------------------------------------------------
         else if (var_idx==kVARS%mol) then
             var%name        = "mol"
@@ -1966,7 +2281,60 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "Monin-Obukhov Length"),                    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Shear velocity
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%ustar) then
+            var%name        = "ustar"
+            var%dimensions  = two_d_t_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "Shear velocity"),                    &
+                                attribute_t("units",         "m/s"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+                    
+        !>------------------------------------------------------------
+        !!  similarity stability function for momentum
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%psim) then
+            var%name        = "psih"
+            var%dimensions  = two_d_t_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "similarity stability function for momentum"),                    &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+                            
+        !>------------------------------------------------------------
+        !!  similarity stability function for heat
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%psih) then
+            var%name        = "psih"
+            var%dimensions  = two_d_t_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "similarity stability function for heat"),                    &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+                                                
+        !>------------------------------------------------------------
+        !!  integrated stability function for momentum
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%fm) then
+            var%name        = "fm"
+            var%dimensions  = two_d_t_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "integrated stability function for momentum"),                    &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+                                                                    
+        !>------------------------------------------------------------
+        !!  integrated stability function for heat
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%fh) then
+            var%name        = "fh"
+            var%dimensions  = two_d_t_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "integrated stability function for heat"),                    &
+                                attribute_t("units",         "-"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
         
+                                                                                                                                                                                                        
+        !>------------------------------------------------------------
+        !!  Sensible Heat Exchange Coefficient, Vegetated
+        !!------------------------------------------------------------
         else if (var_idx==kVARS%ch_veg) then
             var%name        = "ch_veg"
             var%dimensions  = two_d_t_dimensions
@@ -2407,7 +2775,26 @@ contains
             var%attributes  = [attribute_t("standard_name", "eastward_10m_wind_speed"),             &
                                attribute_t("units",         "m s-1"),                               &
                                attribute_t("coordinates",   "lat lon")]
-        
+        !>------------------------------------------------------------
+        !!  V component of wind field averaged to the mass grid
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%v_mass) then
+            var%name        = "v_mass"
+            var%dimensions  = three_d_t_dimensions
+            var%attributes  = [attribute_t("standard_name", "northward wind, averaged to the mass grid"),            &
+                                attribute_t("units",         "m s-1"),                               &
+                                attribute_t("coordinates",   "lat lon")]
+                            
+        !>------------------------------------------------------------
+        !!  U component of the wind field averaged to the mass grid
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%u_mass) then
+            var%name        = "u_mass"
+            var%dimensions  = three_d_t_dimensions
+            var%attributes  = [attribute_t("standard_name", "eastward_ wind, averaged to the mass grid"),             &
+                                attribute_t("units",         "m s-1"),                               &
+                                attribute_t("coordinates",   "lat lon")]
+                    
         !>------------------------------------------------------------
         !!  10 meter height wind speed magnitude, sqrt(u_10m**2+v_10m**2)
         !!------------------------------------------------------------
@@ -2519,6 +2906,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "index_of_planetary_boundary_layer_height"), &
                                attribute_t("units",         "-"),                                      &
                                attribute_t("coordinates",   "lat lon")]
+            var%dtype = kINTEGER
         
         !>------------------------------------------------------------
         !!  Land surface radiative skin temperature
@@ -2539,7 +2927,8 @@ contains
             var%attributes  = [attribute_t("standard_name", "Sea Surface Temperature"),                 &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%force_boundaries = .False.
+
         !>------------------------------------------------------------
         !!  Sensible heat flux from the surface (positive up)
         !!------------------------------------------------------------
@@ -2549,7 +2938,8 @@ contains
             var%attributes  = [attribute_t("standard_name", "surface_upward_sensible_heat_flux"),   &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%force_boundaries = .False.
+
         !>------------------------------------------------------------
         !!  Latent heat flux from the surface (positive up)
         !!------------------------------------------------------------
@@ -2559,7 +2949,8 @@ contains
             var%attributes  = [attribute_t("standard_name", "surface_upward_latent_heat_flux"),     &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
-        
+            var%force_boundaries = .False.
+
         !>------------------------------------------------------------
         !!  Lake temperature 3d
         !!------------------------------------------------------------
@@ -2603,7 +2994,16 @@ contains
             var%attributes  = [attribute_t("standard_name", "lake_layer_thickness"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
-        
+        !>------------------------------------------------------------
+        !!  lake_depth
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%lake_depth) then
+            var%name        = "lake_depth"
+            var%dimensions  = two_d_t_dimensions
+            var%attributes  = [attribute_t("standard_name", "lake_depth"),     &
+                                attribute_t("units",         "m"),                               &
+                                attribute_t("coordinates",   "lat lon")]
+                    
         !>------------------------------------------------------------
         !!  lake snl2d
         !!------------------------------------------------------------
@@ -2851,7 +3251,8 @@ contains
             var%dimensions  = two_d_dimensions
             var%attributes  = [attribute_t("non_standard_name", "land_water_mask"),                 &
                                attribute_t("coordinates",       "lat lon")]
-        
+            var%dtype = kINTEGER
+
         !>------------------------------------------------------------
         !!  Height of the terrain
         !!------------------------------------------------------------
@@ -3066,24 +3467,9 @@ contains
         var%n_attrs      = size(var%attributes)
         var%unlimited_dim=.False.
 
-
-        if (var%n_dimensions == 2) then
-            var%two_d = .True.
-            var%three_d = .False.
-        else
-            var%two_d = .False.
-            var%three_d = .True.
-        endif
-
         do j = 1,var%n_dimensions
             if (var%dimensions(j) == "time") then
                 var%unlimited_dim=.True.
-
-                !If time is one of the dimensions, and we only have 3 dimensions, then this is a 2D variable
-                if (var%n_dimensions == 3) then
-                    var%two_d = .True.
-                    var%three_d = .False.
-                endif
             endif
             if (var%dimensions(j) == "lon_u") then
                 var%xstag = 1
@@ -3092,6 +3478,27 @@ contains
                 var%ystag = 1
             endif
         enddo
+
+        if (var%unlimited_dim) then
+                !If time is one of the dimensions, and we only have 3 dimensions, then this is a 2D variable
+            if (var%n_dimensions == 2) then
+                var%one_d = .True.
+            else if (var%n_dimensions == 3) then
+                var%two_d = .True.
+            else if (var%n_dimensions == 4) then
+                var%three_d = .True.
+            endif
+        else
+            if (var%n_dimensions == 1) then
+                var%one_d = .True.
+            else if (var%n_dimensions == 2) then
+                var%two_d = .True.
+            else if (var%n_dimensions == 3) then
+                var%three_d = .True.
+            else if (var%n_dimensions == 4) then
+                var%four_d = .True.
+            endif        
+        endif
 
     end function get_varmeta
 

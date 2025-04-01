@@ -336,14 +336,14 @@ module options_types
 
 
         ! variable names from init/BC/wind/... files
-        character (len=kMAX_NAME_LENGTH) :: latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar, &
-                                        pvar,tvar,qvvar,qcvar,qivar,qrvar,qsvar,qgvar,i2mvar,i3mvar,&
-                                        qncvar,qnivar,qnrvar,qnsvar,qngvar,i2nvar,i3nvar,&
-                                        i1avar,i1cvar,i2avar,i2cvar,i3avar,i3cvar,hgtvar, &
-                                        pslvar, psvar, sst_var, pblhvar, &
-                                        shvar,lhvar,zvar, &
-                                        swdown_var, lwdown_var, &
-                                        time_var
+        character (len=kMAX_NAME_LENGTH) :: latvar="",lonvar="",uvar="",ulat="",ulon="",vvar="",vlat="",vlon="",wvar="", &
+                        pvar="",tvar="",qvvar="",qcvar="",qivar="",qrvar="",qsvar="",qgvar="",i2mvar="",i3mvar="",&
+                        qncvar="",qnivar="",qnrvar="",qnsvar="",qngvar="",i2nvar="",i3nvar="",&
+                        i1avar="",i1cvar="",i2avar="",i2cvar="",i3avar="",i3cvar="",hgtvar="", &
+                        pslvar="", psvar="", sst_var="", pblhvar="", &
+                        shvar="",lhvar="",zvar="", &
+                        swdown_var="", lwdown_var="", &
+                        time_var=""
 
         ! The following are NOT read from the namelist -- instead they are set/calculated from other options which ARE read from the namelist
         character(len=kMAX_NAME_LENGTH) :: vars_to_read(kMAX_STORAGE_VARS)
