@@ -44,7 +44,6 @@ endif()
 
 
 option(ASSERTIONS "Check logical assertions at runtime" ON)
-option(CAF "Turn on Coarray-Fortran (only available with Cray Compiler)" OFF)
 option(FSM "Link to the FSM2 snow model, requires separate compilation of the FSM2 model" ON)
 #########################################
 
@@ -73,11 +72,6 @@ if(ASSERTIONS)
   	add_definitions(-DUSE_ASSERTIONS=.true.)
 else()
   	add_definitions(-DUSE_ASSERTIONS=.false.)
-endif()
-
-#-DCRAY_PE -- controls usage of Coarray-Fortran over MPI
-if(CAF AND COMPILER STREQUAL "cray")
-  	add_definitions(-DCRAY_PE)
 endif()
 
 #-DFSM -- controls compilation of FSM2 driver and linking to the FSM2 library
@@ -339,8 +333,8 @@ elseif(MODE STREQUAL "release")
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -c -eI)
-		set(LINK "-h noomp")
+		target_compile_options(HICAR PUBLIC -h omp -Ofast)
+		# set(LINK "-h noomp")
 	endif()
 endif()
 
