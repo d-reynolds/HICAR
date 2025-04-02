@@ -23,10 +23,10 @@ module icar_constants
     
     ! string lengths
     integer, parameter :: kMAX_FILE_LENGTH =   1024
-    integer, parameter :: kMAX_DIM_LENGTH  =   1024
-    integer, parameter :: kMAX_NAME_LENGTH =   1024
-    integer, parameter :: kMAX_ATTR_LENGTH =   1024
-    integer, parameter :: kMAX_STRING_LENGTH = 1024  ! maximum length of other strings (e.g. netcdf attributes)
+    integer, parameter :: kMAX_DIM_LENGTH  =   256
+    integer, parameter :: kMAX_NAME_LENGTH =   256
+    integer, parameter :: kMAX_ATTR_LENGTH =   256
+    integer, parameter :: kMAX_STRING_LENGTH = 256  ! maximum length of other strings (e.g. netcdf attributes)
 
     ! maximum number of nests
     integer, parameter :: kMAX_NESTS = 10
