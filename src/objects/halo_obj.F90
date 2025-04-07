@@ -10,6 +10,7 @@
 submodule(halo_interface) halo_implementation
 use icar_constants
 use iso_fortran_env
+use output_metadata,            only : get_varmeta, get_varindx
 use, intrinsic :: iso_c_binding
 
 implicit none
@@ -24,7 +25,7 @@ contains
 !! -------------------------------
 module subroutine init(this, exch_vars, adv_vars, grid, comms)
     class(halo_t), intent(inout) :: this
-    type(var_dict_t), intent(inout) :: exch_vars, adv_vars
+    type(index_type), intent(in) :: adv_vars(:), exch_vars(:)
     type(grid_t), intent(in) :: grid
     type(MPI_comm), intent(inout) :: comms
 
@@ -318,7 +319,7 @@ end subroutine exch_var
 !! -------------------------------
 module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
     type(halo_t), intent(inout) :: this
-    type(var_dict_t), intent(inout) :: exch_vars, adv_vars
+    type(index_type), intent(in) :: adv_vars(:), exch_vars(:)
     type(MPI_comm), intent(in) :: comms
     type(variable_t) :: var
 
@@ -330,31 +331,33 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
     type(MPI_Group) :: comp_proc, tmp_MPI_grp
     type(MPI_Comm) :: tmp_MPI_comm
 
-    CALL MPI_Type_size(MPI_REAL, real_size)
+    CALL MPI_Type_size(MPI_REAL, real_size)    
 
-    ! Loop over all adv_vars and count how many are 3D
-    call adv_vars%reset_iterator()
-    
-    this%n_2d = 0
-    this%n_3d = 0
 
-    do while (adv_vars%has_more_elements())
-        var = adv_vars%next()
-        if (var%three_d) this%n_3d = this%n_3d + 1
-    end do
-    
-    ! Loop over all exch vars and count how many are 3D
-    call exch_vars%reset_iterator()
-    
-    do while (exch_vars%has_more_elements())
-        var = exch_vars%next()
-        if (var%three_d) this%n_3d = this%n_3d + 1
-    end do
     if (STD_OUT_PE) write(*,*) "In Setup Batch Exch"
     if (STD_OUT_PE) flush(output_unit)
 
+    this%n_2d = 0
+    this%n_3d = 0
+
+    ! Loop over all adv vars and count how many are 3D
+    do i = 1,size(adv_vars)
+        var = get_varmeta(get_varindx(adv_vars(i)%n))
+        if (var%three_d) then
+            this%n_3d = this%n_3d + 1
+        end if
+    end do
+
+    ! Loop over all exch vars and count how many are 3D
+    do i = 1,size(exch_vars)
+        var = get_varmeta(get_varindx(exch_vars(i)%n))
+        if (var%three_d) then
+            this%n_3d = this%n_3d + 1
+        end if
+    end do
+
     ! Determine number of 2D and 3D vars present
-    this%n_2d = (adv_vars%n_vars+exch_vars%n_vars)-this%n_3d
+    this%n_2d = (size(adv_vars)+size(exch_vars))-this%n_3d
 
     if (.not.(comms == MPI_COMM_NULL)) then
         call MPI_Info_Create(info_in,ierr)
@@ -581,14 +584,15 @@ module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
 end subroutine setup_batch_exch
 
 
-module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
+module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_var_only)
     class(halo_t), intent(inout) :: this
-    class(var_dict_t), intent(inout) :: exch_vars, adv_vars
+    type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+    type(variable_t), intent(inout) :: var_data(:)
     logical, optional, intent(in) :: exch_var_only
     
     type(variable_t) :: var
     logical :: exch_v_only
-    integer :: n, k_max, msg_size, indx
+    integer :: n, k_max, msg_size, indx, i
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
     if (this%n_3d <= 0) return
@@ -599,8 +603,8 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
     exch_v_only = .False.
     if (present(exch_var_only)) exch_v_only=exch_var_only
 
-    call adv_vars%reset_iterator()
-    call exch_vars%reset_iterator()
+    ! call adv_vars%reset_iterator()
+    ! call exch_vars%reset_iterator()
     n = 1
 
 
@@ -616,47 +620,45 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
     ! Now iterate through the dictionary as long as there are more elements present. If two processors are on shared memory
     ! this step will directly copy the data to the other PE
     if (.not.(exch_v_only)) then
-        do while (adv_vars%has_more_elements())
+        do i = 1, size(adv_vars)
             ! get the next variable
-            var = adv_vars%next()
+            var = get_varmeta(get_varindx(adv_vars(i)%n))
             if (var%three_d) then
                 if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
-                        var%data_3d(this%its:this%ite,:,(this%jte-this%halo_size+1):this%jte)
+                    var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte-this%halo_size+1):this%jte)
                 if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
-                        var%data_3d(this%its:this%ite,:,this%jts:(this%jts+this%halo_size-1))
+                    var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,this%jts:(this%jts+this%halo_size-1))
                 if (.not.(this%east_boundary)) this%east_buffer_3d(n,:,:,1:(this%jte-this%jts+1)) = &
-                        var%data_3d((this%ite-this%halo_size+1):this%ite,:,this%jts:this%jte)
+                    var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,this%jts:this%jte)
                 if (.not.(this%west_boundary)) this%west_buffer_3d(n,:,:,1:(this%jte-this%jts+1)) = &
-                        var%data_3d(this%its:(this%its+this%halo_size-1),:,this%jts:this%jte)
+                    var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,this%jts:this%jte)
 
                 if (.not.(this%northwest_boundary)) this%northwest_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                        var%data_3d(this%its:(this%its+this%halo_size-1),:,(this%jte-this%halo_size+1):this%jte)
+                    var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,(this%jte-this%halo_size+1):this%jte)
                 if (.not.(this%southeast_boundary)) this%southeast_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                        var%data_3d((this%ite-this%halo_size+1):this%ite,:,this%jts:(this%jts+this%halo_size-1))
+                    var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,this%jts:(this%jts+this%halo_size-1))
                 if (.not.(this%southwest_boundary)) this%southwest_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                        var%data_3d(this%its:(this%its+this%halo_size-1),:,this%jts:(this%jts+this%halo_size-1))
+                    var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,this%jts:(this%jts+this%halo_size-1))
                 if (.not.(this%northeast_boundary)) this%northeast_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                        var%data_3d((this%ite-this%halo_size+1):this%ite,:,(this%jte-this%halo_size+1):this%jte)
+                    var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,(this%jte-this%halo_size+1):this%jte)
                 n = n+1
             endif
         enddo
     endif
 
     ! Now iterate through the exchange-only objects as long as there are more elements present
-    do while (exch_vars%has_more_elements())
-        ! get the next variable
-        var = exch_vars%next()
+     do i = 1, size(exch_vars)
+        var = get_varmeta(get_varindx(exch_vars(i)%n))
         if (var%three_d) then
             k_max = ubound(var%data_3d,2)
             if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
-                    var%data_3d(this%its:this%ite,1:k_max,(this%jte-this%halo_size+1):this%jte)
+                var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte-this%halo_size+1):this%jte)
             if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
-                    var%data_3d(this%its:this%ite,1:k_max,this%jts:(this%jts+this%halo_size-1))
+                var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,this%jts:(this%jts+this%halo_size-1))
             if (.not.(this%east_boundary)) this%east_buffer_3d(n,:,1:k_max,1:(this%jte-this%jts+1)) = &
-                    var%data_3d((this%ite-this%halo_size+1):this%ite,1:k_max,this%jts:this%jte)
+                var_data(exch_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,1:k_max,this%jts:this%jte)
             if (.not.(this%west_boundary)) this%west_buffer_3d(n,:,1:k_max,1:(this%jte-this%jts+1)) = &
-                    var%data_3d(this%its:(this%its+this%halo_size)-1,1:k_max,this%jts:this%jte)
-
+                var_data(exch_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size)-1,1:k_max,this%jts:this%jte)
             n = n+1
         endif
     enddo
@@ -741,14 +743,15 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
 
 end subroutine halo_3d_send_batch
 
-module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars,exch_var_only, wait_timer)
+module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exch_var_only, wait_timer)
     class(halo_t), intent(inout) :: this
-    class(var_dict_t), intent(inout) :: exch_vars, adv_vars
+    type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+    type(variable_t), intent(inout) :: var_data(:)
     logical, optional, intent(in) :: exch_var_only
     type(timer_t), optional,     intent(inout)   :: wait_timer
 
     type(variable_t) :: var
-    integer :: n, k_max
+    integer :: n, k_max, i
     logical :: exch_v_only
 
     if (this%n_3d <= 0) return
@@ -765,49 +768,48 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars,exch_var_only,
     if (.not.(this%southwest_boundary)) call MPI_Win_Wait(this%southwest_3d_win)
     if (.not.(this%northeast_boundary)) call MPI_Win_Wait(this%northeast_3d_win)
 
-    call adv_vars%reset_iterator()
-    call exch_vars%reset_iterator()
+    ! call adv_vars%reset_iterator()
+    ! call exch_vars%reset_iterator()
     n = 1
     ! Now iterate through the dictionary as long as there are more elements present
     if (.not.(exch_v_only)) then
-        do while (adv_vars%has_more_elements())
-            ! get the next variable
-            var = adv_vars%next()
+
+        do i = 1, size(adv_vars)
+            var = get_varmeta(get_varindx(adv_vars(i)%n))
             if (var%three_d) then
-                if (.not.(this%north_boundary)) var%data_3d(this%its:this%ite,:,(this%jte+1):this%jme) = &
+                if (.not.(this%north_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte+1):this%jme) = &
                         this%north_batch_in_3d(n,1:(this%ite-this%its+1),:,1:this%halo_size)
-                if (.not.(this%south_boundary)) var%data_3d(this%its:this%ite,:,this%jms:(this%jts-1)) = &
+                if (.not.(this%south_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,this%jms:(this%jts-1)) = &
                         this%south_batch_in_3d(n,1:(this%ite-this%its+1),:,1:this%halo_size)
-                if (.not.(this%east_boundary)) var%data_3d((this%ite+1):this%ime,:,this%jts:this%jte) = &
+                if (.not.(this%east_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,this%jts:this%jte) = &
                         this%east_batch_in_3d(n,:,:,1:(this%jte-this%jts+1))
-                if (.not.(this%west_boundary)) var%data_3d(this%ims:(this%its-1),:,this%jts:this%jte) = &
+                if (.not.(this%west_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,this%jts:this%jte) = &
                         this%west_batch_in_3d(n,:,:,1:(this%jte-this%jts+1))
 
-                if (.not.(this%northwest_boundary)) var%data_3d(this%ims:(this%its-1),:,(this%jte+1):this%jme) = &
+                if (.not.(this%northwest_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,(this%jte+1):this%jme) = &
                         this%northwest_batch_in_3d(n,:,:,:)
-                if (.not.(this%southeast_boundary)) var%data_3d((this%ite+1):this%ime,:,this%jms:(this%jts-1)) = &
+                if (.not.(this%southeast_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,this%jms:(this%jts-1)) = &
                         this%southeast_batch_in_3d(n,:,:,:)
-                if (.not.(this%southwest_boundary)) var%data_3d(this%ims:(this%its-1),:,this%jms:(this%jts-1)) = &
+                if (.not.(this%southwest_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,this%jms:(this%jts-1)) = &
                         this%southwest_batch_in_3d(n,:,:,:)
-                if (.not.(this%northeast_boundary)) var%data_3d((this%ite+1):this%ime,:,(this%jte+1):this%jme) = &
+                if (.not.(this%northeast_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,(this%jte+1):this%jme) = &
                         this%northeast_batch_in_3d(n,:,:,:)
                 n = n+1
             endif
         enddo
     endif
     ! Now iterate through the exchange-only objects as long as there are more elements present
-    do while (exch_vars%has_more_elements())
-        ! get the next variable
-        var = exch_vars%next()
+    do i = 1, size(exch_vars)
+        var = get_varmeta(get_varindx(exch_vars(i)%n))
         if (var%three_d) then
             k_max = ubound(var%data_3d,2)
-            if (.not.(this%north_boundary)) var%data_3d(this%its:this%ite,1:k_max,(this%jte+1):this%jme) = &
+            if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte+1):this%jme) = &
                     this%north_batch_in_3d(n,1:(this%ite-this%its+1),1:k_max,:)
-            if (.not.(this%south_boundary)) var%data_3d(this%its:this%ite,1:k_max,this%jms:(this%jts-1)) = &
+            if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,this%jms:(this%jts-1)) = &
                     this%south_batch_in_3d(n,1:(this%ite-this%its+1),1:k_max,:)
-            if (.not.(this%east_boundary)) var%data_3d((this%ite+1):this%ime,1:k_max,this%jts:this%jte) = &
+            if (.not.(this%east_boundary)) var_data(exch_vars(i)%v)%data_3d((this%ite+1):this%ime,1:k_max,this%jts:this%jte) = &
                     this%east_batch_in_3d(n,:,1:k_max,1:(this%jte-this%jts+1))
-            if (.not.(this%west_boundary)) var%data_3d(this%ims:(this%its-1),1:k_max,this%jts:this%jte) = &
+            if (.not.(this%west_boundary)) var_data(exch_vars(i)%v)%data_3d(this%ims:(this%its-1),1:k_max,this%jts:this%jte) = &
                     this%west_batch_in_3d(n,:,1:k_max,1:(this%jte-this%jts+1))
             n = n+1
         endif
@@ -823,11 +825,12 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars,exch_var_only,
 
 end subroutine halo_3d_retrieve_batch
 
-module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)
+module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
     class(halo_t), intent(inout) :: this
-    class(var_dict_t), intent(inout) :: exch_vars, adv_vars
+    type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+    type(variable_t), intent(inout) :: var_data(:)
     type(variable_t) :: var
-    integer :: n, msg_size
+    integer :: n, msg_size, i
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
     if (this%n_2d <= 0) return
@@ -835,7 +838,7 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)
     msg_size = 1
     disp = 0
 
-    call exch_vars%reset_iterator()
+    ! call exch_vars%reset_iterator()
 
 
     if (.not.(this%north_boundary)) call MPI_Win_Start(this%north_neighbor_grp, 0, this%north_2d_win)
@@ -845,18 +848,17 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)
 
     n = 1
     ! Now iterate through the exchange-only objects as long as there are more elements present
-    do while (exch_vars%has_more_elements())
-        ! get the next variable
-        var = exch_vars%next()
+    do i = 1, size(exch_vars)
+        var = get_varmeta(get_varindx(exch_vars(i)%n))
         if (var%two_d) then
             if (.not.(this%north_boundary)) this%north_buffer_2d(n,1:(this%ite-this%its+1),:) = &
-                    var%data_2d(this%its:this%ite,(this%jte-this%halo_size+1):this%jte)
+                var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte-this%halo_size+1):this%jte)
             if (.not.(this%south_boundary)) this%south_buffer_2d(n,1:(this%ite-this%its+1),:) = &
-                    var%data_2d(this%its:this%ite,this%jts:(this%jts+this%halo_size-1))
+                var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,this%jts:(this%jts+this%halo_size-1))
             if (.not.(this%east_boundary)) this%east_buffer_2d(n,:,1:(this%jte-this%jts+1)) = &
-                    var%data_2d((this%ite-this%halo_size+1):this%ite,this%jts:this%jte)
+                var_data(exch_vars(i)%v)%data_2d((this%ite-this%halo_size+1):this%ite,this%jts:this%jte)
             if (.not.(this%west_boundary)) this%west_buffer_2d(n,:,1:(this%jte-this%jts+1)) = &
-                    var%data_2d(this%its:(this%its+this%halo_size)-1,this%jts:this%jte)
+                var_data(exch_vars(i)%v)%data_2d(this%its:(this%its+this%halo_size)-1,this%jts:this%jte)
 
             n = n+1
         endif
@@ -896,11 +898,12 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)
 
 end subroutine halo_2d_send_batch
 
-module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars)
+module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
     class(halo_t), intent(inout) :: this
-    class(var_dict_t), intent(inout) :: exch_vars, adv_vars
+    type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+    type(variable_t), intent(inout) :: var_data(:)
     type(variable_t) :: var
-    integer :: n
+    integer :: n, i
 
     if (this%n_2d <= 0) return
     ! if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_2d_win)
@@ -913,17 +916,16 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars)
     if (.not.(this%east_boundary)) call MPI_Win_Wait(this%east_2d_win)
     if (.not.(this%west_boundary)) call MPI_Win_Wait(this%west_2d_win)
 
-    call exch_vars%reset_iterator()
+    ! call exch_vars%reset_iterator()
     n = 1    
     ! Now iterate through the exchange-only objects as long as there are more elements present
-    do while (exch_vars%has_more_elements())
-        ! get the next variable
-        var = exch_vars%next()
+    do i = 1, size(exch_vars)
+        var = get_varmeta(get_varindx(exch_vars(i)%n))
         if (var%two_d) then
-            if (.not.(this%north_boundary)) var%data_2d(this%its:this%ite,(this%jte+1):this%jme) = this%north_batch_in_2d(n,1:(this%ite-this%its+1),:)
-            if (.not.(this%south_boundary)) var%data_2d(this%its:this%ite,this%jms:(this%jts-1)) = this%south_batch_in_2d(n,1:(this%ite-this%its+1),:)
-            if (.not.(this%east_boundary)) var%data_2d((this%ite+1):this%ime,this%jts:this%jte) = this%east_batch_in_2d(n,:,1:(this%jte-this%jts+1))
-            if (.not.(this%west_boundary)) var%data_2d(this%ims:(this%its-1),this%jts:this%jte) = this%west_batch_in_2d(n,:,1:(this%jte-this%jts+1))
+            if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte+1):this%jme) = this%north_batch_in_2d(n,1:(this%ite-this%its+1),:)
+            if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,this%jms:(this%jts-1)) = this%south_batch_in_2d(n,1:(this%ite-this%its+1),:)
+            if (.not.(this%east_boundary)) var_data(exch_vars(i)%v)%data_2d((this%ite+1):this%ime,this%jts:this%jte) = this%east_batch_in_2d(n,:,1:(this%jte-this%jts+1))
+            if (.not.(this%west_boundary)) var_data(exch_vars(i)%v)%data_2d(this%ims:(this%its-1),this%jts:this%jte) = this%west_batch_in_2d(n,:,1:(this%jte-this%jts+1))
             n = n+1
         endif
     enddo
@@ -939,33 +941,34 @@ end subroutine halo_2d_retrieve_batch
 !! Send and get the data from all exch+adv objects to/from their neighbors (3D)
 !!
 !! -------------------------------
-module subroutine batch_exch(this, exch_vars, adv_vars, two_d, three_d, exch_var_only)
-    class(halo_t), intent(inout) :: this
-    class(var_dict_t), intent(inout) :: exch_vars, adv_vars
-    logical, optional, intent(in) :: two_d,three_d,exch_var_only
+! module subroutine batch_exch(this, exch_vars, adv_vars, two_d, three_d, var_data, exch_var_only)
+!     class(halo_t), intent(inout) :: this
+!     type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+!     type(variable_t), intent(inout) :: var_data(:)
+!     logical, optional, intent(in) :: two_d,three_d,exch_var_only
     
-    logical :: twod, threed, exch_only
+!     logical :: twod, threed, exch_only
     
-    exch_only = .False.
-    if (present(exch_var_only)) exch_only = exch_var_only
+!     exch_only = .False.
+!     if (present(exch_var_only)) exch_only = exch_var_only
 
-    twod = .False.
-    if(present(two_d)) twod = two_d
-    threed = .True.
-    if(present(three_d)) threed = three_d
+!     twod = .False.
+!     if(present(two_d)) twod = two_d
+!     threed = .True.
+!     if(present(three_d)) threed = three_d
 
-    if (twod) then
-        call this%halo_2d_send_batch(exch_vars, adv_vars)
+!     if (twod) then
+!         call this%halo_2d_send_batch(exch_vars, adv_vars)
      
-        call this%halo_2d_retrieve_batch(exch_vars, adv_vars)
-    endif
-    if (threed) then
-        call this%halo_3d_send_batch(exch_vars, adv_vars, exch_var_only=exch_only)
+!         call this%halo_2d_retrieve_batch(exch_vars, adv_vars)
+!     endif
+!     if (threed) then
+!         call this%halo_3d_send_batch(exch_vars, adv_vars, exch_var_only=exch_only)
 
-        call this%halo_3d_retrieve_batch(exch_vars, adv_vars, exch_var_only=exch_only)
-    endif
+!         call this%halo_3d_retrieve_batch(exch_vars, adv_vars, exch_var_only=exch_only)
+!     endif
 
-end subroutine
+! end subroutine
 
 
 module subroutine put_north(this,var,do_dqdt)
@@ -1106,8 +1109,8 @@ module subroutine put_west(this,var,do_dqdt)
 end subroutine
 
 module subroutine retrieve_north_halo(this,var,do_dqdt)
-  class(halo_t), intent(inout) :: this
-  class(variable_t), intent(in) :: var
+  class(halo_t), intent(in) :: this
+  class(variable_t), intent(inout) :: var
   logical, optional, intent(in) :: do_dqdt
   integer :: n, nx, offs_x, offs_y
   logical :: dqdt
@@ -1134,8 +1137,8 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
 end subroutine
 
 module subroutine retrieve_south_halo(this,var,do_dqdt)
-  class(halo_t), intent(inout) :: this
-  class(variable_t), intent(in) :: var
+  class(halo_t), intent(in) :: this
+  class(variable_t), intent(inout) :: var
   logical, optional, intent(in) :: do_dqdt
   integer :: start, nx, offs_y, offs_x
   logical :: dqdt
@@ -1163,9 +1166,9 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
 end subroutine
 
 module subroutine retrieve_east_halo(this,var,do_dqdt)
-  class(halo_t), intent(inout) :: this
-  class(variable_t), intent(in) :: var
-  logical, optional, intent(in) :: do_dqdt
+    class(halo_t), intent(in) :: this
+    class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
   integer :: n, ny, offs_x, offs_y
   logical :: dqdt
 
@@ -1191,9 +1194,9 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
 end subroutine
 
 module subroutine retrieve_west_halo(this,var,do_dqdt)
-  class(halo_t), intent(inout) :: this
-  class(variable_t), intent(in) :: var
-  logical, optional, intent(in) :: do_dqdt
+    class(halo_t), intent(in) :: this
+    class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
   integer :: start, ny, offs_x, offs_y
   logical :: dqdt
 
@@ -1341,9 +1344,9 @@ end subroutine
 
 
 module subroutine retrieve_northeast_halo(this,var,do_dqdt)
-  class(halo_t), intent(inout) :: this
-  class(variable_t), intent(in) :: var
-  logical, optional, intent(in) :: do_dqdt
+    class(halo_t), intent(in) :: this
+    class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
   integer :: offs_x, offs_y
   logical :: dqdt
 
@@ -1365,9 +1368,9 @@ module subroutine retrieve_northeast_halo(this,var,do_dqdt)
 end subroutine
 
 module subroutine retrieve_northwest_halo(this,var,do_dqdt)
-  class(halo_t), intent(inout) :: this
-  class(variable_t), intent(in) :: var
-  logical, optional, intent(in) :: do_dqdt
+    class(halo_t), intent(in) :: this
+    class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
   integer :: offs_x, offs_y
   logical :: dqdt
 
@@ -1389,9 +1392,9 @@ module subroutine retrieve_northwest_halo(this,var,do_dqdt)
 end subroutine
 
 module subroutine retrieve_southwest_halo(this,var,do_dqdt)
-  class(halo_t), intent(inout) :: this
-  class(variable_t), intent(in) :: var
-  logical, optional, intent(in) :: do_dqdt
+    class(halo_t), intent(in) :: this
+    class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
 
   logical :: dqdt
 
@@ -1410,9 +1413,9 @@ module subroutine retrieve_southwest_halo(this,var,do_dqdt)
 end subroutine
 
 module subroutine retrieve_southeast_halo(this,var,do_dqdt)
-  class(halo_t), intent(inout) :: this
-  class(variable_t), intent(in) :: var
-  logical, optional, intent(in) :: do_dqdt
+    class(halo_t), intent(in) :: this
+    class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
   integer :: offs_x, offs_y
   logical :: dqdt
 

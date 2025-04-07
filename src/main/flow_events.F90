@@ -231,7 +231,6 @@ subroutine component_read(component, options, boundary, ioclient)
             call component%interpolate_forcing(boundary, update=.True.)
 
             ! Make the boundary condition dXdt values into units of [X]/s
-            call boundary%update_delta_fields(component)
             call component%update_delta_fields()
 
             call component%input_timer%stop()

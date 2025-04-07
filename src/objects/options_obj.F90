@@ -1133,7 +1133,7 @@ contains
         character(len=kMAX_FILE_LENGTH) :: init_conditions_file(kMAX_NESTS)
 
         character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: landvar,lakedepthvar,hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
-                                        snowh_var, soiltype_var, soil_t_var,soil_vwc_var,swe_var, soil_deept_var,           &
+                                        snowh_var, soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var, soil_deept_var,           &
                                         vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var, linear_mask_var, nsq_calibration_var,  &
                                         sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, &
                                         aspect_angle_var, shd_var  !!MJ added
@@ -1141,7 +1141,7 @@ contains
         namelist /domain/ dx, nz, longitude_system, init_conditions_file, &
                             landvar,lakedepthvar, snowh_var, agl_cap, use_agl_height, &
                             hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
-                            soiltype_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
+                            soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
                             vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var, linear_mask_var, nsq_calibration_var,  &
                             sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, & !! MJ added
                             dz_levels, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n
@@ -1179,6 +1179,7 @@ contains
         call set_nml_var_default(vlat_hi, 'vlat_hi', print_info, gennml)
         call set_nml_var_default(vlon_hi, 'vlon_hi', print_info, gennml)
         call set_nml_var_default(soiltype_var, 'soiltype_var', print_info, gennml)
+        call set_nml_var_default(cropcategory_var, 'cropcategory_var', print_info, gennml)
         call set_nml_var_default(soil_t_var, 'soil_t_var', print_info, gennml)
         call set_nml_var_default(soil_vwc_var, 'soil_vwc_var', print_info, gennml)
         call set_nml_var_default(swe_var, 'swe_var', print_info, gennml)
@@ -1279,6 +1280,7 @@ contains
         call set_nml_var(domain_options%vlat_hi, vlat_hi(n_indx), 'vlat_hi',domain_options, vlat_hi(1))
         call set_nml_var(domain_options%vlon_hi, vlon_hi(n_indx), 'vlon_hi',domain_options, vlon_hi(1))
         call set_nml_var(domain_options%soiltype_var, soiltype_var(n_indx), 'soiltype_var',domain_options, soiltype_var(1))
+        call set_nml_var(domain_options%cropcategory_var, cropcategory_var(n_indx), 'cropcategory_var',domain_options, cropcategory_var(1))
         call set_nml_var(domain_options%soil_t_var, soil_t_var(n_indx), 'soil_t_var',domain_options, soil_t_var(1))
         call set_nml_var(domain_options%soil_vwc_var, soil_vwc_var(n_indx), 'soil_vwc_var',domain_options, soil_vwc_var(1))
         call set_nml_var(domain_options%swe_var, swe_var(n_indx), 'swe_var',domain_options, swe_var(1))

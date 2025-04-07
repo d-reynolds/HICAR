@@ -55,11 +55,11 @@ contains
     !! @param err     : optional, if available this will be set to indicate if the key is not found
     !!
     !!------------------------------------------------
-    module function get_var(this, varname, err) result(var_data)
+    module function get_var(this, varname, err, indx) result(var_data)
         implicit none
         class(var_dict_t),   intent(in) :: this
         character(len=*),    intent(in) :: varname
-        integer,             intent(out),  optional :: err
+        integer,             intent(out),  optional :: err, indx
 
         type(variable_t)                :: var_data
 
@@ -87,6 +87,7 @@ contains
             ! if this key matches the supplied key, return the variable
             if (trim(this%var_list(i)%name) == trim(varname)) then
                 var_data = this%var_list(i)%var
+                if (present(indx)) indx = i
                 return
             endif
         end do
@@ -119,8 +120,9 @@ contains
         logical,             intent(in), optional :: save_state
         integer,             intent(out),optional :: err
 
+        type(variable_t) :: var
         logical :: save_data
-        integer :: ims,ime, jms,jme, kms,kme
+        integer :: ims,ime, jms,jme, kms,kme, indx, error
 
         save_data = .False.
         if (present(save_state)) save_data=save_state
@@ -138,39 +140,55 @@ contains
             stop "Ran out of space in var_dict"
         endif
 
-        this%n_vars = this%n_vars + 1
-        this%var_list(this%n_vars)%name = varname
+        ! check if an entry with varname is already in dictionary
+        var = this%get_var(trim(varname),err=error, indx=indx)
 
-        ! warning, this copies all information directly from the var_data into the dict, including the POINTER to the data
-        this%var_list(this%n_vars)%var  = var_data
-        this%var_list(this%n_vars)%var%name = varname
-
-        ! If we want to assume that the data arrays may be deallocated outside of the dict, we can do this...
-        if (save_data) then
-
-            if (var_data%two_d) then
-                ims = lbound(var_data%data_2d,1)
-                ime = ubound(var_data%data_2d,1)
-                jms = lbound(var_data%data_2d,2)
-                jme = ubound(var_data%data_2d,2)
-
-                nullify( this%var_list(this%n_vars)%var%data_2d)
-                allocate(this%var_list(this%n_vars)%var%data_2d(ims:ime, jms:jme))
-                this%var_list(this%n_vars)%var%data_2d(:,:)  = var_data%data_2d(:,:)
-            else
-                ims = lbound(var_data%data_3d,1)
-                ime = ubound(var_data%data_3d,1)
-                jms = lbound(var_data%data_3d,2)
-                jme = ubound(var_data%data_3d,2)
-                kms = lbound(var_data%data_3d,3)
-                kme = ubound(var_data%data_3d,3)
-
-                nullify( this%var_list(this%n_vars)%var%data_3d)
-                allocate(this%var_list(this%n_vars)%var%data_3d(ims:ime, jms:jme, kms:kme))
-                this%var_list(this%n_vars)%var%data_3d(:,:,:)  = var_data%data_3d(:,:,:)
+        ! if we get an error, then we need to add a new entry
+        if (error == 0) then
+            ! if (STD_OUT_PE) write(*,*) "WARNING: Overwriting existing variable in var_dict: ", trim(var_data%name)
+            if (this%var_list(indx)%var%two_d) then
+                this%var_list(indx)%var%data_2d(:,:)  = var_data%data_2d(:,:)
+                if (allocated(this%var_list(indx)%var%dqdt_2d)) this%var_list(indx)%var%dqdt_2d(:,:)  = var_data%dqdt_2d(:,:)
+            else if (this%var_list(indx)%var%three_d) then
+                this%var_list(indx)%var%data_3d(:,:,:)  = var_data%data_3d(:,:,:)
+                if (allocated(this%var_list(indx)%var%dqdt_3d)) this%var_list(indx)%var%dqdt_3d(:,:,:)  = var_data%dqdt_3d(:,:,:)
             endif
-
         else
+            ! if (STD_OUT_PE) write(*,*) "WARNING: Adding var to var dict: ", trim(var_data%name)
+            this%n_vars = this%n_vars + 1
+            indx = this%n_vars
+
+            this%var_list(indx)%name = varname
+
+            ! warning, this copies all information directly from the var_data into the dict, including the POINTER to the data
+            this%var_list(indx)%var  = var_data
+            ! this%var_list(indx)%var%name = varname
+
+            ! If we want to assume that the data arrays may be deallocated outside of the dict, we can do this...
+            if (save_data) then
+
+                if (var_data%two_d) then
+                    ims = lbound(var_data%data_2d,1)
+                    ime = ubound(var_data%data_2d,1)
+                    jms = lbound(var_data%data_2d,2)
+                    jme = ubound(var_data%data_2d,2)
+
+                    deallocate( this%var_list(indx)%var%data_2d)
+                    allocate(this%var_list(indx)%var%data_2d(ims:ime, jms:jme))
+                    this%var_list(indx)%var%data_2d(:,:)  = var_data%data_2d(:,:)
+                else
+                    ims = lbound(var_data%data_3d,1)
+                    ime = ubound(var_data%data_3d,1)
+                    jms = lbound(var_data%data_3d,2)
+                    jme = ubound(var_data%data_3d,2)
+                    kms = lbound(var_data%data_3d,3)
+                    kme = ubound(var_data%data_3d,3)
+
+                    deallocate( this%var_list(indx)%var%data_3d)
+                    allocate(this%var_list(indx)%var%data_3d(ims:ime, jms:jme, kms:kme))
+                    this%var_list(indx)%var%data_3d(:,:,:)  = var_data%data_3d(:,:,:)
+                endif
+            endif
         endif
 
 

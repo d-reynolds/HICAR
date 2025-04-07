@@ -230,24 +230,24 @@ contains
             domain%tend%u         = 0
             domain%tend%v         = 0
 
-            ! windspd=sqrt(  domain%diagnostic_vars(domain%var_indx(kVARS%u_mass))%data_3d(ims:ime, 1, jms:jme)**2 +     &
-            !             domain%diagnostic_vars(domain%var_indx(kVARS%v_mass))%data_3d(ims:ime, 1, jms:jme)**2   )
-            windspd = sqrt(domain%diagnostic_vars(domain%var_indx(kVARS%u_10m))%data_2d**2 + domain%diagnostic_vars(domain%var_indx(kVARS%v_10m))%data_2d**2) ! as it is done in lsm_driver.
+            ! windspd=sqrt(  domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d(ims:ime, 1, jms:jme)**2 +     &
+            !             domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d(ims:ime, 1, jms:jme)**2   )
+            windspd = sqrt(domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d**2 + domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d**2) ! as it is done in lsm_driver.
             where(windspd==0) windspd=1e-5
 
             if (options%physics%radiation==kRA_RRTMG) then
                 RTHRATEN = domain%tend%th_lwrad + domain%tend%th_swrad
             endif
-            call ysu(u3d=domain%diagnostic_vars(domain%var_indx(kVARS%u_mass))%data_3d                           & !-- u3d         3d u-velocity interpolated to theta points (m/s)
-                    ,v3d=domain%diagnostic_vars(domain%var_indx(kVARS%v_mass))%data_3d                           & !-- v3d         3d v-velocity interpolated to theta points (m/s)
-                    ,th3d=domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d           &
-                    ,t3d=domain%diagnostic_vars(domain%var_indx(kVARS%temperature))%data_3d                      &
-                    ,qv3d=domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d                     &
-                    ,qc3d=domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d                & !-- qc3d        cloud water mixing ratio (kg/kg)
-                    ,qi3d=domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d                  & !-- qi3d        cloud ice mixing ratio (kg/kg)
-                    ,p3d=domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d                         & !-- p3d         3d pressure (pa)
-                    ,p3di=domain%diagnostic_vars(domain%var_indx(kVARS%pressure_interface))%data_3d              & !-- p3di        3d pressure (pa) at interface level
-                    ,pi3d=domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d                           & !-- pi3d        3d exner function (dimensionless)
+            call ysu(u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d                           & !-- u3d         3d u-velocity interpolated to theta points (m/s)
+                    ,v3d=domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d                           & !-- v3d         3d v-velocity interpolated to theta points (m/s)
+                    ,th3d=domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d           &
+                    ,t3d=domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d                      &
+                    ,qv3d=domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d                     &
+                    ,qc3d=domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d                & !-- qc3d        cloud water mixing ratio (kg/kg)
+                    ,qi3d=domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d                  & !-- qi3d        cloud ice mixing ratio (kg/kg)
+                    ,p3d=domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d                         & !-- p3d         3d pressure (pa)
+                    ,p3di=domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d              & !-- p3di        3d pressure (pa) at interface level
+                    ,pi3d=domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d                           & !-- pi3d        3d exner function (dimensionless)
                     ,rublten=domain%tend%u                               & ! i/o
                     ,rvblten=domain%tend%v                  & ! i/o
                     ,rthblten=domain%tend%th_pbl            & ! i/o
@@ -260,34 +260,34 @@ contains
                     ,rovcp=rcp                            & ! rovcp = Rd/cp
                     ,rd=R_d                                 &  ! J/(kg K) specific gas constant for dry air
                     ,rovg=rovg                              &
-                    ,dz8w=domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d       & !-- dz8w        dz between full levels (m)
+                    ,dz8w=domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d       & !-- dz8w        dz between full levels (m)
                     ,xlv=XLV                    & !-- xlv         latent heat of vaporization (j/kg)
                     ,rv=r_v                                  &  ! J/(kg K) specific gas constant for wet/moist air
-                    ,psfc=domain%diagnostic_vars(domain%var_indx(kVARS%surface_pressure))%data_2d   &
-                    ,znt=domain%diagnostic_vars(domain%var_indx(kVARS%roughness_z0))%data_2d       &  ! i/o -- znt		roughness length (m) (input only)
-                    ,ust=domain%diagnostic_vars(domain%var_indx(kVARS%ustar))%data_2d                       & ! i/o -- ust		u* in similarity theory (m/s)
-                    ,hpbl=domain%diagnostic_vars(domain%var_indx(kVARS%hpbl))%data_2d               & ! i/o -- hpbl	pbl height (m) - intent(inout)
-                    ,psim=domain%diagnostic_vars(domain%var_indx(kVARS%psim))%data_2d               & !-- psim        similarity stability function for momentum - intent(in)
-                    ,psih=domain%diagnostic_vars(domain%var_indx(kVARS%psih))%data_2d               & !-- psih        similarity stability function for heat- intent(in)
-                    ,xland=real(domain%grid_vars(domain%var_indx(kVARS%land_mask))%data_2di)                               &
-                    ,hfx=domain%diagnostic_vars(domain%var_indx(kVARS%sensible_heat))%data_2d                     & !  HFX  - net upward heat flux at the surface (W/m^2)
-                    ,qfx=domain%diagnostic_vars(domain%var_indx(kVARS%qfx))%data_2d           & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
+                    ,psfc=domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d   &
+                    ,znt=domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d       &  ! i/o -- znt		roughness length (m) (input only)
+                    ,ust=domain%vars_2d(domain%var_indx(kVARS%ustar)%v)%data_2d                       & ! i/o -- ust		u* in similarity theory (m/s)
+                    ,hpbl=domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d               & ! i/o -- hpbl	pbl height (m) - intent(inout)
+                    ,psim=domain%vars_2d(domain%var_indx(kVARS%psim)%v)%data_2d               & !-- psim        similarity stability function for momentum - intent(in)
+                    ,psih=domain%vars_2d(domain%var_indx(kVARS%psih)%v)%data_2d               & !-- psih        similarity stability function for heat- intent(in)
+                    ,xland=real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di)                               &
+                    ,hfx=domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d                     & !  HFX  - net upward heat flux at the surface (W/m^2)
+                    ,qfx=domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d           & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
                     !,UOCE=uoce,VOCE=voce                                  & !ocean currents -- not currently used
                     !,CTOPO=ctopo,CTOPO2=ctopo2                            & !optional, only applied to momentum tendencies, not currently used
                     ,YSU_TOPDOWN_PBLMIX=options%pbl%ysu_topdown_pblmix                &
                     ,wspd=windspd                           & ! i/o -- wspd        wind speed at lowest model level (m/s)
-                    ,br=domain%diagnostic_vars(domain%var_indx(kVARS%br))%data_2d                   & !-- br          bulk richardson number in surface layer
+                    ,br=domain%vars_2d(domain%var_indx(kVARS%br)%v)%data_2d                   & !-- br          bulk richardson number in surface layer
                     ,dt=dt_in                               & !-- dt		time step (s)
-                    ,kpbl2d=domain%diagnostic_vars(domain%var_indx(kVARS%kpbl))%data_2di                          & ! o --     ?? k layer of pbl top??
+                    ,kpbl2d=domain%vars_2d(domain%var_indx(kVARS%kpbl)%v)%data_2di                          & ! o --     ?? k layer of pbl top??
                     ,ep1=EP_1                                & !-- ep1         constant for virtual temperature (r_v/r_d - 1) (dimensionless)
                     ,ep2=EP_2                                & !-- ep2         constant for specific humidity calculation
                     ,karman=karman                          & !-- karman      von karman constant
                     ,RTHRATEN=RTHRATEN                                    &
 !                    ,WSTAR=wstar,DELTA=delta                              &  !Output variables of YSU which we currently dont use
-                    ,exch_h=domain%diagnostic_vars(domain%var_indx(kVARS%coeff_heat_exchange_3d))%data_3d  & ! i/o -- exch_h ! exchange coefficient for heat, K m/s , but 3d??
-                    ,exch_m=domain%diagnostic_vars(domain%var_indx(kVARS%coeff_momentum_exchange_3d))%data_3d  & ! i/o -- exch_h ! exchange coefficient for heat, K m/s , but 3d??
-                    ,u10=domain%diagnostic_vars(domain%var_indx(kVARS%u_10m))%data_2d               &
-                    ,v10=domain%diagnostic_vars(domain%var_indx(kVARS%v_10m))%data_2d               &
+                    ,exch_h=domain%vars_3d(domain%var_indx(kVARS%coeff_heat_exchange_3d)%v)%data_3d  & ! i/o -- exch_h ! exchange coefficient for heat, K m/s , but 3d??
+                    ,exch_m=domain%vars_3d(domain%var_indx(kVARS%coeff_momentum_exchange_3d)%v)%data_3d  & ! i/o -- exch_h ! exchange coefficient for heat, K m/s , but 3d??
+                    ,u10=domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d               &
+                    ,v10=domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d               &
                     ,ids=ids, ide=ide, jds=jds, jde=jde     &
                     ,kds=kds, kde=kde, ims=ims, ime=ime     &
                     ,jms=jms, jme=jme, kms=kms, kme=kme     &
@@ -296,7 +296,7 @@ contains
                 !optional
                     ,regime=regime                          )!  i/o -- regime	flag indicating pbl regime (stable, unstable, etc.) - not used?
 
-                    ! if(STD_OUT_PE .and. options%general%debug) write(*,*) "  pbl height/lev is:", maxval(domain%diagnostic_vars(domain%var_indx(kVARS%hpbl))%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
+                    ! if(STD_OUT_PE .and. options%general%debug) write(*,*) "  pbl height/lev is:", maxval(domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
 
 
 
@@ -307,13 +307,13 @@ contains
             ! ! $omp do schedule(static)
             ! do j=jts,jte ! OMP  loop
 
-                ! domain%state_vars(domain%var_indx(kVARS%u))%data_3d(:,:,j)  =  domain%state_vars(domain%var_indx(kVARS%u))%data_3d(:,:,j) + tend_u_ugrid(:,:,j) * dt_in
-                ! ! domain%state_vars(domain%var_indx(kVARS%v))%data_3d(:,:,j)            =  domain%state_vars(domain%var_indx(kVARS%v))%data_3d(:,:,j)       + domain%tend%v(:,:,j) * dt_in
+                ! domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(:,:,j)  =  domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(:,:,j) + tend_u_ugrid(:,:,j) * dt_in
+                ! ! domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(:,:,j)            =  domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(:,:,j)       + domain%tend%v(:,:,j) * dt_in
 
-                ! domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d(:,:,j)  =  domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d(:,:,j)  +  domain%tend%qv_pbl(:,:,j) * dt_in
-                ! domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d(:,:,j)      = domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d(:,:,j)      + domain%tend%qc_pbl(:,:,j) * dt_in
-                ! domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d(:,:,j) = domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d(:,:,j) + domain%tend%th_pbl(:,:,j) * dt_in
-                ! domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d(:,:,j)        = domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d(:,:,j)        + domain%tend%qi_pbl(:,:,j) * dt_in
+                ! domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(:,:,j)  =  domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(:,:,j)  +  domain%tend%qv_pbl(:,:,j) * dt_in
+                ! domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d(:,:,j)      = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d(:,:,j)      + domain%tend%qc_pbl(:,:,j) * dt_in
+                ! domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(:,:,j) = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(:,:,j) + domain%tend%th_pbl(:,:,j) * dt_in
+                ! domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d(:,:,j)        = domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d(:,:,j)        + domain%tend%qi_pbl(:,:,j) * dt_in
 
                 ! ! Reset tendencies before the next pbl call. (necessary?)
                 ! domain%tend%qv_pbl(:,:,j)   = 0
@@ -348,14 +348,14 @@ contains
             ! call array_offset_x_3d(domain%tend%u , tend_u_ugrid)
             ! call array_offset_y_3d(domain%tend%v , tend_v_vgrid)
 
-            ! domain%state_vars(domain%var_indx(kVARS%u))%data_3d   =  domain%state_vars(domain%var_indx(kVARS%u))%data_3d  +  tend_u_ugrid  * dt_in
-            ! domain%state_vars(domain%var_indx(kVARS%v))%data_3d   =  domain%state_vars(domain%var_indx(kVARS%v))%data_3d  +  tend_v_vgrid  * dt_in
+            ! domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d   =  domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d  +  tend_u_ugrid  * dt_in
+            ! domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d   =  domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d  +  tend_v_vgrid  * dt_in
 
             ! add mass grid tendencies
-            domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d            =  domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d            + domain%tend%qv_pbl  * dt
-            domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d       =  domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d       + domain%tend%qc_pbl  * dt
-            domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d  =  domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d  + domain%tend%th_pbl  * dt
-            domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d         =  domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d         + domain%tend%qi_pbl  * dt
+            domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d            =  domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d            + domain%tend%qv_pbl  * dt
+            domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d       =  domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d       + domain%tend%qc_pbl  * dt
+            domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d  =  domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d  + domain%tend%th_pbl  * dt
+            domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d         =  domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d         + domain%tend%qi_pbl  * dt
         endif
     end subroutine pbl_apply_tend
 

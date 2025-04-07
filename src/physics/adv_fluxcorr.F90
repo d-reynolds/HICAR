@@ -117,18 +117,17 @@ contains
         ! Next compute max and min possible fluxes
         ! $omp parallel default(none) &
         ! $omp shared(q,flux_x_up,flux_y_up,flux_z_up,flux_x,flux_y,flux_z) &
-        ! $omp shared(scale_in,scale_out,flux_x_cpy,flux_y_cpy,flux_z_cpy) &
+        ! $omp shared(scale_in,scale_out) &
         ! $omp shared(dz,denom,usign,vsign,wsign) &
-        ! $omp private(i,j,k, j_block, k_block, q0, q_i, q_j, q_k, qmin, qmax, dz_t_i) &
+        ! $omp private(i,j,k, scale, usign0, vsign0, wsign0, q0, q_i, q_j, q_k, qmin, qmax, dz_t_i) &
         ! $omp private(fx, fx1, fy, fy1, fz, fz1, temp, flux_in, flux_out) &
-        ! $omp private(flux_x_up_0, flux_y_up_0, flux_z_up_0, flux_x_up_1, flux_y_up_1, flux_z_up_1, bot, wes, sou) &
+        ! $omp private(flux_x_up_0, flux_y_up_0, flux_z_up_0, flux_x_up_1, flux_y_up_1, flux_z_up_1) &
         ! $omp firstprivate(its, ite, jts, jte, kms,kme)
-        ! $omp do schedule(static) collapse(2)
-        ! $omp simd collapse(3)
-        do j = jts-1, jte+1 
-            do k = kms, kme
-                do i = its-1, ite+1
-
+        ! $omp do
+        ! do j = jts-1, jte+1 
+        !     do k = kms, kme
+        !         do i = its-1, ite+1
+        do concurrent (j = jts-1:jte+1, k = kms:kme, i = its-1:ite+1)
                     usign0 = usign(i,k,j)
                     vsign0 = vsign(i,k,j)
                     wsign0 = wsign(i,k,j)
@@ -207,11 +206,16 @@ contains
     
                     scale_in(i,k,j) = (qmax-temp)/(flux_in  + 0.000000001)
                     scale_out(i,k,j) = (temp-qmin)/(flux_out+ 0.000000001)
-                enddo
-            enddo
+            !     enddo
+            ! enddo
         enddo
-        do concurrent (j = jts:jte+1, k = kms:kme, i = its:ite+1)
+        ! $OMP END DO
 
+        ! $omp do
+        ! do j = jts-1, jte+1 
+        !     do k = kms, kme
+        !         do i = its-1, ite+1
+        do concurrent (j = jts-1:jte+1, k = kms:kme, i = its-1:ite+1)
                     if (i >= its) then
                         flux_x(i,k,j) = flux_x(i,k,j) - flux_x_up(i,k,j)
                         if (flux_x(i,k,j) > 0) then
@@ -248,7 +252,8 @@ contains
             !     enddo
             ! enddo
         enddo
-
+        ! $omp end do
+        ! $omp end parallel
         ! do concurrent (j = jts:jte+1, k = kms:kme, i = its:ite+1)
         !     flux_x (i,k,j) = flux_x (i,k,j) - flux_x_up(i,k,j)
         !     if (flux_x(i,k,j) > 0) then

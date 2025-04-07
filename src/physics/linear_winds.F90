@@ -665,11 +665,11 @@ contains
 
         LUT_file = trim(options%lt%u_LUT_Filename) // "_" // trim(str(NUM_COMPUTE)) // "_" // trim(str(my_index)) // ".nc"
 
-        ims = lbound(domain%grid_vars(domain%var_indx(kVARS%z))%data_3d,1)
-        jms = lbound(domain%grid_vars(domain%var_indx(kVARS%z))%data_3d,3)
+        ims = lbound(domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d,1)
+        jms = lbound(domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d,3)
 
         ! the domain to work over
-        nz = size(domain%state_vars(domain%var_indx(kVARS%u))%data_3d,  2)
+        nz = size(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,  2)
 
         fftnx = size(domain%terrain_frequency, 1)
         fftny = size(domain%terrain_frequency, 2)
@@ -719,7 +719,7 @@ contains
 
         if ( (reverse.or.(.not.((options%lt%read_LUT).and.(error==0)))) .and. (.not.module_initialized) ) then
 
-            call setup_remote_grids(u_grids, v_grids, domain%grid_vars(domain%var_indx(kVARS%global_terrain))%data_2d, nz, &
+            call setup_remote_grids(u_grids, v_grids, domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, nz, &
                                                       domain%grid%halo_size, domain%compute_comms)
 
             ! ensure these are at their required size for all images
@@ -803,10 +803,10 @@ contains
 
                     ! call update_irregular_grid(u,v, nsq_values(j), z, domain, minimum_layer_size)
                     call linear_perturbation(u, v, exp(nsq_values(j)),                                                                      &
-                                             domain%grid_vars(domain%var_indx(kVARS%global_z_interface))%data_3d(:,z,:) - &
-                                             domain%grid_vars(domain%var_indx(kVARS%global_terrain))%data_2d,                                      &
-                                             domain%grid_vars(domain%var_indx(kVARS%global_z_interface))%data_3d(:,z,:) - &
-                                             domain%grid_vars(domain%var_indx(kVARS%global_terrain))%data_2d + domain%grid_vars(domain%var_indx(kVARS%global_dz_interface))%data_3d(:,z,:),  &
+                                             domain%vars_3d(domain%var_indx(kVARS%global_z_interface)%v)%data_3d(:,z,:) - &
+                                             domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d,                                      &
+                                             domain%vars_3d(domain%var_indx(kVARS%global_z_interface)%v)%data_3d(:,z,:) - &
+                                             domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d + domain%vars_3d(domain%var_indx(kVARS%global_dz_interface)%v)%data_3d(:,z,:),  &
                                              minimum_layer_size, domain%terrain_frequency, lt_data_m)
 
                     ! need to handle stagger (nxu /= nx) and the buffer around edges of the domain
@@ -911,17 +911,17 @@ contains
         real :: hydrometeors
 
         ! pointers to the u/v data to be updated so they can point to different places depending on the update flag
-        real, pointer :: u3d(:,:,:), v3d(:,:,:), nsquared(:,:,:)
+        real, allocatable :: u3d(:,:,:), v3d(:,:,:), nsquared(:,:,:)
 
 
         if (update) then
-            u3d => domain%state_vars(domain%var_indx(kVARS%u))%dqdt_3d
-            v3d => domain%state_vars(domain%var_indx(kVARS%v))%dqdt_3d
+            u3d = domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d
+            v3d = domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d
         else
-            u3d => domain%state_vars(domain%var_indx(kVARS%u))%data_3d
-            v3d => domain%state_vars(domain%var_indx(kVARS%v))%data_3d
+            u3d = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d
+            v3d = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d
         endif
-        nsquared => domain%diagnostic_vars(domain%var_indx(kVARS%nsquared))%data_3d
+        nsquared = domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d
 
         ims_u = lbound(u3d,1)
         ime_u = ubound(u3d,1)
@@ -936,8 +936,8 @@ contains
         kms = lbound(u3d,2)
         kme = ubound(u3d,2)
 
-        nx  = size(domain%grid_vars(domain%var_indx(kVARS%latitude))%data_2d,1)
-        ny  = size(domain%grid_vars(domain%var_indx(kVARS%latitude))%data_2d,2)
+        nx  = size(domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d,1)
+        ny  = size(domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d,2)
         nz  = size(u3d,2)
         nxu = size(u3d,1)
         nyv = size(v3d,3)
@@ -976,22 +976,22 @@ contains
                         bottom = max(1, j - (vsmooth - (top-j)))
 
                         hydrometeors = 0
-                        if (domain%var_indx(kVARS%cloud_water_mass) > 0) &
-                            hydrometeors = hydrometeors + domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d(i+ims-1,j+kms-1,k+jms-1)
-                        if (domain%var_indx(kVARS%ice_mass) > 0) &
-                            hydrometeors = hydrometeors + domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d(i+ims-1,j+kms-1,k+jms-1)
-                        if (domain%var_indx(kVARS%rain_mass) > 0) &
-                            hydrometeors = hydrometeors + domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d(i+ims-1,j+kms-1,k+jms-1)
-                        if (domain%var_indx(kVARS%snow_mass) > 0) &
-                            hydrometeors = hydrometeors + domain%state_vars(domain%var_indx(kVARS%snow_mass))%data_3d(i+ims-1,j+kms-1,k+jms-1)
+                        if (domain%var_indx(kVARS%cloud_water_mass)%v > 0) &
+                            hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
+                        if (domain%var_indx(kVARS%ice_mass)%v > 0) &
+                            hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
+                        if (domain%var_indx(kVARS%rain_mass)%v > 0) &
+                            hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
+                        if (domain%var_indx(kVARS%snow_mass)%v > 0) &
+                            hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
 
 
                         if (.not.reverse) then
-                            nsquared(i+ims-1,j+kms-1,k+jms-1) = calc_stability(domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d(i+ims-1,bottom+kms-1,k+jms-1),                              &
-                                                             domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d(i+ims-1,top+kms-1,k+jms-1),                                                   &
-                                                             domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d(i+ims-1,bottom+kms-1,k+jms-1),domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d(i+ims-1,top+kms-1,k+jms-1),                &
-                                                             domain%grid_vars(domain%var_indx(kVARS%z))%data_3d(i+ims-1,bottom+kms-1,k+jms-1),  domain%grid_vars(domain%var_indx(kVARS%z))%data_3d(i+ims-1,top+kms-1,k+jms-1),                      &
-                                                             domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d(i+ims-1,bottom+kms-1,k+jms-1), domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d(i+ims-1,top+kms-1,k+jms-1),   &
+                            nsquared(i+ims-1,j+kms-1,k+jms-1) = calc_stability(domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i+ims-1,bottom+kms-1,k+jms-1),                              &
+                                                             domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i+ims-1,top+kms-1,k+jms-1),                                                   &
+                                                             domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d(i+ims-1,bottom+kms-1,k+jms-1),domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d(i+ims-1,top+kms-1,k+jms-1),                &
+                                                             domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i+ims-1,bottom+kms-1,k+jms-1),  domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i+ims-1,top+kms-1,k+jms-1),                      &
+                                                             domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i+ims-1,bottom+kms-1,k+jms-1), domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i+ims-1,top+kms-1,k+jms-1),   &
                                                              hydrometeors)
 
                             nsquared(i+ims-1,j+kms-1,k+jms-1) = max(min_stability, min(max_stability, &
@@ -1247,7 +1247,7 @@ contains
             ! Create a buffer zone around the topography to smooth the edges
             buffer = original_buffer
             ! first create it including a 5 grid cell smoothing function
-            call add_buffer_topo(domain%grid_vars(domain%var_indx(kVARS%global_terrain))%data_2d, complex_terrain_firstpass, 5, buffer)
+            call add_buffer_topo(domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, complex_terrain_firstpass, 5, buffer)
             buffer = 2
             ! then further add a small (~2) grid cell buffer where all cells have the same value
             call add_buffer_topo(real(real(complex_terrain_firstpass)), complex_terrain, 0, buffer, debug=options%general%debug)
@@ -1271,9 +1271,9 @@ contains
             if (STD_OUT_PE) write(*,*) "  Using a fraction of the linear perturbation:",linear_contribution
         endif
 
-        nx = size(domain%grid_vars(domain%var_indx(kVARS%global_terrain))%data_2d, 1)
-        nz = size(domain%state_vars(domain%var_indx(kVARS%u))%data_3d,       2)
-        ny = size(domain%grid_vars(domain%var_indx(kVARS%global_terrain))%data_2d, 2)
+        nx = size(domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, 1)
+        nz = size(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,       2)
+        ny = size(domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, 2)
 
 
         ! set up linear_mask variable

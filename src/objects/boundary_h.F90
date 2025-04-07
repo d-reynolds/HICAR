@@ -37,7 +37,6 @@ module boundary_interface
         character(len=kMAX_STRING_LENGTH) :: time_var       ! the name of the input time variable [optional]
 
         type(var_dict_t)                  :: variables      ! a dictionary with all forcing data
-        type(var_dict_t)                  :: variables_hi   ! a dictionary with all forcing data interpolated to high-res grid
 
         ! boundary data coordinate system
         real, dimension(:,:),   allocatable :: lat, lon
@@ -55,7 +54,6 @@ module boundary_interface
     contains
 
         procedure :: init
-        procedure :: update_delta_fields
 
         ! procedure :: find_start_time
         procedure :: init_local
@@ -67,17 +65,16 @@ module boundary_interface
     interface
 
     ! Set default component values
-    module subroutine init(this, options, domain_lat, domain_lon, domain_vars, parent_options)
+    module subroutine init(this, options, domain_lat, domain_lon, parent_options)
         class(boundary_t),    intent(inout) :: this
         type(options_t),      intent(inout) :: options
         real, dimension(:,:), intent(in)    :: domain_lat
         real, dimension(:,:), intent(in)    :: domain_lon
-        type(var_dict_t),     intent(inout) :: domain_vars
         type(options_t), optional, intent(in)    :: parent_options
     end subroutine
 
     module subroutine init_local(this, options, file_list, var_list, dim_list, start_time, &
-                                 lat_var, lon_var, z_var, time_var, p_var, domain_lat, domain_lon, domain_vars)
+                                 lat_var, lon_var, z_var, time_var, p_var, domain_lat, domain_lon)
         implicit none
         class(boundary_t),               intent(inout)  :: this
         type(options_t),                 intent(inout)  :: options
@@ -92,25 +89,15 @@ module boundary_interface
         character(len=kMAX_NAME_LENGTH), intent(in)     :: p_var
         real, dimension(:,:), intent(in)                :: domain_lat
         real, dimension(:,:), intent(in)                :: domain_lon
-        type(var_dict_t),     intent(inout)             :: domain_vars
     end subroutine
 
-    module subroutine init_local_asnest(this, var_list, dim_list, domain_lat, domain_lon, domain_vars, parent_options)
+    module subroutine init_local_asnest(this, var_list, dim_list, domain_lat, domain_lon, parent_options)
         class(boundary_t),               intent(inout)  :: this
         character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
         integer,                         intent(in)     :: dim_list (:)
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
-        type(var_dict_t),                intent(inout)  :: domain_vars
         type(options_t),                 intent(in)     :: parent_options
-    end subroutine
-
-
-
-    module subroutine update_delta_fields(this, flow_obj)
-        implicit none
-        class(boundary_t),    intent(inout) :: this
-        class(flow_obj_t),    intent(in)    :: flow_obj
     end subroutine
     
     module subroutine update_computed_vars(this, options, update)

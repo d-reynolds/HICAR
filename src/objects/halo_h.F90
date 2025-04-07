@@ -4,6 +4,7 @@ module halo_interface
     use variable_interface,       only : variable_t
     use variable_dict_interface,  only : var_dict_t
     use timer_interface,          only : timer_t
+    use data_structures,          only : index_type
 
     use mpi_f08
     implicit none
@@ -112,7 +113,7 @@ module halo_interface
         procedure, public :: init
         procedure, public :: finalize
         procedure, public :: exch_var
-        procedure, public :: batch_exch
+        ! procedure, public :: batch_exch
         procedure, public :: halo_3d_send_batch
         procedure, public :: halo_3d_retrieve_batch
 
@@ -144,7 +145,7 @@ interface
     module subroutine init(this, exch_vars, adv_vars, grid, comms)
         implicit none
         class(halo_t), intent(inout) :: this
-        type(var_dict_t), intent(inout) :: exch_vars, adv_vars
+        type(index_type), intent(in) :: adv_vars(:), exch_vars(:)
         type(grid_t), intent(in) :: grid
         type(MPI_comm), intent(inout) :: comms
     end subroutine init
@@ -162,40 +163,44 @@ interface
     end subroutine exch_var
 
 
-    module subroutine batch_exch(this, exch_vars, adv_vars, two_d, three_d, exch_var_only)
-        implicit none
-        class(halo_t), intent(inout) :: this
-        class(var_dict_t), intent(inout) :: exch_vars, adv_vars
-        logical, optional, intent(in) :: two_d,three_d,exch_var_only
-    end subroutine
+    ! module subroutine batch_exch(this, exch_vars, adv_vars, two_d, three_d, exch_var_only)
+    !     implicit none
+    !     class(halo_t), intent(inout) :: this
+    !     type(variable_t), intent(inout) :: adv_vars(:), exch_vars(:)
+    !     logical, optional, intent(in) :: two_d,three_d,exch_var_only
+    ! end subroutine
 
-    module subroutine halo_3d_send_batch(this, exch_vars, adv_vars,exch_var_only)
+    module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_var_only)
         implicit none
         class(halo_t), intent(inout) :: this
-        class(var_dict_t), intent(inout) :: exch_vars, adv_vars
-        logical, optional, intent(in) :: exch_var_only
+        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(variable_t), intent(inout) :: var_data(:)
+            logical, optional, intent(in) :: exch_var_only
     end subroutine halo_3d_send_batch
 
-    module subroutine halo_3d_retrieve_batch(this, exch_vars, adv_vars,exch_var_only, wait_timer)
+    module subroutine halo_3d_retrieve_batch(this, exch_vars, adv_vars, var_data, exch_var_only, wait_timer)
         implicit none
         class(halo_t), intent(inout) :: this
-        class(var_dict_t), intent(inout) :: exch_vars, adv_vars
-        logical, optional, intent(in) :: exch_var_only
+        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(variable_t), intent(inout) :: var_data(:)
+            logical, optional, intent(in) :: exch_var_only
         type(timer_t), optional,     intent(inout)   :: wait_timer
 
     end subroutine halo_3d_retrieve_batch
 
-    module subroutine halo_2d_send_batch(this, exch_vars, adv_vars)
+    module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
         implicit none
         class(halo_t), intent(inout) :: this
-        class(var_dict_t), intent(inout) :: exch_vars, adv_vars
-    end subroutine halo_2d_send_batch
+        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(variable_t), intent(inout) :: var_data(:)
+        end subroutine halo_2d_send_batch
 
-    module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars)
+    module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
         implicit none
         class(halo_t), intent(inout) :: this
-        class(var_dict_t), intent(inout) :: exch_vars, adv_vars
-    end subroutine halo_2d_retrieve_batch
+        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(variable_t), intent(inout) :: var_data(:)
+        end subroutine halo_2d_retrieve_batch
 
 
     module subroutine put_north(this,var,do_dqdt)
@@ -214,15 +219,15 @@ interface
 
     module subroutine retrieve_north_halo(this,var,do_dqdt)
         implicit none
-        class(halo_t), intent(inout) :: this
-        class(variable_t), intent(in) :: var
+        class(halo_t), intent(in) :: this
+        class(variable_t), intent(inout) :: var
         logical, optional, intent(in) :: do_dqdt
     end subroutine
 
     module subroutine retrieve_south_halo(this,var,do_dqdt)
         implicit none
-        class(halo_t), intent(inout) :: this
-        class(variable_t), intent(in) :: var
+        class(halo_t), intent(in) :: this
+        class(variable_t), intent(inout) :: var
         logical, optional, intent(in) :: do_dqdt
     end subroutine
 
@@ -243,16 +248,16 @@ interface
 
     module subroutine retrieve_east_halo(this,var,do_dqdt)
         implicit none
-        class(halo_t), intent(inout) :: this
-        class(variable_t), intent(in) :: var
+        class(halo_t), intent(in) :: this
+        class(variable_t), intent(inout) :: var
         logical, optional, intent(in) :: do_dqdt
 
     end subroutine
 
     module subroutine retrieve_west_halo(this,var,do_dqdt)
         implicit none
-        class(halo_t), intent(inout) :: this
-        class(variable_t), intent(in) :: var
+        class(halo_t), intent(in) :: this
+        class(variable_t), intent(inout) :: var
         logical, optional, intent(in) :: do_dqdt
 
     end subroutine
@@ -287,30 +292,30 @@ interface
 
   module subroutine retrieve_northwest_halo(this,var,do_dqdt)
       implicit none 
-      class(halo_t), intent(inout) :: this
-      class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_dqdt
+      class(halo_t), intent(in) :: this
+      class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
   end subroutine
 
   module subroutine retrieve_northeast_halo(this,var,do_dqdt)
       implicit none 
-      class(halo_t), intent(inout) :: this
-      class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_dqdt
+      class(halo_t), intent(in) :: this
+      class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
   end subroutine
 
   module subroutine retrieve_southeast_halo(this,var,do_dqdt)
       implicit none 
-      class(halo_t), intent(inout) :: this
-      class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_dqdt
+      class(halo_t), intent(in) :: this
+      class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
   end subroutine
 
   module subroutine retrieve_southwest_halo(this,var,do_dqdt)
       implicit none 
-      class(halo_t), intent(inout) :: this
-      class(variable_t), intent(in) :: var
-      logical, optional, intent(in) :: do_dqdt
+      class(halo_t), intent(in) :: this
+      class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
   end subroutine
 
 end interface

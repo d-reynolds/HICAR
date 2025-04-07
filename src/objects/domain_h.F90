@@ -8,11 +8,11 @@ module domain_interface
   use variable_dict_interface,  only : var_dict_t
   use time_object,              only : Time_type
   use time_delta_object,        only : time_delta_t
-  use data_structures,          only : interpolable_type, tendencies_type
+  use data_structures,          only : interpolable_type, tendencies_type, index_type
   use halo_interface,           only : halo_t
   use timer_interface,          only : timer_t
   use flow_object_interface,    only : flow_obj_t
-  use icar_constants,               only : kMAX_STORAGE_VARS, kVARS
+  use icar_constants,               only : kMAX_STORAGE_VARS, kVARS, kMAX_NAME_LENGTH
   implicit none
 
   private
@@ -40,13 +40,13 @@ module domain_interface
 
     type(tendencies_type) :: tend
 
-    type(var_dict_t) :: variables_to_force
-    type(var_dict_t) :: vars_to_out
+    type(var_dict_t) :: forcing_hi
+    type(index_type) :: vars_to_out(kMAX_STORAGE_VARS)
     
     ! Array listing variables to advect with pointers to local data
-    type(var_dict_t) :: adv_vars
-    type(var_dict_t) :: exch_vars
-
+    type(index_type), allocatable :: adv_vars(:), exch_vars(:)
+    integer :: n_adv_2d, n_adv_3d, n_exch_2d, n_exch_3d
+    
     type(interpolable_type) :: geo
     type(interpolable_type) :: geo_agl
     type(interpolable_type) :: geo_u
@@ -58,11 +58,12 @@ module domain_interface
     complex(C_DOUBLE_COMPLEX),  allocatable :: terrain_frequency(:,:) ! FFT(terrain)
 
 
-    type(variable_t), allocatable :: state_vars(:)
-    type(variable_t), allocatable :: diagnostic_vars(:)
-    type(variable_t), allocatable :: grid_vars(:)
+    type(variable_t), allocatable :: vars_1d(:)
+    type(variable_t), allocatable :: vars_2d(:)
+    type(variable_t), allocatable :: vars_3d(:)
+    type(variable_t), allocatable :: vars_4d(:)
 
-    integer :: var_indx(kMAX_STORAGE_VARS)
+    type(index_type) :: var_indx(kMAX_STORAGE_VARS)
     
     ! MPI communicator object for doing parallel communications among domain objects
     type(MPI_Comm), public :: compute_comms
@@ -99,6 +100,12 @@ module domain_interface
     procedure :: release
     procedure :: enforce_limits
 
+    procedure :: batch_exch
+    procedure :: halo_3d_send_batch
+    procedure :: halo_3d_retrieve_batch
+    procedure :: halo_2d_send_batch
+    procedure :: halo_2d_retrieve_batch
+
     procedure :: get_initial_conditions
     procedure :: diagnostic_update
     procedure :: interpolate_forcing
@@ -124,7 +131,35 @@ module domain_interface
         implicit none
         class(domain_t), intent(inout) :: this
     end subroutine
+
+    module subroutine batch_exch(this, two_d, exch_only)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        logical, optional,   intent(in) :: two_d, exch_only
+  end subroutine
+
+    module subroutine halo_3d_send_batch(this, exch_only)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        logical, optional,   intent(in) :: exch_only
+    end subroutine
     
+    module subroutine halo_3d_retrieve_batch(this, exch_only)
+      implicit none
+      class(domain_t), intent(inout) :: this
+      logical, optional,   intent(in) :: exch_only
+  end subroutine
+
+  module subroutine halo_2d_send_batch(this)
+    implicit none
+    class(domain_t), intent(inout) :: this
+  end subroutine
+
+  module subroutine halo_2d_retrieve_batch(this)
+    implicit none
+    class(domain_t), intent(inout) :: this
+  end subroutine
+
     ! read initial atmospheric conditions from forcing data
     module subroutine get_initial_conditions(this, forcing, options)
         implicit none
@@ -142,7 +177,7 @@ module domain_interface
     module subroutine interpolate_forcing(this, forcing, update)
         implicit none
         class(domain_t),  intent(inout) :: this
-        type(boundary_t), intent(in)    :: forcing
+        type(boundary_t), intent(inout) :: forcing
         logical,          intent(in),   optional :: update
     end subroutine
 
