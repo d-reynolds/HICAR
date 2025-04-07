@@ -13,7 +13,7 @@ module wind_surf
     use options_interface, only : options_t
     use io_routines,       only : io_write
     use mod_atm_utilities,     only : calc_thresh_ang
-    use icar_constants,    only : kVARS
+    use icar_constants,    only : kVARS, STD_OUT_PE
 
     implicit none
     private
@@ -74,24 +74,24 @@ contains
                         dist = domain%dx*sqrt(real((i-i_s)**2+(j-j_s)**2))
                         
                         if (dist <= TPI_d_max .and. .not.(dist == 0) ) then
-                            search_height = domain%grid_vars(domain%var_indx(kVARS%neighbor_terrain))%data_2d(i_s,j_s)
+                            search_height = domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s,j_s)
                         
                             TPI_sum = TPI_sum + search_height
                             TPI_num = TPI_num + 1
                         end if                               
                     end do
                 end do
-                if (TPI_num > 0) neighbor_TPI(i,j) = domain%grid_vars(domain%var_indx(kVARS%neighbor_terrain))%data_2d(i,j) - TPI_sum/TPI_num
+                if (TPI_num > 0) neighbor_TPI(i,j) = domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i,j) - TPI_sum/TPI_num
             end do
         end do
         
-        domain%grid_vars(domain%var_indx(kVARS%TPI))%data_2d = neighbor_TPI(domain%grid2d%ims:domain%grid2d%ime,domain%grid2d%jms:domain%grid2d%jme)
+        domain%vars_2d(domain%var_indx(kVARS%TPI)%v)%data_2d = neighbor_TPI(domain%grid2d%ims:domain%grid2d%ime,domain%grid2d%jms:domain%grid2d%jme)
         
         
         ! if ( STD_OUT_PE ) then
         !     write (*,*) "Saving *_TPI.nc"
         !     !Save file
-        !     call io_write("neighbor_TPI.nc", "TPI", domain%grid_vars(domain%var_indx(kVARS%neighbor_TPI))%data_2d(:,:) ) 
+        !     call io_write("neighbor_TPI.nc", "TPI", domain%vars_2d(domain%var_indx(kVARS%neighbor_TPI)%v)%data_2d(:,:) ) 
         ! endif
              
     end subroutine calc_TPI
@@ -134,11 +134,11 @@ contains
         exposed_TPI = 10.0
         
         ! Initialize Sx and set to value of -90 (absolute minimum possible) for search algorithm
-        ! allocate(domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d( 1:72, domain%grid2d%ims:domain%grid2d%ime, 1:Sx_k_max, domain%grid2d%jms:domain%grid2d%jme ))
+        ! allocate(domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d( 1:72, domain%grid2d%ims:domain%grid2d%ime, 1:Sx_k_max, domain%grid2d%jms:domain%grid2d%jme ))
         allocate(Sx_array_temp(domain%grid2d%ims:domain%grid2d%ime, 1:Sx_k_max, domain%grid2d%jms:domain%grid2d%jme,  1:72))
         
         Sx_array_temp = -90.0
-        domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d = -90.0
+        domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d = -90.0
         
         allocate(temp_sheltering_TPI( domain%grid2d%ims:domain%grid2d%ime, 1:Sx_k_max, domain%grid2d%jms:domain%grid2d%jme, 1:72 ))
         allocate(sheltering_TPI( domain%grid2d%ims:domain%grid2d%ime, 1:Sx_k_max, domain%grid2d%jms:domain%grid2d%jme, 1:72 ))
@@ -154,9 +154,9 @@ contains
                 do k = 1, Sx_k_max
 
                     if (k == 1) then
-                        pt_height = domain%grid_vars(domain%var_indx(kVARS%terrain))%data_2d(i,j)
+                        pt_height = domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d(i,j)
                     else if (k > 1) then
-                        pt_height = pt_height + domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d(i,k,j)
+                        pt_height = pt_height + domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,k,j)
                     end if
                     
                     ! Check to use buffers to avoid searching out of grid
@@ -185,7 +185,7 @@ contains
                                 azm_index = int(azm/5)+1
 
                                 !Calculate height difference
-                                search_height = domain%grid_vars(domain%var_indx(kVARS%neighbor_terrain))%data_2d(i_s,j_s)
+                                search_height = domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s,j_s)
                                 h_diff = search_height - pt_height
 
                                 !Calculate Sx slope to search-cell
@@ -242,7 +242,7 @@ contains
                                 maxSxLoc = maxloc(Sx_array_temp(i,k,j,window_rear:72),dim=1)
                                 maxSxLoc = maxSxLoc + (window_rear - 1)
                                 
-                                if (maxval(Sx_array_temp(1:window_fore,i,k,j)) > maxSxVal) then
+                                if (maxval(Sx_array_temp(i,k,j,1:window_fore)) > maxSxVal) then
                                     maxSxVal = maxval(Sx_array_temp(i,k,j,1:window_fore))
                                     maxSxLoc = maxloc(Sx_array_temp(i,k,j,1:window_fore),dim=1)
                                 end if
@@ -251,7 +251,7 @@ contains
                                 maxSxLoc = maxloc(Sx_array_temp(i,k,j,window_rear:window_fore),dim=1)
                                 maxSxLoc = maxSxLoc + (window_rear - 1)
                             end if
-                            domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,ang) = maxSxVal
+                            domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,ang) = maxSxVal
                             sheltering_TPI(i,k,j,ang) = temp_sheltering_TPI(i,k,j,maxSxLoc)
                         end do                    
                     
@@ -264,7 +264,7 @@ contains
                                 fore_ang = ang+1
                                 if (fore_ang > 72) fore_ang = 1
                                 
-                                do while (domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,fore_ang) <= -90.0)
+                                do while (domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,fore_ang) <= -90.0)
                                     fore_ang = fore_ang+1
                                     if (fore_ang > 72) fore_ang = 1
                                 end do
@@ -273,13 +273,13 @@ contains
                             
                             if (ang==1) then
                                 rear_ang = 72
-                                do while(domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,rear_ang) <= -90)
+                                do while(domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,rear_ang) <= -90)
                                     rear_ang = rear_ang-1
                                 end do
                             end if
                     
                             !If we did not calculate Sx for a given direction
-                            if (domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,ang) == -90.0) then
+                            if (domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,ang) == -90.0) then
                                 !Weight the two surrounding Sx values based on our angular-distance to them
                                 rear_ang_diff = ang-rear_ang
                                 fore_ang_diff = fore_ang-ang
@@ -292,8 +292,8 @@ contains
                                 end if
                         
                                 !Interpolation, linearly-weighted by angular-distance from values
-                                domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,ang) = (domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,rear_ang)*fore_ang_diff + &
-                                                    domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,fore_ang)*rear_ang_diff)/ang_diff
+                                domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,ang) = (domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,rear_ang)*fore_ang_diff + &
+                                                    domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,fore_ang)*rear_ang_diff)/ang_diff
 
                                 !if (domain%Sx(ang,i,k,j) > 0) sheltering_TPI(ang,i,k,j) = (sheltering_TPI(rear_ang,i,k,j)*fore_ang_diff + &
                                 !                    sheltering_TPI(fore_ang,i,k,j)*rear_ang_diff)/ang_diff
@@ -303,7 +303,7 @@ contains
 
                     else
                         !IF we only have -90 for all entries, set to 0
-                        domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,:) = 0.0
+                        domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,:) = 0.0
                     end if
                 end do
             end do
@@ -315,8 +315,8 @@ contains
             do j=domain%grid2d%jms, domain%grid2d%jme
                 do k = 1, Sx_k_max
                     do ang = 1, 72
-                        if( (domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,ang) < 0.0) .and. (domain%grid_vars(domain%var_indx(kVARS%TPI))%data_2d(i,j) <= exposed_TPI) ) domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,ang) = 0.0
-                        if( (domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,ang) > 0.0) .and. (sheltering_TPI(i,k,j,ang) <= exposed_TPI) ) domain%grid_vars(domain%var_indx(kVARS%Sx))%data_4d(i,k,j,ang) = 0.0
+                        if( (domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,ang) < 0.0) .and. (domain%vars_2d(domain%var_indx(kVARS%TPI)%v)%data_2d(i,j) <= exposed_TPI) ) domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,ang) = 0.0
+                        if( (domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,ang) > 0.0) .and. (sheltering_TPI(i,k,j,ang) <= exposed_TPI) ) domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d(i,k,j,ang) = 0.0
                     end do
                 end do
             end do
@@ -326,7 +326,7 @@ contains
         !     write (*,*) "Saving *_Sx.nc"
         !     !Save file
         !     call io_write(filename, "Sx", domain%Sx(:,:,:,:) ) 
-        !     call io_write("TPI_out.nc", "TPI", domain%grid_vars(domain%var_indx(kVARS%neighbor_TPI))%data_2d(:,:) ) 
+        !     call io_write("TPI_out.nc", "TPI", domain%vars_2d(domain%var_indx(kVARS%neighbor_TPI)%v)%data_2d(:,:) ) 
         !     call io_write("sheltering_TPI.nc", "Sx_shelter", sheltering_TPI(:,:,:,:) ) 
         ! endif
         

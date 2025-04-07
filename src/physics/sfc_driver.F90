@@ -135,7 +135,7 @@ contains
             mavail = 0.3
             th2d = 0.0
 
-            gz1oz0 = log((domain%grid_vars(domain%var_indx(kVARS%z))%data_3d(:,kts,:) - domain%grid_vars(domain%var_indx(kVARS%terrain))%data_2d) / domain%diagnostic_vars(domain%var_indx(kVARS%roughness_z0))%data_2d)
+            gz1oz0 = log((domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(:,kts,:) - domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d) / domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)
             
             if (context_change) return
 
@@ -156,54 +156,54 @@ contains
 
         if (options%physics%surfacelayer==kSFC_MM5REV) then
         
-            windspd = sqrt(domain%diagnostic_vars(domain%var_indx(kVARS%u_mass))%data_3d(ims:ime,kms,jms:jme)**2 + domain%diagnostic_vars(domain%var_indx(kVARS%v_mass))%data_3d(ims:ime,kms,jms:jme)**2)
+            windspd = sqrt(domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d(ims:ime,kms,jms:jme)**2 + domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d(ims:ime,kms,jms:jme)**2)
             where(windspd==0) windspd=1e-5            
 
-            call sfclayrev(u3d=domain%diagnostic_vars(domain%var_indx(kVARS%u_mass))%data_3d   & !-- u3d         3d u-velocity interpolated to theta points (m/s)
-               ,v3d=domain%diagnostic_vars(domain%var_indx(kVARS%v_mass))%data_3d              & !-- v3d         3d v-velocity interpolated to theta points (m/s)
-               ,t3d=domain%diagnostic_vars(domain%var_indx(kVARS%temperature))%data_3d         &
-               ,qv3d=domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d        &
-               ,p3d=domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d            & !-- p3d         3d pressure (pa)
-               ,dz8w=domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d       & !-- dz8w        dz between full levels (m)
+            call sfclayrev(u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d   & !-- u3d         3d u-velocity interpolated to theta points (m/s)
+               ,v3d=domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d              & !-- v3d         3d v-velocity interpolated to theta points (m/s)
+               ,t3d=domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d         &
+               ,qv3d=domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d        &
+               ,p3d=domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d            & !-- p3d         3d pressure (pa)
+               ,dz8w=domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d       & !-- dz8w        dz between full levels (m)
                ,cp=cp                                  &
                ,g=gravity                              &
                ,rovcp=rcp                              & ! rovcp = Rd/cp
                ,r=R_d                                  &  ! J/(kg K) specific gas constant for dry air
                ,xlv=XLV                                & !-- xlv         latent heat of vaporization (j/kg)
-               ,psfc=domain%diagnostic_vars(domain%var_indx(kVARS%surface_pressure))%data_2d   &
-               ,chs=domain%diagnostic_vars(domain%var_indx(kVARS%chs))%data_2d                 &
-               ,chs2=domain%diagnostic_vars(domain%var_indx(kVARS%chs2))%data_2d               &
-               ,cqs2=domain%diagnostic_vars(domain%var_indx(kVARS%cqs2))%data_2d               &
+               ,psfc=domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d   &
+               ,chs=domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d                 &
+               ,chs2=domain%vars_2d(domain%var_indx(kVARS%chs2)%v)%data_2d               &
+               ,cqs2=domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d               &
                ,cpm=cpm                                &
                ,mavail=mavail                          &
                ,regime=regime                          &
-               ,psim=domain%diagnostic_vars(domain%var_indx(kVARS%psim))%data_2d               &
-               ,psih=domain%diagnostic_vars(domain%var_indx(kVARS%psih))%data_2d               &
-               ,fm=domain%diagnostic_vars(domain%var_indx(kVARS%fm))%data_2d                   &
-               ,fh=domain%diagnostic_vars(domain%var_indx(kVARS%fh))%data_2d                   &
+               ,psim=domain%vars_2d(domain%var_indx(kVARS%psim)%v)%data_2d               &
+               ,psih=domain%vars_2d(domain%var_indx(kVARS%psih)%v)%data_2d               &
+               ,fm=domain%vars_2d(domain%var_indx(kVARS%fm)%v)%data_2d                   &
+               ,fh=domain%vars_2d(domain%var_indx(kVARS%fh)%v)%data_2d                   &
                ,flhc=flhc                              & !these are only used by 1 PBL scheme in WRF, which is not in ICAR, so we dont need to use them
                ,flqc=flqc                              & !these are only used by 1 PBL scheme in WRF, which is not in ICAR, so we dont need to use them
-               ,mol=domain%diagnostic_vars(domain%var_indx(kVARS%mol))%data_2d                 &
+               ,mol=domain%vars_2d(domain%var_indx(kVARS%mol)%v)%data_2d                 &
                ,rmol=rmol                              &
                ,qgh=qgh                                &
                ,qsfc=qsfc                              &
-               ,u10=domain%diagnostic_vars(domain%var_indx(kVARS%u_10m))%data_2d               &
-               ,v10=domain%diagnostic_vars(domain%var_indx(kVARS%v_10m))%data_2d               &
-               ,znt=domain%diagnostic_vars(domain%var_indx(kVARS%roughness_z0))%data_2d        & ! i/o -- znt		roughness length (m) (input only)
-               ,ust=domain%diagnostic_vars(domain%var_indx(kVARS%ustar))%data_2d                       & ! i/o -- ust		u* in similarity theory (m/s)
+               ,u10=domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d               &
+               ,v10=domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d               &
+               ,znt=domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d        & ! i/o -- znt		roughness length (m) (input only)
+               ,ust=domain%vars_2d(domain%var_indx(kVARS%ustar)%v)%data_2d                       & ! i/o -- ust		u* in similarity theory (m/s)
                ,zol=zol                                & ! i/o -- zol		z/l height over monin-obukhov length - intent(inout) - but appears to not be used really?
-               ,pblh=domain%diagnostic_vars(domain%var_indx(kVARS%hpbl))%data_2d               & ! i/o -- hpbl	pbl height (m) - intent(inout)
-               ,xland=real(domain%grid_vars(domain%var_indx(kVARS%land_mask))%data_2di)           &
-               ,hfx=domain%diagnostic_vars(domain%var_indx(kVARS%sensible_heat))%data_2d       & !  HFX  - net upward heat flux at the surface (W/m^2)
-               ,qfx=domain%diagnostic_vars(domain%var_indx(kVARS%qfx))%data_2d                 & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
-               ,lh=domain%diagnostic_vars(domain%var_indx(kVARS%latent_heat))%data_2d          & !  LH  - net upward latent flux at the surface (W/m^2/s)
+               ,pblh=domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d               & ! i/o -- hpbl	pbl height (m) - intent(inout)
+               ,xland=real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di)           &
+               ,hfx=domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d       & !  HFX  - net upward heat flux at the surface (W/m^2)
+               ,qfx=domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d                 & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
+               ,lh=domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d          & !  LH  - net upward latent flux at the surface (W/m^2/s)
                ,th2=th2d                               &
-               ,t2=domain%diagnostic_vars(domain%var_indx(kVARS%temperature_2m))%data_2d       &
-               ,q2=domain%diagnostic_vars(domain%var_indx(kVARS%humidity_2m))%data_2d          &
+               ,t2=domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d       &
+               ,q2=domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d          &
                ,gz1oz0=gz1oz0                          &
-               ,br=domain%diagnostic_vars(domain%var_indx(kVARS%br))%data_2d                   &
+               ,br=domain%vars_2d(domain%var_indx(kVARS%br)%v)%data_2d                   &
                ,wspd=windspd                           & ! i/o -- wspd        wind speed at lowest model level (m/s)
-               ,tsk=domain%diagnostic_vars(domain%var_indx(kVARS%skin_temperature))%data_2d    &
+               ,tsk=domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d    &
                ,isfflx=options%sfc%isfflx      &
                ,dx=domain%dx                           &
                ,svp1=SVP1                              & !-- svp1        constant for saturation vapor pressure (kpa)

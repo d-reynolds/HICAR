@@ -192,8 +192,8 @@ contains
                 
         ! If this is the first step (future_dt_seconds has not yet been set)
         !if (future_dt_seconds == DT_BIG) then
-        present_dt_seconds = compute_dt(domain%dx, domain%state_vars(domain%var_indx(kVARS%u))%data_3d, domain%state_vars(domain%var_indx(kVARS%v))%data_3d, &
-                        domain%diagnostic_vars(domain%var_indx(kVARS%w))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, options%domain%dz_levels, &
+        present_dt_seconds = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, options%domain%dz_levels, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
@@ -202,8 +202,8 @@ contains
         !    present_dt_seconds = future_dt_seconds
         !endif
         
-        future_dt_seconds = compute_dt(domain%dx, domain%state_vars(domain%var_indx(kVARS%u))%dqdt_3d, domain%state_vars(domain%var_indx(kVARS%v))%dqdt_3d, &
-                        domain%diagnostic_vars(domain%var_indx(kVARS%w))%dqdt_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, options%domain%dz_levels, &
+        future_dt_seconds = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, options%domain%dz_levels, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
@@ -217,18 +217,18 @@ contains
             write(*,*) 'time_step determining j:      ',max_j
             write(*,*) 'time_step determining k:      ',max_k
             if (future_dt_seconds<present_dt_seconds) then
-                write(*,*) 'time_step determining w_grid: ',domain%diagnostic_vars(domain%var_indx(kVARS%w))%dqdt_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining u: ',domain%state_vars(domain%var_indx(kVARS%u))%dqdt_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining v: ',domain%state_vars(domain%var_indx(kVARS%v))%dqdt_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining w_grid: ',domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining u: ',domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining v: ',domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(max_i,max_k,max_j)
             else
-                write(*,*) 'time_step determining w_grid: ',domain%diagnostic_vars(domain%var_indx(kVARS%w))%data_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining u: ',domain%state_vars(domain%var_indx(kVARS%u))%data_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining v: ',domain%state_vars(domain%var_indx(kVARS%v))%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining w_grid: ',domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining u: ',domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining v: ',domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(max_i,max_k,max_j)
             endif
-            write(*,*) 'time_step determining w_real: ',domain%diagnostic_vars(domain%var_indx(kVARS%w_real))%data_3d(max_i,max_k,max_j)
-            write(*,*) 'time_step determining jaco: ',domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d(max_i,max_k,max_j)
-            write(*,*) 'time_step determining dzdx: ',domain%grid_vars(domain%var_indx(kVARS%dzdx))%data_3d(max_i,max_k,max_j)
-            write(*,*) 'time_step determining dzdy: ',domain%grid_vars(domain%var_indx(kVARS%dzdy))%data_3d(max_i,max_k,max_j)
+            write(*,*) 'time_step determining w_real: ',domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(max_i,max_k,max_j)
+            write(*,*) 'time_step determining jaco: ',domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(max_i,max_k,max_j)
+            write(*,*) 'time_step determining dzdx: ',domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(max_i,max_k,max_j)
+            write(*,*) 'time_step determining dzdy: ',domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(max_i,max_k,max_j)
             flush(output_unit)
         endif
         ! Set dt to the outcome of reduce
@@ -345,8 +345,8 @@ contains
                 if (options%general%debug) call domain_check(domain, "init", fix=.True.)
 
                 call domain%send_timer%start()
-                call domain%halo%halo_3d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
-                call domain%halo%halo_2d_send_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call domain%halo_3d_send_batch()
+                call domain%halo_2d_send_batch()
                 call domain%send_timer%stop()
     
                 call domain%rad_timer%start()
@@ -366,8 +366,8 @@ contains
                 call domain%pbl_timer%stop()
 
                 call domain%ret_timer%start()
-                call domain%halo%halo_3d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
-                call domain%halo%halo_2d_retrieve_batch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call domain%halo_3d_retrieve_batch()
+                call domain%halo_2d_retrieve_batch()
                 call integrate_physics_tendencies(domain, options, real(dt%seconds()))
                 !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
                 call domain%ret_timer%stop()

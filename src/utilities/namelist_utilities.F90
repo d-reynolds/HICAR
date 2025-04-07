@@ -1452,6 +1452,11 @@ contains
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Domain"
+            case ("cropcategory_var")
+                description = "Name of the crop category variable in domain file"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
             case ("soil_t_var")
                 description = "Name of the soil temperature variable in domain file"
                 units = "K"

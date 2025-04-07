@@ -94,19 +94,6 @@ contains
         allocate(this%parent_write_buffer_3d(this%n_w_3d,this%i_s_w:this%i_e_w+1,this%k_s_w:this%k_e_w,this%j_s_w:this%j_e_w+1))
         allocate(this%parent_write_buffer_2d(this%n_w_2d,this%i_s_w:this%i_e_w+1,                      this%j_s_w:this%j_e_w+1))
 
-        n_3d = 1
-        n_2d = 1
-
-        do n = 1,this%outputer%n_vars
-            if (this%outputer%variables(n)%three_d) then
-                this%outputer%variables(n)%data_3d => this%parent_write_buffer_3d(n_3d,:,:,:)
-                n_3d = n_3d + 1
-            else
-                this%outputer%variables(n)%data_2d => this%parent_write_buffer_2d(n_2d,:,:)
-                n_2d = n_2d + 1
-            endif
-        enddo
-
         !Setup arrays for information about accessing variables from write buffer
         allocate(this%out_var_indices(count(options(nest_indx)%output%vars_for_output > 0)))
         allocate(this%rst_var_indices(count(options(nest_indx)%vars_for_restart > 0)))
@@ -515,6 +502,7 @@ contains
         class(ioserver_t), intent(inout)  :: this
 
         integer :: i, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, msg_size
+        integer :: n, n_3d, n_2d
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
         msg_size = 1
         disp = 0
@@ -541,6 +529,19 @@ contains
         if (ALL(this%parent_write_buffer_3d==kEMPT_BUFF) .or. ALL(this%parent_write_buffer_2d==kEMPT_BUFF))then
             stop 'Error, all of write buffer used for output was still set to empty buffer flag at time of writing.'
         endif
+
+        n_3d = 1
+        n_2d = 1
+
+        do n = 1,this%outputer%n_vars
+            if (this%outputer%variables(n)%two_d) then
+                this%outputer%variables(n)%data_2d = this%parent_write_buffer_2d(n_2d,:,:)
+                n_2d = n_2d + 1
+            elseif (this%outputer%variables(n)%three_d) then
+                this%outputer%variables(n)%data_3d = this%parent_write_buffer_3d(n_3d,:,:,:)
+                n_3d = n_3d + 1
+            endif
+        enddo
 
         call this%outputer%save_out_file(this%sim_time,this%IO_Comms,this%out_var_indices,this%rst_var_indices)        
         

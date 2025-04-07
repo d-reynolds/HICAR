@@ -11,6 +11,7 @@ module test_halo_exch
     use grid_interface, only: grid_t
     use halo_interface, only: halo_t
     use icar_constants
+    use data_structures, only: index_type
     use testdrive, only : new_unittest, unittest_type, error_type, check, test_failed
 
     implicit none
@@ -131,8 +132,8 @@ module test_halo_exch
         character(len=*), optional, intent(in) :: test_str_in
 
         type(halo_t) :: halo
-        type(var_dict_t) :: exch_vars, adv_vars
-        type(variable_t) :: var
+        type(index_type), allocatable :: exch_vars(:), adv_vars(:)
+        type(variable_t) :: var, var_data(1)
         integer :: my_index
         integer :: ierr
         type(MPI_Comm) :: comms
@@ -156,12 +157,19 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize variables to exchange
+        call var_data(1)%initialize(grid)
         call var%initialize(grid)
 
+        allocate(exch_vars(1), adv_vars(1))
+        ! adv_vars(1) = var
         !populate adv_vars with two test variables
-        call adv_vars%add_var('var', var) 
+        ! call adv_vars%add_var('var', var) 
         !call adv_vars%add_var('temperature', temperature) 
 
+        exch_vars(1)%v = 0
+        exch_vars(1)%n = ""
+        adv_vars(1)%v = 1
+        adv_vars(1)%n = "qv"
         call halo%init(exch_vars, adv_vars, grid, comms)
         
         ! Initialize fields with my_index values
@@ -171,12 +179,15 @@ module test_halo_exch
             do j = grid%jts, grid%jte-grid%ny_e
                 do k = 1, grid%kts
                     ! Set the interior values to the index values
+                    var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global
                     var%data_3d(i,k,j) = i+(j-1)*grid%nx_global
                 end do
             end do
         end do
         if (batch) then
-            call halo%batch_exch(exch_vars, adv_vars)
+            call halo%halo_3d_send_batch(exch_vars, adv_vars, var_data)
+            call halo%halo_3d_retrieve_batch(exch_vars, adv_vars, var_data)
+            var = var_data(1)
         else
             call halo%exch_var(var, corners=corners)
         endif

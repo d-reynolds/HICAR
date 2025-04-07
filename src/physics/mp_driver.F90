@@ -373,25 +373,25 @@ contains
         ! run the thompson microphysics
         if (options%physics%microphysics==kMP_THOMPSON) then
             ! call the thompson microphysics
-            call mp_gt_driver(qv = domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,                      &
-                              th = domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d,            &
-                              qc = domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d,                 &
-                              qi = domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d,                   &
-                              ni = domain%state_vars(domain%var_indx(kVARS%ice_number))%data_3d,                 &
-                              qr = domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d,                        &
-                              nr = domain%state_vars(domain%var_indx(kVARS%rain_number))%data_3d,                      &
-                              qs = domain%state_vars(domain%var_indx(kVARS%snow_mass))%data_3d,                        &
-                              qg = domain%state_vars(domain%var_indx(kVARS%graupel_mass))%data_3d,                     &
-                              pii= domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d,                            &
-                              p =  domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,                         &
-                              dz = domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d,                          &
+            call mp_gt_driver(qv = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,                      &
+                              th = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,            &
+                              qc = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d,                 &
+                              qi = domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d,                   &
+                              ni = domain%vars_3d(domain%var_indx(kVARS%ice_number)%v)%data_3d,                 &
+                              qr = domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d,                        &
+                              nr = domain%vars_3d(domain%var_indx(kVARS%rain_number)%v)%data_3d,                      &
+                              qs = domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d,                        &
+                              qg = domain%vars_3d(domain%var_indx(kVARS%graupel_mass)%v)%data_3d,                     &
+                              pii= domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,                            &
+                              p =  domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                         &
+                              dz = domain%vars_3d(domain%var_indx(kVARS%dz)%v)%data_3d,                          &
                               dt_in = dt,                                           &
                               itimestep = 1,                                        & ! not used in thompson
-                              RAINNC = domain%diagnostic_vars(domain%var_indx(kVARS%precipitation))%data_2d,    &
+                              RAINNC = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d,    &
                               RAINNCV = last_rain,                                & ! not used outside thompson (yet)
                               SR = SR,                                              & ! not used outside thompson (yet)
-                              SNOWNC = domain%diagnostic_vars(domain%var_indx(kVARS%snowfall))%data_2d,         &
-                              GRAUPELNC = domain%diagnostic_vars(domain%var_indx(kVARS%graupel))%data_2d,       &
+                              SNOWNC = domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d,         &
+                              GRAUPELNC = domain%vars_2d(domain%var_indx(kVARS%graupel)%v)%data_2d,       &
                               ids = ids, ide = ide,                   & ! domain dims
                               jds = jds, jde = jde,                   &
                               kds = kds, kde = kde,                   &
@@ -404,26 +404,26 @@ contains
 
         elseif (options%physics%microphysics==kMP_THOMP_AER) then
             ! call the thompson microphysics
-            call mp_gt_driver_aer(qv = domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,                      &
-                                  th = domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d,            &
-                                  qc = domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d,                 &
-                                  qi = domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d,                   &
-                                  ni = domain%state_vars(domain%var_indx(kVARS%ice_number))%data_3d,                 &
-                                  qr = domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d,                        &
-                                  nr = domain%state_vars(domain%var_indx(kVARS%rain_number))%data_3d,                      &
-                                  qs = domain%state_vars(domain%var_indx(kVARS%snow_mass))%data_3d,                        &
-                                  qg = domain%state_vars(domain%var_indx(kVARS%graupel_mass))%data_3d,                     &
-                                  pii= domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d,                            &
-                                  p =  domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,                         &
-                                  w =  domain%diagnostic_vars(domain%var_indx(kVARS%w_real))%data_3d,                           &
-                                  dz = domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d,                     &
+            call mp_gt_driver_aer(qv = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,                      &
+                                  th = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,            &
+                                  qc = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d,                 &
+                                  qi = domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d,                   &
+                                  ni = domain%vars_3d(domain%var_indx(kVARS%ice_number)%v)%data_3d,                 &
+                                  qr = domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d,                        &
+                                  nr = domain%vars_3d(domain%var_indx(kVARS%rain_number)%v)%data_3d,                      &
+                                  qs = domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d,                        &
+                                  qg = domain%vars_3d(domain%var_indx(kVARS%graupel_mass)%v)%data_3d,                     &
+                                  pii= domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,                            &
+                                  p =  domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                         &
+                                  w =  domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d,                           &
+                                  dz = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d,                     &
                                   dt_in = dt,                                           &
-                                  RAINNC = domain%diagnostic_vars(domain%var_indx(kVARS%precipitation))%data_2d,    &
-                                  SNOWNC = domain%diagnostic_vars(domain%var_indx(kVARS%snowfall))%data_2d,         &
-                                  GRAUPELNC = domain%diagnostic_vars(domain%var_indx(kVARS%graupel))%data_2d,       &
-                                  re_cloud = domain%diagnostic_vars(domain%var_indx(kVARS%re_cloud))%data_3d,                   &
-                                  re_ice   = domain%diagnostic_vars(domain%var_indx(kVARS%re_ice))%data_3d,                     &
-                                  re_snow  = domain%diagnostic_vars(domain%var_indx(kVARS%re_snow))%data_3d,                    &
+                                  RAINNC = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d,    &
+                                  SNOWNC = domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d,         &
+                                  GRAUPELNC = domain%vars_2d(domain%var_indx(kVARS%graupel)%v)%data_2d,       &
+                                  re_cloud = domain%vars_3d(domain%var_indx(kVARS%re_cloud)%v)%data_3d,                   &
+                                  re_ice   = domain%vars_3d(domain%var_indx(kVARS%re_ice)%v)%data_3d,                     &
+                                  re_snow  = domain%vars_3d(domain%var_indx(kVARS%re_snow)%v)%data_3d,                    &
                                   has_reqc=1, has_reqi=1, has_reqs=1,                   &
                                   ids = ids, ide = ide,                   & ! domain dims
                                   jds = jds, jde = jde,                   &
@@ -437,18 +437,18 @@ contains
 
         elseif (options%physics%microphysics==kMP_SB04) then
             ! call the simple microphysics routine of SB04
-            call mp_simple_driver(domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,                  &
-                                  domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d,     &
-                                  domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d,                     &
-                                  domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d,                   &
-                                  domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,               &
-                                  domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d,          &
-                                  domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d,                 &
-                                  domain%state_vars(domain%var_indx(kVARS%snow_mass))%data_3d,                 &
-                                  domain%diagnostic_vars(domain%var_indx(kVARS%precipitation))%data_2d, &
-                                  domain%diagnostic_vars(domain%var_indx(kVARS%snowfall))%data_2d,      &
+            call mp_simple_driver(domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                  &
+                                  domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,     &
+                                  domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,                     &
+                                  domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,                   &
+                                  domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,               &
+                                  domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d,          &
+                                  domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d,                 &
+                                  domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d,                 &
+                                  domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
+                                  domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d,      &
                                   dt,                                       &
-                                  domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d,                   &
+                                  domain%vars_3d(domain%var_indx(kVARS%dz)%v)%data_3d,                   &
                                   ims = ims, ime = ime,                   & ! memory dims
                                   jms = jms, jme = jme,                   &
                                   kms = kms, kme = kme,                   &
@@ -458,33 +458,33 @@ contains
 
         elseif (options%physics%microphysics==kMP_MORRISON) then
             call MP_MORR_TWO_MOMENT(ITIMESTEP = 1,                   &
-                             TH = domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d,   &
-                             QV = domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,             &
-                             QC = domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d,        &
-                             QR = domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d,               &
-                             QI = domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d,          &
-                             QS = domain%state_vars(domain%var_indx(kVARS%snow_mass))%data_3d,               &
-                             QG = domain%state_vars(domain%var_indx(kVARS%graupel_mass))%data_3d,            &
-                             NI = domain%state_vars(domain%var_indx(kVARS%ice_number))%data_3d,        &
-                             NS = domain%state_vars(domain%var_indx(kVARS%snow_number))%data_3d,             &
-                             NR = domain%state_vars(domain%var_indx(kVARS%rain_number))%data_3d,             &
-                             NG = domain%state_vars(domain%var_indx(kVARS%graupel_number))%data_3d,          &
-                             RHO = domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d,                &
-                             PII = domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d,                  &
-                             P = domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,                 &
-                             DT_IN = dt, DZ = domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d,     &
-                             W = domain%diagnostic_vars(domain%var_indx(kVARS%w_real))%data_3d,                        &
-                             RAINNC = domain%diagnostic_vars(domain%var_indx(kVARS%precipitation))%data_2d, &
+                             TH = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,   &
+                             QV = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,             &
+                             QC = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d,        &
+                             QR = domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d,               &
+                             QI = domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d,          &
+                             QS = domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d,               &
+                             QG = domain%vars_3d(domain%var_indx(kVARS%graupel_mass)%v)%data_3d,            &
+                             NI = domain%vars_3d(domain%var_indx(kVARS%ice_number)%v)%data_3d,        &
+                             NS = domain%vars_3d(domain%var_indx(kVARS%snow_number)%v)%data_3d,             &
+                             NR = domain%vars_3d(domain%var_indx(kVARS%rain_number)%v)%data_3d,             &
+                             NG = domain%vars_3d(domain%var_indx(kVARS%graupel_number)%v)%data_3d,          &
+                             RHO = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,                &
+                             PII = domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,                  &
+                             P = domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                 &
+                             DT_IN = dt, DZ = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d,     &
+                             W = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d,                        &
+                             RAINNC = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
                              RAINNCV = last_rain, SR=SR,                  &
-                             SNOWNC = domain%diagnostic_vars(domain%var_indx(kVARS%snowfall))%data_2d,&
+                             SNOWNC = domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d,&
                              SNOWNCV = last_snow,                         &
-                             GRAUPELNC = domain%diagnostic_vars(domain%var_indx(kVARS%graupel))%data_2d,          &
+                             GRAUPELNC = domain%vars_2d(domain%var_indx(kVARS%graupel)%v)%data_2d,          &
                              GRAUPELNCV = last_graup,                    & ! hm added 7/13/13
-                             EFFC = domain%diagnostic_vars(domain%var_indx(kVARS%re_cloud))%data_3d,          &
-                             EFFI = domain%diagnostic_vars(domain%var_indx(kVARS%re_ice))%data_3d,            &
-                             EFFS = domain%diagnostic_vars(domain%var_indx(kVARS%re_snow))%data_3d,           &
-                             ISED3D = domain%diagnostic_vars(domain%var_indx(kVARS%ice2_vmi))%data_3d,           &
-                             SSED3D = domain%diagnostic_vars(domain%var_indx(kVARS%ice1_vmi))%data_3d,           &
+                             EFFC = domain%vars_3d(domain%var_indx(kVARS%re_cloud)%v)%data_3d,          &
+                             EFFI = domain%vars_3d(domain%var_indx(kVARS%re_ice)%v)%data_3d,            &
+                             EFFS = domain%vars_3d(domain%var_indx(kVARS%re_snow)%v)%data_3d,           &
+                             ISED3D = domain%vars_3d(domain%var_indx(kVARS%ice2_vmi)%v)%data_3d,           &
+                             SSED3D = domain%vars_3d(domain%var_indx(kVARS%ice1_vmi)%v)%data_3d,           &
                              refl_10cm = refl_10cm, diagflag = .False.,   &
                              do_radar_ref=0,                              & ! GT added for reflectivity calcs
                              qrcuten=domain%tend%qr,                      &
@@ -502,64 +502,64 @@ contains
         elseif (options%physics%microphysics==kMP_ISHMAEL) then
             call mp_jensen_ishmael(ITIMESTEP=1,                &  !*                                                                         
                              DT_IN=dt,                           &  !*
-                             P=domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,                                &  !*
-                             DZ=domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d,                            &  !* !
-                             TH= domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d,                              &  !*
-                             QV = domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,             &
-                             QC = domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d,        &
-                             QR = domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d,               &
-                             NR = domain%state_vars(domain%var_indx(kVARS%rain_number))%data_3d,             &
-                             QI1 = domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d,          &
-                             NI1 = domain%state_vars(domain%var_indx(kVARS%ice_number))%data_3d,        &
-                             AI1 = domain%state_vars(domain%var_indx(kVARS%ice1_a))%data_3d,                     &  !*
-                             CI1 = domain%state_vars(domain%var_indx(kVARS%ice1_c))%data_3d,                     &  !*
-                             QI2 = domain%state_vars(domain%var_indx(kVARS%ice2_mass))%data_3d,                     &  !*
-                             NI2 = domain%state_vars(domain%var_indx(kVARS%ice2_number))%data_3d,                     &  !*
-                             AI2 = domain%state_vars(domain%var_indx(kVARS%ice2_a))%data_3d,                     &  !*
-                             CI2 = domain%state_vars(domain%var_indx(kVARS%ice2_c))%data_3d,                     &  !*
-                             QI3 = domain%state_vars(domain%var_indx(kVARS%ice3_mass))%data_3d,                     &  !*
-                             NI3 = domain%state_vars(domain%var_indx(kVARS%ice3_number))%data_3d,                     &  !*
-                             AI3 = domain%state_vars(domain%var_indx(kVARS%ice3_a))%data_3d,                     &  !*
-                             CI3 = domain%state_vars(domain%var_indx(kVARS%ice3_c))%data_3d,                     &  !*
+                             P=domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                                &  !*
+                             DZ=domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d,                            &  !* !
+                             TH= domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,                              &  !*
+                             QV = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,             &
+                             QC = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d,        &
+                             QR = domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d,               &
+                             NR = domain%vars_3d(domain%var_indx(kVARS%rain_number)%v)%data_3d,             &
+                             QI1 = domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d,          &
+                             NI1 = domain%vars_3d(domain%var_indx(kVARS%ice_number)%v)%data_3d,        &
+                             AI1 = domain%vars_3d(domain%var_indx(kVARS%ice1_a)%v)%data_3d,                     &  !*
+                             CI1 = domain%vars_3d(domain%var_indx(kVARS%ice1_c)%v)%data_3d,                     &  !*
+                             QI2 = domain%vars_3d(domain%var_indx(kVARS%ice2_mass)%v)%data_3d,                     &  !*
+                             NI2 = domain%vars_3d(domain%var_indx(kVARS%ice2_number)%v)%data_3d,                     &  !*
+                             AI2 = domain%vars_3d(domain%var_indx(kVARS%ice2_a)%v)%data_3d,                     &  !*
+                             CI2 = domain%vars_3d(domain%var_indx(kVARS%ice2_c)%v)%data_3d,                     &  !*
+                             QI3 = domain%vars_3d(domain%var_indx(kVARS%ice3_mass)%v)%data_3d,                     &  !*
+                             NI3 = domain%vars_3d(domain%var_indx(kVARS%ice3_number)%v)%data_3d,                     &  !*
+                             AI3 = domain%vars_3d(domain%var_indx(kVARS%ice3_a)%v)%data_3d,                     &  !*
+                             CI3 = domain%vars_3d(domain%var_indx(kVARS%ice3_c)%v)%data_3d,                     &  !*
                              IDS=ids,IDE=ide, JDS=jds,JDE=jde, KDS=kds,KDE=kde, &
                              IMS=ims,IME=ime, JMS=jms,JME=jme, KMS=kms,KME=kme, &
                              ITS=its,ITE=ite, JTS=jts,JTE=jte, KTS=kts,KTE=kte, &
-                             RAINNC = domain%diagnostic_vars(domain%var_indx(kVARS%precipitation))%data_2d, &
+                             RAINNC = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
                              RAINNCV = last_rain,                    &
-                             SNOWNC = domain%diagnostic_vars(domain%var_indx(kVARS%snowfall))%data_2d,&
+                             SNOWNC = domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d,&
                              SNOWNCV = last_snow,                         &
-                             diag_effc3d=domain%diagnostic_vars(domain%var_indx(kVARS%re_cloud))%data_3d,               &
-                             diag_effi3d=domain%diagnostic_vars(domain%var_indx(kVARS%re_ice))%data_3d,                 &
+                             diag_effc3d=domain%vars_3d(domain%var_indx(kVARS%re_cloud)%v)%data_3d,               &
+                             diag_effi3d=domain%vars_3d(domain%var_indx(kVARS%re_ice)%v)%data_3d,                 &
                              !diag_dbz3d=refl_10cm,               &
-                             diag_vmi3d_1=domain%diagnostic_vars(domain%var_indx(kVARS%ice1_vmi))%data_3d,                 &
+                             diag_vmi3d_1=domain%vars_3d(domain%var_indx(kVARS%ice1_vmi)%v)%data_3d,                 &
                              !diag_di3d_1=di3d,                   &
-                             diag_rhopo3d_1=domain%diagnostic_vars(domain%var_indx(kVARS%ice1_rho))%data_3d,          &
-                             diag_phii3d_1=domain%diagnostic_vars(domain%var_indx(kVARS%ice1_phi))%data_3d,           &
-                             diag_vmi3d_2=domain%diagnostic_vars(domain%var_indx(kVARS%ice2_vmi))%data_3d,               &
+                             diag_rhopo3d_1=domain%vars_3d(domain%var_indx(kVARS%ice1_rho)%v)%data_3d,          &
+                             diag_phii3d_1=domain%vars_3d(domain%var_indx(kVARS%ice1_phi)%v)%data_3d,           &
+                             diag_vmi3d_2=domain%vars_3d(domain%var_indx(kVARS%ice2_vmi)%v)%data_3d,               &
                              !diag_di3d_2=di3d_2,                 
-                             diag_rhopo3d_2=domain%diagnostic_vars(domain%var_indx(kVARS%ice2_rho))%data_3d,          &
-                             diag_phii3d_2=domain%diagnostic_vars(domain%var_indx(kVARS%ice2_phi))%data_3d,           &
-                             diag_vmi3d_3=domain%diagnostic_vars(domain%var_indx(kVARS%ice3_vmi))%data_3d,               &
+                             diag_rhopo3d_2=domain%vars_3d(domain%var_indx(kVARS%ice2_rho)%v)%data_3d,          &
+                             diag_phii3d_2=domain%vars_3d(domain%var_indx(kVARS%ice2_phi)%v)%data_3d,           &
+                             diag_vmi3d_3=domain%vars_3d(domain%var_indx(kVARS%ice3_vmi)%v)%data_3d,               &
                           
                           !diag_di3d_3=di3d_3,                 &
-                             diag_rhopo3d_3=domain%diagnostic_vars(domain%var_indx(kVARS%ice3_rho))%data_3d,          &
-                             diag_phii3d_3=domain%diagnostic_vars(domain%var_indx(kVARS%ice3_phi))%data_3d            &
+                             diag_rhopo3d_3=domain%vars_3d(domain%var_indx(kVARS%ice3_rho)%v)%data_3d,          &
+                             diag_phii3d_3=domain%vars_3d(domain%var_indx(kVARS%ice3_phi)%v)%data_3d            &
                              !diag_itype_1=itype,                 &
                              !diag_itype_2=itype_2,               &
                              !diag_itype_3=itype_3                &
                              )
         elseif (options%physics%microphysics==kMP_WSM6) then
-            call wsm6(q = domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,                      &
-                              th = domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d,            &
-                              qc = domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d,                 &
-                              qi = domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d,                   &
-                              qr = domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d,                        &
-                              qs = domain%state_vars(domain%var_indx(kVARS%snow_mass))%data_3d,                        &
-                              qg = domain%state_vars(domain%var_indx(kVARS%graupel_mass))%data_3d,                     &
-                              pii= domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d,                            &
-                              p =  domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,                         &
-                              delz = domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d,                          &
-                              den = domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d,                   &
+            call wsm6(q = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,                      &
+                              th = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,            &
+                              qc = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d,                 &
+                              qi = domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d,                   &
+                              qr = domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d,                        &
+                              qs = domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d,                        &
+                              qg = domain%vars_3d(domain%var_indx(kVARS%graupel_mass)%v)%data_3d,                     &
+                              pii= domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,                            &
+                              p =  domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                         &
+                              delz = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d,                          &
+                              den = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,                   &
                               delt = dt,                                           &
                               g = gravity,                                          &
                               cpd = cp, cpv = cpv, rd = R_d, rv = R_v, t0c = 273.15,          &
@@ -567,11 +567,11 @@ contains
                               XLS = XLS, XLV0 = XLV, XLF0 = XLF,                    &
                               den0 = rhoair0, denr = rhowater,                  &
                               cliq = cliq, cice = cice, psat = psat,                                   &
-                              rain = domain%diagnostic_vars(domain%var_indx(kVARS%precipitation))%data_2d,    &
+                              rain = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d,    &
                               rainncv = last_rain,                                & ! not used outside thompson (yet)
                               sr = SR,                                              & ! not used outside thompson (yet)
-                              snow = domain%diagnostic_vars(domain%var_indx(kVARS%snowfall))%data_2d,         &
-                              graupel = domain%diagnostic_vars(domain%var_indx(kVARS%graupel))%data_2d,       &
+                              snow = domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d,         &
+                              graupel = domain%vars_2d(domain%var_indx(kVARS%graupel)%v)%data_2d,       &
                               ids = ids, ide = ide,                   & ! domain dims
                               jds = jds, jde = jde,                   &
                               kds = kds, kde = kde,                   &
@@ -584,15 +584,15 @@ contains
 
         elseif (options%physics%microphysics==kMP_WSM3) then
 
-            call wsm3(        q = domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d,                       &
-                              th = domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d,            &
-                              qci = domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d,                &
-                              qrs = domain%state_vars(domain%var_indx(kVARS%rain_mass))%data_3d,                       &
-                              w = domain%diagnostic_vars(domain%var_indx(kVARS%w_real))%data_3d,                            &
-                              pii= domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d,                            &
-                              p =  domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,                         &
-                              delz = domain%grid_vars(domain%var_indx(kVARS%dz))%data_3d,                        &
-                              den = domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d,                         &
+            call wsm3(        q = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,                       &
+                              th = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,            &
+                              qci = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d,                &
+                              qrs = domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d,                       &
+                              w = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d,                            &
+                              pii= domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,                            &
+                              p =  domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                         &
+                              delz = domain%vars_3d(domain%var_indx(kVARS%dz)%v)%data_3d,                        &
+                              den = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,                         &
                               delt = dt,                                            &
                               g = gravity,                                          &
                               cpd = cp, cpv = cpv, rd = R_d, rv = R_v, t0c = 273.15,  &
@@ -600,10 +600,10 @@ contains
                               XLS = XLS, XLV0 = XLV, XLF0 = XLF,                    &
                               den0 = rhoair0, denr = rhowater,                      &
                               cliq = cliq, cice = cice, psat = psat,                &
-                              rain = domain%diagnostic_vars(domain%var_indx(kVARS%precipitation))%data_2d,      &
+                              rain = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d,      &
                               rainncv = last_rain,                                & ! not used outside thompson (yet)
                               sr = SR,                                              & ! not used outside thompson (yet)
-                              snow = domain%diagnostic_vars(domain%var_indx(kVARS%snowfall))%data_2d,           &
+                              snow = domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d,           &
                               snowncv = last_snow,                                  &
                               has_reqc=0, has_reqi=0, has_reqs=0,     &
                               ids = ids, ide = ide,                   & ! domain dims
@@ -729,12 +729,12 @@ contains
             ! NOTE, ONLY reset this when running the inner subset... ideally probably need a separate counter for the halo and subset
             !last_model_time = domain%sim_time%seconds()
             
-            call calc_w_real(domain%state_vars(domain%var_indx(kVARS%u)) %data_3d,      &
-                         domain%state_vars(domain%var_indx(kVARS%v)) %data_3d,      &
-                         domain%diagnostic_vars(domain%var_indx(kVARS%w)) %data_3d,      &
-                         domain%diagnostic_vars(domain%var_indx(kVARS%w_real)) %data_3d,      &
-                         domain%grid_vars(domain%var_indx(kVARS%dzdx_u))%data_3d, domain%grid_vars(domain%var_indx(kVARS%dzdy_v))%data_3d, domain%grid_vars(domain%var_indx(kVARS%dzdx))%data_3d, domain%grid_vars(domain%var_indx(kVARS%dzdy))%data_3d,   &
-                         domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d)
+            call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,      &
+                         domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d,      &
+                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d,      &
+                         domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d,      &
+                         domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
+                         domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
                              
 
             if (present(subset)) then

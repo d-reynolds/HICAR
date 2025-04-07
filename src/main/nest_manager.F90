@@ -95,7 +95,7 @@ contains
             return
         endif
 
-        call init_winds(domain,options)
+        call init_winds(domain,options, context_chng=.True.)
 
         ! initialize microphysics code (e.g. compute look up tables in Thompson et al)
         call mp_init(domain, options, context_chng=.True.) !this could easily be moved to init_model...

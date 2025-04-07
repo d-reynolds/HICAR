@@ -16,7 +16,7 @@ submodule(ioclient_interface) ioclient_implementation
   use debug_module,             only : check_ncdf
   use iso_fortran_env
   use, intrinsic :: iso_c_binding
-  use output_metadata,          only : get_varindx
+  use output_metadata,          only : get_varindx, get_varmeta
 
 
   implicit none
@@ -212,7 +212,7 @@ contains
         class(ioclient_t),   intent(inout) :: this
         type(domain_t),   intent(inout)    :: domain
         
-        type(variable_t) :: var
+        type(variable_t) :: var, tmp_var
         integer :: i, n_3d, n_2d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w
                         
         n_3d = 1
@@ -226,12 +226,18 @@ contains
         endif
         this%written = .False.
 
-        ! loop through the list of variables that need to be written out
-        call domain%vars_to_out%reset_iterator()
-
-        do while (domain%vars_to_out%has_more_elements())
+        do i = 1, kMAX_STORAGE_VARS
             ! get the next variable in the structure
-            var = domain%vars_to_out%next()
+            if (domain%vars_to_out(i)%v <= 0) cycle
+            tmp_var = get_varmeta(i)
+            if (tmp_var%two_d) then
+                var = domain%vars_2d(domain%vars_to_out(i)%v)
+            else if (tmp_var%three_d) then
+                var = domain%vars_3d(domain%vars_to_out(i)%v)
+            else
+                write(*,*) 'Error: Variable ', domain%vars_to_out(i)%n, ' not found in parent domain: ', domain%nest_indx
+                stop
+            endif
             
             i_s_w = this%i_s_w; i_e_w = this%i_e_w
             j_s_w = this%j_s_w; j_e_w = this%j_e_w
@@ -276,8 +282,8 @@ contains
         class(ioclient_t),   intent(inout) :: this
         type(domain_t),      intent(in)    :: domain
 
-        type(variable_t) :: var
-        integer :: i, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, err
+        type(variable_t) :: var, tmp_var
+        integer :: i, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, err, var_indx
 
         n_3d = 1
 
@@ -290,11 +296,15 @@ contains
         this%nest_updated = .False.
         !This is false only when it is the first call to push (i.e. first write call)
 
-        do i = 1, size(this%vars_for_nest)
+        do i = 1, kMAX_STORAGE_VARS
             ! get the next variable in the structure
             if (this%vars_for_nest(i) == '') cycle
-            var = domain%vars_to_out%get_var(this%vars_for_nest(i),err=err)
-            if (var%two_d) cycle
+            var_indx = get_varindx(this%vars_for_nest(i))
+            tmp_var = get_varmeta(var_indx)
+
+            if (tmp_var%two_d) cycle
+
+            var = domain%vars_3d(domain%var_indx(var_indx)%v)
 
             if (err > 0) then
                 write(*,*) 'Error: Variable ', this%vars_for_nest(i), ' not found in parent domain: ', domain%nest_indx
@@ -328,6 +338,7 @@ contains
 
         type(variable_t)     :: var
         integer :: i, n, nx, ny
+        character(len=kMAX_NAME_LENGTH) :: varname
                 
         n = 1
         nx = this%i_e_r - this%i_s_r + 1
@@ -343,7 +354,7 @@ contains
 
         do while (forcing%variables%has_more_elements())
             ! get the next variable in the structure
-            var = forcing%variables%next()
+            var = forcing%variables%next(name=varname)
             if (var%computed) then
                 cycle
             else
@@ -358,6 +369,7 @@ contains
                 endif
                 n = n+1
             endif
+            call forcing%variables%add_var(varname, var)
         enddo
     
         ! Do MPI_Win_Post on read_buffer to indicate that we are open for delivery of new input data
@@ -375,8 +387,9 @@ contains
         type(domain_t),   intent(inout)  :: domain
         type(options_t),  intent(in)     :: options
 
-        type(variable_t)     :: var
+        type(variable_t)     :: var, tmp_var
         integer :: i, n_2d, n_3d, nx, ny, i_s_re, i_e_re, j_s_re, j_e_re
+        character(len=kMAX_NAME_LENGTH) :: varname
 
         ! Because this is for reading restart data, performance is not critical, and 
         ! we use a simple MPI_fence syncronization
@@ -387,13 +400,19 @@ contains
 
         n_3d = 1
         n_2d = 1
-
-        ! loop through the list of variables that need to be written out
-        call domain%vars_to_out%reset_iterator()
         
-        do while (domain%vars_to_out%has_more_elements())
+        do i = 1, kMAX_STORAGE_VARS
             ! get the next variable in the structure
-            var = domain%vars_to_out%next()
+            if (domain%vars_to_out(i)%v <= 0) cycle
+            tmp_var = get_varmeta(i)
+            if (tmp_var%two_d) then
+                var = domain%vars_2d(domain%vars_to_out(i)%v)
+            else if (tmp_var%three_d) then
+                var = domain%vars_3d(domain%vars_to_out(i)%v)
+            else
+                write(*,*) 'Error: Variable ', domain%vars_to_out(i)%n, ' not found in parent domain: ', domain%nest_indx
+                stop
+            endif
 
             !See if var is in restart vars
             if (options%vars_for_restart(get_varindx(var%name)) <= 0) then
@@ -408,12 +427,12 @@ contains
             ny = j_e_re - j_s_re + 1
 
             if (var%three_d) then
-                var%data_3d(i_s_re:i_e_re,1:var%dim_len(2),j_s_re:j_e_re) = &
+                domain%vars_3d(domain%vars_to_out(i)%v)%data_3d(i_s_re:i_e_re,1:var%dim_len(2),j_s_re:j_e_re) = &
                     this%write_buffer_3d(n_3d,1:nx,1:var%dim_len(2),1:ny)
                 n_3d = n_3d+1
             else
                 if (var%dtype == kREAL) then
-                    var%data_2d(i_s_re:i_e_re,j_s_re:j_e_re) = &
+                    domain%vars_2d(domain%vars_to_out(i)%v)%data_2d(i_s_re:i_e_re,j_s_re:j_e_re) = &
                         this%write_buffer_2d(n_2d,1:nx,1:ny)
                 ! elseif (var%dtype == kDOUBLE) then
                 !     var%data_2dd(i_s_re:i_e_re,j_s_re:j_e_re) = &

@@ -27,12 +27,11 @@ contains
     !! Distributes initial conditions to all other images
     !!
     !!------------------------------------------------------------
-    module subroutine init(this, options, domain_lat, domain_lon, domain_vars, parent_options)
+    module subroutine init(this, options, domain_lat, domain_lon, parent_options)
         class(boundary_t),    intent(inout) :: this
         type(options_t),      intent(inout) :: options
         real, dimension(:,:), intent(in)    :: domain_lat
         real, dimension(:,:), intent(in)    :: domain_lon
-        type(var_dict_t),     intent(inout) :: domain_vars
         type(options_t), optional, intent(in)    :: parent_options
 
         type(Time_type) :: strt_time
@@ -56,7 +55,6 @@ contains
             call this%init_local_asnest(vars_to_read, var_dimensions,   &
                                     domain_lat,        &
                                     domain_lon,       &
-                                    domain_vars,      &
                                     parent_options)
         else
             call this%init_local(options,                           &
@@ -69,8 +67,7 @@ contains
                                     options%forcing%time_var,       &
                                     options%forcing%pvar,           &
                                     domain_lat,        &
-                                    domain_lon,       &
-                                    domain_vars)
+                                    domain_lon)
         endif
         ! endif
         ! call this%distribute_initial_conditions()
@@ -87,7 +84,7 @@ contains
     !!
     !!------------------------------------------------------------
     module subroutine init_local(this, options, file_list, var_list, dim_list, start_time, &
-                                 lat_var, lon_var, z_var, time_var, p_var, domain_lat, domain_lon, domain_vars)
+                                 lat_var, lon_var, z_var, time_var, p_var, domain_lat, domain_lon)
         class(boundary_t),               intent(inout)  :: this
         type(options_t),                 intent(inout)  :: options
         character(len=kMAX_NAME_LENGTH), intent(in)     :: file_list(:)
@@ -101,7 +98,6 @@ contains
         character(len=kMAX_NAME_LENGTH), intent(in)     :: p_var
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
-        type(var_dict_t),                intent(inout)  :: domain_vars
 
         type(variable_t)  :: test_variable
         real, allocatable :: temp_z(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:)
@@ -182,12 +178,6 @@ contains
             call add_var_to_dict(this, var_list(i), dim_list(i), [(this%ite-this%its+1), nz, (this%jte-this%jts+1)])
         end do
 
-        call domain_vars%reset_iterator()
-
-        do while (domain_vars%has_more_elements())
-            test_variable = domain_vars%next()
-            call add_var_hi_to_dict(this%variables_hi, test_variable%forcing_var, test_variable%grid)
-        enddo
 
     end subroutine
 
@@ -196,13 +186,12 @@ contains
     !! Reads initial conditions from the forcing file
     !!
     !!------------------------------------------------------------
-    module subroutine init_local_asnest(this, var_list, dim_list, domain_lat, domain_lon, domain_vars, parent_options)
+    module subroutine init_local_asnest(this, var_list, dim_list, domain_lat, domain_lon, parent_options)
         class(boundary_t),               intent(inout)  :: this
         character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
         integer,                         intent(in)     :: dim_list (:)
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
-        type(var_dict_t),                intent(inout)  :: domain_vars
         type(options_t),                 intent(in)     :: parent_options
 
         type(variable_t)  :: test_variable
@@ -259,13 +248,6 @@ contains
         do i=1, size(var_list)
             call add_var_to_dict(this, var_list(i), dim_list(i), [(this%ite-this%its+1), this%kte, (this%jte-this%jts+1)])
         end do
-
-        call domain_vars%reset_iterator()
-
-        do while (domain_vars%has_more_elements())
-            test_variable = domain_vars%next()
-            call add_var_hi_to_dict(this%variables_hi, test_variable%forcing_var, test_variable%grid)
-        enddo
 
     end subroutine
 
@@ -439,20 +421,6 @@ contains
         endif
 
     end subroutine
-    
-    subroutine add_var_hi_to_dict(var_dict, var_name, grid)
-        implicit none
-        type(var_dict_t), intent(inout) :: var_dict
-        character(len=*), intent(in)    :: var_name
-        type(grid_t),     intent(in)    :: grid
-
-        type(variable_t)  :: new_variable
-
-        call new_variable%initialize( grid, var_name)
-        call var_dict%add_var(var_name, new_variable)
-
-    end subroutine
-
 
     module subroutine interpolate_original_levels(this, options)
         implicit none
@@ -471,6 +439,7 @@ contains
 
         if (options%forcing%z_is_geopotential) then
             input_z%data_3d = input_z%data_3d / gravity
+            call list%add_var(options%forcing%zvar, input_z)
         endif
 
         ! if (options%forcing%z_is_on_interface) then
@@ -496,6 +465,7 @@ contains
                 call vinterp(var%data_3d, temp_3d, input_geo%vert_lut)
 
             endif
+            call list%add_var(name, var)
 
         end do
         end associate
@@ -510,7 +480,7 @@ contains
         logical,             intent(in),    optional :: update
 
         integer           :: err
-        type(variable_t)  :: var, pvar, zvar, tvar, qvar
+        type(variable_t)  :: var, pvar, tvar
         logical :: update_internal
 
         integer :: nx,ny,nz
@@ -544,6 +514,7 @@ contains
         if (options%forcing%t_offset /= 0) then
             tvar = list%get_var(options%forcing%tvar)
             tvar%data_3d = tvar%data_3d + options%forcing%t_offset
+            call list%add_var(options%forcing%tvar, tvar)
         endif
 
         ! loop through the list of variables that need to be read in
@@ -560,18 +531,17 @@ contains
                 endif
 
                 if (trim(name) == trim(options%forcing%pvar)) then
-                    call compute_p_update(this, list, options, var)
+                    call compute_p_update(this, list, options)
                 endif
 
             endif
         end do
 
         if (.not.options%forcing%t_is_potential) then
-
             tvar = list%get_var(options%forcing%tvar)
-            pvar = list%get_var(options%forcing%pvar)
-
+            pvar = list%get_var(options%forcing%pvar)    
             tvar%data_3d = tvar%data_3d / exner_function(pvar%data_3d)
+            call list%add_var(options%forcing%tvar, tvar)
         endif
 
         if (options%forcing%limit_rh) call limit_rh(list, options)
@@ -611,6 +581,7 @@ contains
             qvar%data_3d = rh_to_mr(qvar%data_3d, tvar%data_3d, pvar%data_3d)
         endif
 
+        call list%add_var(options%forcing%qvvar, qvar)
 
     end subroutine compute_mixing_ratio_from_rh
 
@@ -645,6 +616,8 @@ contains
             enddo
         enddo
 
+        call list%add_var(options%forcing%qvvar, qvar)
+
     end subroutine limit_rh
 
     ! set minimum and/or maximum values on any 2D forcing variable (e.g. sst_var, rain_var)
@@ -668,6 +641,7 @@ contains
         if (present(max_val)) then
             where(var%data_2d > max_val) var%data_2d = max_val
         endif
+        call list%add_var(varname, var)
 
     end subroutine limit_2d_var
 
@@ -683,6 +657,8 @@ contains
 
         qvar%data_3d = qvar%data_3d / (1 - qvar%data_3d)
 
+        call list%add_var(options%forcing%qvvar, qvar)
+
     end subroutine compute_mixing_ratio_from_sh
 
 
@@ -694,9 +670,8 @@ contains
 
         integer           :: err
         type(variable_t)  :: var, pvar, zvar, tvar, qvar
-        real, allocatable, target :: real_t(:,:,:)
 
-        real, pointer :: t(:,:,:)
+        real, allocatable :: t(:,:,:)
 
         qvar = list%get_var(options%forcing%qvvar)
         tvar = list%get_var(options%forcing%tvar)
@@ -705,13 +680,12 @@ contains
 
         pvar = list%get_var(options%forcing%pslvar, err)
 
+        allocate(t, mold=tvar%data_3d)
         if (options%forcing%t_is_potential) then
             ! stop "Need real air temperature to compute height"
-            allocate(real_t, mold=tvar%data_3d)
-            real_t = exner_function(var%data_3d) * tvar%data_3d
-            t => real_t
+            t = exner_function(var%data_3d) * tvar%data_3d
         else
-            t => tvar%data_3d
+            t = tvar%data_3d
         endif
 
         if (err == 0) then
@@ -728,40 +702,42 @@ contains
         endif
         zvar = list%get_var(options%forcing%zvar)
         zvar%data_3d = this%z
+        call list%add_var(options%forcing%zvar, zvar)
 
     end subroutine compute_z_update
 
-    subroutine compute_p_update(this, list, options, pressure_var)
+    subroutine compute_p_update(this, list, options)
         implicit none
         class(boundary_t),  intent(inout)   :: this
         type(var_dict_t),   intent(inout)   :: list
         type(options_t),    intent(in)      :: options
-        type(variable_t),   intent(inout)   :: pressure_var
 
         integer           :: err
-        type(variable_t)  :: pvar, zvar, tvar, qvar
+        type(variable_t)  :: pvar, zvar, tvar, qvar, psvar
 
         if (options%forcing%t_is_potential) stop "Need real air temperature to compute pressure"
 
         qvar = list%get_var(options%forcing%qvvar)
         tvar = list%get_var(options%forcing%tvar)
         zvar = list%get_var(options%forcing%hgtvar)
+        pvar = list%get_var(options%forcing%pvar)
 
-        pvar = list%get_var(options%forcing%pslvar, err)
+        psvar = list%get_var(options%forcing%pslvar, err)
 
         if (err == 0) then
-            call compute_3d_p(pressure_var%data_3d, pvar%data_2d, this%z, tvar%data_3d, qvar%data_3d, zvar%data_2d)
+            call compute_3d_p(pvar%data_3d, psvar%data_2d, this%z, tvar%data_3d, qvar%data_3d, zvar%data_2d)
 
         else
-            pvar = list%get_var(options%forcing%psvar, err)
+            psvar = list%get_var(options%forcing%psvar, err)
 
             if (err == 0) then
-                call compute_3d_p(pressure_var%data_3d, pvar%data_2d, this%z, tvar%data_3d, qvar%data_3d)
+                call compute_3d_p(pvar%data_3d, psvar%data_2d, this%z, tvar%data_3d, qvar%data_3d)
             else
                 write(*,*) "ERROR reading surface pressure or sea level pressure, variables not found"
                 error stop
             endif
         endif
+        call list%add_var(options%forcing%pvar, pvar)
 
 
     end subroutine compute_p_update
@@ -807,58 +783,5 @@ contains
             endif
         enddo
     end subroutine
-
-
-
-    module subroutine update_delta_fields(this, flow_obj)
-        implicit none
-        class(boundary_t),    intent(inout) :: this
-        class(flow_obj_t),   intent(in) :: flow_obj
-        
-        type(time_delta_t)  :: advance_dt
-
-        ! temporary to hold the variable to be interpolated to
-        type(variable_t) :: var_to_update
-        
-        ! make sure the dictionary is reset to point to the first variable
-        call this%variables_hi%reset_iterator()
-
-        ! Now iterate through the dictionary as long as there are more elements present
-        do while (this%variables_hi%has_more_elements())
-            ! get the next variable
-            var_to_update = this%variables_hi%next()
-
-            if (var_to_update%two_d) then
-                var_to_update%dqdt_2d = (var_to_update%dqdt_2d - var_to_update%data_2d) / flow_obj%input_dt%seconds()
-            else if (var_to_update%three_d) then
-                var_to_update%dqdt_3d = (var_to_update%dqdt_3d - var_to_update%data_3d) / flow_obj%input_dt%seconds()
-            endif
-
-        enddo
-
-        ! check if the difference between the simulation time and next_input is less than an input_dt
-        ! if so, this signals that we are in between two input times, so advance the state of the variables%data_3d
-        ! to the simulation time
-        advance_dt = flow_obj%next_input - flow_obj%sim_time
-        if (advance_dt%seconds() < flow_obj%input_dt%seconds()) then
-
-            call advance_dt%set(seconds= (flow_obj%input_dt%seconds() - advance_dt%seconds()) )
-
-            call this%variables_hi%reset_iterator()
-            do while (this%variables_hi%has_more_elements())
-                var_to_update = this%variables_hi%next()
-                if (var_to_update%three_d) then
-                    var_to_update%data_3d = var_to_update%data_3d + (var_to_update%dqdt_3d * advance_dt%seconds())
-                else if (var_to_update%two_d) then
-                    var_to_update%data_2d = var_to_update%data_2d + (var_to_update%dqdt_2d * advance_dt%seconds())
-                endif
-            enddo
-        endif
-
-        ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
-        ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
-        !var_to_update = this%w%meta_data
-        !var_to_update%dqdt_3d = (var_to_update%dqdt_3d - var_to_update%data_3d) / dt%seconds()
-    end subroutine update_delta_fields
 
 end submodule
