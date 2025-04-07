@@ -149,8 +149,8 @@ contains
 
             if (allocated(XLAND)) deallocate(XLAND)
             allocate(XLAND(ims:ime,jms:jme))
-            XLAND = domain%grid_vars(domain%var_indx(KVARS%land_mask))%data_2di
-            where(domain%grid_vars(domain%var_indx(KVARS%land_mask))%data_2di == 0) XLAND = 2 ! 0 is water if using "LANDMASK" as input
+            XLAND = domain%vars_2d(domain%var_indx(KVARS%land_mask)%v)%data_2di
+            where(domain%vars_2d(domain%var_indx(KVARS%land_mask)%v)%data_2di == 0) XLAND = 2 ! 0 is water if using "LANDMASK" as input
 
             if (allocated(w_stochastic)) deallocate(w_stochastic)
             allocate(w_stochastic(ims:ime,kms:kme,jms:jme))
@@ -196,7 +196,7 @@ contains
             if (options%physics%boundarylayer/=kPBL_YSU) then
                 do i=ims,ime
                     do j=jms,jme
-                        domain%diagnostic_vars(domain%var_indx(kVARS%hpbl))%data_2d(i,j)=1000.  ! or take terrain height into account?
+                        domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d(i,j)=1000.  ! or take terrain height into account?
                     enddo
                 enddo
             endif
@@ -236,14 +236,14 @@ contains
             allocate( QICONV(ims:ime,jms:jme,kms:kme) )
             allocate( CONVCLD(ims:ime,jms:jme) )
             allocate( lowlyr(ims:ime,jms:jme) )
-            ! allocate( kpbl(ims:ime,jms:jme) ) ! domain%diagnostic_vars(domain%var_indx(kVARS%kpbl))%data_2d when YSU is selected
+            ! allocate( kpbl(ims:ime,jms:jme) ) ! domain%vars_2d(domain%var_indx(kVARS%kpbl)%v)%data_2d when YSU is selected
 
 
             ! ----- the values below are just educated (or not) guesses. Need to refine.  -------
             do i=ims,ime
                 do j=jms,jme
                     lowlyr(i,j) = 1 ! ???
-                    if (options%physics%boundarylayer/=kPBL_YSU) domain%diagnostic_vars(domain%var_indx(kVARS%kpbl))%data_2d(i,j) = 10 ! without YSU, we assign a stationary value to kpbl
+                    if (options%physics%boundarylayer/=kPBL_YSU) domain%vars_2d(domain%var_indx(kVARS%kpbl)%v)%data_2d(i,j) = 10 ! without YSU, we assign a stationary value to kpbl
                 enddo
             enddo
 
@@ -314,12 +314,12 @@ subroutine convect(domain,options,dt_in)
         block
             integer :: i
             do i=1,size(w_stochastic,2)
-                w_stochastic(:,i,:) = domain%diagnostic_vars(domain%var_indx(kVARS%sensible_heat))%data_2d/500 + w_stochastic(:,i,:)
+                w_stochastic(:,i,:) = domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d/500 + w_stochastic(:,i,:)
             enddo
         end block
-        W0AVG = domain%diagnostic_vars(domain%var_indx(kVARS%w_real))%data_3d+(w_stochastic * options%cu%stochastic_cu - options%cu%stochastic_cu*0.75) ! e.g. * 20 - 15)
+        W0AVG = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d+(w_stochastic * options%cu%stochastic_cu - options%cu%stochastic_cu*0.75) ! e.g. * 20 - 15)
     else
-        W0AVG = domain%diagnostic_vars(domain%var_indx(kVARS%w_real))%data_3d
+        W0AVG = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d
     endif
 
 
@@ -329,23 +329,23 @@ subroutine convect(domain,options,dt_in)
         call CU_TIEDTKE(                                        &
                  dt_in, itimestep, STEPCU                       &
                 ,RAINCV, PRATEC                                 &
-                ,domain%diagnostic_vars(domain%var_indx(kVARS%QFX))%data_2d                             &
-                ,domain%diagnostic_vars(domain%var_indx(kVARS%sensible_heat))%data_2d                   &
+                ,domain%vars_2d(domain%var_indx(kVARS%QFX)%v)%data_2d                             &
+                ,domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d                   &
                 ,znu                                     &
-                ,domain%diagnostic_vars(domain%var_indx(kVARS%u_mass))%data_3d                          &
-                ,domain%diagnostic_vars(domain%var_indx(kVARS%v_mass))%data_3d                          &
+                ,domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d                          &
+                ,domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d                          &
                 ,W0AVG                                          &
-                ,domain%diagnostic_vars(domain%var_indx(kVARS%temperature))%data_3d                     &
-                ,domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d                     &
-                ,domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d                &
-                ,domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d                  &
-                ,domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d                           &
-                ,domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d                         &
+                ,domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d                     &
+                ,domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d                     &
+                ,domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d                &
+                ,domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d                  &
+                ,domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d                           &
+                ,domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d                         &
                 ,domain%tend%qv_adv                             &
                 ,domain%tend%qv_pbl                             &
-                ,domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d                    & ! dz8w
-                ,domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d                        & !
-                ,domain%diagnostic_vars(domain%var_indx(kVARS%pressure_interface))%data_3d              &
+                ,domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d                    & ! dz8w
+                ,domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d                        & !
+                ,domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d              &
                 ,XLAND, CU_ACT_FLAG                             &
                 ,ids,ide, jds,jde, kds,kde                      &
                 ,ims,ime, jms,jme, kms,kme                      &
@@ -389,12 +389,12 @@ subroutine convect(domain,options,dt_in)
         call cu_nsas( &
             dt=dt_in               & !-- dt          time step (s)
             ,dx=domain%dx           & !-- dx          grid interval (m)
-            ,p3di=domain%diagnostic_vars(domain%var_indx(kVARS%pressure_interface))%data_3d              & !-- p3di        3d pressure (pa) at interface level
-            ,p3d=domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d                         & !-- p3d         3d pressure (pa)
-            ,pi3d=domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d                           & !-- pi3d        3d exner function (dimensionless)
-            ,qc3d=domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d                & !-- qc3d        cloud water mixing ratio (kg/kg)
-            ,qi3d=domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d                  & !-- qi3d        cloud ice mixing ratio (kg/kg)
-            ,rho3d=domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d                        &
+            ,p3di=domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d              & !-- p3di        3d pressure (pa) at interface level
+            ,p3d=domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d                         & !-- p3d         3d pressure (pa)
+            ,pi3d=domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d                           & !-- pi3d        3d exner function (dimensionless)
+            ,qc3d=domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d                & !-- qc3d        cloud water mixing ratio (kg/kg)
+            ,qi3d=domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d                  & !-- qi3d        cloud ice mixing ratio (kg/kg)
+            ,rho3d=domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d                        &
             ,itimestep=itimestep                                 &
             ,stepcu=STEPCU                                       &
             ,hbot=lowest_convection_layer                        & !-- HBOT          index of lowest model layer with convection  intent(out) ???
@@ -406,18 +406,18 @@ subroutine convect(domain,options,dt_in)
             ,rqicuten=domain%tend%qi                             &
             ,rucuten=domain%tend%u                               &
             ,rvcuten=domain%tend%v                               &
-            ,qv3d=domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d                     & !-- qv3d        3d water vapor mixing ratio (kg/kg)
-            ,t3d=domain%diagnostic_vars(domain%var_indx(kVARS%temperature))%data_3d                      & !-- t3d         temperature (k)
+            ,qv3d=domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d                     & !-- qv3d        3d water vapor mixing ratio (kg/kg)
+            ,t3d=domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d                      & !-- t3d         temperature (k)
             ,raincv=RAINCV                                       & !-- raincv      cumulus scheme precipitation (mm)
             ,pratec=PRATEC                                       &
             ,xland=XLAND                                         &
-            ,dz8w=domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d                    & !-- dz8w        dz between full levels (m)
+            ,dz8w=domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d                    & !-- dz8w        dz between full levels (m)
             ,w=W0AVG                                             & !-- w           vertical velocity (m/s)
-            ,u3d=domain%diagnostic_vars(domain%var_indx(kVARS%u_mass))%data_3d                           & !-- u3d         3d u-velocity interpolated to theta points (m/s)
-            ,v3d=domain%diagnostic_vars(domain%var_indx(kVARS%v_mass))%data_3d                           & !-- v3d         3d v-velocity interpolated to theta points (m/s)
-            ,hpbl=domain%diagnostic_vars(domain%var_indx(kVARS%hpbl))%data_2d                            &  ! ?? PBL height I assume?
-            ,hfx=domain%diagnostic_vars(domain%var_indx(kVARS%sensible_heat))%data_2d                     & !  HFX  - net upward heat flux at the surface (W/m^2)
-            ,qfx=domain%diagnostic_vars(domain%var_indx(kVARS%QFX))%data_2d                              & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
+            ,u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d                           & !-- u3d         3d u-velocity interpolated to theta points (m/s)
+            ,v3d=domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d                           & !-- v3d         3d v-velocity interpolated to theta points (m/s)
+            ,hpbl=domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d                            &  ! ?? PBL height I assume?
+            ,hfx=domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d                     & !  HFX  - net upward heat flux at the surface (W/m^2)
+            ,qfx=domain%vars_2d(domain%var_indx(kVARS%QFX)%v)%data_2d                              & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
             ,mp_physics=5        & ! - sets ncloud: - integer no_cloud(0),no_ice(1),cloud+ice(2) (see ln 141 cu_nsas.f90)  use options%physics%microphysics?
             ,dx_factor_nsas=dx_factor_nsas                       & !
             ,p_qc=1                                              & ! copied from Tiedke; no idea as to what these 3 flags represent.
@@ -458,25 +458,25 @@ subroutine convect(domain,options,dt_in)
 
     elseif (options%physics%convection==kCU_BMJ) then
         CALL BMJDRV(                                            &
-                TH=domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d         &
-                ,T=domain%diagnostic_vars(domain%var_indx(kVARS%temperature))%data_3d                   &
+                TH=domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d         &
+                ,T=domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d                   &
                 ,RAINCV=RAINCV                                  &
                 ,PRATEC=PRATEC                                  &
-                ,rho=domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d                     &
+                ,rho=domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d                     &
                 ,dt=dt_in                                       & !-- dt          time step (s)
                 ,ITIMESTEP=itimestep ,STEPCU=stepcu             &
                 ,CUTOP=CUTOP, CUBOT=CUBOT                       &
-                ,KPBL=domain%diagnostic_vars(domain%var_indx(kVARS%kpbl))%data_2di                                      &!-- KPBL INTENT(IN)          layer index of the PBL?
-                ,dz8w=domain%grid_vars(domain%var_indx(kVARS%dz_interface))%data_3d               &!-- dz8w          dz between full levels (m)
-                ,PINT=domain%diagnostic_vars(domain%var_indx(kVARS%pressure_interface))%data_3d         &  !-- p8w           pressure at full levels (Pa)
-                ,PMID=domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d                   &!-- Pcps        3D hydrostatic pressure at half levels (Pa)
-                ,PI=domain%diagnostic_vars(domain%var_indx(kVARS%exner))%data_3d                        &   ! exner
+                ,KPBL=domain%vars_2d(domain%var_indx(kVARS%kpbl)%v)%data_2di                                      &!-- KPBL INTENT(IN)          layer index of the PBL?
+                ,dz8w=domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d               &!-- dz8w          dz between full levels (m)
+                ,PINT=domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d         &  !-- p8w           pressure at full levels (Pa)
+                ,PMID=domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d                   &!-- Pcps        3D hydrostatic pressure at half levels (Pa)
+                ,PI=domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d                        &   ! exner
                 ,CP=cp ,R=r_d ,ELWV=xlv ,ELIV=xls ,G=gravity    &
                 ,TFRZ=svpt0 ,D608=EP_1 ,CLDEFI=cldefi           &
                 ,LOWLYR=lowlyr                                  &
                 ,XLAND=XLAND                                    &
                 ,CU_ACT_FLAG=CU_ACT_FLAG                        &
-                ,QV=domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d                  &
+                ,QV=domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d                  &
                 ,CCLDFRA=CCLDFRA                                &                 !-- CCLDFRA       convective cloud fraction (for BMJ scheme)
                 ,CONVCLD=CONVCLD                                &  !-- CONVCLD       Convective cloud (for BMJ scheme) (kg/m^2)
                 ,QCCONV=qcconv                                  &! QCCONV     convective cloud mixing ratio (kg/kg)
@@ -512,18 +512,18 @@ subroutine convect(domain,options,dt_in)
                 !-- RTHCUTEN      Theta tendency due to cumulus scheme precipitation (K/s)  (domain%tend%qv)
                 !-- RQVCUTEN      Qv tendency due to cumulus scheme precipitation (kg/kg/s)  (domain%tend%th)
                 ! -- ...etc
-                if (options%cu%tend_qv_fraction > 0) domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d(:,:,j)           = domain%state_vars(domain%var_indx(kVARS%water_vapor))%data_3d(:,:,j)           + domain%tend%qv(:,:,j)*internal_dt * options%cu%tend_qv_fraction
-                if (options%cu%tend_qc_fraction > 0) domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d(:,:,j)      = domain%state_vars(domain%var_indx(kVARS%cloud_water_mass))%data_3d(:,:,j)      + domain%tend%qc(:,:,j)*internal_dt * options%cu%tend_qc_fraction
-                if (options%cu%tend_th_fraction > 0) domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d(:,:,j) = domain%state_vars(domain%var_indx(kVARS%potential_temperature))%data_3d(:,:,j) + domain%tend%th(:,:,j)*internal_dt * options%cu%tend_th_fraction
-                if (options%cu%tend_qi_fraction > 0) domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d(:,:,j)        = domain%state_vars(domain%var_indx(kVARS%ice_mass))%data_3d(:,:,j)        + domain%tend%qi(:,:,j)*internal_dt * options%cu%tend_qi_fraction
+                if (options%cu%tend_qv_fraction > 0) domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(:,:,j)           = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(:,:,j)           + domain%tend%qv(:,:,j)*internal_dt * options%cu%tend_qv_fraction
+                if (options%cu%tend_qc_fraction > 0) domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d(:,:,j)      = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d(:,:,j)      + domain%tend%qc(:,:,j)*internal_dt * options%cu%tend_qc_fraction
+                if (options%cu%tend_th_fraction > 0) domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(:,:,j) = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(:,:,j) + domain%tend%th(:,:,j)*internal_dt * options%cu%tend_th_fraction
+                if (options%cu%tend_qi_fraction > 0) domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d(:,:,j)        = domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d(:,:,j)        + domain%tend%qi(:,:,j)*internal_dt * options%cu%tend_qi_fraction
             endif
             ! if (options%physics%convection==kCU_KAINFR) then
             !     domain%qsnow(:,:,j) =domain%qsnow(:,:,j) + domain%tend%Qs(:,:,j)*internal_dt
             !     domain%qrain(:,:,j) =domain%qrain(:,:,j) + domain%tend%Qr(:,:,j)*internal_dt
             ! endif
 
-            domain%diagnostic_vars(domain%var_indx(kVARS%precipitation))%data_2d(:,j)  = domain%diagnostic_vars(domain%var_indx(kVARS%precipitation))%data_2d(:,j) + RAINCV(:,j)
-            domain%diagnostic_vars(domain%var_indx(kVARS%convective_precipitation))%data_2d(:,j) = domain%diagnostic_vars(domain%var_indx(kVARS%convective_precipitation))%data_2d(:,j) + RAINCV(:,j)
+            domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d(:,j)  = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d(:,j) + RAINCV(:,j)
+            domain%vars_2d(domain%var_indx(kVARS%convective_precipitation)%v)%data_2d(:,j) = domain%vars_2d(domain%var_indx(kVARS%convective_precipitation)%v)%data_2d(:,j) + RAINCV(:,j)
 
             ! if (options%physics%convection==kCU_TIEDTKE) then
             !     domain%u_cu(ids+1:ide,:,j) = 0.999*domain%u_cu(ids+1:ide,:,j) + (domain%tend%u(ids:ide-1,:,j)+domain%tend%u(ids+1:ide,:,j))/2 * internal_dt
@@ -561,8 +561,8 @@ end subroutine convect
         xpt = domain%ims + domain%grid%halo_size
         ypt = domain%jms + domain%grid%halo_size
 
-        associate(p     => domain%diagnostic_vars(domain%var_indx(kVARS%pressure))%data_3d,                         &
-                psfc  => domain%diagnostic_vars(domain%var_indx(kVARS%surface_pressure))%data_2d(xpt, ypt))
+        associate(p     => domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                         &
+                psfc  => domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d(xpt, ypt))
 
         ptop = p(xpt,kme,ypt) - (p(xpt,kme-1,ypt) - p(xpt,kme,ypt))/2.0 !NOT CORRECT
         ptop = max(ptop,1.0)
@@ -571,12 +571,12 @@ end subroutine convect
             znu(i) = (p(xpt,i,ypt) - ptop) / (psfc - ptop)
         enddo
 
-        ! if (domain%var_indx(kVARS%znw) > 0) then
+        ! if (domain%var_indx(kVARS%znw)%v > 0) then
         !     do i = kms, kme
         !         if (i > kms) then
-        !             domain%diagnostic_vars(domain%var_indx(kVARS%znw))%data_1d(i) = ((p(xpt,i,ypt) + p(xpt,i-1,ypt)) / 2 - ptop) / (psfc-ptop)
+        !             domain%vars_1d(domain%var_indx(kVARS%znw)%v)%data_1d(i) = ((p(xpt,i,ypt) + p(xpt,i-1,ypt)) / 2 - ptop) / (psfc-ptop)
         !         else
-        !             domain%diagnostic_vars(domain%var_indx(kVARS%znw))%data_1d(i) = 1
+        !             domain%vars_1d(domain%var_indx(kVARS%znw)%v)%data_1d(i) = 1
         !         endif
         !     enddo
         ! endif

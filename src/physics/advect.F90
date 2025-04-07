@@ -873,7 +873,7 @@ contains
             do i = ims,ime
                 do j = jms,jme
                     do k = kms,kme
-                        rho(i,k,j) = domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d(i,k,j)  
+                        rho(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d(i,k,j)  
                     enddo
                 enddo
             enddo
@@ -888,28 +888,28 @@ contains
         endif
 
         !Compute the denomenator for all of the flux summation terms here once
-        denom = 1/(rho*domain%grid_vars(domain%var_indx(kVARS%jacobian))%data_3d)
+        denom = 1/(rho*domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
 
         do concurrent (j = j_s:j_e+1, k = kms:kme, i = i_s:i_e+1)
-            U_m(i,k,j) = domain%state_vars(domain%var_indx(kVARS%u))%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i-1,k,j))*0.5 * &
-                    domain%grid_vars(domain%var_indx(kVARS%jacobian_u))%data_3d(i,k,j) / domain%dx
+            U_m(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i-1,k,j))*0.5 * &
+                    domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i,k,j) / domain%dx
         enddo
 
         do concurrent (j = j_s:j_e+1, k = kms:kme, i = i_s:i_e+1)
-            V_m(i,k,j) = domain%state_vars(domain%var_indx(kVARS%v))%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i,k,j-1))*0.5 * &
-                    domain%grid_vars(domain%var_indx(kVARS%jacobian_v))%data_3d(i,k,j) / domain%dx
+            V_m(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i,k,j-1))*0.5 * &
+                    domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i,k,j) / domain%dx
         enddo
 
         do concurrent (j = j_s:j_e+1, k = kms:kme-1, i = i_s:i_e+1)
-            W_m(i,k,j) = domain%diagnostic_vars(domain%var_indx(kVARS%w))%data_3d(i,k,j) * dt * domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d(i,k,j) * &
-                    ( rho(i,k,j)*domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i,k+1,j) + &
-                        rho(i,k+1,j)*domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i,k,j) ) / &
-                        (domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i,k,j)+domain%grid_vars(domain%var_indx(kVARS%advection_dz))%data_3d(i,k+1,j))
+            W_m(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j) * dt * domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d(i,k,j) * &
+                    ( rho(i,k,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j) + &
+                        rho(i,k+1,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j) ) / &
+                        (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j)+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j))
         enddo
 
         do j = j_s,j_e+1
             do i = i_s,i_e+1
-                W_m(i,kme,j) = domain%diagnostic_vars(domain%var_indx(kVARS%w))%data_3d(i,kme,j) * dt * domain%grid_vars(domain%var_indx(kVARS%jacobian_w))%data_3d(i,kme,j) * rho(i,kme,j)
+                W_m(i,kme,j) = domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,kme,j) * dt * domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d(i,kme,j) * rho(i,kme,j)
             enddo
         enddo
 

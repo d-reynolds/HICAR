@@ -14,6 +14,11 @@ module data_structures
 ! ------------------------------------------------
 !   various data structures for use in geographic interpolation routines
 ! ------------------------------------------------
+
+    type index_type
+        integer :: v = -1
+        character(kMAX_NAME_LENGTH) :: n = ''
+    end type index_type
     ! contains the location of a specific grid point
     type position
         integer::x,y

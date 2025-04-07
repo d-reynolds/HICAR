@@ -102,11 +102,11 @@ interface
     !! Primary subroutines to add and retrieve elements
     !!
     !!-------------------------
-    module function get_var(this, varname, err) result(var_data)
+    module function get_var(this, varname, err, indx) result(var_data)
         implicit none
         class(var_dict_t),   intent(in) :: this
         character(len=*),    intent(in) :: varname
-        integer,             intent(out),   optional :: err
+        integer,             intent(out),   optional :: err, indx
         type(variable_t)                :: var_data
     end function
 

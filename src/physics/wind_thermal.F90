@@ -74,8 +74,8 @@ contains
         do j = jms,jme
             do i = ims,ime
                 do k = kms,kme
-                    if ( (k_200m(i,j)==0) .and. ((domain%grid_vars(domain%var_indx(kVARS%z))%data_3d(i,k,j)-domain%grid_vars(domain%var_indx(kVARS%z_interface))%data_3d(i,kms,j)) >= 200.0) ) k_200m(i,j) = k
-                    if ( (k_1200m(i,j)==0) .and. ((domain%grid_vars(domain%var_indx(kVARS%z))%data_3d(i,k,j)-domain%grid_vars(domain%var_indx(kVARS%z_interface))%data_3d(i,kms,j)) >= 1200.0) ) then
+                    if ( (k_200m(i,j)==0) .and. ((domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i,k,j)-domain%vars_3d(domain%var_indx(kVARS%z_interface)%v)%data_3d(i,kms,j)) >= 200.0) ) k_200m(i,j) = k
+                    if ( (k_1200m(i,j)==0) .and. ((domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i,k,j)-domain%vars_3d(domain%var_indx(kVARS%z_interface)%v)%data_3d(i,kms,j)) >= 1200.0) ) then
                         k_1200m(i,j) = k
                         exit
                     endif
@@ -94,7 +94,7 @@ contains
             allocate( level_height(ims:ime,kms:therm_k_max,jms:jme))
 
             do k = kms,therm_k_max
-                level_height(:,k,:) = domain%grid_vars(domain%var_indx(kVARS%z))%data_3d(:,k,:)-domain%grid_vars(domain%var_indx(kVARS%z_interface))%data_3d(ims:ime,kms,jms:jme)
+                level_height(:,k,:) = domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(:,k,:)-domain%vars_3d(domain%var_indx(kVARS%z_interface)%v)%data_3d(ims:ime,kms,jms:jme)
             enddo
         endif
         

@@ -14,6 +14,7 @@ module test_advect
     use timer_interface, only: timer_t
     use io_routines,     only : check_file_exists
     use time_step, only: compute_dt
+    use grid_interface, only: grid_t
     implicit none
     private
     
@@ -101,6 +102,7 @@ module test_advect
         type(domain_t) :: domain
         type(options_t) :: options
         type(variable_t) :: var
+        type(grid_t)     :: var_grid
         type(timer_t) :: flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time
         real :: max_u, max_v, max_w, max_wind
         real :: dt, t_step_f, initial_val, spatial_constraint
@@ -158,46 +160,47 @@ module test_advect
         call adv_init(domain,options)
 
         ! Set values for u,v,w and the tracer to advect
-        domain%state_vars(domain%var_indx(kVARS%u))%data_3d =  10.0
-        domain%state_vars(domain%var_indx(kVARS%v))%data_3d =  -10.0
-        domain%state_vars(domain%var_indx(kVARS%w))%data_3d =  0.0
+        domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d =  10.0
+        domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d =  -10.0
+        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d =  0.0
 
-        do i = 1, domain%adv_vars%n_vars
-            var = domain%adv_vars%var_list(i)%var
+        do i = 1, size(domain%adv_vars)
+            var_grid = domain%vars_3d(domain%adv_vars(i)%v)%grid
 
-            var%data_3d = -99999.0
-            var%data_3d(var%grid%its:var%grid%ite,:,var%grid%jts:var%grid%jte) = initial_val
+            domain%vars_3d(domain%adv_vars(i)%v)%data_3d = -99999.0
+            domain%vars_3d(domain%adv_vars(i)%v)%data_3d(var_grid%its:var_grid%ite,:,var_grid%jts:var_grid%jte) = initial_val
 
             !copy over initial value like "forcing" at the domain edges
-            if (domain%north_boundary) var%data_3d(:,:,var%grid%jte+1:var%grid%jme) = initial_val
-            if (domain%south_boundary) var%data_3d(:,:,var%grid%jms:var%grid%jts-1) = initial_val
-            if (domain%east_boundary) var%data_3d(var%grid%ite+1:var%grid%ime,:,:) = initial_val
-            if (domain%west_boundary) var%data_3d(var%grid%ims:var%grid%its-1,:,:) = initial_val
+            if (domain%north_boundary) domain%vars_3d(domain%adv_vars(i)%v)%data_3d(:,:,var_grid%jte+1:var_grid%jme) = initial_val
+            if (domain%south_boundary) domain%vars_3d(domain%adv_vars(i)%v)%data_3d(:,:,var_grid%jms:var_grid%jts-1) = initial_val
+            if (domain%east_boundary) domain%vars_3d(domain%adv_vars(i)%v)%data_3d(var_grid%ite+1:var_grid%ime,:,:) = initial_val
+            if (domain%west_boundary) domain%vars_3d(domain%adv_vars(i)%v)%data_3d(var_grid%ims:var_grid%its-1,:,:) = initial_val
         end do
 
         ! exchange to get each others values in the halo regions
-        call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars)
+        call domain%batch_exch()
 
-        dt = compute_dt(domain%dx, domain%state_vars(domain%var_indx(kVARS%u))%data_3d, domain%state_vars(domain%var_indx(kVARS%v))%data_3d, &
-                domain%state_vars(domain%var_indx(kVARS%w))%data_3d, domain%diagnostic_vars(domain%var_indx(kVARS%density))%data_3d, options%domain%dz_levels, &
-                domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
-                domain%its, domain%ite, domain%jts, domain%jte, &
-                options%time%cfl_reduction_factor, &
-                use_density=.false.)
+        dt = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, options%domain%dz_levels, &
+                        domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
+                        domain%its, domain%ite, domain%jts, domain%jte, &
+                        options%time%cfl_reduction_factor, &
+                        use_density=.false.)
 
         STD_OUT_PE = .True.
 
         ! loop 10 times, calling advect and halo_exchange
         do l = 1, 100
             call advect(domain, options, dt, flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
-            call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars)
+            call domain%batch_exch()
         end do
 
         ! test that all of the tile indices of temperature for the domain object are the same as the intial value
-        do i = 1, domain%adv_vars%n_vars
-            var = domain%adv_vars%var_list(i)%var
+        do i = 1, size(domain%adv_vars)
+            var = domain%vars_3d(domain%adv_vars(i)%v)
             if (.not.(ALL(var%data_3d(var%grid%its:var%grid%ite,:,var%grid%jts:var%grid%jte) == initial_val))) then
                 write(*,*) "Initial value (expected) is: ", initial_val
+                write(*,*) "bounds of var are: ", var%grid%its, " ", var%grid%ite, " ", var%grid%jts, " ", var%grid%jte
                 write(*,*) "Max val of advected variable in tile: ", maxval(var%data_3d(var%grid%its:var%grid%ite,:,var%grid%jts:var%grid%jte))
                 write(*,*) "Min val of advected variable in tile: ", minval(var%data_3d(var%grid%its:var%grid%ite,:,var%grid%jts:var%grid%jte))    
                 call test_failed(error,"advect_standard","Tile data is not equal to initial value")

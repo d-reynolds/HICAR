@@ -394,6 +394,38 @@ module icar_constants
     !                                                         291, 289, 293, 294, 295, 296, 297, 298, 299, 300,  &
     !                                                         301, 302, 303, 304, 305, 306, 307, 308, 309, 310)
 
+    character(len=kMAX_NAME_LENGTH) :: kADV_VARS(22) = (/"potential_temperature",&
+                                                         "qv                   ",&
+                                                         "qc                   ",&
+                                                         "qs                   ",&
+                                                         "qr                   ",&
+                                                         "qi                   ",&
+                                                         "qg                   ",&
+                                                         "ice2_mass            ",&
+                                                         "ice3_mass            ",&
+                                                         "nc                   ",&
+                                                         "ns                   ",&
+                                                         "nr                   ",&
+                                                         "ni                   ",&
+                                                         "ng                   ",&
+                                                         "ice2_number          ",&
+                                                         "ice3_number          ",&
+                                                         "ice1_a               ",&
+                                                         "ice1_c               ",&
+                                                         "ice2_a               ",&
+                                                         "ice2_c               ",&
+                                                         "ice3_a               ",&
+                                                         "ice3_c               "/)
+
+
+    character(len=kMAX_NAME_LENGTH) :: kEXCH_VARS(7) = (/"hfss ",&
+                                                        "tsfe ",&
+                                                        "Ds   ",&
+                                                        "scfe ",&
+                                                        "Sice ",&
+                                                        "Sliq ",&
+                                                        "Nsnow"/)
+                                                 
     integer, parameter :: kINTEGER_BITS     = storage_size(kINTEGER_BITS)
     integer, parameter :: kMAX_STORAGE_VARS = storage_size(kVARS) / kINTEGER_BITS
 

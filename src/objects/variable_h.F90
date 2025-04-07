@@ -1,5 +1,5 @@
 module variable_interface
-    use icar_constants,          only : kMAX_DIM_LENGTH, kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, kINTEGER, kREAL, kDOUBLE
+    use icar_constants,          only : kMAX_DIM_LENGTH, kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, kINTEGER, kREAL, kDOUBLE, STD_OUT_PE
     use grid_interface,          only : grid_t
     use meta_data_interface,     only : meta_data_t
     use iso_fortran_env,         only : real64
@@ -10,14 +10,14 @@ module variable_interface
     ! have to think about how to handle multiple variable types (int, 2d, etc)
     ! could add multiple "local" variables or create multiple variable types...
     type, extends(meta_data_t) :: variable_t
-        real, pointer :: data_4d(:,:,:,:) => null()
-        real, pointer :: data_3d(:,:,:) => null()
-        real, pointer :: data_2d(:,:)   => null()
-        real, pointer :: data_1d(:)   => null()
-        real(kind=real64), pointer :: data_2dd(:,:) => null()
-        integer, pointer ::           data_2di(:,:) => null()
-        real, pointer :: dqdt_3d(:,:,:) => null()   ! Note these have to be pointers so they get referenced when variable_t is passed around(?)
-        real, pointer :: dqdt_2d(:,:)   => null()   ! Note these have to be pointers so they get referenced when variable_t is passed around(?)
+        real, allocatable :: data_4d(:,:,:,:)! => null()
+        real, allocatable :: data_3d(:,:,:)! => null()
+        real, allocatable :: data_2d(:,:) !  => null()
+        real, allocatable :: data_1d(:) !  => null()
+        !real(kind=real64), pointer :: data_2dd(:,:)! => null()
+        integer, allocatable ::           data_2di(:,:)! => null()
+        real, allocatable :: dqdt_3d(:,:,:) !=> null()   ! Note these have to be pointers so they get referenced when variable_t is passed around(?)
+        real, allocatable :: dqdt_2d(:,:)  ! => null()   ! Note these have to be pointers so they get referenced when variable_t is passed around(?)
 
         logical                         :: unlimited_dim = .False.
         logical                         :: one_d = .False.
@@ -51,6 +51,10 @@ module variable_interface
 
     end type
 
+    interface assignment(=)
+        module procedure assign_variable
+    end interface
+
     interface
 
         module subroutine init_grid(this, grid, forcing_var, force_boundaries, dtype)
@@ -71,6 +75,12 @@ module variable_interface
             logical,            intent(in), optional :: force_boundaries
         end subroutine
 
+        module subroutine assign_variable(dest, src)
+            implicit none
+            class(variable_t), intent(out) :: dest
+            class(variable_t), intent(in)  :: src
+        end subroutine
+    
     end interface
 
 end module
