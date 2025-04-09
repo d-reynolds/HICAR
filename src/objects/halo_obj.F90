@@ -592,7 +592,7 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     
     type(variable_t) :: var
     logical :: exch_v_only
-    integer :: n, k_max, msg_size, indx, i
+    integer :: n, k_max, msg_size, indx, i, n_vars
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
     if (this%n_3d <= 0) return
@@ -606,7 +606,7 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     ! call adv_vars%reset_iterator()
     ! call exch_vars%reset_iterator()
     n = 1
-
+    n_vars = size(var_data)
 
     if (.not.(this%north_boundary)) call MPI_Win_Start(this%north_neighbor_grp, 0, this%north_3d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Start(this%south_neighbor_grp, 0, this%south_3d_win)
@@ -621,27 +621,28 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     ! this step will directly copy the data to the other PE
     if (.not.(exch_v_only)) then
         do i = 1, size(adv_vars)
-            ! get the next variable
-            !check that the variable indexed matches the name
-            if (var_data(adv_vars(i)%v)%name == adv_vars(i)%n) then
-                if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
-                    var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte-this%halo_size+1):this%jte)
-                if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
-                    var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,this%jts:(this%jts+this%halo_size-1))
-                if (.not.(this%east_boundary)) this%east_buffer_3d(n,:,:,1:(this%jte-this%jts+1)) = &
-                    var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,this%jts:this%jte)
-                if (.not.(this%west_boundary)) this%west_buffer_3d(n,:,:,1:(this%jte-this%jts+1)) = &
-                    var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,this%jts:this%jte)
+            if (adv_vars(i)%v < n_vars) then
+                !check that the variable indexed matches the name
+                if (var_data(adv_vars(i)%v)%name == adv_vars(i)%n) then
+                    if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
+                        var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte-this%halo_size+1):this%jte)
+                    if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
+                        var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,this%jts:(this%jts+this%halo_size-1))
+                    if (.not.(this%east_boundary)) this%east_buffer_3d(n,:,:,1:(this%jte-this%jts+1)) = &
+                        var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,this%jts:this%jte)
+                    if (.not.(this%west_boundary)) this%west_buffer_3d(n,:,:,1:(this%jte-this%jts+1)) = &
+                        var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,this%jts:this%jte)
 
-                if (.not.(this%northwest_boundary)) this%northwest_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                    var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,(this%jte-this%halo_size+1):this%jte)
-                if (.not.(this%southeast_boundary)) this%southeast_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                    var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,this%jts:(this%jts+this%halo_size-1))
-                if (.not.(this%southwest_boundary)) this%southwest_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                    var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,this%jts:(this%jts+this%halo_size-1))
-                if (.not.(this%northeast_boundary)) this%northeast_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                    var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,(this%jte-this%halo_size+1):this%jte)
-                n = n+1
+                    if (.not.(this%northwest_boundary)) this%northwest_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
+                        var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,(this%jte-this%halo_size+1):this%jte)
+                    if (.not.(this%southeast_boundary)) this%southeast_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
+                        var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,this%jts:(this%jts+this%halo_size-1))
+                    if (.not.(this%southwest_boundary)) this%southwest_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
+                        var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,this%jts:(this%jts+this%halo_size-1))
+                    if (.not.(this%northeast_boundary)) this%northeast_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
+                        var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,(this%jte-this%halo_size+1):this%jte)
+                    n = n+1
+                endif
             endif
         enddo
     endif
@@ -649,17 +650,19 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     ! Now iterate through the exchange-only objects as long as there are more elements present
      do i = 1, size(exch_vars)
         !check that the variable indexed matches the name
-        if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
-            k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
-            if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
-                var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte-this%halo_size+1):this%jte)
-            if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
-                var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,this%jts:(this%jts+this%halo_size-1))
-            if (.not.(this%east_boundary)) this%east_buffer_3d(n,:,1:k_max,1:(this%jte-this%jts+1)) = &
-                var_data(exch_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,1:k_max,this%jts:this%jte)
-            if (.not.(this%west_boundary)) this%west_buffer_3d(n,:,1:k_max,1:(this%jte-this%jts+1)) = &
-                var_data(exch_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size)-1,1:k_max,this%jts:this%jte)
-            n = n+1
+        if (exch_vars(i)%v < n_vars) then
+            if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
+                k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
+                if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
+                    var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte-this%halo_size+1):this%jte)
+                if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
+                    var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,this%jts:(this%jts+this%halo_size-1))
+                if (.not.(this%east_boundary)) this%east_buffer_3d(n,:,1:k_max,1:(this%jte-this%jts+1)) = &
+                    var_data(exch_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,1:k_max,this%jts:this%jte)
+                if (.not.(this%west_boundary)) this%west_buffer_3d(n,:,1:k_max,1:(this%jte-this%jts+1)) = &
+                    var_data(exch_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size)-1,1:k_max,this%jts:this%jte)
+                n = n+1
+            endif
         endif
     enddo
 
@@ -751,7 +754,7 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     type(timer_t), optional,     intent(inout)   :: wait_timer
 
     type(variable_t) :: var
-    integer :: n, k_max, i
+    integer :: n, k_max, i, n_vars
     logical :: exch_v_only
 
     if (this%n_3d <= 0) return
@@ -768,50 +771,54 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     if (.not.(this%southwest_boundary)) call MPI_Win_Wait(this%southwest_3d_win)
     if (.not.(this%northeast_boundary)) call MPI_Win_Wait(this%northeast_3d_win)
 
-    ! call adv_vars%reset_iterator()
-    ! call exch_vars%reset_iterator()
     n = 1
+    n_vars = size(var_data)
+
     ! Now iterate through the dictionary as long as there are more elements present
     if (.not.(exch_v_only)) then
 
         do i = 1, size(adv_vars)
-            !check that the variable indexed matches the name
-            if (var_data(adv_vars(i)%v)%name == adv_vars(i)%n) then
-                if (.not.(this%north_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte+1):this%jme) = &
-                        this%north_batch_in_3d(n,1:(this%ite-this%its+1),:,1:this%halo_size)
-                if (.not.(this%south_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,this%jms:(this%jts-1)) = &
-                        this%south_batch_in_3d(n,1:(this%ite-this%its+1),:,1:this%halo_size)
-                if (.not.(this%east_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,this%jts:this%jte) = &
-                        this%east_batch_in_3d(n,:,:,1:(this%jte-this%jts+1))
-                if (.not.(this%west_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,this%jts:this%jte) = &
-                        this%west_batch_in_3d(n,:,:,1:(this%jte-this%jts+1))
+            if (adv_vars(i)%v < n_vars) then
+                !check that the variable indexed matches the name
+                if (var_data(adv_vars(i)%v)%name == adv_vars(i)%n) then
+                    if (.not.(this%north_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte+1):this%jme) = &
+                            this%north_batch_in_3d(n,1:(this%ite-this%its+1),:,1:this%halo_size)
+                    if (.not.(this%south_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,this%jms:(this%jts-1)) = &
+                            this%south_batch_in_3d(n,1:(this%ite-this%its+1),:,1:this%halo_size)
+                    if (.not.(this%east_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,this%jts:this%jte) = &
+                            this%east_batch_in_3d(n,:,:,1:(this%jte-this%jts+1))
+                    if (.not.(this%west_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,this%jts:this%jte) = &
+                            this%west_batch_in_3d(n,:,:,1:(this%jte-this%jts+1))
 
-                if (.not.(this%northwest_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,(this%jte+1):this%jme) = &
-                        this%northwest_batch_in_3d(n,:,:,:)
-                if (.not.(this%southeast_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,this%jms:(this%jts-1)) = &
-                        this%southeast_batch_in_3d(n,:,:,:)
-                if (.not.(this%southwest_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,this%jms:(this%jts-1)) = &
-                        this%southwest_batch_in_3d(n,:,:,:)
-                if (.not.(this%northeast_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,(this%jte+1):this%jme) = &
-                        this%northeast_batch_in_3d(n,:,:,:)
-                n = n+1
+                    if (.not.(this%northwest_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,(this%jte+1):this%jme) = &
+                            this%northwest_batch_in_3d(n,:,:,:)
+                    if (.not.(this%southeast_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,this%jms:(this%jts-1)) = &
+                            this%southeast_batch_in_3d(n,:,:,:)
+                    if (.not.(this%southwest_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,this%jms:(this%jts-1)) = &
+                            this%southwest_batch_in_3d(n,:,:,:)
+                    if (.not.(this%northeast_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,(this%jte+1):this%jme) = &
+                            this%northeast_batch_in_3d(n,:,:,:)
+                    n = n+1
+                endif
             endif
         enddo
     endif
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do i = 1, size(exch_vars)
-        !check that the variable indexed matches the name
-        if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
-            k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
-            if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte+1):this%jme) = &
-                    this%north_batch_in_3d(n,1:(this%ite-this%its+1),1:k_max,:)
-            if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,this%jms:(this%jts-1)) = &
-                    this%south_batch_in_3d(n,1:(this%ite-this%its+1),1:k_max,:)
-            if (.not.(this%east_boundary)) var_data(exch_vars(i)%v)%data_3d((this%ite+1):this%ime,1:k_max,this%jts:this%jte) = &
-                    this%east_batch_in_3d(n,:,1:k_max,1:(this%jte-this%jts+1))
-            if (.not.(this%west_boundary)) var_data(exch_vars(i)%v)%data_3d(this%ims:(this%its-1),1:k_max,this%jts:this%jte) = &
-                    this%west_batch_in_3d(n,:,1:k_max,1:(this%jte-this%jts+1))
-            n = n+1
+        if (exch_vars(i)%v < n_vars) then
+            !check that the variable indexed matches the name
+            if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
+                k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
+                if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte+1):this%jme) = &
+                        this%north_batch_in_3d(n,1:(this%ite-this%its+1),1:k_max,:)
+                if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,this%jms:(this%jts-1)) = &
+                        this%south_batch_in_3d(n,1:(this%ite-this%its+1),1:k_max,:)
+                if (.not.(this%east_boundary)) var_data(exch_vars(i)%v)%data_3d((this%ite+1):this%ime,1:k_max,this%jts:this%jte) = &
+                        this%east_batch_in_3d(n,:,1:k_max,1:(this%jte-this%jts+1))
+                if (.not.(this%west_boundary)) var_data(exch_vars(i)%v)%data_3d(this%ims:(this%its-1),1:k_max,this%jts:this%jte) = &
+                        this%west_batch_in_3d(n,:,1:k_max,1:(this%jte-this%jts+1))
+                n = n+1
+            endif
         endif
     enddo
     if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp, 0, this%north_3d_win)
@@ -830,7 +837,7 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
     type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
     type(variable_t), intent(inout) :: var_data(:)
     type(variable_t) :: var
-    integer :: n, msg_size, i
+    integer :: n, msg_size, i, n_vars
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
     if (this%n_2d <= 0) return
@@ -847,20 +854,24 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
     if (.not.(this%west_boundary)) call MPI_Win_Start(this%west_neighbor_grp, 0, this%west_2d_win)
 
     n = 1
+    n_vars = size(var_data)
+
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do i = 1, size(exch_vars)
-        !check that the variable indexed matches the name
-        if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
-            if (.not.(this%north_boundary)) this%north_buffer_2d(n,1:(this%ite-this%its+1),:) = &
-                var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte-this%halo_size+1):this%jte)
-            if (.not.(this%south_boundary)) this%south_buffer_2d(n,1:(this%ite-this%its+1),:) = &
-                var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,this%jts:(this%jts+this%halo_size-1))
-            if (.not.(this%east_boundary)) this%east_buffer_2d(n,:,1:(this%jte-this%jts+1)) = &
-                var_data(exch_vars(i)%v)%data_2d((this%ite-this%halo_size+1):this%ite,this%jts:this%jte)
-            if (.not.(this%west_boundary)) this%west_buffer_2d(n,:,1:(this%jte-this%jts+1)) = &
-                var_data(exch_vars(i)%v)%data_2d(this%its:(this%its+this%halo_size)-1,this%jts:this%jte)
+        if (exch_vars(i)%v < n_vars) then
+            !check that the variable indexed matches the name
+            if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
+                if (.not.(this%north_boundary)) this%north_buffer_2d(n,1:(this%ite-this%its+1),:) = &
+                    var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte-this%halo_size+1):this%jte)
+                if (.not.(this%south_boundary)) this%south_buffer_2d(n,1:(this%ite-this%its+1),:) = &
+                    var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,this%jts:(this%jts+this%halo_size-1))
+                if (.not.(this%east_boundary)) this%east_buffer_2d(n,:,1:(this%jte-this%jts+1)) = &
+                    var_data(exch_vars(i)%v)%data_2d((this%ite-this%halo_size+1):this%ite,this%jts:this%jte)
+                if (.not.(this%west_boundary)) this%west_buffer_2d(n,:,1:(this%jte-this%jts+1)) = &
+                    var_data(exch_vars(i)%v)%data_2d(this%its:(this%its+this%halo_size)-1,this%jts:this%jte)
 
-            n = n+1
+                n = n+1
+            endif
         endif
     enddo
 
@@ -903,7 +914,7 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
     type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
     type(variable_t), intent(inout) :: var_data(:)
     type(variable_t) :: var
-    integer :: n, i
+    integer :: n, i, n_vars
 
     if (this%n_2d <= 0) return
     ! if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_2d_win)
@@ -918,15 +929,19 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
 
     ! call exch_vars%reset_iterator()
     n = 1    
+    n_vars = size(var_data)
+
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do i = 1, size(exch_vars)
-        !check that the variable indexed matches the name
-        if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
-            if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte+1):this%jme) = this%north_batch_in_2d(n,1:(this%ite-this%its+1),:)
-            if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,this%jms:(this%jts-1)) = this%south_batch_in_2d(n,1:(this%ite-this%its+1),:)
-            if (.not.(this%east_boundary)) var_data(exch_vars(i)%v)%data_2d((this%ite+1):this%ime,this%jts:this%jte) = this%east_batch_in_2d(n,:,1:(this%jte-this%jts+1))
-            if (.not.(this%west_boundary)) var_data(exch_vars(i)%v)%data_2d(this%ims:(this%its-1),this%jts:this%jte) = this%west_batch_in_2d(n,:,1:(this%jte-this%jts+1))
-            n = n+1
+        if (exch_vars(i)%v < n_vars) then
+            !check that the variable indexed matches the name
+            if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
+                if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte+1):this%jme) = this%north_batch_in_2d(n,1:(this%ite-this%its+1),:)
+                if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,this%jms:(this%jts-1)) = this%south_batch_in_2d(n,1:(this%ite-this%its+1),:)
+                if (.not.(this%east_boundary)) var_data(exch_vars(i)%v)%data_2d((this%ite+1):this%ime,this%jts:this%jte) = this%east_batch_in_2d(n,:,1:(this%jte-this%jts+1))
+                if (.not.(this%west_boundary)) var_data(exch_vars(i)%v)%data_2d(this%ims:(this%its-1),this%jts:this%jte) = this%west_batch_in_2d(n,:,1:(this%jte-this%jts+1))
+                n = n+1
+            endif
         endif
     enddo
 
