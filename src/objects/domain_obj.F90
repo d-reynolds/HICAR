@@ -27,7 +27,7 @@ submodule(domain_interface) domain_implementation
     end interface
     
     real, parameter::deg2rad=0.017453293 !2*pi/360
-    integer :: FILTER_WIDTH
+    integer :: FILTER_WIDTH = 7
 
     ! primary public routines : init, get_initial_conditions, halo_send, halo_retrieve, or halo_exchange
 contains
@@ -2676,16 +2676,16 @@ contains
         integer :: ims, ime, jms, jme
         ! temporary to hold the variable to be interpolated to
         type(variable_t) :: var_to_update
-        integer :: i, k, j, var_indx
+        integer :: i, k, j, var_indx, n
         real    :: dt_h
         logical :: do_boundary
         
         !calculate dt in units of hours
         dt_h = dt/3600.0
         
-        do i = 1,size(this%forcing_hi)
+        do n = 1,size(this%forcing_hi)
 
-            var_indx = get_varindx(trim(this%forcing_hi(i)%name))
+            var_indx = get_varindx(trim(this%forcing_hi(n)%name))
             var_to_update = get_varmeta(var_indx)            
 
             if (var_to_update%two_d) then
@@ -2707,13 +2707,13 @@ contains
                         !Update forcing data to current time step
                         do concurrent (j = jms:jme, i = ims:ime)
                             if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) > 0.0) then
-                                this%forcing_hi(i)%data_2d(i,j) = this%forcing_hi(i)%data_2d(i,j) + (this%forcing_hi(i)%dqdt_2d(i,j) * dt)
+                                this%forcing_hi(n)%data_2d(i,j) = this%forcing_hi(n)%data_2d(i,j) + (this%forcing_hi(n)%dqdt_2d(i,j) * dt)
                                 if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) == 1.0) then
-                                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%forcing_hi(i)%data_2d(i,j)
+                                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%forcing_hi(n)%data_2d(i,j)
                                 else
                                     this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) + &
                                                     (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) * dt_h) * &
-                                                    (this%forcing_hi(i)%data_2d(i,j) - this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j))
+                                                    (this%forcing_hi(n)%data_2d(i,j) - this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j))
                                 endif
                             endif
                         enddo
@@ -2733,7 +2733,7 @@ contains
                 ! applying forcing to the edges has already been handeled when updating dqdt using the relaxation filter
                 if (.not.(var_to_update%force_boundaries)) then
                     do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
-                        this%forcing_hi(i)%data_3d(i,k,j)    = this%forcing_hi(i)%data_3d(i,k,j) + (this%forcing_hi(i)%dqdt_3d(i,k,j) * dt)
+                        this%forcing_hi(n)%data_3d(i,k,j)    = this%forcing_hi(n)%data_3d(i,k,j) + (this%forcing_hi(n)%dqdt_3d(i,k,j) * dt)
                         this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
                                                         (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d(i,k,j) * dt)
                     enddo
@@ -2742,13 +2742,13 @@ contains
                         !Update forcing data to current time step
                         do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
                             if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) > 0.0) then
-                                this%forcing_hi(i)%data_3d(i,k,j) = this%forcing_hi(i)%data_3d(i,k,j) + (this%forcing_hi(i)%dqdt_3d(i,k,j) * dt)
+                                this%forcing_hi(n)%data_3d(i,k,j) = this%forcing_hi(n)%data_3d(i,k,j) + (this%forcing_hi(n)%dqdt_3d(i,k,j) * dt)
                                 if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) == 1.0) then
-                                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%forcing_hi(i)%data_3d(i,k,j)
+                                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%forcing_hi(n)%data_3d(i,k,j)
                                 else
                                     this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
                                                     (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) * dt_h) * &
-                                                    (this%forcing_hi(i)%data_3d(i,k,j) - this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j))
+                                                    (this%forcing_hi(n)%data_3d(i,k,j) - this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j))
                                 endif
                             endif
                         enddo

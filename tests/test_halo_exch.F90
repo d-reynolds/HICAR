@@ -157,9 +157,9 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize variables to exchange
-        call var_data(1)%initialize(grid)
         call var%initialize(grid)
-
+        var%name = "qv"
+        var_data(1) = var
         allocate(exch_vars(1), adv_vars(1))
         ! adv_vars(1) = var
         !populate adv_vars with two test variables
