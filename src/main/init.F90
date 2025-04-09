@@ -56,16 +56,15 @@ contains
 
     subroutine split_processes(components, ioclient, n_nests)
         implicit none
-        class(flow_obj_t), allocatable, intent(inout) :: components(:)
+        class(flow_obj_t), allocatable, intent(out) :: components(:)
         type(ioclient_t), intent(inout) :: ioclient(:)
         integer, intent(in) :: n_nests
 
-        integer :: n, k, name_len, color, ierr, node_name_i, num_PE
+        integer :: n, k, name_len, color, IOcolor, ierr, num_PE
         integer :: num_threads, found, PE_RANK_GLOBAL, NUM_SERVERS, NUM_COMPUTE, NUM_IO_PER_NODE, NUM_PROC_PER_NODE
 
-        character(len=MPI_MAX_PROCESSOR_NAME) :: node_name, ENV_IO_PER_NODE
-        integer, allocatable :: node_names(:) 
-        type(MPI_Comm) :: globalComm, splitComm, shared_comm
+        character(len=MPI_MAX_PROCESSOR_NAME) :: ENV_IO_PER_NODE
+        type(MPI_Comm) :: globalComm, shared_comm, mainComms, IOComms
 
 #if defined(_OPENMP)
         num_threads = omp_get_max_threads()
@@ -89,14 +88,18 @@ contains
         call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
 
         !Discover the number of processors per node
-        call MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, shared_comm, ierr)
+        CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
+        call MPI_Comm_split_type(globalComm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, shared_comm, ierr)
         call MPI_Comm_Size(shared_comm,NUM_PROC_PER_NODE)
+        call MPI_Comm_free(shared_comm, ierr)
+        ! call MPI_Comm_free(globalComm, ierr)
+
 
         !Assign one io process per node, this results in best co-array transfer times
         NUM_SERVERS = ceiling(num_PE*NUM_IO_PER_NODE*1.0/NUM_PROC_PER_NODE)
         NUM_COMPUTE = num_PE-NUM_SERVERS
 
-        STD_OUT_PE_IO = (PE_RANK_GLOBAL == NUM_PROC_PER_NODE-NUM_IO_PER_NODE)
+        STD_OUT_PE_IO = (PE_RANK_GLOBAL == NUM_PROC_PER_NODE-NUM_IO_PER_NODE) .and. STD_OUT_PE_IO
 
         
         if ((mod(NUM_COMPUTE,2) /= 0) .and. STD_OUT_PE) then
@@ -104,53 +107,50 @@ contains
             write(*,*) 'One process per node is used for I/O.'
             write(*,*) 'If the total number of compute processes is odd-numbered,'
             write(*,*) 'this may lead to errors with domain decomposition'
+            flush(output_unit)
         endif
 
         !-----------------------------------------
         ! Assign Compute and IO processes
         !-----------------------------------------
         if (mod((PE_RANK_GLOBAL+1),(num_PE/NUM_SERVERS)) == 0) then
-            color = 1
-            allocate(ioserver_t::components(n_nests))
+            color = kIO_TEAM
         else
-            color = 0
-            allocate(domain_t::components(n_nests))
+            color = kCOMPUTE_TEAM
         endif
-    
-        CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
-        ! Assign all images in the IO team to the IO_comms MPI communicator. Use image indexing within initial team to get indexing of global MPI ranks
-        CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, splitComm, ierr )
 
-        do n = 1, n_nests
-            associate(current_component => components(n))
-                select type (current_component)
-                    type is (domain_t)
-                        CALL MPI_Comm_dup( splitComm, current_component%compute_comms, ierr )
-                    type is (ioserver_t)
-                        CALL MPI_Comm_dup( splitComm, current_component%IO_comms, ierr )
-                end select
-            end associate
-        enddo
-        !-----------------------------------------
-        ! Group server and client processes
-        !-----------------------------------------
+        ! Assign all images in the IO team to the IO_comms MPI communicator. Use image indexing within initial team to get indexing of global MPI ranks
+        CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, mainComms, ierr )
 
         ! Assign IO clients to the same communicator as their related server process
-        color = (PE_RANK_GLOBAL) / (num_PE/NUM_SERVERS)
+        IOcolor = (PE_RANK_GLOBAL) / (num_PE/NUM_SERVERS)
 
-        CALL MPI_Comm_dup( MPI_COMM_WORLD, globalComm, ierr )
         ! Group IO clients with their related server process. This is basically just grouping processes by node
-        CALL MPI_Comm_split( globalComm, color, PE_RANK_GLOBAL, splitComm, ierr )
+        CALL MPI_Comm_split( globalComm, IOcolor, PE_RANK_GLOBAL, IOComms, ierr )
+
+        if (color == kIO_TEAM) then
+            allocate(ioserver_t::components(n_nests))
+        elseif (color == kCOMPUTE_TEAM) then
+            allocate(domain_t::components(n_nests))
+        endif
 
         do n = 1, n_nests
-            associate(current_component => components(n))
-                select type (current_component)
-                    type is (domain_t)
-                        CALL MPI_Comm_dup( splitComm, ioclient(n)%parent_comms, ierr )
-                    type is (ioserver_t)
-                        CALL MPI_Comm_dup( splitComm, current_component%client_comms, ierr )
-                end select
-            end associate
+            select type (components)
+                type is (domain_t)
+                    ! CALL MPI_Comm_dup( mainComms, components(n)%compute_comms, ierr )
+                    ! CALL MPI_Comm_dup( IOComms, ioclient(n)%parent_comms, ierr )
+
+                    components(n)%compute_comms = mainComms
+                    ioclient(n)%parent_comms = IOComms
+                type is (ioserver_t)
+                    ! CALL MPI_Comm_dup( mainComms, components(n)%IO_comms, ierr )
+                    ! CALL MPI_Comm_dup( IOComms, components(n)%client_comms, ierr )
+
+                    components(n)%IO_comms = mainComms
+                    components(n)%client_comms = IOComms
+                class default
+                    ! some default behavior
+            end select
         enddo
         if (STD_OUT_PE) then
             write(*,*) "  Number of processing elements:          ",num_PE
@@ -162,21 +162,20 @@ contains
 #if defined(_OPENMP)
             write(*,*) "  Max number of OpenMP Threads:           ",num_threads
 #endif
-        endif
+            flush(output_unit)
 
+        endif
 
     end subroutine split_processes
 
     subroutine init_options(options, namelist_file, info_only, gen_nml, only_namelist_check)
         implicit none
-        type(options_t), allocatable, intent(inout) :: options(:)
+        type(options_t), allocatable, intent(out) :: options(:)
         character(len=*), intent(in) :: namelist_file
-        logical, optional, intent(in) :: info_only, gen_nml, only_namelist_check
+        logical, intent(in) :: info_only, gen_nml, only_namelist_check
 
         type(general_options_type) :: dummy_general_options
-        integer :: nests, i, name_unit, rc
-
-        namelist /general/  nests
+        integer :: nests, i
 
         ! We need at least one domain
         nests = 1

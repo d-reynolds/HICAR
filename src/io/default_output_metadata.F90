@@ -5,6 +5,7 @@ module output_metadata
     use meta_data_interface,    only : attribute_t
     use string,       only : to_lower
     use iso_fortran_env, only : output_unit
+    use options_interface, only : options_t
     implicit none
 
     character(len=18) :: one_d_column_dimensions(1)         = [character(len=18) :: "level"]
@@ -359,11 +360,13 @@ contains
     !! Initialize the module level master data structure
     !!
     !!------------------------------------------------------------
-    function get_varmeta(var_idx) result(var)
+    function get_varmeta(var_idx, opt) result(var)
         implicit none
-        integer :: i, j
         integer, intent(in) :: var_idx
+        type(options_t), intent(in), optional :: opt
+
         type(variable_t) :: var
+        integer :: i, j
 
         if (kVARS%last_var/=kMAX_STORAGE_VARS) then
             stop "ERROR: variable indicies not correctly initialized"
@@ -383,7 +386,7 @@ contains
                                attribute_t("units",         "m s-1"),                           &
                                attribute_t("coordinates",   "u_lat u_lon")]
             var%force_boundaries = .False.
-        
+            if (present(opt)) var%forcing_var = opt%forcing%uvar
         !>------------------------------------------------------------
         !!  V  North South Winds
         !!------------------------------------------------------------
@@ -395,6 +398,7 @@ contains
                                attribute_t("units",         "m s-1"),                           &
                                attribute_t("coordinates",   "v_lat v_lon")]
             var%force_boundaries = .False.
+            if (present(opt)) var%forcing_var = opt%forcing%vvar
 
         !>------------------------------------------------------------
         !!  W  Vertical Winds
@@ -418,6 +422,7 @@ contains
                                attribute_t("units",         "m s-1"),                           &
                                attribute_t("coordinates",   "lat lon")]
             var%force_boundaries = .False.
+            if (present(opt)) var%forcing_var = opt%forcing%wvar
 
         !>------------------------------------------------------------
         !!  Brunt Vaisala frequency (squared)
@@ -441,6 +446,7 @@ contains
                                attribute_t("units",         "Pa"),                              &
                                attribute_t("coordinates",   "lat lon")]
             var%force_boundaries = .False.
+            if (present(opt)) var%forcing_var = opt%forcing%pvar
 
         !>------------------------------------------------------------
         !!  Air Pressure on interfaces between mass levels
@@ -474,7 +480,8 @@ contains
                                attribute_t("long_name",     "Potential Temperature"),           &
                                attribute_t("units",         "K"),                               &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%tvar
+
         !>------------------------------------------------------------
         !!  Real Air Temperature
         !!------------------------------------------------------------
@@ -496,7 +503,8 @@ contains
                                attribute_t("long_name",     "Water Vapor Mixing Ratio"),            &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%qvvar
+
         !>------------------------------------------------------------
         !!  Cloud water (liquid) mixing ratio
         !!------------------------------------------------------------
@@ -506,7 +514,8 @@ contains
             var%attributes  = [attribute_t("standard_name", "cloud_liquid_water_mixing_ratio"),     &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%qcvar
+
         !>------------------------------------------------------------
         !!  Cloud water (liquid) number concentration
         !!------------------------------------------------------------
@@ -516,7 +525,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_cloud_droplets_in_air"), &
                                attribute_t("units",         "cm-3"),                                              &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%qncvar
         !>------------------------------------------------------------
         !!  Cloud ice mixing ratio
         !!------------------------------------------------------------
@@ -526,7 +535,7 @@ contains
             var%attributes  = [attribute_t("standard_name", "cloud_ice_mixing_ratio"),              &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%qivar
         !>------------------------------------------------------------
         !!  Cloud ice number concentration
         !!------------------------------------------------------------
@@ -536,7 +545,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_ice_crystals_in_air"), &
                                attribute_t("units",         "cm-3"),                                            &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%qnivar        
         !>------------------------------------------------------------
         !!  Rain water mixing ratio
         !!------------------------------------------------------------
@@ -546,7 +555,7 @@ contains
             var%attributes  = [attribute_t("standard_name", "mass_fraction_of_rain_in_air"),        &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%qrvar
         !>------------------------------------------------------------
         !!  Rain water number concentration
         !!------------------------------------------------------------
@@ -556,7 +565,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_rain_particles_in_air"), &
                                attribute_t("units",         "cm-3"),                                              &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%qnrvar
         !>------------------------------------------------------------
         !!  Snow in air mixing ratio
         !!------------------------------------------------------------
@@ -566,7 +575,7 @@ contains
             var%attributes  = [attribute_t("standard_name", "mass_fraction_of_snow_in_air"),        &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%qsvar
         !>------------------------------------------------------------
         !!  Snow in air number concentration
         !!------------------------------------------------------------
@@ -576,7 +585,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_snow_particles_in_air"), &
                                attribute_t("units",         "cm-3"),                                              &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%qnsvar
         !>------------------------------------------------------------
         !!  Graupel mixing ratio
         !!------------------------------------------------------------
@@ -586,7 +595,7 @@ contains
             var%attributes  = [attribute_t("standard_name", "mass_fraction_of_graupel_in_air"),     &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%qgvar
         !>------------------------------------------------------------
         !!  Graupel number concentration
         !!------------------------------------------------------------
@@ -596,7 +605,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_graupel_particles_in_air"), &
                                attribute_t("units",         "cm-3"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%qngvar
         !>------------------------------------------------------------
         !!  planar-nucleated a^2c mixing ratio
         !!------------------------------------------------------------
@@ -606,7 +615,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "planar-nucleated a^2c mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%i1avar
         !>------------------------------------------------------------
         !!  planar-nucleated c^2a mixing ratio
         !!------------------------------------------------------------
@@ -616,7 +625,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "planar-nucleated c^2a mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%i1cvar
         !>------------------------------------------------------------
         !!  columnar-nucleated mixing ratio
         !!------------------------------------------------------------
@@ -626,7 +635,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "columnar-nucleated mixing ratio"), &
                                attribute_t("units",         "kg kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%i2mvar
         !>------------------------------------------------------------
         !!  columnar-nucleated number mixing ratio
         !!------------------------------------------------------------
@@ -636,7 +645,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "columnar-nucleated number mixing ratio"), &
                                attribute_t("units",         "kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%i2nvar
         !>------------------------------------------------------------
         !!  columnar-nucleated a^2c mixing ratio
         !!------------------------------------------------------------
@@ -646,7 +655,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "columnar-nucleated a^2c mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%i2avar
         !>------------------------------------------------------------
         !!  columnar-nucleated c^2a mixing ratio
         !!------------------------------------------------------------
@@ -656,7 +665,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "columnar-nucleated c^2a mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%i2cvar
         !>------------------------------------------------------------
         !!  aggregate mixing ratio
         !!------------------------------------------------------------
@@ -666,7 +675,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "aggregate mixing ratio"), &
                                attribute_t("units",         "kg kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%i3mvar
         !>------------------------------------------------------------
         !!  aggregate number mixing ratio
         !!------------------------------------------------------------
@@ -676,7 +685,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "aggregate number mixing ratio"), &
                                attribute_t("units",         "kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%i3nvar
         !>------------------------------------------------------------
         !!  aggregate a^2c mixing ratio
         !!------------------------------------------------------------
@@ -686,7 +695,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "aggregate a^2c mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%i3avar
         !>------------------------------------------------------------
         !!  aggregate c^2a mixing ratio
         !!------------------------------------------------------------
@@ -696,7 +705,7 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "aggregate c^2a mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-        
+            if (present(opt)) var%forcing_var = opt%forcing%i3cvar
 
         !>------------------------------------------------------------
         !!  Precipitation rate at the surface (requires tracking past precipitation amounts)
@@ -1370,6 +1379,7 @@ contains
                                attribute_t("units",         "W m-2"),                                     &
                                attribute_t("coordinates",   "lat lon")]
             var%force_boundaries = .False.
+            if (present(opt)) var%forcing_var = opt%forcing%swdown_var
 
         !>------------------------------------------------------------
         !!  MJ: in OSHD as 'sdri' referring to 'direct shortwave radiation, per inclined surface area' accounted for shading and slope effects. Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
@@ -1421,6 +1431,7 @@ contains
                                attribute_t("units",         "W m-2"),                                    &
                                attribute_t("coordinates",   "lat lon")]
             var%force_boundaries = .False.
+            if (present(opt)) var%forcing_var = opt%forcing%lwdown_var
 
         !>------------------------------------------------------------
         !!  Total Absorbed Solar Radiation
@@ -2928,6 +2939,7 @@ contains
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
             var%force_boundaries = .False.
+            if (present(opt)) var%forcing_var = opt%forcing%sst_var
 
         !>------------------------------------------------------------
         !!  Sensible heat flux from the surface (positive up)
@@ -2939,6 +2951,7 @@ contains
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
             var%force_boundaries = .False.
+            if (present(opt)) var%forcing_var = opt%forcing%shvar
 
         !>------------------------------------------------------------
         !!  Latent heat flux from the surface (positive up)
@@ -2950,6 +2963,7 @@ contains
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
             var%force_boundaries = .False.
+            if (present(opt)) var%forcing_var = opt%forcing%lhvar
 
         !>------------------------------------------------------------
         !!  Lake temperature 3d

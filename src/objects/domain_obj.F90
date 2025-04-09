@@ -27,7 +27,8 @@ submodule(domain_interface) domain_implementation
     end interface
     
     real, parameter::deg2rad=0.017453293 !2*pi/360
-    
+    integer :: FILTER_WIDTH
+
     ! primary public routines : init, get_initial_conditions, halo_send, halo_retrieve, or halo_exchange
 contains
 
@@ -415,19 +416,20 @@ contains
         integer :: ims, ime, jms, jme, kms, kme
         type(variable_t) :: tmp_var, forcing_var_hi
         type(grid_t)     :: grid
-        integer :: n_dims, n_one_d, n_two_d, n_three_d, n_four_d
-        character(len=kMAX_NAME_LENGTH) :: forcing_var_name
+        integer :: n_dims, n_one_d, n_two_d, n_three_d, n_four_d, n_forcing_var
 
         if (STD_OUT_PE) print *,"  Initializing variables"
+        if (STD_OUT_PE) flush(output_unit)
         n_one_d = 0
         n_two_d = 0
         n_three_d = 0
         n_four_d = 0
+        n_forcing_var = 0
         ! get counts of 1d, 2d, 3d, and 4d variables
         do i = 1, kMAX_STORAGE_VARS
             if (0<opt%vars_to_allocate(i)) then
                 ! get the variable meta data defined in var_defs.F90
-                tmp_var = get_varmeta(i)
+                tmp_var = get_varmeta(i,opt)
 
                 if (tmp_var%one_d) then
                     n_one_d = n_one_d + 1
@@ -438,6 +440,11 @@ contains
                 else if (tmp_var%four_d) then
                     n_four_d = n_four_d + 1
                 endif
+                                        
+                if (tmp_var%forcing_var /= "") then
+                    n_forcing_var = n_forcing_var + 1
+                endif
+
             endif
         enddo
 
@@ -445,56 +452,23 @@ contains
         allocate(this%vars_2d(n_two_d))
         allocate(this%vars_3d(n_three_d))
         allocate(this%vars_4d(n_four_d))
+        allocate(this%forcing_hi(n_forcing_var))
 
         !reset to be used as index counters
         n_one_d = 0
         n_two_d = 0
         n_three_d = 0
         n_four_d = 0
-
+        n_forcing_var = 0
         do i = 1, kMAX_STORAGE_VARS
             if (0<opt%vars_to_allocate(i)) then
                 ! get the variable meta data defined in var_defs.F90
-                tmp_var = get_varmeta(i)
+                tmp_var = get_varmeta(i,opt)
                 
                 ! test if variable even has an entry
                 if (tmp_var%name == "") cycle 
 
                 n_dims = size(tmp_var%dimensions)
-
-                forcing_var_name = ''
-
-                if (i==kVARS%u) forcing_var_name = opt%forcing%uvar
-                if (i==kVARS%v) forcing_var_name = opt%forcing%vvar
-                if (i==kVARS%w_real) forcing_var_name = opt%forcing%wvar
-                if (i==kVARS%water_vapor) forcing_var_name = opt%forcing%qvvar
-                if (i==kVARS%potential_temperature) forcing_var_name = opt%forcing%tvar
-                if (i==kVARS%cloud_water_mass) forcing_var_name = opt%forcing%qcvar
-                if (i==kVARS%cloud_number)  forcing_var_name = opt%forcing%qncvar
-                if (i==kVARS%ice_mass) forcing_var_name = opt%forcing%qivar
-                if (i==kVARS%ice_number) forcing_var_name = opt%forcing%qnivar
-                if (i==kVARS%rain_mass) forcing_var_name = opt%forcing%qrvar
-                if (i==kVARS%rain_number) forcing_var_name = opt%forcing%qnrvar
-                if (i==kVARS%snow_mass) forcing_var_name = opt%forcing%qsvar
-                if (i==kVARS%snow_number) forcing_var_name = opt%forcing%qnsvar
-                if (i==kVARS%graupel_mass) forcing_var_name = opt%forcing%qgvar
-                if (i==kVARS%graupel_number) forcing_var_name = opt%forcing%qngvar
-                if (i==kVARS%ice1_a) forcing_var_name = opt%forcing%i1avar
-                if (i==kVARS%ice1_c) forcing_var_name = opt%forcing%i1cvar
-                if (i==kVARS%ice2_mass) forcing_var_name = opt%forcing%i2mvar
-                if (i==kVARS%ice2_number) forcing_var_name = opt%forcing%i2nvar
-                if (i==kVARS%ice2_a) forcing_var_name = opt%forcing%i2avar
-                if (i==kVARS%ice2_c) forcing_var_name = opt%forcing%i2cvar
-                if (i==kVARS%ice3_mass) forcing_var_name = opt%forcing%i3mvar
-                if (i==kVARS%ice3_number) forcing_var_name = opt%forcing%i3nvar
-                if (i==kVARS%ice3_a) forcing_var_name = opt%forcing%i3avar
-                if (i==kVARS%ice3_c) forcing_var_name = opt%forcing%i3cvar
-                if (i==kVARS%pressure) forcing_var_name = opt%forcing%pvar
-                if (i==kVARS%shortwave) forcing_var_name = opt%forcing%swdown_var
-                if (i==kVARS%longwave) forcing_var_name = opt%forcing%lwdown_var
-                if (i==kVARS%sst) forcing_var_name = opt%forcing%sst_var
-                if (i==kVARS%sensible_heat) forcing_var_name = opt%forcing%shvar
-                if (i==kVARS%latent_heat) forcing_var_name = opt%forcing%lhvar
 
                 if (tmp_var%one_d) then
                     grid = this%column_grid
@@ -571,14 +545,19 @@ contains
                 endif
 
                 ! test if forcing var is empty
-                if (trim(forcing_var_name) == '') then
+                if (trim(tmp_var%forcing_var) == '') then
                     call setup(tmp_var, grid, dtype=tmp_var%dtype)
                 else
-                    call setup(tmp_var, grid, forcing_var=trim(forcing_var_name), force_boundaries=tmp_var%force_boundaries, dtype=tmp_var%dtype)
+                    call setup(tmp_var, grid, forcing_var=trim(tmp_var%forcing_var), force_boundaries=tmp_var%force_boundaries, dtype=tmp_var%dtype)
 
-                    call forcing_var_hi%initialize( grid, forcing_var=trim(forcing_var_name))
-                    forcing_var_hi%name = tmp_var%name
-                    call this%forcing_hi%add_var(trim(forcing_var_name), forcing_var_hi)
+                    n_forcing_var = n_forcing_var + 1
+                    call forcing_var_hi%initialize( grid, forcing_var=trim(tmp_var%forcing_var))
+                    forcing_var_hi%name = trim(tmp_var%name)
+
+                    this%forcing_var_indx(i)%n = trim(tmp_var%name)
+                    this%forcing_var_indx(i)%v = n_forcing_var
+
+                    this%forcing_hi(this%forcing_var_indx(i)%v) = forcing_var_hi
                 endif
 
                 this%var_indx(i)%n = trim(tmp_var%name)
@@ -786,6 +765,7 @@ contains
         endif
 
         if (STD_OUT_PE) write(*,*) "  Finished reading core domain variables"
+        if (STD_OUT_PE) flush(output_unit)
 
     end subroutine
 
@@ -848,6 +828,7 @@ contains
             if (STD_OUT_PE) write(*,*) "    Treating flat_z_height as counting levels up from the ground: ", options%domain%flat_z_height," levels"
             max_level = options%domain%flat_z_height
         endif
+        if (STD_OUT_PE) flush(output_unit)
 
     end function find_flat_model_level
 
@@ -960,6 +941,7 @@ contains
                 if(gamma_min <= 0) write(*,*) " CAUTION: coordinate transformation is not invertible (gamma <= 0 ) !!! reduce decay rate(s), and/or increase flat_z_height!"
                 ! if(options%general%debug)  write(*,*) "   (for (debugging) reference: 'gamma(n=1)'= ", gamma,")"
                 write(*,*) ""
+                flush(output_unit)
             endif
 
             ! use temp to store global z-interface so that global-jacobian can be calculated
@@ -1324,6 +1306,7 @@ contains
             jme = this%jme
 
             if (STD_OUT_PE) print*, "Reading Sinalpha/cosalpha"
+            if (STD_OUT_PE) flush(output_unit)
 
             call io_read(options%domain%init_conditions_file, options%domain%sinalpha_var, lon)
             this%vars_2d(this%var_indx(kVARS%sintheta)%v)%data_2d = lon(ims:ime, jms:jme)
@@ -1390,6 +1373,7 @@ contains
             print*, "MAX / MIN COS(theta) (ideally 1)"
             print*, "   ", maxval(this%vars_2d(this%var_indx(kVARS%costheta)%v)%data_2d), minval(this%vars_2d(this%var_indx(kVARS%costheta)%v)%data_2d)
             print*, ""
+            flush(output_unit)
         endif
 
 
@@ -1629,6 +1613,8 @@ contains
         init_surf_temp = 280
 
         if (STD_OUT_PE) write (*,*) "Reading Land Variables"
+        if (STD_OUT_PE) flush(output_unit)
+
         if (this%var_indx(kVARS%soil_water_content)%v > 0) then
             nsoil = size(this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d, 2)
         elseif (this%var_indx(kVARS%soil_temperature)%v > 0) then
@@ -2494,7 +2480,7 @@ contains
         implicit none
         class(domain_t),    intent(inout) :: this
         integer :: hs, nr, k, i
-        real, dimension(7) :: rs, rs_r
+        real, dimension(FILTER_WIDTH) :: rs, rs_r
         logical :: corner
         !Setup relaxation filters, start with 2D then expand for 3D version
         
@@ -2506,7 +2492,7 @@ contains
         hs = this%grid%halo_size
 
         !relaxation boundary -- set to be 7 for default
-        nr = min(7,(this%ime-this%ims-hs),(this%jme-this%jms-hs))
+        FILTER_WIDTH = min(FILTER_WIDTH,(this%ime-this%ims-hs),(this%jme-this%jms-hs))
         
         rs = (/0.9, 0.75, 0.6, 0.5, 0.4, 0.25, 0.1 /)
         rs_r = (/0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9/)
@@ -2605,27 +2591,22 @@ contains
         ! temporary to hold the variable to be interpolated to
         type(variable_t) :: var_to_update
         integer :: i, var_indx
-        character(len=kMAX_NAME_LENGTH) :: var_list_name
 
         dt = this%next_input - this%sim_time
 
-        ! make sure the dictionary is reset to point to the first variable
-        call this%forcing_hi%reset_iterator()
 
         ! Now iterate through the dictionary as long as there are more elements present
-        do while (this%forcing_hi%has_more_elements())
+        do i = 1,size(this%forcing_hi)
             !Update delta fields on the high-resolution forcing varaibles...
-            var_to_update = this%forcing_hi%next(name=var_list_name)
 
-            if (var_to_update%two_d) then
-                var_to_update%dqdt_2d = (var_to_update%dqdt_2d - var_to_update%data_2d) / dt%seconds()
-            else if (var_to_update%three_d) then
-                var_to_update%dqdt_3d = (var_to_update%dqdt_3d - var_to_update%data_3d) / dt%seconds()
+            if (this%forcing_hi(i)%two_d) then
+                this%forcing_hi(i)%dqdt_2d = (this%forcing_hi(i)%dqdt_2d - this%forcing_hi(i)%data_2d) / dt%seconds()
+            else if (this%forcing_hi(i)%three_d) then
+                this%forcing_hi(i)%dqdt_3d = (this%forcing_hi(i)%dqdt_3d - this%forcing_hi(i)%data_3d) / dt%seconds()
             endif
-            call this%forcing_hi%add_var(var_list_name, var_to_update)
 
             ! now update delta fields for domain variables
-            var_indx = get_varindx(trim(var_to_update%name))
+            var_indx = get_varindx(trim(this%forcing_hi(i)%name))
             var_to_update = get_varmeta(var_indx)
 
             if (var_to_update%force_boundaries) cycle
@@ -2645,19 +2626,18 @@ contains
 
             call dt%set(seconds= (this%input_dt%seconds() - dt%seconds()) )
 
-            call this%forcing_hi%reset_iterator()
 
-            do while (this%forcing_hi%has_more_elements())
-                var_to_update = this%forcing_hi%next(name=var_list_name)
-                if (var_to_update%three_d) then
-                    var_to_update%data_3d = var_to_update%data_3d + (var_to_update%dqdt_3d * dt%seconds())
-                else if (var_to_update%two_d) then
-                    var_to_update%data_2d = var_to_update%data_2d + (var_to_update%dqdt_2d * dt%seconds())
+            do i = 1,size(this%forcing_hi)
+                !Update delta fields on the high-resolution forcing varaibles...
+    
+                if (this%forcing_hi(i)%two_d) then
+                    this%forcing_hi(i)%dqdt_2d = (this%forcing_hi(i)%dqdt_2d - this%forcing_hi(i)%data_2d) / dt%seconds()
+                else if (this%forcing_hi(i)%three_d) then
+                    this%forcing_hi(i)%dqdt_3d = (this%forcing_hi(i)%dqdt_3d - this%forcing_hi(i)%data_3d) / dt%seconds()
                 endif
-                call this%forcing_hi%add_var(var_list_name, var_to_update)
-
+    
                 ! now update delta fields for domain variables
-                var_indx = get_varindx(trim(var_to_update%name))
+                var_indx = get_varindx(trim(this%forcing_hi(i)%name))
                 var_to_update = get_varmeta(var_indx)
 
                 if (var_to_update%force_boundaries) cycle
@@ -2696,23 +2676,16 @@ contains
         integer :: ims, ime, jms, jme
         ! temporary to hold the variable to be interpolated to
         type(variable_t) :: var_to_update
-        type(variable_t) :: forcing_var_hi
-        integer :: i, k, j, i, var_indx
+        integer :: i, k, j, var_indx
         real    :: dt_h
-        character(len=kMAX_NAME_LENGTH) :: var_list_name
+        logical :: do_boundary
         
         !calculate dt in units of hours
         dt_h = dt/3600.0
         
-        ! make sure the dictionary is reset to point to the first variable
-        call this%forcing_hi%reset_iterator()
+        do i = 1,size(this%forcing_hi)
 
-        ! Now iterate through the dictionary as long as there are more elements present
-        do while (this%forcing_hi%has_more_elements())
-
-            forcing_var_hi = this%forcing_hi%next(var_list_name)
-
-            var_indx = get_varindx(trim(forcing_var_hi%name))
+            var_indx = get_varindx(trim(this%forcing_hi(i)%name))
             var_to_update = get_varmeta(var_indx)            
 
             if (var_to_update%two_d) then
@@ -2721,25 +2694,30 @@ contains
                 jms = this%vars_2d(this%var_indx(var_indx)%v)%grid%jms
                 jme = this%vars_2d(this%var_indx(var_indx)%v)%grid%jme
     
+                do_boundary = (ims < this%ids+this%grid%halo_size+FILTER_WIDTH) .or. (ime > this%ide-this%grid%halo_size-FILTER_WIDTH) .or. &
+                    (jms < this%jds+this%grid%halo_size+FILTER_WIDTH) .or. (jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
+
                 ! apply forcing throughout the domain for 2D diagnosed variables (e.g. SST, SW)
                 if (.not.(var_to_update%force_boundaries)) then
                     do concurrent (j = jms:jme, i = ims:ime)
                         this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) + (this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d(i,j) * dt)
                     enddo
-                else if (any(this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d > 0.0)) then
-                    !Update forcing data to current time step
-                    do concurrent (j = jms:jme, i = ims:ime)
-                        if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) > 0.0) then
-                            forcing_var_hi%data_2d(i,j) = forcing_var_hi%data_2d(i,j) + (forcing_var_hi%dqdt_2d(i,j) * dt)
-                            if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) == 1.0) then
-                                this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = forcing_var_hi%data_2d(i,j)
-                            else
-                                this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) + &
-                                                (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) * dt_h) * &
-                                                (forcing_var_hi%data_2d(i,j) - this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j))
+                else if (do_boundary) then
+                    if (any(this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d > 0.0)) then
+                        !Update forcing data to current time step
+                        do concurrent (j = jms:jme, i = ims:ime)
+                            if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) > 0.0) then
+                                this%forcing_hi(i)%data_2d(i,j) = this%forcing_hi(i)%data_2d(i,j) + (this%forcing_hi(i)%dqdt_2d(i,j) * dt)
+                                if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) == 1.0) then
+                                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%forcing_hi(i)%data_2d(i,j)
+                                else
+                                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) + &
+                                                    (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) * dt_h) * &
+                                                    (this%forcing_hi(i)%data_2d(i,j) - this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j))
+                                endif
                             endif
-                        endif
-                    enddo
+                        enddo
+                    endif
                 endif 
 
             else if (var_to_update%three_d) then
@@ -2748,32 +2726,35 @@ contains
                 jms = this%vars_3d(this%var_indx(var_indx)%v)%grid%jms
                 jme = this%vars_3d(this%var_indx(var_indx)%v)%grid%jme
 
+                do_boundary = (ims < this%ids+this%grid%halo_size+FILTER_WIDTH) .or. (ime > this%ide-this%grid%halo_size-FILTER_WIDTH) .or. &
+                               (jms < this%jds+this%grid%halo_size+FILTER_WIDTH) .or. (jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
+
                 ! only apply forcing data on the boundaries for advected scalars (e.g. temperature, humidity)
                 ! applying forcing to the edges has already been handeled when updating dqdt using the relaxation filter
                 if (.not.(var_to_update%force_boundaries)) then
                     do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
-                        forcing_var_hi%data_3d(i,k,j)    = forcing_var_hi%data_3d(i,k,j) + (forcing_var_hi%dqdt_3d(i,k,j) * dt)
+                        this%forcing_hi(i)%data_3d(i,k,j)    = this%forcing_hi(i)%data_3d(i,k,j) + (this%forcing_hi(i)%dqdt_3d(i,k,j) * dt)
                         this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
                                                         (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d(i,k,j) * dt)
                     enddo
-                else if (any(this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d > 0.0)) then
-                    !Update forcing data to current time step
-                    do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
-                        if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) > 0.0) then
-                            forcing_var_hi%data_3d(i,k,j) = forcing_var_hi%data_3d(i,k,j) + (forcing_var_hi%dqdt_3d(i,k,j) * dt)
-                            if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) == 1.0) then
-                                this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = forcing_var_hi%data_3d(i,k,j)
-                            else
-                                this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
-                                                (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) * dt_h) * &
-                                                (forcing_var_hi%data_3d(i,k,j) - this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j))
+                else if (do_boundary) then
+                    if (any(this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d > 0.0)) then
+                        !Update forcing data to current time step
+                        do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
+                            if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) > 0.0) then
+                                this%forcing_hi(i)%data_3d(i,k,j) = this%forcing_hi(i)%data_3d(i,k,j) + (this%forcing_hi(i)%dqdt_3d(i,k,j) * dt)
+                                if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) == 1.0) then
+                                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%forcing_hi(i)%data_3d(i,k,j)
+                                else
+                                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
+                                                    (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) * dt_h) * &
+                                                    (this%forcing_hi(i)%data_3d(i,k,j) - this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j))
+                                endif
                             endif
-                        endif
-                    enddo
+                        enddo
+                    endif
                 endif
             endif
-            call this%forcing_hi%add_var(var_list_name, forcing_var_hi)
-
         enddo
 
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
@@ -2802,29 +2783,21 @@ contains
         logical :: update_only
         ! temporary to hold the variable to be interpolated to
         type(variable_t) :: var_to_interpolate
-        ! temporary to hold pressure and temperature for later below-grid adjustments
-        type(variable_t) :: pressure, potential_temp
         ! temporary to hold the forcing variable to be interpolated from
         type(variable_t) :: input_data
-        type(variable_t) :: forcing_var_hi
 
         ! number of layers has to be used when subsetting for update_pressure (for now)
-        integer :: nz, i, var_indx
+        integer :: nz, i, var_indx, pressure_indx, pot_temp_indx
         logical :: var_is_u, var_is_v, var_is_pressure, var_is_potential_temp, agl_interp
-        character(len=kMAX_NAME_LENGTH) :: var_list_name, potential_temp_name, pressure_name
 
         update_only = .False.
         if (present(update)) update_only = update
 
-        ! make sure the dictionary is reset to point to the first variable
-        call this%forcing_hi%reset_iterator()
 
         ! Now iterate through the dictionary as long as there are more elements present
-        do while (this%forcing_hi%has_more_elements())
+        do i = 1,size(this%forcing_hi)
 
-            forcing_var_hi = this%forcing_hi%next(name=var_list_name)
-
-            var_indx = get_varindx(trim(forcing_var_hi%name))
+            var_indx = get_varindx(trim(this%forcing_hi(i)%name))
             var_to_interpolate = get_varmeta(var_indx)
 
             if (var_to_interpolate%two_d) then
@@ -2838,13 +2811,13 @@ contains
             ! interpolate
             if (var_to_interpolate%two_d) then
                 if (update_only) then
-                    call geo_interp2d(forcing_var_hi%dqdt_2d, input_data%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(this%forcing_hi(i)%dqdt_2d, input_data%data_2d, forcing%geo%geolut)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    if (.not.(var_to_interpolate%force_boundaries)) this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d = forcing_var_hi%dqdt_2d
+                    if (.not.(var_to_interpolate%force_boundaries)) this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d = this%forcing_hi(i)%dqdt_2d
                 else
-                    call geo_interp2d(forcing_var_hi%data_2d, input_data%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(this%forcing_hi(i)%data_2d, input_data%data_2d, forcing%geo%geolut)
                     !If this is an initialization step, copy high res directly over to domain
-                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d = forcing_var_hi%data_2d
+                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d = this%forcing_hi(i)%data_2d
                 endif
             else
 
@@ -2858,43 +2831,33 @@ contains
 
                 ! if just updating, use the dqdt variable otherwise use the 3D variable
                 if (update_only) then
-                    call interpolate_variable(forcing_var_hi%dqdt_3d, input_data, forcing, this, &
+                    call interpolate_variable(this%forcing_hi(i)%dqdt_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    if (.not.(var_to_interpolate%force_boundaries).and..not.var_is_u.and..not.var_is_v) this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d = forcing_var_hi%dqdt_3d
+                    if (.not.(var_to_interpolate%force_boundaries).and..not.var_is_u.and..not.var_is_v) this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d = this%forcing_hi(i)%dqdt_3d
                 else
-                    call interpolate_variable(forcing_var_hi%data_3d, input_data, forcing, this, &
+                    call interpolate_variable(this%forcing_hi(i)%data_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     !If this is an initialization step, copy high res directly over to domain
-                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d = forcing_var_hi%data_3d
+                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d = this%forcing_hi(i)%data_3d
                 endif
-                if (var_is_pressure) then
-                    pressure = forcing_var_hi
-                    pressure_name = var_list_name
-                endif
-                if (var_is_potential_temp) then
-                    potential_temp = forcing_var_hi
-                    potential_temp_name = var_list_name
-                endif
+                if (var_is_pressure) pressure_indx = i
+                if (var_is_potential_temp) pot_temp_indx = i
             endif
             call forcing%variables%add_var(var_to_interpolate%forcing_var, input_data)
-            call this%forcing_hi%add_var(var_list_name, forcing_var_hi)
-
         enddo
 
         !Adjust potential temperature (first) and pressure (second) to account for points below forcing grid
         !Only domain-wide-forced variables are updated with the domain dqdt_3d
         if (update_only) then
-            call adjust_pressure_temp(pressure%dqdt_3d,potential_temp%dqdt_3d, forcing%geo%z, this%geo%z)
-            this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d = pressure%dqdt_3d
-            this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%dqdt_3d = potential_temp%dqdt_3d
+            call adjust_pressure_temp(this%forcing_hi(pressure_indx)%dqdt_3d,this%forcing_hi(pot_temp_indx)%dqdt_3d, forcing%geo%z, this%geo%z)
+            this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d = this%forcing_hi(pressure_indx)%dqdt_3d
+            this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%dqdt_3d = this%forcing_hi(pot_temp_indx)%dqdt_3d
         else
-            call adjust_pressure_temp(pressure%data_3d,potential_temp%data_3d, forcing%geo%z, this%geo%z)
-            this%vars_3d(this%var_indx(kVARS%pressure)%v)%data_3d = pressure%data_3d
-            this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d = potential_temp%data_3d
+            call adjust_pressure_temp(this%forcing_hi(pressure_indx)%data_3d,this%forcing_hi(pot_temp_indx)%data_3d, forcing%geo%z, this%geo%z)
+            this%vars_3d(this%var_indx(kVARS%pressure)%v)%data_3d = this%forcing_hi(pressure_indx)%data_3d
+            this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d = this%forcing_hi(pot_temp_indx)%data_3d
         endif
-        call this%forcing_hi%add_var(potential_temp_name, potential_temp)
-        call this%forcing_hi%add_var(pressure_name, pressure)
 
         !Ensure that input data for hydrometeors after interpolation have been forced to 0-minimum
         call this%enforce_limits(update_in=update_only)

@@ -301,7 +301,7 @@ if(MODE STREQUAL "debug")
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
 	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h noomp -c -eI -G0 -m2 -rl -R bcdsp) #-R cpbs --cray-print-opts
+		target_compile_options(HICAR PUBLIC -h noomp -c -eI -g -O0) #-R cpbs --cray-print-opts
 	endif()
 elseif(MODE STREQUAL "debugslow")
 	set(CMAKE_BUILD_TYPE Debug)

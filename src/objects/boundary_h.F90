@@ -8,7 +8,7 @@ module boundary_interface
     use time_object,              only : Time_type
     use time_delta_object,        only : time_delta_t
     use data_structures,          only : interpolable_type
-    use icar_constants,           only : kMAX_NAME_LENGTH, kMAX_STRING_LENGTH
+    use icar_constants,           only : kMAX_NAME_LENGTH, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH
     use grid_interface,           only : grid_t
     use flow_object_interface,     only : flow_obj_t
     implicit none
@@ -78,7 +78,7 @@ module boundary_interface
         implicit none
         class(boundary_t),               intent(inout)  :: this
         type(options_t),                 intent(inout)  :: options
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: file_list(:)
+        character(len=kMAX_FILE_LENGTH), intent(in)     :: file_list(:)
         character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
         integer,                         intent(in)     :: dim_list (:)
         type(Time_type),                 intent(in)     :: start_time

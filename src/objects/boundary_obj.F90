@@ -87,7 +87,7 @@ contains
                                  lat_var, lon_var, z_var, time_var, p_var, domain_lat, domain_lon)
         class(boundary_t),               intent(inout)  :: this
         type(options_t),                 intent(inout)  :: options
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: file_list(:)
+        character(len=kMAX_FILE_LENGTH), intent(in)     :: file_list(:)
         character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
         integer,                         intent(in)     :: dim_list (:)
         type(Time_type),                 intent(in)     :: start_time

@@ -221,6 +221,9 @@ contains
         if (allocated(dSWE_susp_)) deallocate(dSWE_susp_)
         if (allocated(dSWE_subl_)) deallocate(dSWE_subl_)
         if (allocated(dSWE_slide_)) deallocate(dSWE_slide_)
+        if (allocated(Sf24_tracker)) deallocate(Sf24_tracker)
+        if (allocated(Roff_sum)) deallocate(Roff_sum)
+        if (allocated(meltflux_out_sum)) deallocate(meltflux_out_sum)
 
         allocate(Esrf_(Nx_HICAR,Ny_HICAR)); Esrf_=0.
         allocate(Gsoil_(Nx_HICAR,Ny_HICAR));Gsoil_=0.
@@ -239,11 +242,6 @@ contains
         allocate(dSWE_subl_(Nx_HICAR,Ny_HICAR)); dSWE_subl_=0.
         allocate(dSWE_slide_(Nx_HICAR,Ny_HICAR)); dSWE_slide_=0.
         allocate(Sf24_tracker(24,Nx_HICAR,Ny_HICAR));Sf24_tracker=0.
-        !allocate(Qs_u(Nx_HICAR,Ny_HICAR)); Qs_u=0.
-        !allocate(Qs_v(Nx_HICAR,Ny_HICAR)); Qs_v=0.
-        !!
-        ! allocate(snowfall_sum(Nx_HICAR,Ny_HICAR)); snowfall_sum=0.
-        ! allocate(rainfall_sum(Nx_HICAR,Ny_HICAR)); rainfall_sum=0.
         allocate(Roff_sum(Nx_HICAR,Ny_HICAR)); Roff_sum=0.
         allocate(meltflux_out_sum(Nx_HICAR,Ny_HICAR)); meltflux_out_sum=0.   
         !!
@@ -354,14 +352,14 @@ contains
         Sdif=TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d(its:ite,jts:jte)) !Sdif=0.0
         Sf=TRANSPOSE(current_snow(its:ite,jts:jte))
 
-        if (hour /= hour_old) then
-            Sf24_tracker(hour,:,:) = Sf
+        ! if (hour /= hour_old) then
+        !     Sf24_tracker(INT(hour),:,:) = Sf
 
-            hour_old = hour
-        else
-            Sf24_tracker(hour,:,:) = Sf24_tracker(hour,:,:) + Sf
-        endif
-        Sf24h=sum(Sf24_tracker,dim=1)
+        !     hour_old = hour
+        ! else
+        !     Sf24_tracker(INT(hour),:,:) = Sf24_tracker(INT(hour),:,:) + Sf
+        ! endif
+        Sf24h=0.0 !sum(Sf24_tracker,dim=1)
         
         ! This should always be 2m temperature and humidity
         Ta= TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d(its:ite,jts:jte))

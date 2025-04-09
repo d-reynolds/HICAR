@@ -40,7 +40,6 @@ module domain_interface
 
     type(tendencies_type) :: tend
 
-    type(var_dict_t) :: forcing_hi
     type(index_type) :: vars_to_out(kMAX_STORAGE_VARS)
     
     ! Array listing variables to advect with pointers to local data
@@ -57,13 +56,14 @@ module domain_interface
 
     complex(C_DOUBLE_COMPLEX),  allocatable :: terrain_frequency(:,:) ! FFT(terrain)
 
+    type(variable_t), allocatable :: forcing_hi(:)
 
     type(variable_t), allocatable :: vars_1d(:)
     type(variable_t), allocatable :: vars_2d(:)
     type(variable_t), allocatable :: vars_3d(:)
     type(variable_t), allocatable :: vars_4d(:)
 
-    type(index_type) :: var_indx(kMAX_STORAGE_VARS)
+    type(index_type) :: var_indx(kMAX_STORAGE_VARS), forcing_var_indx(kMAX_STORAGE_VARS)
     
     ! MPI communicator object for doing parallel communications among domain objects
     type(MPI_Comm), public :: compute_comms

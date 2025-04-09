@@ -622,8 +622,8 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     if (.not.(exch_v_only)) then
         do i = 1, size(adv_vars)
             ! get the next variable
-            var = get_varmeta(get_varindx(adv_vars(i)%n))
-            if (var%three_d) then
+            !check that the variable indexed matches the name
+            if (var_data(adv_vars(i)%v)%name == adv_vars(i)%n) then
                 if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
                     var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte-this%halo_size+1):this%jte)
                 if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
@@ -648,9 +648,9 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
 
     ! Now iterate through the exchange-only objects as long as there are more elements present
      do i = 1, size(exch_vars)
-        var = get_varmeta(get_varindx(exch_vars(i)%n))
-        if (var%three_d) then
-            k_max = ubound(var%data_3d,2)
+        !check that the variable indexed matches the name
+        if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
+            k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
             if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
                 var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte-this%halo_size+1):this%jte)
             if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
@@ -775,8 +775,8 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     if (.not.(exch_v_only)) then
 
         do i = 1, size(adv_vars)
-            var = get_varmeta(get_varindx(adv_vars(i)%n))
-            if (var%three_d) then
+            !check that the variable indexed matches the name
+            if (var_data(adv_vars(i)%v)%name == adv_vars(i)%n) then
                 if (.not.(this%north_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte+1):this%jme) = &
                         this%north_batch_in_3d(n,1:(this%ite-this%its+1),:,1:this%halo_size)
                 if (.not.(this%south_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,this%jms:(this%jts-1)) = &
@@ -800,9 +800,9 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     endif
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do i = 1, size(exch_vars)
-        var = get_varmeta(get_varindx(exch_vars(i)%n))
-        if (var%three_d) then
-            k_max = ubound(var%data_3d,2)
+        !check that the variable indexed matches the name
+        if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
+            k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
             if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte+1):this%jme) = &
                     this%north_batch_in_3d(n,1:(this%ite-this%its+1),1:k_max,:)
             if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,this%jms:(this%jts-1)) = &
@@ -849,8 +849,8 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
     n = 1
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do i = 1, size(exch_vars)
-        var = get_varmeta(get_varindx(exch_vars(i)%n))
-        if (var%two_d) then
+        !check that the variable indexed matches the name
+        if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
             if (.not.(this%north_boundary)) this%north_buffer_2d(n,1:(this%ite-this%its+1),:) = &
                 var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte-this%halo_size+1):this%jte)
             if (.not.(this%south_boundary)) this%south_buffer_2d(n,1:(this%ite-this%its+1),:) = &
@@ -920,8 +920,8 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
     n = 1    
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do i = 1, size(exch_vars)
-        var = get_varmeta(get_varindx(exch_vars(i)%n))
-        if (var%two_d) then
+        !check that the variable indexed matches the name
+        if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
             if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte+1):this%jme) = this%north_batch_in_2d(n,1:(this%ite-this%its+1),:)
             if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,this%jms:(this%jts-1)) = this%south_batch_in_2d(n,1:(this%ite-this%its+1),:)
             if (.not.(this%east_boundary)) var_data(exch_vars(i)%v)%data_2d((this%ite+1):this%ime,this%jts:this%jte) = this%east_batch_in_2d(n,:,1:(this%jte-this%jts+1))
