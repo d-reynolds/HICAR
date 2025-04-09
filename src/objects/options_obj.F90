@@ -9,6 +9,7 @@ submodule(options_interface) options_implementation
     use model_tracking,             only : print_model_diffs
     use output_metadata,            only : get_varname, get_varindx
     use namelist_utils,             only : set_nml_var, set_nml_var_default, set_namelist, write_nml_file_end
+    use iso_fortran_env,            only : output_unit
     implicit none
 
 

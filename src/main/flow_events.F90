@@ -42,7 +42,7 @@ subroutine component_init(component, options, boundary, ioclient, nest_index)
             call component%initialization_timer%stop()
         type is (ioserver_t)
             call component%init(options,nest_index)
-        type is (flow_obj_t)
+        class default
     end select
 
 end subroutine component_init
@@ -73,7 +73,7 @@ subroutine wake_component(component, options, boundary, ioclient)
             if (options%restart%restart) then
                 call component(options%nest_indx)%read_restart_file(options)
             else
-                call component_write(component(options%nest_indx),options,ioclient)
+                call component_write(component(options%nest_indx),ioclient)
             endif
 
             !See if any nests needs updating
@@ -85,7 +85,7 @@ subroutine wake_component(component, options, boundary, ioclient)
             ! This is needed to ensure that the compute team does not wait unnescecarily on us
             if (options%general%parent_nest == 0) call component_read(component(options%nest_indx),options,boundary,ioclient)
 
-        type is (flow_obj_t)
+        class default
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
                 call MPI_Barrier(MPI_COMM_WORLD)
                 if (.not.(options%restart%restart)) then
@@ -151,7 +151,7 @@ subroutine update_component_nest(component,options,ioclient)
 
                 endif
             enddo
-        type is (flow_obj_t)
+        class default
             ! if ioclient is null, then we are acting as an ioserver
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
                 call MPI_Barrier(MPI_COMM_WORLD)
@@ -170,10 +170,9 @@ subroutine update_component_nest(component,options,ioclient)
 
 end subroutine update_component_nest
 
-subroutine component_write(component, options, ioclient)
+subroutine component_write(component, ioclient)
     implicit none
     class(flow_obj_t), intent(inout) :: component
-    type(options_t), intent(inout) :: options
     type(ioclient_t), intent(inout) :: ioclient
 
     ! check if the type of component is a domain or an ioserver
@@ -190,8 +189,7 @@ subroutine component_write(component, options, ioclient)
             if (STD_OUT_PE_IO) write(*,*) "  Next Output = ", trim(component%next_output%as_string())
             call component%write_file()
             if (STD_OUT_PE_IO) write(*,*) "Wrote out domain"
-
-        type is (flow_obj_t)
+        class default
             call component%increment_output_time()
             call MPI_Barrier(MPI_COMM_WORLD)
 
@@ -243,7 +241,7 @@ subroutine component_read(component, options, boundary, ioclient)
             call component%read_file()
             if (STD_OUT_PE_IO) write(*,*) "Read in Boundary conditions"
 
-        type is (flow_obj_t)
+        class default
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
                 call MPI_Barrier(MPI_COMM_WORLD)
             else
@@ -285,7 +283,7 @@ subroutine component_main_loop(component, options, boundary)
             call component%physics_timer%stop()
         type is (ioserver_t)
             call component%set_sim_time(component%next_flow_event())
-        type is (flow_obj_t)
+        class default
             if (STD_OUT_PE) write(*,*) "  Model time = ", trim(component%sim_time%as_string())
             if (STD_OUT_PE) write(*,*) "   End  time = ", trim(component%end_time%as_string())
             if (STD_OUT_PE) write(*,*) "  Next Input = ", trim(component%next_input%as_string())
@@ -328,34 +326,34 @@ subroutine component_loop(components, options, boundary, ioclient)
                 endif
     
                 if (components(i)%time_for_output()) then
-                    call component_write(components(i), options(i), ioclient(i))
+                    call component_write(components(i), ioclient(i))
                 endif
             end do
 
-            call component_end_of_nest_loop(components(i), options(i))
+            call component_end_of_nest_loop(components,i)
         enddo
     enddo
 
 end subroutine component_loop
 
 
-subroutine component_end_of_nest_loop(component,options)
+subroutine component_end_of_nest_loop(component,nest_indx)
     implicit none
-    class(flow_obj_t), intent(inout) :: component
-    type(options_t), intent(in) :: options
+    class(flow_obj_t), intent(inout) :: component(:)
+    integer, intent(in) :: nest_indx
 
     ! check if the type of component is a domain or an ioserver
     select type (component)
         type is (domain_t)
-            call component%total_timer%stop()
+            call component(nest_indx)%total_timer%stop()
 
-            if (component%ended) then
+            if (component(nest_indx)%ended) then
                 call end_nest_context()
-                call component%release()
-                if (STD_OUT_PE) write(*,*) "Domain ",component%nest_indx," has reached the end of its run time."
+                call component(nest_indx)%release()
+                if (STD_OUT_PE) write(*,*) "Domain ",nest_indx," has reached the end of its run time."
             endif
-        type is (ioserver_t)
-        type is (flow_obj_t)
+        class default
+            ! Handle generic flow_obj_t case
     end select
 
 end subroutine component_end_of_nest_loop
@@ -491,6 +489,8 @@ subroutine component_program_end(component, options)
 
         type is (ioserver_t)
             call component(1)%close_files()
+        class default
+
     end select
 
 end subroutine component_program_end

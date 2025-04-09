@@ -84,10 +84,10 @@ program icar
     ! Reads user supplied model options
     call init_options(options, namelist_file, info_only=info_only, gen_nml=gen_nml, only_namelist_check=only_namelist_check)
 
-    if (STD_OUT_PE) flush(output_unit)
     if (STD_OUT_PE) write(*,'(/ A)') "--------------------------------------------------------"
     if (STD_OUT_PE) write(*,'(A)')   "Finished reading options, beginning processor assignment"
     if (STD_OUT_PE) write(*,'(A /)') "--------------------------------------------------------"
+    if (STD_OUT_PE) flush(output_unit)
 
     n_nests = options(1)%general%nests
 
@@ -101,6 +101,7 @@ program icar
     if (STD_OUT_PE) write(*,'(/ A)') "--------------------------------------------------------------"
     if (STD_OUT_PE) write(*,'(A)')   "Finished processor assignment, beginning domain initialization"
     if (STD_OUT_PE) write(*,'(A)')   "--------------------------------------------------------------"
+    if (STD_OUT_PE) flush(output_unit)
 
     do i = 1, n_nests
         call component_init(components(i), options, boundary(i), ioclient(i), i)

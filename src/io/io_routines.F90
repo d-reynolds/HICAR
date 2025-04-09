@@ -16,7 +16,7 @@
 !!------------------------------------------------------------
 module io_routines
     use netcdf
-    use iso_fortran_env, only: real64, real128
+    use iso_fortran_env, only: real64, real128, output_unit
     use icar_constants, only: STD_OUT_PE
     implicit none
     ! maximum number of dimensions for a netCDF file
@@ -131,7 +131,7 @@ contains
         real(real64), allocatable, dimension(:) :: time_data
         integer :: ncid,varid,dims(1),ntimes,i
 
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, "time", varid),                 trim(filename)//" : time")
         call check(nf90_inquire_variable(ncid, varid, dimids = dims),   trim(filename)//" : time dims")
@@ -173,21 +173,26 @@ contains
         integer,dimension(io_maxDims) :: dimIds
 
         ! open the netcdf file
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
+
         ! Get the varid of the variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),varname)
         ! find the number of dimensions
+
         call check(nf90_inquire_variable(ncid, varid, ndims = numDims),varname)
         ! find the dimension IDs
         call check(nf90_inquire_variable(ncid, varid, dimids = dimIds(:numDims)),varname)
+
         if (allocated(dims)) deallocate(dims)
         allocate(dims(numDims))
+
         ! finally, find the length of each dimension
         do i=1,numDims
             call check(nf90_inquire_dimension(ncid, dimIds(i), len = dimlen))
             !assign in reverse order, since netcdf reverses the dimension order from what is in the file
             dims(i)=dimlen
         end do
+
         ! Close the file, freeing all resources.
         call check( nf90_close(ncid),filename )
 
@@ -232,7 +237,7 @@ contains
         allocate(data_in(diminfo(1),diminfo(2),diminfo(3),diminfo(4),diminfo(5),diminfo(6)))
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
 
@@ -294,7 +299,7 @@ contains
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
         err = nf90_get_att(ncid,varid,'scale_factor', scale)
@@ -364,7 +369,7 @@ contains
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
         err = nf90_get_att(ncid,varid,'scale_factor', scale)
@@ -433,7 +438,7 @@ contains
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
         err = nf90_get_att(ncid,varid,'scale_factor', scale)
@@ -493,16 +498,11 @@ contains
             dimstart=1
         endif
 
-        ! Read the dimension lengths
-        call io_getdims(filename,varname,diminfo)
-
-        if (allocated(data_in)) deallocate(data_in)
-        allocate(data_in(diminfo(1),diminfo(2)))
-
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
+
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
         err = nf90_get_att(ncid,varid,'scale_factor', scale)
         if (err/=0) scale=1
@@ -510,6 +510,12 @@ contains
         if (err/=0) offset=0
 
 
+
+        ! Read the dimension lengths
+        call io_getdims(trim(filename),varname,diminfo)
+
+        if (allocated(data_in)) deallocate(data_in)
+        allocate(data_in(diminfo(1),diminfo(2)))
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
         if (size(diminfo)>2) then
@@ -558,7 +564,7 @@ contains
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
         err = nf90_get_att(ncid,varid,'scale_factor', scale)
@@ -630,7 +636,7 @@ contains
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
 
@@ -692,7 +698,7 @@ contains
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
 
@@ -751,7 +757,7 @@ contains
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
 
@@ -801,7 +807,7 @@ contains
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
 
@@ -860,7 +866,7 @@ contains
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
 
@@ -910,7 +916,7 @@ contains
 
         ! Open the file. NF90_NOWRITE tells netCDF we want read-only access to
         ! the file.
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
 
         ! Get the varid of the data_in variable, based on its name.
         call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
@@ -1339,7 +1345,7 @@ contains
         integer :: ncid, varid
 
         ! open the netcdf file
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
 
         ! If a variable name was specified, get the varid of the variable
         ! else search for a global attribute
@@ -1384,7 +1390,7 @@ contains
         integer :: ncid, varid
 
         ! open the netcdf file
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
 
         ! If a variable name was specified, get the varid of the variable
         ! else search for a global attribute
@@ -1429,7 +1435,7 @@ contains
         integer :: ncid, varid
 
         ! open the netcdf file
-        call check(nf90_open(filename, NF90_NOWRITE, ncid),filename)
+        call check(nf90_open(trim(filename), NF90_NOWRITE, ncid),trim(filename))
 
         ! If a variable name was specified, get the varid of the variable
         ! else search for a global attribute

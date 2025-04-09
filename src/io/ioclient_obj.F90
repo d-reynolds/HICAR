@@ -283,10 +283,9 @@ contains
         type(domain_t),      intent(in)    :: domain
 
         type(variable_t) :: var, tmp_var
-        integer :: i, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, err, var_indx
+        integer :: i, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, var_indx
 
         n_3d = 1
-
         ! Do MPI_Win_Wait on forcing_win. This is mostly unnecesarry, since the server process is what will be waiting on us, which is handeled by the MPI_Win_Start call
         ! in ioserver%gather_foring. Still, MPI_Win_Wait is called here for completeness of PSCW model
         if (this%nest_updated) then
@@ -304,12 +303,13 @@ contains
 
             if (tmp_var%two_d) cycle
 
-            var = domain%vars_3d(domain%var_indx(var_indx)%v)
-
-            if (err > 0) then
+            if (domain%var_indx(var_indx)%v <= 0) then
                 write(*,*) 'Error: Variable ', this%vars_for_nest(i), ' not found in parent domain: ', domain%nest_indx
                 stop
             end if
+
+            var = domain%vars_3d(domain%var_indx(var_indx)%v)
+
             i_s_w = this%i_s_w; i_e_w = this%i_e_w
             j_s_w = this%j_s_w; j_e_w = this%j_e_w
             if (domain%ime == domain%ide) i_e_w = i_e_w+var%xstag !Add extra to accomodate staggered vars

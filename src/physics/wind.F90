@@ -355,7 +355,6 @@ contains
         real, allocatable, dimension(:,:,:) :: div
         integer :: nx, ny, nz, it
         logical :: update
-        type(variable_t) :: forcing_var
         
         if (first_wind) then            
             ! do nothing if this is a restart run -- then we have read in the already calculated winds
@@ -365,60 +364,54 @@ contains
             endif
 
             !Compute the forcing wind field at the current step
-            forcing_var = domain%forcing_hi%get_var(options%forcing%uvar)
             do i = ims,ime+1
                 do k = kms, kme
                     do j = jms, jme
-                        domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i,k,j) = forcing_var%data_3d(i,k,j)
+                        domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d(i,k,j)
                     enddo
                 enddo
             enddo
             
-            forcing_var = domain%forcing_hi%get_var(options%forcing%vvar)
             do i = ims,ime
                 do k = kms, kme
                     do j = jms, jme+1
-                        domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i,k,j) = forcing_var%data_3d(i,k,j)
+                        domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d(i,k,j)
                     enddo
                 enddo
             enddo
             
             if (.not.(options%forcing%wvar=="")) then
-                forcing_var = domain%forcing_hi%get_var(options%forcing%wvar)
                 do i = ims,ime
                     do k = kms, kme
                         do j = jms, jme
-                            domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%dqdt_3d(i,k,j) = forcing_var%data_3d(i,k,j)
+                            domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%dqdt_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d(i,k,j)
                         enddo
                     enddo
                 enddo
             endif
         else
             !Compute the forcing wind field at the next update step, assuming a linear interpolation through time
-            forcing_var = domain%forcing_hi%get_var(options%forcing%uvar)
             do i = ims,ime+1
                 do k = kms, kme
                     do j = jms, jme
-                        domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i,k,j) = forcing_var%data_3d(i,k,j)+forcing_var%dqdt_3d(i,k,j)*options%wind%update_dt%seconds()
+                        domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d(i,k,j)+domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%dqdt_3d(i,k,j)*options%wind%update_dt%seconds()
                     enddo
                 enddo
             enddo
             
-            forcing_var = domain%forcing_hi%get_var(options%forcing%vvar)
             do i = ims,ime
                 do k = kms, kme
                     do j = jms, jme+1
-                        domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i,k,j) = forcing_var%data_3d(i,k,j)+forcing_var%dqdt_3d(i,k,j)*options%wind%update_dt%seconds()
+                        domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d(i,k,j)+domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%dqdt_3d(i,k,j)*options%wind%update_dt%seconds()
                     enddo
                 enddo
             enddo
             
             if (.not.(options%forcing%wvar=="")) then
-                forcing_var = domain%forcing_hi%get_var(options%forcing%wvar)
                 do i = ims,ime
                     do k = kms, kme
                         do j = jms, jme
-                            domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%dqdt_3d(i,k,j) = forcing_var%data_3d(i,k,j)+forcing_var%dqdt_3d(i,k,j)*options%wind%update_dt%seconds()
+                            domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%dqdt_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d(i,k,j)+domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%dqdt_3d(i,k,j)*options%wind%update_dt%seconds()
                         enddo
                     enddo
                 enddo
@@ -789,7 +782,7 @@ contains
 
         call set_module_indices(domain)
         
-        call allocate_winds(domain)
+        if (.not.(context_change) .and. first_wind) call allocate_winds(domain, options)
 
         if (options%physics%windtype==kWIND_LINEAR .or. &
                  options%physics%windtype==kLINEAR_OBRIEN_WINDS .or. &
@@ -801,16 +794,7 @@ contains
             !call init_iter_winds(domain)
         endif
 
-        if (options%wind%Sx .and. (domain%var_indx(kVARS%Sx)%v > 0)) then
-            if (STD_OUT_PE) write(*,*) "    Calculating Sx and TPI for wind modification"
-            call calc_Sx(domain, options)
-        endif
-
         if (options%wind%thermal) call init_thermal_winds(domain, options)
-        
-        if (options%wind%alpha_const<0 .and. (options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS)) then
-            call compute_terrain_blocking_heights(domain)
-        endif
 
     end subroutine init_winds
 
@@ -837,15 +821,24 @@ contains
     !! Allocate memory used in various wind related routines
     !!
     !!------------------------------------------------------------
-    subroutine allocate_winds(domain)
+    subroutine allocate_winds(domain, options)
         type(domain_t), intent(inout) :: domain
-
+        type(options_t), intent(in) :: options
         ! note w is special cased because it does not have a forcing variable, so it is not necessarily allocated automatically
-        if (first_wind .and. (domain%var_indx(kVARS%w)%v > 0)) then
+        if ((domain%var_indx(kVARS%w)%v > 0)) then
             if (.not.(allocated(domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d))) then
                 allocate(domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(ims:ime,kms:kme,jms:jme))
             endif
             domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = 0
+        endif
+
+        if (options%wind%Sx .and. (domain%var_indx(kVARS%Sx)%v > 0)) then
+            if (STD_OUT_PE) write(*,*) "    Calculating Sx and TPI for wind modification"
+            call calc_Sx(domain, options)
+        endif
+        
+        if (options%wind%alpha_const<0 .and. (options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS)) then
+            call compute_terrain_blocking_heights(domain)
         endif
 
     end subroutine allocate_winds
