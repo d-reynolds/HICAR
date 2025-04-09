@@ -421,7 +421,6 @@ contains
         if (err /= NF90_NOERR) then
             call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id, &
                     comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL), "Opening:"//trim(filename))
-            this%creating=.True.
         else
             ! in case we need to add a new variable when setting up variables
             call check_ncdf(nf90_redef(this%active_nc_id), "Setting redefine mode for: "//trim(filename))
@@ -437,6 +436,10 @@ contains
             ! add global attributes such as the image number, domain dimension, creation time
             call add_global_attributes(this)
         endif
+
+        !Set creatint to true, so that we will output any static variables on the first pass.
+        this%creating=.True.
+
         ! End define mode. This tells netCDF we are done defining metadata.
         call check_ncdf( nf90_enddef(this%active_nc_id), "end define mode" )
     

@@ -2479,7 +2479,7 @@ contains
     subroutine init_relax_filters(this)
         implicit none
         class(domain_t),    intent(inout) :: this
-        integer :: hs, nr, k, i
+        integer :: hs, k, i
         real, dimension(FILTER_WIDTH) :: rs, rs_r
         logical :: corner
         !Setup relaxation filters, start with 2D then expand for 3D version
@@ -2501,33 +2501,33 @@ contains
         if (this%west_boundary) then
             relax_filter(this%ims:this%ims+hs-1,this%jms:this%jme) = 1.0
             do k=this%jms,this%jme
-                relax_filter(this%ims+hs:this%ims+hs+nr-1,k) = rs(1:nr)
+                relax_filter(this%ims+hs:this%ims+hs+FILTER_WIDTH-1,k) = rs(1:FILTER_WIDTH)
             enddo
         endif
         if (this%east_boundary) then
             relax_filter(this%ime-hs+1:this%ime,this%jms:this%jme) = 1.0
             do k=this%jms,this%jme
-                relax_filter(this%ime-hs-nr+1:this%ime-hs,k) = rs_r(1:nr)        
+                relax_filter(this%ime-hs-FILTER_WIDTH+1:this%ime-hs,k) = rs_r(1:FILTER_WIDTH)        
             enddo
         endif
         if (this%north_boundary) then
             relax_filter(this%ims:this%ime,this%jme-hs+1:this%jme) = 1.0
             do k=this%ims,this%ime
-                relax_filter(k,this%jme-hs-nr+1:this%jme-hs) = rs_r(1:nr)
+                relax_filter(k,this%jme-hs-FILTER_WIDTH+1:this%jme-hs) = rs_r(1:FILTER_WIDTH)
             enddo
         endif
         if (this%south_boundary) then
             relax_filter(this%ims:this%ime,this%jms:this%jms+hs-1) = 1.0
             do k=this%ims,this%ime
-                relax_filter(k,this%jms+hs:this%jms+hs+nr-1) = rs(1:nr)
+                relax_filter(k,this%jms+hs:this%jms+hs+FILTER_WIDTH-1) = rs(1:FILTER_WIDTH)
             enddo
         endif
         if (this%north_boundary .and. this%west_boundary) then
             relax_filter(this%ims:this%ims+hs-1,this%jms:this%jme) = 1.0
             relax_filter(this%ims:this%ime,this%jme-hs+1:this%jme) = 1.0
 
-            do i = 1, nr
-                do k = 1, nr
+            do i = 1, FILTER_WIDTH
+                do k = 1, FILTER_WIDTH
                     relax_filter(this%ims+hs+i-1,this%jme-hs-k+1) = rs(min(i,k))
                 enddo
             enddo
@@ -2536,8 +2536,8 @@ contains
             relax_filter(this%ime-hs+1:this%ime,this%jms:this%jme) = 1.0
             relax_filter(this%ims:this%ime,this%jme-hs+1:this%jme) = 1.0
 
-            do i = 1, nr
-                do k = 1, nr
+            do i = 1, FILTER_WIDTH
+                do k = 1, FILTER_WIDTH
                     relax_filter(this%ime-hs-i+1,this%jme-hs-k+1) = rs(min(i,k))
                 enddo
             enddo
@@ -2547,8 +2547,8 @@ contains
             relax_filter(this%ims:this%ims+hs-1,this%jms:this%jme) = 1.0
             relax_filter(this%ims:this%ime,this%jms:this%jms+hs-1) = 1.0
 
-            do i = 1, nr
-                do k = 1, nr
+            do i = 1, FILTER_WIDTH
+                do k = 1, FILTER_WIDTH
                     relax_filter(this%ims+hs+i-1,this%jms+hs+k-1) = rs(min(i,k))
                 enddo
             enddo
@@ -2558,8 +2558,8 @@ contains
             relax_filter(this%ime-hs+1:this%ime,this%jms:this%jme) = 1.0
             relax_filter(this%ims:this%ime,this%jms:this%jms+hs-1) = 1.0
 
-            do i = 1, nr
-                do k = 1, nr
+            do i = 1, FILTER_WIDTH
+                do k = 1, FILTER_WIDTH
                     relax_filter(this%ime-hs-i+1,this%jms+hs+k-1) = rs(min(i,k))
                 enddo
             enddo
