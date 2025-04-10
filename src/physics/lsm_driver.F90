@@ -1125,13 +1125,10 @@ contains
                                       domain%vars_2d(domain%var_indx(kVARS%sst)%v)%data_2d(its:ite,jts:jte),                   &
                                       domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d(its:ite,jts:jte),      &
                                       windspd(its:ite,jts:jte),                              &
-                                      domain%vars_2d(domain%var_indx(kVARS%ustar)%v)%data_2d(its:ite,jts:jte),                         &
                                       domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(its:ite,kms,jts:jte),       &
                                       domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d(its:ite,kms,jts:jte),       &
                                       domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d(its:ite,jts:jte),         &
                                       domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d(its:ite,jts:jte),           &
-                                      z_atm(its:ite,jts:jte),                                &
-                                      domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d(its:ite,jts:jte),          &
                                       domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(its:ite,jts:jte),                     &
                                       QSFC(its:ite,jts:jte),                                 &
                                       domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d(its:ite,jts:jte),                   &
