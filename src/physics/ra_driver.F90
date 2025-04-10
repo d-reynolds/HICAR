@@ -28,13 +28,13 @@ module radiation
     use module_ra_rrtmg_sw, only: rrtmg_swinit, rrtmg_swrad
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
-    use icar_constants, only : kVARS, kRA_BASIC, kRA_SIMPLE, kRA_RRTMG, STD_OUT_PE, kMP_THOMP_AER
+    use icar_constants, only : kVARS, kRA_BASIC, kRA_SIMPLE, kRA_RRTMG, STD_OUT_PE, kMP_THOMP_AER, kMAX_NESTS
     use mod_wrf_constants, only : cp, R_d, gravity, DEGRAD, DPD, piconst
     use mod_atm_utilities, only : cal_cldfra3, calc_solar_elevation
 
     implicit none
     integer :: update_interval
-    real*8  :: last_model_time
+    real*8  :: last_model_time(kMAX_NESTS)
     real    :: solar_constant
     real    :: p_top = 100000.0
     
@@ -88,12 +88,13 @@ contains
         update_interval=options%rad%update_interval_rrtmg ! 30 min, 1800 s   600 ! 10 min (600 s)
 
         !Saftey bound, in case update_interval is 0, or very small
-        if (update_interval<=10) then
-            last_model_time = domain%sim_time%seconds()-10
-        else
-            last_model_time = domain%sim_time%seconds()-update_interval
+        if (.not.(context_change)) then
+            if (update_interval<=10) then
+                last_model_time(domain%nest_indx) = domain%sim_time%seconds()-10
+            else
+                last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
+            endif
         endif
-
         !! MJ added to aggregate radiation over output interval
         !allocate(sum_SW(domain%grid%ims:domain%grid%ime,domain%grid%jms:domain%grid%jme)); sum_SW=0.
         !allocate(sum_SWdif(domain%grid%ims:domain%grid%ime,domain%grid%jms:domain%grid%jme)); sum_SWdif=0.
@@ -270,7 +271,7 @@ contains
         
         !We only need to calculate these variables if we are using terrain shading, otherwise only call on each radiation update
         if (options%physics%radiation_downScaling == 1 .or. &
-            ((domain%sim_time%seconds() - last_model_time) >= update_interval)) then
+            ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval)) then
             do j = jms,jme
                !! MJ used corr version, as other does not work in Erupe
                 solar_elevation  = calc_solar_elevation(date=domain%sim_time, tzone=options%rad%tzone, &
@@ -290,10 +291,10 @@ contains
             enddo
         endif
         !If we are not over the update interval, don't run any of this, since it contains allocations, etc...
-        if ((domain%sim_time%seconds() - last_model_time) >= update_interval) then
+        if ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval) then
 
-            ra_dt = domain%sim_time%seconds() - last_model_time
-            last_model_time = domain%sim_time%seconds()
+            ra_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
+            last_model_time(domain%nest_indx) = domain%sim_time%seconds()
 
             allocate(t_1d(kms:kme))
             allocate(p_1d(kms:kme))
