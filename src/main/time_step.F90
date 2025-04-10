@@ -381,6 +381,7 @@ contains
 
                 call domain%adv_timer%start()
                 call advect(domain, options, real(dt%seconds()),domain%flux_timer, domain%flux_up_timer, domain%flux_corr_timer, domain%sum_timer, domain%adv_wind_timer)
+                !call domain%enforce_limits()
                 if (options%general%debug) call domain_check(domain, "advect(domain", fix=.True.)
                 call domain%adv_timer%stop()
 
@@ -392,16 +393,6 @@ contains
                 if (options%general%debug) call domain_check(domain, "mp_halo", fix=.True.)
                 call domain%mp_timer%stop()
                 
-                if (options%general%debug) call domain_check(domain, "domain%halo_send", fix=.True.)
-
-
-                !If we are in the last ~10 updates of a time step and a variable drops below 0, we have probably over-shot a value of 0. Force back to 0
-                if ((end_time%seconds() - domain%sim_time%seconds()) < (dt%seconds()*10)) then
-                    call domain%enforce_limits()
-                endif
-
-
-                if (options%general%debug) call domain_check(domain, "domain%apply_forcing", fix=.True.)
 
             endif
             ! step model_time forward
