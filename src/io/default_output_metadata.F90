@@ -2072,7 +2072,26 @@ contains
             var%attributes  = [attribute_t("non_standard_name", "ground_rain_rate"),                &
                                attribute_t("units",         "mm s-1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-        
+        !>------------------------------------------------------------
+        !!  Last snowfall saved for LSM
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%lsm_last_snow) then
+            var%name        = "lsm_last_snow"
+            var%dimensions  = two_d_t_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "snowfall at last lsm call"),                &
+                                attribute_t("units",         "mm"),                              &
+                                attribute_t("coordinates",   "lat lon")]
+                            
+        !>------------------------------------------------------------
+        !!  Last precipitation saved for LSM
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%lsm_last_precip) then
+            var%name        = "lsm_last_precip"
+            var%dimensions  = two_d_t_dimensions
+            var%attributes  = [attribute_t("non_standard_name", "precipitation at last lsm call"),                &
+                                attribute_t("units",         "mm"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+                    
         !>------------------------------------------------------------
         !!  Snow water equivalent on the surface
         !!------------------------------------------------------------

@@ -39,7 +39,7 @@ module land_surface
     use module_water_lake,   only : lake, lakeini, nlevsoil, nlevsnow, nlevlake
     use mod_atm_utilities,   only : sat_mr, calc_Richardson_nr, calc_solar_elevation
     use time_object,         only : Time_type
-    use icar_constants,      only : kVARS, kLSM_NOAH, kLSM_NOAHMP, kSM_FSM
+    use icar_constants,      only : kVARS, kLSM_NOAH, kLSM_NOAHMP, kSM_FSM, kMAX_NESTS
     use options_interface,   only : options_t
     use domain_interface,    only : domain_t
     use ieee_arithmetic
@@ -88,7 +88,7 @@ module land_surface
     logical :: FNDSOILW,FNDSNOWH,RDMAXALB
     integer :: num_soil_layers,ISURBAN,ISICE,ISWATER, ISLAKE
     integer :: exchange_term
-    real*8  :: last_model_time
+    real*8  :: last_model_time(kMAX_NESTS)
     real*8  :: Delta_t !! MJ added to detect the time for outputting 
 
     !Noah-MP specific
@@ -98,7 +98,7 @@ module land_surface
     character(len=kMAX_NAME_LENGTH) :: landuse_name
 
     ! MJ added for FSM
-    real,allocatable, dimension(:,:) :: current_snow, current_rain, current_precipitation, snowlsm, rainlsm
+    real,allocatable, dimension(:,:) :: current_snow, current_rain, current_precipitation
 
     ! Lake model: (allocated on lake init)
     real, allocatable, dimension (:,:)      ::      TH2 !, savedtke12d  lakedepth2d,
@@ -112,7 +112,7 @@ contains
         implicit none
         type(options_t),intent(inout) :: options
 
-        if (options%physics%landsurface == kLSM_NOAH .or. options%physics%landsurface == kLSM_BASIC) then
+        if (options%physics%landsurface >= kLSM_BASIC) then
             call options%alloc_vars( &
                          [kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature,       &
                          kVARS%exner, kVARS%dz_interface, kVARS%density, kVARS%pressure_interface, kVARS%shortwave,     &
@@ -122,14 +122,14 @@ contains
                          kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
                          kVARS%soil_totalmoisture, kVARS%soil_deep_temperature, kVARS%roughness_z0, kVARS%ustar,        &
                          kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%soil_water_content_liq,                    &
-                         kVARS%snow_height, kVARS%lai, kVARS%temperature_2m_veg, kVARS%albedo,                          &
-                         kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%land_emissivity])
+                         kVARS%snow_height, kVARS%lai, kVARS%temperature_2m_veg, kVARS%albedo, kVARS%lsm_last_snow,     &
+                         kVARS%lsm_last_precip, kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%land_emissivity])
 
              call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
 
              call options%restart_vars( &
                          [kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature,       &
-                         kVARS%density, kVARS%pressure_interface, kVARS%shortwave,                                      &
+                         kVARS%density, kVARS%pressure_interface, kVARS%shortwave, kVARS%lsm_last_snow, kVARS%lsm_last_precip,   &
                          kVARS%longwave, kVARS%canopy_water, kVARS%snow_water_equivalent,                               &
                          kVARS%skin_temperature, kVARS%soil_water_content, kVARS%soil_temperature, kVARS%terrain,       &
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
@@ -216,8 +216,8 @@ contains
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
                          kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
                          kVARS%soil_totalmoisture, kVARS%soil_deep_temperature, kVARS%roughness_z0, kVARS%ustar,        &
-                         kVARS%snow_height, kVARS%lai, kVARS%temperature_2m_veg, kVARS%slope_angle,                     &
-                         kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%land_emissivity,                           &
+                         kVARS%snow_height, kVARS%lai, kVARS%temperature_2m_veg, kVARS%slope_angle, kVARS%lsm_last_snow,&
+                         kVARS%lsm_last_precip, kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%land_emissivity,    &
                          kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%snowfall, kVARS%albedo,                &
                          kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%Nsnow,   &
                          kVARS%shd, kVARS%meltflux_out_tstep, kVARS%Sliq_out, &
@@ -235,7 +235,7 @@ contains
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
                          kVARS%snow_height,  kVARS%snowfall, kVARS%albedo, kVARS%QFX, kVARS%land_emissivity,            &
                          kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
-                         kVARS%soil_totalmoisture, kVARS%roughness_z0,                                                  &
+                         kVARS%soil_totalmoisture, kVARS%roughness_z0, kVARS%lsm_last_snow, kVARS%lsm_last_precip,      &
                          kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%Nsnow  ])
         endif
 
@@ -263,7 +263,7 @@ contains
             kVARS%ground_heat_flux, kVARS%snow_water_equivalent, kVARS%t_lake3d, kVARS%dz_lake3d,                   &
             kVARS%t_soisno3d, kVARS%h2osoi_ice3d, kVARS%h2osoi_liq3d, kVARS%h2osoi_vol3d, kVARS%z3d,                &
             kVARS%dz3d, kVARS%watsat3d, kVARS%csol3d, kVARS%tkmg3d, kVARS%lakemask, kVARS%zi3d,                     &
-            kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%land_emissivity, kVARS%xice,                        &
+            kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%land_emissivity, kVARS%xice, kVARS%lsm_last_precip, &
             kVARS%tksatu3d, kVARS%tkdry3d, kVARS%snl2d, kVARS%t_grnd2d,  kVARS%savedtke12d, kVARS%lakedepth2d,      & !  kVARS%snowdp2d, kVARS%h2osno2d,
             kVARS%lake_icefrac3d, kVARS%z_lake3d,kVARS%water_vapor, kVARS%potential_temperature     ])
 
@@ -276,7 +276,7 @@ contains
             kVARS%ground_heat_flux, kVARS%snow_water_equivalent, kVARS%t_lake3d, kVARS%dz_lake3d,                   &
             kVARS%t_soisno3d, kVARS%h2osoi_ice3d, kVARS%h2osoi_liq3d, kVARS%h2osoi_vol3d, kVARS%z3d,                &
             kVARS%dz3d, kVARS%watsat3d, kVARS%csol3d, kVARS%tkmg3d, kVARS%lakemask, kVARS%zi3d,                     &
-            kVARS%QFX, kVARS%land_emissivity, kVARS%xice,                                                           &
+            kVARS%QFX, kVARS%land_emissivity, kVARS%xice, kVARS%lsm_last_precip,                                    &
             kVARS%tksatu3d, kVARS%tkdry3d, kVARS%snl2d, kVARS%t_grnd2d, kVARS%savedtke12d, kVARS%lakedepth2d,       & !kVARS%snowdp2d, kVARS%h2osno2d,
             kVARS%lake_icefrac3d, kVARS%z_lake3d,kVARS%water_vapor, kVARS%potential_temperature ])
         endif
@@ -680,11 +680,6 @@ contains
             if (allocated(current_rain)) deallocate(current_rain)
             allocate(current_snow(ims:ime,jms:jme), source=0.0) ! MJ added 
             allocate(current_rain(ims:ime,jms:jme), source=0.0) ! MJ added 
-            if (allocated(snowlsm)) deallocate(snowlsm)
-            if (allocated(rainlsm)) deallocate(rainlsm)
-            allocate(snowlsm(ims:ime,jms:jme), source=0.0) ! MJ added 
-            allocate(rainlsm(ims:ime,jms:jme), source=0.0) ! MJ added 
-
         endif
         
         if (options%physics%landsurface==kLSM_NOAH .or. options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
@@ -1065,7 +1060,13 @@ contains
         z_atm = domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(:,kts,:) - domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d
 
         update_interval=options%lsm%update_interval
-        last_model_time=-999
+        if (.not.(context_change)) then
+            if (update_interval<=10) then
+                last_model_time(domain%nest_indx) = domain%sim_time%seconds()-10
+            else
+                last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
+            endif
+        endif
 
     end subroutine lsm_init
 
@@ -1083,17 +1084,9 @@ contains
 
         if (options%physics%landsurface == 0) return
 
-        if (last_model_time==-999) then
-            if (update_interval<=dt) then
-                last_model_time = domain%sim_time%seconds()-dt
-            else
-                last_model_time = domain%sim_time%seconds()-update_interval
-            endif
-        endif
-
-        if ((domain%sim_time%seconds() - last_model_time) >= update_interval) then
-            lsm_dt = domain%sim_time%seconds() - last_model_time
-            last_model_time = domain%sim_time%seconds()
+        if ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval) then
+            lsm_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
+            last_model_time(domain%nest_indx) = domain%sim_time%seconds()
 
             if (options%physics%radiation_downScaling==1  .and. options%physics%radiation>1) then
                 SW = domain%vars_2d(domain%var_indx(kVARS%shortwave_total)%v)%data_2d
@@ -1116,6 +1109,13 @@ contains
                 
                 domain%vars_2d(domain%var_indx(kVARS%chs2)%v)%data_2d = domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d
                 domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d = domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d
+            endif
+
+            current_precipitation = (domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d - domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
+
+            if (options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
+                current_snow = (domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d-domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d)!+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
+                current_rain = max(current_precipitation-current_snow,0.) !! MJ: rainfall in kg m-2
             endif
 
 
@@ -1145,8 +1145,6 @@ contains
             ! It requires the VEGPARM.TBL landuse category to be one which has a separate lake category (i.e. MODIFIED_IGBP_MODIS_NOAH, USGS-RUC or MODI-RUC).
             ! For the grid cells that are defined as water, but not as lake (i.e. oceans), the simple water model above will be run.
             if (options%physics%watersurface==kWATER_LAKE) then    ! WRF's lake model
-
-                ! current_precipitation = (domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2dd-RAINBL)+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE  ! analogous to noah calls
 
                 call lake( &
                     t_phy=domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d                            & !-- t_phy         temperature (K)     !Temprature at the mid points (K)
@@ -1243,7 +1241,6 @@ contains
 
 
                 ! RAINBL(i,j) = [kg m-2]   RAINBL = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2dd  ! used to store last time step accumulated precip so that it can be subtracted from the current step
-                current_precipitation = (domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d - rainlsm) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
 
                 CHS = domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d*windspd
                 CHS2 = domain%vars_2d(domain%var_indx(kVARS%chs2)%v)%data_2d*windspd
@@ -1352,10 +1349,6 @@ contains
                 ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: RAINBL max:", MAXVAL(RAINBL)
                 ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: domain%precipitation_bucket max:", MAXVAL(domain%precipitation_bucket)
                 ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: rain_bucket max:", MAXVAL(rain_bucket)
-                
-                current_snow = (domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d-snowlsm)!+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
-                current_precipitation = (domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d - rainlsm) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
-
 !                do I = ims,ime
 !                  do J = jms,jme
 !                    call calc_declin(domain%sim_time%day_of_year(),real(domain%sim_time%hour),real(domain%sim_time%minute),real(domain%sim_time%second),domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d(I,J),domain%vars_2d(domain%var_indx(kVARS%longitude)%v)%data_2d(I,J),domain%cos_zenith%data_2d(I,J))
@@ -1573,9 +1566,6 @@ contains
 
             !! MJ added: this block is for FSM as sm.
             if (options%physics%snowmodel == kSM_FSM) then
-                current_precipitation = (domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d - rainlsm) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
-                current_snow = (domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d-snowlsm)!+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
-                current_rain = max(current_precipitation-current_snow,0.) !! MJ: rainfall in kg m-2
                 !!
                 domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d(its:ite,jts:jte)=windspd(its:ite,jts:jte)
                 !!
@@ -1592,8 +1582,8 @@ contains
             !!
             if (options%physics%landsurface > kLSM_BASIC) then
             
-                rainlsm = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d
-                snowlsm = domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d
+                domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d
+                domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d = domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d
                 
                 domain%vars_2d(domain%var_indx(kVARS%longwave_up)%v)%data_2d = STBOLT * domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d * domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d**4
                 ! accumulate soil moisture over the entire column
