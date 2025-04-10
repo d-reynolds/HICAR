@@ -319,6 +319,14 @@ contains
             if (STD_OUT_PE) write(*,*) "  "
             if (STD_OUT_PE) write(*,*) "  ERROR, a surface layer scheme is required when using a PBL scheme,"
             if (STD_OUT_PE) write(*,*) "  ERROR, set sfc > 0 in the namelist."
+            stop "  ERROR, a surface layer scheme is required when using a PBL scheme"
+        endif
+        ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
+        if ((this%physics%surfacelayer==0).and.(this%physics%watersurface==kWATER_SIMPLE)) then
+            if (STD_OUT_PE) write(*,*) "  "
+            if (STD_OUT_PE) write(*,*) "  ERROR, a surface layer scheme is required when the simple open water scheme,"
+            if (STD_OUT_PE) write(*,*) "  ERROR, set sfc > 0 in the namelist."
+            stop "  ERROR, a surface layer scheme is required when using the simple open water scheme"
         endif
 
         ! prior to v 0.9.3 this was assumed, so throw a warning now just in case.
