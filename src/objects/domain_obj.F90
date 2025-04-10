@@ -2678,7 +2678,7 @@ contains
         type(variable_t) :: var_to_update
         integer :: i, k, j, var_indx, n
         real    :: dt_h
-        logical :: do_boundary
+        logical :: do_boundary, is_wind
         
         !calculate dt in units of hours
         dt_h = dt/3600.0
@@ -2697,6 +2697,7 @@ contains
                 do_boundary = (ims < this%ids+this%grid%halo_size+FILTER_WIDTH) .or. (ime > this%ide-this%grid%halo_size-FILTER_WIDTH) .or. &
                     (jms < this%jds+this%grid%halo_size+FILTER_WIDTH) .or. (jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
 
+                is_wind = (this%var_indx(var_indx)%v == this%var_indx(kVARS%u)%v) .or. (this%var_indx(var_indx)%v == this%var_indx(kVARS%v)%v) .or. (this%var_indx(var_indx)%v == this%var_indx(kVARS%w_real)%v)
                 ! apply forcing throughout the domain for 2D diagnosed variables (e.g. SST, SW)
                 if (.not.(var_to_update%force_boundaries)) then
                     do concurrent (j = jms:jme, i = ims:ime)
@@ -2739,11 +2740,11 @@ contains
                 if (.not.(var_to_update%force_boundaries)) then
                     do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
                         this%forcing_hi(n)%data_3d(i,k,j)    = this%forcing_hi(n)%data_3d(i,k,j) + (this%forcing_hi(n)%dqdt_3d(i,k,j) * dt)
-                        this%forcing_hi(n)%data_3d(i,k,j) = max(this%forcing_hi(n)%data_3d(i,k,j),0.0)
+                        if (.not.(is_wind)) this%forcing_hi(n)%data_3d(i,k,j) = max(this%forcing_hi(n)%data_3d(i,k,j),0.0)
 
                         this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
                                                         (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d(i,k,j) * dt)
-                        this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = max(this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j),0.0)
+                        if (.not.(is_wind)) this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = max(this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j),0.0)
                     enddo
                 else if (do_boundary) then
                     if (any(this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d > 0.0)) then
