@@ -91,8 +91,8 @@ contains
 
 
         !Link local buffer to the outputer variables
-        allocate(this%parent_write_buffer_3d(this%n_w_3d,this%i_s_w:this%i_e_w+1,this%k_s_w:this%k_e_w,this%j_s_w:this%j_e_w+1))
-        allocate(this%parent_write_buffer_2d(this%n_w_2d,this%i_s_w:this%i_e_w+1,                      this%j_s_w:this%j_e_w+1))
+        allocate(this%parent_write_buffer_3d(this%n_w_3d,this%i_s_re:this%i_e_re+1,this%k_s_w:this%k_e_w,this%j_s_re:this%j_e_re+1))
+        allocate(this%parent_write_buffer_2d(this%n_w_2d,this%i_s_re:this%i_e_re+1,                      this%j_s_re:this%j_e_re+1))
 
         !Setup arrays for information about accessing variables from write buffer
         allocate(this%out_var_indices(count(options(nest_indx)%output%vars_for_output > 0)))
@@ -331,11 +331,11 @@ contains
 
         do i = 1,this%n_children
             ! +2 included to account for staggered grids for output variables
-            call MPI_Type_create_subarray(4, [this%n_w_3d, (this%i_e_w-this%i_s_w+2), (this%k_e_w-this%k_s_w+1), (this%j_e_w-this%j_s_w+2)], &
+            call MPI_Type_create_subarray(4, [this%n_w_3d, (this%i_e_re-this%i_s_re+2), (this%k_e_w-this%k_s_w+1), (this%j_e_re-this%j_s_re+2)], &
                 [this%n_w_3d, (this%iewc(i)-this%iswc(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jewc(i)-this%jswc(i)+2)], &
                 [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%get_types_3d(i))
-        
-            call MPI_Type_create_subarray(3, [this%n_w_2d, (this%i_e_w-this%i_s_w+2), (this%j_e_w-this%j_s_w+2)], &
+                
+            call MPI_Type_create_subarray(3, [this%n_w_2d, (this%i_e_re-this%i_s_re+2), (this%j_e_re-this%j_s_re+2)], &
                 [this%n_w_2d, (this%iewc(i)-this%iswc(i)+2), (this%jewc(i)-this%jswc(i)+2)], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%get_types_2d(i))
 
@@ -535,10 +535,12 @@ contains
 
         do n = 1,this%outputer%n_vars
             if (this%outputer%variables(n)%two_d) then
-                this%outputer%variables(n)%data_2d = this%parent_write_buffer_2d(n_2d,:,:)
+                this%outputer%variables(n)%data_2d = &
+                    this%parent_write_buffer_2d(n_2d,this%i_s_w:this%i_e_w+1,this%j_s_w:this%j_e_w+1)
                 n_2d = n_2d + 1
             elseif (this%outputer%variables(n)%three_d) then
-                this%outputer%variables(n)%data_3d = this%parent_write_buffer_3d(n_3d,:,:,:)
+                this%outputer%variables(n)%data_3d = &
+                    this%parent_write_buffer_3d(n_3d,this%i_s_w:this%i_e_w+1,:,this%j_s_w:this%j_e_w+1)
                 n_3d = n_3d + 1
             endif
         enddo
