@@ -185,6 +185,7 @@ contains
                     ! from here on, we just want the given simulation start times, not the restart times
                     child_strt_time = options(child_nest_indx)%general%start_time
                     loop_strt_time = options(i)%general%start_time
+                    parent_restart_time = loop_strt_time + helper_delta
 
                     !! Check that, for a given chain of nests, the time at which restart files are output is the same for all nests
                     !Compute when the first restart time is for the child nest
