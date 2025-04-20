@@ -54,11 +54,12 @@ module initialization
 contains
 
 
-    subroutine split_processes(components, ioclient, n_nests)
+    subroutine split_processes(components, ioclient, n_nests, options)
         implicit none
         class(flow_obj_t), allocatable, intent(out) :: components(:)
         type(ioclient_t), intent(inout) :: ioclient(:)
         integer, intent(in) :: n_nests
+        type(options_t), intent(in) :: options
 
         integer :: n, k, name_len, color, IOcolor, ierr, num_PE
         integer :: num_threads, found, PE_RANK_GLOBAL, NUM_SERVERS, NUM_COMPUTE, NUM_IO_PER_NODE, NUM_PROC_PER_NODE
@@ -99,7 +100,7 @@ contains
         NUM_SERVERS = ceiling(num_PE*NUM_IO_PER_NODE*1.0/NUM_PROC_PER_NODE)
         NUM_COMPUTE = num_PE-NUM_SERVERS
 
-        STD_OUT_PE_IO = (PE_RANK_GLOBAL == NUM_PROC_PER_NODE-NUM_IO_PER_NODE) .and. STD_OUT_PE_IO
+        STD_OUT_PE_IO = (PE_RANK_GLOBAL == NUM_PROC_PER_NODE-NUM_IO_PER_NODE) .and. (options%general%debug .or. STD_OUT_PE_IO)
 
         
         if ((mod(NUM_COMPUTE,2) /= 0) .and. STD_OUT_PE) then
