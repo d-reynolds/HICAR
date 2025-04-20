@@ -97,7 +97,7 @@ program icar
 
     !Determine split of processes which will become I/O servers and which will be compute tasks
     !Also sets constants for the program to keep track of this splitting
-    call split_processes(components, ioclient, n_nests)
+    call split_processes(components, ioclient, n_nests, options(1))
     if (STD_OUT_PE) write(*,'(/ A)') "--------------------------------------------------------------"
     if (STD_OUT_PE) write(*,'(A)')   "Finished processor assignment, beginning domain initialization"
     if (STD_OUT_PE) write(*,'(A)')   "--------------------------------------------------------------"

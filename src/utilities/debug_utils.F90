@@ -41,6 +41,10 @@ contains
         if (domain%var_indx(kVARS%ice3_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_number)%v)%data_3d	,           name="ice3num", msg=error_msg, less_than    =-1e-1, fix=fix_data)
         if (domain%var_indx(kVARS%ice3_a)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_a)%v)%data_3d	,                name="ice3a",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
         if (domain%var_indx(kVARS%ice3_c)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_c)%v)%data_3d	,                name="ice3c",   msg=error_msg, less_than    =-1e-10, fix=fix_data)
+        if (domain%var_indx(kVARS%u)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d	,                     name="u",       msg=error_msg, less_than    =-1e5,  fix=fix_data)
+        if (domain%var_indx(kVARS%u)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d	,                     name="u",       msg=error_msg, greater_than =1e5,   fix=fix_data)
+        if (domain%var_indx(kVARS%v)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d	,                     name="v",       msg=error_msg, less_than    =-1e5,  fix=fix_data)
+        if (domain%var_indx(kVARS%v)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d	,                     name="v",       msg=error_msg, greater_than =1e5,   fix=fix_data)
         if (domain%var_indx(kVARS%w)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d	,                     name="w",       msg=error_msg, less_than    =-1e5,  fix=fix_data)
         if (domain%var_indx(kVARS%w)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d	,                     name="w",       msg=error_msg, greater_than =1e5,   fix=fix_data)
         if (domain%var_indx(kVARS%sensible_heat)%v > 0) call check_var2d(domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d	,       name="hfx",     msg=error_msg) ! check for NaN's only.
@@ -49,9 +53,12 @@ contains
         if (domain%var_indx(kVARS%roughness_z0)%v > 0) call check_var2d(domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d	,        name="z0",      msg=error_msg)
         if (domain%var_indx(kVARS%surface_pressure)%v > 0) call check_var2d(domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d	,    name="psfc",    msg=error_msg)
         ! call check_var2d(domain%ustar,                       name="ustar", msg=error_msg)
-        if (domain%var_indx(kVARS%exner)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d	,                 name="pii",     msg=error_msg)
+        if (domain%var_indx(kVARS%exner)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d	,   less_than    =-1e5,              name="pii",     msg=error_msg)
+        if (domain%var_indx(kVARS%exner)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d	,   greater_than    =5.0,              name="pii",     msg=error_msg)
         if (domain%var_indx(kVARS%pressure_interface)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d	,    name="pi",      msg=error_msg)
         if (domain%var_indx(kVARS%pressure)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d	,              name="p",       msg=error_msg)
+        if (domain%var_indx(kVARS%density)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d	,                     name="density",       msg=error_msg, less_than    =0.0,  fix=fix_data)
+        if (domain%var_indx(kVARS%density)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d	,                     name="density",       msg=error_msg, greater_than =2.0,   fix=fix_data)
 
     end subroutine domain_check
 

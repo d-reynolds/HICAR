@@ -76,6 +76,7 @@ module test_halo_exch
         call halo_exch_standard(grid,error,test_str_in="var exchange")
         if (allocated(error)) return
         call halo_exch_standard(grid,error,corners_in=.True.,test_str_in="var exchange, corners")
+        call halo_exch_standard(grid,error,corners_in=.True.,do_dqdt=.True.,test_str_in="var exchange, corners, dqdt")
 
     end subroutine test_var_exch
 
@@ -98,6 +99,7 @@ module test_halo_exch
         call halo_exch_standard(grid,error,test_str_in="var staggered on u grid")
         if (allocated(error)) return
         call halo_exch_standard(grid,error,corners_in=.True.,test_str_in="var staggered on u grid, corners")
+        call halo_exch_standard(grid,error,corners_in=.True.,do_dqdt=.True.,test_str_in="var staggered on u grid, corners, dqdt")
 
     end subroutine test_var_u_exch
 
@@ -120,15 +122,15 @@ module test_halo_exch
         call halo_exch_standard(grid,error,test_str_in="var staggered on v grid")
         if (allocated(error)) return
         call halo_exch_standard(grid,error,corners_in=.True.,test_str_in="var staggered on v grid, corners")
+        call halo_exch_standard(grid,error,corners_in=.True.,do_dqdt=.True.,test_str_in="var staggered on v grid, corners, dqdt")
 
     end subroutine test_var_v_exch
 
-    subroutine halo_exch_standard(grid,error,batch_in,corners_in,test_str_in)
+    subroutine halo_exch_standard(grid,error,batch_in,corners_in,do_dqdt,test_str_in)
         implicit none
         type(grid_t), intent(in) :: grid
         type(error_type), allocatable, intent(out) :: error
-        logical, optional, intent(in) :: batch_in
-        logical, optional, intent(in) :: corners_in
+        logical, optional, intent(in) :: batch_in, corners_in, do_dqdt
         character(len=*), optional, intent(in) :: test_str_in
 
         type(halo_t) :: halo
@@ -137,17 +139,20 @@ module test_halo_exch
         integer :: my_index
         integer :: ierr
         type(MPI_Comm) :: comms
-        logical :: batch, corners, interior
+        logical :: batch, corners, interior, dqdt
         logical :: north, south, east, west
         logical :: northeast, northwest, southeast, southwest
         integer :: i, j, k
+        real    :: val
         character(len=100) :: test_str
     
         batch = .false.
         corners = .false.
+        dqdt = .False.
         test_str = ""
         if (present(batch_in)) batch = batch_in
         if (present(corners_in)) corners = corners_in
+        if (present(do_dqdt)) dqdt = do_dqdt
         if (present(test_str_in)) test_str = test_str_in
 
         call MPI_Comm_Rank(MPI_COMM_WORLD,my_index,ierr)
@@ -157,17 +162,17 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize variables to exchange
-        call var%initialize(grid)
+        call var%initialize(grid,forcing_var="qv")
         var%name = "qv"
         var_data(1) = var
-        allocate(exch_vars(1), adv_vars(1))
+        allocate(exch_vars(0), adv_vars(1))
         ! adv_vars(1) = var
         !populate adv_vars with two test variables
         ! call adv_vars%add_var('var', var) 
         !call adv_vars%add_var('temperature', temperature) 
 
-        exch_vars(1)%v = 0
-        exch_vars(1)%n = ""
+        ! exch_vars(1)%v = 0
+        ! exch_vars(1)%n = ""
         adv_vars(1)%v = 1
         adv_vars(1)%n = "qv"
         call halo%init(exch_vars, adv_vars, grid, comms)
@@ -175,13 +180,15 @@ module test_halo_exch
         ! Initialize fields with my_index values
         !var%data_3d = my_index
 
-        do i = grid%its, grid%ite-grid%nx_e
-            do j = grid%jts, grid%jte-grid%ny_e
+        do i = grid%its, grid%ite
+            do j = grid%jts, grid%jte
                 do k = 1, grid%kts
                     ! Set the interior values to the index values
                     var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global
                     var%data_3d(i,k,j) = i+(j-1)*grid%nx_global
+                    var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global
                 end do
+                
             end do
         end do
         if (batch) then
@@ -189,7 +196,7 @@ module test_halo_exch
             call halo%halo_3d_retrieve_batch(exch_vars, adv_vars, var_data)
             var = var_data(1)
         else
-            call halo%exch_var(var, corners=corners)
+            call halo%exch_var(var, do_dqdt=dqdt, corners=corners)
         endif
 
         ! now loop through all memory indices and check that the value in var%data_3d
@@ -210,7 +217,9 @@ module test_halo_exch
         do i = grid%ims, grid%ime
             do j = grid%jms, grid%jme
                 do k = 1, grid%kms
-                    if (var%data_3d(i,k,j) /= i+(j-1)*grid%nx_global) then
+                    val = var%data_3d(i,k,j)
+                    if (dqdt) val = var%dqdt_3d(i,k,j)
+                    if (val /= i+(j-1)*grid%nx_global) then
                         if (i < grid%its) then
                             if (j < grid%jts) then
                                 southwest = .False.
