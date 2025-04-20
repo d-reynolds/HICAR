@@ -260,6 +260,7 @@ module test_halo_exch
             !check that the eastern halo is filled with the value of my_index for the eastern neighbor
             if (.not.(east)) then
                 call test_failed(error, "Halo exch failed", "Failed for eastern halo exchange, "//trim(test_str))
+                write(*,*) "east data is: ", var%data_3d(grid%ite+1:grid%ime,1,grid%jts:grid%jte)
                 return
             endif
         endif
