@@ -99,13 +99,13 @@ contains
                         !              + max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) ) &
                         !              / (rho(i,k,j) * dz(i,k,j) * dx)
                     else
-                        !current_wind = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
-                        !              +max(abs(v(i,k,j)), abs(v(i,k,j+1))) / dx &
-                        !              +max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) / dz(k)
+                        current_wind = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
+                                     +max(abs(v(i,k,j)), abs(v(i,k,j+1))) / dx &
+                                     +max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) / dz(k)
                                         
-                        current_wind = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
-                                            ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
-                                            ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(k) ))
+                        ! current_wind = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
+                        !                     ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
+                        !                     ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(k) ))
                     endif
                     if (current_wind > maxwind3d) then
                         max_i = i
@@ -117,10 +117,13 @@ contains
             ENDDO
         ENDDO
                 
+        ! According to the WRF technical documentation, the CFL condition for 3D advection is
+        ! obtained by taking the CFL criterion for the 1D case and dividing by sqrt(3).
+        ! A more rigorous restriction is that CFL_x + CFL_y + CFL_z < CFL (Baldauf 2008), as calculated above.
+        ! This is more restrictive for diagonal winds, but allows the restriction to 
+        ! relax to the 1D case for one-dimensional winds. Since the CFL constraint on vertical
+        ! winds is often much less than 1, the criterion has a maximum of roughly 2x the 1D case.
         maxwind3d = maxwind3d !* sqrt3
-
-        !TESTING: Do we need to multiply maxwind3d by sqrt3 as the comment above suggests?
-        ! maxwind3d = maxwind3d * sqrt3
 
         dt = CFL / maxwind3d
 

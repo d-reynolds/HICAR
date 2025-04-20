@@ -215,31 +215,32 @@ contains
         ! do j = jts-1, jte+1 
         !     do k = kms, kme
         !         do i = its-1, ite+1
-        do concurrent (j = jts-1:jte+1, k = kms:kme, i = its-1:ite+1)
-                    if (i >= its) then
-                        flux_x(i,k,j) = flux_x(i,k,j) - flux_x_up(i,k,j)
-                        if (flux_x(i,k,j) > 0) then
-                            scale = max(0.0,min(scale_in(i,k,j),scale_out(i-1,k,j),1.0))
-                        elseif(flux_x(i,k,j) < 0) then
-                            scale = max(0.0,min(scale_out(i,k,j),scale_in(i-1,k,j),1.0))
-                        else
-                            scale = 1.0
-                        endif
-                        flux_x(i,k,j) = scale*flux_x(i,k,j) + flux_x_up(i,k,j)
-                    end if
-                    if (j >= jts) then
-                        flux_y(i,k,j) = flux_y(i,k,j) - flux_y_up(i,k,j)
-                        if (flux_y(i,k,j) > 0) then
-                            scale = max(0.0,min(scale_in(i,k,j),scale_out(i,k,j-1),1.0))
-                        elseif(flux_y(i,k,j) < 0) then
-                            scale = max(0.0,min(scale_out(i,k,j),scale_in(i,k,j-1),1.0))
-                        else
-                            scale = 1.0
-                        endif
-                        flux_y(i,k,j) = scale*flux_y(i,k,j) + flux_y_up(i,k,j)
+        do concurrent (j = jts:jte+1, k = kms:kme, i = its:ite+1)
+                    flux_x(i,k,j) = flux_x(i,k,j) - flux_x_up(i,k,j)
+                    if (flux_x(i,k,j) > 0) then
+                        scale = max(0.0,min(scale_in(i,k,j),scale_out(i-1,k,j),1.0))
+                    elseif(flux_x(i,k,j) < 0) then
+                        scale = max(0.0,min(scale_out(i,k,j),scale_in(i-1,k,j),1.0))
+                    else
+                        scale = 1.0
                     endif
+                    flux_x(i,k,j) = scale*flux_x(i,k,j) + flux_x_up(i,k,j)
+
+                    flux_y(i,k,j) = flux_y(i,k,j) - flux_y_up(i,k,j)
+                    if (flux_y(i,k,j) > 0) then
+                        scale = max(0.0,min(scale_in(i,k,j),scale_out(i,k,j-1),1.0))
+                    elseif(flux_y(i,k,j) < 0) then
+                        scale = max(0.0,min(scale_out(i,k,j),scale_in(i,k,j-1),1.0))
+                    else
+                        scale = 1.0
+                    endif
+                    flux_y(i,k,j) = scale*flux_y(i,k,j) + flux_y_up(i,k,j)
+
+
+
                     if (k > kms) then
                         flux_z(i,k,j) = flux_z(i,k,j) - flux_z_up(i,k,j)
+
                         if (flux_z(i,k,j) > 0) then
                             scale = max(0.0,min(scale_in(i,k,j),scale_out(i,k-1,j),1.0))
                         elseif(flux_z(i,k,j) < 0) then
@@ -247,10 +248,24 @@ contains
                         else
                             scale = 1.0
                         endif
+
                         flux_z(i,k,j) = scale*flux_z(i,k,j) + flux_z_up(i,k,j)
                     endif
+
             !     enddo
             ! enddo
+        enddo
+
+        do concurrent (j = jts:jte+1, i = its:ite+1)
+            flux_z(i,kme+1,j) = flux_z(i,kme+1,j) - flux_z_up(i,kme+1,j)
+
+            if (abs(flux_z(i,kme+1,j)) > 0) then
+                scale = max(0.0,min(scale_in(i,kme,j),scale_out(i,kme,j),1.0))
+            else
+                scale = 1.0
+            endif
+
+            flux_z(i,kme+1,j) = scale*flux_z(i,kme+1,j) + flux_z_up(i,kme+1,j)
         enddo
         ! $omp end do
         ! $omp end parallel
