@@ -310,8 +310,8 @@ contains
             exner = exner_function(this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d)
 
             do concurrent (j = jms:jme, k = kms:kme, i = ims:ime)                
-                temperature(i,k,j) = this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%dqdt_3d(i,k,j) * exner(i,k,j)
-                density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+this%vars_3d(this%var_indx(kVARS%water_vapor)%v)%dqdt_3d(i,k,j))) ! kg/m^3
+                temperature(i,k,j) = potential_temperature(i,k,j) * exner(i,k,j)
+                density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,j))) ! kg/m^3
             enddo
             return
         else

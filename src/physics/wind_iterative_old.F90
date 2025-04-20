@@ -283,19 +283,6 @@ contains
         call DMDAVecRestoreArrayF90(dm,vec_b,barray, ierr)
     end subroutine ComputeRHS
 
-    subroutine ComputeInitialGuess(ksp,vec_b,ctx,ierr)
-        implicit none
-        PetscErrorCode  ierr
-        KSP ksp
-        PetscInt ctx(*)
-        Vec vec_b
-        PetscScalar  i_guess
-
-        i_guess = 0.0
-
-        call VecSet(vec_b,i_guess,ierr)
-    end subroutine ComputeInitialGuess
-
     subroutine ComputeMatrix(ksp,array_A,array_B)
         implicit none
         KSP ksp
@@ -736,7 +723,6 @@ contains
         
                 call KSPSetType(ksp(i),KSPPIPEGCR,ierr) !KSPPIPEFCG <-- this one does not converge.
                                                 !KSPPIPEGCR <-- this one tested to give fastest convergence...
-                call KSPSetComputeInitialGuess(ksp(i),ComputeInitialGuess,0,ierr)
             ! endif
         enddo
         initialized = .True.
