@@ -1238,10 +1238,10 @@ contains
             jacobian_u = jacobian_u*smooth_height
             jacobian_v = jacobian_v*smooth_height
             jacobian_w = jacobian_w*smooth_height
-            where(jacobian==smooth_height) jacobian=1
-            where(jacobian_u==smooth_height) jacobian_u=1
-            where(jacobian_v==smooth_height) jacobian_v=1
-            where(jacobian_w==smooth_height) jacobian_w=1
+            ! where(jacobian==smooth_height) jacobian=1
+            ! where(jacobian_u==smooth_height) jacobian_u=1
+            ! where(jacobian_v==smooth_height) jacobian_v=1
+            ! where(jacobian_w==smooth_height) jacobian_w=1
 
         end associate
 
@@ -2130,6 +2130,11 @@ contains
         call this%neighbor_grid_2d%set_grid_dimensions(   nx_global, ny_global, 0)
         call this%neighbor_grid%set_grid_dimensions(   nx_global, ny_global, nz_global)
         call this%neighbor_grid8w%set_grid_dimensions(   nx_global, ny_global, nz_global+1)
+
+        this%ximg = this%grid%ximg
+        this%ximages = this%grid%ximages
+        this%yimg = this%grid%yimg
+        this%yimages = this%grid%yimages
 
         this%north_boundary = (this%grid%yimg == this%grid%yimages)
         this%south_boundary = (this%grid%yimg == 1)
