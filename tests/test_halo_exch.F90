@@ -51,7 +51,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 20, 20, 20, image=my_index, comms=comms, adv_order=3)
+        call grid%set_grid_dimensions( 23, 25, 20, image=my_index, comms=comms, adv_order=3)
 
         call halo_exch_standard(grid,error,batch_in=.True.,test_str_in="batch exchange")
 
@@ -71,7 +71,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 20, 20, 20, image=my_index, comms=comms, adv_order=3)
+        call grid%set_grid_dimensions( 23, 25, 20, image=my_index, comms=comms, adv_order=3)
 
         call halo_exch_standard(grid,error,test_str_in="var exchange")
         if (allocated(error)) return
@@ -94,7 +94,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 20, 20, 20, image=my_index, comms=comms, adv_order=3, nx_extra = 1)
+        call grid%set_grid_dimensions( 23, 25, 20, image=my_index, comms=comms, adv_order=3, nx_extra = 1)
 
         call halo_exch_standard(grid,error,test_str_in="var staggered on u grid")
         if (allocated(error)) return
@@ -117,7 +117,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 20, 20, 20, image=my_index, comms=comms, adv_order=3, ny_extra = 1)
+        call grid%set_grid_dimensions( 23, 25, 20, image=my_index, comms=comms, adv_order=3, ny_extra = 1)
 
         call halo_exch_standard(grid,error,test_str_in="var staggered on v grid")
         if (allocated(error)) return
@@ -180,13 +180,13 @@ module test_halo_exch
         ! Initialize fields with my_index values
         !var%data_3d = my_index
 
-        do i = grid%its, grid%ite
-            do j = grid%jts, grid%jte
+        do i = grid%its, grid%ite+grid%nx_e
+            do j = grid%jts, grid%jte+grid%ny_e
                 do k = 1, grid%kts
                     ! Set the interior values to the index values
-                    var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global
-                    var%data_3d(i,k,j) = i+(j-1)*grid%nx_global
-                    var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global
+                    var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                    var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                    var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
                 end do
                 
             end do
@@ -219,7 +219,7 @@ module test_halo_exch
                 do k = 1, grid%kms
                     val = var%data_3d(i,k,j)
                     if (dqdt) val = var%dqdt_3d(i,k,j)
-                    if (val /= i+(j-1)*grid%nx_global) then
+                    if (val /= i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global) then
                         if (i < grid%its) then
                             if (j < grid%jts) then
                                 southwest = .False.

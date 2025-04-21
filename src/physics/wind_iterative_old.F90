@@ -20,7 +20,6 @@ module wind_iterative_old
 #include <petsc/finclude/petscdm.h>
 #include <petsc/finclude/petscdmda.h>
 
-    !use exchangeable_interface,   only : exchangeable_t
     use domain_interface,  only : domain_t
     !use options_interface, only : options_t
     !use grid_interface,    only : grid_t

@@ -1293,26 +1293,27 @@ contains
         type(domain_t),  intent(inout) :: this
         type(options_t), intent(in)    :: options
 
-        integer :: i, j, ims, ime, jms, jme, smooth_loops
-        integer :: starti, endi
+        integer :: i, j, i_s, i_e, j_s, j_e, smooth_loops
+        integer :: starti, endi, smooth_window_size
         double precision :: dist, dlat, dlon
 
         real, allocatable :: lat(:,:), lon(:,:), costheta(:,:), sintheta(:,:)
 
+        
         if (options%domain%sinalpha_var /= "") then
-            ims = this%ims
-            ime = this%ime
-            jms = this%jms
-            jme = this%jme
+            i_s = this%ims
+            i_e = this%ime
+            j_s = this%jms
+            j_e = this%jme
 
             if (STD_OUT_PE) print*, "Reading Sinalpha/cosalpha"
             if (STD_OUT_PE) flush(output_unit)
 
             call io_read(options%domain%init_conditions_file, options%domain%sinalpha_var, lon)
-            this%vars_2d(this%var_indx(kVARS%sintheta)%v)%data_2d = lon(ims:ime, jms:jme)
+            this%vars_2d(this%var_indx(kVARS%sintheta)%v)%data_2d = lon(i_s:i_e, j_s:j_e)
 
             call io_read(options%domain%init_conditions_file, options%domain%cosalpha_var, lon)
-            this%vars_2d(this%var_indx(kVARS%costheta)%v)%data_2d = lon(ims:ime, jms:jme)
+            this%vars_2d(this%var_indx(kVARS%costheta)%v)%data_2d = lon(i_s:i_e, j_s:j_e)
 
         else
 
@@ -1323,16 +1324,18 @@ contains
                            options%domain%lon_hi,                 &
                            lon)
 
-            ims = this%ims
-            ime = this%ime
-            jms = this%jms
-            jme = this%jme
+            smooth_window_size = 50
 
-            allocate(sintheta(ims:ime,jms:jme))
-            allocate(costheta(ims:ime,jms:jme))
+            i_s = this%ids!max(this%ims-smooth_window_size,this%ids)
+            i_e = this%ide!min(this%ime+smooth_window_size,this%ide)
+            j_s = this%jds!max(this%jms-smooth_window_size,this%jms)
+            j_e = this%jde!min(this%jme+smooth_window_size,this%jde)
 
-            do j = jms, jme
-                do i = ims, ime
+            allocate(sintheta(i_s:i_e,j_s:j_e))
+            allocate(costheta(i_s:i_e,j_s:j_e))
+
+            do j = j_s, j_e
+                do i = i_s, i_e
                     ! in case we are in the first or last grid, reset boundaries
                     starti = max(this%ids, i-2)
                     endi   = min(this%ide, i+2)
@@ -1358,11 +1361,11 @@ contains
             smooth_loops = int(1000/this%dx)
             
             do i=1,smooth_loops
-             call smooth_array_2d( costheta , windowsize  =  int((ime-ims)/5))
-             call smooth_array_2d( sintheta , windowsize  =  int((ime-ims)/5))
+             call smooth_array_2d( costheta , windowsize  =  4)!int((ime-ims)/5))
+             call smooth_array_2d( sintheta , windowsize  =  4)!int((ime-ims)/5))
             enddo
-            this%vars_2d(this%var_indx(kVARS%costheta)%v)%data_2d(ims:ime,jms:jme) = costheta(ims:ime,jms:jme)
-            this%vars_2d(this%var_indx(kVARS%sintheta)%v)%data_2d(ims:ime,jms:jme) = sintheta(ims:ime,jms:jme)
+            this%vars_2d(this%var_indx(kVARS%costheta)%v)%data_2d(this%ims:this%ime,this%jms:this%jme) = costheta(this%ims:this%ime,this%jms:this%jme)
+            this%vars_2d(this%var_indx(kVARS%sintheta)%v)%data_2d(this%ims:this%ime,this%jms:this%jme) = sintheta(this%ims:this%ime,this%jms:this%jme)
              
         endif
         if (options%general%debug .and.(STD_OUT_PE)) then
@@ -1516,10 +1519,7 @@ contains
         integer :: i
 
                             
-        associate(ims => this%ims,      ime => this%ime,                        &
-                  jms => this%jms,      jme => this%jme,                        &
-                  kms => this%kms,      kme => this%kme,                        &
-                  h1                    => this%vars_2d(this%var_indx(kVARS%h1)%v)%data_2d,                             &
+        associate(h1                    => this%vars_2d(this%var_indx(kVARS%h1)%v)%data_2d,                             &
                   h2                    => this%vars_2d(this%var_indx(kVARS%h2)%v)%data_2d,                             &
                   h1_u                  => this%vars_2d(this%var_indx(kVARS%h1_u)%v)%data_2d,                           &
                   h2_u                  => this%vars_2d(this%var_indx(kVARS%h2_u)%v)%data_2d,                           &
