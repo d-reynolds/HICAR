@@ -3101,9 +3101,9 @@ contains
                 group = "Wind"
             case ("alpha_const")
                 description = "Option for setting the alpha parameter in the wind=3 euqtions to a constant"//achar(10)//BLNK_CHR_N// &
-                              "(between 0.1 and 1). Default of -1.0 allows for dynamic alpha. For more information, see Reynolds et al., 2023."
-                min = 0.1
-                max = 1.0
+                              "(between 0.2 and 2). Default of -1.0 allows for dynamic alpha. For more information, see Reynolds et al., 2023."
+                min = 0.2
+                max = 2.0
                 default = "-1.0"
                 group = "Wind"
             case ("TPI_dmax")
