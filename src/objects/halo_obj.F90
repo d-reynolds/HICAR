@@ -221,74 +221,30 @@ module subroutine exch_var(this, var, do_dqdt, corners)
     if (present(corners)) do_corners=corners
 
     if (do_corners) then
-            if (.not. this%north_boundary .and. .not.this%east_boundary) call this%put_northeast(var, dqdt)
-            if (.not. this%north_boundary .and. .not.this%west_boundary) call this%put_northwest(var, dqdt)
-            if (.not. this%south_boundary .and. .not.this%east_boundary)  call this%put_southeast(var, dqdt)
-            if (.not. this%south_boundary .and. .not.this%west_boundary)  call this%put_southwest(var, dqdt)
 
-            call MPI_Win_fence(0,this%south_in_win)
-            call MPI_Win_fence(0,this%north_in_win)
-            call MPI_Win_fence(0,this%east_in_win)
-            call MPI_Win_fence(0,this%west_in_win)
+        call MPI_Win_fence(0,this%south_in_win)
+        call MPI_Win_fence(0,this%north_in_win)
+        call MPI_Win_fence(0,this%east_in_win)
+        call MPI_Win_fence(0,this%west_in_win)
 
-            if (.not. this%north_boundary .and. .not.this%west_boundary) call this%retrieve_northwest_halo(var, dqdt)
-            if (.not. this%north_boundary .and. .not.this%east_boundary) call this%retrieve_northeast_halo(var, dqdt)
-            if (.not. this%south_boundary .and. .not.this%east_boundary)  call this%retrieve_southeast_halo(var, dqdt)
-            if (.not. this%south_boundary .and. .not.this%west_boundary)  call this%retrieve_southwest_halo(var, dqdt)
+        if (.not. this%north_boundary .and. .not.this%east_boundary) call this%put_northeast(var, dqdt)
+        if (.not. this%north_boundary .and. .not.this%west_boundary) call this%put_northwest(var, dqdt)
+        if (.not. this%south_boundary .and. .not.this%east_boundary)  call this%put_southeast(var, dqdt)
+        if (.not. this%south_boundary .and. .not.this%west_boundary)  call this%put_southwest(var, dqdt)
 
+
+        call MPI_Win_fence(0,this%south_in_win)
+        call MPI_Win_fence(0,this%north_in_win)
+        call MPI_Win_fence(0,this%east_in_win)
+        call MPI_Win_fence(0,this%west_in_win)
+
+        if (.not. this%north_boundary .and. .not.this%west_boundary) call this%retrieve_northwest_halo(var, dqdt)
+        if (.not. this%north_boundary .and. .not.this%east_boundary) call this%retrieve_northeast_halo(var, dqdt)
+        if (.not. this%south_boundary .and. .not.this%east_boundary)  call this%retrieve_southeast_halo(var, dqdt)
+        if (.not. this%south_boundary .and. .not.this%west_boundary)  call this%retrieve_southwest_halo(var, dqdt)
     endif
 
-    ! if staggered in x direction, we need to carefully call the put and get commands
-    if(var%xstag>0) then
-        call MPI_Win_fence(0,this%east_in_win)
-        call MPI_Win_fence(0,this%west_in_win)
 
-        if (.not. this%east_boundary)  call this%put_east(var, dqdt)
-        if (.not. this%west_boundary)  call this%put_west(var, dqdt)
-
-        call MPI_Win_fence(0,this%east_in_win)
-        call MPI_Win_fence(0,this%west_in_win) 
-
-        if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
-        if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
-
-        call MPI_Win_fence(0,this%south_in_win) 
-        call MPI_Win_fence(0,this%north_in_win)
-
-        if (.not. this%north_boundary) call this%put_north(var, dqdt)
-        if (.not. this%south_boundary) call this%put_south(var, dqdt)
-
-        call MPI_Win_fence(0,this%south_in_win)
-        call MPI_Win_fence(0,this%north_in_win) 
-
-        if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
-        if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
-    ! if staggered in y direction, we need to carefully call the put and get commands
-    elseif(var%ystag>0) then
-        call MPI_Win_fence(0,this%south_in_win)
-        call MPI_Win_fence(0,this%north_in_win)
-
-        if (.not. this%north_boundary) call this%put_north(var, dqdt)
-        if (.not. this%south_boundary) call this%put_south(var, dqdt)
-
-        call MPI_Win_fence(0,this%south_in_win)
-        call MPI_Win_fence(0,this%north_in_win)
-
-        if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
-        if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
-
-        call MPI_Win_fence(0,this%east_in_win)
-        call MPI_Win_fence(0,this%west_in_win)
-        if (.not. this%east_boundary)  call this%put_east(var, dqdt)
-        if (.not. this%west_boundary)  call this%put_west(var, dqdt)
-
-        call MPI_Win_fence(0,this%east_in_win)
-        call MPI_Win_fence(0,this%west_in_win)                
-
-        if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
-        if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
-
-    else
         call MPI_Win_fence(0,this%south_in_win)
         call MPI_Win_fence(0,this%north_in_win)
         call MPI_Win_fence(0,this%east_in_win)
@@ -308,7 +264,6 @@ module subroutine exch_var(this, var, do_dqdt, corners)
         if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
         if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
         if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
-    endif
 
 end subroutine exch_var
 
@@ -621,7 +576,7 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     ! this step will directly copy the data to the other PE
     if (.not.(exch_v_only)) then
         do i = 1, size(adv_vars)
-            if (adv_vars(i)%v < n_vars) then
+            if (adv_vars(i)%v <= n_vars) then
                 !check that the variable indexed matches the name
                 if (var_data(adv_vars(i)%v)%name == adv_vars(i)%n) then
                     if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
@@ -650,7 +605,7 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     ! Now iterate through the exchange-only objects as long as there are more elements present
      do i = 1, size(exch_vars)
         !check that the variable indexed matches the name
-        if (exch_vars(i)%v < n_vars) then
+        if (exch_vars(i)%v <= n_vars) then
             if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
                 k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
                 if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
@@ -778,7 +733,7 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     if (.not.(exch_v_only)) then
 
         do i = 1, size(adv_vars)
-            if (adv_vars(i)%v < n_vars) then
+            if (adv_vars(i)%v <= n_vars) then
                 !check that the variable indexed matches the name
                 if (var_data(adv_vars(i)%v)%name == adv_vars(i)%n) then
                     if (.not.(this%north_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte+1):this%jme) = &
@@ -805,7 +760,7 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     endif
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do i = 1, size(exch_vars)
-        if (exch_vars(i)%v < n_vars) then
+        if (exch_vars(i)%v <= n_vars) then
             !check that the variable indexed matches the name
             if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
                 k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
@@ -858,7 +813,7 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
 
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do i = 1, size(exch_vars)
-        if (exch_vars(i)%v < n_vars) then
+        if (exch_vars(i)%v <= n_vars) then
             !check that the variable indexed matches the name
             if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
                 if (.not.(this%north_boundary)) this%north_buffer_2d(n,1:(this%ite-this%its+1),:) = &
@@ -933,7 +888,7 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
 
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do i = 1, size(exch_vars)
-        if (exch_vars(i)%v < n_vars) then
+        if (exch_vars(i)%v <= n_vars) then
             !check that the variable indexed matches the name
             if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
                 if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte+1):this%jme) = this%north_batch_in_2d(n,1:(this%ite-this%its+1),:)

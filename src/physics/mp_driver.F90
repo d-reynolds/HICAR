@@ -734,7 +734,7 @@ contains
                          domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d,      &
                          domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d,      &
                          domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
-                         domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
+                         domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
                              
 
             if (present(subset)) then

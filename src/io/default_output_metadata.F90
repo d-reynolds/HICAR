@@ -938,10 +938,10 @@ contains
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
-        !!  The Jacobian of the z-coordinate transform
+        !!  The Jacobian of the z-coordinate transform on staggered u grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%jacobian_u) then
-            var%name        = "jacobian_u on staggered u grid"
+            var%name        = "jacobian_u"
             var%dimensions  = three_d_u_dimensions
             var%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on staggered u grid"),                 &
                                 attribute_t("units",         "-"),                                   &
