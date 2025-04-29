@@ -26,7 +26,6 @@ module wind_iterative_old
     use petscksp
     use petscdm
     use petscdmda
-    use array_utilities,      only : smooth_array_3d
     use icar_constants,    only : STD_OUT_PE, kVARS
     use options_interface, only : options_t
 
@@ -77,11 +76,11 @@ contains
         integer k !, i_s, i_e, k_s, k_e, j_s, j_e
         
         PetscErrorCode ierr
+        Vec            x
+
         PetscInt       one, x_size, iteration, maxits
         PetscReal      rtol, abstol, dtol
-        PetscBool      reuse_bool
 
-        Vec   x
         KSPConvergedReason reason
 
         update=.False.
@@ -89,7 +88,6 @@ contains
                 
         !Initialize div to be the initial divergence of the input wind field
         div = div_in(i_s:i_e,k_s:k_e,j_s:j_e) 
-        one = 1
         alpha = alpha_in(i_s:i_e,k_s:k_e,j_s:j_e) 
 
         ! set minimum number of iterations for ksp solver
@@ -123,13 +121,13 @@ contains
         call DMGlobalToLocal(da,x,INSERT_VALUES,localX,ierr)
 
         call DMDAVecGetArrayF90(da,localX,lambda, ierr)
+
         call calc_updated_winds(domain, lambda, adv_den)
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
-        
         !Exchange u and v, since the outer points are not updated in above function
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
-                                 
+       
     end subroutine calc_iter_winds_old
 
     subroutine calc_updated_winds(domain,lambda,adv_den) !u, v, w, jaco_u,jaco_v,jaco_w,u_dzdx,v_dzdy,lambda, ids, ide, jds, jde)
@@ -164,7 +162,7 @@ contains
         rho_v = 1.0
         
         if (adv_den) rho(domain%ims:domain%ime,:,domain%jms:domain%jme)=domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d(domain%ims:domain%ime,:,domain%jms:domain%jme)
-
+        
         if (i_s==domain%grid%ids .and. i_e==domain%grid%ide) then
             rho_u(i_start+1:i_end-1,:,j_s:j_e) = 0.5*(rho(i_start+1:i_end-1,:,j_s:j_e) + rho(i_start:i_end-2,:,j_s:j_e))
             rho_u(i_end,:,j_s:j_e) = rho(i_end-1,:,j_s:j_e)
@@ -210,22 +208,24 @@ contains
             dlambdz(i_s-1:i_e+1,k,j_s-1:j_e+1) = lambda(i_s-1:i_e+1,k+1,j_s-1:j_e+1) - lambda(i_s-1:i_e+1,k-1,j_s-1:j_e+1)
             dlambdz(:,k,:) = dlambdz(:,k,:)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
         enddo
-        
-        
+
+
         !PETSc arrays are zero-indexed
         
         domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
                                                         0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
                                                         lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
-        (1/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))*domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/(rho_u(i_start:i_end,:,j_s:j_e))
+        domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_start:i_end,:,j_s:j_e)*(u_dlambdz)/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))/(rho_u(i_start:i_end,:,j_s:j_e))!domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))
         
         domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
                                                         0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
                                                         lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
-        (1/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))*domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/(rho_v(i_s:i_e,:,j_start:j_end))
+        domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i_s:i_e,:,j_start:j_end)*(v_dlambdz)/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))/(rho_v(i_s:i_e,:,j_start:j_end))!domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))
         
         domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i_s:i_e,:,j_s:j_e) = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i_s:i_e,:,j_s:j_e) + &
                     0.5*(alpha**2)*dlambdz(i_s:i_e,:,j_s:j_e)/domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,:,j_s:j_e)
+
+        ! domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) = 0.5*((lambda(i_s:i_e,k_s:k_e,j_s:j_e) - lambda(i_s-1:i_e-1,k_s:k_e,j_s:j_e))/dx - u_dlambdz(i_s:i_e,k_s:k_e,j_s:j_e))
 
     end subroutine calc_updated_winds
 
@@ -234,9 +234,9 @@ contains
         
         PetscErrorCode  ierr
         KSP ksp
-        Vec vec_b
+        Vec vec_b, x
         integer dummy(*)
-        DM      ::       dm
+        DM             dm
 
         PetscInt       i,j,k,mx,my,mz,xm,ym,zm,xs,ys,zs
         DMDALocalInfo       :: info(DMDA_LOCAL_INFO_SIZE)
@@ -280,7 +280,6 @@ contains
         implicit none
         KSP ksp
         Mat array_A,array_B
-        ! integer dummy(*)
 
         PetscErrorCode  ierr
         DM             da
@@ -479,16 +478,14 @@ contains
         endif
 
     end subroutine ComputeMatrix
-    
-    
 
     subroutine initialize_coefs(domain)
         implicit none
         type(domain_t), intent(in) :: domain
         
-        real :: sig_i, mixed_denom
+        real :: mixed_denom
         integer :: k
-        
+
         allocate(A_coef(i_s:i_e,k_s:k_e,j_s:j_e))
         allocate(B_coef(i_s:i_e,k_s:k_e,j_s:j_e))
         allocate(C_coef(i_s:i_e,k_s:k_e,j_s:j_e))
@@ -539,7 +536,7 @@ contains
         !Now consider mixed derivatives -- d2lam/dxdz
         do k=k_s,k_e
             !sigma and dz_if are both horizontally constant, so can be set to constants for each layer
-            mixed_denom = 2*domain%dx*(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))!*(sig_i+sig_i**2)
+            mixed_denom = 2*domain%dx*(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
             
             H_coef(:,k,:) = -(dzdx(:,k,:)/jaco(:,k,:)+domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_s+1:i_e+1,k,j_s:j_e)/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_s+1:i_e+1,k,j_s:j_e))/mixed_denom
             I_coef(:,k,:) =  (dzdx(:,k,:)/jaco(:,k,:)+domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_s:i_e,k,j_s:j_e)/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_s:i_e,k,j_s:j_e))/mixed_denom
@@ -693,7 +690,7 @@ contains
             call DMDestroy(da,ierr)
         endif
 
-    end subroutine
+    end subroutine finalize_iter_winds_old
 
     subroutine init_petsc_comms(domain, options)
         implicit none
@@ -725,7 +722,7 @@ contains
             stop
         endif
 
-    end subroutine
+    end subroutine init_petsc_comms
 
     subroutine init_iter_winds_old(domain, options)
         implicit none
@@ -771,7 +768,7 @@ contains
         implicit none
         type(domain_t), intent(in) :: domain
 
-        integer :: ierr, i_s_bnd, i_e_bnd, j_s_bnd, j_e_bnd
+        integer :: ierr, k, i_s_bnd, i_e_bnd, j_s_bnd, j_e_bnd
 
         i_s = domain%its
         i_e = domain%ite
@@ -809,7 +806,6 @@ contains
             j_e_bnd = j_e - 1
         endif
 
-
         hs = domain%grid%halo_size
         if (.not.(allocated(dzdx))) then
             !call MPI_INIT(ierr)
@@ -828,12 +824,12 @@ contains
             allocate( yl( 1:domain%grid%yimages ))
             xl = 0
             yl = 0
-            
+
             dx = domain%dx
-            dzdx  = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) 
-            dzdy  = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
+            dzdx = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) 
+            dzdy = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
             jaco = domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
-            
+
             dzdx_surf = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)
             dzdy_surf = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)
 
