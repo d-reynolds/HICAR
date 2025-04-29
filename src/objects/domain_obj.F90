@@ -2540,6 +2540,12 @@ contains
 
         dt = this%next_input - this%sim_time
 
+        ! check if the difference between the simulation time and next_input is less than an input_dt
+        ! if so, this signals that we are in between two input times, so advance the state of the variables%data_3d
+        ! to the simulation time
+
+        if (dt%seconds() < this%input_dt%seconds()) call dt%set(seconds= (this%input_dt%seconds() - dt%seconds()) )
+
 
         ! Now iterate through the dictionary as long as there are more elements present
         do i = 1,size(this%forcing_hi)
@@ -2565,37 +2571,6 @@ contains
             
         enddo
 
-        ! check if the difference between the simulation time and next_input is less than an input_dt
-        ! if so, this signals that we are in between two input times, so advance the state of the variables%data_3d
-        ! to the simulation time
-        if (dt%seconds() < this%input_dt%seconds()) then
-
-            call dt%set(seconds= (this%input_dt%seconds() - dt%seconds()) )
-
-
-            do i = 1,size(this%forcing_hi)
-                !Update delta fields on the high-resolution forcing varaibles...
-    
-                if (this%forcing_hi(i)%two_d) then
-                    this%forcing_hi(i)%dqdt_2d = (this%forcing_hi(i)%dqdt_2d - this%forcing_hi(i)%data_2d) / dt%seconds()
-                else if (this%forcing_hi(i)%three_d) then
-                    this%forcing_hi(i)%dqdt_3d = (this%forcing_hi(i)%dqdt_3d - this%forcing_hi(i)%data_3d) / dt%seconds()
-                endif
-    
-                ! now update delta fields for domain variables
-                var_indx = get_varindx(trim(this%forcing_hi(i)%name))
-                var_to_update = get_varmeta(var_indx)
-
-                if (var_to_update%force_boundaries) cycle
-
-                if (var_to_update%two_d) then
-                    this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d = (this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d - this%vars_2d(this%var_indx(var_indx)%v)%data_2d) / dt%seconds()
-                else if (var_to_update%three_d) then
-                    this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d = (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d - this%vars_3d(this%var_indx(var_indx)%v)%data_3d) / dt%seconds()
-                endif
-
-            enddo
-        endif
 
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
