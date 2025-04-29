@@ -162,20 +162,15 @@ contains
         ! If update is true, calculate the divergence and w component from the dqdt_3d arrays
         if (update) then
             call calc_divergence(divergence, domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
-                                    jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only=.True.)
-            domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d = divergence
-            domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d(:,kme,:) = SUM(divergence,dim=2)
+            domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only=.True.)
             call calc_w(domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, divergence, dz, jaco_w, rho, &
                         options%adv%advect_density)
 
         ! If update is false, calculate the divergence and w component from the data_3d arrays
         else
             call calc_divergence(divergence, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
-                                    jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only=.True.)
-            domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d = divergence
-            domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d(:,kme,:) = SUM(divergence,dim=2)
+                    domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only=.True.)
             call calc_w(domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, divergence, dz, jaco_w, rho, options%adv%advect_density)
-
         endif
         
         end associate
@@ -238,10 +233,10 @@ contains
 
     end subroutine
 
-    subroutine calc_divergence(div, u, v, w, jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only)
+    subroutine calc_divergence(div, u, v, w, jaco, jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only)
         implicit none
         real,           intent(inout) :: div(ims:ime,kms:kme,jms:jme)
-        real, dimension(ims:ime,kms:kme,jms:jme),   intent(in)    :: w, dz, jaco_w, rho
+        real, dimension(ims:ime,kms:kme,jms:jme),   intent(in)    :: w, dz, jaco_w, rho, jaco
         real, dimension(ims:ime+1,kms:kme,jms:jme), intent(in)    :: u, jaco_u
         real, dimension(ims:ime,kms:kme,jms:jme+1), intent(in)    :: v, jaco_v
         real,           intent(in)    :: dx
@@ -297,97 +292,12 @@ contains
                                    (w_met(ims:ime,k,jms:jme)-w_met(ims:ime,k-1,jms:jme))/(dz(ims:ime,k,jms:jme))
                 endif
             enddo
+
+            div = div / jaco
         endif
 
     end subroutine calc_divergence
     
-    subroutine calc_divergence_iter(div, u, v, w, jaco, jaco_u, jaco_v, jaco_w, dz, dz_mass, dx, dzdx, dzdy, rho, options, horz_only)
-        implicit none
-        real,           intent(inout) :: div(ims:ime,kms:kme,jms:jme)
-        real, dimension(ims:ime,kms:kme,jms:jme),   intent(in)    :: w, dz, dz_mass, jaco_w, rho, jaco, dzdx, dzdy
-        real, dimension(ims:ime+1,kms:kme,jms:jme), intent(in)    :: u, jaco_u
-        real, dimension(ims:ime,kms:kme,jms:jme+1), intent(in)    :: v, jaco_v
-        real,           intent(in)    :: dx
-        type(options_t),intent(in)    :: options
-        logical, optional, intent(in) :: horz_only
-        
-        real, dimension(ims:ime,kms:kme,jms:jme) :: diff_U, diff_V, w_met, u_interp, v_interp, w_interp, u_m, v_m
-        real, dimension(ims:ime+1,kms:kme,jms:jme) :: u_met
-        real, dimension(ims:ime,kms:kme,jms:jme+1) :: v_met
-        real, dimension(ims:ime,kms:kme-1,jms:jme) :: rho_i
-        logical :: horz
-
-        horz = .False.
-        if (present(horz_only)) horz=horz_only
-
-
-        !Multiplication of U/V by metric terms, converting jacobian to staggered-grid where possible, otherwise making assumption of
-        !Constant jacobian at edges
-        
-        if (options%adv%advect_density) then
-            u_met(ims+1:ime,:,:) = u(ims+1:ime,:,:) * jaco_u(ims+1:ime,:,:) * (rho(ims:ime-1,:,:) + rho(ims+1:ime,:,:))/2
-            u_met(ims,:,:) = u(ims,:,:) * jaco_u(ims,:,:) * (1.5*rho(ims,:,:) - 0.5*rho(ims+1,:,:))
-            u_met(ime+1,:,:) = u(ime+1,:,:) * jaco_u(ime+1,:,:) * (1.5*rho(ime,:,:) - 0.5*rho(ime-1,:,:))
-
-            v_met(:,:,jms+1:jme) = v(:,:,jms+1:jme) * jaco_v(:,:,jms+1:jme) * (rho(:,:,jms:jme-1) + rho(:,:,jms+1:jme))/2
-            v_met(:,:,jms) = v(:,:,jms) * jaco_v(:,:,jms) * (1.5*rho(:,:,jms) - 0.5*rho(:,:,jms+1))
-            v_met(:,:,jme+1) = v(:,:,jme+1) * jaco_v(:,:,jme+1) * (1.5*rho(:,:,jme) - 0.5*rho(:,:,jme-1))
-
-            rho_i(:,kms:kme-1,:) = ( rho(:,kms:kme-1,:)*dz(:,kms+1:kme,:) + rho(:,kms+1:kme,:)*dz(:,kms:kme-1,:) ) / (dz(:,kms:kme-1,:)+dz(:,kms+1:kme,:))
-        else
-            u_met = u * jaco_u
-            v_met = v * jaco_v
-        end if
-
-        diff_U = u_met(ims+1:ime+1, :, jms:jme) - u_met(ims:ime, :, jms:jme)
-        diff_V = v_met(ims:ime, :, jms+1:jme+1) - v_met(ims:ime, :, jms:jme)
-
-        div(ims:ime,kms:kme,jms:jme) = (diff_U+diff_V) /(dx)
-
-        u_interp = 0
-        v_interp = 0
-        u_m = (u(ims+1:ime+1, :, jms:jme) + u(ims:ime, :, jms:jme)) / 2
-        v_m = (v(ims:ime, :, jms+1:jme+1) + v(ims:ime, :, jms:jme)) / 2
-        do i = ims,ime
-            do j = jms, jme
-                do k = kms, kme-1
-                    u_interp(i,k,j) = dzdx(i,k,j)*(u_m(i,k,j)*dz_mass(i,k+1,j) + u_m(i,k+1,j)*dz_mass(i,k,j))/(dz_mass(i,k,j)+dz_mass(i,k+1,j))
-                    v_interp(i,k,j) = dzdy(i,k,j)*(v_m(i,k,j)*dz_mass(i,k+1,j) + v_m(i,k+1,j)*dz_mass(i,k,j))/(dz_mass(i,k,j)+dz_mass(i,k+1,j))
-                    w_interp(i,k,j) = (w(i,k,j)*dz_mass(i,k+1,j) + w(i,k+1,j)*dz_mass(i,k,j))/(dz_mass(i,k,j)+dz_mass(i,k+1,j))
-                enddo
-            enddo
-        enddo
-        w_interp(:,kme,:) = w(:,kme,:)
-
-        if (.NOT.(horz)) then
-            if (options%adv%advect_density) then
-                w_met(:,kme,:) = w(:,kme,:) * rho(:,kme,:)
-                w_met(:,kms:kme-1,:) = w(:,kms:kme-1,:) * rho_i
-            else
-                w_met = w_interp
-            end if
-
-            do k = kms,kme
-                if (k == kms) then
-                    div(ims:ime, k, jms:jme) = div(ims:ime, k, jms:jme) - &
-                                    (u_interp(ims:ime,k,jms:jme))/(dz(ims:ime,k,jms:jme)) - &
-                                    (v_interp(ims:ime,k,jms:jme))/(dz(ims:ime,k,jms:jme)) + &
-                                    (w_met(ims:ime,k,jms:jme))/(dz(ims:ime,k,jms:jme))
-                elseif (k==kme) then
-                    div(ims:ime, k, jms:jme) = div(ims:ime, k, jms:jme)
-                else
-                    div(ims:ime, k, jms:jme) = div(ims:ime, k, jms:jme) - &
-                                   (u_interp(ims:ime,k,jms:jme)-u_interp(ims:ime,k-1,jms:jme))/(dz(ims:ime,k,jms:jme)) - &
-                                   (v_interp(ims:ime,k,jms:jme)-v_interp(ims:ime,k-1,jms:jme))/(dz(ims:ime,k,jms:jme)) + &
-                                      (w_met(ims:ime,k,jms:jme)-w_met(ims:ime,k-1,jms:jme))/(dz(ims:ime,k,jms:jme))
-                endif
-            enddo
-        endif
-
-        div = div / jaco
-
-    end subroutine calc_divergence_iter
-
 
     !>------------------------------------------------------------
     !! Correct for a grid that is locally rotated with respect to EW,NS
@@ -569,52 +479,69 @@ contains
                 endif
 
                 !Call this, passing 0 for w_grid, to get vertical components of vertical motion
-                ! call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v) %dqdt_3d,      &
-                !              domain%vars_3d(domain%var_indx(kVARS%v)%v) %dqdt_3d,      &
-                !              domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d*0.0,      &
-                !              domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
-                !              domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
-                !              domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
+                call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v) %dqdt_3d,      &
+                             domain%vars_3d(domain%var_indx(kVARS%v)%v) %dqdt_3d,      &
+                             domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d*0.0,      &
+                             domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
+                             domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
+                             domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
 
 
 
                 !If we have not read in W_real from forcing, set target w_real to 0.0. This minimizes vertical motion in solution
                 if (options%forcing%wvar=="") then
-                    domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d = 0.0!-domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d
+                    domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = -domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d
                 else
-                    domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d = (domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%dqdt_3d)
+                    domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = (domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%dqdt_3d-domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
                 endif
 
                 !stagger w, which was just calculated at the mass points, to the vertical k-levels, so that we can calculate divergence with it
-                ! do i = ims,ime
-                !     do j = jms, jme
-                !         do k = kms, kme-1
-                !             domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k,j) = (domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j) + &
-                !                                                  domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k+1,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j))/ &
-                !                                 (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j)+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j))/domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d(i,k,j)
-                !         enddo
-                !     enddo
-                ! enddo
-                ! domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d = 0.0
+                do i = ims,ime
+                    do j = jms, jme
+                        do k = kms, kme-1
+                            domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k,j) = (domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j) + &
+                                                                 domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k+1,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j))/ &
+                                                (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j)+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j))
+                        enddo
+                    enddo
+                enddo
+                domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(:,kme,:) = 0.0
+                domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d / domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d
 
-                call calc_divergence_iter(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, &
-                                domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
-                                domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, domain%dx, &
-                                domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options,horz_only=.False.)
-                ! call calc_divergence(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
-                !                 domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,domain%dx, &
-                !                 domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options,horz_only=.False.)
+                call calc_divergence(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+                                domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,domain%dx, &
+                                domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options,horz_only=.False.)
 
-                ! div = div / domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d
-                ! write out maximum value of divergence
-                write(*,*) 'Max divergence = ', maxval(div(ims:ime,kms:kme,jms:jme))
-                write(*,*) 'Min divergence = ', minval(div(ims:ime,kms:kme,jms:jme))
-                call calc_iter_winds(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density,update_in=(.not.(first_wind)))
+                call calc_iter_winds_old(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density,update_in=(.not.(first_wind)))
 
-                call calc_divergence_iter(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, &
-                                domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
-                                domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, domain%dx, &
-                                domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options,horz_only=.False.)
+
+                call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v) %dqdt_3d,      &
+                        domain%vars_3d(domain%var_indx(kVARS%v)%v) %dqdt_3d,      &
+                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d*0.0,      &
+                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
+                        domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
+                        domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
+
+                domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = (domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d-domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+
+                !stagger w, which was just calculated at the mass points, to the vertical k-levels, so that we can calculate divergence with it
+                do i = ims,ime
+                    do j = jms, jme
+                        do k = kms, kme-1
+                            domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k,j) = (domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j) + &
+                                                                    domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k+1,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j))/ &
+                                                (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j)+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j))
+                        enddo
+                    enddo
+                enddo
+                domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(:,kme,:) = 0.0
+                domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d / domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d
+
+                call calc_divergence(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+                        domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,domain%dx, &
+                        domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options,horz_only=.False.)
+
+                call calc_iter_winds_old(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density,update_in=(.not.(first_wind)))
             endif
         elseif (options%physics%windtype==kOBRIEN_WINDS) then
             call Obrien_winds(domain, options, update_in=.True.)
@@ -626,12 +553,12 @@ contains
         call balance_uvw(domain,options,update_in=.True.)
 
 
-        ! call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,      &
-        !                  domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,      &
-        !                  domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
-        !                  domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d,           &
-        !                  domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
-        !                  domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
+        call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,      &
+                         domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,      &
+                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
+                         domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d,           &
+                         domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
+                         domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
 
         !If not an update, then transfer the dqdt fields to data_3d
         if (first_wind) then
@@ -708,10 +635,10 @@ contains
         if (ime==ide) alpha(ime,:,:) = alpha(ime-1,:,:)
     end subroutine calc_alpha
     
-    subroutine calc_w_real(u,v,w_grid,w_real,dzdx_u,dzdy_v,dzdx,dzdy,jaco_w)
+    subroutine calc_w_real(u,v,w_grid,w_real,dzdx_u,dzdy_v,dzdx,dzdy,jaco)
 
         implicit none
-        real, intent(in), dimension(ims:ime,kms:kme,jms:jme)    :: w_grid, jaco_w, dzdx, dzdy
+        real, intent(in), dimension(ims:ime,kms:kme,jms:jme)    :: w_grid, jaco, dzdx, dzdy
         real, intent(in), dimension(ims:ime+1,kms:kme,jms:jme)  :: u, dzdx_u
         real, intent(in), dimension(ims:ime,kms:kme,jms:jme+1)  :: v, dzdy_v
         real, intent(inout), dimension(ims:ime,kms:kme,jms:jme) :: w_real
@@ -728,13 +655,13 @@ contains
         do z = kms, kme
 
             ! compute the U * dz/dx component of vertical motion
-            uw    =  dzdx_u(ims:ime+1,z,jms:jme) * u(ims:ime+1,z,jms:jme)
+            uw    =   u(ims:ime+1,z,jms:jme) !* dzdx_u(ims:ime+1,z,jms:jme) *
 
             ! compute the V * dz/dy component of vertical motion
-            vw    =  dzdy_v(ims:ime,z,jms:jme+1) * v(ims:ime,z,jms:jme+1)
+            vw    =   v(ims:ime,z,jms:jme+1) !* dzdy_v(ims:ime,z,jms:jme+1)
 
             ! the W grid relative motion
-            currw = w_grid(ims:ime, z, jms:jme) * jaco_w(ims:ime, z, jms:jme)
+            currw = w_grid(ims:ime, z, jms:jme) !* jaco_w(ims:ime, z, jms:jme)
 
             ! if (options%physics%convection>0) then
             !     currw = currw + domain%w_cu(2:nx-1,z,2:ny-1) * domain%dz_inter(2:nx-1,z,2:ny-1) / domain%dx
@@ -742,9 +669,9 @@ contains
             
             ! compute the real vertical velocity of air by combining the different components onto the mass grid
             ! includes vertical interpolation between w_z-1/2 and w_z+1/2
-            w_real(ims:ime, z, jms:jme) = (uw(ims:ime,:) + uw(ims+1:ime+1,:))*0.5 &
-                                                 +(vw(:,jms:jme) + vw(:,jms+1:jme+1))*0.5 &
-                                                 +(lastw + currw) * 0.5
+            w_real(ims:ime, z, jms:jme) = (uw(ims:ime,:) + uw(ims+1:ime+1,:))*0.5*dzdx(:,z,:) &
+                                                 +(vw(:,jms:jme) + vw(:,jms+1:jme+1))*0.5*dzdy(:,z,:) &
+                                                 +(lastw + currw)*jaco(:,z,:) * 0.5
             lastw = currw ! could avoid this memcopy cost using pointers or a single manual loop unroll
         end do
                 
@@ -830,7 +757,7 @@ contains
         do it = 0,options%wind%wind_iterations
             !Compute divergence in new wind field
             call calc_divergence(div, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
-                                domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,    &
+                                domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,    &
                                 domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, domain%dx, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, options)
             !Compute adjustment based on divergence
             ADJ = div/ADJ_coef
@@ -894,7 +821,7 @@ contains
             call setup_linwinds(domain, options, .False., options%adv%advect_density)
         endif
         if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
-            call init_iter_winds(domain,options)
+            call init_iter_winds_old(domain,options)
         endif
 
         if (options%wind%thermal) call init_thermal_winds(domain, options)

@@ -886,7 +886,7 @@ contains
             smooth_height         => this%smooth_height)
 
             ! Still not 100% convinced this works well in cases other than flat_z_height = 0 (w sleve). So for now best to keep at 0 when using sleve?
-            max_level = find_flat_model_level(options, nz, dz)
+            max_level = nz !find_flat_model_level(options, nz, dz)
 
             smooth_height = sum(dz(1:max_level))!+dz(max_level)*0.5
 
@@ -1089,6 +1089,9 @@ contains
             i=kme+1
             global_z_interface(:,i,:)  = global_z_interface(:,i-1,:) + global_dz_interface(:,i-1,:)
             
+            jacobian_w(:,this%kme,:) = 1.0
+
+
             ! this is on the subset grid:
             dz_interface = global_dz_interface(ims:ime,:,jms:jme)
             z_interface  = global_z_interface(ims:ime,:,jms:jme)
@@ -1143,8 +1146,6 @@ contains
 
             ! Start with a separate calculation for the lowest model level z=1
             i = this%grid%kms
-
-            max_level = nz
             
             
             if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
@@ -1157,7 +1158,7 @@ contains
             endif
 
 
-            max_level = find_flat_model_level(options, nz, dz)
+            max_level = nz !find_flat_model_level(options, nz, dz)
 
             smooth_height = sum(dz(1:max_level))
 
@@ -1176,7 +1177,6 @@ contains
                 if (i<=max_level) then
                     jacobian(:,i,:) = jacobian(:,i-1,:)
                     global_jacobian(:,i,:) = global_jacobian(:,i-1,:)
-
                 else
                     jacobian(:,i,:) = 1
                     global_jacobian(:,i,:) = 1
@@ -1190,8 +1190,6 @@ contains
                 global_dz_interface(:,i,:) = dz(i) * global_jacobian(:,i,:)
                 global_z_interface(:,i,:)  = global_z_interface(:,i-1,:) + global_dz_interface(:,i-1,:)
 
-                jacobian(:,i,:) = dz_interface(:,i,:)/dz(i)
-                global_jacobian(:,i,:) = global_dz_interface(:,i,:)/dz(i)
 
             enddo
 
@@ -1213,7 +1211,7 @@ contains
                                                 global_jacobian(this%ihs:this%ihe,:,this%jhs:this%jhe-1))/2
             jacobian_v = temp(ims:ime,:,jms:jme+1)
 
-            jacobian_w(:,this%kme,:) = jacobian(:,this%kme,:)
+            jacobian_w(:,this%kme,:) = 1.0 !jacobian(:,this%kme,:)
             jacobian_w(:,this%kms:this%kme-1,:) = (dz_interface(:,this%kms+1:this%kme,:)* jacobian(:,this%kms:this%kme-1,:) + &
                                                    dz_interface(:,this%kms:this%kme-1,:)* jacobian(:,this%kms+1:this%kme,:))/ &
                                                                                 (dz_interface(:,this%kms:this%kme-1,:)+dz_interface(:,this%kms+1:this%kme,:))
@@ -1233,15 +1231,6 @@ contains
             enddo
                                                                                 
             call setup_dzdxy(this, options, global_jacobian)
-            
-            jacobian = jacobian*smooth_height
-            jacobian_u = jacobian_u*smooth_height
-            jacobian_v = jacobian_v*smooth_height
-            jacobian_w = jacobian_w*smooth_height
-            where(jacobian==smooth_height) jacobian=1
-            where(jacobian_u==smooth_height) jacobian_u=1
-            where(jacobian_v==smooth_height) jacobian_v=1
-            where(jacobian_w==smooth_height) jacobian_w=1
 
         end associate
 
@@ -1411,41 +1400,18 @@ contains
         neighbor_dzdy = 0
 
         !For dzdx
-        ! neighbor_dzdx(this%ihs+1:this%ihe-1,:,:) = (neighbor_z(this%ihs+2:this%ihe,:,:) - &
-        !                                                    neighbor_z(this%ihs:this%ihe-2,:,:))/(2*this%dx)
-        !                                                                                                   
-        ! neighbor_dzdx(this%ihs,:,:) = (-3*neighbor_z(this%ihs,:,:) + &
-        !                                   4*neighbor_z(this%ihs+1,:,:) - neighbor_z(this%ihs+2,:,:)) / (2*this%dx)
-        !                                   
-        ! neighbor_dzdx(this%ihe,:,:) = (3*neighbor_z(this%ihe,:,:) - &
-        !                                  4*neighbor_z(this%ihe-1,:,:) + neighbor_z(this%ihe-2,:,:)) / (2*this%dx)
-        ! this%dzdx(:,:,:) = neighbor_dzdx(this%ims:this%ime,:,this%jms:this%jme)
-        ! 
+        neighbor_dzdx(this%ihs+1:this%ihe-1,:,:) = (neighbor_z(this%ihs+2:this%ihe,:,:) - &
+                                                           neighbor_z(this%ihs:this%ihe-2,:,:))/(2*this%dx)
+                                                                                                          
+        neighbor_dzdx(this%ihs,:,:) = (-3*neighbor_z(this%ihs,:,:) + &
+                                          4*neighbor_z(this%ihs+1,:,:) - neighbor_z(this%ihs+2,:,:)) / (2*this%dx)
+                                          
+        neighbor_dzdx(this%ihe,:,:) = (3*neighbor_z(this%ihe,:,:) - &
+                                         4*neighbor_z(this%ihe-1,:,:) + neighbor_z(this%ihe-2,:,:)) / (2*this%dx)
+        
+        this%vars_3d(this%var_indx(kVARS%dzdx)%v)%data_3d(:,:,:) = neighbor_dzdx(this%ims:this%ime,:,this%jms:this%jme)
         
         
-        ! neighbor_dzdx(this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(this%ims+2:this%ime,:,:) - &
-        !                                                   this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(this%ims:this%ime-2,:,:))/(2*this%dx)
-        !                                                                                                   
-        ! neighbor_dzdx(this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(this%ims,:,:) + &
-        !                                   4*this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(this%ims+2,:,:)) / (2*this%dx)
-        !                                   
-        ! neighbor_dzdx(this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(this%ime,:,:) - &
-        !                                  4*this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(this%ime-2,:,:)) / (2*this%dx)
-        ! this%dzdx(:,:,:) = neighbor_dzdx(this%ims:this%ime,:,this%jms:this%jme)
-        ! 
-! 
-        ! neighbor_dzdx(this%ims+1:this%ime,:,this%jms:this%jme) = (this%geo_u%z(this%ims+2:this%ime+1,:,:) - &
-        !                                                    this%geo_u%z(this%ims:this%ime-1,:,:))/(2*this%dx)
-        !                                                                                                   
-        ! neighbor_dzdx(this%ims,:,this%jms:this%jme) = (-3*this%geo_u%z(this%ims,:,:) + &
-        !                                   4*this%geo_u%z(this%ims+1,:,:) - this%geo_u%z(this%ims+2,:,:)) / (2*this%dx)
-        !                                   
-        ! neighbor_dzdx(this%ime+1,:,this%jms:this%jme) = (3*this%geo_u%z(this%ime+1,:,:) - &
-        !                                  4*this%geo_u%z(this%ime,:,:) + this%geo_u%z(this%ime-1,:,:)) / (2*this%dx)
-        ! this%vars_3d(this%var_indx(kVARS%dzdx_u)%v)%data_3d(:,:,:) = neighbor_dzdx(this%ims:this%ime+1,:,this%jms:this%jme)
-        
-        
-        this%vars_3d(this%var_indx(kVARS%dzdx)%v)%data_3d(:,:,:) = (this%geo_u%z(this%ims+1:this%ime+1,:,:) - this%geo_u%z(this%ims:this%ime,:,:))/(this%dx)
 
         neighbor_dzdx(this%ihs+1:this%ihe,:,:) = (neighbor_z(this%ihs+1:this%ihe,:,:) - neighbor_z(this%ihs:this%ihe-1,:,:))/this%dx
         neighbor_dzdx(this%ihs,:,:) = neighbor_dzdx(this%ihs+1,:,:) 
@@ -1457,35 +1423,15 @@ contains
         
         
         !For dzdy
-        ! neighbor_dzdy(:,:,this%jhs+1:this%jhe-1) = (neighbor_z(:,:,this%jhs+2:this%jhe) - &
-        !                                                    neighbor_z(:,:,this%jhs:this%jhe-2))/(2*this%dx)
-        ! neighbor_dzdy(:,:,this%jhs) = (-3*neighbor_z(:,:,this%jms) + &
-        !                                   4*neighbor_z(:,:,this%jms+1) - neighbor_z(:,:,this%jms+2)) / (2*this%dx)
-        !                                   
-        ! neighbor_dzdy(:,:,this%jhe) = (3*neighbor_z(:,:,this%jhe) - &
-        !                                  4*neighbor_z(:,:,this%jhe-1) + neighbor_z(:,:,this%jhe-2)) / (2*this%dx)
-        ! this%dzdy(:,:,:) = neighbor_dzdy(this%ims:this%ime,:,this%jms:this%jme)
+        neighbor_dzdy(:,:,this%jhs+1:this%jhe-1) = (neighbor_z(:,:,this%jhs+2:this%jhe) - &
+                                                           neighbor_z(:,:,this%jhs:this%jhe-2))/(2*this%dx)
+        neighbor_dzdy(:,:,this%jhs) = (-3*neighbor_z(:,:,this%jms) + &
+                                          4*neighbor_z(:,:,this%jms+1) - neighbor_z(:,:,this%jms+2)) / (2*this%dx)
+                                          
+        neighbor_dzdy(:,:,this%jhe) = (3*neighbor_z(:,:,this%jhe) - &
+                                         4*neighbor_z(:,:,this%jhe-1) + neighbor_z(:,:,this%jhe-2)) / (2*this%dx)
+        this%vars_3d(this%var_indx(kVARS%dzdy)%v)%data_3d(:,:,:) = neighbor_dzdy(this%ims:this%ime,:,this%jms:this%jme)
 
-        !  neighbor_dzdy(this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(:,:,this%jms+2:this%jme) - &
-        !                                                     this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(:,:,this%jms:this%jme-2))/(2*this%dx)
-        !  neighbor_dzdy(this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(:,:,this%jms) + &
-        !                                    4*this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(:,:,this%jms+2)) / (2*this%dx)
-        !                                    
-        !  neighbor_dzdy(this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(:,:,this%jme) - &
-        !                                   4*this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(:,:,this%jme-2)) / (2*this%dx)
-        !  this%dzdy(:,:,:) = neighbor_dzdy(this%ims:this%ime,:,this%jms:this%jme)
-!  
-!  
-        !  neighbor_dzdy(this%ims:this%ime,:,this%jms+1:this%jme) = (this%geo_v%z(:,:,this%jms+2:this%jme+1) - &
-        !                                                     this%geo_v%z(:,:,this%jms:this%jme-1))/(2*this%dx)
-        !  neighbor_dzdy(this%ims:this%ime,:,this%jms) = (-3*this%geo_v%z(:,:,this%jms) + &
-        !                                    4*this%geo_v%z(:,:,this%jms+1) - this%geo_v%z(:,:,this%jms+2)) / (2*this%dx)
-        !                                    
-        !  neighbor_dzdy(this%ims:this%ime,:,this%jme+1) = (3*this%geo_v%z(:,:,this%jme+1) - &
-        !                                   4*this%geo_v%z(:,:,this%jme) + this%geo_v%z(:,:,this%jme-1)) / (2*this%dx)
-        !  this%vars_3d(this%var_indx(kVARS%dzdy_v)%v)%data_3d(:,:,:) = neighbor_dzdy(this%ims:this%ime,:,this%jms:this%jme+1)
-
-        this%vars_3d(this%var_indx(kVARS%dzdy)%v)%data_3d(:,:,:) = (this%geo_v%z(:,:,this%jms+1:this%jme+1) - this%geo_v%z(:,:,this%jms:this%jme))/(this%dx)
 
         neighbor_dzdy(:,:,this%jhs+1:this%jhe) = (neighbor_z(:,:,this%jhs+1:this%jhe) - neighbor_z(:,:,this%jhs:this%jhe-1))/this%dx
         neighbor_dzdy(:,:,this%jhs) = neighbor_dzdy(:,:,this%jhs+1) 

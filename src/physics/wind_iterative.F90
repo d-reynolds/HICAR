@@ -24,6 +24,7 @@ module wind_iterative
     use domain_interface,  only : domain_t
     !use options_interface, only : options_t
     !use grid_interface,    only : grid_t
+    use io_routines,     only : io_write
     use petscksp
     use petscdm
     use petscdmda
@@ -77,7 +78,8 @@ contains
         
         PetscErrorCode ierr
         Vec            x
-        PetscInt       iter
+        PetscInt       one, x_size, iter, maxits
+        PetscReal      rtol, abstol, dtol
         PetscBool isSymmetric
         Mat A
 
@@ -89,6 +91,13 @@ contains
         
         alpha = alpha_in(i_s:i_e,k_s:k_e,j_s:j_e) 
         
+        ! set minimum number of iterations for ksp solver
+        rtol = 1.0e-7
+        abstol = 1.0e-7
+        dtol = 1000.0
+        maxits = 1000
+        call KSPSetTolerances(ksp(domain%nest_indx),rtol,abstol,dtol, maxits,ierr)
+
         if (.not.(allocated(A_coef))) then
             ! Can't be called in module-level init function, since we first need alpha
             call initialize_coefs(domain)
@@ -101,18 +110,6 @@ contains
             call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_TRUE,ierr)
         endif
     
-        ! call KSPGetOperators(ksp, A, PETSC_NULL_MAT, ierr) ! The second parameter is for the right-hand matrix, which can be NULL if not needed
-        ! call MatIsSymmetric(A, PETSC_SMALL, isSymmetric, ierr);
-        ! if (isSymmetric) then
-        !     if(STD_OUT_PE) write(*,*) 'Matrix is symmetric'
-        !     call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
-        ! else 
-        !     if(STD_OUT_PE) write(*,*) 'Matrix is not symmetric'
-        !     call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
-        ! endif
-        ! call KSPSetType(ksp(domain%nest_indx),KSPPIPEGCR,ierr) !KSPPIPEFCG <-- this one tested to give fastest convergence...
-                         !KSPPIPEGCR <-- this one tested to give fastest convergence...
-                         !KSPGCR <-- this one tested to give fastest convergence...
 
         call KSPSetComputeRHS(ksp(domain%nest_indx),ComputeRHS,0,ierr)
 
@@ -214,11 +211,7 @@ contains
             dlambdz(i_s-1:i_e+1,k,j_s-1:j_e+1) = (lambda(i_s-1:i_e+1,k+1,j_s-1:j_e+1)*sigma(i_s,k,j_s)**2) - (sigma(i_s,k,j_s)**2 - 1)*lambda(i_s-1:i_e+1,k,j_s-1:j_e+1) - lambda(i_s-1:i_e+1,k-1,j_s-1:j_e+1)
             dlambdz(:,k,:) = dlambdz(:,k,:)/(dz_if(i_s,k+1,j_s)*(sigma(i_s,k,j_s)+sigma(i_s,k,j_s)**2))
         enddo
-        !stager lambda to u grid
-        u_dlambdz = (dlambdz(i_start:i_end,:,j_s:j_e) + dlambdz(i_start-1:i_end-1,:,j_s:j_e)) / 2 
 
-        !stager lambda to v grid
-        v_dlambdz = (dlambdz(i_s:i_e,:,j_start:j_end) + dlambdz(i_s:i_e,:,j_start-1:j_end-1)) / 2 
 
         !PETSc arrays are zero-indexed
         
@@ -307,14 +300,14 @@ contains
 
 
         DM             da
-        PetscInt       i,j,k,mx,my,mz,xm,ym,zm,xs,ys,zs,i1,i2,i6,i15
+        PetscInt       i,j,k,mx,my,mz,xm,ym,zm,xs,ys,zs,i1,i3,i7,i15
         DMDALocalInfo  info(DMDA_LOCAL_INFO_SIZE)
         PetscScalar    v(15)
-        MatStencil     row(4),col(4,15),gnd_col(4,6),top_col(4,2)
+        MatStencil     row(4),col(4,15),gnd_col(4,11),top_col(4,3)
         
         i1 = 1
-        i2 = 2
-        i6 = 6
+        i3 = 3
+        i7 = 11
         i15 = 15
 
         call KSPGetDM(ksp,da,ierr)
@@ -342,53 +335,84 @@ contains
                     v(1) = 1.0
                     call MatSetValuesStencil(arr_B,i1,row,i1,row,v,INSERT_VALUES, ierr)
                 else if (k.eq.mz-1) then
-                    !k
-                    v(1) = 1/dz_if(i,k,j)
+
+                    !k + 1
+                    v(1) = (2+sigma(i,k-1,j))/(dz_if(i,k,j)*(sigma(i,k-1,j)+1))
                     top_col(MatStencil_i,1) = i
                     top_col(MatStencil_j,1) = k
                     top_col(MatStencil_k,1) = j
                     !k - 1
-                    v(2) = -1/dz_if(i,k,j)
+                    v(2) = -(sigma(i,k-1,j)+1)/(dz_if(i,k,j)*sigma(i,k-1,j))
                     top_col(MatStencil_i,2) = i
                     top_col(MatStencil_j,2) = k-1
                     top_col(MatStencil_k,2) = j
-                    call MatSetValuesStencil(arr_B,i1,row,i2,top_col,v,INSERT_VALUES, ierr)
+                    !k - 2
+                    v(3) = 1/(dz_if(i,k,j)*sigma(i,k-1,j)+dz_if(i,k,j)*sigma(i,k-1,j)**2)
+                    top_col(MatStencil_i,3) = i
+                    top_col(MatStencil_j,3) = k-2
+                    top_col(MatStencil_k,3) = j
+                    call MatSetValuesStencil(arr_B,i1,row,i3,top_col,v,INSERT_VALUES, ierr)
 
                 else if (k.eq.0) then
-                                
-                    denom = (alpha(i,1,j)**2 + dzdx_surf(i,j)**2 + &
+                    denom = 2*(alpha(i,1,j)**2 + dzdx_surf(i,j)**2 + &
                                           dzdy_surf(i,j)**2)/(jaco(i,1,j))
                     !k
-                    v(1) = -1/dz_if(i,k+1,j)
+                    v(1) = -(2*sigma(i,k+1,j)+1)/(dz_if(i,k+1,j)*(sigma(i,k+1,j)+1))
                     gnd_col(MatStencil_i,1) = i
                     gnd_col(MatStencil_j,1) = k
                     gnd_col(MatStencil_k,1) = j
                     !k + 1
-                    v(2) = 1/dz_if(i,k+1,j)
+                    v(2) = (sigma(i,k+1,j)+1)/dz_if(i,k+1,j)
                     gnd_col(MatStencil_i,2) = i
                     gnd_col(MatStencil_j,2) = k+1
                     gnd_col(MatStencil_k,2) = j
-                    !i - 1
-                    v(3) = dzdx_surf(i,j)/(denom*2*dx)
-                    gnd_col(MatStencil_i,3) = i-1
-                    gnd_col(MatStencil_j,3) = k
+                    !k + 2
+                    v(3) = -(sigma(i,k+1,j)**2)/(dz_if(i,k+1,j)*(sigma(i,k+1,j)+1))
+                    gnd_col(MatStencil_i,3) = i
+                    gnd_col(MatStencil_j,3) = k+2
                     gnd_col(MatStencil_k,3) = j
-                    !i + 1
-                    v(4) = -dzdx_surf(i,j)/(denom*2*dx)
-                    gnd_col(MatStencil_i,4) = i+1
+                    !i - 1
+                    v(4) = dzdx_surf(i,j)/(denom*2*dx)
+                    gnd_col(MatStencil_i,4) = i-1
                     gnd_col(MatStencil_j,4) = k
                     gnd_col(MatStencil_k,4) = j
-                    !j - 1
-                    v(5) = dzdy_surf(i,j)/(denom*2*dx)
-                    gnd_col(MatStencil_i,5) = i
+                    !i + 1
+                    v(5) = -dzdx_surf(i,j)/(denom*2*dx)
+                    gnd_col(MatStencil_i,5) = i+1
                     gnd_col(MatStencil_j,5) = k
-                    gnd_col(MatStencil_k,5) = j-1
-                    !j + 1
-                    v(6) = -dzdy_surf(i,j)/(denom*2*dx)
+                    gnd_col(MatStencil_k,5) = j
+                    !j - 1
+                    v(6) = dzdy_surf(i,j)/(denom*2*dx)
                     gnd_col(MatStencil_i,6) = i
                     gnd_col(MatStencil_j,6) = k
-                    gnd_col(MatStencil_k,6) = j+1
-                    call MatSetValuesStencil(arr_B,i1,row,i6,gnd_col,v,INSERT_VALUES, ierr)
+                    gnd_col(MatStencil_k,6) = j-1
+                    !j + 1
+                    v(7) = -dzdy_surf(i,j)/(denom*2*dx)
+                    gnd_col(MatStencil_i,7) = i
+                    gnd_col(MatStencil_j,7) = k
+                    gnd_col(MatStencil_k,7) = j+1
+                    !i - 1
+                    v(8) = dzdx_surf(i,j)/(denom*2*dx)
+                    gnd_col(MatStencil_i,8) = i-1
+                    gnd_col(MatStencil_j,8) = k+1
+                    gnd_col(MatStencil_k,8) = j
+                    !i + 1
+                    v(9) = -dzdx_surf(i,j)/(denom*2*dx)
+                    gnd_col(MatStencil_i,9) = i+1
+                    gnd_col(MatStencil_j,9) = k+1
+                    gnd_col(MatStencil_k,9) = j
+                    !j - 1
+                    v(10) = dzdy_surf(i,j)/(denom*2*dx)
+                    gnd_col(MatStencil_i,10) = i
+                    gnd_col(MatStencil_j,10) = k+1
+                    gnd_col(MatStencil_k,10) = j-1
+                    !j + 1
+                    v(11) = -dzdy_surf(i,j)/(denom*2*dx)
+                    gnd_col(MatStencil_i,11) = i
+                    gnd_col(MatStencil_j,11) = k+1
+                    gnd_col(MatStencil_k,11) = j+1
+
+                    call MatSetValuesStencil(arr_B,i1,row,i7,gnd_col,v,INSERT_VALUES, ierr)
                 else
                     !j - 1, k - 1
                     v(1) = O_coef(i,k,j)
@@ -614,18 +638,28 @@ contains
                  domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i_s:i_e,:,j_s_bnd-1:j_e_bnd-1))/(dx**2)
 
         dzdxz(:,k_s+1:k_e-1,:) = (sigma(:,k_s+1:k_e-1,:)**2)*dzdx(:,k_s+2:k_e,:) - (sigma(:,k_s+1:k_e-1,:)**2-1)*dzdx(:,k_s+1:k_e-1,:) - dzdx(:,k_s:k_e-2,:)
-        dzdxz(:,k_e,:) = dzdxz(:,k_e-1,:) 
         dzdxz = dzdxz/mixed_denom
         dzdxz(:,k_s,:) = -(sigma(:,k_s+1,:)**2)*dzdx(:,k_s+2,:)/(dz_if(:,k_s+1,:)*(sigma(:,k_s+1,:)+1)) + &
                           (sigma(:,k_s+1,:)+1)*dzdx(:,k_s+1,:)/dz_if(:,k_s+1,:) - &
                           (2*sigma(:,k_s+1,:)+1)*dzdx(:,k_s,:)/(dz_if(:,k_s+1,:)*(sigma(:,k_s+1,:)+1))
 
+        dzdxz(:,k_e,:) = (dzdx(:,k_e-2,:))/(dz_if(:,k_e,:)*sigma(:,k_e-1,:)+dz_if(:,k_e,:)*sigma(:,k_e-1,:)**2) - &
+                           (sigma(:,k_e-1,:)+1)*(dzdx(:,k_e-1,:))/(dz_if(:,k_e,:)*sigma(:,k_e-1,:)) + &
+                            (2+sigma(:,k_e-1,:))*(dzdx(:,k_e,:))/(dz_if(:,k_e,:)*(sigma(:,k_e-1,:)+1))
+
+
         dzdyz(:,k_s+1:k_e-1,:) = (sigma(:,k_s+1:k_e-1,:)**2)*dzdy(:,k_s+2:k_e,:) - (sigma(:,k_s+1:k_e-1,:)**2-1)*dzdy(:,k_s+1:k_e-1,:) - dzdy(:,k_s:k_e-2,:)
-        dzdyz(:,k_e,:) = dzdyz(:,k_e-1,:) 
         dzdyz = dzdyz/mixed_denom
         dzdyz(:,k_s,:) = -(sigma(:,k_s+1,:)**2)*dzdy(:,k_s+2,:)/(dz_if(:,k_s+1,:)*(sigma(:,k_s+1,:)+1)) + &
                           (sigma(:,k_s+1,:)+1)*dzdy(:,k_s+1,:)/dz_if(:,k_s+1,:) - &
                           (2*sigma(:,k_s+1,:)+1)*dzdy(:,k_s,:)/(dz_if(:,k_s+1,:)*(sigma(:,k_s+1,:)+1))
+        dzdyz(:,k_e,:) = (dzdy(:,k_e-2,:))/(dz_if(:,k_e,:)*sigma(:,k_e-1,:)+dz_if(:,k_e,:)*sigma(:,k_e-1,:)**2) - &
+                          (sigma(:,k_e-1,:)+1)*(dzdy(:,k_e-1,:))/(dz_if(:,k_e,:)*sigma(:,k_e-1,:)) + &
+                           (2+sigma(:,k_e-1,:))*(dzdy(:,k_e,:))/(dz_if(:,k_e,:)*(sigma(:,k_e-1,:)+1))
+
+        !Numerical solution
+        X_coef = (-(d2zdx/jaco + dijacodx*dzdx + d2zdy/jaco + dijacody*dzdy) + &
+                    (dzdxz*dzdx+dzdyz*dzdy)/(jaco**2)) /mixed_denom
 
         ! if (STD_OUT_PE) write(*,*) "maxval of dijacodx", maxval(dijacodx*dzdx)
         ! if (STD_OUT_PE) write(*,*) "minval of dijacodx", minval(dijacodx*dzdx)
@@ -635,36 +669,31 @@ contains
         ! if (STD_OUT_PE) write(*,*) "minval of d2zdx", minval(d2zdx/jaco)
         ! if (STD_OUT_PE) write(*,*) "maxval of d2zdy", maxval(d2zdy/jaco)
         ! if (STD_OUT_PE) write(*,*) "minval of d2zdy", minval(d2zdy/jaco)
-        ! if (STD_OUT_PE) write(*,*) "maxval of dzdxz", maxval(dzdxz*dzdx/(jaco**2))
-        ! if (STD_OUT_PE) write(*,*) "minval of dzdxz", minval(dzdxz*dzdx/(jaco**2))
-        ! if (STD_OUT_PE) write(*,*) "maxval of dzdyz", maxval(dzdyz*dzdy/(jaco**2))
-        ! if (STD_OUT_PE) write(*,*) "minval of dzdyz", minval(dzdyz*dzdy/(jaco**2))
-
+        ! if (STD_OUT_PE) write(*,*) "maxval of dzdxz", maxval(dzdxz(:,k_s+1:k_e-1,:)*dzdx(:,k_s+1:k_e-1,:)/(jaco(:,k_s+1:k_e-1,:)**2))
+        ! if (STD_OUT_PE) write(*,*) "minval of dzdxz", minval(dzdxz(:,k_s+1:k_e-1,:)*dzdx(:,k_s+1:k_e-1,:)/(jaco(:,k_s+1:k_e-1,:)**2))
+        ! if (STD_OUT_PE) write(*,*) "maxval of dzdyz", maxval(dzdyz(:,k_s+1:k_e-1,:)*dzdy(:,k_s+1:k_e-1,:)/(jaco(:,k_s+1:k_e-1,:)**2))
+        ! if (STD_OUT_PE) write(*,*) "minval of dzdyz", minval(dzdyz(:,k_s+1:k_e-1,:)*dzdy(:,k_s+1:k_e-1,:)/(jaco(:,k_s+1:k_e-1,:)**2))
         ! if (STD_OUT_PE) write(*,*) "------------------------------------"
 
-        
-        ! do k = k_s,k_e
-        !     d2zdx(:,k,:) = (domain%smooth_height-sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k,j_s)))*d2zdx_surf/domain%smooth_height
-        !     d2zdy(:,k,:) = (domain%smooth_height-sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k,j_s)))*d2zdy_surf/domain%smooth_height
 
-        !     dijacodx(:,k,:) =  (domain%smooth_height-(sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k,j_s))))*(dzdx_surf**2)/((domain%smooth_height*jaco(:,k,:))**2)
-        !     dijacody(:,k,:) =  (domain%smooth_height-(sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k,j_s))))*(dzdy_surf**2)/((domain%smooth_height*jaco(:,k,:))**2)
-        ! enddo
-
-        ! dzdxz(:,k_s,:) = (domain%smooth_height-domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k_s,j_s)*0.5)*(dzdx_surf**2)/((domain%smooth_height*jaco(:,k_s,:))**2)
-        ! dzdyz(:,k_s,:) = (domain%smooth_height-domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k_s,j_s)*0.5)*(dzdy_surf**2)/((domain%smooth_height*jaco(:,k_s,:))**2)
+        ! dzdxz(:,k_s,:) = -(domain%smooth_height-domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k_s,j_s)*0.5)*(dzdx_surf**2)/((domain%smooth_height*jaco(:,k_s,:))**2)
+        ! dzdyz(:,k_s,:) = -(domain%smooth_height-domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k_s,j_s)*0.5)*(dzdy_surf**2)/((domain%smooth_height*jaco(:,k_s,:))**2)
         ! d2zdx(:,k_s,:) = (domain%smooth_height-domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k_s,j_s)*0.5)*d2zdx_surf/domain%smooth_height
         ! d2zdy(:,k_s,:) = (domain%smooth_height-domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k_s,j_s)*0.5)*d2zdy_surf/domain%smooth_height
+        ! dijacodx(:,k_s,:) =  (domain%smooth_height-domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k_s,j_s)*0.5)*(dzdx_surf**2)/((domain%smooth_height*jaco(:,k_s,:))**2)
+        ! dijacody(:,k_s,:) =  (domain%smooth_height-domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k_s,j_s)*0.5)*(dzdy_surf**2)/((domain%smooth_height*jaco(:,k_s,:))**2)
 
         ! do k = k_s+1,k_e
-        !     dzdxz(:,k,:) = (domain%smooth_height-(sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k-1,j_s))+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k,j_s)*0.5))*(dzdx_surf**2)/((domain%smooth_height*jaco(:,k,:))**2)
-        !     dzdyz(:,k,:) = (domain%smooth_height-(sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k-1,j_s))+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k,j_s)*0.5))*(dzdy_surf**2)/((domain%smooth_height*jaco(:,k,:))**2)
+        !     dzdxz(:,k,:) = -(domain%smooth_height-(sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k-1,j_s))+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k,j_s)*0.5))*(dzdx_surf**2)/((domain%smooth_height*jaco(:,k,:))**2)
+        !     dzdyz(:,k,:) = -(domain%smooth_height-(sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k-1,j_s))+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k,j_s)*0.5))*(dzdy_surf**2)/((domain%smooth_height*jaco(:,k,:))**2)
 
         !     d2zdx(:,k,:) = (domain%smooth_height-(sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k-1,j_s))+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k,j_s)*0.5))*d2zdx_surf/domain%smooth_height
         !     d2zdy(:,k,:) = (domain%smooth_height-(sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k-1,j_s))+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k,j_s)*0.5))*d2zdy_surf/domain%smooth_height
+        !     dijacodx(:,k,:) =  (domain%smooth_height-(sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k-1,j_s))+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k,j_s)*0.5))*(dzdx_surf**2)/((domain%smooth_height*jaco(:,k,:))**2)
+        !     dijacody(:,k,:) =  (domain%smooth_height-(sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,1:k-1,j_s))+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k,j_s)*0.5))*(dzdy_surf**2)/((domain%smooth_height*jaco(:,k,:))**2)
 
         ! enddo
-
+        ! if (STD_OUT_PE) call io_write("dzdxz_analytical.nc", "var", dzdxz(:,:,:))
         ! if (STD_OUT_PE) write(*,*) "maxval of dijacodx", maxval(dijacodx)
         ! if (STD_OUT_PE) write(*,*) "minval of dijacodx", minval(dijacodx)
         ! if (STD_OUT_PE) write(*,*) "maxval of dijacody", maxval(dijacody)
@@ -673,16 +702,14 @@ contains
         ! if (STD_OUT_PE) write(*,*) "minval of d2zdx", minval(d2zdx/jaco)
         ! if (STD_OUT_PE) write(*,*) "maxval of d2zdy", maxval(d2zdy/jaco)
         ! if (STD_OUT_PE) write(*,*) "minval of d2zdy", minval(d2zdy/jaco)
-        ! if (STD_OUT_PE) write(*,*) "maxval of dzdxz", maxval(dzdxz)
-        ! if (STD_OUT_PE) write(*,*) "minval of dzdxz", minval(dzdxz)
-        ! if (STD_OUT_PE) write(*,*) "maxval of dzdyz", maxval(dzdyz)
-        ! if (STD_OUT_PE) write(*,*) "minval of dzdyz", minval(dzdyz)
+        ! if (STD_OUT_PE) write(*,*) "maxval of dzdxz", maxval(dzdxz(:,k_s+1:k_e-1,:))
+        ! if (STD_OUT_PE) write(*,*) "minval of dzdxz", minval(dzdxz(:,k_s+1:k_e-1,:))
+        ! if (STD_OUT_PE) write(*,*) "maxval of dzdyz", maxval(dzdyz(:,k_s+1:k_e-1,:))
+        ! if (STD_OUT_PE) write(*,*) "minval of dzdyz", minval(dzdyz(:,k_s+1:k_e-1,:))
 
-        ! X_coef = (-(d2zdx/jaco + 0*dijacodx + d2zdy/jaco + 0*dijacody) + &
-        !             0*(dzdxz+dzdyz)) /mixed_denom
-
-        X_coef = (-(d2zdx/jaco + dijacodx*dzdx + d2zdy/jaco + dijacody*dzdy) + &
-                    (dzdxz*dzdx+dzdyz*dzdy)/(jaco**2)) /mixed_denom
+        ! Pure analytical solution for gal-chen
+        ! X_coef = (-(d2zdx/jaco + dijacodx + d2zdy/jaco + dijacody) + &
+        !             (dzdxz+dzdyz)) /mixed_denom
 
         B_coef = 2*sigma * ( (alpha**2 + dzdy**2 + dzdx**2)) / ((sigma+sigma**2)*dz_if(:,k_s+1:k_e+1,:)**2)
         C_coef = 2*( (alpha**2 + dzdy**2 + dzdx**2)) / ((sigma+sigma**2)*dz_if(:,k_s+1:k_e+1,:)**2)
@@ -778,7 +805,7 @@ contains
         type(domain_t), intent(in) :: domain
         type(options_t), intent(in) :: options
 
-        PetscInt       one, iter
+        PetscInt       one, two, iter
         PetscErrorCode ierr
 
         ! call finalize routine to deallocate any arrays that are already allocated. 
@@ -796,9 +823,10 @@ contains
         call init_module_vars(domain)
 
         one = 1
+        two = 2
 
         call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
-                          (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
+                          (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,two, &
                           xl, PETSC_NULL_INTEGER_ARRAY ,yl,da,ierr)
         
         call DMSetFromOptions(da,ierr)
@@ -900,10 +928,10 @@ contains
 
             jaco = domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
             
-            dz_if(:,k_s,:) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)
+            dz_if(:,k_s,:) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)*0.5
             dz_if(:,k_s+1:k_e,:) = (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s+1:k_e,j_s:j_e) + &
                                    domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s:k_e-1,j_s:j_e))/2
-            dz_if(:,k_e+1,:) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_e,j_s:j_e)
+            dz_if(:,k_e+1,:) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_e,j_s:j_e)*0.5
             sigma = dz_if(:,k_s:k_e,:)/dz_if(:,k_s+1:k_e+1,:)
                                 
             do k = k_s+1, k_e

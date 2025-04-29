@@ -77,9 +77,10 @@ contains
         integer k !, i_s, i_e, k_s, k_e, j_s, j_e
         
         PetscErrorCode ierr
-        PetscInt       one, x_size, iteration
-        PetscReal      norm, conv_tol
+        PetscInt       one, x_size, iteration, maxits
+        PetscReal      rtol, abstol, dtol
         PetscBool      reuse_bool
+
         Vec   x
         KSPConvergedReason reason
 
@@ -91,6 +92,12 @@ contains
         one = 1
         alpha = alpha_in(i_s:i_e,k_s:k_e,j_s:j_e) 
 
+        ! set minimum number of iterations for ksp solver
+        rtol = 1.0e-5
+        abstol = 1.0e-5
+        dtol = 1000.0
+        maxits = 1000
+        call KSPSetTolerances(ksp(domain%nest_indx),rtol,abstol,dtol, maxits,ierr)
 
         if (.not.(allocated(A_coef))) then
             ! Can't be called in module-level init function, since we first need alpha
@@ -103,15 +110,6 @@ contains
         if (update_in) then
             call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_TRUE,ierr)
         endif
-        ! call KSPGetOperators(ksp, A, PETSC_NULL_MAT, ierr) ! The second parameter is for the right-hand matrix, which can be NULL if not needed
-        ! call MatIsSymmetric(A, PETSC_SMALL, isSymmetric, ierr);
-        ! if (isSymmetric) then
-        !     if(STD_OUT_PE) write(*,*) 'Matrix is symmetric'
-        !     call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
-        ! else 
-        !     if(STD_OUT_PE) write(*,*) 'Matrix is not symmetric'
-        !     call KSPSetType(ksp,KSPPIPEGCR,ierr) !KSPIBCGS <-- this one tested to give fastest convergence...
-        ! endif
 
         call KSPSetComputeRHS(ksp(domain%nest_indx),ComputeRHS,0,ierr)
 
@@ -142,7 +140,7 @@ contains
         logical,     intent(in)                :: adv_den
 
 
-        real, allocatable, dimension(:,:,:)    :: u_dlambdz, v_dlambdz, u_temp, v_temp, lambda_too, rho, rho_u, rho_v
+        real, allocatable, dimension(:,:,:)    :: u_dlambdz, v_dlambdz, dlambdz, u_temp, v_temp, lambda_too, rho, rho_u, rho_v
         integer k, i_start, i_end, j_start, j_end 
 
         i_start = i_s
@@ -155,7 +153,8 @@ contains
 
         allocate(u_dlambdz(i_start:i_end,k_s:k_e,j_s:j_e))
         allocate(v_dlambdz(i_s:i_e,k_s:k_e,j_start:j_end))
-        
+        allocate(dlambdz(i_s-1:i_e+1,k_s:k_e,j_s-1:j_e+1))
+
         allocate(rho(domain%ims:domain%ime,k_s:k_e,domain%jms:domain%jme))
         allocate(rho_u(i_start:i_end,k_s:k_e,j_s:j_e))
         allocate(rho_v(i_s:i_e,k_s:k_e,j_start:j_end))
@@ -201,37 +200,32 @@ contains
         v_temp = (lambda(i_s:i_e,k_s-1:k_e+1,j_start:j_end) + lambda(i_s:i_e,k_s-1:k_e+1,j_start-1:j_end-1)) / 2 
 
         !divide dz differennces by dz. Note that dz will be horizontally constant
-        !STRUCT_DIFF: u_dlambdz and v_dlambdz are are calculated using "normal" numerics, and not the derivative for
-        !             a stretched vertical grid.
         do k=k_s,k_e
             u_dlambdz(:,k,:) = u_temp(:,k+1,:) - u_temp(:,k-1,:)
             v_dlambdz(:,k,:) = v_temp(:,k+1,:) - v_temp(:,k-1,:)
         
             u_dlambdz(:,k,:) = u_dlambdz(:,k,:)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
             v_dlambdz(:,k,:) = v_dlambdz(:,k,:)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
+
+            dlambdz(i_s-1:i_e+1,k,j_s-1:j_e+1) = lambda(i_s-1:i_e+1,k+1,j_s-1:j_e+1) - lambda(i_s-1:i_e+1,k-1,j_s-1:j_e+1)
+            dlambdz(:,k,:) = dlambdz(:,k,:)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
         enddo
         
-        !u_dlambdz(:,k_s,:) = -(u_temp(:,k_s+2,:)*sigma(i_s,k_s+1,j_s)**2) + &
-        !                    u_temp(:,k_s+1,:)*(sigma(i_s,k_s+1,j_s)+1)**2 - u_temp(:,k_s,:)*(2*sigma(i_s,k_s+1,j_s)+1)
-        !v_dlambdz(:,k_s,:) = -(v_temp(:,k_s+2,:)*sigma(i_s,k_s+1,j_s)**2) + &
-        !                    v_temp(:,k_s+1,:)*(sigma(i_s,k_s+1,j_s)+1)**2 - v_temp(:,k_s,:)*(2*sigma(i_s,k_s+1,j_s)+1)
-        !
-        !u_dlambdz(:,k_s,:) = u_dlambdz(:,k_s,:)/(dz_if(i_s,k_s+1,j_s)*(sigma(i_s,k_s+1,j_s)+1))
-        !v_dlambdz(:,k_s,:) = v_dlambdz(:,k_s,:)/(dz_if(i_s,k_s+1,j_s)*(sigma(i_s,k_s+1,j_s)+1))
         
         !PETSc arrays are zero-indexed
         
-        ! STRUCT_DIFF: divide by jacobian again when it is an "update" call
         domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
                                                         0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
                                                         lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
-        (1/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))*domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/(rho_u(i_start:i_end,:,j_s:j_e)*domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))
+        (1/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))*domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_start:i_end,:,j_s:j_e)*(u_dlambdz))/(rho_u(i_start:i_end,:,j_s:j_e))
         
         domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
                                                         0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
                                                         lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
-        (1/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))*domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/(rho_v(i_s:i_e,:,j_start:j_end)*domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))
+        (1/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))*domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i_s:i_e,:,j_start:j_end)*(v_dlambdz))/(rho_v(i_s:i_e,:,j_start:j_end))
         
+        domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i_s:i_e,:,j_s:j_e) = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i_s:i_e,:,j_s:j_e) + &
+                    0.5*(alpha**2)*dlambdz(i_s:i_e,:,j_s:j_e)/domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,:,j_s:j_e)
 
     end subroutine calc_updated_winds
 
@@ -777,7 +771,7 @@ contains
         implicit none
         type(domain_t), intent(in) :: domain
 
-        integer :: ierr
+        integer :: ierr, i_s_bnd, i_e_bnd, j_s_bnd, j_e_bnd
 
         i_s = domain%its
         i_e = domain%ite
@@ -797,6 +791,24 @@ contains
         
         !j_e, unless we are on global boundary, then j_e+1
         if (domain%grid%jme==domain%grid%jde) j_e = domain%grid%jde
+
+        i_s_bnd = i_s
+        i_e_bnd = i_e
+        j_s_bnd = j_s
+        j_e_bnd = j_e
+        if (i_s==domain%grid%ids) then
+            i_s_bnd = i_s + 1
+        endif
+        if (i_e==domain%grid%ide) then
+            i_e_bnd = i_e - 1
+        endif
+        if (j_s==domain%grid%jds) then
+            j_s_bnd = j_s + 1
+        endif
+        if (j_e==domain%grid%jde) then
+            j_e_bnd = j_e - 1
+        endif
+
 
         hs = domain%grid%halo_size
         if (.not.(allocated(dzdx))) then
@@ -822,19 +834,11 @@ contains
             dzdy  = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
             jaco = domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
             
-            dzdx_surf = 0.1
-            dzdy_surf = 0.1
-            dzdx_surf(i_s+1:i_e-1,j_s:j_e) = (domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s+2:i_e,j_s:j_e)-domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s:i_e-2,j_s:j_e))/(2*dx)
-            dzdy_surf(i_s:i_e,j_s+1:j_e-1) = (domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s:i_e,j_s+2:j_e)-domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s:i_e,j_s:j_e-2))/(2*dx)
-                          
-            dzdx_surf(i_s,j_s:j_e) = dzdx_surf(i_s+1,j_s:j_e)
-            dzdx_surf(i_e,j_s:j_e) = dzdx_surf(i_e-1,j_s:j_e)
-            dzdy_surf(i_s:i_e,j_s) = dzdy_surf(i_s:i_e,j_s+1)
-            dzdy_surf(i_s:i_e,j_e) = dzdy_surf(i_s:i_e,j_e-1)
-            
-            dzdy_surf(i_s:i_e,j_s:j_e) = dzdy(i_s:i_e,1,j_s:j_e)
-            dzdx_surf(i_s:i_e,j_s:j_e) = dzdx(i_s:i_e,1,j_s:j_e)
+            dzdx_surf = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)
+            dzdy_surf = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)
 
+            dzdx_surf(i_s_bnd:i_e_bnd,j_s:j_e) = (domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s_bnd+1:i_e_bnd+1,j_s:j_e)-domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s_bnd-1:i_e_bnd-1,j_s:j_e))/(2*dx)
+            dzdy_surf(i_s:i_e,j_s_bnd:j_e_bnd) = (domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s:i_e,j_s_bnd+1:j_e_bnd+1)-domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s:i_e,j_s_bnd-1:j_e_bnd-1))/(2*dx)
             
             dz_if(:,k_s+1:k_e,:) = (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s+1:k_e,j_s:j_e) + &
                                    domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s:k_e-1,j_s:j_e))/2

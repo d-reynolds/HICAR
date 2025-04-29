@@ -48,7 +48,6 @@ option(FSM "Link to the FSM2 snow model, requires separate compilation of the FS
 #########################################
 
 #Set constants for project
-set(BUILD ${PROJECT_SOURCE_DIR}/build)
 add_subdirectory(${PROJECT_SOURCE_DIR}/tests EXCLUDE_FROM_ALL)
 #######################################
 
@@ -398,7 +397,7 @@ message(STATUS "Libraries linked against HICAR target: ${HICAR_LIBS}")
 # Set the location for library installation -- i.e., /usr/lib in this case
 # not really necessary in this example. Use "sudo make install" to apply 
 set(CMAKE_INSTALL_EXEDIR ${PROJECT_SOURCE_DIR}/bin)
-set(CMAKE_Fortran_MODULE_DIRECTORY  ${PROJECT_SOURCE_DIR}/build)
+set(CMAKE_Fortran_MODULE_DIRECTORY  ${CMAKE_BINARY_DIR})
 
 # this is to copy the library to the diseired directory
 install(TARGETS HICAR  DESTINATION  ${CMAKE_INSTALL_EXEDIR})
@@ -413,8 +412,8 @@ install(TARGETS HICAR  DESTINATION  ${CMAKE_INSTALL_EXEDIR})
 #target_link_libraries(test_FSM_interface FSM_interface ${PROJECT_LINK_LIBS})
 
 ADD_CUSTOM_TARGET( distclean make clean
-				   COMMAND ${CMAKE_COMMAND} -E remove_directory ${PROJECT_SOURCE_DIR}/build/CMakeFiles
-				   COMMAND ${CMAKE_COMMAND} -E remove ${PROJECT_SOURCE_DIR}/build/cmake_install.cmake ${PROJECT_SOURCE_DIR}/build/install_manifest.txt ${PROJECT_SOURCE_DIR}/build/Makefile ${PROJECT_SOURCE_DIR}/build/CMakeCache.txt
+				   COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/CMakeFiles
+				   COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/cmake_install.cmake ${CMAKE_BINARY_DIR}/install_manifest.txt ${CMAKE_BINARY_DIR}/Makefile ${CMAKE_BINARY_DIR}/CMakeCache.txt
 					)
 
 # Add a custom target for running tests with MPI
