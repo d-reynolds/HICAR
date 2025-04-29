@@ -11,7 +11,6 @@
 !!------------------------------------------------------------
 !#include <petsc/finclude/petscdmda.h90>
 
-
 module wind_iterative
     !include 'petsc/finclude/petscksp.h'
     !include 'petsc/finclude/petscdm.h'
@@ -47,10 +46,12 @@ module wind_iterative
     integer, allocatable :: xl(:), yl(:)
     integer              :: hs, i_s, i_e, k_s, k_e, j_s, j_e
 
+
     type(tKSP), allocatable, dimension(:) ::    ksp
     DM             da
     Vec            localX, b
     Mat            arr_A,arr_B
+
 contains
 
 
@@ -78,19 +79,17 @@ contains
         
         PetscErrorCode ierr
         Vec            x
-        PetscInt       one, x_size, iter, maxits
+
+        PetscInt       one, x_size, iteration, maxits
         PetscReal      rtol, abstol, dtol
-        PetscBool isSymmetric
-        Mat A
 
         update=.False.
         if (present(update_in)) update=update_in
                 
         !Initialize div to be the initial divergence of the input wind field
         div = div_in(i_s:i_e,k_s:k_e,j_s:j_e) 
-        
         alpha = alpha_in(i_s:i_e,k_s:k_e,j_s:j_e) 
-        
+
         ! set minimum number of iterations for ksp solver
         rtol = 1.0e-7
         abstol = 1.0e-7
@@ -109,15 +108,14 @@ contains
         if (update_in) then
             call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_TRUE,ierr)
         endif
-    
 
         call KSPSetComputeRHS(ksp(domain%nest_indx),ComputeRHS,0,ierr)
 
         call KSPSolve(ksp(domain%nest_indx),PETSC_NULL_VEC,PETSC_NULL_VEC,ierr)
-
         call KSPGetSolution(ksp(domain%nest_indx),x,ierr)
-        call KSPGetIterationNumber(ksp(domain%nest_indx), iter, ierr)
-        if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iter,' iterations'
+
+        call KSPGetIterationNumber(ksp(domain%nest_indx), iteration, ierr)
+        if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iteration,' iterations'
         
         !Subset global solution x to local grid so that we can access ghost-points
         call DMGlobalToLocal(da,x,INSERT_VALUES,localX,ierr)
@@ -131,7 +129,7 @@ contains
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
 
     end subroutine calc_iter_winds
-    
+
     subroutine calc_updated_winds(domain,lambda,adv_den) !u, v, w, jaco_u,jaco_v,jaco_w,u_dzdx,v_dzdy,lambda, ids, ide, jds, jde)
         type(domain_t), intent(inout) :: domain
         !real, intent(inout), dimension(:,:,:)  :: u,v,w
@@ -141,8 +139,7 @@ contains
 
 
         real, allocatable, dimension(:,:,:)    :: u_dlambdz, v_dlambdz, dlambdz, u_temp, v_temp, lambda_too, rho, rho_u, rho_v
-        integer k, i_start, i_end, j_start, j_end !i_s, i_e, k_s, k_e, j_s, j_e, ids, ide, jds, jde
-                
+        integer k, i_start, i_end, j_start, j_end 
 
         i_start = i_s
         i_end   = i_e+1
@@ -224,9 +221,11 @@ contains
                                                         0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
                                                         lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
         domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i_s:i_e,:,j_start:j_end)*(v_dlambdz)/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))/(rho_v(i_s:i_e,:,j_start:j_end))!domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))
-
+        
         domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i_s:i_e,:,j_s:j_e) = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i_s:i_e,:,j_s:j_e) + &
                     0.5*(alpha**2)*dlambdz(i_s:i_e,:,j_s:j_e)/domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,:,j_s:j_e)
+
+        ! domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) = 0.5*((lambda(i_s:i_e,k_s:k_e,j_s:j_e) - lambda(i_s-1:i_e-1,k_s:k_e,j_s:j_e))/dx - u_dlambdz(i_s:i_e,k_s:k_e,j_s:j_e))
 
     end subroutine calc_updated_winds
 
@@ -277,34 +276,19 @@ contains
         call DMDAVecRestoreArrayF90(dm,vec_b,barray, ierr)
     end subroutine ComputeRHS
 
-    subroutine ComputeInitialGuess(ksp,vec_b,ctx,ierr)
+    subroutine ComputeMatrix(ksp,array_A,array_B)
         implicit none
-        PetscErrorCode  ierr
         KSP ksp
-        PetscInt ctx(*)
-        Vec vec_b
-        PetscScalar  i_guess
+        Mat array_A,array_B
 
-        i_guess = 0.0
-
-        call VecSet(vec_b,i_guess,ierr)
-    end subroutine ComputeInitialGuess
-
-    subroutine ComputeMatrix(ksp,arr_A,arr_B,dummy,ierr)
-        implicit none
         PetscErrorCode  ierr
-        KSP ksp
-        Mat arr_A,arr_B
-        integer dummy(*)
-        real denom
-
-
         DM             da
         PetscInt       i,j,k,mx,my,mz,xm,ym,zm,xs,ys,zs,i1,i3,i7,i15
         DMDALocalInfo  info(DMDA_LOCAL_INFO_SIZE)
         PetscScalar    v(15)
         MatStencil     row(4),col(4,15),gnd_col(4,11),top_col(4,3)
-        
+        real :: denom
+
         i1 = 1
         i3 = 3
         i7 = 11
@@ -330,13 +314,12 @@ contains
                 row(MatStencil_i) = i
                 row(MatStencil_j) = k
                 row(MatStencil_k) = j
-                if (i.eq.0 .or. j.eq.0 .or. &
-                    i.eq.mx-1 .or. j.eq.my-1) then
+                if (i.le.0 .or. j.le.0 .or. &
+                    i.ge.mx-1 .or. j.ge.my-1) then
                     v(1) = 1.0
-                    call MatSetValuesStencil(arr_B,i1,row,i1,row,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_B,i1,row,i1,row,v,INSERT_VALUES, ierr)
                 else if (k.eq.mz-1) then
-
-                    !k + 1
+                    !k
                     v(1) = (2+sigma(i,k-1,j))/(dz_if(i,k,j)*(sigma(i,k-1,j)+1))
                     top_col(MatStencil_i,1) = i
                     top_col(MatStencil_j,1) = k
@@ -351,7 +334,7 @@ contains
                     top_col(MatStencil_i,3) = i
                     top_col(MatStencil_j,3) = k-2
                     top_col(MatStencil_k,3) = j
-                    call MatSetValuesStencil(arr_B,i1,row,i3,top_col,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_B,i1,row,i3,top_col,v,INSERT_VALUES, ierr)
 
                 else if (k.eq.0) then
                     denom = 2*(alpha(i,1,j)**2 + dzdx_surf(i,j)**2 + &
@@ -412,7 +395,7 @@ contains
                     gnd_col(MatStencil_j,11) = k+1
                     gnd_col(MatStencil_k,11) = j+1
 
-                    call MatSetValuesStencil(arr_B,i1,row,i7,gnd_col,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_B,i1,row,i7,gnd_col,v,INSERT_VALUES, ierr)
                 else
                     !j - 1, k - 1
                     v(1) = O_coef(i,k,j)
@@ -489,22 +472,21 @@ contains
                     col(MatStencil_i,15) = i
                     col(MatStencil_j,15) = k-1
                     col(MatStencil_k,15) = j+1
-                    call MatSetValuesStencil(arr_B,i1,row,i15,col,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_B,i1,row,i15,col,v,INSERT_VALUES, ierr)
                 endif
             enddo
         enddo
         enddo
 
-        call MatAssemblyBegin(arr_B,MAT_FINAL_ASSEMBLY,ierr)
-        call MatAssemblyEnd(arr_B,MAT_FINAL_ASSEMBLY,ierr)
-        if (arr_A .ne. arr_B) then
-         call MatAssemblyBegin(arr_A,MAT_FINAL_ASSEMBLY,ierr)
-         call MatAssemblyEnd(arr_A,MAT_FINAL_ASSEMBLY,ierr)
+        call MatAssemblyBegin(array_B,MAT_FINAL_ASSEMBLY,ierr)
+        call MatAssemblyEnd(array_B,MAT_FINAL_ASSEMBLY,ierr)
+        if (array_A .ne. array_B) then
+         call MatAssemblyBegin(array_A,MAT_FINAL_ASSEMBLY,ierr)
+         call MatAssemblyEnd(array_A,MAT_FINAL_ASSEMBLY,ierr)
         endif
 
     end subroutine ComputeMatrix
-    
-    
+
     subroutine initialize_coefs(domain)
         implicit none
         type(domain_t), intent(in) :: domain
@@ -840,7 +822,7 @@ contains
         call DMCreateMatrix(da,arr_A,ierr)
         call DMCreateMatrix(da,arr_B,ierr)
     end subroutine
-    
+
     subroutine init_module_vars(domain)
         implicit none
         type(domain_t), intent(in) :: domain
@@ -853,7 +835,7 @@ contains
         k_e = domain%kte  
         j_s = domain%jts
         j_e = domain%jte
-        
+
         !i_s+hs, unless we are on global boundary, then i_s
         if (domain%grid%ims==domain%grid%ids) i_s = domain%grid%ids
         
@@ -888,12 +870,13 @@ contains
             !call MPI_INIT(ierr)
             allocate(dzdx(i_s:i_e,k_s:k_e,j_s:j_e))
             allocate(dzdy(i_s:i_e,k_s:k_e,j_s:j_e))
+            allocate(jaco(i_s:i_e,k_s:k_e,j_s:j_e))
+
             allocate(dzdx_surf(i_s:i_e,j_s:j_e))
             allocate(dzdy_surf(i_s:i_e,j_s:j_e))
             allocate(d2zdx_surf(i_s:i_e,j_s:j_e))
             allocate(d2zdy_surf(i_s:i_e,j_s:j_e))
 
-            allocate(jaco(i_s:i_e,k_s:k_e,j_s:j_e))
             allocate(sigma(i_s:i_e,k_s:k_e,j_s:j_e))
             allocate(dz_if(i_s:i_e,k_s:k_e+1,j_s:j_e))
             allocate(alpha(i_s:i_e,k_s:k_e,j_s:j_e))
@@ -906,6 +889,7 @@ contains
             dx = domain%dx
             dzdx = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) 
             dzdy = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
+            jaco = domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
 
             dzdx_surf = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)
             dzdy_surf = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)
@@ -926,22 +910,12 @@ contains
                     2*domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s:i_e,j_s_bnd:j_e_bnd)     + &
                     domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s:i_e,j_s_bnd-1:j_e_bnd-1))/(dx**2)
 
-            jaco = domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
             
-            dz_if(:,k_s,:) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)*0.5
             dz_if(:,k_s+1:k_e,:) = (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s+1:k_e,j_s:j_e) + &
                                    domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s:k_e-1,j_s:j_e))/2
+            dz_if(:,k_s,:) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)*0.5
             dz_if(:,k_e+1,:) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_e,j_s:j_e)*0.5
             sigma = dz_if(:,k_s:k_e,:)/dz_if(:,k_s+1:k_e+1,:)
-                                
-            do k = k_s+1, k_e
-                if (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k,j_s) < domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k-1,j_s)) then
-                    !if (STD_OUT_PE) write(*,*) 'ERROR: dz levels are not monotonically increasing in k'
-                    !if (STD_OUT_PE) write(*,*) 'ERROR: at level ', k, ' dz inrecases from ', domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k-1,j_s), ' to ', domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s,k,j_s)
-                    !if (STD_OUT_PE) write(*,*) 'ERROR: to correct, ensure that dz levels increase monotonically '
-                    !stop
-                endif
-            enddo
             
             !Calculate how global grid is decomposed for DMDA
             !subtract halo size from boundaries of each cell to get x/y extent
