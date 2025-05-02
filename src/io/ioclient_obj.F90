@@ -442,6 +442,12 @@ contains
             endif
         enddo
 
+        ! Pack this%write_win_2d and this%write_win_3d with kEMPT_BUFF. This is done so that the write_buffers are 
+        ! again initialized to empty buffers, which is needed for the output objects on the IOserver processes
+        ! to find the "blocks" which are needed to output
+        this%write_buffer_2d = kEMPT_BUFF
+        this%write_buffer_3d = kEMPT_BUFF
+
     end subroutine 
 
 

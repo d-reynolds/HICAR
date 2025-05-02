@@ -262,7 +262,7 @@ contains
 
         if (STD_OUT_PE) write(*,*) "Initializing physics"
         ! physics drivers need to be initialized after restart data are potentially read in.
-        call init_physics(options, domain, boundary)
+        call init_physics(options, domain)
         if (STD_OUT_PE) flush(output_unit)
 
         if (.not.(options%restart%restart)) call ioclient%push(domain)
@@ -272,11 +272,10 @@ contains
     end subroutine init_model_state
 
 
-    subroutine init_physics(options, domain, forcing)
+    subroutine init_physics(options, domain)
         implicit none
         type(options_t), intent(inout) :: options
         type(domain_t),  intent(inout) :: domain
-        type(boundary_t),intent(in)    :: forcing
 
 
         if (STD_OUT_PE) write(*,*) "Init initial winds"
@@ -285,7 +284,7 @@ contains
 
         if (STD_OUT_PE) write(*,*) "Updating initial winds"
         if (STD_OUT_PE) flush(output_unit)
-        call update_winds(domain, forcing, options)
+        call update_winds(domain, options)
 
         ! initialize microphysics code (e.g. compute look up tables in Thompson et al)
         call mp_init(domain, options) !this could easily be moved to init_model...

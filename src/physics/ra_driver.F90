@@ -687,7 +687,7 @@ contains
         !This is now outside of interval loop, so this will be called every phys timestep
         if (options%physics%radiation==kRA_RRTMG) then
             domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d+domain%tend%th_lwrad*dt+domain%tend%th_swrad*dt
-            domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d*domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d
+            ! domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d*domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d
             domain%vars_3d(domain%var_indx(kVARS%tend_swrad)%v)%data_3d = domain%tend%th_swrad
         endif
 

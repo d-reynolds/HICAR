@@ -368,22 +368,18 @@ contains
     
     
 
-    subroutine apply_Sx(Sx, TPI, u, v, Ri, dzdx, dzdy)
+    subroutine apply_Sx(Sx, TPI, u, v, Ri, dzdx, dzdy, ims, ime, kms, kme, jms, jme, its, ite, jts, jte)
         implicit none
-        real, intent(in)                       :: Sx(:,:,:,:), TPI(:,:), Ri(:,:,:), dzdx(:,:,:), dzdy(:,:,:)
-        real, intent(inout),  dimension(:,:,:) :: u, v
+        real, intent(in)                       :: Sx(ims:ime,kms:kme,jms:jme,1:72), TPI(ims:ime,jms:jme), Ri(ims:ime,kms:kme,jms:jme), dzdx(ims:ime,kms:kme,jms:jme), dzdy(ims:ime,kms:kme,jms:jme)
+        real, intent(inout) :: u(ims:ime+1,kms:kme,jms:jme), v(ims:ime,kms:kme,jms:jme+1)
+        integer, intent(in)                   :: its, ite, jts, jte, ims, ime, kms, kme, jms, jme
         
-        real, allocatable, dimension(:,:)   :: winddir, x_norm, y_norm, thresh_ang
+        real, allocatable, dimension(:,:)   :: x_norm, y_norm, thresh_ang
         real, allocatable, dimension(:,:,:) :: Sx_U_corr, Sx_V_corr, Sx_curr, Sx_corr, TPI_corr
 
-        integer ::  i, j, k, ims, ime, jms, jme, kms
+        integer ::  i, j, k
         real    ::  Ri_num, WS, max_spd
-                
-        ims = lbound(dzdx,1)
-        ime = ubound(dzdx,1)
-        kms = lbound(dzdx,2)
-        jms = lbound(dzdx,3)
-        jme = ubound(dzdx,3)
+                        
         
         allocate(x_norm(ims:ime,jms:jme))
         allocate(y_norm(ims:ime,jms:jme))
@@ -409,7 +405,7 @@ contains
         
         !Pick appropriate Sx for wind direction
         do k = kms, Sx_k_max
-            call pick_Sx(Sx(:,k,:,:), Sx_curr(:,k,:), u(:,k,:), v(:,k,:))
+            call pick_Sx(Sx(:,k,:,:), Sx_curr(:,k,:), u(:,k,:), v(:,k,:),ims,ime,jms,jme)
         end do
         
         !Initialize Sx and TPI corr
@@ -474,32 +470,27 @@ contains
         v(:,kms:Sx_k_max,jms) = v(:,kms:Sx_k_max,jms) - Sx_V_corr(:,:,jms)
         v(:,kms:Sx_k_max,jme+1) = v(:,kms:Sx_k_max,jme+1) - Sx_V_corr(:,:,jme)
 
-        u(ims+1:ime,kms:Sx_k_max,:) = u(ims+1:ime,kms:Sx_k_max,:) * (1 + (TPI_corr(ims+1:ime,:,:)+TPI_corr(ims:ime-1,:,:))/2 )
-        u(ims,kms:Sx_k_max,:) = u(ims,kms:Sx_k_max,:) * (1+TPI_corr(ims,:,:))
-        u(ime+1,kms:Sx_k_max,:) = u(ime+1,kms:Sx_k_max,:) * (1+TPI_corr(ime,:,:))
+        ! u(ims+1:ime,kms:Sx_k_max,:) = u(ims+1:ime,kms:Sx_k_max,:) * (1 + (TPI_corr(ims+1:ime,:,:)+TPI_corr(ims:ime-1,:,:))/2 )
+        ! u(ims,kms:Sx_k_max,:) = u(ims,kms:Sx_k_max,:) * (1+TPI_corr(ims,:,:))
+        ! u(ime+1,kms:Sx_k_max,:) = u(ime+1,kms:Sx_k_max,:) * (1+TPI_corr(ime,:,:))
         
-        v(:,kms:Sx_k_max,jms+1:jme) = v(:,kms:Sx_k_max,jms+1:jme) * (1 + (TPI_corr(:,:,jms+1:jme)+TPI_corr(:,:,jms:jme-1))/2 )
-        v(:,kms:Sx_k_max,jms) = v(:,kms:Sx_k_max,jms) * (1+TPI_corr(:,:,jms))
-        v(:,kms:Sx_k_max,jme+1) = v(:,kms:Sx_k_max,jme+1) * (1+TPI_corr(:,:,jme))
+        ! v(:,kms:Sx_k_max,jms+1:jme) = v(:,kms:Sx_k_max,jms+1:jme) * (1 + (TPI_corr(:,:,jms+1:jme)+TPI_corr(:,:,jms:jme-1))/2 )
+        ! v(:,kms:Sx_k_max,jms) = v(:,kms:Sx_k_max,jms) * (1+TPI_corr(:,:,jms))
+        ! v(:,kms:Sx_k_max,jme+1) = v(:,kms:Sx_k_max,jme+1) * (1+TPI_corr(:,:,jme))
 
     end subroutine apply_Sx
     
-    subroutine pick_Sx(Sx,Sx_curr,u,v)
+    subroutine pick_Sx(Sx,Sx_curr,u,v,ims,ime,jms,jme)
         implicit none
-        real, intent(in)                     :: Sx(:,:,:)
-        real, intent(inout)                  :: Sx_curr(:,:)
-        real, intent(in),  dimension(:,:)    :: u, v
-                        
+        real, intent(in)       :: Sx(ims:ime,jms:jme,1:72)
+        real, intent(inout)    :: Sx_curr(ims:ime,jms:jme)
+        real, intent(in)       :: u(ims:ime+1,jms:jme), v(ims:ime,jms:jme+1)
+        integer, intent(in)    :: ims, ime, jms, jme
+
         real, allocatable, dimension(:,:)   :: winddir, u_m, v_m
         integer, allocatable                ::  dir_indices(:,:)
-        integer ::  i, j, ims, ime, jms, jme
+        integer ::  i, j
         
-
-
-        ims = lbound(v,1)
-        ime = ubound(v,1)
-        jms = lbound(u,2)
-        jme = ubound(u,2)
                 
         allocate(winddir(ims:ime,jms:jme))
         allocate(u_m(ims:ime,jms:jme))

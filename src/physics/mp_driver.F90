@@ -729,11 +729,14 @@ contains
             ! NOTE, ONLY reset this when running the inner subset... ideally probably need a separate counter for the halo and subset
             !last_model_time = domain%sim_time%seconds()
             
-            call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,      &
+            call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,  &
                          domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d,      &
                          domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d,      &
-                         domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d,      &
-                         domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
+                         domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
+                         domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, &
+                         domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, &
+                         domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,   &
+                         domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
                          domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
                              
 

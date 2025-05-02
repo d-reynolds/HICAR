@@ -25,7 +25,7 @@ program icar
     use boundary_interface, only : boundary_t
     use output_interface,   only : output_t
     use time_step,          only : step                ! Advance the model forward in time
-    use initialization,     only : split_processes, welcome_message, init_options, init_model, init_physics
+    use initialization,     only : split_processes, welcome_message, init_options, init_model
     use nest_manager,      only : nest_next_up, should_update_nests, can_update_child_nest, all_nests_not_done, &
                                 end_nest_context, wake_nest, switch_nest_context
     use timer_interface,    only : timer_t

@@ -286,6 +286,8 @@ contains
 
         associate(ims => this%ims, ime => this%ime,                             &
                   jms => this%jms, jme => this%jme,                             &
+                  ids => this%ids, ide => this%ide,                             &
+                  jds => this%jds, jde => this%jde,                             &
                   kms => this%kms, kme => this%kme,                             &
                   its => this%its, ite => this%ite,                             &
                   jts => this%jts, jte => this%jte,                             &
@@ -305,31 +307,80 @@ contains
                   v_mass                => this%vars_3d(this%var_indx(kVARS%v_mass)%v)%data_3d,                 &
                   potential_temperature => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d )
 
-        !Calculation of density
-        if (forcing_update_only) then
-            exner = exner_function(this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d)
+                !Calculation of density
+                if (forcing_update_only) then
+                    exner = exner_function(this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d)
+                    temperature = potential_temperature * exner
+                    density =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d / (R_d * temperature*(1+qv)) ! kg/m^3
+                else
+                    exner = exner_function(pressure)
+                    temperature = potential_temperature * exner
+                    density =  pressure / (R_d * temperature*(1+qv)) ! kg/m^3
+                endif
+        
 
-            do concurrent (j = jms:jme, k = kms:kme, i = ims:ime)                
-                temperature(i,k,j) = potential_temperature(i,k,j) * exner(i,k,j)
-                density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,j))) ! kg/m^3
-            enddo
-            return
-        else
-            exner = exner_function(pressure)
-            do concurrent (j = jms:jme, k = kms:kme, i = ims:ime)
-                ! qsum = qv(i,k,j)
-                ! if(this%vars_3d(this%var_indx(kVARS%cloud_water_mass)%v)%data_3d(i,k,j)
-                ! if(this%vars_3d(this%var_indx(kVARS%ice_mass)%v)%data_3d(i,k,j)
-                ! if(this%vars_3d(this%var_indx(kVARS%ice2_mass)%v)%data_3d(i,k,j)
-                ! if(this%vars_3d(this%var_indx(kVARS%ice3_mass)%v)%data_3d(i,k,j)
-                ! if(this%vars_3d(this%var_indx(kVARS%rain_mass)%v)%data_3d(i,k,j)
-                ! if(this%vars_3d(this%var_indx(kVARS%snow_mass)%v)%data_3d(i,k,j)
-                ! if(this%vars_3d(this%var_indx(kVARS%graupel_mass)%v)%data_3d(i,k,j)
-                
-                temperature(i,k,j) = potential_temperature(i,k,j) * exner(i,k,j)
-                density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,j))) ! kg/m^3
-            enddo
-        endif
+        ! differences between forcing data at the boudnary and the internal model state can lead to strong discontinuities in temperature and qv
+        ! these then affect density, leading to discontinuities in density, and thus winds. So, here we set the density for points on the "frame"
+        ! to be the same as the density in the first cell within the physics region of the domain
+                if (ims==ids) then
+                    do j = jms,jme
+                        do k = kms,kme
+                            do i = ims,its-1
+                                temperature(i,k,j) = potential_temperature(its,k,j) * exner(i,k,j)
+                                if (forcing_update_only) then
+                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,j))) ! kg/m^3
+                                else
+                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,j))) ! kg/m^3
+                                endif
+                            enddo
+                        enddo
+                    enddo
+                endif
+                if (ime==ide) then
+                    do j = jms,jme
+                        do k = kms,kme
+                            do i = ite+1,ime
+                                temperature(i,k,j) = potential_temperature(ite,k,j) * exner(i,k,j)
+                                if (forcing_update_only) then
+                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,j))) ! kg/m^3
+                                else
+                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,j))) ! kg/m^3
+                                endif
+                            enddo
+                        enddo
+                    enddo
+                endif
+                if (jms==jds) then
+                    do j = jms,jts-1
+                        do k = kms,kme
+                            do i = ims,ime
+                                temperature(i,k,j) = potential_temperature(i,k,jts) * exner(i,k,j)
+                                if (forcing_update_only) then
+                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jts))) ! kg/m^3
+                                else
+                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jts))) ! kg/m^3
+                                endif
+                            enddo
+                        enddo
+                    enddo
+                endif
+                if (jme==jde) then
+                    do j = jte+1,jme
+                        do k = kms,kme
+                            do i = ims,ime
+                                temperature(i,k,j) = potential_temperature(i,k,jte) * exner(i,k,j)
+                                if (forcing_update_only) then
+                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jte))) ! kg/m^3
+                                else
+                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jte))) ! kg/m^3
+                                endif
+                            enddo
+                        enddo
+                    enddo
+                endif
+        
+                if (forcing_update_only) return
+
         
         temperature_i(ims:ime,kms,jms:jme) = temperature(ims:ime,kms,jms:jme) + (temperature(ims:ime,kms,jms:jme) - temperature(ims:ime,kms+1,jms:jme)) * 0.5
         pressure_i(ims:ime,kms,jms:jme) = pressure(ims:ime,kms,jms:jme) + (pressure(ims:ime,kms,jms:jme) - pressure(ims:ime,kms+1,jms:jme)) * 0.5
@@ -2445,8 +2496,11 @@ contains
         !relaxation boundary -- set to be 7 for default
         FILTER_WIDTH = min(FILTER_WIDTH,(this%ime-this%ims-hs),(this%jme-this%jms-hs))
         
-        rs = (/0.9, 0.75, 0.6, 0.5, 0.4, 0.25, 0.1 /)
-        rs_r = (/0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9/)
+        ! rs = (/0.9, 0.75, 0.6, 0.5, 0.4, 0.25, 0.1 /)
+        ! rs_r = (/0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9/)
+        rs = (/0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 /)
+        rs_r = (/0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0/)
+
         relax_filter = 0.0
         
         if (this%west_boundary) then
@@ -2545,6 +2599,12 @@ contains
 
         dt = this%next_input - this%sim_time
 
+        ! check if the difference between the simulation time and next_input is less than an input_dt
+        ! if so, this signals that we are in between two input times, so advance the state of the variables%data_3d
+        ! to the simulation time
+
+        !include "-1" to accomodate rounding errors
+        if (dt%seconds() < (this%input_dt%seconds()-1)) call dt%set(seconds= (this%input_dt%seconds() - dt%seconds()) )
 
         ! Now iterate through the dictionary as long as there are more elements present
         do i = 1,size(this%forcing_hi)
@@ -2604,8 +2664,7 @@ contains
 
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
-
-        this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d = (this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d - this%vars_3d(this%var_indx(kVARS%w)%v)%data_3d) / dt%seconds()
+        !this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d = (this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d - this%vars_3d(this%var_indx(kVARS%w)%v)%data_3d) / dt%seconds()
 
     end subroutine
 
@@ -2618,10 +2677,9 @@ contains
     !! apply forcing multiplies that /second value and multiplies it by the current time step before adding it
     !!
     !! -------------------------------
-    module subroutine apply_forcing(this, forcing, options, dt)
+    module subroutine apply_forcing(this, options, dt)
         implicit none
         class(domain_t),    intent(inout) :: this
-        class(boundary_t),  intent(inout) :: forcing
         type(options_t), intent(in)       :: options
         real, intent(in)                  :: dt
         integer :: ims, ime, jms, jme
@@ -2629,16 +2687,17 @@ contains
         type(variable_t) :: var_to_update
         integer :: i, k, j, var_indx, n
         real    :: dt_h
-        logical :: do_boundary, is_wind
+        logical :: do_boundary, is_wind, is_w_real
         
         !calculate dt in units of hours
         dt_h = dt/3600.0
-        
+
         do n = 1,size(this%forcing_hi)
 
             var_indx = get_varindx(trim(this%forcing_hi(n)%name))
             var_to_update = get_varmeta(var_indx)            
-            is_wind = (this%var_indx(var_indx)%v == this%var_indx(kVARS%u)%v) .or. (this%var_indx(var_indx)%v == this%var_indx(kVARS%v)%v) .or. (this%var_indx(var_indx)%v == this%var_indx(kVARS%w_real)%v)
+            is_w_real = (this%var_indx(var_indx)%v == this%var_indx(kVARS%w_real)%v)
+            is_wind = (this%var_indx(var_indx)%v == this%var_indx(kVARS%u)%v) .or. (this%var_indx(var_indx)%v == this%var_indx(kVARS%v)%v) .or. is_w_real
 
             if (var_to_update%two_d) then
                 ims = this%vars_2d(this%var_indx(var_indx)%v)%grid%ims
@@ -2683,6 +2742,7 @@ contains
                 jms = this%vars_3d(this%var_indx(var_indx)%v)%grid%jms
                 jme = this%vars_3d(this%var_indx(var_indx)%v)%grid%jme
 
+                !see if we are on the boundary of the domain
                 do_boundary = (ims < this%ids+this%grid%halo_size+FILTER_WIDTH) .or. (ime > this%ide-this%grid%halo_size-FILTER_WIDTH) .or. &
                                (jms < this%jds+this%grid%halo_size+FILTER_WIDTH) .or. (jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
 
@@ -2693,8 +2753,9 @@ contains
                         this%forcing_hi(n)%data_3d(i,k,j)    = this%forcing_hi(n)%data_3d(i,k,j) + (this%forcing_hi(n)%dqdt_3d(i,k,j) * dt)
                         if (.not.(is_wind)) this%forcing_hi(n)%data_3d(i,k,j) = max(this%forcing_hi(n)%data_3d(i,k,j),0.0)
 
-                        this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
+                        if (.not.(is_w_real)) this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
                                                         (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d(i,k,j) * dt)
+                                                        
                         if (.not.(is_wind)) this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = max(this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j),0.0)
                     enddo
                 else if (do_boundary) then
@@ -2723,11 +2784,11 @@ contains
 
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
-        if (.not.(options%adv%advect_density)) then
-            do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
-                this%vars_3d(this%var_indx(kVARS%w)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(kVARS%w)%v)%data_3d(i,k,j) + (this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d(i,k,j) * dt)
-            enddo
-        endif
+        ! if (.not.(options%adv%advect_density)) then
+        !     do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
+        !         this%vars_3d(this%var_indx(kVARS%w)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(kVARS%w)%v)%data_3d(i,k,j) + (this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d(i,k,j) * dt)
+        !     enddo
+        ! endif
 
 
     end subroutine
