@@ -57,7 +57,7 @@ contains
 
         call set_var_lists(this, options)
 
-        call init_relax_filters(this)
+        call init_relax_filters(this,options)
 
         call init_batch_exch(this)
 
@@ -2478,9 +2478,10 @@ contains
 
     end subroutine
 
-    subroutine init_relax_filters(this)
+    subroutine init_relax_filters(this,options)
         implicit none
         class(domain_t),    intent(inout) :: this
+        type(options_t),    intent(in)     :: options
         integer :: hs, k, i
         real, dimension(FILTER_WIDTH) :: rs, rs_r
         logical :: corner
@@ -2496,10 +2497,13 @@ contains
         !relaxation boundary -- set to be 7 for default
         FILTER_WIDTH = min(FILTER_WIDTH,(this%ime-this%ims-hs),(this%jme-this%jms-hs))
         
-        ! rs = (/0.9, 0.75, 0.6, 0.5, 0.4, 0.25, 0.1 /)
-        ! rs_r = (/0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9/)
-        rs = (/0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 /)
-        rs_r = (/0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0/)
+        if (options%forcing%relax_filters) then
+            rs = (/0.9, 0.75, 0.6, 0.5, 0.4, 0.25, 0.1 /)
+            rs_r = (/0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9/)
+        else
+            rs = (/0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 /)
+            rs_r = (/0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0/)
+        endif
 
         relax_filter = 0.0
         
