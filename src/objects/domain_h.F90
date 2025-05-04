@@ -200,10 +200,9 @@ module domain_interface
         class(domain_t),    intent(inout) :: this
     end subroutine
 
-    module subroutine apply_forcing(this, forcing, options, dt)
+    module subroutine apply_forcing(this, options, dt)
         implicit none
         class(domain_t),    intent(inout) :: this
-        class(boundary_t),  intent(inout) :: forcing
         type(options_t), intent(in)       :: options
         real, intent(in)                  :: dt
     end subroutine

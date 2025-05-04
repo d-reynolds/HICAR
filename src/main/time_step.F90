@@ -67,11 +67,10 @@ contains
         real :: dt
 
         ! locals
-        real :: three_d_cfl = 0.577350269 ! = sqrt(3)/3
         integer :: i, j, k, zoffset
-        real :: maxwind3d, maxwind1d, current_wind, sqrt3
+        real :: maxwind3d, maxwind1d, current_wind3d, current_wind1d, sqrt3
 
-        sqrt3 = sqrt(3.0) * 1.001 ! with a safety factor
+        sqrt3 = sqrt(3.0)
 
         maxwind1d = 0
         maxwind3d = 0
@@ -90,29 +89,20 @@ contains
                 endif
 
                 do i=its,ite
-                    ! just compute the sum of the wind speeds, but take the max over the two
-                    ! faces of the grid cell (e.g. east and west sides)
-                    ! this will be divided by 3 later by three_d_cfl
-                    if (use_density) then
-                        !current_wind = (max(abs(u(i,k,j)), abs(u(i+1,k,j))) &
-                        !              + max(abs(v(i,k,j)), abs(v(i,k,j+1))) &
-                        !              + max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) ) &
-                        !              / (rho(i,k,j) * dz(i,k,j) * dx)
-                    else
-                        current_wind = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
-                                     +max(abs(v(i,k,j)), abs(v(i,k,j+1))) / dx &
-                                     +max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) / dz(k)
-                                        
-                        ! current_wind = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
-                        !                     ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
-                        !                     ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(k) ))
-                    endif
-                    if (current_wind > maxwind3d) then
+                    current_wind3d = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
+                                    +max(abs(v(i,k,j)), abs(v(i,k,j+1))) / dx &
+                                    +max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) / dz(k)
+                                    
+                    current_wind1d = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
+                                         ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
+                                         ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(k) ))
+                    if (current_wind3d > maxwind3d) then
                         max_i = i
                         max_j = j
                         max_k = k
                     endif
-                    maxwind3d = max(maxwind3d, current_wind)
+                    maxwind3d = max(maxwind3d, current_wind3d)
+                    maxwind1d = max(maxwind1d, current_wind1d)
                 ENDDO
             ENDDO
         ENDDO
@@ -123,7 +113,11 @@ contains
         ! This is more restrictive for diagonal winds, but allows the restriction to 
         ! relax to the 1D case for one-dimensional winds. Since the CFL constraint on vertical
         ! winds is often much less than 1, the criterion has a maximum of roughly 2x the 1D case.
-        maxwind3d = maxwind3d !* sqrt3
+
+        ! In practical experience, the 1D CFL winds, multiplied by sqrt(3) (for 3 dimensions)
+        ! is often sufficiently stable. So, to allow for faster time steps, we make this the
+        ! maximum limiting wind speed condition.
+        maxwind3d = min(maxwind3d,maxwind1d*sqrt3)
 
         dt = CFL / maxwind3d
 
@@ -254,10 +248,9 @@ contains
     !! @param next_output   Next time to write an output file (in "model_time")
     !!
     !!------------------------------------------------------------
-    subroutine step(domain, forcing, end_time, options)
+    subroutine step(domain, end_time, options)
         implicit none
         type(domain_t),     intent(inout)   :: domain
-        type(boundary_t),   intent(inout)   :: forcing
         type(Time_type),    intent(in)      :: end_time
         type(options_t),    intent(in)      :: options
 
@@ -293,7 +286,7 @@ contains
             !Determine dt
             if (last_wind_update >= options%wind%update_dt%seconds() .or. options%wind%wind_only) then
                 call domain%wind_timer%start()
-                call update_winds(domain, forcing, options)
+                call update_winds(domain, options, new_input=.True.)
                 call domain%wind_timer%stop()
 
                 !Now that new winds have been calculated, get new time step in seconds, and see if they require adapting the time step
@@ -323,19 +316,19 @@ contains
             
             ! ! apply/update boundary conditions including internal wind and pressure changes.
             call domain%forcing_timer%start()
-            call domain%apply_forcing(forcing,options,real(dt%seconds()))
+            call domain%apply_forcing(options,real(dt%seconds()))
             call domain%forcing_timer%stop()
 
             call domain%diagnostic_timer%start()
             call domain%diagnostic_update()
             call domain%diagnostic_timer%stop()
 
-            if (options%adv%advect_density) then
-                ! if using advect_density winds need to be balanced at each update
-                call domain%wind_bal_timer%start()
-                call balance_uvw(domain,options)
-                call domain%wind_bal_timer%stop()
-            endif
+            ! if (options%adv%advect_density) then
+            ! if using advect_density winds need to be balanced at each update
+            call domain%wind_bal_timer%start()
+            call balance_uvw(domain,options)
+            call domain%wind_bal_timer%stop()
+            ! endif
 
             ! if an interactive run was requested than print status updates everytime at least 5% of the progress has been made
             if (options%general%interactive .and. (STD_OUT_PE)) then

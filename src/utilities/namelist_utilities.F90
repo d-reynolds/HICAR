@@ -1610,6 +1610,11 @@ contains
                 default = ".False."
                 group = "Forcing"
                 type = 1
+            case ("relax_filters")
+                description = "Use smoothly variying relaxation condition at domain boundary to nudge domain (T/F)"
+                default = ".False."
+                group = "Forcing"
+                type = 1
             case ("qv_is_relative_humidity")
                 description = "Forcing QV variable is relative humidity (T/F)"
                 default = ".False."

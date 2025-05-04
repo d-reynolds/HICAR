@@ -256,11 +256,10 @@ subroutine component_read(component, options, boundary, ioclient)
 
 end subroutine component_read
 
-subroutine component_main_loop(component, options, boundary)
+subroutine component_main_loop(component, options)
     implicit none
     class(flow_obj_t), intent(inout) :: component
     type(options_t), intent(in) :: options
-    type(boundary_t), intent(inout) :: boundary
 
     ! check if the type of component is a domain or an ioserver
     select type (component)
@@ -279,7 +278,7 @@ subroutine component_main_loop(component, options, boundary)
             
             ! this is the meat of the model physics, run all the physics for the current time step looping over internal timesteps
             call component%physics_timer%start()
-            call step(component, boundary, component%next_flow_event(), options)
+            call step(component, component%next_flow_event(), options)
             call component%physics_timer%stop()
         type is (ioserver_t)
             call component%set_sim_time(component%next_flow_event())
@@ -319,7 +318,7 @@ subroutine component_loop(components, options, boundary, ioclient)
             call component_read(components(i), options(i), boundary(i), ioclient(i))
 
             do while ( .not.(components(i)%time_for_input()) .and. .not.(components(i)%ended) )
-                call component_main_loop(components(i), options(i), boundary(i))
+                call component_main_loop(components(i), options(i))
 
                 if (should_update_nests(components,options(i))) then
                     call update_component_nest(components,options(i),ioclient(i))

@@ -742,7 +742,7 @@ contains
         logical :: compute_p, print_info, read_namelist, gennml, no_check
         logical, dimension(kMAX_NESTS) :: limit_rh, z_is_geopotential, z_is_on_interface,&
                    time_varying_z, t_is_potential, qv_is_spec_humidity, &
-                   qv_is_relative_humidity
+                   qv_is_relative_humidity, relax_filters
         real, dimension(kMAX_NESTS)    :: t_offset, inputinterval
 
         character(len=kMAX_FILE_LENGTH) :: forcing_file_list
@@ -755,7 +755,7 @@ contains
                                         psvar, pslvar, swdown_var, lwdown_var, sst_var, time_var
 
         namelist /forcing/ forcing_file_list, inputinterval, t_offset, limit_rh, z_is_geopotential, z_is_on_interface, time_varying_z, &
-                            t_is_potential, qv_is_relative_humidity, qv_is_spec_humidity, &
+                            t_is_potential, qv_is_relative_humidity, qv_is_spec_humidity, relax_filters, &
                             pvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,qncvar,qnivar,qnrvar,qngvar,qnsvar,&
                             i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
                             hgtvar,shvar,lhvar,pblhvar,   &
@@ -784,6 +784,7 @@ contains
         call set_nml_var_default(t_is_potential, 't_is_potential', print_info, gennml)
         call set_nml_var_default(qv_is_relative_humidity, 'qv_is_relative_humidity', print_info, gennml)
         call set_nml_var_default(qv_is_spec_humidity, 'qv_is_spec_humidity', print_info, gennml)
+        call set_nml_var_default(relax_filters, 'relax_filters', print_info, gennml)
         call set_nml_var_default(latvar, 'latvar', print_info, gennml)
         call set_nml_var_default(lonvar, 'lonvar', print_info, gennml)
         call set_nml_var_default(hgtvar, 'hgtvar', print_info, gennml)
@@ -851,6 +852,7 @@ contains
         call set_nml_var(options%forcing%t_is_potential, t_is_potential(n_indx), 't_is_potential', t_is_potential(1))
         call set_nml_var(options%forcing%qv_is_relative_humidity, qv_is_relative_humidity(n_indx), 'qv_is_relative_humidity', qv_is_relative_humidity(1))
         call set_nml_var(options%forcing%qv_is_spec_humidity, qv_is_spec_humidity(n_indx), 'qv_is_spec_humidity', qv_is_spec_humidity(1))
+        call set_nml_var(options%forcing%relax_filters, relax_filters(n_indx), 'relax_filters', relax_filters(1))
         call set_nml_var(options%forcing%inputinterval, inputinterval(n_indx), 'inputinterval', inputinterval(1))
 
         call options%forcing%input_dt%set(seconds=options%forcing%inputinterval)

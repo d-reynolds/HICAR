@@ -125,8 +125,8 @@ contains
         call calc_updated_winds(domain, lambda, adv_den)
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
         !Exchange u and v, since the outer points are not updated in above function
-        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
-        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
+        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
 
     end subroutine calc_iter_winds
 
@@ -212,12 +212,12 @@ contains
 
         !PETSc arrays are zero-indexed
         
-        domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
+        domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i_start:i_end,:,j_s:j_e) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i_start:i_end,:,j_s:j_e) + &
                                                         0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
                                                         lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
         domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_start:i_end,:,j_s:j_e)*(u_dlambdz)/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))/(rho_u(i_start:i_end,:,j_s:j_e))!domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))
         
-        domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
+        domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i_s:i_e,:,j_start:j_end) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i_s:i_e,:,j_start:j_end) + &
                                                         0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
                                                         lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
         domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i_s:i_e,:,j_start:j_end)*(v_dlambdz)/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))/(rho_v(i_s:i_e,:,j_start:j_end))!domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))

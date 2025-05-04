@@ -328,6 +328,7 @@ module options_types
         logical :: z_is_geopotential    ! if true the z variable is interpreted as geopotential height
         logical :: z_is_on_interface    ! if true the z variable is interpreted as residing at model level interfaces
         logical :: time_varying_z       ! read in a new z coordinate every time step and interpolate accordingly
+        logical :: relax_filters       ! should use smoothly varying relaxation filters to nudge forcing at the boundaries
 
         real :: t_offset                ! offset to temperature because WRF outputs potential temperature-300
         logical :: limit_rh                ! impose a limit on relative humidity in the forcing data to be <=1

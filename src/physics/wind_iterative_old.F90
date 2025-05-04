@@ -105,9 +105,6 @@ contains
         endif
 
         call KSPSetComputeOperators(ksp(domain%nest_indx),ComputeMatrix,0,ierr)
-        if (update_in) then
-            call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_TRUE,ierr)
-        endif
 
         call KSPSetComputeRHS(ksp(domain%nest_indx),ComputeRHS,0,ierr)
 
@@ -125,8 +122,8 @@ contains
         call calc_updated_winds(domain, lambda, adv_den)
         call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
         !Exchange u and v, since the outer points are not updated in above function
-        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
-        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
+        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
        
     end subroutine calc_iter_winds_old
 
@@ -212,12 +209,12 @@ contains
 
         !PETSc arrays are zero-indexed
         
-        domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i_start:i_end,:,j_s:j_e) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i_start:i_end,:,j_s:j_e) + &
+        domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i_start:i_end,:,j_s:j_e) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i_start:i_end,:,j_s:j_e) + &
                                                         0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
                                                         lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
         domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_start:i_end,:,j_s:j_e)*(u_dlambdz)/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))/(rho_u(i_start:i_end,:,j_s:j_e))!domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))
         
-        domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i_s:i_e,:,j_start:j_end) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i_s:i_e,:,j_start:j_end) + &
+        domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i_s:i_e,:,j_start:j_end) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i_s:i_e,:,j_start:j_end) + &
                                                         0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
                                                         lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
         domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i_s:i_e,:,j_start:j_end)*(v_dlambdz)/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))/(rho_v(i_s:i_e,:,j_start:j_end))!domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))
@@ -706,14 +703,12 @@ contains
         allocate(ksp(options%general%nests))
 
         do i=1,options%general%nests
-            ! if (options%physics%windtype == kITERATIVE_WINDS .or. &
-            !     options%physics%windtype == kLINEAR_ITERATIVE_WINDS) then
-                call KSPCreate(domain%compute_comms%MPI_VAL,ksp(i),ierr)
-                call KSPSetFromOptions(ksp(i),ierr)
-        
-                call KSPSetType(ksp(i),KSPPIPEGCR,ierr) !KSPPIPEFCG <-- this one does not converge.
-                                                !KSPPIPEGCR <-- this one tested to give fastest convergence...
-            ! endif
+            call KSPCreate(domain%compute_comms%MPI_VAL,ksp(i),ierr)
+            call KSPSetFromOptions(ksp(i),ierr)
+            call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_FALSE,ierr)
+
+            call KSPSetType(ksp(i),KSPPIPEGCR,ierr) !KSPPIPEFCG <-- this one does not converge.
+                                            !KSPPIPEGCR <-- this one tested to give fastest convergence...
         enddo
         initialized = .True.
 
@@ -741,7 +736,6 @@ contains
         endif
 
 
-        ! call KSPSetReusePreconditioner(ksp,PETSC_TRUE,ierr)
         ! call KSPSetComputeRHS(ksp,ComputeRHS,0,ierr)
 
         call init_module_vars(domain)
