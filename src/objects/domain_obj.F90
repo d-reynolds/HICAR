@@ -2564,7 +2564,7 @@ contains
             if (var_to_update%force_boundaries) cycle
 
             if (var_to_update%two_d) then
-                this%vars_3d(this%var_indx(var_indx)%v)%dqdt_2d = (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_2d - this%vars_3d(this%var_indx(var_indx)%v)%data_2d) / dt%seconds()
+                this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d = (this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d - this%vars_2d(this%var_indx(var_indx)%v)%data_2d) / dt%seconds()
             else if (var_to_update%three_d) then
                 this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d = (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d - this%vars_3d(this%var_indx(var_indx)%v)%data_3d) / dt%seconds()
             endif
