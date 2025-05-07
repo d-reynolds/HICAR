@@ -31,7 +31,7 @@ module wind_iterative_old
 
     implicit none
     private
-    public:: init_iter_winds_old, calc_iter_winds_old, finalize_iter_winds_old
+    public:: init_iter_winds_old, calc_iter_winds_old, finalize_iter_winds_old, finalize_petsc
     real, parameter::deg2rad=0.017453293 !2*pi/360
     real, parameter :: rad2deg=57.2957779371
     logical :: initialized = .False.
@@ -76,7 +76,6 @@ contains
         integer k !, i_s, i_e, k_s, k_e, j_s, j_e
         
         PetscErrorCode ierr
-        Vec            x
 
         PetscInt       one, x_size, iteration, maxits
         PetscReal      rtol, abstol, dtol
@@ -95,7 +94,7 @@ contains
         abstol = 1.0e-5
         dtol = 1000.0
         maxits = 1000
-        call KSPSetTolerances(ksp(domain%nest_indx),rtol,abstol,dtol, maxits,ierr)
+        call KSPSetTolerances(ksp(domain%nest_indx),PETSC_DETERMINE_REAL,PETSC_DETERMINE_REAL,dtol, maxits,ierr)
 
         if (.not.(allocated(A_coef))) then
             ! Can't be called in module-level init function, since we first need alpha
@@ -104,18 +103,22 @@ contains
             call update_coefs(domain)
         endif
 
-        call KSPSetComputeOperators(ksp(domain%nest_indx),ComputeMatrix,0,ierr)
+        call ComputeMatrix(ksp(domain%nest_indx),arr_A,arr_B)
+        call KSPSetOperators(ksp(domain%nest_indx),arr_B,arr_B,ierr)
+        ! if (update) then
+        !     call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_TRUE,ierr)
+        ! endif
 
-        call KSPSetComputeRHS(ksp(domain%nest_indx),ComputeRHS,0,ierr)
-
-        call KSPSolve(ksp(domain%nest_indx),PETSC_NULL_VEC,PETSC_NULL_VEC,ierr)
-        call KSPGetSolution(ksp(domain%nest_indx),x,ierr)
+        call ComputeRHS(ksp(domain%nest_indx),b,ierr)
+        
+        call KSPSetDMActive(ksp(domain%nest_indx),PETSC_FALSE,ierr)
+        call KSPSolve(ksp(domain%nest_indx),b,b,ierr)
 
         call KSPGetIterationNumber(ksp(domain%nest_indx), iteration, ierr)
         if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iteration,' iterations'
         
-        !Subset global solution x to local grid so that we can access ghost-points
-        call DMGlobalToLocal(da,x,INSERT_VALUES,localX,ierr)
+        !Subset global solution to local grid so that we can access ghost-points
+        call DMGlobalToLocal(da,b,INSERT_VALUES,localX,ierr)
 
         call DMDAVecGetArrayF90(da,localX,lambda, ierr)
 
@@ -226,13 +229,13 @@ contains
 
     end subroutine calc_updated_winds
 
-    subroutine ComputeRHS(ksp,vec_b,dummy,ierr)
+    subroutine ComputeRHS(ksp,vec_b,ierr)
         implicit none
         
         PetscErrorCode  ierr
         KSP ksp
         Vec vec_b, x
-        integer dummy(*)
+        ! integer dummy(*)
         DM             dm
 
         PetscInt       i,j,k,mx,my,mz,xm,ym,zm,xs,ys,zs
@@ -694,7 +697,7 @@ contains
         type(domain_t), intent(in) :: domain
         type(options_t), intent(in) :: options
         PetscErrorCode ierr
-
+        PC precond
         integer :: i
 
         PETSC_COMM_WORLD = domain%compute_comms%MPI_VAL
@@ -706,9 +709,12 @@ contains
             call KSPCreate(domain%compute_comms%MPI_VAL,ksp(i),ierr)
             call KSPSetFromOptions(ksp(i),ierr)
             call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_FALSE,ierr)
+            call KSPGetPC(ksp(i),precond,ierr)
+            call PCFactorSetUseInPlace(precond,PETSC_TRUE,ierr)
+            call PCFactorSetReuseOrdering(precond,PETSC_TRUE,ierr)
 
-            call KSPSetType(ksp(i),KSPPIPEGCR,ierr) !KSPPIPEFCG <-- this one does not converge.
-                                            !KSPPIPEGCR <-- this one tested to give fastest convergence...
+            call KSPSetType(ksp(i),KSPFBCGS,ierr) !KSPFBCGS <-- this one tested to give fastest convergence...
+                                            !KSPPIPEGCR <-- this one used previously...
         enddo
         initialized = .True.
 
@@ -719,6 +725,16 @@ contains
 
     end subroutine init_petsc_comms
 
+    subroutine finalize_petsc()
+        implicit none
+        PetscErrorCode ierr
+
+        if (initialized) then
+            call PetscFinalize(ierr)
+        endif
+
+    end subroutine finalize_petsc
+
     subroutine init_iter_winds_old(domain, options)
         implicit none
         type(domain_t), intent(in) :: domain
@@ -726,6 +742,7 @@ contains
 
         PetscInt       one, iter
         PetscErrorCode ierr
+        ISLocalToGlobalMapping isltog
 
         ! call finalize routine to deallocate any arrays that are already allocated. 
         ! This would only occur if another nest was using this module previously. 
@@ -745,7 +762,7 @@ contains
         call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
                           xl, PETSC_NULL_INTEGER_ARRAY ,yl,da,ierr)
-        
+        call DMSetMatType(da,MATIS,ierr)
         call DMSetFromOptions(da,ierr)
         call DMSetUp(da,ierr)
 
@@ -756,6 +773,11 @@ contains
         call DMCreateGlobalVector(da,b,ierr)
         call DMCreateMatrix(da,arr_A,ierr)
         call DMCreateMatrix(da,arr_B,ierr)
+
+        call DMGetLocalToGlobalMapping(da,isltog,ierr)
+        call MatSetLocalToGlobalMapping(arr_A,isltog,isltog,ierr)
+        call MatSetLocalToGlobalMapping(arr_B,isltog,isltog,ierr)
+
     end subroutine
 
     subroutine init_module_vars(domain)
