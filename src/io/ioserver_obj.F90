@@ -63,6 +63,8 @@ contains
 
             allocate(this%send_nest_types(this%n_child_ioservers,this%n_servers))
             allocate(this%buffer_nest_types(this%n_child_ioservers,this%n_servers))    
+            allocate(this%nest_types_initialized(this%n_child_ioservers))
+            this%nest_types_initialized = .false.
         endif
 
         !Setup writing capability
@@ -163,7 +165,13 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,parent_jms,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,parent_jme,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
 
-        call MPI_Allreduce(MPI_IN_PLACE,parent_ims,this%n_servers,MPI_INT,MPI_MIN,this%IO_Comms,ierr)
+        !Fill write buffer with fake values to simulate a write
+        this%parent_write_buffer_3d = kEMPT_BUFF
+        do i=1,this%n_children
+            this%parent_write_buffer_3d(1,this%iswc(i):this%iewc(i),1,this%jswc(i):this%jewc(i)) = 1.0
+        enddo
+
+        ! call MPI_Allreduce(MPI_IN_PLACE,parent_ims,this%n_servers,MPI_INT,MPI_MIN,this%IO_Comms,ierr)
         do n = 1,this%n_servers
             ! find where we have a "block" (hole) in the domain, since the child ioclients may not give us a perfect rectangle
             
@@ -250,8 +258,6 @@ contains
             endif
             call MPI_Type_commit(buffer_nest_types(n))
         enddo
-
-        this%nest_types_initialized = .true.
 
     end subroutine setup_nest_types
     
@@ -623,8 +629,9 @@ contains
         allocate(forcing_buffer(this%n_f,child_ioserver%i_s_r:child_ioserver%i_e_r,child_ioserver%k_s_r:child_ioserver%k_e_r, child_ioserver%j_s_r:child_ioserver%j_e_r))
 
         ! If this is the first time calling gather_forcing, we are still in initialization. Call setup_nest_types now, passing in the child ioserver
-        if (this%nest_types_initialized .eqv. .False.) then
+        if (this%nest_types_initialized(child_indx) .eqv. .False.) then
             call this%setup_nest_types(child_ioserver, this%send_nest_types(child_indx,:), this%buffer_nest_types(child_indx,:))
+            this%nest_types_initialized(child_indx) = .true.
         endif
 
         ! What would be smart here, is to send our forcing buffer to only the processes, on which the child ioservers need the data

@@ -13,6 +13,7 @@ module flow_events
     use time_object, only: Time_type
     use iso_fortran_env
     use mpi_f08
+    use wind_iterative_old, only: finalize_petsc
 
     implicit none
     private
@@ -133,21 +134,26 @@ subroutine update_component_nest(component,options,ioclient)
             call ioclient%update_nest(component(options%nest_indx))
         type is (ioserver_t)
             ! This call will gather the model state of the forcing fields from the nest parent
-            if (STD_OUT_PE_IO) write(*,"(/ A22,I2,A16)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
+            if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Gathering forcings"
             if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(component(options%nest_indx)%sim_time%as_string())
+            if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
 
             call component(options%nest_indx)%gather_forcing()
+            if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Completed gathering forcings"
-    
+            if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
+
             ! now loop over all child nests
             do n = 1, size(options%general%child_nests)
                 !Test if we can update the child nest
                 if ( can_update_child_nest(component(options%nest_indx),component(options%general%child_nests(n))) ) then
                     ! This call will distribute the model state of the forcing fields to the child nest
-                    if (STD_OUT_PE_IO) write(*,*) "Distributing forcings to child nest: ",options%general%child_nests(n)
+                    ! if (STD_OUT_PE_IO) write(*,*) "Distributing forcings to child nest: ",options%general%child_nests(n)
                     call component(options%nest_indx)%distribute_forcing(component(options%general%child_nests(n)), n)
+                    if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
                     if (STD_OUT_PE_IO) write(*,*) "Distributed forcings to child nest: ",options%general%child_nests(n)
+                    if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
 
                 endif
             enddo
@@ -183,12 +189,15 @@ subroutine component_write(component, ioclient)
             call ioclient%push(component)
             call component%output_timer%stop()
         type is (ioserver_t)
-            if (STD_OUT_PE_IO) write(*,"(/ A22,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
+            if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Writing out domain"
             if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(component%sim_time%as_string())
             if (STD_OUT_PE_IO) write(*,*) "  Next Output = ", trim(component%next_output%as_string())
+            if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component%nest_indx," --------------"
             call component%write_file()
+            if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Wrote out domain"
+            if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component%nest_indx," --------------"
         class default
             call component%increment_output_time()
             call MPI_Barrier(MPI_COMM_WORLD)
@@ -234,12 +243,15 @@ subroutine component_read(component, options, boundary, ioclient)
             call component%input_timer%stop()
         type is (ioserver_t)
             !See if we even have files to read
-            if (STD_OUT_PE_IO) write(*,"(/ A22,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
+            if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Reading in Boundary conditions"
             if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(component%sim_time%as_string())
             if (STD_OUT_PE_IO) write(*,*) "  Next Input = ", trim(component%next_input%as_string())
+            if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component%nest_indx," --------------"
             call component%read_file()
+            if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Read in Boundary conditions"
+            if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component%nest_indx," --------------"
 
         class default
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
@@ -486,6 +498,9 @@ subroutine component_program_end(component, options)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "winds", ":", t_val, " | ", t_val2, " | ", t_val3
             enddo
 
+            if ( ANY(options%physics%windtype == kITERATIVE_WINDS) .or. ANY(options%physics%windtype == kLINEAR_ITERATIVE_WINDS)) then
+                call finalize_petsc()
+            endif
         type is (ioserver_t)
             call component(1)%close_files()
         class default
