@@ -328,7 +328,7 @@ elseif(MODE STREQUAL "release")
 	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR")
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -O3 -fopenmp -finline-limit=10000 -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
+		target_compile_options(HICAR PUBLIC -O3 -fopenmp -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
