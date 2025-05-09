@@ -754,7 +754,7 @@ contains
 
         ! check if we should read the namelist, if we
         ! are not gonna use the forcing options directly, dont read it
-        if (read_namelist) read_namelist = (options%general%parent_nest > 0)
+        if (read_namelist) read_namelist = (options%general%parent_nest == 0)
 
         print_info = .False.
         if (present(info_only)) print_info = info_only

@@ -316,7 +316,7 @@ elseif(MODE STREQUAL "profile")
 	set(CMAKE_BUILD_TYPE Profile)
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fbounds-check -fbacktrace -fopt-info-missed=opt_info.txt -mfma -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
+		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fbounds-check -fbacktrace -fopt-info-missed=opt_info.txt -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
 		target_link_options(HICAR PUBLIC -pg)
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -pg -debug inline-debug-info -shared-intel)
