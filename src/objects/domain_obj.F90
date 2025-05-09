@@ -1079,12 +1079,12 @@ contains
 
                         if ( ANY(global_z_interface(:,i,:)<0) ) then   ! Eror catching. Probably good to engage.
                             if (STD_OUT_PE) then
-                                write(*,*) "Error: dz_interface below zero (for level  ",i,")"
-                                write(*,*)  "min max dz_interface: ",MINVAL(global_z_interface(:,i,:)),MAXVAL(global_z_interface(:,i,:))
+                                write(*,*) "Error: global_z_interface below zero (for level  ",i,")"
+                                write(*,*)  "min max global_z_interface: ",MINVAL(global_z_interface(:,i,:)),MAXVAL(global_z_interface(:,i,:))
                                 error stop
                             endif
                         else if ( ANY(global_z_interface(:,i,:)<=0.01) ) then
-                            write(*,*) "WARNING: dz_interface very low (at level ",i,")"
+                            write(*,*) "WARNING: global_z_interface very low (at level ",i,")"
                         endif
 
                     else ! above the flat_z_height

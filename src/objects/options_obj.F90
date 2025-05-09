@@ -865,13 +865,35 @@ contains
         if (.not.(no_check)) then
             call require_var(lonvar, "Longitude")
             call require_var(latvar, "Latitude")
-            call require_var(hgtvar, "Terrain Height")
             call require_var(zvar, "Verticle Level Height")
             call require_var(uvar, "U winds")
             call require_var(vvar, "V winds")
             call require_var(tvar, "Temperature")
             call require_var(qvvar, "Water Vapor Mixing Ratio")
             call require_var(time_var, "Time")
+
+            if (pvar == "") then
+                if (pslvar == "") then
+                    call require_var(psvar, "Surface Pressure")
+                    call require_var(hgtvar, "Surface Height")
+                else
+                    call require_var(pslvar, "Sea Level Pressure")
+                endif
+            else
+                call require_var(pvar, "Pressure")
+            endif
+
+            if (zvar == "") then
+                if (pslvar == "") then
+                    call require_var(psvar, "Surface Pressure")
+                    call require_var(hgtvar, "Terrain Height")
+                else
+                    call require_var(pslvar, "Sea Level Pressure")
+                endif
+            else
+                call require_var(zvar, "Verticle Level Height")
+            endif
+
     
             call check_file_exists(forcing_file_list, message="Forcing file list does not exist.")
     

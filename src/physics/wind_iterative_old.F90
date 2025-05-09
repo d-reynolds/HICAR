@@ -103,8 +103,8 @@ contains
             call update_coefs(domain)
         endif
 
-        call ComputeMatrix(ksp(domain%nest_indx),arr_A,arr_B)
-        call KSPSetOperators(ksp(domain%nest_indx),arr_B,arr_B,ierr)
+        call ComputeMatrix(ksp(domain%nest_indx),arr_A)
+        call KSPSetOperators(ksp(domain%nest_indx),arr_A,arr_A,ierr)
         ! if (update) then
         !     call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_TRUE,ierr)
         ! endif
@@ -276,10 +276,10 @@ contains
         call DMDAVecRestoreArrayF90(dm,vec_b,barray, ierr)
     end subroutine ComputeRHS
 
-    subroutine ComputeMatrix(ksp,array_A,array_B)
+    subroutine ComputeMatrix(ksp,array_A)
         implicit none
         KSP ksp
-        Mat array_A,array_B
+        Mat array_A!,array_B
 
         PetscErrorCode  ierr
         DM             da
@@ -318,7 +318,7 @@ contains
                 if (i.le.0 .or. j.le.0 .or. &
                     i.ge.mx-1 .or. j.ge.my-1) then
                     v(1) = 1.0
-                    call MatSetValuesStencil(array_B,i1,row,i1,row,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_A,i1,row,i1,row,v,INSERT_VALUES, ierr)
                 else if (k.eq.mz-1) then
                     !k
                     v(1) = 1/dz_if(i,k,j)
@@ -330,7 +330,7 @@ contains
                     top_col(MatStencil_i,2) = i
                     top_col(MatStencil_j,2) = k-1
                     top_col(MatStencil_k,2) = j
-                    call MatSetValuesStencil(array_B,i1,row,i2,top_col,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_A,i1,row,i2,top_col,v,INSERT_VALUES, ierr)
 
                 else if (k.eq.0) then
                     denom = 2*(dzdx_surf(i,j)**2 + dzdy_surf(i,j)**2 + alpha(i,1,j)**2)/(jaco(i,1,j))
@@ -387,7 +387,7 @@ contains
                     gnd_col(MatStencil_i,10) = i
                     gnd_col(MatStencil_j,10) = k+1
                     gnd_col(MatStencil_k,10) = j+1
-                    call MatSetValuesStencil(array_B,i1,row,i6,gnd_col,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_A,i1,row,i6,gnd_col,v,INSERT_VALUES, ierr)
                 else
                     !j - 1, k - 1
                     v(1) = O_coef(i,k,j)
@@ -464,18 +464,18 @@ contains
                     col(MatStencil_i,15) = i
                     col(MatStencil_j,15) = k-1
                     col(MatStencil_k,15) = j+1
-                    call MatSetValuesStencil(array_B,i1,row,i15,col,v,INSERT_VALUES, ierr)
+                    call MatSetValuesStencil(array_A,i1,row,i15,col,v,INSERT_VALUES, ierr)
                 endif
             enddo
         enddo
         enddo
 
-        call MatAssemblyBegin(array_B,MAT_FINAL_ASSEMBLY,ierr)
-        call MatAssemblyEnd(array_B,MAT_FINAL_ASSEMBLY,ierr)
-        if (array_A .ne. array_B) then
-         call MatAssemblyBegin(array_A,MAT_FINAL_ASSEMBLY,ierr)
-         call MatAssemblyEnd(array_A,MAT_FINAL_ASSEMBLY,ierr)
-        endif
+        call MatAssemblyBegin(array_A,MAT_FINAL_ASSEMBLY,ierr)
+        call MatAssemblyEnd(array_A,MAT_FINAL_ASSEMBLY,ierr)
+        ! if (array_A .ne. array_B) then
+        !  call MatAssemblyBegin(array_A,MAT_FINAL_ASSEMBLY,ierr)
+        !  call MatAssemblyEnd(array_A,MAT_FINAL_ASSEMBLY,ierr)
+        ! endif
 
     end subroutine ComputeMatrix
 
@@ -686,7 +686,7 @@ contains
             call VecDestroy(localX,ierr)
             call VecDestroy(b, ierr)
             call MatDestroy(arr_A,ierr)
-            call MatDestroy(arr_B,ierr)
+            ! call MatDestroy(arr_B,ierr)
             call DMDestroy(da,ierr)
         endif
 
@@ -753,8 +753,6 @@ contains
         endif
 
 
-        ! call KSPSetComputeRHS(ksp,ComputeRHS,0,ierr)
-
         call init_module_vars(domain)
 
         one = 1
@@ -762,6 +760,7 @@ contains
         call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
                           xl, PETSC_NULL_INTEGER_ARRAY ,yl,da,ierr)
+
         call DMSetMatType(da,MATIS,ierr)
         call DMSetFromOptions(da,ierr)
         call DMSetUp(da,ierr)
@@ -772,11 +771,11 @@ contains
         call DMCreateLocalVector(da,localX,ierr)
         call DMCreateGlobalVector(da,b,ierr)
         call DMCreateMatrix(da,arr_A,ierr)
-        call DMCreateMatrix(da,arr_B,ierr)
+        ! call DMCreateMatrix(da,arr_B,ierr)
 
         call DMGetLocalToGlobalMapping(da,isltog,ierr)
         call MatSetLocalToGlobalMapping(arr_A,isltog,isltog,ierr)
-        call MatSetLocalToGlobalMapping(arr_B,isltog,isltog,ierr)
+        ! call MatSetLocalToGlobalMapping(arr_B,isltog,isltog,ierr)
 
     end subroutine
 

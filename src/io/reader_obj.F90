@@ -81,10 +81,10 @@ contains
         real, allocatable, intent(inout) :: buffer(:,:,:,:)
         type(MPI_Comm), intent(in)              :: par_comms
 
-        real, allocatable :: data3d(:,:,:,:)
+        real, allocatable :: data3d_t(:,:,:,:), data3d(:,:,:)
         type(variable_t)  :: var
         character(len=kMAX_NAME_LENGTH) :: name
-        integer :: nx, ny, nz, err, varid, n, start_3d(4), cnt_3d(4), start_2d(3), cnt_2d(3)
+        integer :: nx, ny, nz, err, varid, n, ndims, start_3d_t(4), cnt_3d_t(4), start_2d_t(3), cnt_2d_t(3), start_3d(3), cnt_3d(3), start_2d(2), cnt_2d(2)
 
         if (allocated(buffer)) deallocate(buffer)
         allocate(buffer(this%n_vars,this%its:this%ite,this%kts:this%kte,this%jts:this%jte))
@@ -97,10 +97,15 @@ contains
         
 
         ! setup start/count arrays accordingly
-        start_3d = (/ this%its,this%jts,this%kts,this%curstep /)
-        start_2d = (/ this%its,this%jts,this%curstep /)
-        cnt_3d = (/ (this%ite-this%its+1),(this%jte-this%jts+1),(this%kte-this%kts+1),1 /)
-        cnt_2d = (/ (this%ite-this%its+1),(this%jte-this%jts+1),1 /)
+        start_3d_t = (/ this%its,this%jts,this%kts,this%curstep /)
+        start_2d_t = (/ this%its,this%jts,this%curstep /)
+        start_3d = (/ this%its,this%jts,this%kts /)
+        start_2d = (/ this%its,this%jts /)
+
+        cnt_3d_t = (/ (this%ite-this%its+1),(this%jte-this%jts+1),(this%kte-this%kts+1),1 /)
+        cnt_2d_t = (/ (this%ite-this%its+1),(this%jte-this%jts+1),1 /)
+        cnt_3d = (/ (this%ite-this%its+1),(this%jte-this%jts+1),(this%kte-this%kts+1) /)
+        cnt_2d = (/ (this%ite-this%its+1),(this%jte-this%jts+1) /)
 
         associate(list => this%variables)
             
@@ -112,17 +117,32 @@ contains
             var = list%next(name)
             if (var%var_id < 0) call check_ncdf( nf90_inq_varid(this%ncfile_id, name, var%var_id), " Getting var ID for "//trim(name))
             call check_ncdf( nf90_var_par_access(this%ncfile_id, var%var_id, nf90_collective))
+
+            !get number of dimensions
+            call check_ncdf( nf90_inquire_variable(this%ncfile_id, var%var_id, ndims = ndims), " Getting dim length for "//trim(name))
+
             if (var%three_d) then
                 nx = size(var%data_3d, 1)
                 ny = size(var%data_3d, 3)
                 nz = size(var%data_3d, 2)
-                if (allocated(data3d)) deallocate(data3d)
-                allocate(data3d(nx,ny,nz,1))
-                call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, data3d, start=start_3d, count=cnt_3d), " Getting 3D var "//trim(name))
 
-                buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
+                if (ndims > 3) then
+                    if (allocated(data3d_t)) deallocate(data3d_t)
+                    allocate(data3d_t(nx,ny,nz,1))
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, data3d_t, start=start_3d_t, count=cnt_3d_t), " Getting 3D var "//trim(name))
+                    buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d_t(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
+                else
+                    if (allocated(data3d)) deallocate(data3d)
+                    allocate(data3d(nx,ny,nz))
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, data3d, start=start_3d, count=cnt_3d), " Getting 3D var "//trim(name))
+                    buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d(:,:,:), shape=[nx,nz,ny], order=[1,3,2])
+                endif
             else if (var%two_d) then
-                call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, buffer(n,:,1,:), start=start_2d, count=cnt_2d), " Getting 2D "//trim(name))
+                if (ndims > 2) then
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, buffer(n,:,1,:), start=start_2d_t, count=cnt_2d_t), " Getting 2D "//trim(name))
+                else
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, buffer(n,:,1,:), start=start_2d, count=cnt_2d), " Getting 2D "//trim(name))
+                endif
             endif
 
             n = n+1

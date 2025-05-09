@@ -90,8 +90,10 @@ contains
             gain = 1440.0Q0
         else if ((units(1:3)=="sec").or.(units(1:3)=="Sec")) then
             gain = 86400.0Q0
+        else if ((units(1:11)=="nanoseconds").or.(units(1:11)=="Nanoseconds")) then
+            gain = 86400000000000.0Q0
         else
-            if (STD_OUT_PE) write(*,*) trim(units)
+            if (STD_OUT_PE) write(*,*) 'unknown units for input time: ', trim(units)
             stop "Error: unknown units"
         endif
 

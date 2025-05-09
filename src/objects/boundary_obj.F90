@@ -100,17 +100,54 @@ contains
         real, dimension(:,:),            intent(in)     :: domain_lon
 
         type(variable_t)  :: test_variable
-        real, allocatable :: temp_z(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:)
-
-        integer :: i, nx, ny, nz, PE_RANK_GLOBAL
+        real, allocatable :: temp_z(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:), lat_1d(:), lon_1d(:)
+        integer, allocatable :: lat_dims(:), lon_dims(:)
+        real :: neg_z
+        integer :: i, nx, ny, nz, PE_RANK_GLOBAL, x_len, y_len
 
         ! figure out while file and timestep contains the requested start_time
         call set_firstfile_firststep(this, start_time, file_list, time_var)
-        ! call read_bc_time(this%current_time, file_list(this%curfile), time_var, this%curstep)
 
-        !  read in latitude and longitude coordinate data
-        call io_read(this%firstfile, lat_var, temp_lat, this%firststep)
-        call io_read(this%firstfile, lon_var, temp_lon, this%firststep)
+        !See if lat and lon are 1D or 2D
+        call io_getdims(this%firstfile, lat_var, lat_dims)
+        call io_getdims(this%firstfile, lon_var, lon_dims)
+
+        if (size(lat_dims) == 1) then
+            call io_read(this%firstfile, lat_var, lat_1d)
+
+            !This will always be the case for 1D or 2D lon
+            x_len = lon_dims(1)
+
+            allocate(temp_lat(1:x_len,1:lat_dims(1)))
+            do i=1,x_len
+                temp_lat(i,:) = lat_1d
+            end do
+        elseif (size(lat_dims) == 2) then
+            call io_read(this%firstfile, lat_var, temp_lat)
+        else
+            write(*,*) 'ERROR: lat dimension on forcing data is not 1D or 2D'
+            stop
+        endif
+
+        if (size(lon_dims) == 1) then
+            call io_read(this%firstfile, lon_var, lon_1d)
+
+            if (size(lat_dims) == 1) then
+                y_len = lat_dims(1)
+            else
+                y_len = lat_dims(2)
+            endif
+
+            allocate(temp_lon(1:lon_dims(1),1:y_len))
+            do i=1,y_len
+                temp_lon(:,i) = lon_1d
+            end do
+        elseif (size(lon_dims) == 2) then
+            call io_read(this%firstfile, lon_var, temp_lon)
+        else
+            write(*,*) 'ERROR: lon dimension on forcing data is not 1D or 2D'
+            stop
+        endif
 
         call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
 
@@ -144,7 +181,7 @@ contains
         ! read in the height coordinate of the input data
         if (.not. options%forcing%compute_z) then
             ! call io_read(file_list(this%curfile), z_var,   temp_z,   this%curstep)
-            call io_read(this%firstfile, z_var,   temp_z,   1)
+            call io_read(this%firstfile, z_var,   temp_z,   this%firststep)
             nx = size(temp_z,1)
             ny = size(temp_z,2)
             nz = size(temp_z,3)
@@ -155,6 +192,17 @@ contains
             temp_z_trans(1:nx,1:nz,1:ny) = reshape(temp_z, shape=[nx,nz,ny], order=[1,3,2])
             this%z = temp_z_trans(this%its:this%ite,1:nz,this%jts:this%jte)
             this%z_is_set = .True.
+
+            if (options%forcing%z_is_geopotential) then
+                this%z = this%z / gravity
+                !neg_z = minval(temp_z)/ gravity
+                ! if (neg_z < 0.0) this%z = this%z - neg_z
+            endif
+
+            if (options%forcing%z_is_on_interface) then
+                call interpolate_in_z(this%z)
+            endif
+
         else
             call io_read(this%firstfile, p_var,   temp_z,   this%firststep)
             nx = size(temp_z,1)
@@ -430,6 +478,7 @@ contains
         type(variable_t)        :: input_z, var
         type(interpolable_type) :: input_geo
         real, allocatable :: temp_3d(:,:,:)
+        real :: neg_z
         character(len=kMAX_NAME_LENGTH) :: name
 
 
@@ -439,6 +488,8 @@ contains
 
         if (options%forcing%z_is_geopotential) then
             input_z%data_3d = input_z%data_3d / gravity
+            !neg_z = minval(input_z%data_3d)
+            ! if (neg_z < 0.0) input_z%data_3d = input_z%data_3d - neg_z
             call list%add_var(options%forcing%zvar, input_z)
         endif
 
@@ -473,22 +524,18 @@ contains
     end subroutine
 
 
-    module subroutine update_computed_vars(this, options, update)
+    module subroutine update_computed_vars(this, options)
         implicit none
         class(boundary_t),   intent(inout)   :: this
         type(options_t),     intent(in)      :: options
-        logical,             intent(in),    optional :: update
 
         integer           :: err
         type(variable_t)  :: var, pvar, tvar
-        logical :: update_internal
 
         integer :: nx,ny,nz
         real, allocatable :: temp_z(:,:,:)
+        real :: neg_z
         character(len=kMAX_NAME_LENGTH) :: name
-
-        update_internal = .False.
-        if (present(update)) update_internal = update
 
         associate(list => this%variables)
 
@@ -498,17 +545,6 @@ contains
 
         if (options%forcing%qv_is_spec_humidity) then
             call compute_mixing_ratio_from_sh(list, options)
-        endif
-
-        ! because z is not updated over time, we don't want to reapply this every time, only in the initialization
-        if (.not. update_internal) then
-            if (options%forcing%z_is_geopotential) then
-                this%z = this%z / gravity
-            endif
-
-            if (options%forcing%z_is_on_interface) then
-                call interpolate_in_z(this%z)
-            endif
         endif
 
         if (options%forcing%t_offset /= 0) then
@@ -712,28 +748,28 @@ contains
         type(var_dict_t),   intent(inout)   :: list
         type(options_t),    intent(in)      :: options
 
-        integer           :: err
+        integer           :: err, hgterr
         type(variable_t)  :: pvar, zvar, tvar, qvar, psvar
 
         if (options%forcing%t_is_potential) stop "Need real air temperature to compute pressure"
 
         qvar = list%get_var(options%forcing%qvvar)
         tvar = list%get_var(options%forcing%tvar)
-        zvar = list%get_var(options%forcing%hgtvar)
         pvar = list%get_var(options%forcing%pvar)
 
-        psvar = list%get_var(options%forcing%pslvar, err)
+        psvar = list%get_var(options%forcing%psvar, err)
+        zvar = list%get_var(options%forcing%hgtvar, hgterr)
 
-        if (err == 0) then
+        if ((err + hgterr) == 0) then
             call compute_3d_p(pvar%data_3d, psvar%data_2d, this%z, tvar%data_3d, qvar%data_3d, zvar%data_2d)
-
         else
-            psvar = list%get_var(options%forcing%psvar, err)
+            psvar = list%get_var(options%forcing%pslvar, err)
 
             if (err == 0) then
                 call compute_3d_p(pvar%data_3d, psvar%data_2d, this%z, tvar%data_3d, qvar%data_3d)
             else
                 write(*,*) "ERROR reading surface pressure or sea level pressure, variables not found"
+                write(*,*) "ERROR or forcing height not given if sea level pressure is given"
                 error stop
             endif
         endif

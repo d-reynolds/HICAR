@@ -100,11 +100,10 @@ module boundary_interface
         type(options_t),                 intent(in)     :: parent_options
     end subroutine
     
-    module subroutine update_computed_vars(this, options, update)
+    module subroutine update_computed_vars(this, options)
         implicit none
         class(boundary_t),   intent(inout)   :: this
         type(options_t),     intent(in)      :: options
-        logical,             intent(in),    optional :: update
     end subroutine
     
     module subroutine interpolate_original_levels(this, options)

@@ -271,7 +271,7 @@ contains
         integer :: p, dim_indx, dim_len, type
         character(len=kMAX_STRING_LENGTH) :: dim_name
         character(len=1), allocatable :: dimensions(:), t_dimensions(:), dimensions_tmp(:), t_dimensions_tmp(:)
-        logical :: no_check_flag
+        logical :: no_check_flag, is_latlon
 
         if (present(no_check)) then
             no_check_flag = no_check
@@ -289,8 +289,32 @@ contains
             call io_getdims(options%boundary_files(1), var_val, var_dims)
             ! test if the number of dimensions matches the number of dimensions required
             if (.not.(size(dimensions) == size(var_dims))) then
-                if (STD_OUT_PE) write(*,*) "Error: ", trim(name), " has the wrong number of dimensions, should be: ", size(dimensions)
-                error stop
+
+                is_latlon =  ( (index(name,'lat') > 0) .or. (index(name,'lon') > 0))
+
+                if ( (size(dimensions)-1) == size(var_dims) .and. (dimensions(1) == 'T' .or. is_latlon)) then
+                    allocate(dimensions_tmp,source=dimensions)
+                    deallocate(dimensions)
+                    allocate(dimensions(size(dimensions_tmp)-1))
+
+                    if (.not.is_latlon) then
+                        if (STD_OUT_PE) write(*,*) "Forcing variable ", trim(name), " possibly missing the time dimension."
+                        if (STD_OUT_PE) write(*,*) "Proceeding, assuming that the forcing data does not contain a time dimension."
+                        dimensions = dimensions_tmp(2:size(dimensions_tmp))
+                    else
+                        if (STD_OUT_PE) write(*,*) "Forcing variable ", trim(name), " is 1D."
+
+                        if (index(name,'lat') > 0) then
+                            dimensions = dimensions_tmp(1:size(dimensions_tmp)-1)
+                        else
+                            dimensions = dimensions_tmp(2:size(dimensions_tmp))
+                        endif
+                    endif
+                    deallocate(dimensions_tmp)
+                else
+                    if (STD_OUT_PE) write(*,*) "Error: ", trim(name), " has the wrong number of dimensions, should be: ", size(dimensions)
+                    error stop
+                endif
             endif
 
             ! pointless if this is hgt_hi
@@ -1887,10 +1911,10 @@ contains
                 group = "Forcing"
                 type = 1
             case ("zvar")
-                description = "Name of the vertical height variable in forcing file (REQUIRED)"
+                description = "Name of the vertical height variable in forcing file"
                 units = "m"
-                allocate(dimensions(3))
-                dimensions = ["Z", "Y", "X"]
+                allocate(dimensions(4))
+                dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
                 type = 1
             case ("shvar")

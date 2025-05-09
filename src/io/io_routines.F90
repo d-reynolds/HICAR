@@ -244,7 +244,7 @@ contains
         ! Read the data_in. skip the slowest varying indices if there are more than 6 dimensions (typically this will be time)
         ! and good luck if you have more than 6 dimensions...
         if (size(diminfo)>6) then
-            diminfo(8:size(diminfo))=1 ! set count for extra dims to 1
+            diminfo(7:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
                                     dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
                                     [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
@@ -310,7 +310,7 @@ contains
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
         if (size(diminfo)>5) then
-            diminfo(7:size(diminfo))=1 ! set count for extra dims to 1
+            diminfo(6:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
                                     dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
                                     [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
@@ -380,7 +380,7 @@ contains
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
         if (size(diminfo)>4) then
-            diminfo(6:size(diminfo))=1 ! set count for extra dims to 1
+            diminfo(5:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
                                     dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
                                     [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
@@ -449,7 +449,7 @@ contains
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
         if (size(diminfo)>3) then
-            diminfo(5:size(diminfo))=1 ! set count for extra dims to 1
+            diminfo(4:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
                                     dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
                                     [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
@@ -519,7 +519,7 @@ contains
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
         if (size(diminfo)>2) then
-            diminfo(4:size(diminfo))=1 ! set count for extra dims to 1
+            diminfo(3:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
                                     dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
                                     [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
@@ -576,7 +576,7 @@ contains
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
         if (size(diminfo)>2) then
-            diminfo(4:size(diminfo))=1 ! set count for extra dims to 1
+            diminfo(3:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
                                     dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
                                     [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
@@ -642,7 +642,7 @@ contains
 
         ! Read the data_in. skip the slowest varying indices if there are more than 3 dimensions (typically this will be time)
         if (size(diminfo)>2) then
-            diminfo(4:size(diminfo))=1 ! set count for extra dims to 1
+            diminfo(3:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
                                     dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
                                     [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
@@ -704,7 +704,7 @@ contains
 
         ! Read the data_in. skip the slowest varying indices if there are more than 1 dimensions (typically this will be time)
         if (size(diminfo)>1) then
-            diminfo(3:size(diminfo))=1 ! set count for extra dims to 1
+            diminfo(2:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
                                     dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
                                     [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop
@@ -857,7 +857,7 @@ contains
         call io_getdims(filename,varname,diminfo)
 
         if (allocated(data_in)) deallocate(data_in)
-        if (present(curstep)) then
+        if (present(curstep) .or. size(diminfo)<1) then
             allocate(data_in(1))
         else
             allocate(data_in(diminfo(1)))
@@ -872,7 +872,7 @@ contains
 
         ! Read the data_in. skip the slowest varying indices if there are more than 1 dimensions (typically this will be time)
         if (size(diminfo)>1) then
-            diminfo(3:size(diminfo))=1 ! set count for extra dims to 1
+            diminfo(2:size(diminfo))=1 ! set count for extra dims to 1
             call check(nf90_get_var(ncid, varid, data_in,&
                                     dimstart(1:size(diminfo)), &               ! start  = 1 or extradim
                                     [ (diminfo(i), i=1,size(diminfo)) ],&    ! count=n or 1 created through an implied do loop

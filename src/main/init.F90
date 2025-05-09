@@ -194,12 +194,13 @@ contains
         do i = 1, nests
             call options(i)%init(namelist_file, i, info_only=info_only, gen_nml=gen_nml)
             call collect_physics_requests(options(i))
-            call options(i)%check()
 
             if (options(i)%general%parent_nest > 0) then
                 ! Setup options%forcing to expect synthetic forcing from parent domain
                 call options(i)%setup_synthetic_forcing()
             endif
+            call options(i)%check()
+
         enddo
 
         call inter_nest_options_check(options)
@@ -232,6 +233,8 @@ contains
             call boundary%init(options(nest_indx), domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d, domain%vars_2d(domain%var_indx(kVARS%longitude)%v)%data_2d, &
                                 parent_options=options(options(nest_indx)%general%parent_nest))
         endif
+        if (STD_OUT_PE) write(*,*) "Initializing IO client"
+        if (STD_OUT_PE) flush(output_unit)    
 
         call ioclient%init(domain, boundary, options, nest_indx)
 
@@ -250,7 +253,7 @@ contains
 
         if (STD_OUT_PE) write(*,*) "Populating boundary object"
         if (STD_OUT_PE) flush(output_unit)
-        call boundary%update_computed_vars(options, update=options%forcing%time_varying_z)
+        call boundary%update_computed_vars(options)
 
         if (STD_OUT_PE) write(*,*) "Initializing forcing interpolation"
         call domain%get_initial_conditions(boundary, options)    
