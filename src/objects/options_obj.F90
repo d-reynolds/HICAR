@@ -447,19 +447,6 @@ contains
             call check_file_exists('mp_support/ishmael_gamma_tab.nc', message='At least one of the ISHMAEL supporting files does not exist. These files should be in a folder "mp_support" placed in the same directory as the namelist.')
         endif
 
-        ! check that input variables are specified when relevant physics options are chosen
-        if (this%physics%landsurface > kLSM_BASIC) then
-            call require_var(this%forcing%latvar, 'latvar', 'This variable is required when running with this LSM option')
-            !call require_var(this%forcing%sst_var, 'sst_var')
-            !call require_var(this%forcing%time_var, 'time_var')
-        endif
-
-        if (this%physics%snowmodel == kSM_FSM) then
-            !call require_var(this%forcing%qcvar, 'qcvar', 'This variable is required when running with the FSM snowmodel option')
-            !call require_var(this%forcing%qngvar, 'qngvar')
-            !call require_var(this%forcing%qnsvar, 'qnsvar')
-        endif
-
         if (trim(this%lsm%LU_Categories)=="USGS") then
             if((this%physics%watersurface==kWATER_LAKE) .AND. (STD_OUT_PE)) then
                 write(*,*) "  WARNING: Lake model selected (water=2), but USGS LU-categories has no lake category"
