@@ -415,22 +415,53 @@ ADD_CUSTOM_TARGET( distclean make clean
 				   COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/CMakeFiles
 				   COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/cmake_install.cmake ${CMAKE_BINARY_DIR}/install_manifest.txt ${CMAKE_BINARY_DIR}/Makefile ${CMAKE_BINARY_DIR}/CMakeCache.txt
 					)
-
 # Add a custom target for running tests with MPI
-add_custom_target(check
-  COMMAND ${CMAKE_COMMAND} -E echo "Running code integration testes with MPI..."
-  COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 ${CMAKE_BINARY_DIR}/tests/${PROJECT_NAME}-tester
-  DEPENDS ${PROJECT_NAME}-tester 
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-  COMMENT "Running integration test suite with 4 MPI processes"
-  VERBATIM
-)
 
-add_custom_target(test_cases
-  COMMAND ${CMAKE_COMMAND} -E echo "Running test cases..."
-  COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_case_runner.sh ${PROJECT_SOURCE_DIR} Standard,Standard_restart
-  DEPENDS ${PROJECT_NAME}-tester 
-  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
-  COMMENT "Running test case suite"
-  VERBATIM
-)
+separate_arguments(SRUN_FLAGS_LIST UNIX_COMMAND "${SRUN_FLAGS}")
+SET(SRUN_FLAGS_LIST_TEST_CASE "-SRUN_FLAGS='${SRUN_FLAGS}'")
+
+#check if the string "srun" appears in the MPIEXEC_EXECUTABLE variable
+if (MPIEXEC_EXECUTABLE MATCHES "srun")
+    #see if the variable "account" is not set
+	if (NOT DEFINED SRUN_FLAGS)
+		message(ERROR "No account specified for srun, please pass your SLURM account name to cmake using -SRUN_FLAGS=<SRUN_FLAGS>")
+	endif()
+	
+	add_custom_target(check
+	COMMAND ${CMAKE_COMMAND} -E echo "Running code integration testes with srun..."	
+	COMMAND "${MPIEXEC_EXECUTABLE}" ${MPIEXEC_NUMPROC_FLAG} 4 ${SRUN_FLAGS_LIST} ${CMAKE_BINARY_DIR}/tests/${PROJECT_NAME}-tester
+	DEPENDS ${PROJECT_NAME}-tester 
+	WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+	COMMENT "Running integration test suite with 4 MPI processes"
+	VERBATIM
+	)
+
+	add_custom_target(test_cases
+	COMMAND ${CMAKE_COMMAND} -E echo "Running test cases..."
+	COMMAND "${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_case_runner.sh" ${PROJECT_SOURCE_DIR} "Standard,Standard_nested" ${SRUN_FLAGS_LIST_TEST_CASE} 
+	DEPENDS ${PROJECT_NAME}-tester 
+	WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
+	COMMENT "Running test case suite"
+	VERBATIM
+	)  
+
+else()
+	add_custom_target(check
+	COMMAND ${CMAKE_COMMAND} -E echo "Running code integration testes with MPI..."
+	COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 ${CMAKE_BINARY_DIR}/tests/${PROJECT_NAME}-tester
+	DEPENDS ${PROJECT_NAME}-tester 
+	WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+	COMMENT "Running integration test suite with 4 MPI processes"
+	VERBATIM
+	)
+
+	add_custom_target(test_cases
+	COMMAND ${CMAKE_COMMAND} -E echo "Running test cases..."
+	COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_case_runner.sh ${PROJECT_SOURCE_DIR} Standard,Standard_restart
+	DEPENDS ${PROJECT_NAME}-tester 
+	WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
+	COMMENT "Running test case suite"
+	VERBATIM
+	)  
+
+endif()
