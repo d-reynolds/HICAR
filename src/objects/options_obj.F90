@@ -739,7 +739,7 @@ contains
         logical, intent(in), optional  :: read_nml, info_only, gen_nml
 
         integer :: name_unit, rc, i, j, nfiles
-        logical :: compute_p, print_info, read_namelist, gennml, no_check
+        logical :: compute_p, print_info, read_namelist, gennml
         logical, dimension(kMAX_NESTS) :: limit_rh, z_is_geopotential, z_is_on_interface,&
                    time_varying_z, t_is_potential, qv_is_spec_humidity, &
                    qv_is_relative_humidity, relax_filters
@@ -764,6 +764,10 @@ contains
 
         read_namelist = .True.
         if (present(read_nml)) read_namelist = read_nml
+
+        ! check if we should read the namelist, if we
+        ! are not gonna use the forcing options directly, dont read it
+        if (read_namelist) read_namelist = (options%general%parent_nest > 0)
 
         print_info = .False.
         if (present(info_only)) print_info = info_only
@@ -859,100 +863,95 @@ contains
 
         if (.not.(read_namelist)) return
         
-        ! See if we should check for these variables in the boundary conditions files
-        no_check = (options%general%parent_nest > 0)
+        call require_var(lonvar, "Longitude")
+        call require_var(latvar, "Latitude")
+        call require_var(zvar, "Verticle Level Height")
+        call require_var(uvar, "U winds")
+        call require_var(vvar, "V winds")
+        call require_var(tvar, "Temperature")
+        call require_var(qvvar, "Water Vapor Mixing Ratio")
+        call require_var(time_var, "Time")
 
-        if (.not.(no_check)) then
-            call require_var(lonvar, "Longitude")
-            call require_var(latvar, "Latitude")
-            call require_var(zvar, "Verticle Level Height")
-            call require_var(uvar, "U winds")
-            call require_var(vvar, "V winds")
-            call require_var(tvar, "Temperature")
-            call require_var(qvvar, "Water Vapor Mixing Ratio")
-            call require_var(time_var, "Time")
-
-            if (pvar == "") then
-                if (pslvar == "") then
-                    call require_var(psvar, "Surface Pressure")
-                    call require_var(hgtvar, "Surface Height")
-                else
-                    call require_var(pslvar, "Sea Level Pressure")
-                endif
+        if (pvar == "") then
+            if (pslvar == "") then
+                call require_var(psvar, "Surface Pressure")
+                call require_var(hgtvar, "Surface Height")
             else
-                call require_var(pvar, "Pressure")
+                call require_var(pslvar, "Sea Level Pressure")
             endif
-
-            if (zvar == "") then
-                if (pslvar == "") then
-                    call require_var(psvar, "Surface Pressure")
-                    call require_var(hgtvar, "Terrain Height")
-                else
-                    call require_var(pslvar, "Sea Level Pressure")
-                endif
-            else
-                call require_var(zvar, "Verticle Level Height")
-            endif
-
-    
-            call check_file_exists(forcing_file_list, message="Forcing file list does not exist.")
-    
-            nfiles = read_forcing_file_names(forcing_file_list, boundary_files)
-
-            if (nfiles==0) then
-                stop "No boundary conditions files specified."
-            endif
-
-            allocate(options%forcing%boundary_files(nfiles))
-            options%forcing%boundary_files(1:nfiles) = boundary_files(1:nfiles)
-            deallocate(boundary_files)
+        else
+            call require_var(pvar, "Pressure")
         endif
+
+        if (zvar == "") then
+            if (pslvar == "") then
+                call require_var(psvar, "Surface Pressure")
+                call require_var(hgtvar, "Terrain Height")
+            else
+                call require_var(pslvar, "Sea Level Pressure")
+            endif
+        else
+            call require_var(zvar, "Verticle Level Height")
+        endif
+
+
+        call check_file_exists(forcing_file_list, message="Forcing file list does not exist.")
+
+        nfiles = read_forcing_file_names(forcing_file_list, boundary_files)
+
+        if (nfiles==0) then
+            stop "No boundary conditions files specified."
+        endif
+
+        allocate(options%forcing%boundary_files(nfiles))
+        options%forcing%boundary_files(1:nfiles) = boundary_files(1:nfiles)
+        deallocate(boundary_files)
 
         ! NOTE: temperature must be the first of the forcing variables read
         options%forcing%vars_to_read(:) = ""
         options%forcing%dim_list(:) = 0
         i = 1
-        call set_nml_var(options%forcing%tvar, tvar, 'tvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%latvar, latvar, 'latvar', options%forcing, no_check=no_check)
-        call set_nml_var(options%forcing%lonvar, lonvar, 'lonvar', options%forcing, no_check=no_check)
-        call set_nml_var(options%forcing%hgtvar, hgtvar, 'hgtvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%uvar, uvar, 'uvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%ulat, ulat, 'ulat', options%forcing, no_check=no_check)
-        call set_nml_var(options%forcing%ulon, ulon, 'ulon', options%forcing, no_check=no_check)
-        call set_nml_var(options%forcing%vvar, vvar, 'vvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%vlat, vlat, 'vlat', options%forcing, no_check=no_check)
-        call set_nml_var(options%forcing%vlon, vlon, 'vlon', options%forcing, no_check=no_check)
-        call set_nml_var(options%forcing%wvar, wvar, 'wvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%pslvar, pslvar, 'pslvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%psvar, psvar, 'psvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%qvvar, qvvar, 'qvvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%qcvar, qcvar, 'qcvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%qivar, qivar, 'qivar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%qrvar, qrvar, 'qrvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%qgvar, qgvar, 'qgvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%qsvar, qsvar, 'qsvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%qncvar, qncvar, 'qncvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%qnivar, qnivar, 'qnivar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%qnrvar, qnrvar, 'qnrvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%qngvar, qngvar, 'qngvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%qnsvar, qnsvar, 'qnsvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%i2mvar, i2mvar, 'i2mvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%i3mvar, i3mvar, 'i3mvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%i2nvar, i2nvar, 'i2nvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%i3nvar, i3nvar, 'i3nvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%i1avar, i1avar, 'i1avar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%i2avar, i2avar, 'i2avar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%i3avar, i3avar, 'i3avar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%i1cvar, i1cvar, 'i1cvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%i2cvar, i2cvar, 'i2cvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%i3cvar, i3cvar, 'i3cvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%shvar, shvar, 'shvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%lhvar, lhvar, 'lhvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%swdown_var, swdown_var, 'swdown_var', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%lwdown_var, lwdown_var, 'lwdown_var', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%sst_var, sst_var, 'sst_var', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%pblhvar, pblhvar, 'pblhvar', options%forcing, i, no_check=no_check)
-        call set_nml_var(options%forcing%time_var, time_var, 'time_var', options%forcing, no_check=no_check)
+        call set_nml_var(options%forcing%tvar, tvar, 'tvar', options%forcing, i)
+        call set_nml_var(options%forcing%latvar, latvar, 'latvar', options%forcing)
+        call set_nml_var(options%forcing%lonvar, lonvar, 'lonvar', options%forcing)
+        call set_nml_var(options%forcing%hgtvar, hgtvar, 'hgtvar', options%forcing, i)
+        call set_nml_var(options%forcing%uvar, uvar, 'uvar', options%forcing, i)
+        call set_nml_var(options%forcing%ulat, ulat, 'ulat', options%forcing)
+        call set_nml_var(options%forcing%ulon, ulon, 'ulon', options%forcing)
+        call set_nml_var(options%forcing%vvar, vvar, 'vvar', options%forcing, i)
+        call set_nml_var(options%forcing%vlat, vlat, 'vlat', options%forcing)
+        call set_nml_var(options%forcing%vlon, vlon, 'vlon', options%forcing)
+        call set_nml_var(options%forcing%wvar, wvar, 'wvar', options%forcing, i)
+        call set_nml_var(options%forcing%pslvar, pslvar, 'pslvar', options%forcing, i)
+        call set_nml_var(options%forcing%psvar, psvar, 'psvar', options%forcing, i)
+        call set_nml_var(options%forcing%qvvar, qvvar, 'qvvar', options%forcing, i)
+        call set_nml_var(options%forcing%qcvar, qcvar, 'qcvar', options%forcing, i)
+        call set_nml_var(options%forcing%qivar, qivar, 'qivar', options%forcing, i)
+        call set_nml_var(options%forcing%qrvar, qrvar, 'qrvar', options%forcing, i)
+        call set_nml_var(options%forcing%qgvar, qgvar, 'qgvar', options%forcing, i)
+        call set_nml_var(options%forcing%qsvar, qsvar, 'qsvar', options%forcing, i)
+        call set_nml_var(options%forcing%qncvar, qncvar, 'qncvar', options%forcing, i)
+        call set_nml_var(options%forcing%qnivar, qnivar, 'qnivar', options%forcing, i)
+        call set_nml_var(options%forcing%qnrvar, qnrvar, 'qnrvar', options%forcing, i)
+        call set_nml_var(options%forcing%qngvar, qngvar, 'qngvar', options%forcing, i)
+        call set_nml_var(options%forcing%qnsvar, qnsvar, 'qnsvar', options%forcing, i)
+        call set_nml_var(options%forcing%i2mvar, i2mvar, 'i2mvar', options%forcing, i)
+        call set_nml_var(options%forcing%i3mvar, i3mvar, 'i3mvar', options%forcing, i)
+        call set_nml_var(options%forcing%i2nvar, i2nvar, 'i2nvar', options%forcing, i)
+        call set_nml_var(options%forcing%i3nvar, i3nvar, 'i3nvar', options%forcing, i)
+        call set_nml_var(options%forcing%i1avar, i1avar, 'i1avar', options%forcing, i)
+        call set_nml_var(options%forcing%i2avar, i2avar, 'i2avar', options%forcing, i)
+        call set_nml_var(options%forcing%i3avar, i3avar, 'i3avar', options%forcing, i)
+        call set_nml_var(options%forcing%i1cvar, i1cvar, 'i1cvar', options%forcing, i)
+        call set_nml_var(options%forcing%i2cvar, i2cvar, 'i2cvar', options%forcing, i)
+        call set_nml_var(options%forcing%i3cvar, i3cvar, 'i3cvar', options%forcing, i)
+        call set_nml_var(options%forcing%shvar, shvar, 'shvar', options%forcing, i)
+        call set_nml_var(options%forcing%lhvar, lhvar, 'lhvar', options%forcing, i)
+        call set_nml_var(options%forcing%swdown_var, swdown_var, 'swdown_var', options%forcing, i)
+        call set_nml_var(options%forcing%lwdown_var, lwdown_var, 'lwdown_var', options%forcing, i)
+        call set_nml_var(options%forcing%sst_var, sst_var, 'sst_var', options%forcing, i)
+        call set_nml_var(options%forcing%pblhvar, pblhvar, 'pblhvar', options%forcing, i)
+        call set_nml_var(options%forcing%time_var, time_var, 'time_var', options%forcing)
 
         compute_p = .False.
         if ((pvar=="") .and. ((pslvar/="") .or. (psvar/=""))) compute_p = .True.
@@ -977,7 +976,7 @@ contains
             zvar = "height_computed"
             options%forcing%zvar        = zvar; options%forcing%vars_to_read(i) = zvar;      options%forcing%dim_list(i) = -3;    i = i + 1
         else
-            call set_nml_var(options%forcing%zvar, zvar, 'zvar', options%forcing, i, no_check=no_check)
+            call set_nml_var(options%forcing%zvar, zvar, 'zvar', options%forcing, i)
         endif
 
 
@@ -985,7 +984,7 @@ contains
             pvar = "air_pressure_computed"
             options%forcing%pvar        = pvar  ; options%forcing%vars_to_read(i) = pvar;       options%forcing%dim_list(i) = -3;   i = i + 1
         else
-            call set_nml_var(options%forcing%pvar, pvar, 'pvar', options%forcing, i, no_check=no_check)
+            call set_nml_var(options%forcing%pvar, pvar, 'pvar', options%forcing, i)
         endif
 
 
