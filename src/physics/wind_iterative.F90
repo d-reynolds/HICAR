@@ -138,7 +138,7 @@ contains
         logical,     intent(in)                :: adv_den
 
 
-        real, allocatable, dimension(:,:,:)    :: u_dlambdz, v_dlambdz, dlambdz, u_temp, v_temp, lambda_too, rho, rho_u, rho_v
+        real, allocatable, dimension(:,:,:)    :: u_dlambdz, v_dlambdz, dlambdz, u_temp, v_temp, rho, rho_u, rho_v
         integer k, i_start, i_end, j_start, j_end 
 
         i_start = i_s

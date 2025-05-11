@@ -113,9 +113,9 @@ program icar
     if (STD_OUT_PE) write(*,'(A)')   "Initialization complete, beginning physics integration"
     if (STD_OUT_PE) write(*,'(A)')   "------------------------------------------------------"
 
-    call component_loop(components(1:n_nests), options(1:n_nests), boundary(1:n_nests), ioclient(1:n_nests))
+    call component_loop(components, options, boundary, ioclient)
 
-    call component_program_end(components(1:n_nests), options(1:n_nests))
+    call component_program_end(components, options)
 
     CALL MPI_Finalize()
 
