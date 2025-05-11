@@ -13,7 +13,7 @@ module flow_events
     use time_object, only: Time_type
     use iso_fortran_env
     use mpi_f08
-    use wind_iterative_old, only: finalize_petsc
+    use wind_iterative, only: finalize_petsc
 
     implicit none
     private
