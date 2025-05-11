@@ -11,6 +11,7 @@ module wind
 
     use linear_theory_winds, only : linear_perturb, setup_linwinds
     use wind_iterative,      only : calc_iter_winds, init_iter_winds
+    use wind_iterative_old,      only : calc_iter_winds_old, init_iter_winds_old
 
     !use mod_blocking,        only : update_froude_number, initialize_blocking
     use variable_interface,       only : variable_t
@@ -476,7 +477,7 @@ contains
                                 domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,domain%dx, &
                                 domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options,horz_only=.False.)
 
-                call calc_iter_winds(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
+                call calc_iter_winds_old(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
 
                 ! -- Do this all a second time to minimize discretization artifacts
                 call calc_idealized_wgrid(domain)
@@ -485,7 +486,7 @@ contains
                         domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,domain%dx, &
                         domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options,horz_only=.False.)
 
-                call calc_iter_winds(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
+                call calc_iter_winds_old(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
             endif
         elseif (options%physics%windtype==kOBRIEN_WINDS) then
             call Obrien_winds(domain, options, update_in=.True.)
@@ -797,7 +798,7 @@ contains
             call setup_linwinds(domain, options, .False., options%adv%advect_density)
         endif
         if (options%physics%windtype==kITERATIVE_WINDS .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
-            call init_iter_winds(domain,options)
+            call init_iter_winds_old(domain,options)
         endif
 
         if (options%wind%thermal) call init_thermal_winds(domain, options)
