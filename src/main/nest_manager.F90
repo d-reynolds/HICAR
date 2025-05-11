@@ -181,7 +181,7 @@ contains
                 ! loop over children
                 do n = 1, num_children
                     ! If we are at or ahead of our child's time, and the child has not ended, then our child needs to be updated
-                    if ( ahead_or_at_child(flow_objs(options%nest_indx),flow_objs(options%general%child_nests(n))) ) then
+                    if ( flow_objs(options%nest_indx)%sim_time >= flow_objs(options%general%child_nests(n))%sim_time - flow_objs(options%nest_indx)%small_time_delta) then
                         if (flow_objs(options%general%child_nests(n))%ended .eqv. .False.) then
                             can_update = .true.
                             return

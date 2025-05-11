@@ -308,7 +308,7 @@ end subroutine component_main_loop
 
 subroutine component_loop(components, options, boundary, ioclient)
     implicit none
-    class(flow_obj_t), intent(inout) :: components(:)
+    class(flow_obj_t), allocatable, intent(inout) :: components(:)
     type(options_t), intent(inout) :: options(:)
     type(boundary_t), intent(inout):: boundary(:)
     type(ioclient_t), intent(inout):: ioclient(:)
@@ -350,7 +350,7 @@ end subroutine component_loop
 
 subroutine component_end_of_nest_loop(component,nest_indx)
     implicit none
-    class(flow_obj_t), intent(inout) :: component(:)
+    class(flow_obj_t), allocatable, intent(inout) :: component(:)
     integer, intent(in) :: nest_indx
 
     ! check if the type of component is a domain or an ioserver
@@ -371,7 +371,7 @@ end subroutine component_end_of_nest_loop
 
 subroutine component_program_end(component, options)
     implicit none
-    class(flow_obj_t), intent(inout) :: component(:)
+    class(flow_obj_t), allocatable, intent(inout) :: component(:)
     type(options_t), intent(in) :: options(:)
 
     integer :: i, n_nests

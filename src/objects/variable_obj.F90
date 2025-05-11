@@ -54,7 +54,7 @@ contains
             this%global_dim_len(3) = grid%jde
             this%global_dim_len(4) = grid%n_4d
         endif
-        this%forcing_var = ""
+
         if (present(forcing_var)) this%forcing_var = forcing_var
 
         ! this%force_boundaries = .True.

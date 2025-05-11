@@ -575,7 +575,7 @@ contains
         
         !Following Moussiopoulos, et al. (1988). Bounding low Fr to avoid /0 error and negative Fr
         alpha = 1.0 - 0.5*max(froude**4,0.00001)*(sqrt(1.0+4.0/max(froude**4,0.00001)) - 1.0) 
-        alpha = sqrt(alpha)
+        alpha = sqrt(max(alpha,0.00001))
         alpha = min(max(alpha,alpha_min),alpha_max)
 
         ! Ensure that there are no sharp transitions in alpha at boundary, 
@@ -882,8 +882,8 @@ contains
             
             !Compute wind direction for each cell on mass grid
             do i = ims, ime
-                do j = jms, jme
-                    do k=kms, kme
+                do k=kms, kme
+                    do j = jms, jme
                         winddir(i,k,j) = ATAN(-u_m(i,k,j),-v_m(i,k,j))*rad2deg
                         if(winddir(i,k,j) <= 0.0) winddir(i,k,j) = winddir(i,k,j)+360
                         if(winddir(i,k,j) == 360.0) winddir(i,k,j) = 0.0
@@ -894,8 +894,8 @@ contains
             
             !Build grid of Sx values based on wind direction at that cell
             do i = ims, ime
-                do j = jms, jme
-                    do k=kms, kme
+                do k=kms, kme
+                    do j = jms, jme
                         temp_froude(i,k,j) = domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(i,k,j,dir_indices(i,k,j))
                     enddo
                 end do
@@ -923,9 +923,9 @@ contains
         enddo
 
 
-        do i = ims,ime
-            do j = jms,jme
-                do k = kms,kme-1
+        do i = ims, ime
+            do k=kms, kme-1
+                do j = jms, jme
                     th_bot = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i,kms,j)
                     th_top = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i,Ri_k_max,j)
                     z_bot  = domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i,kms,j)
@@ -939,10 +939,10 @@ contains
 
 
         if (options%wind%alpha_const<0 .and. (options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS)) then
-            do i = ims,ime
-                do j = jms,jme
-                    do k = kms,kme-1
-                
+            do i = ims, ime
+                do k=kms, kme-1
+                    do j = jms, jme
+
                         th_bot = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i,k,j)
                         th_top = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i,k+1,j)
                         z_bot  = domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i,k,j)
@@ -986,7 +986,6 @@ contains
         integer           :: rear_ang, fore_ang, test_ang, rear_ang_diff, fore_ang_diff, ang_diff, k_max, window_rear, window_fore, window_width
         integer :: x, y, azm_index
         integer :: xs,xe, ys,ye, n, np
-        real, allocatable :: temp_terrain(:,:)
         real              :: pt_height, temp_ft, maxFTVal, azm
                 
         temp_ft_array = -100000.0

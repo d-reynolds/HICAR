@@ -332,7 +332,7 @@ elseif(MODE STREQUAL "release")
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h omp -Ofast)
+		target_compile_options(HICAR PUBLIC -h omp -O2)
 		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_cray")
 
 		# set(LINK "-h noomp")

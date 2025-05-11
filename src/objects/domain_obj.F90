@@ -732,7 +732,7 @@ contains
             else
                 call var%initialize(grid, forcing_var=forcing_var)
             endif
-
+            var%forcing_var = forcing_var
             if (present(force_boundaries)) var%force_boundaries = force_boundaries
         else
 
