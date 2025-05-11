@@ -164,7 +164,7 @@ module test_control_flow
         logical :: is_io, is_exec
         integer :: my_rank, num_procs, my_io_rank, my_exec_rank
         integer :: ierr
-        type(flow_obj_t), allocatable :: flow_obj(:)
+        class(flow_obj_t), allocatable :: flow_obj(:)
         type(options_t), allocatable :: options(:)
         type(boundary_t), allocatable :: boundary(:)
         type(ioclient_t), allocatable :: ioclient(:)
@@ -172,7 +172,7 @@ module test_control_flow
 
         n_nests = size(in_options)
 
-        allocate(flow_obj(n_nests))
+        allocate(flow_obj_t::flow_obj(n_nests))
         allocate(options(n_nests))
         allocate(boundary(n_nests))
         allocate(ioclient(n_nests))
@@ -225,7 +225,7 @@ module test_control_flow
 
             call flow_obj(i)%init_flow_obj(options(i), i)
         end do
-        call component_loop(flow_obj(1:n_nests), options(1:n_nests), boundary(1:n_nests), ioclient(1:n_nests))
+        call component_loop(flow_obj, options, boundary, ioclient)
 
         ! Ensure that all processes have really finished the main loop, and sync is completed
         call MPI_Barrier(MPI_COMM_WORLD, ierr)
