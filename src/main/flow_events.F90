@@ -127,6 +127,7 @@ subroutine update_component_nest(component,options,ioclient)
     type(options_t), intent(in) :: options
     type(ioclient_t), intent(inout) :: ioclient
 
+    class(flow_obj_t), allocatable :: child_nest
     integer :: n
     ! check if the type of component is a domain or an ioserver
     select type (component)
@@ -147,7 +148,8 @@ subroutine update_component_nest(component,options,ioclient)
             ! now loop over all child nests
             do n = 1, size(options%general%child_nests)
                 !Test if we can update the child nest
-                if ( can_update_child_nest(component(options%nest_indx),component(options%general%child_nests(n))) ) then
+                child_nest = component(options%general%child_nests(n))
+                if ( (component(options%nest_indx)%sim_time >= child_nest%sim_time - component(options%nest_indx)%small_time_delta .and. .not.(child_nest%ended)) )then
                     ! This call will distribute the model state of the forcing fields to the child nest
                     ! if (STD_OUT_PE_IO) write(*,*) "Distributing forcings to child nest: ",options%general%child_nests(n)
                     call component(options%nest_indx)%distribute_forcing(component(options%general%child_nests(n)), n)
@@ -166,8 +168,9 @@ subroutine update_component_nest(component,options,ioclient)
                 call MPI_Barrier(MPI_COMM_WORLD)
                 do n = 1, size(options%general%child_nests)
                     !Test if we can update the child nest
-                    if ( can_update_child_nest(component(options%nest_indx),component(options%general%child_nests(n))) ) then
-                        ! This call will distribute the model state of the forcing fields to the child nest
+                    child_nest = component(options%general%child_nests(n))
+                    if ( (component(options%nest_indx)%sim_time >= child_nest%sim_time - component(options%nest_indx)%small_time_delta .and. .not.(child_nest%ended)) )then
+                            ! This call will distribute the model state of the forcing fields to the child nest
                         call MPI_Barrier(MPI_COMM_WORLD)
                     endif
                 enddo
