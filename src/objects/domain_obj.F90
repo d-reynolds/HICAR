@@ -378,6 +378,66 @@ contains
                         enddo
                     enddo
                 endif
+
+                if (ims==ids .and. jms==jds) then
+                    do j = jms,jts-1
+                        do k = kms,kme
+                            do i = ims,its-1
+                                temperature(i,k,j) = potential_temperature(its,k,jts) * exner(i,k,j)
+                                if (forcing_update_only) then
+                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jts))) ! kg/m^3
+                                else
+                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jts))) ! kg/m^3
+                                endif
+                            enddo
+                        enddo
+                    enddo
+                endif
+
+                if (ims==ids .and. jme==jde) then
+                    do j = jte+1,jme
+                        do k = kms,kme
+                            do i = ims,its-1
+                                temperature(i,k,j) = potential_temperature(its,k,jte) * exner(i,k,j)
+                                if (forcing_update_only) then
+                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jte))) ! kg/m^3
+                                else
+                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jte))) ! kg/m^3
+                                endif
+                            enddo
+                        enddo
+                    enddo
+                endif
+
+                if (ime==ide .and. jms==jds) then
+                    do j = jms,jts-1
+                        do k = kms,kme
+                            do i = ite+1,ime
+                                temperature(i,k,j) = potential_temperature(ite,k,jts) * exner(i,k,j)
+                                if (forcing_update_only) then
+                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jts))) ! kg/m^3
+                                else
+                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jts))) ! kg/m^3
+                                endif
+                            enddo
+                        enddo
+                    enddo
+                endif
+
+                if (ime==ide .and. jme==jde) then
+                    do j = jte+1,jme
+                        do k = kms,kme
+                            do i = ite+1,ime
+                                temperature(i,k,j) = potential_temperature(ite,k,jte) * exner(i,k,j)
+                                if (forcing_update_only) then
+                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jte))) ! kg/m^3
+                                else
+                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jte))) ! kg/m^3
+                                endif
+                            enddo
+                        enddo
+                    enddo
+                endif
         
                 if (forcing_update_only) return
 
