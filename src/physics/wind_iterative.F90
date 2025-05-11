@@ -114,20 +114,23 @@ contains
         call KSPSetDMActive(ksp(domain%nest_indx),PETSC_FALSE,ierr)
         call KSPSolve(ksp(domain%nest_indx),b,b,ierr)
 
-        call KSPGetIterationNumber(ksp(domain%nest_indx), iteration, ierr)
-        if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iteration,' iterations'
+        call KSPGetConvergedReason(ksp(domain%nest_indx), reason, ierr)
         
-        !Subset global solution to local grid so that we can access ghost-points
-        call DMGlobalToLocal(da,b,INSERT_VALUES,localX,ierr)
+        if (reason > 0) then
+            call KSPGetIterationNumber(ksp(domain%nest_indx), iteration, ierr)
+            if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iteration,' iterations'
+            
+            !Subset global solution to local grid so that we can access ghost-points
+            call DMGlobalToLocal(da,b,INSERT_VALUES,localX,ierr)
 
-        call DMDAVecGetArrayF90(da,localX,lambda, ierr)
+            call DMDAVecGetArrayF90(da,localX,lambda, ierr)
 
-        call calc_updated_winds(domain, lambda, adv_den)
-        call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
-        !Exchange u and v, since the outer points are not updated in above function
-        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
-        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
-
+            call calc_updated_winds(domain, lambda, adv_den)
+            call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
+            !Exchange u and v, since the outer points are not updated in above function
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
+        endif
     end subroutine calc_iter_winds
 
     subroutine calc_updated_winds(domain,lambda,adv_den) !u, v, w, jaco_u,jaco_v,jaco_w,u_dzdx,v_dzdy,lambda, ids, ide, jds, jde)
