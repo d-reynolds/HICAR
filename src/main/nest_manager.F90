@@ -12,7 +12,7 @@
 module nest_manager
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
-    use flow_object_interface, only : flow_obj_t
+    use flow_object_interface, only : flow_obj_t, comp_arr_t
     use boundary_interface, only : boundary_t
     use ioclient_interface, only : ioclient_t
     use time_object,     only : Time_type
@@ -46,7 +46,7 @@ module nest_manager
 
     public:: end_nest_context, start_nest_context, wake_nest
     public:: switch_nest_context
-    public:: all_nests_not_done
+    public:: any_nests_not_done
     public:: nest_next_up
     public:: should_update_nests
     public:: can_update_child_nest
@@ -133,31 +133,39 @@ contains
 
     end subroutine wake_nest
 
-    function all_nests_not_done(flow_objs) result(all_done)
+    function any_nests_not_done(flow_objs) result(any_not_done)
         implicit none
-        class(flow_obj_t), intent(in) :: flow_objs(:)
-        logical :: all_done
+        type(comp_arr_t), intent(in) :: flow_objs(:)
+        logical :: any_not_done
         integer :: i
 
-        all_done = ANY(flow_objs%ended .eqv. .False.)
+        any_not_done = .false.
+        do i = 1, size(flow_objs)
+            if (allocated(flow_objs(i)%comp)) then
+                if (flow_objs(i)%comp%ended .eqv. .false.) then
+                    any_not_done = .true.
+                    return
+                end if
+            endif
+        end do
 
-    end function all_nests_not_done
+    end function any_nests_not_done
 
     function nest_next_up(flow_objs, options) result(next)
         implicit none
-        class(flow_obj_t), intent(in) :: flow_objs(:)
+        type(comp_arr_t), intent(in) :: flow_objs(:)
         type(options_t), intent(in) :: options
         logical :: next
 
         next = .false.
 
         ! If we are a child nest, not at the end of our run time...
-        if (flow_objs(options%nest_indx)%started .eqv. .False.) then
+        if (flow_objs(options%nest_indx)%comp%started .eqv. .False.) then
             ! ... and if we will be running on the next iteration...
             !safety check before indexing into flow_obj
             if (options%general%parent_nest == 0 .or. options%restart%restart) then
                 next = .true.
-            else if (flow_objs(options%nest_indx)%sim_time - flow_objs(options%nest_indx)%small_time_delta <= flow_objs(options%general%parent_nest)%sim_time) then
+            else if (flow_objs(options%nest_indx)%comp%sim_time - flow_objs(options%nest_indx)%comp%small_time_delta <= flow_objs(options%general%parent_nest)%comp%sim_time) then
                 next = .true.
             endif
         end if
@@ -166,7 +174,7 @@ contains
 
     function should_update_nests(flow_objs, options) result(can_update)
         implicit none
-        class(flow_obj_t), intent(in) :: flow_objs(:)
+        type(comp_arr_t), intent(in) :: flow_objs(:)
         type(options_t), intent(in) :: options
         logical :: can_update
         integer :: n, num_children
@@ -177,12 +185,12 @@ contains
         ! if we even have nests
         if (num_children > 0) then
             ! if we are at the end of an input step, or we have just ended, or we have not started (this would mean we are in wake_component)
-            if (flow_objs(options%nest_indx)%time_for_input() .or. flow_objs(options%nest_indx)%sim_time%equals(flow_objs(options%nest_indx)%end_time) .or. (flow_objs(options%nest_indx)%started .eqv. .False.)) then
+            if (flow_objs(options%nest_indx)%comp%time_for_input() .or. flow_objs(options%nest_indx)%comp%sim_time%equals(flow_objs(options%nest_indx)%comp%end_time) .or. (flow_objs(options%nest_indx)%comp%started .eqv. .False.)) then
                 ! loop over children
                 do n = 1, num_children
                     ! If we are at or ahead of our child's time, and the child has not ended, then our child needs to be updated
-                    if ( flow_objs(options%nest_indx)%sim_time >= flow_objs(options%general%child_nests(n))%sim_time - flow_objs(options%nest_indx)%small_time_delta) then
-                        if (flow_objs(options%general%child_nests(n))%ended .eqv. .False.) then
+                    if ( flow_objs(options%nest_indx)%comp%sim_time >= flow_objs(options%general%child_nests(n))%comp%sim_time - flow_objs(options%nest_indx)%comp%small_time_delta) then
+                        if (flow_objs(options%general%child_nests(n))%comp%ended .eqv. .False.) then
                             can_update = .true.
                             return
                         end if

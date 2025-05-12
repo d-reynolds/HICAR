@@ -2,11 +2,11 @@ module flow_events
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
-    use flow_object_interface, only : flow_obj_t
+    use flow_object_interface, only : flow_obj_t, comp_arr_t
     use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
     use ioserver_interface,         only : ioserver_t
     use ioclient_interface,         only : ioclient_t
-    use nest_manager, only: all_nests_not_done, nest_next_up, should_update_nests, &
+    use nest_manager, only: any_nests_not_done, nest_next_up, should_update_nests, &
         can_update_child_nest, end_nest_context, switch_nest_context, wake_nest
     use time_step, only: step
     use initialization, only: init_model
@@ -37,6 +37,7 @@ subroutine component_init(component, options, boundary, ioclient, nest_index)
             call component%initialization_timer%start()    
 
             if (STD_OUT_PE) write(*,"(/ A22,I2,A2,A,A16)") "-------------- Domain ",nest_index," (",trim(options(nest_index)%domain%init_conditions_file),") --------------"
+            if (STD_OUT_PE) flush(output_unit)
             call init_model(options, component, boundary, ioclient, nest_index)
 
             call component%total_timer%stop()
@@ -48,67 +49,69 @@ subroutine component_init(component, options, boundary, ioclient, nest_index)
 
 end subroutine component_init
 
-subroutine wake_component(component, options, boundary, ioclient)
+subroutine wake_component(comp_arr, options, boundary, ioclient)
     implicit none
-    class(flow_obj_t), intent(inout) :: component(:)
+    type(comp_arr_t), intent(inout) :: comp_arr(:)
     type(options_t), intent(inout) :: options
     type(boundary_t), intent(inout) :: boundary
     type(ioclient_t), intent(inout) :: ioclient
 
     ! check if the type of component is a domain or an ioserver
-    select type (component)
+    associate (comp => comp_arr(options%nest_indx)%comp)
+    select type (comp)
         type is (domain_t)
-            call component(options%nest_indx)%total_timer%start()
-            call component(options%nest_indx)%initialization_timer%start()    
+            call comp%total_timer%start()
+            call comp%initialization_timer%start()    
 
             if (STD_OUT_PE) write(*,"(/ A22,I2,A2,A,A16)") "-------------- Domain ",options%nest_indx," (",trim(options%domain%init_conditions_file),") --------------"
-            call wake_nest(options, component(options%nest_indx), boundary, ioclient)
+            if (STD_OUT_PE) flush(output_unit)
+            call wake_nest(options, comp, boundary, ioclient)
 
-            call component(options%nest_indx)%total_timer%stop()
-            call component(options%nest_indx)%initialization_timer%stop() 
+            call comp%total_timer%stop()
+            call comp%initialization_timer%stop() 
         type is (ioserver_t)
 
             !Get initial conditions
-            if (options%general%parent_nest == 0) call component_read(component(options%nest_indx),options,boundary,ioclient)
+            if (options%general%parent_nest == 0) call component_read(comp,options,boundary,ioclient)
 
             if (options%restart%restart) then
-                call component(options%nest_indx)%read_restart_file(options)
+                call comp%read_restart_file(options)
             else
-                call component_write(component(options%nest_indx),ioclient)
+                call component_write(comp,ioclient)
             endif
 
             !See if any nests needs updating
-            if (should_update_nests(component,options)) then
-                call update_component_nest(component,options,ioclient)
+            if (should_update_nests(comp_arr,options)) then
+                call update_component_nest(comp_arr,options,ioclient)
             endif
 
             ! Batch off another round of file reads so that we are always one step ahead of the compute team
             ! This is needed to ensure that the compute team does not wait unnescecarily on us
-            if (options%general%parent_nest == 0) call component_read(component(options%nest_indx),options,boundary,ioclient)
+            if (options%general%parent_nest == 0) call component_read(comp,options,boundary,ioclient)
 
         class default
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
                 call MPI_Barrier(MPI_COMM_WORLD)
                 if (.not.(options%restart%restart)) then
-                    call component(options%nest_indx)%increment_output_time()
+                    call comp%increment_output_time()
                     call MPI_Barrier(MPI_COMM_WORLD)
                 endif
                 ! "update nest"
                 if (size(options%general%child_nests) > 0) then
-                    call update_component_nest(component,options,ioclient)
+                    call update_component_nest(comp_arr,options,ioclient)
                 endif
             else
                 if (options%general%parent_nest == 0) then
                     call MPI_Barrier(MPI_COMM_WORLD)
                 endif
                 if (.not.(options%restart%restart)) then
-                    call component(options%nest_indx)%increment_output_time()
+                    call comp%increment_output_time()
                     call MPI_Barrier(MPI_COMM_WORLD)
                 endif
 
                 !See if any nests needs updating
-                if (should_update_nests(component,options)) then
-                    call update_component_nest(component,options,ioclient)
+                if (should_update_nests(comp_arr,options)) then
+                    call update_component_nest(comp_arr,options,ioclient)
                 endif
 
                 if (options%general%parent_nest == 0) then
@@ -117,47 +120,56 @@ subroutine wake_component(component, options, boundary, ioclient)
             endif
     end select
 
-    component(options%nest_indx)%started = .true.
-
+    comp%started = .true.
+    end associate
 end subroutine wake_component
 
-subroutine update_component_nest(component,options,ioclient)
+subroutine update_component_nest(comp_arr,options,ioclient)
     implicit none
-    class(flow_obj_t), intent(inout) :: component(:)
+    type(comp_arr_t), intent(inout) :: comp_arr(:)
     type(options_t), intent(in) :: options
     type(ioclient_t), intent(inout) :: ioclient
 
     class(flow_obj_t), allocatable :: child_nest
     integer :: n
     ! check if the type of component is a domain or an ioserver
-    select type (component)
+
+    associate (comp => comp_arr(options%nest_indx)%comp)
+    select type (comp)
         type is (domain_t)
-            call ioclient%update_nest(component(options%nest_indx))
+            call ioclient%update_nest(comp)
         type is (ioserver_t)
             ! This call will gather the model state of the forcing fields from the nest parent
-            if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
+            if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",comp%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Gathering forcings"
-            if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(component(options%nest_indx)%sim_time%as_string())
-            if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
+            if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(comp%sim_time%as_string())
+            if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",comp%nest_indx," --------------"
+            if (STD_OUT_PE_IO) flush(output_unit)
 
-            call component(options%nest_indx)%gather_forcing()
-            if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
+            call comp%gather_forcing()
+            if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",comp%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Completed gathering forcings"
-            if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
+            if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",comp%nest_indx," --------------"
+            if (STD_OUT_PE_IO) flush(output_unit)
 
             ! now loop over all child nests
             do n = 1, size(options%general%child_nests)
                 !Test if we can update the child nest
-                child_nest = component(options%general%child_nests(n))
-                if ( (component(options%nest_indx)%sim_time >= child_nest%sim_time - component(options%nest_indx)%small_time_delta .and. .not.(child_nest%ended)) )then
-                    ! This call will distribute the model state of the forcing fields to the child nest
-                    ! if (STD_OUT_PE_IO) write(*,*) "Distributing forcings to child nest: ",options%general%child_nests(n)
-                    call component(options%nest_indx)%distribute_forcing(component(options%general%child_nests(n)), n)
-                    if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
-                    if (STD_OUT_PE_IO) write(*,*) "Distributed forcings to child nest: ",options%general%child_nests(n)
-                    if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component(options%nest_indx)%nest_indx," --------------"
+                associate (child_nest => comp_arr(options%general%child_nests(n))%comp)
+                select type(child_nest)
+                type is (ioserver_t)
+                    if ( (comp%sim_time >= child_nest%sim_time - comp%small_time_delta .and. .not.(child_nest%ended)) )then
+                        ! This call will distribute the model state of the forcing fields to the child nest
+                        ! if (STD_OUT_PE_IO) write(*,*) "Distributing forcings to child nest: ",options%general%child_nests(n)
+                        call comp%distribute_forcing(child_nest, n)
+                        if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",comp%nest_indx," --------------"
+                        if (STD_OUT_PE_IO) write(*,*) "Distributed forcings to child nest: ",options%general%child_nests(n)
+                        if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",comp%nest_indx," --------------"
+                        if (STD_OUT_PE_IO) flush(output_unit)
 
-                endif
+                    endif
+                end select
+                end associate
             enddo
         class default
             ! if ioclient is null, then we are acting as an ioserver
@@ -168,14 +180,15 @@ subroutine update_component_nest(component,options,ioclient)
                 call MPI_Barrier(MPI_COMM_WORLD)
                 do n = 1, size(options%general%child_nests)
                     !Test if we can update the child nest
-                    child_nest = component(options%general%child_nests(n))
-                    if ( (component(options%nest_indx)%sim_time >= child_nest%sim_time - component(options%nest_indx)%small_time_delta .and. .not.(child_nest%ended)) )then
+                    child_nest = comp_arr(options%general%child_nests(n))%comp
+                    if ( (comp%sim_time >= child_nest%sim_time - comp%small_time_delta .and. .not.(child_nest%ended)) )then
                             ! This call will distribute the model state of the forcing fields to the child nest
                         call MPI_Barrier(MPI_COMM_WORLD)
                     endif
                 enddo
             endif
     end select
+    end associate
 
 end subroutine update_component_nest
 
@@ -188,6 +201,7 @@ subroutine component_write(component, ioclient)
     select type (component)
         type is (domain_t)
             if (STD_OUT_PE) write(*,*) "Writing output file"
+            if (STD_OUT_PE) flush(output_unit)
             call component%output_timer%start()
             call ioclient%push(component)
             call component%output_timer%stop()
@@ -197,10 +211,12 @@ subroutine component_write(component, ioclient)
             if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(component%sim_time%as_string())
             if (STD_OUT_PE_IO) write(*,*) "  Next Output = ", trim(component%next_output%as_string())
             if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component%nest_indx," --------------"
+            if (STD_OUT_PE_IO) flush(output_unit)
             call component%write_file()
             if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Wrote out domain"
             if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component%nest_indx," --------------"
+            if (STD_OUT_PE_IO) flush(output_unit)
         class default
             call component%increment_output_time()
             call MPI_Barrier(MPI_COMM_WORLD)
@@ -231,6 +247,7 @@ subroutine component_read(component, options, boundary, ioclient)
             ! -----------------------------------------------------
             if (STD_OUT_PE) write(*,"(/ A22,I2,A2,A,A16)") "-------------- Domain ",component%nest_indx," (",trim(options%domain%init_conditions_file),") --------------"
             if (STD_OUT_PE) write(*,*) "Updating Boundary conditions"
+            if (STD_OUT_PE) flush(output_unit)
 
             call component%input_timer%start()
 
@@ -251,10 +268,12 @@ subroutine component_read(component, options, boundary, ioclient)
             if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(component%sim_time%as_string())
             if (STD_OUT_PE_IO) write(*,*) "  Next Input = ", trim(component%next_input%as_string())
             if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component%nest_indx," --------------"
+            if (STD_OUT_PE_IO) flush(output_unit)
             call component%read_file()
             if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Read in Boundary conditions"
             if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component%nest_indx," --------------"
+            if (STD_OUT_PE_IO) flush(output_unit)
 
         class default
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
@@ -311,40 +330,40 @@ end subroutine component_main_loop
 
 subroutine component_loop(components, options, boundary, ioclient)
     implicit none
-    class(flow_obj_t), allocatable, intent(inout) :: components(:)
+    type(comp_arr_t), intent(inout) :: components(:)
     type(options_t), intent(inout) :: options(:)
     type(boundary_t), intent(inout):: boundary(:)
     type(ioclient_t), intent(inout):: ioclient(:)
 
     integer :: i, n_nests
 
-    n_nests = size(components)
+    n_nests = options(1)%general%nests
 
-    do while (all_nests_not_done(components))
+    do while (any_nests_not_done(components))
         do i = 1, n_nests
             if (nest_next_up(components,options(i))) then
                 call wake_component(components, options(i), boundary(i), ioclient(i))
                 cycle
             endif
 
-            if (components(i)%dead_or_asleep()) cycle
+            if (components(i)%comp%dead_or_asleep()) cycle
 
-            call components(i)%increment_input_time()
-            call component_read(components(i), options(i), boundary(i), ioclient(i))
+            call components(i)%comp%increment_input_time()
+            call component_read(components(i)%comp, options(i), boundary(i), ioclient(i))
 
-            do while ( .not.(components(i)%time_for_input()) .and. .not.(components(i)%ended) )
-                call component_main_loop(components(i), options(i))
+            do while ( .not.(components(i)%comp%time_for_input()) .and. .not.(components(i)%comp%ended) )
+                call component_main_loop(components(i)%comp, options(i))
 
                 if (should_update_nests(components,options(i))) then
                     call update_component_nest(components,options(i),ioclient(i))
                 endif
-    
-                if (components(i)%time_for_output()) then
-                    call component_write(components(i), ioclient(i))
+
+                if (components(i)%comp%time_for_output()) then
+                    call component_write(components(i)%comp, ioclient(i))
                 endif
             end do
 
-            call component_end_of_nest_loop(components,i)
+            call component_end_of_nest_loop(components(i)%comp,i)
         enddo
     enddo
 
@@ -353,18 +372,19 @@ end subroutine component_loop
 
 subroutine component_end_of_nest_loop(component,nest_indx)
     implicit none
-    class(flow_obj_t), allocatable, intent(inout) :: component(:)
+    class(flow_obj_t), intent(inout) :: component
     integer, intent(in) :: nest_indx
 
     ! check if the type of component is a domain or an ioserver
     select type (component)
         type is (domain_t)
-            call component(nest_indx)%total_timer%stop()
+            call component%total_timer%stop()
 
-            if (component(nest_indx)%ended) then
+            if (component%ended) then
                 call end_nest_context()
-                call component(nest_indx)%release()
+                call component%release()
                 if (STD_OUT_PE) write(*,*) "Domain ",nest_indx," has reached the end of its run time."
+                if (STD_OUT_PE) flush(output_unit)
             endif
         class default
             ! Handle generic flow_obj_t case
@@ -374,141 +394,150 @@ end subroutine component_end_of_nest_loop
 
 subroutine component_program_end(component, options)
     implicit none
-    class(flow_obj_t), allocatable, intent(inout) :: component(:)
+    type(comp_arr_t), intent(inout) :: component(:)
     type(options_t), intent(in) :: options(:)
 
     integer :: i, n_nests
     real    :: t_val, t_val2, t_val3
 
-    n_nests = size(component)
+    n_nests = options(1)%general%nests
 
-    select type (component)
-        type is (domain_t)
-            t_val = 0
-            do i = 1,n_nests
-                t_val = t_val + component(i)%total_timer%mean(component(1)%compute_comms)
-            enddo
-    
-            !
-            !-----------------------------------------
-            if (STD_OUT_PE) then
-                call MPI_Comm_Size(MPI_COMM_WORLD,i)
-    
-    
-                if (STD_OUT_PE) write(*,'(/ A)') "------------------------------------------------------"
-                if (STD_OUT_PE) write(*,'(A)')   "Simulation completed successfully!"
-                if (STD_OUT_PE) write(*,'(A /)') "------------------------------------------------------"
-                write(*,*) "Model run from : ",trim(options(1)%general%start_time%as_string())
-                write(*,*) "           to  : ",trim(options(1)%general%end_time%as_string())
-                write(*,*) "Number of images:",i
-                write(*,*) ""
-                write(*,*) "Timing across all compute images:"
-                write(*,*) ""
-                write(*,*) "  Total time: ",t_val
-                write(*,*) ""
-            endif
-            do i = 1, n_nests
-    
+    t_val = 0
+
+    do i = 1, n_nests
+        associate (comp => component(i)%comp)
+        select type (comp)
+            type is (domain_t)        
+                t_val = t_val + comp%total_timer%mean(comp%compute_comms)            
+            end select
+        end associate
+    enddo
+
+    !
+    !-----------------------------------------
+    if (STD_OUT_PE) then
+        call MPI_Comm_Size(MPI_COMM_WORLD,i)
+
+
+        write(*,'(/ A)') "------------------------------------------------------"
+        write(*,'(A)')   "Simulation completed successfully!"
+        write(*,'(A /)') "------------------------------------------------------"
+        write(*,*) "Model run from : ",trim(options(1)%general%start_time%as_string())
+        write(*,*) "           to  : ",trim(options(1)%general%end_time%as_string())
+        write(*,*) "Number of images:",i
+        write(*,*) ""
+        write(*,*) "Timing across all compute images:"
+        write(*,*) ""
+        write(*,*) "  Total time: ",t_val
+        write(*,*) ""
+        flush(output_unit)
+
+    endif
+
+    do i = 1, n_nests
+        associate (comp => component(i)%comp)
+        select type (comp)
+            type is (domain_t)
                 if (STD_OUT_PE) write(*,"(A22,I2,A2,A,A16)") "-------------- Domain ",i," (",trim(options(i)%domain%init_conditions_file),") --------------"
                 if (STD_OUT_PE) write(*,'(A31 A10 A3 A10 A3 A10)') " ", "mean", " | ", "min", " | ", "max"
-                t_val = component(i)%total_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%total_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%total_timer%max(component(1)%compute_comms)
+                t_val = comp%total_timer%mean(comp%compute_comms)
+                t_val2 = comp%total_timer%min(comp%compute_comms)
+                t_val3 = comp%total_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "total", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%initialization_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%initialization_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%initialization_timer%max(component(1)%compute_comms)
+                t_val = comp%initialization_timer%mean(comp%compute_comms)
+                t_val2 = comp%initialization_timer%min(comp%compute_comms)
+                t_val3 = comp%initialization_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "init", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%input_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%input_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%input_timer%max(component(1)%compute_comms)
+                t_val = comp%input_timer%mean(comp%compute_comms)
+                t_val2 = comp%input_timer%min(comp%compute_comms)
+                t_val3 = comp%input_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "input", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%output_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%output_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%output_timer%max(component(1)%compute_comms)
+                t_val = comp%output_timer%mean(comp%compute_comms)
+                t_val2 = comp%output_timer%min(comp%compute_comms)
+                t_val3 = comp%output_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "output", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%physics_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%physics_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%physics_timer%max(component(1)%compute_comms)
+                t_val = comp%physics_timer%mean(comp%compute_comms)
+                t_val2 = comp%physics_timer%min(comp%compute_comms)
+                t_val3 = comp%physics_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "physics", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%mp_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%mp_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%mp_timer%max(component(1)%compute_comms)
+                t_val = comp%mp_timer%mean(comp%compute_comms)
+                t_val2 = comp%mp_timer%min(comp%compute_comms)
+                t_val3 = comp%mp_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "microphysics", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%adv_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%adv_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%adv_timer%max(component(1)%compute_comms)
+                t_val = comp%adv_timer%mean(comp%compute_comms)
+                t_val2 = comp%adv_timer%min(comp%compute_comms)
+                t_val3 = comp%adv_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%sum_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%sum_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%sum_timer%max(component(1)%compute_comms)
+                t_val = comp%sum_timer%mean(comp%compute_comms)
+                t_val2 = comp%sum_timer%min(comp%compute_comms)
+                t_val3 = comp%sum_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_sum", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%flux_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%flux_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%flux_timer%max(component(1)%compute_comms)
+                t_val = comp%flux_timer%mean(comp%compute_comms)
+                t_val2 = comp%flux_timer%min(comp%compute_comms)
+                t_val3 = comp%flux_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_flux", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%flux_up_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%flux_up_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%flux_up_timer%max(component(1)%compute_comms)
+                t_val = comp%flux_up_timer%mean(comp%compute_comms)
+                t_val2 = comp%flux_up_timer%min(comp%compute_comms)
+                t_val3 = comp%flux_up_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_flux_up", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%flux_corr_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%flux_corr_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%flux_corr_timer%max(component(1)%compute_comms)
+                t_val = comp%flux_corr_timer%mean(comp%compute_comms)
+                t_val2 = comp%flux_corr_timer%min(comp%compute_comms)
+                t_val3 = comp%flux_corr_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_flux_corr", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%adv_wind_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%adv_wind_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%adv_wind_timer%max(component(1)%compute_comms)
+                t_val = comp%adv_wind_timer%mean(comp%compute_comms)
+                t_val2 = comp%adv_wind_timer%min(comp%compute_comms)
+                t_val3 = comp%adv_wind_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_wind", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%rad_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%rad_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%rad_timer%max(component(1)%compute_comms)
+                t_val = comp%rad_timer%mean(comp%compute_comms)
+                t_val2 = comp%rad_timer%min(comp%compute_comms)
+                t_val3 = comp%rad_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "radiation", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%lsm_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%lsm_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%lsm_timer%max(component(1)%compute_comms)
+                t_val = comp%lsm_timer%mean(comp%compute_comms)
+                t_val2 = comp%lsm_timer%min(comp%compute_comms)
+                t_val3 = comp%lsm_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "LSM", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%pbl_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%pbl_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%pbl_timer%max(component(1)%compute_comms)
+                t_val = comp%pbl_timer%mean(comp%compute_comms)
+                t_val2 = comp%pbl_timer%min(comp%compute_comms)
+                t_val3 = comp%pbl_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "PBL", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%forcing_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%forcing_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%forcing_timer%max(component(1)%compute_comms)
+                t_val = comp%forcing_timer%mean(comp%compute_comms)
+                t_val2 = comp%forcing_timer%min(comp%compute_comms)
+                t_val3 = comp%forcing_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "forcing", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%wind_bal_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%wind_bal_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%wind_bal_timer%max(component(1)%compute_comms)
+                t_val = comp%wind_bal_timer%mean(comp%compute_comms)
+                t_val2 = comp%wind_bal_timer%min(comp%compute_comms)
+                t_val3 = comp%wind_bal_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "wind bal", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%diagnostic_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%diagnostic_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%diagnostic_timer%max(component(1)%compute_comms)
+                t_val = comp%diagnostic_timer%mean(comp%compute_comms)
+                t_val2 = comp%diagnostic_timer%min(comp%compute_comms)
+                t_val3 = comp%diagnostic_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "diagnostic", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%send_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%send_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%send_timer%max(component(1)%compute_comms)
+                t_val = comp%send_timer%mean(comp%compute_comms)
+                t_val2 = comp%send_timer%min(comp%compute_comms)
+                t_val3 = comp%send_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "halo-exchange(send)", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%ret_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%ret_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%ret_timer%max(component(1)%compute_comms)
+                t_val = comp%ret_timer%mean(comp%compute_comms)
+                t_val2 = comp%ret_timer%min(comp%compute_comms)
+                t_val3 = comp%ret_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "halo-exchange(retrieve)", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%wait_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%wait_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%wait_timer%max(component(1)%compute_comms)
+                t_val = comp%wait_timer%mean(comp%compute_comms)
+                t_val2 = comp%wait_timer%min(comp%compute_comms)
+                t_val3 = comp%wait_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "halo-exchange(wait)", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = component(i)%wind_timer%mean(component(1)%compute_comms)
-                t_val2 = component(i)%wind_timer%min(component(1)%compute_comms)
-                t_val3 = component(i)%wind_timer%max(component(1)%compute_comms)
+                t_val = comp%wind_timer%mean(comp%compute_comms)
+                t_val2 = comp%wind_timer%min(comp%compute_comms)
+                t_val3 = comp%wind_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "winds", ":", t_val, " | ", t_val2, " | ", t_val3
-            enddo
-
-            if ( ANY(options%physics%windtype == kITERATIVE_WINDS) .or. ANY(options%physics%windtype == kLINEAR_ITERATIVE_WINDS)) then
-                call finalize_petsc()
-            endif
-        type is (ioserver_t)
-            call component(1)%close_files()
-        class default
-
-    end select
+                if (STD_OUT_PE) flush(output_unit)
+                if ( ANY(options%physics%windtype == kITERATIVE_WINDS) .or. ANY(options%physics%windtype == kLINEAR_ITERATIVE_WINDS)) then
+                    call finalize_petsc()
+                endif
+            type is (ioserver_t)
+                call comp%close_files()
+            class default
+        end select
+        end associate
+    end do
 
 end subroutine component_program_end
 

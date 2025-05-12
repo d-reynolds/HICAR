@@ -21,7 +21,7 @@ module initialization
     use options_types,      only : general_options_type
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
-    use flow_object_interface, only : flow_obj_t
+    use flow_object_interface, only : flow_obj_t, comp_arr_t
     use microphysics,               only : mp_init, mp_var_request
     use advection,                  only : adv_init, adv_var_request
     use radiation,                  only : radiation_init, ra_var_request
@@ -56,7 +56,7 @@ contains
 
     subroutine split_processes(components, ioclient, n_nests, options)
         implicit none
-        class(flow_obj_t), allocatable, intent(out) :: components(:)
+        type(comp_arr_t), intent(inout) :: components(:)
         type(ioclient_t), intent(inout) :: ioclient(:)
         integer, intent(in) :: n_nests
         type(options_t), intent(in) :: options
@@ -129,29 +129,33 @@ contains
         ! Group IO clients with their related server process. This is basically just grouping processes by node
         CALL MPI_Comm_split( globalComm, IOcolor, PE_RANK_GLOBAL, IOComms, ierr )
 
-        if (color == kIO_TEAM) then
-            allocate(ioserver_t::components(n_nests))
-        elseif (color == kCOMPUTE_TEAM) then
-            allocate(domain_t::components(n_nests))
-        endif
+        do n = 1, n_nests
+            if (color == kIO_TEAM) then
+                allocate(ioserver_t::components(n)%comp)
+            elseif (color == kCOMPUTE_TEAM) then
+                allocate(domain_t::components(n)%comp)
+            endif
+        enddo
 
         do n = 1, n_nests
-            select type (components)
+            associate(comp => components(n)%comp)
+            select type (comp)
                 type is (domain_t)
                     ! CALL MPI_Comm_dup( mainComms, components(n)%compute_comms, ierr )
                     ! CALL MPI_Comm_dup( IOComms, ioclient(n)%parent_comms, ierr )
 
-                    components(n)%compute_comms = mainComms
+                    comp%compute_comms = mainComms
                     ioclient(n)%parent_comms = IOComms
                 type is (ioserver_t)
                     ! CALL MPI_Comm_dup( mainComms, components(n)%IO_comms, ierr )
                     ! CALL MPI_Comm_dup( IOComms, components(n)%client_comms, ierr )
 
-                    components(n)%IO_comms = mainComms
-                    components(n)%client_comms = IOComms
+                    comp%IO_comms = mainComms
+                    comp%client_comms = IOComms
                 class default
                     ! some default behavior
             end select
+            end associate
         enddo
         if (STD_OUT_PE) then
             write(*,*) "  Number of processing elements:          ",num_PE
