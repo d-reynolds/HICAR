@@ -8,8 +8,11 @@ module flow_object_interface
 implicit none
 
 private
-public :: flow_obj_t
+public :: flow_obj_t, comp_arr_t
 
+type comp_arr_t
+    class(flow_obj_t), allocatable :: comp
+end type comp_arr_t
 
 type flow_obj_t
 !   private

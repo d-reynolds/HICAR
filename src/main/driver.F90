@@ -20,14 +20,12 @@ program icar
     use iso_fortran_env
     use mpi_f08
     use options_interface,  only : options_t
-    use flow_object_interface, only : flow_obj_t
+    use flow_object_interface, only : flow_obj_t, comp_arr_t
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
     use output_interface,   only : output_t
     use time_step,          only : step                ! Advance the model forward in time
     use initialization,     only : split_processes, welcome_message, init_options, init_model
-    use nest_manager,      only : nest_next_up, should_update_nests, can_update_child_nest, all_nests_not_done, &
-                                end_nest_context, wake_nest, switch_nest_context
     use timer_interface,    only : timer_t
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
@@ -45,7 +43,7 @@ program icar
     ! type(domain_t) :: domain(kMAX_NESTS) ! Currently hard-coded, could be dynamic, but compile time on 
     !                                      ! the Cray compiler is very slow for dynamically allocating large, derrived type arrays
     type(boundary_t), allocatable :: boundary(:)
-    class(flow_obj_t), allocatable  :: components(:)
+    type(comp_arr_t)  :: components(kMAX_NESTS)
     type(ioclient_t), allocatable  :: ioclient(:)
     
     integer :: i, ierr, exec_team, n_nests, n, old_nest, PE_RANK_GLOBAL
@@ -104,7 +102,7 @@ program icar
     if (STD_OUT_PE) flush(output_unit)
 
     do i = 1, n_nests
-        call component_init(components(i), options, boundary(i), ioclient(i), i)
+        call component_init(components(i)%comp, options, boundary(i), ioclient(i), i)
     enddo
 
     !  End Compute-Side Initialization
@@ -113,9 +111,9 @@ program icar
     if (STD_OUT_PE) write(*,'(A)')   "Initialization complete, beginning physics integration"
     if (STD_OUT_PE) write(*,'(A)')   "------------------------------------------------------"
 
-    call component_loop(components, options, boundary, ioclient)
+    call component_loop(components(1:n_nests), options, boundary, ioclient)
 
-    call component_program_end(components, options)
+    call component_program_end(components(1:n_nests), options)
 
     CALL MPI_Finalize()
 
