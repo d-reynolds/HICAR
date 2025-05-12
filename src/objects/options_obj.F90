@@ -752,10 +752,6 @@ contains
         read_namelist = .True.
         if (present(read_nml)) read_namelist = read_nml
 
-        ! check if we should read the namelist, if we
-        ! are not gonna use the forcing options directly, dont read it
-        if (read_namelist) read_namelist = (options%general%parent_nest == 0)
-
         print_info = .False.
         if (present(info_only)) print_info = info_only
 
@@ -848,7 +844,7 @@ contains
 
         call options%forcing%input_dt%set(seconds=options%forcing%inputinterval)
 
-        if (.not.(read_namelist)) return
+        if (.not.(read_namelist) .or. options%general%parent_nest > 0) return
         
         call require_var(lonvar, "Longitude")
         call require_var(latvar, "Latitude")
@@ -2632,6 +2628,7 @@ contains
         this%forcing%z_is_on_interface = .False.
         this%forcing%time_varying_z = .False.
         this%forcing%t_offset = 0.0
+        this%forcing%relax_filters = .False.
         this%forcing%compute_z = .False.
 
         ! Now set the forcing variable names -- these are the same as the domain variable names
