@@ -53,7 +53,8 @@ contains
         endif
 
         this%n_child_ioservers = size(options(nest_indx)%general%child_nests)
-
+        this%n_f = 0
+        
         if (size(options(nest_indx)%general%child_nests) > 0) then
             some_child_id = options(nest_indx)%general%child_nests(1)
             this%n_f = count(options(some_child_id)%forcing%vars_to_read /= "")

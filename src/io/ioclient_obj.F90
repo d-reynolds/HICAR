@@ -36,8 +36,6 @@ contains
 
         integer :: my_rank, comm_size, some_child_id
         
-        if (STD_OUT_PE) write(*,*) 'Initializing I/O Clients'
-        if (STD_OUT_PE) flush(output_unit)
         this%i_s_r = forcing%its; this%i_e_r = forcing%ite
         this%k_s_r = forcing%kts; this%k_e_r = forcing%kte
         this%j_s_r = forcing%jts; this%j_e_r = forcing%jte

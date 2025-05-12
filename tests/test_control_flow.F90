@@ -9,12 +9,12 @@ module test_control_flow
     use options_interface, only: options_t
     use time_object, only: Time_type
     use time_delta_object, only: time_delta_t
-    use flow_object_interface, only: flow_obj_t
+    use flow_object_interface, only: flow_obj_t, comp_arr_t
     use ioclient_interface, only: ioclient_t
     use boundary_interface, only: boundary_t
     use flow_events,        only: component_loop
     use icar_constants
-    use nest_manager, only: all_nests_not_done, nest_next_up, should_update_nests, &
+    use nest_manager, only: any_nests_not_done, nest_next_up, should_update_nests, &
         can_update_child_nest
     use testdrive, only : new_unittest, unittest_type, error_type, check, test_failed
 
@@ -164,7 +164,7 @@ module test_control_flow
         logical :: is_io, is_exec
         integer :: my_rank, num_procs, my_io_rank, my_exec_rank
         integer :: ierr
-        class(flow_obj_t), allocatable :: flow_obj(:)
+        type(comp_arr_t), allocatable :: flow_obj(:)
         type(options_t), allocatable :: options(:)
         type(boundary_t), allocatable :: boundary(:)
         type(ioclient_t), allocatable :: ioclient(:)
@@ -172,7 +172,12 @@ module test_control_flow
 
         n_nests = size(in_options)
 
-        allocate(flow_obj_t::flow_obj(n_nests))
+        allocate(flow_obj(n_nests))
+
+        do i = 1, n_nests
+            allocate(flow_obj_t::flow_obj(i)%comp)
+        end do
+
         allocate(options(n_nests))
         allocate(boundary(n_nests))
         allocate(ioclient(n_nests))
@@ -223,7 +228,7 @@ module test_control_flow
                 options(i)%general%child_nests = in_options(i)%general%child_nests
             end if
 
-            call flow_obj(i)%init_flow_obj(options(i), i)
+            call flow_obj(i)%comp%init_flow_obj(options(i), i)
         end do
         call component_loop(flow_obj, options, boundary, ioclient)
 
