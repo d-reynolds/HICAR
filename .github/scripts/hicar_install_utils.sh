@@ -204,7 +204,7 @@ function install_PETSc {
 
     cd petsc
     git pull # obtain new release fixes (since a prior clone or pull)
-
+    git checkout release-3.22
     # check if make file exists and if not, run configure
     if [ ! -f "Makefile" ]; then
         ./configure --prefix=$INSTALLDIR --with-debugging=0 --download-fblaslapack=1 #&> config.log
