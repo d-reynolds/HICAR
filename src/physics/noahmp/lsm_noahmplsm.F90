@@ -10262,7 +10262,7 @@ END MODULE MODULE_SF_NOAHMPLSM
 
 MODULE NOAHMP_TABLES
   use icar_constants,    only : STD_OUT_PE
-
+  use io_routines,       only : io_newunit
     IMPLICIT NONE
 
     INTEGER, PRIVATE, PARAMETER :: MVT   = 27
@@ -10541,7 +10541,7 @@ CONTAINS
   subroutine read_mp_veg_parameters(DATASET_IDENTIFIER)
     implicit none
     character(len=*), intent(in) :: DATASET_IDENTIFIER
-    integer :: ierr
+    integer :: ierr, unit
     INTEGER :: IK,IM
     logical :: file_named
 
@@ -10667,11 +10667,12 @@ CONTAINS
     LCZ_10_TABLE   = -99999
     LCZ_11_TABLE   = -99999
 
+    unit = io_newunit()
     inquire( file='MPTABLE.TBL', exist=file_named )
     if ( file_named ) then
-      open(15, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
     else
-      open(15, status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, status='old', form='formatted', action='read', iostat=ierr)
     end if
 
     if (ierr /= 0) then
@@ -10682,11 +10683,11 @@ CONTAINS
     endif
 
     if ( trim(DATASET_IDENTIFIER) == "USGS" ) then
-       read(15,noahmp_usgs_veg_categories)
-       read(15,noahmp_usgs_parameters)
+       read(unit,noahmp_usgs_veg_categories)
+       read(unit,noahmp_usgs_parameters)
     else if ( trim(DATASET_IDENTIFIER) == "MODIFIED_IGBP_MODIS_NOAH" ) then
-       read(15,noahmp_modis_veg_categories)
-       read(15,noahmp_modis_parameters)
+       read(unit,noahmp_modis_veg_categories)
+       read(unit,noahmp_modis_parameters)
     else
        write(*,'("WARNING: Unrecognized DATASET_IDENTIFIER in subroutine READ_MP_VEG_PARAMETERS")')
        write(*,'("WARNING: DATASET_IDENTIFIER = ''", A, "''")') trim(DATASET_IDENTIFIER)
@@ -10694,7 +10695,7 @@ CONTAINS
        STOP
   !     call wrf_error_fatal("STOP in Noah-MP read_mp_veg_parameters")
     endif
-    close(15)
+    close(unit)
 
                       ISURBAN_TABLE   = ISURBAN
                       ISWATER_TABLE   = ISWATER
@@ -10800,7 +10801,7 @@ CONTAINS
 
   subroutine read_mp_soil_parameters()
     IMPLICIT NONE
-    INTEGER :: IERR
+    INTEGER :: IERR, unit
     CHARACTER*4         :: SLTYPE
     INTEGER             :: ITMP, NUM_SLOPE, LC
     CHARACTER(len=256)  :: message
@@ -10830,10 +10831,12 @@ CONTAINS
 !-----READ IN SOIL PROPERTIES FROM SOILPARM.TBL
 !
     inquire( file='SOILPARM.TBL', exist=file_named )
+    unit = io_newunit()
+
     if ( file_named ) then
-      open(21, file='SOILPARM.TBL',form='formatted',status='old',iostat=ierr)
+      open(unit, file='SOILPARM.TBL',form='formatted',status='old',iostat=ierr)
     else
-      open(21, form='formatted',status='old',iostat=ierr)
+      open(unit, form='formatted',status='old',iostat=ierr)
     end if
 
     IF(ierr .NE. 0 ) THEN
@@ -10842,9 +10845,9 @@ CONTAINS
 !      CALL wrf_error_fatal ( message )
     END IF
 
-    READ (21,*)
-    READ (21,*) SLTYPE
-    READ (21,*) SLCATS
+    READ (unit,*)
+    READ (unit,*) SLTYPE
+    READ (unit,*) SLCATS
     IF (STD_OUT_PE) THEN
       WRITE( message , * ) 'SOIL TEXTURE CLASSIFICATION = ', TRIM ( SLTYPE ) , ' FOUND', &
                SLCATS,' CATEGORIES'
@@ -10852,21 +10855,23 @@ CONTAINS
 !    CALL wrf_message ( message )
 
     DO LC=1,SLCATS
-      READ (21,*) ITMP,BEXP_TABLE(LC),SMCDRY_TABLE(LC),F1_TABLE(LC),SMCMAX_TABLE(LC),    &
+      READ (unit,*) ITMP,BEXP_TABLE(LC),SMCDRY_TABLE(LC),F1_TABLE(LC),SMCMAX_TABLE(LC),    &
                   SMCREF_TABLE(LC),PSISAT_TABLE(LC),DKSAT_TABLE(LC), DWSAT_TABLE(LC),   &
                   SMCWLT_TABLE(LC), QUARTZ_TABLE(LC)
     ENDDO
 
-    CLOSE (21)
+    CLOSE (unit)
 
 !
 !-----READ IN GENERAL PARAMETERS FROM GENPARM.TBL
 !
     inquire( file='GENPARM.TBL', exist=file_named )
+    unit = io_newunit()
+
     if ( file_named ) then
-      open(22, file='GENPARM.TBL',form='formatted',status='old',iostat=ierr)
+      open(unit, file='GENPARM.TBL',form='formatted',status='old',iostat=ierr)
     else
-      open(22, form='formatted',status='old',iostat=ierr)
+      open(unit, form='formatted',status='old',iostat=ierr)
     end if
 
     IF(ierr .NE. 0 ) THEN
@@ -10875,44 +10880,44 @@ CONTAINS
 !      CALL wrf_error_fatal ( message )
     END IF
 
-    READ (22,*)
-    READ (22,*)
-    READ (22,*) NUM_SLOPE
+    READ (unit,*)
+    READ (unit,*)
+    READ (unit,*) NUM_SLOPE
 
     DO LC=1,NUM_SLOPE
-        READ (22,*) SLOPE_TABLE(LC)
+        READ (unit,*) SLOPE_TABLE(LC)
     ENDDO
 
-    READ (22,*)
-    READ (22,*)
-    READ (22,*)
-    READ (22,*)
-    READ (22,*)
-    READ (22,*) CSOIL_TABLE
-    READ (22,*)
-    READ (22,*)
-    READ (22,*)
-    READ (22,*) REFDK_TABLE
-    READ (22,*)
-    READ (22,*) REFKDT_TABLE
-    READ (22,*)
-    READ (22,*) FRZK_TABLE
-    READ (22,*)
-    READ (22,*) ZBOT_TABLE
-    READ (22,*)
-    READ (22,*) CZIL_TABLE
-    READ (22,*)
-    READ (22,*)
-    READ (22,*)
-    READ (22,*)
+    READ (unit,*)
+    READ (unit,*)
+    READ (unit,*)
+    READ (unit,*)
+    READ (unit,*)
+    READ (unit,*) CSOIL_TABLE
+    READ (unit,*)
+    READ (unit,*)
+    READ (unit,*)
+    READ (unit,*) REFDK_TABLE
+    READ (unit,*)
+    READ (unit,*) REFKDT_TABLE
+    READ (unit,*)
+    READ (unit,*) FRZK_TABLE
+    READ (unit,*)
+    READ (unit,*) ZBOT_TABLE
+    READ (unit,*)
+    READ (unit,*) CZIL_TABLE
+    READ (unit,*)
+    READ (unit,*)
+    READ (unit,*)
+    READ (unit,*)
 
-    CLOSE (22)
+    CLOSE (unit)
 
   end subroutine read_mp_soil_parameters
 
   subroutine read_mp_rad_parameters()
     implicit none
-    integer :: ierr
+    integer :: ierr, unit
     logical :: file_named
 
     REAL :: ALBICE(MBAND),ALBLAK(MBAND),OMEGAS(MBAND),BETADS,BETAIS,EG(2)
@@ -10935,10 +10940,12 @@ CONTAINS
     EG_TABLE         = -1.E36
 
     inquire( file='MPTABLE.TBL', exist=file_named )
+    unit = io_newunit()
+
     if ( file_named ) then
-      open(15, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
     else
-      open(15, status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, status='old', form='formatted', action='read', iostat=ierr)
     end if
 
     if (ierr /= 0) then
@@ -10948,8 +10955,8 @@ CONTAINS
   !     call wrf_error_fatal("STOP in Noah-MP read_mp_rad_parameters")
     endif
 
-    read(15,noahmp_rad_parameters)
-    close(15)
+    READ(unit,noahmp_rad_parameters)
+    close(unit)
 
     ALBSAT_TABLE(:,1) = ALBSAT_VIS ! saturated soil albedos: 1=vis, 2=nir
     ALBSAT_TABLE(:,2) = ALBSAT_NIR ! saturated soil albedos: 1=vis, 2=nir
@@ -10966,7 +10973,7 @@ CONTAINS
 
   subroutine read_mp_global_parameters()
     implicit none
-    integer :: ierr
+    integer :: ierr, unit
     logical :: file_named
 
     REAL :: CO2,O2,TIMEAN,FSATMX,Z0SNO,SSI,SNOW_RET_FAC,SNOW_EMIS,&
@@ -11005,10 +11012,11 @@ RSURF_SNOW_TABLE     = -1.E36
  RSURF_EXP_TABLE     = -1.E36
 
     inquire( file='MPTABLE.TBL', exist=file_named )
+    unit = io_newunit()
     if ( file_named ) then
-      open(15, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
     else
-      open(15, status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, status='old', form='formatted', action='read', iostat=ierr)
     end if
 
     if (ierr /= 0) then
@@ -11018,8 +11026,8 @@ RSURF_SNOW_TABLE     = -1.E36
 !       call wrf_error_fatal("STOP in Noah-MP read_mp_global_parameters")
     endif
 
-    read(15,noahmp_global_parameters)
-    close(15)
+    READ(unit,noahmp_global_parameters)
+    close(unit)
 
        CO2_TABLE     = CO2
         O2_TABLE     = O2
@@ -11048,7 +11056,7 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
 
   subroutine read_mp_crop_parameters()
     implicit none
-    integer :: ierr
+    integer :: ierr, unit
     logical :: file_named
 
  INTEGER                   :: DEFAULT_CROP
@@ -11188,10 +11196,12 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
 
 
     inquire( file='MPTABLE.TBL', exist=file_named )
+    unit = io_newunit()
+
     if ( file_named ) then
-      open(15, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
     else
-      open(15, status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, status='old', form='formatted', action='read', iostat=ierr)
     end if
 
     if (ierr /= 0) then
@@ -11201,8 +11211,8 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
        !call wrf_error_fatal("STOP in Noah-MP read_mp_crop_parameters")
     endif
 
-    read(15,noahmp_crop_parameters)
-    close(15)
+    READ(unit,noahmp_crop_parameters)
+    close(unit)
 
  DEFAULT_CROP_TABLE      = DEFAULT_CROP
        PLTDAY_TABLE      = PLTDAY
@@ -11346,7 +11356,7 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
 
   subroutine read_mp_irrigation_parameters()
     implicit none
-    integer :: ierr
+    integer :: ierr, unit
     logical :: file_named
 
     REAL    :: IRR_FRAC              ! irrigation Fraction
@@ -11373,10 +11383,12 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
     IR_RAIN_TABLE    = -1.E36    ! maximum precipitation to stop irrigation trigger
 
     inquire( file='MPTABLE.TBL', exist=file_named )
+    unit = io_newunit()
+
     if ( file_named ) then
-      open(15, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
     else
-      open(15, status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, status='old', form='formatted', action='read', iostat=ierr)
     end if
 
     if (ierr /= 0) then
@@ -11386,8 +11398,8 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
 !       call wrf_error_fatal("STOP in Noah-MP read_mp_crop_parameters")
     endif
 
-    read(15,noahmp_irrigation_parameters)
-    close(15)
+    READ(unit,noahmp_irrigation_parameters)
+    close(unit)
 
     IRR_FRAC_TABLE   = IRR_FRAC    ! irrigation Fraction
     IRR_HAR_TABLE    = IRR_HAR     ! number of days before harvest date to stop irrigation
@@ -11403,7 +11415,7 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
 
   subroutine read_mp_optional_parameters()
     implicit none
-    integer :: ierr
+    integer :: ierr, unit
     logical :: file_named
 
     NAMELIST / noahmp_optional_parameters /                                &
@@ -11426,10 +11438,12 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
          sr2006_smcmax_a     , sr2006_smcmax_b
 
     inquire( file='MPTABLE.TBL', exist=file_named )
+    unit = io_newunit()
+
     if ( file_named ) then
-      open(15, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, file="MPTABLE.TBL", status='old', form='formatted', action='read', iostat=ierr)
     else
-      open(15, status='old', form='formatted', action='read', iostat=ierr)
+      open(unit, status='old', form='formatted', action='read', iostat=ierr)
     end if
 
     if (ierr /= 0) then
@@ -11439,8 +11453,8 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
 !       call wrf_error_fatal("STOP in Noah-MP read_mp_optional_parameters")
     endif
 
-    read(15,noahmp_optional_parameters)
-    close(15)
+    READ(unit,noahmp_optional_parameters)
+    close(unit)
 
 
   end subroutine read_mp_optional_parameters
