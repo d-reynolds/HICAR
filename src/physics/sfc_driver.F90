@@ -1,19 +1,19 @@
 !>----------------------------------------------------------
-!! This module provides a wrapper to call various PBL models
+!! This module provides a wrapper to call various sfc models
 !! It sets up variables specific to the physics package to be used including both
 !!
-!! The main entry point to the code is pbl(domain,options,dt)
+!! The main entry point to the code is sfc(domain,options,dt)
 !!
 !! <pre>
 !! Call tree graph :
-!!  pbl_init->[ external initialization routines]
-!!  pbl->[  external PBL routines]
-!!  pbl_finalize
+!!  sfc_init->[ external initialization routines]
+!!  sfc->[  external sfc routines]
+!!  sfc_finalize
 !!
 !! High level routine descriptions / purpose
-!!   pbl_init           - initializes physics package
-!!   pbl                - sets up and calls main physics package
-!!   pbl_finalize       - permits physics package cleanup (close files, deallocate memory)
+!!   sfc_init           - initializes physics package
+!!   sfc                - sets up and calls main physics package
+!!   sfc_finalize       - permits physics package cleanup (close files, deallocate memory)
 !!
 !! Inputs: domain, options, dt
 !!      domain,options  = as defined in data_structures

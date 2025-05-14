@@ -1717,16 +1717,17 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     character(len=*), intent(in) :: MMINLU
     MMINSL='STAS'
 
-    call read_mp_veg_parameters(trim(MMINLU))
-    call read_mp_soil_parameters()
-    call read_mp_rad_parameters()
-    call read_mp_global_parameters()
-    call read_mp_crop_parameters()
-    call read_mp_optional_parameters()
-    if(iopt_irr  >= 1) call read_mp_irrigation_parameters()
 
     IF( .NOT. restart ) THEN
 
+      call read_mp_veg_parameters(trim(MMINLU))
+      call read_mp_soil_parameters()
+      call read_mp_rad_parameters()
+      call read_mp_global_parameters()
+      call read_mp_crop_parameters()
+      call read_mp_optional_parameters()
+      if(iopt_irr  >= 1) call read_mp_irrigation_parameters()
+  
        itf=min0(ite,ide-1)
        jtf=min0(jte,jde-1)
 

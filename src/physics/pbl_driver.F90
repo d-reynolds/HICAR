@@ -49,7 +49,7 @@ module planetary_boundary_layer
                ims, ime, jms, jme, kms, kme,  &
                its, ite, jts, jte, kts, kte, j, k, i
 
-    logical :: allowed_to_read, restart, flag_qi
+    logical :: allowed_to_read, flag_qi
 
 contains
 
@@ -108,7 +108,7 @@ contains
         type(options_t),    intent(in)      :: options
         logical, optional, intent(in)       :: context_chng
 
-        logical :: context_change
+        logical :: context_change, restart
 
         if (present(context_chng)) then
             context_change = context_chng

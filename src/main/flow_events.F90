@@ -533,7 +533,7 @@ subroutine component_program_end(component, options)
                     call finalize_petsc()
                 endif
             type is (ioserver_t)
-                call comp%close_files()
+                if (i==1) call comp%close_files()
             class default
         end select
         end associate

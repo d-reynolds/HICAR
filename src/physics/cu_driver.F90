@@ -99,7 +99,7 @@ contains
         type(options_t), intent(in) :: options
         logical, optional, intent(in) :: context_chng
 
-        logical :: context_change
+        logical :: context_change, restart
         integer :: i, j
 
         if (present(context_chng)) then
@@ -107,6 +107,8 @@ contains
         else
             context_change = .false.
         endif
+
+        restart = context_change .or. options%restart%restart
 
         if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing Cumulus Scheme"
 
@@ -163,7 +165,7 @@ contains
             call tiedtkeinit(domain%tend%th,domain%tend%qv,   &
                              domain%tend%qc,domain%tend%qi,   &
                              domain%tend%u, domain%tend%v,    &
-                             context_change,1,1,0,            &
+                             restart,1,1,0,            &
                              .true.,                          &
                              ids,ide, jds,jde, kds,kde,       &
                              ims,ime, jms,jme, kms,kme,       &
@@ -207,7 +209,7 @@ contains
                             ,rqicuten=domain%tend%qi                            &
                             ,rucuten=domain%tend%u                              &
                             ,rvcuten=domain%tend%v                              &
-                            ,restart=context_change             &  ! options%restart                            &
+                            ,restart=restart             &  ! options%restart                            &
                             ,p_qc=1                                             & ! copied from Tiedke; no idea as to what these 3 flags represent.
                             ,p_qi=1                                             &
                             ,p_first_scalar=0                                   &
@@ -259,7 +261,7 @@ contains
                          ,lowlyr=lowlyr                                         & !-- LOWLYR        index of lowest model layer above the ground
                          ,cp=cp                                                 & ! cp  = 1012.0    ! J/kg/K   specific heat capacity of moist STP air?                 CP
                          ,RD=r_d                      & ! r_d (wrf_constatns) = 287., while Rd  = 287.058 (icar_constants)
-                         ,RESTART=context_change                                      &
+                         ,RESTART=restart                                      &
                          ,allowed_to_read=.true.                                & !
                          ,ids=ids, ide=ide, jds=jds, jde=jde, kds=kds, kde=kde  &
                          ,ims=ims, ime=ime, jms=jms, jme=jme, kms=kms, kme=kme  &

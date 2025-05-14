@@ -610,7 +610,7 @@ contains
         type(options_t),intent(in)    :: options
         logical, optional, intent(in) :: context_chng
         integer :: i,j
-        logical :: context_change
+        logical :: context_change, restart
         real,allocatable,dimension(:,:) :: chstarxy
 
         if (options%physics%landsurface == 0) return   !! So we cannot (currently) run without lsm but with water.
@@ -620,6 +620,8 @@ contains
         else
             context_change = .false.
         endif
+
+        restart = context_change .or. options%restart%restart
 
         if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing LSM"
 
@@ -765,7 +767,7 @@ contains
                                 FNDSNOWH,                            &
                                 RDMAXALB,                            &
                                 num_soil_layers,                     &
-                                .False.,                             & ! nlayers, is_restart (can't yet)
+                                restart,                             & ! nlayers, is_restart (can't yet)
                                 .True. ,                             & ! allowed_to_read (e.g. soilparm.tbl)
                                 ids,ide, jds,jde, kds,kde,           &
                                 ims,ime, jms,jme, kms,kme,           &
@@ -907,7 +909,7 @@ contains
                                 domain%vars_2d(domain%var_indx(kVARS%temperature_2m_bare)%v)%data_2d,     &
                                 chstarxy,                               &   !doesn't do anything -_-
                                 num_soil_layers,                        &
-                                options%restart%restart,             &    !restart
+                                restart,             &    !restart
                                 .True.,                                 &    !allowed_to_read
                                 IOPT_RUN,  IOPT_CROP, IOPT_IRR, IOPT_IRRM, &
                                 SF_URBAN_PHYSICS,                         &  ! urban scheme
@@ -996,7 +998,7 @@ contains
                 ,HT=domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d                      & ! terrain height [m] if ht(i,j)>=lake_min_elev -> lake  (grid%ht in WRF)
                 ,SNOW=domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d      & !i  ! SNOW in kg/m^2  (NoahLSM: SNOW liquid water-equivalent snow depth (m)
                 ,lake_min_elev=5.                               & ! minimum elevation of lakes. May be used to determine whether a water point is a lake in the absence of lake category. If the landuse type includes 'lake' (i.e. Modis_lake and USGS_LAKE), this variable is of no effects.
-                ,restart=options%restart%restart                & ! if restart, this (lakeini) subroutine is simply skipped.
+                ,restart=restart                & ! if restart, this (lakeini) subroutine is simply skipped.
                 ,lakedepth_default=50.                          & ! default lake depth (If there is no lake_depth information in the input data, then lake depth is assumed to be 50m)
                 ,lake_depth=domain%vars_2d(domain%var_indx(kVARS%lake_depth)%v)%data_2d           & !INTENT(IN)
                 ,lakedepth2d=domain%vars_2d(domain%var_indx(kVARS%lakedepth2d)%v)%data_2d         & !INTENT(OUT) (will be equal to lake_depth if lake_depth data is provided in hi-res input, otherwise lakedepth_default)

@@ -2046,6 +2046,7 @@ contains
                 values = [0, 1, 2, 3]
                 default = "0"
                 group = "Physics"
+                type = 1
             case ("rad")
                 description = "Radiation scheme to use: "//achar(10)//BLNK_CHR_N// &
                                                        "0 = no RAD,"//achar(10)//BLNK_CHR_N// &
