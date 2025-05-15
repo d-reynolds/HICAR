@@ -171,10 +171,6 @@ Full list of user options, not including standard cmake options, are:
         ON             # (DEFAULT; If no libraries are found, HICAR is not linked to FSM)
         OFF            #
 
-    CAF=               # Flag for using Coarray-Fortran for halo exchanges if compiling using the cray fortran compiler
-        OFF            # (DEFAULT)
-        ON             #
-
     ASSERTIONS=        # Check for logical assertions at runtime. Used sparingly, little effect.
         ON             # (DEFAULT)
         OFF            #

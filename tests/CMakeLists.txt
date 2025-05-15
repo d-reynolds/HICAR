@@ -66,7 +66,7 @@ target_link_libraries(
 
 target_link_libraries("${PROJECT_NAME}-tester" PUBLIC MPI::MPI_Fortran)
 
-target_include_directories("${PROJECT_NAME}-tester" PUBLIC ${PROJECT_SOURCE_DIR}/../build)
+target_include_directories("${PROJECT_NAME}-tester" PUBLIC ${CMAKE_BINARY_DIR})
 
 #if(OpenMP_CXX_FOUND)
 #    target_link_libraries("${PROJECT_NAME}-tester" PUBLIC OpenMP::OpenMP_CXX)

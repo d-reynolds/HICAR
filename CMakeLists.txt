@@ -45,6 +45,7 @@ endif()
 
 option(ASSERTIONS "Check logical assertions at runtime" ON)
 option(FSM "Link to the FSM2 snow model, requires separate compilation of the FSM2 model" ON)
+option(SRUN_FLAGS "srun flags to use for running the test cases" "")
 #########################################
 
 #Set constants for project
@@ -427,7 +428,7 @@ SET(SRUN_FLAGS_LIST_TEST_CASE "-SRUN_FLAGS='${SRUN_FLAGS}'")
 if (MPIEXEC_EXECUTABLE MATCHES "srun")
     #see if the variable "account" is not set
 	if (NOT DEFINED SRUN_FLAGS)
-		message(ERROR "No account specified for srun, please pass your SLURM account name to cmake using -SRUN_FLAGS=<SRUN_FLAGS>")
+		message(ERROR "No account specified for srun, please pass your SLURM account name to cmake using -DSRUN_FLAGS=<SRUN_FLAGS>")
 	endif()
 	
 	add_custom_target(check

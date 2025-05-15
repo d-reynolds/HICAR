@@ -47,7 +47,7 @@ lonvar        = Longitude on mass (P/T/etc.) grid         (degrees)
 
 ## Variable data structure
 
-Forcing variables must conform to a known layout, as follows:
+Forcing variables must conform to a known dimension ordering, as follows:
 
 4-D variables (spatial):
 [time, Z, Y, X]
@@ -58,7 +58,9 @@ Forcing variables must conform to a known layout, as follows:
 2-D variables (spatial):
 [Y, X]
 
-Information about the ordering and meaning of a variable's dimensions be obtained by asking the HICAR executable about a specific forcing variable, such as:
+Input fields in 3 spatial dimensions may either be 4D (with time), or 3D. If they are 3D, there must be a single time step per input file. Latitude and longitude may also be provided as 1D data. Information about how input variables have been interpreted by the model will be output towards the beginning of the model output, where applicable.
+
+Information about the ordering and meaning of a variable's dimensions can be obtained by asking the HICAR executable about a specific forcing variable, such as:
 
 `./HICAR -v pvar`
 
