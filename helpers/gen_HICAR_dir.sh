@@ -4,8 +4,14 @@
 # i.e. :
 #./gen_HICAR_dir.sh ./Model_runs/ /home/user/HICAR/
 
-parent_dir=$(realpath $1)
-HICAR_dir=$(realpath $2)
+# check if the directory at path $1 exists
+if [ ! -d "$1" ]; then
+	mkdir -p $1
+fi
+
+# Use readlink -f or realpath to get absolute paths
+parent_dir=$(readlink -f "$1")
+HICAR_dir=$(readlink -f "$2")
 
 echo
 echo '#######################################################'
@@ -26,6 +32,7 @@ echo
 echo '#######################################################'
 echo
 #Create the parent directory if it doesn't exist and enter it
+
 cd $parent_dir
 if [ ! -d ./HICAR ]; then
 	mkdir HICAR
