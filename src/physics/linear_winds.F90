@@ -1136,7 +1136,7 @@ contains
                             ! if (reverse) then
                             !     u3d(i,j,k) = u3d(i,j,k) - u_perturbation(i,j,k) * linear_contribution
                             ! else
-                                u3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+                                ! domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
                             ! endif
                         endif
                         if (i<=nx) then
@@ -1153,17 +1153,25 @@ contains
                             !     v3d(i,j,k) = v3d(i,j,k) - v_perturbation(i,j,k) * linear_contribution
                             ! else
                                 ! for the high res domain, linear_mask should incorporate linear_contribution
-                                v3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+                                ! domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
                             ! endif
                         endif
                 end do
             end do
         end do
         !$omp end do
-
         deallocate(u1d, v1d)
         !$omp end parallel
-        nsquared = exp(nsquared)
+
+        do k=1, nyv
+            do j=1, nz
+                do i=1, nxu
+                    if (i<=nx) domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+                    if (k<=ny) domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+                enddo
+            enddo
+        enddo
+        domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d = exp(domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d)
 
     end subroutine spatial_winds
 
