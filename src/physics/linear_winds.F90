@@ -668,6 +668,20 @@ contains
 
         fftnx = size(domain%terrain_frequency, 1)
         fftny = size(domain%terrain_frequency, 2)
+
+        call setup_remote_grids(u_grids, v_grids, domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, nz, &
+        domain%grid%halo_size, domain%compute_comms)
+
+        ! ensure these are at their required size for all images
+        nx = maxval(v_grids%nx)
+        ny = maxval(u_grids%ny)
+        nxu = maxval(u_grids%nx)
+        nyv = maxval(v_grids%ny)
+
+        ! store to make it easy to check dim sizes in read_LUT
+        LUT_dims(:,1) = [nxu,nz,ny]
+        LUT_dims(:,2) = [nx,nz,nyv]
+
         ! note:
         ! buffer = (fftnx - nx)/2
 
@@ -714,18 +728,6 @@ contains
 
         if ( (reverse.or.(.not.((options%lt%read_LUT).and.(error==0)))) .and. (.not.module_initialized) ) then
 
-            call setup_remote_grids(u_grids, v_grids, domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, nz, &
-                                                      domain%grid%halo_size, domain%compute_comms)
-
-            ! ensure these are at their required size for all images
-            nx = maxval(v_grids%nx)
-            ny = maxval(u_grids%ny)
-            nxu = maxval(u_grids%nx)
-            nyv = maxval(v_grids%ny)
-            
-            ! store to make it easy to check dim sizes in read_LUT
-            LUT_dims(:,1) = [nxu,nz,ny]
-            LUT_dims(:,2) = [nx,nz,nyv]
     
             if (allocated(hi_u_LUT)) deallocate(hi_u_LUT)
             allocate(hi_u_LUT(n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny), source=0.0)
