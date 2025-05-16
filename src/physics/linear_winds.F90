@@ -94,16 +94,11 @@ module linear_theory_winds
     ! Look Up Tables for linear perturbation are nspd x n_dir_values x n_nsq_values x nx x nz x ny
     real, allocatable,          dimension(:,:,:,:,:,:) :: hi_u_LUT, hi_v_LUT !, rev_u_LUT, rev_v_LUT
     ! real, pointer,              dimension(:,:,:,:,:,:) :: u_LUT, v_LUT
-    real, allocatable,          dimension(:,:)         :: linear_mask, nsq_calibration
 
     ! store the linear perturbation so we can update it slightly each time step
     ! this permits the linear field to build up over time.
     real, allocatable, target,  dimension(:,:,:) :: hi_u_perturbation, hi_v_perturbation, lo_u_perturbation, lo_v_perturbation
     real, pointer,              dimension(:,:,:) :: u_perturbation, v_perturbation
-
-    logical :: use_spatial_linear_fields
-    logical :: use_linear_mask     ! use a spatial mask for the linear wind field
-    logical :: use_nsq_calibration ! use a spatial mask to calibrate the nsquared (brunt vaisala frequency) field
 
     integer :: buffer, original_buffer ! number of grid cells to buffer around the domain MUST be >=1
     integer :: stability_window_size
@@ -959,8 +954,8 @@ contains
         ! !$omp private(i,j,k,step, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
         ! !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v, blocked), &
         ! !$omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
-        ! !$omp shared(domain, u3d,v3d, spd_values, dir_values, nsq_values, u_LUT, v_LUT, linear_mask), &
-        ! !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution, nsq_calibration), &
+        ! !$omp shared(domain, u3d,v3d, spd_values, dir_values, nsq_values, u_LUT, v_LUT), &
+        ! !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution), &
         ! !$omp shared(min_stability, max_stability, n_dir_values, n_spd_values, n_nsq_values, smooth_nsq)
         !
         ! !$omp do
@@ -1040,8 +1035,8 @@ contains
         !$omp private(i,j,k,step, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
         !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v), &
         !$omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
-        !$omp shared(domain, u3d,v3d, nsquared, spd_values, dir_values, nsq_values, hi_u_LUT, hi_v_LUT, linear_mask), &
-        !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution, nsq_calibration), &
+        !$omp shared(domain, u3d,v3d, nsquared, spd_values, dir_values, nsq_values, hi_u_LUT, hi_v_LUT), &
+        !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution), &
         !$omp shared(min_stability, max_stability, n_dir_values, n_spd_values, n_nsq_values, smooth_nsq)
         allocate(u1d(nxu), v1d(nxu))
         !$omp do
@@ -1196,10 +1191,6 @@ contains
 
         linear_update_fraction    = options%lt%linear_update_fraction   ! controls the rate at which the linearfield updates
                                                                                 ! =fraction of linear perturbation to add each time step
-        use_spatial_linear_fields = options%lt%spatial_linear_fields    ! use a spatially varying linear wind perturbation
-        use_linear_mask           = options%lt%linear_mask              ! use a spatial mask for the linear wind field
-        use_nsq_calibration       = options%lt%nsq_calibration          ! use a spatial mask to calibrate the nsquared (brunt vaisala frequency) field
-
         ! Look up table generation parameters, range for each parameter, and number of steps to cover that range
         dirmax = options%lt%dirmax
         dirmin = options%lt%dirmin
@@ -1241,7 +1232,6 @@ contains
 
         if (STD_OUT_PE) write(*,*) "Initializing linear winds"
         if (.not.(allocated(domain%terrain_frequency))) then
-            allocate(domain%terrain_frequency(nx,ny))
 
 
             ! Create a buffer zone around the topography to smooth the edges
@@ -1255,6 +1245,8 @@ contains
 
             nx = size(complex_terrain, 1)
             ny = size(complex_terrain, 2)
+
+            allocate(domain%terrain_frequency(nx,ny))
 
             ! calculate the fourier transform of the terrain for use in linear winds
             plan = fftw_plan_dft_2d(ny, nx, complex_terrain, domain%terrain_frequency, FFTW_FORWARD, FFTW_ESTIMATE)
@@ -1339,15 +1331,13 @@ contains
             v_perturbation=>hi_v_perturbation
         endif
 
-        if (use_spatial_linear_fields) then
-            ! if    ((.not.allocated(hi_u_LUT)  .and. (.not.reverse)) &
-            !  .or.  (.not.allocated(rev_u_LUT) .and. reverse)) then
+        ! if    ((.not.allocated(hi_u_LUT)  .and. (.not.reverse)) &
+        !  .or.  (.not.allocated(rev_u_LUT) .and. reverse)) then
 
-                if (STD_OUT_PE) write(*,*) "  Generating a spatially variable linear perturbation look up table"
-                call initialize_spatial_winds(domain, options, reverse)
+            if (STD_OUT_PE) write(*,*) "  Generating a spatially variable linear perturbation look up table"
+            call initialize_spatial_winds(domain, options, reverse)
 
-            ! endif
-        endif
+        ! endif
 
         module_initialized = .True.
 

@@ -1541,17 +1541,6 @@ contains
                 dimensions = ["Y", "X"]
                 units = "mm"
                 group = "Domain"
-            case ("linear_mask_var")
-                description = "Name of the linear mask variable in domain file"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
-                group = "Domain"
-            case ("nsq_calibration_var")
-                description = "Name of the NSQ calibration variable in domain file"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
-                units = "1/s^2"
-                group = "Domain"
             case ("sinalpha_var")
                 description = "Name of the sine of the slope angle variable in domain file"
                 allocate(dimensions(2))
@@ -2369,18 +2358,6 @@ contains
                 min = 0
                 max = 1
                 default = "0.2"
-                group = "LT_Parameters"
-            case ("spatial_linear_fields")
-                description = "use a spatially varying linear wind perturbation (T/F)"
-                default = ".False."
-                group = "LT_Parameters"
-            case ("linear_mask")
-                description = "use a spatial mask for the linear wind field (T/F)"
-                default = ".False."
-                group = "LT_Parameters"
-            case ("nsq_calibration")
-                description = "use a spatial mask to calibrate the nsquared (brunt vaisala frequency) field (T/F)"
-                default = ".False."
                 group = "LT_Parameters"
             case ("dirmax")
                 description = "maximum direction of the wind perturbation look up table"

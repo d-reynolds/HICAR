@@ -650,8 +650,10 @@ contains
                      (opt%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
                     if (i==kVARS%h1 .or. i==kVARS%h2) then
                         grid = this%global_grid_2d
-                    else if (i==kVARS%global_z_interface .or. i==kVARS%global_dz_interface) then
+                    else if (i==kVARS%global_z_interface) then
                         grid = this%global_grid8w
+                    else if (i==kVARS%global_dz_interface) then
+                        grid = this%global_grid
                     endif
                 endif
 

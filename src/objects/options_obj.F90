@@ -1150,7 +1150,7 @@ contains
 
         character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: landvar,lakedepthvar,hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
                                         snowh_var, soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var, soil_deept_var,           &
-                                        vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var, linear_mask_var, nsq_calibration_var,  &
+                                        vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
                                         sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, &
                                         aspect_angle_var, shd_var  !!MJ added
 
@@ -1158,7 +1158,7 @@ contains
                             landvar,lakedepthvar, snowh_var, agl_cap, use_agl_height, &
                             hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
                             soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
-                            vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var, linear_mask_var, nsq_calibration_var,  &
+                            vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
                             sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, & !! MJ added
                             dz_levels, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n
 
@@ -1207,8 +1207,6 @@ contains
         call set_nml_var_default(albedo_var, 'albedo_var', print_info, gennml)
         call set_nml_var_default(lai_var, 'lai_var', print_info, gennml)
         call set_nml_var_default(canwat_var, 'canwat_var', print_info, gennml)
-        call set_nml_var_default(linear_mask_var, 'linear_mask_var', print_info, gennml)
-        call set_nml_var_default(nsq_calibration_var, 'nsq_calibration_var', print_info, gennml)
         call set_nml_var_default(sinalpha_var, 'sinalpha_var', print_info, gennml)
         call set_nml_var_default(cosalpha_var, 'cosalpha_var', print_info, gennml)
 
@@ -1308,8 +1306,6 @@ contains
         call set_nml_var(domain_options%albedo_var, albedo_var(n_indx), 'albedo_var',domain_options, albedo_var(1))
         call set_nml_var(domain_options%lai_var, lai_var(n_indx), 'lai_var',domain_options, lai_var(1))
         call set_nml_var(domain_options%canwat_var, canwat_var(n_indx), 'canwat_var',domain_options, canwat_var(1))
-        call set_nml_var(domain_options%linear_mask_var, linear_mask_var(n_indx), 'linear_mask_var',domain_options, linear_mask_var(1))
-        call set_nml_var(domain_options%nsq_calibration_var, nsq_calibration_var(n_indx), 'nsq_calibration_var',domain_options, nsq_calibration_var(1))
         call set_nml_var(domain_options%sinalpha_var, sinalpha_var(n_indx), 'sinalpha_var',domain_options, sinalpha_var(1))
         call set_nml_var(domain_options%cosalpha_var, cosalpha_var(n_indx), 'cosalpha_var',domain_options, cosalpha_var(1))
 
@@ -1506,10 +1502,6 @@ contains
         real    :: rm_N_squared(kMAX_NESTS)             ! static Brunt Vaisala Frequency (N^2) to use in removing linear wind field
         real    :: rm_linear_contribution(kMAX_NESTS)   ! fractional contribution of linear perturbation to wind field to remove from the low-res field
 
-        logical :: spatial_linear_fields(kMAX_NESTS)    ! use a spatially varying linear wind perturbation
-        logical :: linear_mask(kMAX_NESTS)              ! use a spatial mask for the linear wind field
-        logical :: nsq_calibration(kMAX_NESTS)          ! use a spatial mask to calibrate the nsquared (brunt vaisala frequency) field
-
         ! Look up table generation parameters
         real, dimension(kMAX_NESTS)    :: dirmax, dirmin
         real, dimension(kMAX_NESTS)    :: spdmax, spdmin
@@ -1527,7 +1519,7 @@ contains
         namelist /lt_parameters/ variable_N, smooth_nsq, buffer, stability_window_size, max_stability, min_stability, &
                                  linear_contribution, linear_update_fraction, N_squared, vert_smooth, &
                                  remove_lowres_linear, rm_N_squared, rm_linear_contribution, &
-                                 spatial_linear_fields, linear_mask, nsq_calibration, minimum_layer_size, &
+                                 minimum_layer_size, &
                                  dirmax, dirmin, spdmax, spdmin, nsqmax, nsqmin, n_dir_values, n_nsq_values, n_spd_values, &
                                  read_LUT, write_LUT, u_LUT_Filename, v_LUT_Filename, overwrite_lt_lut, LUT_Filename
 
@@ -1551,9 +1543,6 @@ contains
         call set_nml_var_default(rm_N_squared, 'rm_N_squared', print_info, gennml)
         call set_nml_var_default(rm_linear_contribution, 'rm_linear_contribution', print_info, gennml)
         call set_nml_var_default(linear_update_fraction, 'linear_update_fraction', print_info, gennml)
-        call set_nml_var_default(spatial_linear_fields, 'spatial_linear_fields', print_info, gennml)
-        call set_nml_var_default(linear_mask, 'linear_mask', print_info, gennml)
-        call set_nml_var_default(nsq_calibration, 'nsq_calibration', print_info, gennml)
         call set_nml_var_default(dirmax, 'dirmax', print_info, gennml)
         call set_nml_var_default(dirmin, 'dirmin', print_info, gennml)
         call set_nml_var_default(spdmax, 'spdmax', print_info, gennml)
@@ -1588,9 +1577,6 @@ contains
             variable_N(n_indx) = variable_N(1)
             smooth_nsq(n_indx) = smooth_nsq(1)
             remove_lowres_linear(n_indx) = remove_lowres_linear(1)
-            spatial_linear_fields(n_indx) = spatial_linear_fields(1)
-            linear_mask(n_indx) = linear_mask(1)
-            nsq_calibration(n_indx) = nsq_calibration(1)
             read_LUT(n_indx) = read_LUT(1)
             write_LUT(n_indx) = write_LUT(1)
             overwrite_lt_lut(n_indx) = overwrite_lt_lut(1)
@@ -1619,9 +1605,6 @@ contains
         call set_nml_var(lt_options%rm_N_squared, rm_N_squared(n_indx), 'rm_N_squared', rm_N_squared(1))
         call set_nml_var(lt_options%rm_linear_contribution, rm_linear_contribution(n_indx), 'rm_linear_contribution', rm_linear_contribution(1))
         call set_nml_var(lt_options%linear_update_fraction, linear_update_fraction(n_indx), 'linear_update_fraction', linear_update_fraction(1))
-        call set_nml_var(lt_options%spatial_linear_fields, spatial_linear_fields(n_indx), 'spatial_linear_fields', spatial_linear_fields(1))
-        call set_nml_var(lt_options%linear_mask, linear_mask(n_indx), 'linear_mask', linear_mask(1))
-        call set_nml_var(lt_options%nsq_calibration, nsq_calibration(n_indx), 'nsq_calibration', nsq_calibration(1))
         call set_nml_var(lt_options%dirmax, dirmax(n_indx), 'dirmax', dirmax(1))
         call set_nml_var(lt_options%dirmin, dirmin(n_indx), 'dirmin', dirmin(1))
         call set_nml_var(lt_options%spdmax, spdmax(n_indx), 'spdmax', spdmax(1))

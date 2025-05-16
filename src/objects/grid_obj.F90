@@ -190,6 +190,11 @@ contains
       this%jde = this%ny_global
       this%kde = this%nz
 
+      this%ims = 1
+      this%jms = 1
+      this%ime = this%nx_global
+      this%jme = this%ny_global
+
       if (nx == 0 .and. ny == 0 .and. nz > 1) then
         this%is1d = .True.
         if (allocated(this%dimensions)) deallocate(this%dimensions)

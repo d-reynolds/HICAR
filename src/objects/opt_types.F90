@@ -90,9 +90,6 @@ module options_types
         real    :: rm_linear_contribution   ! fractional contribution of linear perturbation to wind field to remove from the low-res field
 
         real    :: linear_update_fraction   ! fraction of linear perturbation to add each time step
-        logical :: spatial_linear_fields    ! use a spatially varying linear wind perturbation
-        logical :: linear_mask              ! use a spatial mask for the linear wind field
-        logical :: nsq_calibration          ! use a spatial mask to calibrate the nsquared (brunt vaisala frequency) field
 
         ! Look up table generation parameters
         real    :: dirmax, dirmin           ! minimum and maximum directions to use in the LUT (typically 0 and 2*pi)
@@ -394,7 +391,6 @@ module options_types
         character (len=kMAX_NAME_LENGTH) :: hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,landvar,lakedepthvar, &
                                         snowh_var, soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var, &
                                         vegtype_var,vegfrac_var, albedo_var, vegfracmax_var, lai_var, canwat_var, &
-                                        linear_mask_var, nsq_calibration_var, &
                                         sinalpha_var, cosalpha_var
 
         character(len=kMAX_NAME_LENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var !!MJ added
