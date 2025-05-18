@@ -131,10 +131,10 @@ module subroutine init(this, exch_vars, adv_vars, grid, comms)
         call C_F_POINTER(tmp_ptr, this%west_in_3d, [nx, nz, ny])
         this%west_in_3d = 1
 
-        call MPI_Win_fence(0,this%south_in_win)
-        call MPI_Win_fence(0,this%north_in_win)
-        call MPI_Win_fence(0,this%east_in_win)
-        call MPI_Win_fence(0,this%west_in_win)
+        ! call MPI_Win_fence(0,this%south_in_win)
+        ! call MPI_Win_fence(0,this%north_in_win)
+        ! call MPI_Win_fence(0,this%east_in_win)
+        ! call MPI_Win_fence(0,this%west_in_win)
     endif
 
     !...and the larger 3D halo for batch exchanges

@@ -28,6 +28,7 @@ module wind_iterative_old
     use petscdmda
     use icar_constants,    only : STD_OUT_PE, kVARS
     use options_interface, only : options_t
+    use iso_fortran_env
 
     implicit none
     private
@@ -119,7 +120,7 @@ contains
         if (reason > 0) then
             call KSPGetIterationNumber(ksp(domain%nest_indx), iteration, ierr)
             if(STD_OUT_PE) write(*,*) 'Solved PETSc after ',iteration,' iterations'
-            
+            if (STD_OUT_PE) flush(output_unit)
             !Subset global solution to local grid so that we can access ghost-points
             call DMGlobalToLocal(da,b,INSERT_VALUES,localX,ierr)
 

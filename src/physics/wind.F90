@@ -860,7 +860,7 @@ contains
         
         integer :: n, ob_k, Ri_k_max
         real :: z_top, z_bot, z_mean, th_top, th_bot, obstacle_height, RI_Z_MAX
-        integer :: ymin, ymax, xmin, xmax, n_smoothing_passes, nsmooth_gridcells
+        integer :: ymin, ymax, xmin, xmax, n_smoothing_passes, nsmooth_gridcells, ubound_terrain
         
         RI_Z_MAX = 100.0
         Ri_k_max = 0
@@ -880,7 +880,7 @@ contains
         ! If we want variable alpha, then calculate froude terrrain
         if (options%wind%alpha_const<0 .and. (options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS)) then
                         
-            
+            ubound_terrain = ubound(domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d,4)
             !Compute wind direction for each cell on mass grid
             do i = ims, ime
                 do k=kms, kme
@@ -888,14 +888,14 @@ contains
                         winddir(i,k,j) = ATAN(-u_m(i,k,j),-v_m(i,k,j))*rad2deg
                         if(winddir(i,k,j) <= 0.0) winddir(i,k,j) = winddir(i,k,j)+360
                         if(winddir(i,k,j) == 360.0) winddir(i,k,j) = 0.0
-                        dir_indices(i,k,j) = int(winddir(i,k,j)/5)+1                    
+                        dir_indices(i,k,j) = max(min(int(winddir(i,k,j)/5)+1,ubound_terrain),1)                 
                     enddo
                 end do
             end do
             
             !Build grid of Sx values based on wind direction at that cell
             do i = ims, ime
-                do k=kms, kme
+                do k = kms, kme
                     do j = jms, jme
                         temp_froude(i,k,j) = domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(i,k,j,dir_indices(i,k,j))
                     enddo
