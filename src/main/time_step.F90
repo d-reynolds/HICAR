@@ -231,6 +231,7 @@ contains
         ! Set dt to the outcome of reduce
         call dt%set(seconds=seconds_out)
         if (STD_OUT_PE) write(*,*) 'time_step: ',trim(dt%as_string())
+        if (STD_OUT_PE) flush(output_unit)
 
     end subroutine update_dt
     
