@@ -1709,7 +1709,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     REAL, PARAMETER           :: HLICE = 3.335E5
     REAL, PARAMETER           :: GRAV = 9.81
     REAL, PARAMETER           :: T0 = 273.15
-
+    logical, save :: module_init = .false.
     INTEGER                   :: errflag, i,j,itf,jtf,ns
 
     character(len=240) :: err_message
@@ -1717,9 +1717,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     character(len=*), intent(in) :: MMINLU
     MMINSL='STAS'
 
-
-    IF( .NOT. restart ) THEN
-
+    if (.not.(module_init)) then
       call read_mp_veg_parameters(trim(MMINLU))
       call read_mp_soil_parameters()
       call read_mp_rad_parameters()
@@ -1727,6 +1725,11 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
       call read_mp_crop_parameters()
       call read_mp_optional_parameters()
       if(iopt_irr  >= 1) call read_mp_irrigation_parameters()
+
+      module_init = .True.
+    endif
+
+    IF( .NOT. restart ) THEN
   
        itf=min0(ite,ide-1)
        jtf=min0(jte,jde-1)
