@@ -9,7 +9,7 @@ submodule(options_interface) options_implementation
     use model_tracking,             only : print_model_diffs
     use output_metadata,            only : get_varname, get_varindx
     use namelist_utils,             only : set_nml_var, set_nml_var_default, set_namelist, write_nml_file_end
-    use iso_fortran_env,            only : output_unit
+    use iso_fortran_env
     implicit none
 
 
@@ -496,6 +496,7 @@ contains
         logical :: print_info, gennml, read_namelist
         !define the namelist
         namelist /physics/ pbl, lsm, sfc, sm, water, mp, rad, conv, adv, wind, radiation_downscaling
+        CHARACTER(LEN=200) :: error_msg
 
         read_namelist = .True.
         if (present(read_nml)) read_namelist = read_nml
@@ -524,14 +525,9 @@ contains
         !read the namelist
         if (read_namelist) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=physics)
+            read(name_unit,iostat=rc,nml=physics,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'physics' namelist"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                stop
-            endif
+            if (rc /= 0) call print_nml_error('physics',msg=error_msg,iostat=rc)
         endif
 
         !store options
@@ -593,6 +589,7 @@ contains
         character(len=kMAX_NAME_LENGTH) :: output_vars(kMAX_STORAGE_VARS, kMAX_NESTS)
         
         namelist /output/ output_vars, outputinterval, frames_per_outfile, output_folder
+        CHARACTER(LEN=200) :: error_msg
 
         read_namelist = .True.
         if (present(read_nml)) read_namelist = read_nml
@@ -613,14 +610,9 @@ contains
 
         if (read_namelist) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc, nml=output)
+            read(name_unit,iostat=rc,nml=output,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'output' namelist"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                stop
-            endif
+            if (rc /= 0) call print_nml_error('output',msg=error_msg,iostat=rc)
         endif
 
         do j=1, kMAX_STORAGE_VARS
@@ -662,6 +654,7 @@ contains
         character(len=kMAX_FILE_LENGTH) :: restart_date(kMAX_NESTS)    ! date to restart
 
         namelist /restart/  restartinterval, restart_folder, restart_date, restart_run
+        CHARACTER(LEN=200) :: error_msg
 
         read_namelist = .True.
         if (present(read_nml)) read_namelist = read_nml
@@ -682,14 +675,9 @@ contains
 
         if (read_namelist) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc, nml=restart)
+            read(name_unit,iostat=rc,nml=restart,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'restart' namelist"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                stop
-            endif
+            if (rc /= 0) call print_nml_error('restart',msg=error_msg,iostat=rc)
         endif
         ! Restart interval for this particular nest must be set to be the number of output intervals for this nest
         ! which results in the same restart timestep for the first nest
@@ -748,6 +736,7 @@ contains
                             hgtvar,shvar,lhvar,pblhvar,   &
                             latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar,zvar, &
                             psvar, pslvar, swdown_var, lwdown_var, sst_var, time_var
+        CHARACTER(LEN=200) :: error_msg
 
         read_namelist = .True.
         if (present(read_nml)) read_namelist = read_nml
@@ -821,14 +810,9 @@ contains
 
         if (read_namelist) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=forcing)
+            read(name_unit,iostat=rc,nml=forcing,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'forcing' namelist"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                stop
-            endif
+            if (rc /= 0) call print_nml_error('forcing',msg=error_msg,iostat=rc)
         endif
 
         call set_nml_var(options%forcing%t_offset, t_offset(n_indx), 't_offset', t_offset(1))
@@ -1014,6 +998,7 @@ contains
                               use_sfc_options,    &
                               use_wind_options,   &
                               use_pbl_options
+        CHARACTER(LEN=200) :: error_msg
 
         read_namelist = .True.
         if (present(read_nml)) read_namelist = read_nml
@@ -1050,14 +1035,9 @@ contains
 
         if (read_namelist) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=general)
+            read(name_unit,iostat=rc,nml=general,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'general' namelist"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                stop
-            endif
+            if (rc /= 0) call print_nml_error('general',msg=error_msg,iostat=rc)
         endif
 
         call set_nml_var(gen_options%calendar, calendar(n_indx), 'calendar', calendar(1))
@@ -1161,6 +1141,7 @@ contains
                             vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
                             sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, & !! MJ added
                             dz_levels, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n
+        CHARACTER(LEN=200) :: error_msg
 
         read_namelist = .True.
         if (present(read_nml)) read_namelist = read_nml
@@ -1224,14 +1205,9 @@ contains
 
         if (read_namelist) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=domain)
+            read(name_unit,iostat=rc,nml=domain,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'domain' namelist"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                stop
-            endif
+            if (rc /= 0) call print_nml_error('domain',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             sleve(n_indx) = sleve(1)
             use_agl_height(n_indx) = use_agl_height(1)
@@ -1240,12 +1216,12 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=domain)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'domain' namelist"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                stop
-            endif
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'domain' namelist"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     stop
+            ! endif
         endif
 
 
@@ -1384,6 +1360,7 @@ contains
                                 Ef_si, Ef_rs, Ef_rg, Ef_ri,                                     &   ! thompson microphysics parameters
                                 C_cubes, C_sqrd, mu_r, Ef_rw_l, Ef_sw_l, t_adjust,              &   ! thompson microphysics parameters
                                 top_mp_level, update_interval_mp
+        CHARACTER(LEN=200) :: error_msg
 
         print_info = .False.
         if (present(info_only)) print_info = info_only
@@ -1420,13 +1397,9 @@ contains
         ! read in the namelist
         if (read_nml) then
             open(io_newunit(name_unit), file=mp_filename)
-            read(name_unit,iostat=rc, nml=mp_parameters)
+            read(name_unit,iostat=rc,nml=mp_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'mp_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            if (rc /= 0) call print_nml_error('mp_parameters',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             Ef_rw_l(n_indx) = Ef_rw_l(1)
             Ef_sw_l(n_indx) = Ef_sw_l(1)
@@ -1435,11 +1408,11 @@ contains
             open(io_newunit(name_unit), file=mp_filename)
             read(name_unit,iostat=rc, nml=mp_parameters)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'mp_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'mp_parameters' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
         endif
 
         call set_nml_var(mp_options%Nt_c, Nt_c(n_indx), 'Nt_c', Nt_c(1))
@@ -1514,6 +1487,7 @@ contains
         logical, dimension(kMAX_NESTS) :: read_LUT, write_LUT
         character(len=kMAX_FILE_LENGTH), dimension(kMAX_NESTS) :: u_LUT_Filename, v_LUT_Filename, LUT_Filename
         logical :: overwrite_lt_lut(kMAX_NESTS)
+        CHARACTER(LEN=200) :: error_msg
 
         ! define the namelist
         namelist /lt_parameters/ variable_N, smooth_nsq, buffer, stability_window_size, max_stability, min_stability, &
@@ -1566,13 +1540,9 @@ contains
         ! read the namelist options
         if (read_nml) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=lt_parameters)
+            read(name_unit,iostat=rc,nml=lt_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'lt_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            if (rc /= 0) call print_nml_error('lt_parameters',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             variable_N(n_indx) = variable_N(1)
             smooth_nsq(n_indx) = smooth_nsq(1)
@@ -1585,11 +1555,6 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=lt_parameters)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'lt_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
         endif
 
         call set_nml_var(lt_options%variable_N, variable_N(n_indx), 'variable_N', variable_N(1))
@@ -1647,7 +1612,8 @@ contains
         logical :: advect_density(kMAX_NESTS)
         ! MPDATA order of correction (e.g. 1st=upwind, 2nd=classic, 3rd=better)
         integer, dimension(kMAX_NESTS) :: mpdata_order, flux_corr, h_order, v_order
-        
+        CHARACTER(LEN=200) :: error_msg
+
         ! define the namelist
         namelist /adv_parameters/ boundary_buffer, MPDATA_FCT, mpdata_order, flux_corr, h_order, v_order, advect_density
 
@@ -1671,13 +1637,9 @@ contains
         ! read the namelist options
         if (read_nml) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=adv_parameters)
+            read(name_unit,iostat=rc,nml=adv_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'adv_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            if (rc /= 0) call print_nml_error('adv_parameters',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             boundary_buffer(n_indx) = boundary_buffer(1)
             MPDATA_FCT(n_indx) = MPDATA_FCT(1)
@@ -1687,11 +1649,11 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=adv_parameters)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'adv_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'adv_parameters' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
         endif
 
         call set_nml_var(adv_options%boundary_buffer, boundary_buffer(n_indx), 'boundary_buffer', boundary_buffer(1))
@@ -1723,7 +1685,8 @@ contains
         logical :: print_info, gennml
 
         integer :: ysu_topdown_pblmix(kMAX_NESTS) ! controls if radiative, top-down mixing in YSU scheme is turned on
-        
+        CHARACTER(LEN=200) :: error_msg
+
         ! define the namelist
         namelist /pbl_parameters/ ysu_topdown_pblmix
 
@@ -1741,13 +1704,9 @@ contains
         ! read the namelist options
         if (read_nml) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=pbl_parameters)
+            read(name_unit,iostat=rc,nml=pbl_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'pbl_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            if (rc /= 0) call print_nml_error('pbl_parameters',msg=error_msg,iostat=rc)
         endif
 
         call set_nml_var(pbl_options%ysu_topdown_pblmix, ysu_topdown_pblmix(n_indx), 'ysu_topdown_pblmix', ysu_topdown_pblmix(1))
@@ -1774,7 +1733,8 @@ contains
         logical :: print_info, gennml
         ! define the namelist
         namelist /sfc_parameters/ isfflx, scm_force_flux, iz0tlnd, sbrlim, isftcflx
-         
+        CHARACTER(LEN=200) :: error_msg
+
         print_info = .False.
         if (present(info_only)) print_info = info_only
 
@@ -1793,13 +1753,9 @@ contains
         ! read the namelist options
         if (read_nml) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=sfc_parameters)
+            read(name_unit,iostat=rc,nml=sfc_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'sfc_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            if (rc /= 0) call print_nml_error('sfc_parameters',msg=error_msg,iostat=rc)
         endif
         
         call set_nml_var(sfc_options%isfflx, isfflx(n_indx), 'isfflx', isfflx(1))
@@ -1835,6 +1791,7 @@ contains
         ! define the namelist
         namelist /cu_parameters/ tendency_fraction, tend_qv_fraction, tend_qc_fraction, tend_th_fraction, tend_qi_fraction, &
                                  stochastic_cu
+        CHARACTER(LEN=200) :: error_msg
 
         print_info = .False.
         if (present(info_only)) print_info = info_only
@@ -1855,13 +1812,9 @@ contains
         ! read the namelist options
         if (read_nml) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=cu_parameters)
+            read(name_unit,iostat=rc,nml=cu_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'cu_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            if (rc /= 0) call print_nml_error('cu_parameters',msg=error_msg,iostat=rc)
         endif
 
         ! if not set separately, default to the global tendency setting
@@ -1924,6 +1877,7 @@ contains
                                   nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo,          &
                                   nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, nmp_soiltstep,       &
                                   sf_urban_phys, noahmp_output, num_soil_layers !! MJ added
+        CHARACTER(LEN=200) :: error_msg
 
         print_info = .False.
         if (present(info_only)) print_info = info_only
@@ -1974,13 +1928,9 @@ contains
         ! read the namelist options
         if (read_nml) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=lsm_parameters)
+            read(name_unit,iostat=rc,nml=lsm_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'lsm_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            if (rc /= 0) call print_nml_error('lsm_parameters',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             monthly_albedo(n_indx) = monthly_albedo(1)
             monthly_vegfrac(n_indx) = monthly_vegfrac(1)
@@ -1989,11 +1939,11 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=lsm_parameters)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'lsm_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'lsm_parameters' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
         endif
 
         call set_default_LU_categories(LU_Categories(n_indx), urban_category(n_indx), ice_category(n_indx), water_category(n_indx), lake_category(n_indx))
@@ -2060,6 +2010,7 @@ contains
                                  fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst, &
                                  fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn
 
+        CHARACTER(LEN=200) :: error_msg
 
         print_info = .False.
         if (present(info_only)) print_info = info_only
@@ -2093,13 +2044,9 @@ contains
         ! read the namelist options
         if (read_nml) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=sm_parameters)
+            read(name_unit,iostat=rc,nml=sm_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'sm_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            if (rc /= 0) call print_nml_error('sm_parameters',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             fsm_hn_on(n_indx) = fsm_hn_on(1)
             fsm_for_hn(n_indx) = fsm_for_hn(1)
@@ -2108,11 +2055,11 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=sm_parameters)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'sm_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'sm_parameters' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
         endif
 
         call set_nml_var(sm_options%fsm_nsnow_max, fsm_nsnow_max(n_indx), 'fsm_nsnow_max', fsm_nsnow_max(1))
@@ -2159,6 +2106,7 @@ contains
         real    :: tzone(kMAX_NESTS) !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
         ! define the namelist
         namelist /rad_parameters/ update_interval_rrtmg, icloud, read_ghg, cldovrlp, tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
+        CHARACTER(LEN=200) :: error_msg
 
         print_info = .False.
         if (present(info_only)) print_info = info_only
@@ -2178,24 +2126,20 @@ contains
         ! read the namelist options
         if (read_nml) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit, iostat=rc, nml=rad_parameters)
+            read(name_unit,iostat=rc,nml=rad_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'rad_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            if (rc /= 0) call print_nml_error('rad_parameters',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             read_ghg(n_indx) = read_ghg(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             open(io_newunit(name_unit), file=filename)
             read(name_unit, iostat=rc, nml=rad_parameters)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'rad_parameters' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'rad_parameters' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
         endif
 
         call set_nml_var(rad_options%update_interval_rrtmg, update_interval_rrtmg(n_indx), 'update_interval_rrtmg', update_interval_rrtmg(1))
@@ -2225,7 +2169,8 @@ contains
         !Make name-list
         namelist /wind/ Sx, thermal, wind_only, Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, &
                         update_frequency, smooth_wind_distance, wind_iterations
-        
+        CHARACTER(LEN=200) :: error_msg
+
         print_info = .False.
         if (present(info_only)) print_info = info_only
 
@@ -2250,13 +2195,9 @@ contains
         !Read namelist file
         if (read_nml) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=wind)
+            read(name_unit,iostat=rc,nml=wind,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'wind' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            if (rc /= 0) call print_nml_error('wind',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             Sx(n_indx) = Sx(1)
             thermal(n_indx) = thermal(1)
@@ -2265,11 +2206,11 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=wind)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'wind' namelist, continuing with defaults"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-            endif
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'wind' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
         endif
 
         call set_nml_var(wind_options%Sx, Sx(n_indx), 'Sx', Sx(1))
@@ -2305,7 +2246,8 @@ contains
         
         !Make name-list
         namelist /time_parameters/ cfl_reduction_factor, RK3
-        
+        CHARACTER(LEN=200) :: error_msg
+
         read_namelist = .True.
         if (present(read_nml)) read_namelist = read_nml
 
@@ -2324,26 +2266,21 @@ contains
         !Read namelist file
         if (read_namelist) then
             open(io_newunit(name_unit), file=filename)
-            read(name_unit,iostat=rc,nml=time_parameters)
+            read(name_unit,iostat=rc,nml=time_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'time_parameters' namelist"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                stop
-            endif
+            if (rc /= 0) call print_nml_error('time_parameters',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             RK3(n_indx) = RK3(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=time_parameters)
             close(name_unit)
-            if (rc /= 0) then
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                if (STD_OUT_PE) write(*,*) "  Error reading 'time_parameters' namelist"
-                if (STD_OUT_PE) write(*,*) "  --------------------------------"
-                stop
-            endif
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'time_parameters' namelist"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     stop
+            ! endif
         endif
 
         call set_nml_var(time_options%cfl_reduction_factor, cfl_reduction_factor(n_indx), 'cfl_reduction_factor', cfl_reduction_factor(1))
@@ -2760,5 +2697,41 @@ contains
 
     end subroutine version_check
 
+    subroutine print_nml_error(nml_name, msg, iostat)
+        implicit none
+        character(len=*), intent(in) :: nml_name, msg
+        integer, intent(in) :: iostat
+        
+        integer :: obj_indx
 
+        if (STD_OUT_PE) write(*,*) 
+        if (STD_OUT_PE) write(*,*) "  -----------------------------------------------------------------"
+        if (STD_OUT_PE) write(*,*) "  ERROR reading '",trim(nml_name),"' namelist, continuing with defaults"
+        if (STD_OUT_PE) write(*,*) 
+
+        IF (IS_IOSTAT_END(iostat)) THEN
+            if (STD_OUT_PE) WRITE(*,*) '    End of file encountered'
+            stop
+        ELSE IF (IS_IOSTAT_EOR(iostat)) THEN
+            if (STD_OUT_PE)  WRITE(*,*) '    End of record encountered'
+            stop
+        ELSE    
+            if (STD_OUT_PE) write(*,*) "    ERROR message: ", trim(msg)
+            !see if msg contains string "Bad data"
+            if (index(msg, "Bad data") > 0) then
+                !get index of location after first occurance of "object" in msg
+                obj_indx = index(msg, "object") + len("object ")
+                if (STD_OUT_PE) write(*,*) "    Alternatively, the user may have defined a variable in the namelist that is not valid."
+                if (STD_OUT_PE) write(*,*) "    Please check that the variable following '", trim(msg(obj_indx:)), "' is valid."
+                if (STD_OUT_PE) write(*,*) 
+                if (STD_OUT_PE) write(*,*) "    To see all valid namelist variables, generate a default namelist file using:"
+                if (STD_OUT_PE) write(*,*) "        ./HICAR --gen-nml default.nml"
+                if (STD_OUT_PE) write(*,*) 
+            endif
+        END IF
+
+        if (STD_OUT_PE) write(*,*) "  -----------------------------------------------------------------"
+        if (STD_OUT_PE) write(*,*) 
+
+    end subroutine 
 end submodule
