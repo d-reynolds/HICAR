@@ -219,8 +219,8 @@ contains
         !This is false only when it is the first call to push (i.e. first write call)
         if (this%written) then
             ! Do MPI_Win_Wait on write_buffer to make sure that server process has completed writing of previous data
-            call smart_wait(this%write_win_3d, 'Error: Timeout waiting for write_win_3d completion')
-            call smart_wait(this%write_win_2d, 'Error: Timeout waiting for write_win_2d completion')
+            call smart_wait(this%write_win_3d, 'Waiting for write_win_3d completion')
+            call smart_wait(this%write_win_2d, 'Waiting for write_win_2d completion')
         endif
         this%written = .False.
 
@@ -287,7 +287,7 @@ contains
         ! Do MPI_Win_Wait on forcing_win. This is mostly unnecesarry, since the server process is what will be waiting on us, which is handeled by the MPI_Win_Start call
         ! in ioserver%gather_foring. Still, MPI_Win_Wait is called here for completeness of PSCW model
         if (this%nest_updated) then
-            call smart_wait(this%forcing_win, 'Error: Timeout waiting for forcing_win completion')
+            call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
         endif
 
         this%nest_updated = .False.
@@ -343,7 +343,7 @@ contains
         ny = this%j_e_r - this%j_s_r + 1
 
         ! Do MPI_Win_Wait on read_buffer to make sure that server process has completed data transfer
-        call smart_wait(this%read_win, 'Error: Timeout waiting for read_win completion')
+        call smart_wait(this%read_win, 'Waiting for read_win completion')
 
         ! loop through the list of variables that need to be read in
         call forcing%variables%reset_iterator()
@@ -462,10 +462,11 @@ contains
         character(len=*), intent(in) :: err_msg
 
         integer :: wait_count, ierr
-        logical :: flag
+        logical :: flag, write_flag
         
         wait_count = 0
         flag = .False.
+        write_flag = .False.
 
         call MPI_Win_Test(window, flag, ierr)
         do while (.not.(flag))
@@ -473,9 +474,10 @@ contains
             ! Check if we've waited too long
             wait_count = wait_count + 1
 
-            if (wait_count > 60.0) then
-                write(*,*) err_msg
-                stop
+            if (wait_count > 60.0 .and. .not.(write_flag)) then
+                write_flag = .True.
+                if (STD_OUT_PE) write(*,*) err_msg
+                ! stop
             endif
             
             ! Small sleep to avoid busy waiting
