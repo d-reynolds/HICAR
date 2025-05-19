@@ -52,6 +52,8 @@ program icar
     logical :: start_time_match = .False.
     character(len=kMAX_FILE_LENGTH) :: namelist_file
 
+    ! Read command line options to determine what kind of run this is
+    call read_co(namelist_file, info_only, gen_nml, only_namelist_check)
 
     !Initialize MPI if needed
     init_flag = .False.
@@ -67,8 +69,6 @@ program icar
     !-----------------------------------------
     !  Model Initialization
     
-    ! Read command line options to determine what kind of run this is
-    call read_co(namelist_file, info_only, gen_nml, only_namelist_check)
 
     if (STD_OUT_PE .and. .not.(gen_nml .or. only_namelist_check .or. info_only)) then
         call welcome_message()
@@ -133,6 +133,10 @@ contains
         gen_nml = .False.
         only_namelist_check = .False.
         first_arg = ""
+
+        !Turn this on to enable output by default -- likely that we are only running as a single process
+        !If we do any output from this subroutine
+        STD_OUT_PE = .True.
 
         cnt = command_argument_count()
 
@@ -225,6 +229,7 @@ contains
                 stop "Options file does not exist. "
             endif
         endif
+        STD_OUT_PE = .False.
     end subroutine
 
 end program

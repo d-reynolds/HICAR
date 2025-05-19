@@ -81,6 +81,9 @@ contains
                 if (STD_OUT_PE) write(*,*) 'Default namelist file not overwritten'
                 stop
             endif
+        else
+            if (STD_OUT_PE) write(*,*) 'ERROR: namelist file: ',trim(namelist_file),' does not exist'
+            stop
         endif
 
         this%nest_indx = n_indx
@@ -2726,6 +2729,9 @@ contains
                 if (STD_OUT_PE) write(*,*) 
                 if (STD_OUT_PE) write(*,*) "    To see all valid namelist variables, generate a default namelist file using:"
                 if (STD_OUT_PE) write(*,*) "        ./HICAR --gen-nml default.nml"
+                if (STD_OUT_PE) write(*,*) 
+                if (STD_OUT_PE) write(*,*) "    To check if a variable is valid namelist variable use:"
+                if (STD_OUT_PE) write(*,*) "        ./HICAR -v [YOUR_VAR]"
                 if (STD_OUT_PE) write(*,*) 
             endif
         END IF
