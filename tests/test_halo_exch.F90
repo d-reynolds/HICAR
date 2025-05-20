@@ -218,7 +218,7 @@ module test_halo_exch
 
         do i = grid%its, grid%ite+grid%nx_e
             do j = grid%jts, grid%jte+grid%ny_e
-                do k = 1, grid%kts
+                do k = 1, max(1,grid%kte)
                     ! Set the interior values to the index values
                     if (grid%is3d) then
                         var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
