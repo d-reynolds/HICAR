@@ -29,6 +29,7 @@ module test_halo_exch
         testsuite = [ &
           new_unittest("batch_exch", test_batch_exch), &
             new_unittest("var_exch", test_var_exch), &
+            new_unittest("var_exch_2d", test_var_exch_2d), &
             new_unittest("var_u_exch", test_var_u_exch), &
             new_unittest("var_v_exch", test_var_v_exch) &
           ]
@@ -79,6 +80,29 @@ module test_halo_exch
         call halo_exch_standard(grid,error,corners_in=.True.,do_dqdt=.True.,test_str_in="var exchange, corners, dqdt")
 
     end subroutine test_var_exch
+
+    subroutine test_var_exch_2d(error)
+        type(error_type), allocatable, intent(out) :: error
+
+        integer :: my_index, ierr
+        type(grid_t) :: grid
+        type(MPI_Comm) :: comms
+
+        call MPI_Comm_Rank(MPI_COMM_WORLD,my_index,ierr)
+        my_index = my_index + 1
+
+        !set the comm MPI_com type to be MPI_COMM_WORLD
+        CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
+
+        !initialize grids
+        call grid%set_grid_dimensions( 23, 25, 0, image=my_index, global_nz=20, comms=comms, adv_order=3)
+
+        call halo_exch_standard(grid,error,test_str_in="var exchange")
+        if (allocated(error)) return
+        call halo_exch_standard(grid,error,corners_in=.True.,test_str_in="var exchange, corners")
+
+    end subroutine test_var_exch_2d
+
 
     subroutine test_var_u_exch(error)
         type(error_type), allocatable, intent(out) :: error
@@ -135,10 +159,11 @@ module test_halo_exch
 
         type(halo_t) :: halo
         type(index_type), allocatable :: exch_vars(:), adv_vars(:)
-        type(variable_t) :: var, var_data(1)
+        type(variable_t) :: var, var_data(1), exch_var, exch_var_data(1)
         integer :: my_index
         integer :: ierr
         type(MPI_Comm) :: comms
+        type(grid_t) :: grid_3d
         logical :: batch, corners, interior, dqdt
         logical :: north, south, east, west
         logical :: northeast, northwest, southeast, southwest
@@ -161,32 +186,48 @@ module test_halo_exch
         !set the comm MPI_com type to be MPI_COMM_WORLD
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
-        !initialize variables to exchange
-        call var%initialize(grid,forcing_var="qv")
+        if (grid%is2d) then
+
+            call grid_3d%set_grid_dimensions( grid%nx_global, grid%ny_global, 20, image=my_index, comms=comms, adv_order=3)
+
+            !initialize variables to exchange
+            call var%initialize(grid_3d,forcing_var="qv")
+            call exch_var%initialize(grid,forcing_var="snow")
+
+            allocate(exch_vars(1), adv_vars(1))
+
+            exch_var%name = "snow"
+            exch_var_data(1) = exch_var
+            exch_vars(1)%v = 1
+            exch_vars(1)%n = "snow"    
+    
+        else
+            !initialize variables to exchange
+            call var%initialize(grid,forcing_var="qv")
+
+            allocate(exch_vars(0), adv_vars(1))
+        endif
+
         var%name = "qv"
         var_data(1) = var
-        allocate(exch_vars(0), adv_vars(1))
-        ! adv_vars(1) = var
-        !populate adv_vars with two test variables
-        ! call adv_vars%add_var('var', var) 
-        !call adv_vars%add_var('temperature', temperature) 
 
-        ! exch_vars(1)%v = 0
-        ! exch_vars(1)%n = ""
         adv_vars(1)%v = 1
-        adv_vars(1)%n = "qv"
-        call halo%init(exch_vars, adv_vars, grid, comms)
-        
-        ! Initialize fields with my_index values
-        !var%data_3d = my_index
+        adv_vars(1)%n = "qv"    
+        if (grid%is2d) call halo%init(exch_vars, adv_vars, grid_3d, comms)
+        if (grid%is3d) call halo%init(exch_vars, adv_vars, grid, comms)
 
         do i = grid%its, grid%ite+grid%nx_e
             do j = grid%jts, grid%jte+grid%ny_e
                 do k = 1, grid%kts
                     ! Set the interior values to the index values
-                    var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                    var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                    var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                    if (grid%is3d) then
+                        var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                        var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                        var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                    else
+                        exch_var_data(1)%data_2d(i,j) = i+(j-1)*grid%nx_global
+                        exch_var%data_2d(i,j) = i+(j-1)*grid%nx_global
+                    endif
                 end do
                 
             end do
@@ -196,7 +237,11 @@ module test_halo_exch
             call halo%halo_3d_retrieve_batch(exch_vars, adv_vars, var_data)
             var = var_data(1)
         else
-            call halo%exch_var(var, do_dqdt=dqdt, corners=corners)
+            if (grid%is3d) then
+                call halo%exch_var(var, do_dqdt=dqdt, corners=corners)
+            else
+                call halo%exch_var(exch_var, corners=corners)
+            endif
         endif
 
         ! now loop through all memory indices and check that the value in var%data_3d
@@ -216,8 +261,9 @@ module test_halo_exch
 
         do i = grid%ims, grid%ime
             do j = grid%jms, grid%jme
-                do k = 1, grid%kms
-                    val = var%data_3d(i,k,j)
+                do k = 1, max(1,grid%kms)
+                    if (grid%is3d) val = var%data_3d(i,k,j)
+                    if (grid%is2d) val = exch_var%data_2d(i,j)
                     if (dqdt) val = var%dqdt_3d(i,k,j)
                     if (val /= i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global) then
                         if (i < grid%its) then
@@ -260,7 +306,7 @@ module test_halo_exch
             !check that the eastern halo is filled with the value of my_index for the eastern neighbor
             if (.not.(east)) then
                 call test_failed(error, "Halo exch failed", "Failed for eastern halo exchange, "//trim(test_str))
-                write(*,*) "east data is: ", var%data_3d(grid%ite+1:grid%ime,1,grid%jts:grid%jte)
+                ! write(*,*) "east data is: ", var%data_3d(grid%ite+1:grid%ime,1,grid%jts:grid%jte)
                 return
             endif
         endif
