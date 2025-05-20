@@ -82,8 +82,10 @@ contains
                 stop
             endif
         else
-            if (STD_OUT_PE) write(*,*) 'ERROR: namelist file: ',trim(namelist_file),' does not exist'
-            stop
+            if (.not.(gen_nml)) then
+                if (STD_OUT_PE) write(*,*) 'ERROR: namelist file: ',trim(namelist_file),' does not exist'
+                stop
+            endif
         endif
 
         this%nest_indx = n_indx
