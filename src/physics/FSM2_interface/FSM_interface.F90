@@ -42,6 +42,7 @@ module FSM_interface
       Sliq,              &! Liquid content of snow layers (kg/m^2)
       Ds,                &! Snow layer thicknesses (m)
       fsnow,             &! Surface skin temperature (K)
+      histowet,          &! Historical variable for past wetting of a layer (0-1)
       Nsnow,             &! Number of snow layers
       Tsoil,             &! Soil layer temperatures (K)
       albs,              &! Snow albedo
@@ -90,6 +91,7 @@ module FSM_interface
       Sliq,              &
       Ds,                &
       fsnow,             &
+      histowet,          &
       Nsnow,             &
       Tsoil,             &
       albs,              &

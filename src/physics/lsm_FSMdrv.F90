@@ -62,6 +62,7 @@ module module_sf_FSMdrv
       Sliq,          &
       Ds,            &
       fsnow,         &
+      histowet,      &
       Nsnow,         &
       Tsoil,         &
       albs,          &
@@ -258,6 +259,9 @@ contains
         !!        
         !! MJ added this block to read in while we use restart file:
         if (options%restart%restart .or. context_change) then
+
+            call exch_FSM_state_vars(domain)
+
             !! giving feedback to HICAR
             Tsrf = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d(its:ite,jts:jte))
             if (options%lsm%monthly_albedo) then
@@ -456,7 +460,7 @@ contains
                 first_SLIDE = .True.
                 aval = .False.
                 !Snowslide needs the corner snow depth information from corner neighbor processes
-                !call exch_FSM_state_vars(domain,corners_in=.True.)
+                call exch_FSM_state_vars(domain,corners_in=.True.)
                 
                 do i=1,10
                     call FSM_SNOWSLIDE(SD_0,Sice_0,SD_0_buff,Sice_0_buff,aval,first_SLIDE,dSWE_slide_)
@@ -622,8 +626,8 @@ contains
         !call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.True.)
         !call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.False.,exch_var_only=.True.)      
 
-        if (corners) call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Ds)%v),corners=corners)
-        if (corners) call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%fsnow)%v),corners=corners)
+        if (corners) call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%Ds)%v),corners=corners)
+        if (corners) call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v),corners=corners)
 
         fsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(its:ite,jts:jte))
         Nsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%Nsnow)%v)%data_2d(its:ite,jts:jte))                        
