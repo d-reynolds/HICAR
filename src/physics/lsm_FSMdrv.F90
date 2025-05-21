@@ -8,6 +8,7 @@ module module_sf_FSMdrv
     use time_object,         only : Time_type
     use mod_wrf_constants,   only : piconst, XLS
     use icar_constants
+    use iso_fortran_env,       only : output_unit
     use options_interface,   only : options_t
     use variable_interface,  only : variable_t
     use domain_interface,    only : domain_t
@@ -260,8 +261,6 @@ contains
         !! MJ added this block to read in while we use restart file:
         if (options%restart%restart .or. context_change) then
 
-            call exch_FSM_state_vars(domain)
-
             !! giving feedback to HICAR
             Tsrf = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d(its:ite,jts:jte))
             if (options%lsm%monthly_albedo) then
@@ -283,6 +282,9 @@ contains
                 Tsoil(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d(its:ite,i,jts:jte))
                 theta(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d(its:ite,i,jts:jte))
             enddo
+
+            call exch_FSM_state_vars(domain,corners_in=.True.)
+
         endif
 
         !Test if restart was not succesful, or if we were not passed FSM restart...
@@ -400,7 +402,7 @@ contains
                         
         !Call Snowtran here -- must be done here and not in FSM since we need control over the parallelization of the routine
         if (SNTRAN > 0) then        
-            !call exch_FSM_state_vars(domain)
+            ! call exch_FSM_state_vars(domain)
             
             call FSM_SNOWTRAN_SETUP()
             
@@ -460,7 +462,7 @@ contains
                 first_SLIDE = .True.
                 aval = .False.
                 !Snowslide needs the corner snow depth information from corner neighbor processes
-                call exch_FSM_state_vars(domain,corners_in=.True.)
+                ! call exch_FSM_state_vars(domain,corners_in=.True.)
                 
                 do i=1,10
                     call FSM_SNOWSLIDE(SD_0,Sice_0,SD_0_buff,Sice_0_buff,aval,first_SLIDE,dSWE_slide_)

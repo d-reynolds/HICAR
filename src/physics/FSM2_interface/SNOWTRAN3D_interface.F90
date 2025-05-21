@@ -327,10 +327,9 @@ module SNOWTRAN3D_interface
         if (isnan(dem(i,j))) goto 2 ! Exclude points outside of the domain
 
         k = 1
-        do while (Sliq(k,i,j) < epsilon(Sliq) .AND. histowet(k,i,j) < 0.5)
+        do while (k <= Nsnow(i,j) .AND. Sliq(k,i,j) < epsilon(Sliq) .AND. histowet(k,i,j) < 0.5)
           Ds_soft(i,j) = Ds_soft(i,j) + Ds(k,i,j)
           k = k + 1
-          if (k > Nsnow(i,j)) exit
         end do
 
         2 continue  ! Exclude points outside of the domain   
@@ -686,6 +685,10 @@ module SNOWTRAN3D_interface
           ! LQ: the present subroutine (suspension) is only called in the case there is saltation (bs_flag = 1)
           ! in which case (see third case of solveUtau): h* = (h_const/C_z) z0 = 13.3 z0
           ! So no need to check h*, the following log is always positive
+          ! DR: This condition is needed, since some other cells have have set bs_flag = 1
+          ! but the h_star value at this index is not set this way. Ran into errors following above note.
+          if (h_star(i,j) == z_0(i,j)) h_star(i,j) = 2.0 * z_0(i,j)
+
           U_r = Utau(i,j)/vkman * log(h_star(i,j)/z_0(i,j))
           phistar_Cr = Utau(i,j)/U_r * Ur_const
           prd = phistar_Cr * Utau_fallvel
@@ -725,7 +728,7 @@ module SNOWTRAN3D_interface
 
           ! Finish the quadratures.
           ! Include the constants for Qsusp.
-          Qsusp = Utau(i,j) / vkman * Qsusp
+          Qsusp = (Utau(i,j) / vkman) * Qsusp
 
           ! Include the sublimation contribution due to saltation.
           z = h_star(i,j) / 2.0
@@ -1397,7 +1400,7 @@ module SNOWTRAN3D_interface
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    subroutine getsublim(z,RH,Ta,Utau,z_0,V_susp,V_salt,Utau_t,flag)
+    subroutine getsublim(z,RH,Ta,Utau_s,z_0,V_susp,V_salt,Utau_t_s,flag)
 
     use CONSTANTS, only: &
       hcon_air,          &! Thermal conductivity of air (W/m/K)
@@ -1420,8 +1423,8 @@ module SNOWTRAN3D_interface
       z,                 &! Height (m)
       RH,                &! Relative humidity (%)
       Ta,                &! Air temperature (K)
-      Utau_t,          &! Threshold friction velocity (m/s)
-      Utau,            &! Friction velocity (m/s)
+      Utau_t_s,          &! Threshold friction velocity (m/s)
+      Utau_s,            &! Friction velocity (m/s)
       flag,              &! 1: sublimation due to suspension, 0: sublimation due to saltation
       z_0                 ! Surface roughness length (m)
 
@@ -1466,7 +1469,7 @@ module SNOWTRAN3D_interface
     rbar_r = 4.6e-5 * z**(-0.258)
     xmbar = 4.0/3.0 * pi * rho_ice * rbar_r**3 * (1.0 + 3.0/alpha + 2.0/alpha**2)
     rbar = ((3.0 * xmbar) / (4.0 * pi * rho_ice))**(0.33)
-    u_z = Utau/vkman * log(z/z_0)
+    u_z = Utau_s/vkman * log(z/z_0)
     x_r = 0.005 * u_z**(1.36)
     wbar = 1.1e7 * rbar**(1.8)
 
@@ -1489,7 +1492,7 @@ module SNOWTRAN3D_interface
 
       ! Compute the sublimation loss rate coefficient for the saltation
       ! layer.
-      V_rsalt = 0.68 * Utau + 2.3 * Utau_t
+      V_rsalt = 0.68 * Utau_s + 2.3 * Utau_t_s
       xN_r = 2.0 * rbar * V_rsalt / visc_air
       xNu = 1.79 + 0.606 * xN_r**(0.5)
       xSh = xNu

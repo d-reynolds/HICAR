@@ -149,7 +149,7 @@ subroutine SNOW_interface(Esrf,G,ksnow,ksoil,Melt,unload,Gsoil,Roff,meltflux_out
         Gs(1) = 2 / (Ds(1,i,j)/ksnow(1,i,j) + Dzsoil(1)/ksoil(1,i,j))
         dTs(1) = (G(i,j) + Gs(1)*(Tsoil(1,i,j) - Tsnow(1,i,j)))*dt /  &
                  (csnow(1) + Gs(1)*dt)
-      else
+      else if (Nsnow(i,j) > 1) then
         do k = 1, Nsnow(i,j) - 1
           Gs(k) = 2 / (Ds(k,i,j)/ksnow(k,i,j) + Ds(k+1,i,j)/ksnow(k+1,i,j))
         end do
@@ -179,8 +179,9 @@ subroutine SNOW_interface(Esrf,G,ksnow,ksoil,Melt,unload,Gsoil,Roff,meltflux_out
           Tsnow(k,i,j) = max(Tsnow(k,i,j), (Tm-40))
         endif
       end do
+      
       k = Nsnow(i,j)
-      Gsoil(i,j) = Gs(k)*(Tsnow(k,i,j) - Tsoil(1,i,j))
+      if (k > 0) Gsoil(i,j) = Gs(k)*(Tsnow(k,i,j) - Tsoil(1,i,j))
   
       ! Convert melting ice to liquid water
       dSice = Melt(i,j)*fsnow_thres(i,j)*dt
