@@ -327,8 +327,10 @@ module SNOWTRAN3D_interface
         if (isnan(dem(i,j))) goto 2 ! Exclude points outside of the domain
 
         k = 1
-        do while (k <= Nsnow(i,j) .AND. Sliq(k,i,j) < epsilon(Sliq) .AND. histowet(k,i,j) < 0.5)
-          Ds_soft(i,j) = Ds_soft(i,j) + Ds(k,i,j)
+        do while (k <= Nsnow(i,j))
+          if (Sliq(k,i,j) < epsilon(Sliq) .AND. histowet(k,i,j) < 0.5) then
+            Ds_soft(i,j) = Ds_soft(i,j) + Ds(k,i,j)
+          endif
           k = k + 1
         end do
 

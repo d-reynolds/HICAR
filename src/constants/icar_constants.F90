@@ -420,14 +420,21 @@ module icar_constants
                                                          "ice3_c               "/)
 
 
-    character(len=kMAX_NAME_LENGTH) :: kEXCH_VARS(7) = (/"hfss ",&
-                                                        "tsfe ",&
-                                                        "Ds   ",&
-                                                        "scfe ",&
-                                                        "Sice ",&
-                                                        "Sliq ",&
-                                                        "Nsnow"/)
-                                                 
+    ! character(len=kMAX_NAME_LENGTH) :: kEXCH_VARS(7) = (/"hfss ",&
+    !                                                     "tsfe ",&
+    !                                                     "Ds   ",&
+    !                                                     "scfe ",&
+    !                                                     "Sice ",&
+    !                                                     "Sliq ",&
+    !                                                     "Nsnow"/)
+    character(len=kMAX_NAME_LENGTH) :: kEXCH_VARS(7) = (/"",&
+                                                        "",&
+                                                        "",&
+                                                        "",&
+                                                        "",&
+                                                        "",&
+                                                        ""/)
+
     integer, parameter :: kINTEGER_BITS     = storage_size(kINTEGER_BITS)
     integer, parameter :: kMAX_STORAGE_VARS = storage_size(kVARS) / kINTEGER_BITS
 

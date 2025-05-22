@@ -185,28 +185,32 @@ contains
             if (i_end > i_start .and. j_end > j_start) then
                 counter = count(this%parent_write_buffer_3d(1,i_start:i_end,1,j_start:j_end)/=kEMPT_BUFF)*this%n_f*(this%k_e_f-this%k_s_w+1)
 
-                if (allocated(block_lengths)) deallocate(block_lengths)
-                if (allocated(displacements)) deallocate(displacements)
-                allocate(block_lengths(counter))
-                allocate(displacements(counter))
+                if (counter > 0) then
+                    if (allocated(block_lengths)) deallocate(block_lengths)
+                    if (allocated(displacements)) deallocate(displacements)
+                    allocate(block_lengths(counter))
+                    allocate(displacements(counter))
 
-                block_lengths = 1
+                    block_lengths = 1
 
-                counter = 0
-                do j = j_start, j_end
-                    do k = this%k_s_w, this%k_e_f
-                        do i = i_start, i_end
-                            do v = 1,this%n_f
-                                if (this%parent_write_buffer_3d(1,i,1,j) /= kEMPT_BUFF) then
-                                    counter = counter + 1
-                                    displacements(counter) = (v-1) + ((i-this%i_s_w) + (k-this%k_s_w) * (this%i_e_w-this%i_s_w+2) + &
-                                                                      (j-this%j_s_w) * (this%i_e_w-this%i_s_w+2) * (this%k_e_w-this%k_s_w+1))*this%n_f
-                                endif
+                    counter = 0
+                    do j = j_start, j_end
+                        do k = this%k_s_w, this%k_e_f
+                            do i = i_start, i_end
+                                do v = 1,this%n_f
+                                    if (this%parent_write_buffer_3d(1,i,1,j) /= kEMPT_BUFF) then
+                                        counter = counter + 1
+                                        displacements(counter) = (v-1) + ((i-this%i_s_w) + (k-this%k_s_w) * (this%i_e_w-this%i_s_w+2) + &
+                                                                        (j-this%j_s_w) * (this%i_e_w-this%i_s_w+2) * (this%k_e_w-this%k_s_w+1))*this%n_f
+                                    endif
+                                enddo
                             enddo
                         enddo
                     enddo
-                enddo
-                call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, send_nest_types(n))
+                    call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, send_nest_types(n))
+                else
+                    send_nest_types(n) = MPI_REAL
+                endif
             else
                 send_nest_types(n) = MPI_REAL
             endif
@@ -232,28 +236,32 @@ contains
             if (i_end > i_start .and. j_end > j_start) then
                 counter = count(mask(i_start:i_end,j_start:j_end)/=kEMPT_BUFF)*this%n_f*(child_ioserver%k_e_r-child_ioserver%k_s_r+1)
 
-                if (allocated(block_lengths)) deallocate(block_lengths)
-                if (allocated(displacements)) deallocate(displacements)
-                allocate(block_lengths(counter))
-                allocate(displacements(counter))
+                if (counter > 0) then
+                    if (allocated(block_lengths)) deallocate(block_lengths)
+                    if (allocated(displacements)) deallocate(displacements)
+                    allocate(block_lengths(counter))
+                    allocate(displacements(counter))
 
-                block_lengths = 1
+                    block_lengths = 1
 
-                counter = 0
-                do j = j_start, j_end
-                    do k = child_ioserver%k_s_r, child_ioserver%k_e_r
-                        do i = i_start, i_end
-                            do v = 1,this%n_f
-                                if (mask(i,j) /= kEMPT_BUFF) then
-                                    counter = counter + 1
-                                    displacements(counter) = (v-1) + ((i-child_ioserver%i_s_r) + (k-child_ioserver%k_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+1) + &
-                                                                    (j-child_ioserver%j_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+1) * (child_ioserver%k_e_r-child_ioserver%k_s_r+1))*this%n_f
-                                endif
+                    counter = 0
+                    do j = j_start, j_end
+                        do k = child_ioserver%k_s_r, child_ioserver%k_e_r
+                            do i = i_start, i_end
+                                do v = 1,this%n_f
+                                    if (mask(i,j) /= kEMPT_BUFF) then
+                                        counter = counter + 1
+                                        displacements(counter) = (v-1) + ((i-child_ioserver%i_s_r) + (k-child_ioserver%k_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+1) + &
+                                                                        (j-child_ioserver%j_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+1) * (child_ioserver%k_e_r-child_ioserver%k_s_r+1))*this%n_f
+                                    endif
+                                enddo
                             enddo
                         enddo
                     enddo
-                enddo
-                call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, buffer_nest_types(n))
+                    call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, buffer_nest_types(n))
+                else
+                    buffer_nest_types(n) = MPI_REAL
+                endif
             else
                 buffer_nest_types(n) = MPI_REAL
             endif

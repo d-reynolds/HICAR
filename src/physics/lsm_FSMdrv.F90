@@ -100,7 +100,7 @@ contains
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in)    :: options
         logical, optional, intent(in) :: context_chng
-        integer :: i,j
+        integer :: i,j,k, hj, hi, i_s, i_e, j_s, j_e
         logical :: context_change
         !!
 
@@ -133,6 +133,8 @@ contains
         
         if (options%restart%restart) then
             last_output = options%restart%restart_time
+        else if (context_change) then
+            last_output = domain%next_output - domain%output_dt
         else
             last_output = options%general%start_time
         endif
@@ -272,7 +274,7 @@ contains
             fsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(its:ite,jts:jte))
             Nsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%Nsnow)%v)%data_2d(its:ite,jts:jte))                        
             !!
-            do i=1,kSNOW_GRID_Z
+            do i=1,NNsmax_HICAR
                 Tsnow(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(its:ite,i,jts:jte))
                 Sice(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d(its:ite,i,jts:jte))
                 Sliq(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d(its:ite,i,jts:jte))
@@ -283,6 +285,52 @@ contains
                 theta(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d(its:ite,i,jts:jte))
             enddo
 
+            call exch_FSM_state_vars(domain,corners_in=.True.)
+        !If this is not a restart or a context change (i.e. pure intialization), see if we were 
+        ! initilaized with any snow already present...
+        else
+
+            j_s = 2
+            i_s = 2
+            j_e = Nx_HICAR-1
+            i_e = Ny_HICAR-1
+    
+            do j=j_s,j_e
+                do i=i_s,i_e
+                    hj = j-j_s+domain%jts
+                    hi = i-i_s+domain%its
+
+                    ! The state variables in FSM to set are Ds (array of snow depth by layer)
+                    ! Sice (array of ice content by layer), Sliq (array of liquid water content by layer),
+                    ! Nsnow (number of snow layers), fsnow (fraction of snow cover)
+                    if ( (domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(hi,hj) > 0) .and. .not.(options%physics%watersurface==kWATER_SIMPLE .and. domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(hi,hj)==kLC_WATER)) then
+
+                        !find out how many even layers of snow we have
+                        do k = 1,(NNsmax_HICAR-1)
+                            if (domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(hi,hj)/(k+1) < DDs_min) exit
+                        enddo
+
+                        Nsnow(j,i)     = 1 
+                        fsnow(j,i)     = 0.95
+                        domain%vars_2d(domain%var_indx(kVARS%Nsnow)%v)%data_2d(hi,hj) = Nsnow(j,i)
+                        domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(hi,hj) = fsnow(j,i)
+
+                        Ds(1:k,j,i)      = domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(hi,hj)/k  
+                        Sice(1:k,j,i)    = domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(hi,hj)/k 
+                        Sliq(1:k,j,i)    = 0.0
+                        Tsnow(1:k,j,i)   = 273.15
+                        Tsrf(j,i)      = 273.15
+                        histowet(1:k,j,i) = 0.0
+
+                        domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(hi,1:k,hj) = Tsnow(1:k,j,i)
+                        domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d(hi,1:k,hj) = Sliq(1:k,j,i) 
+                        domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d(hi,1:k,hj) = Sice(1:k,j,i) 
+                        domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d(hi,1:k,hj) = Ds(1:k,j,i)
+            
+                    endif
+                enddo
+            enddo
+            
             call exch_FSM_state_vars(domain,corners_in=.True.)
 
         endif
@@ -351,6 +399,8 @@ contains
         hour=real(domain%sim_time%hour)
         dt=lsm_dt
         
+        call exch_FSM_state_vars(domain,corners_in=.True.)
+
         LW=TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d(its:ite,jts:jte))
         Ps=TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d(its:ite,jts:jte))
         Rf=TRANSPOSE(current_rain(its:ite,jts:jte))
@@ -384,14 +434,13 @@ contains
         Udir = 90 - (Udir * 180/piconst + 180)
         where(Udir<0) Udir=Udir+360
         
-        if ((domain%sim_time%seconds() - dt <= last_output%seconds()) .and. &
-            (domain%sim_time%seconds()   >=    last_output%seconds())) then
+        if ((domain%sim_time%seconds()   >=    last_output%seconds())) then
             !If we are the first call since the last output, reset the per-output counters
             domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d = 0.
             domain%vars_2d(domain%var_indx(kVARS%dSWE_salt)%v)%data_2d  = 0.
             domain%vars_2d(domain%var_indx(kVARS%dSWE_susp)%v)%data_2d  = 0.
             domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d  = 0.
-            last_output = last_output + options%output%output_dt
+            last_output = domain%next_output
         endif
         
         SWE_pre = domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(its:ite,jts:jte)
@@ -582,8 +631,8 @@ contains
         !    !!
         !    domain%vars_2d(domain%var_indx(kVARS%rainfall_tstep)%v)%data_2d(its:ite,jts:jte)=rainfall_sum
         !    domain%vars_2d(domain%var_indx(kVARS%snowfall_tstep)%v)%data_2d(its:ite,jts:jte)=snowfall_sum
-           domain%vars_2d(domain%var_indx(kVARS%runoff_tstep)%v)%data_2d(its:ite,jts:jte)=Roff_sum
-           domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d(its:ite,jts:jte)=meltflux_out_sum
+           domain%vars_2d(domain%var_indx(kVARS%runoff_tstep)%v)%data_2d(its:ite,jts:jte)=TRANSPOSE(Roff_sum)
+           domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d(its:ite,jts:jte)=TRANSPOSE(meltflux_out_sum)
         !    !! reseting the container to zero for next output interval
         !    rainfall_sum = 0.
         !    snowfall_sum = 0.                

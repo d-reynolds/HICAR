@@ -823,7 +823,7 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
                 if (.not.(this%east_boundary)) this%east_buffer_2d(n,:,1:(this%jte-this%jts+1)) = &
                     var_data(exch_vars(i)%v)%data_2d((this%ite-this%halo_size+1):this%ite,this%jts:this%jte)
                 if (.not.(this%west_boundary)) this%west_buffer_2d(n,:,1:(this%jte-this%jts+1)) = &
-                    var_data(exch_vars(i)%v)%data_2d(this%its:(this%its+this%halo_size)-1,this%jts:this%jte)
+                    var_data(exch_vars(i)%v)%data_2d(this%its:(this%its+this%halo_size-1),this%jts:this%jte)
 
                 n = n+1
             endif

@@ -320,7 +320,7 @@ elseif(MODE STREQUAL "profile")
 	set(CMAKE_BUILD_TYPE Profile)
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fbounds-check -fbacktrace -fopt-info-missed=opt_info.txt -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
+		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fbounds-check -fbacktrace -finit-real=nan -fopt-info-missed=opt_info.txt -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
 		target_link_options(HICAR PUBLIC -pg)
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -pg -debug inline-debug-info -shared-intel)
@@ -336,7 +336,7 @@ elseif(MODE STREQUAL "release")
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -c -eI)
+		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -c -eI -e0 -eZ)
 		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_cray")
 
 		# set(LINK "-h noomp")

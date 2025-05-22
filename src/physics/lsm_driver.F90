@@ -69,6 +69,7 @@ module land_surface
                                            POTEVP, NOAHRES,z_atm,Ri,chklowq,  &
                                            flx4_2d,fvb_2d,fbur_2d,fgsn_2d, &
                                            nmp_snow, nmp_snowh
+    real, allocatable, dimension(:,:,:)  :: nmp_snow_t
 
     logical :: MYJ, FRPCPN,ua_phys,RDLAI2D,USEMONALB
     real,allocatable, dimension(:,:,:)  :: SMCREL
@@ -549,6 +550,7 @@ contains
         if (allocated(VEGFRAC)) deallocate(VEGFRAC)
         if (allocated(nmp_snow)) deallocate(nmp_snow)
         if (allocated(nmp_snowh)) deallocate(nmp_snowh)
+        if (allocated(nmp_snow_t)) deallocate(nmp_snow_t)
 
         allocate(SMSTAV(ims:ime,jms:jme),source=0.5)!average soil moisture available for transp (between SMCWLT and SMCMAX)
         allocate(SFCRUNOFF(ims:ime,jms:jme), source=0.0)
@@ -583,6 +585,7 @@ contains
 
         allocate(nmp_snow(ims:ime,jms:jme))
         allocate(nmp_snowh(ims:ime,jms:jme))
+        allocate(nmp_snow_t(ims:ime,1:3,jms:jme), source=273.15)
 
         XICE_THRESHOLD = 1
         RDLAI2D = .false. !TLE check back on this one
@@ -1373,10 +1376,12 @@ contains
                     
                     nmp_snowh = 0.0
                     nmp_snow = 0.0
+                    nmp_snow_t = 273.15
                 else
                     SR = current_snow/(current_precipitation+epsilon)
                     nmp_snowh = domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d
                     nmp_snow = domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d
+                    nmp_snow_t = domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(:,1:3,:)
                 endif
 
                 call noahmplsm(ITIMESTEP,                              &
@@ -1477,7 +1482,7 @@ contains
                              domain%vars_2d(domain%var_indx(kVARS%water_table_depth)%v)%data_2d,         &
                              domain%vars_2d(domain%var_indx(kVARS%water_aquifer)%v)%data_2d,             &
                              domain%vars_2d(domain%var_indx(kVARS%storage_gw)%v)%data_2d,                &
-                             domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(:,1:3,:), &
+                             nmp_snow_t, &
                              domain%vars_3d(domain%var_indx(kVARS%snow_layer_depth)%v)%data_3d(:,1:7,:), &
                              domain%vars_3d(domain%var_indx(kVARS%snow_layer_ice)%v)%data_3d(:,1:3,:),   &
                              domain%vars_3d(domain%var_indx(kVARS%snow_layer_liquid_water)%v)%data_3d(:,1:3,:),&
@@ -1559,6 +1564,7 @@ contains
                 if ( .not.(options%physics%snowmodel==kSM_FSM)) then
                     domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d = nmp_snowh
                     domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = nmp_snow
+                    domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(:,1:3,:) = nmp_snow_t
                 endif
 
     !         TLE: OMITTING OPTIONAL PRECIP INPUTS FOR NOW
