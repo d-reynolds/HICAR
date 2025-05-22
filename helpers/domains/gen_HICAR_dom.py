@@ -38,6 +38,21 @@ if (not(large_domain_fn=="")):
     dom_rad = xr.open_dataset(large_domain_fn)
 else:
     dom_rad = 0
+
+# For all 2D variables dom, rename the first dimension to "x" and the second to "y"
+for var in dom.data_vars:
+    if len(dom[var].dims) == 2:
+        # get the first dimension name
+        dim1 = dom[var].dims[0]
+        dim2 = dom[var].dims[1]
+        dom[var] = dom[var].rename({dim1:'y',dim2:'x'})
+for var in dom.coords:
+    if len(dom[var].dims) == 2:
+        # get the first dimension name
+        dim1 = dom[var].dims[0]
+        dim2 = dom[var].dims[1]
+        dom[var] = dom[var].rename({dim1:'y',dim2:'x'})
+
 dom_out = hd.wholeShebang(dom,dom_rad,res=res,LU_Category=LU_Category)
 
 dom_out.to_netcdf(output_domain_fn)
