@@ -39,7 +39,7 @@ module radiation
     real    :: p_top = 100000.0
     
     !! MJ added to aggregate radiation over output interval
-    real, allocatable, dimension(:,:) :: sum_SWdif, sum_SWdir, sum_SW, sum_LW, cos_project_angle, solar_elevation_store, solar_azimuth_store
+    real, allocatable, dimension(:,:) :: shortwave_cached, cos_project_angle, solar_elevation_store, solar_azimuth_store
     real, allocatable                 :: solar_azimuth(:), solar_elevation(:)
     real*8 :: counter
     real*8  :: Delta_t !! MJ added to detect the time for outputting 
@@ -95,11 +95,6 @@ contains
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
             endif
         endif
-        !! MJ added to aggregate radiation over output interval
-        !allocate(sum_SW(domain%grid%ims:domain%grid%ime,domain%grid%jms:domain%grid%jme)); sum_SW=0.
-        !allocate(sum_SWdif(domain%grid%ims:domain%grid%ime,domain%grid%jms:domain%grid%jme)); sum_SWdif=0.
-        !allocate(sum_SWdir(domain%grid%ims:domain%grid%ime,domain%grid%jms:domain%grid%jme)); sum_SWdir=0.
-        !allocate(sum_LW(domain%grid%ims:domain%grid%ime,domain%grid%jms:domain%grid%jme)); sum_LW=0.
         
         if (options%physics%radiation_downScaling==1) then
             if (allocated(cos_project_angle)) deallocate(cos_project_angle)
@@ -108,6 +103,8 @@ contains
             allocate(solar_elevation_store(ims:ime,jms:jme)) !! MJ added
             if (allocated(solar_azimuth_store)) deallocate(solar_azimuth_store)
             allocate(solar_azimuth_store(ims:ime,jms:jme)) !! MJ added
+            if (allocated(shortwave_cached)) deallocate(shortwave_cached)
+            allocate(shortwave_cached(ims:ime,jms:jme))
         endif
         
         if (allocated(solar_elevation)) deallocate(solar_elevation)
@@ -175,7 +172,7 @@ contains
         !! MJ added: the vars requested if we have radiation_downScaling  
         if (options%physics%radiation_downScaling==1) then        
             call options%alloc_vars( [kVARS%slope, kVARS%slope_angle, kVARS%aspect_angle, kVARS%svf, kVARS%hlm, kVARS%shortwave_direct, &
-                                      kVARS%shortwave_diffuse, kVARS%shortwave_direct_above, kVARS%shortwave_total]) 
+                                      kVARS%shortwave_diffuse, kVARS%shortwave_direct_above]) 
         endif
 
     end subroutine ra_var_request
@@ -531,7 +528,12 @@ contains
                     yr=domain%sim_time%year,                            &
                     julian=domain%sim_time%day_of_year(),               &
                     mp_options=mp_options                               )
-                    
+
+                    ! cache shortwave from RRTMG_SWRAD for downscaling.
+                    ! needed if we are to call the terrain shading routine more frequently than RRTMG_SWRAD
+                    if (options%physics%radiation_downScaling==1) then
+                        shortwave_cached = domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d
+                    endif
                     
                 ! DR added December 2023 -- this is necesarry because HICAR does not use a pressure coordinate, so
                 ! p_top is not fixed throughout the simulation. p_top must be reset for each call of RRTMG_LW, 
@@ -636,7 +638,7 @@ contains
                             ratio_dif=0.165
                         endif
                         domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d(i,j)= &
-                                ratio_dif*domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d(i,j)*domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d(i,j)
+                                ratio_dif*shortwave_cached(i,j)*domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d(i,j)
                     enddo
                 enddo                
             endif
@@ -644,7 +646,7 @@ contains
             zdx_max = ubound(domain%vars_3d(domain%var_indx(kVARS%hlm)%v)%data_3d,1)
             do j = jts,jte
                 do i = its,ite
-                    domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d(i,j) = max( domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d(i,j) - &
+                    domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d(i,j) = max( shortwave_cached(i,j) - &
                                                                     domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d(i,j),0.0)
 
                     ! determin maximum allowed direct swr
@@ -668,7 +670,7 @@ contains
                         domain%vars_2d(domain%var_indx(kVARS%shortwave_direct_above)%v)%data_2d(i,j)=0.
                         domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d(i,j)=0.
                     endif
-                    domain%vars_2d(domain%var_indx(kVARS%shortwave_total)%v)%data_2d(i,j) = domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d(i,j) + &
+                    domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d(i,j) = domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d(i,j) + &
                                                           domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d(i,j)
                 enddo
             enddo           

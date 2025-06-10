@@ -2100,7 +2100,6 @@ contains
         if (this%var_indx(kVARS%shortwave_direct)%v > 0)  this%vars_2d(this%var_indx(kVARS%shortwave_direct)%v)%data_2d=0.
         if (this%var_indx(kVARS%shortwave_diffuse)%v > 0)  this%vars_2d(this%var_indx(kVARS%shortwave_diffuse)%v)%data_2d=0.
         if (this%var_indx(kVARS%shortwave_direct_above)%v > 0)  this%vars_2d(this%var_indx(kVARS%shortwave_direct_above)%v)%data_2d=0.
-        if (this%var_indx(kVARS%shortwave_total)%v > 0)  this%vars_2d(this%var_indx(kVARS%shortwave_total)%v)%data_2d=0.
         if (this%var_indx(kVARS%Sliq_out)%v > 0)  this%vars_2d(this%var_indx(kVARS%Sliq_out)%v)%data_2d=0.
 
     end subroutine read_land_variables

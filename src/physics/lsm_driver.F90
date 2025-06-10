@@ -1093,11 +1093,7 @@ contains
             lsm_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
             last_model_time(domain%nest_indx) = domain%sim_time%seconds()
 
-            if (options%physics%radiation_downScaling==1  .and. options%physics%radiation>1) then
-                SW = domain%vars_2d(domain%var_indx(kVARS%shortwave_total)%v)%data_2d
-            else
-                SW = domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d
-            endif
+            SW = domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d
 
             ! if (STD_OUT_PE .and. .not.context_change) write(*,*) "    lsm start: snow_water_equivalent max:", MAXVAL(domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d)
 

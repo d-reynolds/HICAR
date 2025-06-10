@@ -34,6 +34,7 @@ module test_control_flow
             new_unittest("standard", test_standard_prgm), &
             new_unittest("standard_restart", test_standard_restart_prgm), &
             new_unittest("nested", test_nested_prgm), &
+            new_unittest("nested_freq_output", test_nested_freq_output_prgm), &
             new_unittest("nested_restart", test_nested_restart_prgm), &
             new_unittest("nested_restart_uneven_start_end", test_nested_restart_uneven_startend_prgm) &
 
@@ -106,6 +107,29 @@ module test_control_flow
         call test_main_prg(in_options)
 
     end subroutine test_nested_prgm
+
+    subroutine test_nested_freq_output_prgm(error)
+        type(error_type), allocatable, intent(out) :: error
+
+        type(options_t), allocatable :: in_options(:)
+        integer :: i, n_nests
+
+        n_nests = 3
+        allocate(in_options(n_nests))
+        call init_options_std(in_options)
+
+        do i = 1, n_nests
+            call in_options(i)%general%start_time%set("2000-01-01 00:00:00")
+            call in_options(i)%general%end_time%set("2000-01-01 06:00:00")
+            call in_options(i)%forcing%input_dt%set(seconds=3600)
+            call in_options(i)%output%output_dt%set(seconds=3600)
+        enddo
+
+        call in_options(3)%output%output_dt%set(seconds=60)
+
+        call test_main_prg(in_options)
+
+    end subroutine test_nested_freq_output_prgm
 
     !> Test the control flow of the main driver program
     subroutine test_nested_restart_prgm(error)

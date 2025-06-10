@@ -1387,7 +1387,8 @@ contains
         else if (var_idx==kVARS%shortwave_direct) then
             var%name        = "swtb"
             var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "direct shortwave radiation, per inclined surface area"), &
+            var%attributes  = [attribute_t("standard_name", "surface_direct_downwelling_shortwave_flux_in_air"), &
+                               attribute_t("long_name",     "direct shortwave radiation"), &
                                attribute_t("units",         "W m-2"),                                            &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1397,7 +1398,8 @@ contains
         else if (var_idx==kVARS%shortwave_diffuse) then
             var%name        = "swtd"
             var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "diffuse shortwave radiation, per horizontal surface area"), &
+            var%attributes  = [attribute_t("standard_name", "surface_diffuse_downwelling_shortwave_flux_in_air"), &
+                               attribute_t("long_name",     "diffuse shortwave radiation"), &
                                attribute_t("units",         "W m-2"),                                             &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1410,17 +1412,7 @@ contains
             var%attributes  = [attribute_t("standard_name", "direct shortwave radiation, per horizontal surface area"), &
                                attribute_t("units",         "W m-2"),                                             &
                                attribute_t("coordinates",   "lat lon")]
-                
-        !>------------------------------------------------------------
-        !!  MJ: 'total shortwave radiation, per inclided surface area' as the summation 
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%shortwave_total) then
-            var%name        = "s_dr_df_i"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "direct shortwave radiation, per horizontal surface area"), &
-                               attribute_t("units",         "W m-2"),                                             &
-                               attribute_t("coordinates",   "lat lon")]
-                
+                                
         !>------------------------------------------------------------
         !!  Downward Longwave Radiation at the Surface (positive down)
         !!------------------------------------------------------------
