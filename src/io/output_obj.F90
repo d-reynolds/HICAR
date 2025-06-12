@@ -27,7 +27,6 @@ contains
         this%is_initialized = .True.
 
         this%output_counter = 1
-        this%restart_counter = 1
         
         this%its = its; this%ite = ite; this%kts = kts; this%kte = kte; this%jts = jts; this%jte = jte
         this%global_dim_len = (/ide, jde, kde/)
@@ -47,7 +46,6 @@ contains
         this%base_out_file_name = trim(options%output%output_folder) // '/' // tmp_str(1:(len_trim(tmp_str)-3)) // "_"
         this%output_count = options%output%frames_per_outfile
         this%base_rst_file_name = trim(options%restart%restart_folder) // '/' // tmp_str(1:(len_trim(tmp_str)-3)) // "_"
-        this%restart_count = options%restart%restart_count
         
         write(this%output_fn, '(A,A,".nc")')    &
                 trim(this%base_out_file_name),   &
@@ -88,7 +86,6 @@ contains
             ! if this is a restart run, then there will be no initial call to save_out_file, meaning
             ! that the output counter should be auto-incremented to 2 (1 + 1) here 
             this%output_counter = this%output_counter + 1
-            this%restart_counter = this%restart_counter + 1
         ! if there was an error getting the output step, then we assume that there is no file for the current output time step
         else
             write(*,*) "No existing output file found for restart run. Technically, this should never happen."
@@ -222,13 +219,22 @@ contains
         type(variable_t),  intent(in) :: in_variable
         
         type(variable_t) :: variable
-        integer :: n
+        integer :: n, nx, ny, nz
         
+        nx = this%ite - this%its + 1 + in_variable%xstag
+        ny = this%jte - this%jts + 1 + in_variable%ystag
+        nz = this%kte - this%kts + 1
         variable = in_variable
-        
-        if (variable%three_d.and.variable%dim_len(3)<=0) then
-            if (variable%dimensions(3)== "level")   variable%dim_len(3) = this%kte-1
-            if (variable%dimensions(3)== "level_i") variable%dim_len(3) = this%kte
+
+        if (variable%three_d) then
+            if (variable%dim_len(2)<=0) then
+                if (variable%dimensions(2)== "level")   variable%dim_len(2) = this%kte-1
+                if (variable%dimensions(2)== "level_i") variable%dim_len(2) = this%kte
+                nz = variable%dim_len(2)
+            endif
+            call variable%initialize((/nx, nz, ny/))
+        else
+            call variable%initialize((/nx, ny/))
         endif
         if (this%n_vars == size(this%variables)) call this%increase_var_capacity()
 
@@ -237,11 +243,11 @@ contains
 
     end subroutine
 
-    module subroutine save_out_file(this, time, par_comms, out_var_indices, rst_var_indices)
+    module subroutine save_out_file(this, time, par_comms, out_var_indices)
         class(output_t),  intent(inout) :: this
         type(Time_type),  intent(in)  :: time
         type(MPI_Comm),   intent(in)     :: par_comms
-        integer,          intent(in)  :: out_var_indices(:), rst_var_indices(:)
+        integer,          intent(in)  :: out_var_indices(:)
 
 
         !Check if we should change the file
@@ -272,13 +278,7 @@ contains
         this%creating = .false.
         
         this%active_nc_id = -1
-        
-        if (this%restart_counter > this%restart_count) then
-            call save_rst_file(this, time, par_comms, rst_var_indices)   
-            this%restart_counter = 1
-        endif
-        
-        this%restart_counter = this%restart_counter+ 1
+                
         this%output_counter  = this%output_counter + 1
 
         if (this%out_ncfile_id > 0) then
@@ -288,7 +288,7 @@ contains
 
     end subroutine
     
-    subroutine save_rst_file(this, time, par_comms, rst_var_indices)
+    module subroutine save_rst_file(this, time, par_comms, rst_var_indices)
         class(output_t),  intent(inout) :: this
         type(Time_type),  intent(in)  :: time
         type(MPI_Comm),   intent(in)     :: par_comms
@@ -313,9 +313,10 @@ contains
 
         !Close the file
         call check_ncdf(nf90_close(this%rst_ncfile_id), "Closing restart file ")
+
         this%rst_ncfile_id = -1
-        
         this%active_nc_id = -1
+
     end subroutine
 
     
@@ -600,7 +601,7 @@ contains
         do i=1,size(var_indx_list)
             associate(var => this%variables(var_indx_list(i)))                
                 k_s = this%kts
-                k_e = var%dim_len(3)
+                k_e = var%dim_len(2)
                 
                 start_three_D_t = (/ this%start_3d(1), this%start_3d(2), this%start_3d(3), current_step /)
                 cnt_3d = (/ this%cnt_3d(1), this%cnt_3d(2), (k_e-k_s+1) /)
@@ -768,31 +769,37 @@ contains
         class(output_t),    intent(inout) :: this
         type(variable_t),   intent(inout) :: var
         integer :: i, err, dim_len
-        
+        character(len=kMAX_DIM_LENGTH), allocatable :: dimensions(:)
+        character(len=kMAX_DIM_LENGTH) :: tmp_dim
 
         if (allocated(var%dim_ids)) deallocate(var%dim_ids)
 
-        allocate(var%dim_ids(var%n_dimensions))
+        allocate(var%dim_ids(size(var%dimensions)))
 
+        dimensions = var%dimensions
+        if (var%three_d .or. var%four_d) then
+            tmp_dim = dimensions(2)
+            dimensions(2) = dimensions(3)
+            dimensions(3) = tmp_dim
+        endif
         do i = 1, size(var%dim_ids)
 
             ! Try to find the dimension ID if it exists already.
-            err = nf90_inq_dimid(this%active_nc_id, trim(var%dimensions(i)), var%dim_ids(i))
+            err = nf90_inq_dimid(this%active_nc_id, trim(dimensions(i)), var%dim_ids(i))
 
             ! probably the dimension doesn't exist in the file, so we will create it.
             if (err/=NF90_NOERR) then
                 ! assume that the last dimension should be the unlimited dimension (generally a good idea...)
-                if (var%unlimited_dim .and. (i==size(var%dim_ids))) then
-                    call check_ncdf( nf90_def_dim(this%active_nc_id, trim(var%dimensions(i)), NF90_UNLIMITED, &
-                                var%dim_ids(i) ), "def_dim"//var%dimensions(i) )
+                if (var%unlimited_dim .and. (i==size(var%dim_ids)) .and. trim(dimensions(i))=="time") then
+                    call check_ncdf( nf90_def_dim(this%active_nc_id, trim(dimensions(i)), NF90_UNLIMITED, &
+                                var%dim_ids(i) ), "def_dim"//dimensions(i) )
                 else
-                    dim_len = this%global_dim_len(i)
-                    if (i == 1) dim_len = dim_len+var%xstag
-                    if (i == 2) dim_len = dim_len+var%ystag
-                    if (i == 3) dim_len = var%dim_len(3)
+                    if (i == 1) dim_len = this%global_dim_len(1)+var%xstag
+                    if (i == 2) dim_len = this%global_dim_len(2)+var%ystag
+                    if (i == 3) dim_len = var%dim_len(2)
 
-                    call check_ncdf( nf90_def_dim(this%active_nc_id, var%dimensions(i), dim_len,       &
-                                var%dim_ids(i) ), "def_dim"//var%dimensions(i) )
+                    call check_ncdf( nf90_def_dim(this%active_nc_id, dimensions(i), dim_len,       &
+                                var%dim_ids(i) ), "def_dim"//dimensions(i) )
                 endif
             endif
         end do

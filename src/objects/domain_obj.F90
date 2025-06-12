@@ -595,19 +595,19 @@ contains
                     endif
                 else if (tmp_var%three_d) then
                     if (tmp_var%dimensions(1) == "lon_x_global") then
-                        if (tmp_var%dimensions(3) == "level_i") then
+                        if (tmp_var%dimensions(2) == "level_i") then
                             grid = this%global_grid8w
-                        else if (tmp_var%dimensions(3) == "level") then
+                        else if (tmp_var%dimensions(2) == "level") then
                             grid = this%global_grid
                         endif
                     elseif (tmp_var%dimensions(1) == "lon_x_neighbor") then
-                        if (tmp_var%dimensions(3) == "level_i") then
+                        if (tmp_var%dimensions(2) == "level_i") then
                             grid = this%neighbor_grid8w
-                        else if (tmp_var%dimensions(3) == "level") then
+                        else if (tmp_var%dimensions(2) == "level") then
                             grid = this%neighbor_grid
                         endif
                     else
-                        select case (tmp_var%dimensions(3))
+                        select case (tmp_var%dimensions(2))
                             case ("level")
                                 grid = this%grid
                                 if (tmp_var%xstag > 0) grid = this%u_grid

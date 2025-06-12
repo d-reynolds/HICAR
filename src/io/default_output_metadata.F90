@@ -15,31 +15,31 @@ module output_metadata
     character(len=18) :: two_d_v_dimensions(2)              = [character(len=18) :: "lon_x","lat_v"]
     character(len=18) :: two_d_global_dimensions(2)         = [character(len=18) :: "lon_x_global","lat_y_global"]
     character(len=18) :: two_d_neighbor_dimensions(2)       = [character(len=18) :: "lon_x_neighbor","lat_y_neighbor"]
-    character(len=18) :: three_d_u_t_dimensions(4)          = [character(len=18) :: "lon_u","lat_y","level","time"]
-    character(len=18) :: three_d_v_t_dimensions(4)          = [character(len=18) :: "lon_x","lat_v","level","time"]
-    character(len=18) :: three_d_u_dimensions(3)            = [character(len=18) :: "lon_u","lat_y","level"]
-    character(len=18) :: three_d_v_dimensions(3)            = [character(len=18) :: "lon_x","lat_v","level"]
-    character(len=18) :: three_d_dimensions(3)              = [character(len=18) :: "lon_x","lat_y","level"]
-    character(len=18) :: three_d_global_dimensions(3)       = [character(len=18) :: "lon_x_global","lat_y_global","level"]
-    character(len=18) :: three_d_neighbor_dimensions(3)     = [character(len=18) :: "lon_x_neighbor","lat_y_neighbor","level"]
-    character(len=18) :: three_d_global_interface_dimensions(3)       = [character(len=18) :: "lon_x_global","lat_y_global","level_i"]
-    character(len=18) :: three_d_neighbor_interface_dimensions(3)     = [character(len=18) :: "lon_x_neighbor","lat_y_neighbor","level_i"]
-    character(len=18) :: three_d_t_dimensions(4)            = [character(len=18) :: "lon_x","lat_y","level","time"]
-    character(len=18) :: three_d_interface_dimensions(3)    = [character(len=18) :: "lon_x","lat_y","level_i"]
-    character(len=18) :: three_d_t_interface_dimensions(4)  = [character(len=18) :: "lon_x","lat_y","level_i","time"]
-    character(len=18) :: three_d_hlm_dimensions(3)          = [character(len=18) :: "lon_x","lat_v","azimuth"]
-    character(len=18) :: three_d_t_soil_dimensions(4)       = [character(len=18) :: "lon_x","lat_y","nsoil","time"]
-    character(len=18) :: three_d_t_snow_dimensions(4)       = [character(len=18) :: "lon_x","lat_y","nsnow","time"]
-    character(len=18) :: three_d_t_snowsoil_dimensions(4)   = [character(len=18) :: "lon_x","lat_y","nsnowsoil","time"]
-    character(len=18) :: three_d_soilcomp_dimensions(3)     = [character(len=18) :: "lon_x","lat_y","nsoil_composition"]
-    character(len=18) :: three_d_crop_dimensions(3)         = [character(len=18) :: "lon_x","lat_y","crop"]
-    character(len=18) :: three_d_t_gecros_dimensions(4)     = [character(len=18) :: "lon_x","lat_y","gecros","time"]
-    character(len=18) :: three_d_t_month_dimensions(4)          = [character(len=18) :: "lon_x","lat_y","month","time"]
-    character(len=18) :: three_d_t_lake_dimensions(4)           = [character(len=18) :: "lon_x","lat_y","nlevlake","time"]
-    character(len=18) :: three_d_t_lake_soisno_dimensions(4)    = [character(len=18) :: "lon_x","lat_y","nlevsoisno","time"] !grid_lake_soisno
-    character(len=18) :: three_d_t_lake_soisno_1_dimensions(4)  = [character(len=18) :: "lon_x","lat_y","nlevsoisno_1","time"]
-    character(len=18) :: three_d_t_lake_soi_dimensions(4)       = [character(len=18) :: "lon_x","lat_y","nlevsoi_lake","time"] !grid_lake_soi
-    character(len=18) :: four_d_azim_dimensions(4)                = [character(len=18) :: "lon_x","lat_v","level","Sx_azimuth"]
+    character(len=18) :: three_d_u_t_dimensions(4)          = [character(len=18) :: "lon_u","level","lat_y","time"]
+    character(len=18) :: three_d_v_t_dimensions(4)          = [character(len=18) :: "lon_x","level","lat_v","time"]
+    character(len=18) :: three_d_u_dimensions(3)            = [character(len=18) :: "lon_u","level","lat_y"]
+    character(len=18) :: three_d_v_dimensions(3)            = [character(len=18) :: "lon_x","level","lat_v"]
+    character(len=18) :: three_d_dimensions(3)              = [character(len=18) :: "lon_x","level","lat_y"]
+    character(len=18) :: three_d_global_dimensions(3)       = [character(len=18) :: "lon_x_global","level","lat_y_global"]
+    character(len=18) :: three_d_neighbor_dimensions(3)     = [character(len=18) :: "lon_x_neighbor","level","lat_y_neighbor"]
+    character(len=18) :: three_d_global_interface_dimensions(3)       = [character(len=18) :: "lon_x_global","level_i","lat_y_global"]
+    character(len=18) :: three_d_neighbor_interface_dimensions(3)     = [character(len=18) :: "lon_x_neighbor","level_i","lat_y_neighbor"]
+    character(len=18) :: three_d_t_dimensions(4)            = [character(len=18) :: "lon_x","level","lat_y","time"]
+    character(len=18) :: three_d_interface_dimensions(3)    = [character(len=18) :: "lon_x","level_i","lat_y"]
+    character(len=18) :: three_d_t_interface_dimensions(4)  = [character(len=18) :: "lon_x","level_i","lat_y","time"]
+    character(len=18) :: three_d_hlm_dimensions(3)          = [character(len=18) :: "lon_x","azimuth","lat_y"]
+    character(len=18) :: three_d_t_soil_dimensions(4)       = [character(len=18) :: "lon_x","nsoil","lat_y","time"]
+    character(len=18) :: three_d_t_snow_dimensions(4)       = [character(len=18) :: "lon_x","nsnow","lat_y","time"]
+    character(len=18) :: three_d_t_snowsoil_dimensions(4)   = [character(len=18) :: "lon_x","nsnowsoil","lat_y","time"]
+    character(len=18) :: three_d_soilcomp_dimensions(3)     = [character(len=18) :: "lon_x","nsoil_composition","lat_y"]
+    character(len=18) :: three_d_crop_dimensions(3)         = [character(len=18) :: "lon_x","crop","lat_y"]
+    character(len=18) :: three_d_t_gecros_dimensions(4)     = [character(len=18) :: "lon_x","gecros","lat_y","time"]
+    character(len=18) :: three_d_t_month_dimensions(4)          = [character(len=18) :: "lon_x","month","lat_y","time"]
+    character(len=18) :: three_d_t_lake_dimensions(4)           = [character(len=18) :: "lon_x","nlevlake","lat_y","time"]
+    character(len=18) :: three_d_t_lake_soisno_dimensions(4)    = [character(len=18) :: "lon_x","nlevsoisno","lat_y","time"] !grid_lake_soisno
+    character(len=18) :: three_d_t_lake_soisno_1_dimensions(4)  = [character(len=18) :: "lon_x","nlevsoisno_1","lat_y","time"]
+    character(len=18) :: three_d_t_lake_soi_dimensions(4)       = [character(len=18) :: "lon_x","nlevsoi_lake","lat_y","time"] !grid_lake_soi
+    character(len=18) :: four_d_azim_dimensions(4)                = [character(len=18) :: "lon_x","level","lat_y","Sx_azimuth"]
 
     ! type(variable_t), allocatable, target :: var_meta(:)
 
@@ -1419,7 +1419,7 @@ contains
         else if (var_idx==kVARS%longwave) then
             var%name        = "lwtr"
             var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "incoming direct longwave radiation"), &
+            var%attributes  = [attribute_t("standard_name", "surface_net_downward_longwave_flux"), &
                                attribute_t("units",         "W m-2"),                                    &
                                attribute_t("coordinates",   "lat lon")]
             var%force_boundaries = .False.
@@ -1491,7 +1491,7 @@ contains
         else if (var_idx==kVARS%vegetation_fraction) then
             var%name        = "vegetation_fraction"
             var%dimensions  = three_d_t_month_dimensions
-            var%dim_len(3)  = kMONTH_GRID_Z
+            var%dim_len(2)  = kMONTH_GRID_Z
             var%attributes  = [attribute_t("standard_name", "vegetation_area_fraction"),            &
                                attribute_t("units",         "m2 m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
@@ -1634,7 +1634,7 @@ contains
         else if (var_idx==kVARS%crop_type) then
             var%name        = "crop_type"
             var%dimensions  = three_d_crop_dimensions
-            var%dim_len(3)  = kCROP_GRID_Z
+            var%dim_len(2)  = kCROP_GRID_Z
             var%attributes  = [attribute_t("non_standard_name", "crop_type"),                       &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -1920,7 +1920,7 @@ contains
         else if (var_idx==kVARS%gecros_state) then
             var%name        = "gecros_state"
             var%dimensions  = three_d_t_gecros_dimensions
-            var%dim_len(3)  = kGECROS_GRID_Z
+            var%dim_len(2)  = kGECROS_GRID_Z
             var%attributes  = [attribute_t("non_standard_name", "gecros_state"),                                    &
                                attribute_t("units",         "N/A"),                                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -2110,7 +2110,7 @@ contains
         else if (var_idx==kVARS%albedo) then
             var%name        = "albedo"
             var%dimensions  = three_d_t_month_dimensions
-            var%dim_len(3)  = kMONTH_GRID_Z
+            var%dim_len(2)  = kMONTH_GRID_Z
             var%attributes  = [attribute_t("non_standard_name", "albedo"),            &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -2132,7 +2132,7 @@ contains
         else if (var_idx==kVARS%snow_temperature) then
             var%name        = "snow_temperature"
             var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(3)  = kSNOW_GRID_Z
+            var%dim_len(2)  = kSNOW_GRID_Z
             var%attributes  = [attribute_t("standard_name", "temperature_in_surface_snow"),         &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -2143,7 +2143,7 @@ contains
         else if (var_idx==kVARS%snow_layer_depth) then
             var%name        = "snow_layer_depth"
             var%dimensions  = three_d_t_snowsoil_dimensions
-            var%dim_len(3)  = kSNOWSOIL_GRID_Z
+            var%dim_len(2)  = kSNOWSOIL_GRID_Z
             var%attributes  = [attribute_t("non_standard_name", "snow_layer_depth"),                &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -2154,7 +2154,7 @@ contains
         else if (var_idx==kVARS%snow_layer_ice) then
             var%name        = "snow_layer_ice"
             var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(3)  = kSNOW_GRID_Z
+            var%dim_len(2)  = kSNOW_GRID_Z
             var%attributes  = [attribute_t("non_standard_name", "snow_layer_ice_content"),          &
                                attribute_t("units",         "mm"),                                  &
                                attribute_t("coordinates",   "lat lon")]
@@ -2165,7 +2165,7 @@ contains
         else if (var_idx==kVARS%snow_layer_liquid_water) then
             var%name        = "snow_layer_liquid_water"
             var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(3)  = kSNOW_GRID_Z
+            var%dim_len(2)  = kSNOW_GRID_Z
             var%attributes  = [attribute_t("non_standard_name", "snow_layer_liquid_water_content"), &
                                attribute_t("units",         "mm"),                                  &
                                attribute_t("coordinates",   "lat lon")]
@@ -2207,7 +2207,7 @@ contains
         else if (var_idx==kVARS%soil_water_content) then
             var%name        = "soil_water_content"
             var%dimensions  = three_d_t_soil_dimensions
-            var%dim_len(3)  = kSOIL_GRID_Z
+            var%dim_len(2)  = kSOIL_GRID_Z
             var%attributes  = [attribute_t("standard_name", "moisture_content_of_soil_layer"),      &
                                attribute_t("units",         "m3 m-3"),                              &
                                attribute_t("coordinates",   "lat lon")]
@@ -2218,7 +2218,7 @@ contains
         else if (var_idx==kVARS%soil_water_content_liq) then
             var%name        = "soil_water_content_liq"
             var%dimensions  = three_d_t_soil_dimensions
-            var%dim_len(3)  = kSOIL_GRID_Z
+            var%dim_len(2)  = kSOIL_GRID_Z
             var%attributes  = [attribute_t("standard_name", "liquid_moisture_content_of_soil_layer"),      &
                                attribute_t("units",         "m3 m-3"),                              &
                                attribute_t("coordinates",   "lat lon")]
@@ -2229,7 +2229,7 @@ contains
         else if (var_idx==kVARS%eq_soil_moisture) then
             var%name        = "eq_soil_moisture"
             var%dimensions  = three_d_t_soil_dimensions
-            var%dim_len(3)  = kSOIL_GRID_Z
+            var%dim_len(2)  = kSOIL_GRID_Z
             var%attributes  = [attribute_t("non_standard_name", "equilibrium_volumetric_soil_moisture"), &
                                attribute_t("units",         "m3 m-3"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -2570,7 +2570,7 @@ contains
         else if (var_idx==kVARS%soil_temperature) then
             var%name        = "soil_temperature"
             var%dimensions  = three_d_t_soil_dimensions
-            var%dim_len(3)  = kSOIL_GRID_Z
+            var%dim_len(2)  = kSOIL_GRID_Z
             var%attributes  = [attribute_t("standard_name", "soil_temperature"),                    &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -2651,7 +2651,7 @@ contains
         else if (var_idx==kVARS%soil_sand_and_clay) then
             var%name        = "soil_sand_and_clay_composition"
             var%dimensions  = three_d_soilcomp_dimensions
-            var%dim_len(3)  = kSOILCOMP_GRID_Z
+            var%dim_len(2)  = kSOILCOMP_GRID_Z
             var%attributes  = [attribute_t("non_standard_name", "soil_sand_and_clay_composition"),    &
                                attribute_t("units",         "1"),                                     &
                                attribute_t("coordinates",   "lat lon")]
@@ -2982,7 +2982,7 @@ contains
         else if (var_idx==kVARS%t_lake3d) then
             var%name        = "t_lake3d"
             var%dimensions  = three_d_t_lake_dimensions
-            var%dim_len(3)  = kLAKE_Z
+            var%dim_len(2)  = kLAKE_Z
             var%attributes  = [attribute_t("standard_name", "lake_water_temperature"),     &
                                attribute_t("units",         "K"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -2993,7 +2993,7 @@ contains
         else if (var_idx==kVARS%lake_icefrac3d) then
             var%name        = "lake_icefrac3d"
             var%dimensions  = three_d_t_lake_dimensions
-            var%dim_len(3)  = kLAKE_Z
+            var%dim_len(2)  = kLAKE_Z
             var%attributes  = [attribute_t("standard_name", "lake_icefraction_3d"),     &
                                attribute_t("units",         "-"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3004,7 +3004,7 @@ contains
         else if (var_idx==kVARS%z_lake3d) then
             var%name        = "z_lake3d"
             var%dimensions  = three_d_t_lake_dimensions
-            var%dim_len(3)  = kLAKE_Z
+            var%dim_len(2)  = kLAKE_Z
             var%attributes  = [attribute_t("standard_name", "lake_layer_depth"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3015,7 +3015,7 @@ contains
         else if (var_idx==kVARS%dz_lake3d) then
             var%name        = "dz_lake3d"
             var%dimensions  = three_d_t_lake_dimensions
-            var%dim_len(3)  = kLAKE_Z
+            var%dim_len(2)  = kLAKE_Z
             var%attributes  = [attribute_t("standard_name", "lake_layer_thickness"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3055,7 +3055,7 @@ contains
         else if (var_idx==kVARS%t_soisno3d) then
             var%name        = "t_soisno3d"
             var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(3)  = kLAKE_SOISNO_Z
+            var%dim_len(2)  = kLAKE_SOISNO_Z
             var%attributes  = [attribute_t("standard_name", "temperature_soil_snow_below_or_above_lake"),     &
                                attribute_t("units",         "K"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3066,7 +3066,7 @@ contains
         else if (var_idx==kVARS%h2osoi_ice3d) then
             var%name        = "h2osoi_ice3d"
             var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(3)  = kLAKE_SOISNO_Z
+            var%dim_len(2)  = kLAKE_SOISNO_Z
             var%attributes  = [attribute_t("standard_name", "h2osoi_ice3d"),     &
                                attribute_t("units",         ""),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3077,7 +3077,7 @@ contains
         else if (var_idx==kVARS%h2osoi_liq3d) then
             var%name        = "h2osoi_liq3d"
             var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(3)  = kLAKE_SOISNO_Z
+            var%dim_len(2)  = kLAKE_SOISNO_Z
             var%attributes  = [attribute_t("standard_name", "lake_soil_or_snow_liquid water_content"),     &
                                attribute_t("units",         "kg/m2"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3088,7 +3088,7 @@ contains
         else if (var_idx==kVARS%h2osoi_vol3d) then
             var%name        = "h2osoi_vol3d"
             var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(3)  = kLAKE_SOISNO_Z
+            var%dim_len(2)  = kLAKE_SOISNO_Z
             var%attributes  = [attribute_t("standard_name", "volumetric_soil_water"),     &
                                attribute_t("units",         "m3/m3"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3099,7 +3099,7 @@ contains
         else if (var_idx==kVARS%z3d) then
             var%name        = "z3d"
             var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(3)  = kLAKE_SOISNO_Z
+            var%dim_len(2)  = kLAKE_SOISNO_Z
             var%attributes  = [attribute_t("standard_name", "layer_depth_for_lake_snow&soil"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3110,7 +3110,7 @@ contains
         else if (var_idx==kVARS%dz3d) then
             var%name        = "dz3d"
             var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(3)  = kLAKE_SOISNO_Z
+            var%dim_len(2)  = kLAKE_SOISNO_Z
             var%attributes  = [attribute_t("standard_name", "layer_thickness_for_lake_snow&soil"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3121,7 +3121,7 @@ contains
         else if (var_idx==kVARS%zi3d) then
             var%name        = "zi3d"
             var%dimensions  = three_d_t_lake_soisno_1_dimensions
-            var%dim_len(3)  = kLAKE_SOISNO_1_Z
+            var%dim_len(2)  = kLAKE_SOISNO_1_Z
             var%attributes  = [attribute_t("standard_name", "interface_layer_depth_for_lake_snow&soil"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3132,7 +3132,7 @@ contains
         else if (var_idx==kVARS%watsat3d) then
             var%name        = "watsat3d"
             var%dimensions  = three_d_t_lake_soi_dimensions
-            var%dim_len(3)  = kLAKE_SOI_Z
+            var%dim_len(2)  = kLAKE_SOI_Z
             var%attributes  = [attribute_t("standard_name", "volumetric soil water at saturation (porosity)"),     &
                                attribute_t("units",         ""),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3143,7 +3143,7 @@ contains
         else if (var_idx==kVARS%csol3d) then
             var%name        = "csol3d"
             var%dimensions  = three_d_t_lake_soi_dimensions
-            var%dim_len(3)  = kLAKE_SOI_Z
+            var%dim_len(2)  = kLAKE_SOI_Z
             var%attributes  = [attribute_t("standard_name", "heat capacity, soil solids "),     &
                                attribute_t("units",         "(J/m**3/Kelvin)"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3154,7 +3154,7 @@ contains
         else if (var_idx==kVARS%tkmg3d) then
             var%name        = "tkmg3d"
             var%dimensions  = three_d_t_lake_soi_dimensions
-            var%dim_len(3)  = kLAKE_SOI_Z
+            var%dim_len(2)  = kLAKE_SOI_Z
             var%attributes  = [attribute_t("standard_name", "thermal conductivity, soil minerals  [W/m-K]"),     &
                                attribute_t("units",         ""),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3205,7 +3205,7 @@ contains
         else if (var_idx==kVARS%tksatu3d) then
             var%name        = "tksatu3d"
             var%dimensions  = three_d_t_lake_soi_dimensions
-            var%dim_len(3)  = kLAKE_SOI_Z
+            var%dim_len(2)  = kLAKE_SOI_Z
             var%attributes  = [attribute_t("standard_name", "thermal conductivity, saturated soil [W/m-K]"),     &
                                attribute_t("units",         ""),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3216,7 +3216,7 @@ contains
         else if (var_idx==kVARS%tkdry3d) then
             var%name        = "tkdry3d"
             var%dimensions  = three_d_t_lake_soi_dimensions
-            var%dim_len(3)  = kLAKE_SOI_Z
+            var%dim_len(2)  = kLAKE_SOI_Z
             var%attributes  = [attribute_t("standard_name", "thermal conductivity, dry soil (W/m/Kelvin)"),     &
                                attribute_t("units",         "?"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -3356,7 +3356,7 @@ contains
         else if (var_idx==kVARS%Tsnow) then
             var%name        = "Tsnow"
             var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(3)  = kSNOW_GRID_Z
+            var%dim_len(2)  = kSNOW_GRID_Z
             var%attributes  = [attribute_t("standard_name", "snow_temperature"),                    &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -3367,7 +3367,7 @@ contains
         else if (var_idx==kVARS%Sice) then
             var%name        = "Sice"
             var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(3)  = kSNOW_GRID_Z
+            var%dim_len(2)  = kSNOW_GRID_Z
             var%attributes  = [attribute_t("standard_name", "snow_ice_content"),                    &
                                attribute_t("units",         "kg m-2"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -3378,7 +3378,7 @@ contains
         else if (var_idx==kVARS%Sliq) then
             var%name        = "Sliq"
             var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(3)  = kSNOW_GRID_Z
+            var%dim_len(2)  = kSNOW_GRID_Z
             var%attributes  = [attribute_t("standard_name", "snow_water_content"),                    &
                                attribute_t("units",         "kg m-2"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -3389,7 +3389,7 @@ contains
         else if (var_idx==kVARS%Ds) then
             var%name        = "Ds"
             var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(3)  = kSNOW_GRID_Z
+            var%dim_len(2)  = kSNOW_GRID_Z
             var%attributes  = [attribute_t("standard_name", "snow_layer_thickness"),                    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -3492,7 +3492,7 @@ contains
         var%n_attrs      = size(var%attributes)
         var%unlimited_dim=.False.
 
-        do j = 1,var%n_dimensions
+        do j = 1,size(var%dimensions)
             if (var%dimensions(j) == "time") then
                 var%unlimited_dim=.True.
             endif
@@ -3506,23 +3506,26 @@ contains
 
         if (var%unlimited_dim) then
                 !If time is one of the dimensions, and we only have 3 dimensions, then this is a 2D variable
-            if (var%n_dimensions == 2) then
+            if (size(var%dimensions) == 2) then
                 var%one_d = .True.
-            else if (var%n_dimensions == 3) then
+            else if (size(var%dimensions) == 3) then
                 var%two_d = .True.
-            else if (var%n_dimensions == 4) then
+            else if (size(var%dimensions) == 4) then
                 var%three_d = .True.
             endif
+            var%n_dimensions = size(var%dimensions)-1
+
         else
-            if (var%n_dimensions == 1) then
+            if (size(var%dimensions) == 1) then
                 var%one_d = .True.
-            else if (var%n_dimensions == 2) then
+            else if (size(var%dimensions) == 2) then
                 var%two_d = .True.
-            else if (var%n_dimensions == 3) then
+            else if (size(var%dimensions) == 3) then
                 var%three_d = .True.
-            else if (var%n_dimensions == 4) then
+            else if (size(var%dimensions) == 4) then
                 var%four_d = .True.
-            endif        
+            endif
+            var%n_dimensions = size(var%dimensions)
         endif
 
     end function get_varmeta

@@ -80,8 +80,8 @@ contains
         do n = 1,this%outputer%n_vars
             if (this%outputer%variables(n)%three_d) then
                 this%n_w_3d = this%n_w_3d+1
+                if(this%outputer%variables(n)%dim_len(2) > this%k_e_w) this%k_e_w = this%outputer%variables(n)%dim_len(2)
             endif
-            if(this%outputer%variables(n)%dim_len(3) > this%k_e_w) this%k_e_w = this%outputer%variables(n)%dim_len(3)
         enddo
 
         this%n_w_2d = this%outputer%n_vars - this%n_w_3d
@@ -93,14 +93,14 @@ contains
         call setup_MPI_types(this)
 
 
-        !Link local buffer to the outputer variables
-        allocate(this%parent_write_buffer_3d(this%n_w_3d,this%i_s_re:this%i_e_re+1,this%k_s_w:this%k_e_w,this%j_s_re:this%j_e_re+1))
-        allocate(this%parent_write_buffer_2d(this%n_w_2d,this%i_s_re:this%i_e_re+1,                      this%j_s_re:this%j_e_re+1))
 
         !Setup arrays for information about accessing variables from write buffer
         allocate(this%out_var_indices(count(options(nest_indx)%output%vars_for_output > 0)))
         allocate(this%rst_var_indices(count(options(nest_indx)%vars_for_restart > 0)))
 
+        this%restart_counter = 1
+        this%restart_count = options(nest_indx)%restart%restart_count
+        
         out_i = 1
         rst_i = 1
         
@@ -116,8 +116,12 @@ contains
             endif
         enddo
 
-        if (options(nest_indx)%restart%restart) call this%outputer%init_restart(options(nest_indx), this%IO_Comms, this%out_var_indices)
-
+        if (options(nest_indx)%restart%restart) then
+            call this%outputer%init_restart(options(nest_indx), this%IO_Comms, this%out_var_indices)
+            ! if this is a restart run, then there will be no initial call to save_out_file, meaning
+            ! that the restart counter should be auto-incremented to 2 (1 + 1) here 
+            this%restart_counter = this%restart_counter + 1
+        endif
     end subroutine
 
     ! This subroutine creates MPI datatypes which are used to collect domain data from all parent ioserver processes
@@ -133,7 +137,7 @@ contains
 
         integer, allocatable, dimension(:) :: parent_ims, parent_ime, parent_jms, parent_jme
         integer, allocatable, dimension(:) :: child_isr, child_ier, child_jsr, child_jer, block_lengths, displacements
-        real,    allocatable, dimension(:,:) :: mask
+        real,    allocatable, dimension(:,:) :: mask, test_write_buffer_2d
         !Determine our rank in the this%IO_Comms communicator
         call MPI_Comm_rank(this%IO_Comms, my_rank, ierr)
         !Determine number of IOServers in the this%IO_Comms communicator, i.e. size of communicator
@@ -167,9 +171,12 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,parent_jme,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
 
         !Fill write buffer with fake values to simulate a write
-        this%parent_write_buffer_3d = kEMPT_BUFF
+        if (allocated(test_write_buffer_2d)) deallocate(test_write_buffer_2d)
+        allocate(test_write_buffer_2d(this%i_s_re:this%i_e_re+1, this%j_s_re:this%j_e_re+1))
+
+        test_write_buffer_2d = kEMPT_BUFF
         do i=1,this%n_children
-            this%parent_write_buffer_3d(1,this%iswc(i):this%iewc(i),1,this%jswc(i):this%jewc(i)) = 1.0
+            test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)) = 1.0
         enddo
 
         ! call MPI_Allreduce(MPI_IN_PLACE,parent_ims,this%n_servers,MPI_INT,MPI_MIN,this%IO_Comms,ierr)
@@ -183,7 +190,7 @@ contains
 
             ! See if any of the child ioserver domain is within the parent ioserver domain
             if (i_end > i_start .and. j_end > j_start) then
-                counter = count(this%parent_write_buffer_3d(1,i_start:i_end,1,j_start:j_end)/=kEMPT_BUFF)*this%n_f*(this%k_e_f-this%k_s_w+1)
+                counter = count(test_write_buffer_2d(i_start:i_end,j_start:j_end)/=kEMPT_BUFF)*this%n_f*(this%k_e_f-this%k_s_w+1)
 
                 if (counter > 0) then
                     if (allocated(block_lengths)) deallocate(block_lengths)
@@ -198,7 +205,7 @@ contains
                         do k = this%k_s_w, this%k_e_f
                             do i = i_start, i_end
                                 do v = 1,this%n_f
-                                    if (this%parent_write_buffer_3d(1,i,1,j) /= kEMPT_BUFF) then
+                                    if (test_write_buffer_2d(i,j) /= kEMPT_BUFF) then
                                         counter = counter + 1
                                         displacements(counter) = (v-1) + ((i-this%i_s_w) + (k-this%k_s_w) * (this%i_e_w-this%i_s_w+2) + &
                                                                         (j-this%j_s_w) * (this%i_e_w-this%i_s_w+2) * (this%k_e_w-this%k_s_w+1))*this%n_f
@@ -228,7 +235,7 @@ contains
             mask_size = (parent_ime(n)-parent_ims(n)+2)*(parent_jme(n)-parent_jms(n)+2)
 
             if (my_rank == n-1) then
-                mask = this%parent_write_buffer_3d(1,parent_ims(n):parent_ime(n)+1,1,parent_jms(n):parent_jme(n)+1)
+                mask = test_write_buffer_2d(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1)
             endif
             call MPI_Bcast(mask, mask_size, MPI_REAL, n-1, this%IO_Comms, ierr)
 
@@ -275,7 +282,7 @@ contains
 
         type(c_ptr) :: tmp_ptr
         integer(KIND=MPI_ADDRESS_KIND) :: win_size
-        integer :: ierr, real_size
+        integer :: ierr, real_size, n, size_out
 
         CALL MPI_Type_size(MPI_REAL, real_size)
 
@@ -309,19 +316,45 @@ contains
 
         call MPI_Allreduce(MPI_IN_PLACE,this%n_r,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
 
+        allocate(this%write_buffer_2d(this%n_children))
+        allocate(this%write_buffer_3d(this%n_children))
+        allocate(this%read_buffer(this%n_children))
+        allocate(this%child_gather_buffers(this%n_children))
+
+
         win_size = this%n_w_3d*this%nx_re*this%nz_w*this%ny_re
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_3d)
+        do n = 1,this%n_children
+            call MPI_WIN_SHARED_QUERY(this%write_win_3d, (n-1), win_size, size_out, tmp_ptr)
+            call C_F_POINTER(tmp_ptr, this%write_buffer_3d(n)%buff, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re])
+            this%write_buffer_3d(n)%buff = 1
+        enddo
 
         win_size = this%n_w_2d*this%nx_re*this%ny_re
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_2d)
+        do n = 1,this%n_children
+            call MPI_WIN_SHARED_QUERY(this%write_win_2d, (n-1), win_size, size_out, tmp_ptr)
+            call C_F_POINTER(tmp_ptr, this%write_buffer_2d(n)%buff, [this%n_w_2d, this%nx_re, this%ny_re])
+            this%write_buffer_2d(n)%buff = 1
+        enddo
 
         if (this%n_f > 0) then
             win_size = this%n_f*this%nx_w*this%ny_w*this%nz_w
             call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%nest_win)
+            do n = 1,this%n_children
+                call MPI_WIN_SHARED_QUERY(this%nest_win, (n-1), win_size, size_out, tmp_ptr)
+                call C_F_POINTER(tmp_ptr, this%child_gather_buffers(n)%buff, [this%n_f, this%nx_w, this%nz_w, this%ny_w])
+                this%child_gather_buffers(n)%buff = 1
+            enddo
         endif
 
         win_size = this%n_r*this%nx_r*this%nz_r*this%ny_r
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%read_win)
+        do n = 1,this%n_children
+            call MPI_WIN_SHARED_QUERY(this%read_win, (n-1), win_size, size_out, tmp_ptr)
+            call C_F_POINTER(tmp_ptr, this%read_buffer(n)%buff, [this%n_r, this%nx_r, this%nz_r, this%ny_r])
+            this%read_buffer(n)%buff = 1
+        enddo
     
     end subroutine setup_MPI_windows
 
@@ -517,53 +550,65 @@ contains
         class(ioserver_t), intent(inout)  :: this
 
         integer :: i, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, msg_size
-        integer :: n, n_3d, n_2d
+        integer :: n, n_3d, n_2d, n_vars, var_indx, x_stag, y_stag
+        logical :: should_write_restart
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
         msg_size = 1
         disp = 0
 
-        this%parent_write_buffer_3d = kEMPT_BUFF
-        this%parent_write_buffer_2d = kEMPT_BUFF
+        ! check to see if we should collect and write restart data
+        should_write_restart = .False.
+        should_write_restart = (this%restart_counter > this%restart_count)
+
 
         ! Do MPI_Win_Start on write_win to initiate get
         call MPI_Win_Start(this%children_group,0,this%write_win_3d)
         call MPI_Win_Start(this%children_group,0,this%write_win_2d)
 
+        
+
         ! Loop through child images and get chunks of buffer array from each one
         do i=1,this%n_children
-            call MPI_Get(this%parent_write_buffer_3d(1,this%iswc(i),1,this%jswc(i)), msg_size, &
-                this%get_types_3d(i), this%children_ranks(i), disp, msg_size, this%child_get_types_3d(i), this%write_win_3d)
+            n_2d = 0
+            n_3d = 0
+            do n = 1,n_vars 
 
-            call MPI_Get(this%parent_write_buffer_2d(1,this%iswc(i),this%jswc(i)), msg_size, &
-                this%get_types_2d(i), this%children_ranks(i), disp, msg_size, this%child_get_types_2d(i), this%write_win_2d)
+                if (this%outputer%variables(n)%two_d) n_2d = n_2d + 1
+                if (this%outputer%variables(n)%three_d) n_3d = n_3d + 1
+
+                if (.not.(should_write_restart) .and. .not.(ANY(this%out_var_indices==n))) cycle
+
+                x_stag = this%outputer%variables(n)%xstag
+                y_stag = this%outputer%variables(n)%ystag
+
+                if (this%outputer%variables(n)%two_d) then
+                    this%outputer%variables(n)%data_2d((this%iswc(i)-this%i_s_re+1):(this%iewc(i)-this%i_s_re+1+x_stag),(this%jswc(i)-this%j_s_re+1):(this%jewc(i)-this%j_s_re+1+y_stag)) = &
+                        this%write_buffer_2d(i)%buff(n_2d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
+                elseif (this%outputer%variables(n)%three_d) then
+                    this%outputer%variables(n)%data_3d((this%iswc(i)-this%i_s_re+1):(this%iewc(i)-this%i_s_re+1+x_stag),:,(this%jswc(i)-this%j_s_re+1):(this%jewc(i)-this%j_s_re+1+y_stag)) = &
+                        this%write_buffer_3d(i)%buff(n_3d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:this%outputer%variables(n)%dim_len(2),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
+                endif
+            enddo
         enddo
         ! Do MPI_Win_Complete on write_win to end get
         call MPI_Win_Complete(this%write_win_3d)
         call MPI_Win_Complete(this%write_win_2d)
 
-        if (ALL(this%parent_write_buffer_3d==kEMPT_BUFF) .or. ALL(this%parent_write_buffer_2d==kEMPT_BUFF))then
+        if (ALL(this%write_buffer_3d(1)%buff==kEMPT_BUFF) .or. ALL(this%write_buffer_2d(1)%buff==kEMPT_BUFF))then
             stop 'Error, all of write buffer used for output was still set to empty buffer flag at time of writing.'
         endif
 
-        n_3d = 1
-        n_2d = 1
+        call this%outputer%save_out_file(this%sim_time,this%IO_Comms,this%out_var_indices)
 
-        do n = 1,this%outputer%n_vars
-            if (this%outputer%variables(n)%two_d) then
-                this%outputer%variables(n)%data_2d = &
-                    this%parent_write_buffer_2d(n_2d,this%i_s_w:this%i_e_w+1,this%j_s_w:this%j_e_w+1)
-                n_2d = n_2d + 1
-            elseif (this%outputer%variables(n)%three_d) then
-                this%outputer%variables(n)%data_3d = &
-                    this%parent_write_buffer_3d(n_3d,this%i_s_w:this%i_e_w+1,:,this%j_s_w:this%j_e_w+1)
-                n_3d = n_3d + 1
-            endif
-        enddo
 
-        call this%outputer%save_out_file(this%sim_time,this%IO_Comms,this%out_var_indices,this%rst_var_indices)        
-        
+        if (should_write_restart) then
+            call this%outputer%save_rst_file(this%sim_time,this%IO_Comms,this%rst_var_indices)
+            this%restart_counter = 1
+        endif
+
+
         call this%increment_output_time()
-
+        this%restart_counter = this%restart_counter + 1
     end subroutine 
 
     
@@ -610,8 +655,11 @@ contains
 
         ! Loop through child images and get chunks of buffer array from each one
         do i=1,this%n_children
-            call MPI_Get(this%gather_buffer(1,this%iswc(i),1,this%jswc(i)), msg_size, &
-                this%force_types(i), this%children_ranks(i), disp, msg_size, this%child_force_types(i), this%nest_win)
+            ! call MPI_Get(this%gather_buffer(1,this%iswc(i),1,this%jswc(i)), msg_size, &
+            !     this%force_types(i), this%children_ranks(i), disp, msg_size, this%child_force_types(i), this%nest_win)
+            this%gather_buffer(:,(this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1),:,(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1)) = &
+                    this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+1),:,1:(this%jewc(i)-this%jswc(i)+1))
+
         enddo
 
         ! Do MPI_Win_Complete on read_win to end put
@@ -686,8 +734,10 @@ contains
 
         ! Loop through child images and send chunks of buffer array to each one
         do i=1,this%n_children
-            call MPI_Put(forcing_buffer(1,(this%isrc(i)-this%i_s_r+1),1,(this%jsrc(i)-this%j_s_r+1)), msg_size, &
-                this%put_types(i), this%children_ranks(i), disp, msg_size, this%child_put_types(i), this%read_win)
+            ! call MPI_Put(forcing_buffer(1,(this%isrc(i)-this%i_s_r+1),1,(this%jsrc(i)-this%j_s_r+1)), msg_size, &
+            !     this%put_types(i), this%children_ranks(i), disp, msg_size, this%child_put_types(i), this%read_win)
+            this%read_buffer(i)%buff(:,1:(this%ierc(i)-this%isrc(i)+1),:,1:(this%jerc(i)-this%jsrc(i)+1)) = &
+                forcing_buffer(:,(this%isrc(i)-this%i_s_r+1):(this%ierc(i)-this%i_s_r+1),:,(this%jsrc(i)-this%j_s_r+1):(this%jerc(i)-this%j_s_r+1))
         enddo
 
         ! Do MPI_Win_Complete on read_win to end put
@@ -704,7 +754,7 @@ contains
         integer :: i, n_3d, n_2d, nx, ny, i_s_re, i_e_re, j_s_re, j_e_re
         integer :: ncid, var_id, dimid_3d(4), nz, err, varid, start_3d(4), cnt_3d(4), start_2d(3), cnt_2d(3), msg_size
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-        real, allocatable :: data3d(:,:,:,:)
+        real, allocatable :: data3d(:,:,:,:), restart_data_3d(:,:,:,:), restart_data_2d(:,:,:)
         type(variable_t)  :: var
         character(len=kMAX_NAME_LENGTH) :: name
         character(len=kMAX_FILE_LENGTH) :: base_rst_file_name, tmp_str, restart_in_file
@@ -712,6 +762,9 @@ contains
 
         integer :: restart_step                         ! time step relative to the start of the restart file
         type(Time_type) :: time_at_step   ! restart date as a modified julian day        
+
+        allocate(restart_data_3d(this%n_w_3d,this%i_s_re:this%i_e_re+1,this%k_s_w:this%k_e_w,this%j_s_re:this%j_e_re+1))
+        allocate(restart_data_2d(this%n_w_2d,this%i_s_re:this%i_e_re+1,                      this%j_s_re:this%j_e_re+1))
 
         msg_size = 1
         disp = 0
@@ -753,9 +806,6 @@ contains
         cnt_3d = (/ (this%i_e_re-this%i_s_re+1),(this%j_e_re-this%j_s_re+1),(this%k_e_w-this%k_s_w+1),1 /)
         cnt_2d = (/ (this%i_e_re-this%i_s_re+1),(this%j_e_re-this%j_s_re+1),1 /)
 
-        this%parent_write_buffer_3d = kEMPT_BUFF
-        this%parent_write_buffer_2d = kEMPT_BUFF
-
         n_2d = 1
         n_3d = 1
 
@@ -777,11 +827,11 @@ contains
                 allocate(data3d(nx,ny,nz,1))
                 call check_ncdf( nf90_get_var(ncid, var_id, data3d, start=start_3d, count=(/ nx, ny, nz /)), " Getting 3D var "//trim(name))
 
-                this%parent_write_buffer_3d(n_3d,this%i_s_re:this%i_e_re+var%xstag,1:nz,this%j_s_re:this%j_e_re+var%ystag) = &
+                restart_data_3d(n_3d,this%i_s_re:this%i_e_re+var%xstag,1:nz,this%j_s_re:this%j_e_re+var%ystag) = &
                         reshape(data3d(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
                 n_3d = n_3d+1
             else if (var%two_d) then
-                call check_ncdf( nf90_get_var(ncid, var_id, this%parent_write_buffer_2d(n_2d,this%i_s_re:this%i_e_re+var%xstag,this%j_s_re:this%j_e_re+var%ystag), &
+                call check_ncdf( nf90_get_var(ncid, var_id, restart_data_2d(n_2d,this%i_s_re:this%i_e_re+var%xstag,this%j_s_re:this%j_e_re+var%ystag), &
                         start=start_2d, count=(/ nx, ny /)), " Getting 2D "//trim(name))
                         n_2d = n_2d+1
             endif
@@ -797,10 +847,10 @@ contains
         ! Loop through child images and send chunks of buffer array to each one
         do i=1,this%n_children
             !Note that the MPI datatypes here are reversed since we are working with the write window
-            call MPI_Put(this%parent_write_buffer_3d(1,this%isrec(i),1,this%jsrec(i)), msg_size, &
+            call MPI_Put(restart_data_3d(1,this%isrec(i),1,this%jsrec(i)), msg_size, &
                 this%rst_types_3d(i), this%children_ranks(i), disp, msg_size, this%child_rst_types_3d(i), this%write_win_3d)
 
-            call MPI_Put(this%parent_write_buffer_2d(1,this%isrec(i),this%jsrec(i)), msg_size, &
+            call MPI_Put(restart_data_2d(1,this%isrec(i),this%jsrec(i)), msg_size, &
                 this%rst_types_2d(i), this%children_ranks(i), disp, msg_size, this%child_rst_types_2d(i), this%write_win_2d)
         enddo
         call MPI_Win_fence(0,this%write_win_3d)

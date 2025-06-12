@@ -33,6 +33,14 @@ module ioserver_interface
   !!
   !!----------------------------------------------------------
 
+  type buffer_3d_t
+     real, pointer, dimension(:,:,:,:) :: buff
+  end type buffer_3d_t
+
+  type buffer_2d_t
+     real, pointer, dimension(:,:,:) :: buff
+  end type buffer_2d_t
+
   type , extends(flow_obj_t) :: ioserver_t
 
         ! all components are private and should only be modified through procedures
@@ -50,8 +58,10 @@ module ioserver_interface
         type(output_t) :: outputer
         type(reader_t) :: reader
         
-        real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer_3d, parent_write_buffer_3d, parent_forcing_buffer, gather_buffer
-        real, dimension(:,:,:),   pointer :: write_buffer_2d, parent_write_buffer_2d
+        real, dimension(:,:,:,:), pointer :: gather_buffer
+
+        type(buffer_3d_t), allocatable :: write_buffer_3d(:), read_buffer(:), child_gather_buffers(:)
+        type(buffer_2d_t), allocatable :: write_buffer_2d(:)
 
         type(MPI_Win) :: write_win_3d, write_win_2d, read_win, nest_win
         type(MPI_Group) :: children_group

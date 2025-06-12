@@ -173,7 +173,7 @@ contains
 
         if (this%two_d) then
             this%n_dimensions = 2
-            this%dimensions = ['x','y']
+            ! this%dimensions = ['x','y']
             if (allocated(this%data_2d)) deallocate(this%data_2d)
             allocate(this%data_2d(dims(1), dims(2)), stat=err)
             if (err /= 0) stop "variable:dims:2d: Allocation request denied"
@@ -190,7 +190,7 @@ contains
 
         if (this%three_d) then
             this%n_dimensions = 3
-            this%dimensions = ['x','y','z']
+            ! this%dimensions = ['x','y','z']
             if (allocated(this%data_3d)) deallocate(this%data_3d)
             allocate(this%data_3d(dims(1), dims(2), dims(3)), stat=err)
             if (err /= 0) stop "variable:dims:3d: Allocation request denied"

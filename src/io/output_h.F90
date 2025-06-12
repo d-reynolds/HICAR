@@ -73,7 +73,7 @@ module output_interface
 
       integer :: its, ite, kts, kte, jts, jte
 
-      integer :: output_counter, restart_counter, restart_count, output_count
+      integer :: output_counter, output_count
 
       integer :: global_dim_len(3)
 
@@ -87,6 +87,7 @@ module output_interface
 
       procedure, public  :: set_attrs
       procedure, public  :: save_out_file
+      procedure, public  :: save_rst_file
       procedure, public  :: close_files
 
       procedure, public  :: init
@@ -163,15 +164,26 @@ module output_interface
       !! Save a new timestep (time) to the output file 
       !!
       !!----------------------------------------------------------
-      module subroutine save_out_file(this, time, par_comms, out_var_indices, rst_var_indices)
+      module subroutine save_out_file(this, time, par_comms, out_var_indices)
           implicit none
           class(output_t),  intent(inout) :: this
           type(Time_type),  intent(in)    :: time
           type(MPI_Comm),   intent(in)    :: par_comms
-          integer,          intent(in)    :: out_var_indices(:), rst_var_indices(:)
+          integer,          intent(in)    :: out_var_indices(:)
       end subroutine
       
-      
+      !>----------------------------------------------------------
+      !! Save a new timestep (time) to the restart file 
+      !!
+      !!----------------------------------------------------------
+      module subroutine save_rst_file(this, time, par_comms, rst_var_indices)
+        implicit none
+        class(output_t),  intent(inout) :: this
+        type(Time_type),  intent(in)    :: time
+        type(MPI_Comm),   intent(in)    :: par_comms
+        integer,          intent(in)    :: rst_var_indices(:)
+    end subroutine
+
       module subroutine close_files(this)
         implicit none
         class(output_t),   intent(inout)  :: this
