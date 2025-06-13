@@ -571,7 +571,7 @@ contains
         do i=1,this%n_children
             n_2d = 0
             n_3d = 0
-            do n = 1,n_vars 
+            do n = 1,this%outputer%n_vars 
 
                 if (this%outputer%variables(n)%two_d) n_2d = n_2d + 1
                 if (this%outputer%variables(n)%three_d) n_3d = n_3d + 1

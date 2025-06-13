@@ -336,10 +336,13 @@ allocate(vfhp(Nx,Ny))
 canh(:,:) = undef
 fsky(:,:) = undef
 fveg(:,:) = undef
+fves(:,:) = undef
 hcan(:,:) = undef
+lai(:,:)  = undef
 scap(:,:) = undef
 trcn(:,:) = undef
 VAI(:,:)  = undef
+vfhp(:,:)  = undef
 
 !Terrain properties
 if (allocated(slopemu)) deallocate(slopemu)
