@@ -308,6 +308,7 @@ if(MODE STREQUAL "debug")
 	endif()
 elseif(MODE STREQUAL "debugslow")
 	set(CMAKE_BUILD_TYPE Debug)
+	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_debug")
 
 	if (COMPILER STREQUAL "gnu")
 		target_compile_options(HICAR PUBLIC -c -g -ffree-line-length-none -Wconversion)
@@ -336,11 +337,19 @@ elseif(MODE STREQUAL "release")
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -c -eI -e0 -eZ)
+		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -c -eI -eZ)
 		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_cray")
-
-		# set(LINK "-h noomp")
 	endif()
+endif()
+
+if (COMPILER STREQUAL "cray" AND FSM)
+	#Set compiler flags for FSM_interface files to be the same as those for target HICAR, with the addition of -e0
+	# Set compile options for each file
+	file(GLOB FORTRAN_SOURCES ${PROJECT_SOURCE_DIR}/src/physics/FSM2_interface/*.F90)
+
+	foreach(source ${FORTRAN_SOURCES})
+		set_property(SOURCE ${source} APPEND PROPERTY COMPILE_OPTIONS -e0)
+	endforeach()
 endif()
 
 # Apply the same compile options to hicar_lib as are set on HICAR
