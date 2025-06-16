@@ -477,6 +477,8 @@ contains
             if (wait_count > 60.0 .and. .not.(write_flag)) then
                 write_flag = .True.
                 if (STD_OUT_PE) write(*,*) err_msg
+                if (STD_OUT_PE) flush(output_unit)
+
                 ! stop
             endif
             

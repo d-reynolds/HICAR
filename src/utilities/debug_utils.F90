@@ -4,7 +4,7 @@ module debug_module
     use string,           only  : str
     use ieee_arithmetic
     use icar_constants,    only : STD_OUT_PE, kVARS
-
+    use iso_fortran_env, only : output_unit
     implicit none
 
 contains
@@ -239,10 +239,12 @@ contains
         ! check for errors
         if(status /= nf90_noerr) then
             ! print a useful message
-            print *, trim(nf90_strerror(status))
+            write(*,*) trim(nf90_strerror(status))
+            flush(output_unit)
             if(present(extra)) then
                 ! print any optionally provided context
                 write(*,*) trim(extra)
+                flush(output_unit)
             endif
             ! STOP the program execution
             stop "Stopped"

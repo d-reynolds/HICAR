@@ -223,18 +223,19 @@ contains
         
         nx = this%ite - this%its + 1 + in_variable%xstag
         ny = this%jte - this%jts + 1 + in_variable%ystag
-        nz = this%kte - this%kts + 1
+        nz = this%kte - this%kts ! no "+1" since the writer nz bounds are domain%kts to domain%kte+1 by default
         variable = in_variable
 
         if (variable%three_d) then
-            if (variable%dim_len(2)<=0) then
-                if (variable%dimensions(2)== "level")   variable%dim_len(2) = this%kte-1
-                if (variable%dimensions(2)== "level_i") variable%dim_len(2) = this%kte
-                nz = variable%dim_len(2)
-            endif
+            if (in_variable%dimensions(2)== "level_i") nz = nz+1
+
+            if (in_variable%dim_len(2)>0) nz = in_variable%dim_len(2)
+
             call variable%initialize((/nx, nz, ny/))
+            variable%data_3d = kEMPT_BUFF
         else
             call variable%initialize((/nx, ny/))
+            variable%data_2d = kEMPT_BUFF
         endif
         if (this%n_vars == size(this%variables)) call this%increase_var_capacity()
 
@@ -331,10 +332,11 @@ contains
     subroutine block_hunter(this)
         class(output_t),  intent(inout) :: this
 
-        integer :: i_s, i_e, k_s, k_e, j_s, j_e, nx, ny
+        integer :: i_s, i_e, k_s, k_e, j_s, j_e, nx, ny, nz
         integer :: i_s_b, i_e_b, j_s_b, j_e_b
         integer :: i_s_b2, i_e_b2, j_s_b2, j_e_b2
-
+        logical :: found_var = .False.
+        integer :: i
         real, allocatable, dimension(:,:) :: datas
         
         this%block_checked = .True.
@@ -354,12 +356,31 @@ contains
 
         nx = i_e - i_s + 1
         ny = j_e - j_s + 1
+        allocate(datas(nx,ny))
 
-        if (this%variables(1)%three_d) then
-            datas = this%variables(1)%data_3d(1:nx,1,1:ny)
-        else if (this%variables(1)%two_d) then
-            datas = this%variables(1)%data_2d(1:nx,1:ny)
+        do i = 1,size(this%variables)
+            if ( (this%variables(i)%xstag==0) .and. (this%variables(i)%ystag==0) ) then
+                if (this%variables(i)%three_d) then
+                    if (ALL(this%variables(i)%data_3d(1:nx,1,1:ny) == kEMPT_BUFF)) cycle
+                    datas = this%variables(i)%data_3d(1:nx,1,1:ny)
+                    found_var = .True.
+                    exit
+                else if (this%variables(i)%two_d) then
+                    if (ALL(this%variables(i)%data_2d == kEMPT_BUFF)) cycle
+                    datas = this%variables(i)%data_2d(1:nx,1:ny)
+                    found_var = .True.
+                    exit
+                endif
+            endif
+        enddo
+
+        if (found_var .eqv. .False.) then
+            write(*,*) "No output variable found which is not on a staggered grid."
+            write(*,*) "Cannot determine block. This should never happen"
+            flush(output_unit)
+            stop "block_hunter function in output_obj failed to find a variable"
         endif
+
         !Check each corner to see where this starts
         !LL
         if (datas(1,1) == kEMPT_BUFF) then
@@ -374,7 +395,7 @@ contains
             i_s_b2 = i_s 
             i_e_b2 = findloc(datas(:,ny),kEMPT_BUFF,dim=1,back=.False.) - 1
             j_e_b2 = j_e 
-            j_s_b2 = findloc(datas(nx,:),kEMPT_BUFF,dim=1,back=.False.) + j_s + 1
+            j_s_b2 = findloc(datas(nx,:),kEMPT_BUFF,dim=1,back=.False.) + j_s - 1
             this%blocked_UR = .True.
         endif
         
@@ -382,8 +403,18 @@ contains
         if (this%blocked_UR) j_e = j_s_b2-1
         
         this%start_3d = (/ i_s, j_s, k_s /)
-        this%cnt_3d = (/ (i_e-i_s+1), (j_e-j_s+1), (k_e-k_s+1)  /)
-        this%cnt_2d = (/ (i_e-i_s+1), (j_e-j_s+1) /)
+        nx = max((i_e-i_s+1),0)
+        ny = max((j_e-j_s+1),0)
+        nz = (k_e-k_s+1)
+        this%cnt_3d = (/ nx, ny, nz  /)
+        this%cnt_2d = (/ nx, ny /)
+
+        if (ANY( (/nx, ny, nz/) == 0)) then
+            this%cnt_3d = 0
+            this%cnt_2d = 0
+            this%start_3d = (/ 1, 1, 1 /)
+        endif
+
 
         !Compute block start and cnts accordingly
         if (this%blocked_LL) then
@@ -616,12 +647,12 @@ contains
                 start_two_D_t_b = (/ this%start_3d_b(1), this%start_3d_b(2), current_step /)
                 start_two_D_t_b2 = (/ this%start_3d_b2(1), this%start_3d_b2(2), current_step /)
 
-                if (this%ite == this%global_dim_len(1)) cnt_3d(1) = cnt_3d(1) + var%xstag
-                
+                if (this%ite == this%global_dim_len(1)  .and. cnt_3d(1) > 0) cnt_3d(1) = cnt_3d(1) + var%xstag
                 if ((this%start_3d_b(1) - this%its + cnt_3d_b(1)) == this%global_dim_len(1)) cnt_3d_b(1) = cnt_3d_b(1) + var%xstag
                 if ((this%start_3d_b2(1) - this%its + cnt_3d_b2(1)) == this%global_dim_len(1)) cnt_3d_b2(1) = cnt_3d_b2(1) + var%xstag
                 
-                if (this%jte == this%global_dim_len(2)) cnt_3d(2) = cnt_3d(2) + var%ystag
+                if (this%jte == this%global_dim_len(2) .and. cnt_3d(2) > 0) cnt_3d(2) = cnt_3d(2) + var%ystag
+                if ((this%start_3d_b(2) - this%its + cnt_3d_b(2)) == this%global_dim_len(2)) cnt_3d_b(2) = cnt_3d_b(2) + var%ystag
                 if ((this%start_3d_b2(2) - this%jts + cnt_3d_b2(2)) == this%global_dim_len(2)) cnt_3d_b2(2) = cnt_3d_b2(2) + var%ystag
 
                 v_i_s = this%start_3d(1) - this%its + 1
@@ -643,6 +674,12 @@ contains
                 v_j_e_b2 = v_j_s_b2 + cnt_3d_b2(2) - 1
                 
                 !Safety checks so that we don't index outside of the lower array bound (can happen if no block)
+                v_i_s = max(v_i_s,1)
+                v_i_e = max(v_i_e,1)
+
+                v_j_s = max(v_j_s,1)
+                v_j_e = max(v_j_e,1)
+
                 v_i_s_b = max(v_i_s_b,1)
                 v_i_e_b = max(v_i_e_b,1)
 
@@ -662,69 +699,57 @@ contains
                     if (var%unlimited_dim) then
                         call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
                             var_3d(v_i_s:v_i_e,v_j_s:v_j_e,k_s:k_e), start_three_D_t, count=(/cnt_3d(1), cnt_3d(2), cnt_3d(3), 1/)), "saving:"//trim(var%name) )
-                        if (this%blocked_UR .or. this%blocked_LL) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
-                                var_3d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b,k_s:k_e), start_three_D_t_b, count=(/cnt_3d_b(1), cnt_3d_b(2), cnt_3d_b(3), 1/)), "saving LL block:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
-                                var_3d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2,k_s:k_e), start_three_D_t_b2, count=(/cnt_3d_b2(1), cnt_3d_b2(2), cnt_3d_b2(3), 1/)), "saving UR block:"//trim(var%name) )
-                        endif
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
+                            var_3d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b,k_s:k_e), start_three_D_t_b, count=(/cnt_3d_b(1), cnt_3d_b(2), cnt_3d_b(3), 1/)), "saving LL block:"//trim(var%name) )
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
+                            var_3d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2,k_s:k_e), start_three_D_t_b2, count=(/cnt_3d_b2(1), cnt_3d_b2(2), cnt_3d_b2(3), 1/)), "saving UR block:"//trim(var%name) )
                     elseif (this%creating) then
                         call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, var_3d(v_i_s:v_i_e,v_j_s:v_j_e,k_s:k_e), &
                             start=this%start_3d,count=cnt_3d ), "saving:"//trim(var%name) )
-                        if (this%blocked_UR .or. this%blocked_LL) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, var_3d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b,k_s:k_e), &
-                                start=this%start_3d_b,count=cnt_3d_b ), "saving LL block:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
-                                var_3d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2,k_s:k_e), start=this%start_3d_b2,&
-                                count=cnt_3d_b2 ), "saving UR block:"//trim(var%name) )
-                        endif
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, var_3d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b,k_s:k_e), &
+                            start=this%start_3d_b,count=cnt_3d_b ), "saving LL block:"//trim(var%name) )
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
+                            var_3d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2,k_s:k_e), start=this%start_3d_b2,&
+                            count=cnt_3d_b2 ), "saving UR block:"//trim(var%name) )
                     endif
                 elseif (var%two_d) then
                     if (var%dtype == kREAL) then
                         if (var%unlimited_dim) then
                             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e), &
                                     start_two_D_t,count=(/ cnt_3d(1), cnt_3d(2), 1/)), "saving:"//trim(var%name) )
-                            if (this%blocked_UR .or. this%blocked_LL) then
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
-                                    start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
-                                    start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
-                            endif
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                                start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                                start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
                         elseif (this%creating) then
                             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e), &
                                         start=(/ this%start_3d(1), this%start_3d(2) /), &
                                         count=(/ cnt_3d(1), cnt_3d(2) /)), "saving:"//trim(var%name) )
-                            if (this%blocked_UR .or. this%blocked_LL) then
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
-                                        start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
-                                        count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
-                                        start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
-                                        count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
-                            endif
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                                    start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
+                                    count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                                    start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
+                                    count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
                         endif    
                     else if (var%dtype == kINTEGER) then
                         if (var%unlimited_dim) then
                             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e)), &
                                     start_two_D_t,count=(/ cnt_3d(1), cnt_3d(2), 1/)), "saving:"//trim(var%name) )
-                            if (this%blocked_UR .or. this%blocked_LL) then
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
-                                    start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
-                                    start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
-                            endif
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
+                                start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
+                                start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
                         elseif (this%creating) then
                             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e)), &
                                         start=(/ this%start_3d(1), this%start_3d(2) /), &
                                         count=(/ cnt_3d(1), cnt_3d(2) /)), "saving:"//trim(var%name) )
-                            if (this%blocked_UR .or. this%blocked_LL) then
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
-                                        start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
-                                        count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
-                                call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
-                                        start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
-                                        count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
-                            endif
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
+                                    start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
+                                    count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
+                                    start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
+                                    count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
                         endif    
     
                     ! elseif (var%dtype == kDOUBLE) then

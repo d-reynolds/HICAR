@@ -80,7 +80,7 @@ contains
         do n = 1,this%outputer%n_vars
             if (this%outputer%variables(n)%three_d) then
                 this%n_w_3d = this%n_w_3d+1
-                if(this%outputer%variables(n)%dim_len(2) > this%k_e_w) this%k_e_w = this%outputer%variables(n)%dim_len(2)
+        !         if(this%outputer%variables(n)%dim_len(2) > this%k_e_w) this%k_e_w = this%outputer%variables(n)%dim_len(2)
             endif
         enddo
 
@@ -327,7 +327,6 @@ contains
         do n = 1,this%n_children
             call MPI_WIN_SHARED_QUERY(this%write_win_3d, (n-1), win_size, size_out, tmp_ptr)
             call C_F_POINTER(tmp_ptr, this%write_buffer_3d(n)%buff, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re])
-            this%write_buffer_3d(n)%buff = 1
         enddo
 
         win_size = this%n_w_2d*this%nx_re*this%ny_re
@@ -335,7 +334,6 @@ contains
         do n = 1,this%n_children
             call MPI_WIN_SHARED_QUERY(this%write_win_2d, (n-1), win_size, size_out, tmp_ptr)
             call C_F_POINTER(tmp_ptr, this%write_buffer_2d(n)%buff, [this%n_w_2d, this%nx_re, this%ny_re])
-            this%write_buffer_2d(n)%buff = 1
         enddo
 
         if (this%n_f > 0) then
@@ -344,7 +342,6 @@ contains
             do n = 1,this%n_children
                 call MPI_WIN_SHARED_QUERY(this%nest_win, (n-1), win_size, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%child_gather_buffers(n)%buff, [this%n_f, this%nx_w, this%nz_w, this%ny_w])
-                this%child_gather_buffers(n)%buff = 1
             enddo
         endif
 
@@ -353,7 +350,6 @@ contains
         do n = 1,this%n_children
             call MPI_WIN_SHARED_QUERY(this%read_win, (n-1), win_size, size_out, tmp_ptr)
             call C_F_POINTER(tmp_ptr, this%read_buffer(n)%buff, [this%n_r, this%nx_r, this%nz_r, this%ny_r])
-            this%read_buffer(n)%buff = 1
         enddo
     
     end subroutine setup_MPI_windows
@@ -560,6 +556,9 @@ contains
         should_write_restart = .False.
         should_write_restart = (this%restart_counter > this%restart_count)
 
+        if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",this%nest_indx," --------------"
+        if (STD_OUT_PE_IO) write(*,*) "Fetching data from child images for output"
+        if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",this%nest_indx," --------------"
 
         ! Do MPI_Win_Start on write_win to initiate get
         call MPI_Win_Start(this%children_group,0,this%write_win_3d)
@@ -576,16 +575,17 @@ contains
                 if (this%outputer%variables(n)%two_d) n_2d = n_2d + 1
                 if (this%outputer%variables(n)%three_d) n_3d = n_3d + 1
 
-                if (.not.(should_write_restart) .and. .not.(ANY(this%out_var_indices==n))) cycle
+                ! If this variable is not in the output list, and this is not a restart write, and this is not the first write, skip it
+                if (.not.(should_write_restart) .and. .not.(ANY(this%out_var_indices==n)) .and. .not.(this%first_write) ) cycle
 
                 x_stag = this%outputer%variables(n)%xstag
                 y_stag = this%outputer%variables(n)%ystag
 
                 if (this%outputer%variables(n)%two_d) then
-                    this%outputer%variables(n)%data_2d((this%iswc(i)-this%i_s_re+1):(this%iewc(i)-this%i_s_re+1+x_stag),(this%jswc(i)-this%j_s_re+1):(this%jewc(i)-this%j_s_re+1+y_stag)) = &
+                    this%outputer%variables(n)%data_2d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
                         this%write_buffer_2d(i)%buff(n_2d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
                 elseif (this%outputer%variables(n)%three_d) then
-                    this%outputer%variables(n)%data_3d((this%iswc(i)-this%i_s_re+1):(this%iewc(i)-this%i_s_re+1+x_stag),:,(this%jswc(i)-this%j_s_re+1):(this%jewc(i)-this%j_s_re+1+y_stag)) = &
+                    this%outputer%variables(n)%data_3d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),:,(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
                         this%write_buffer_3d(i)%buff(n_3d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:this%outputer%variables(n)%dim_len(2),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
                 endif
             enddo
@@ -593,12 +593,22 @@ contains
         ! Do MPI_Win_Complete on write_win to end get
         call MPI_Win_Complete(this%write_win_3d)
         call MPI_Win_Complete(this%write_win_2d)
+        if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",this%nest_indx," --------------"
+        if (STD_OUT_PE_IO) write(*,*) "Done data from child images for output"
+        if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",this%nest_indx," --------------"
 
         if (ALL(this%write_buffer_3d(1)%buff==kEMPT_BUFF) .or. ALL(this%write_buffer_2d(1)%buff==kEMPT_BUFF))then
             stop 'Error, all of write buffer used for output was still set to empty buffer flag at time of writing.'
         endif
 
+        if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",this%nest_indx," --------------"
+        if (STD_OUT_PE_IO) write(*,*) "Writing out file"
+        if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",this%nest_indx," --------------"
+
         call this%outputer%save_out_file(this%sim_time,this%IO_Comms,this%out_var_indices)
+        if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",this%nest_indx," --------------"
+        if (STD_OUT_PE_IO) write(*,*) "Done writing out file"
+        if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",this%nest_indx," --------------"
 
 
         if (should_write_restart) then
@@ -606,6 +616,7 @@ contains
             this%restart_counter = 1
         endif
 
+        if (this%first_write) this%first_write = .false.
 
         call this%increment_output_time()
         this%restart_counter = this%restart_counter + 1
@@ -657,7 +668,7 @@ contains
         do i=1,this%n_children
             ! call MPI_Get(this%gather_buffer(1,this%iswc(i),1,this%jswc(i)), msg_size, &
             !     this%force_types(i), this%children_ranks(i), disp, msg_size, this%child_force_types(i), this%nest_win)
-            this%gather_buffer(:,(this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1),:,(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1)) = &
+            this%gather_buffer(:,this%iswc(i):this%iewc(i),:,this%jswc(i):this%jewc(i)) = &
                     this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+1),:,1:(this%jewc(i)-this%jswc(i)+1))
 
         enddo

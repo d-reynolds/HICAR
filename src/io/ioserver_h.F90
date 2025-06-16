@@ -52,6 +52,7 @@ module ioserver_interface
         integer, public :: n_input_variables, n_output_variables, n_servers, n_children, n_child_ioservers
         type(MPI_Comm), public :: client_comms, IO_comms
         logical, public :: files_to_read
+        logical         :: first_write = .true.
         logical, allocatable :: nest_types_initialized(:)
 
         ! time variable , publicis stored outside of the variable list... probably need to think about that some
