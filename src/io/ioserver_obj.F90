@@ -15,6 +15,7 @@
 submodule(ioserver_interface) ioserver_implementation
   use debug_module,             only : check_ncdf
   use iso_fortran_env
+  use iso_c_binding
   use output_metadata,          only : get_varindx
   use string,                   only : split_str
   use io_routines,              only : check_file_exists
