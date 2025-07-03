@@ -364,7 +364,7 @@ contains
     !! This should ONLY be called once for each forcing step, otherwise effects will be additive.
     !!
     !!------------------------------------------------------------
-    subroutine update_winds(domain, options, new_input)
+    recursive subroutine update_winds(domain, options, new_input)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in)    :: options
@@ -438,8 +438,8 @@ contains
 
         if (options%wind%thermal) then
             !Since this is an update call and the sensible heat fluxes can now be quite variable/patch, exchange sensible heat so that corrections are consistent
-            call domain%halo_2d_send_batch()
-            call domain%halo_2d_retrieve_batch()
+            call domain%halo_2d_send()
+            call domain%halo_2d_retrieve()
 
             ! If model is running with a pbl scheme that supplies a 3D K_h, pass that here
             if (options%physics%boundarylayer == kPBL_YSU) then

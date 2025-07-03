@@ -67,7 +67,7 @@ module ioclient_interface
       procedure, public  :: receive
       procedure, public  :: receive_rst
       procedure, public  :: update_nest
-      procedure, public  :: init
+      procedure, public  :: init => init_ioclient
   end type
 
   interface
@@ -76,14 +76,14 @@ module ioclient_interface
       !! Initialize the object (e.g. allocate the variables array)
       !!
       !!----------------------------------------------------------
-    module subroutine init(this, domain, forcing, options, n_indx)
+    module subroutine init_ioclient(this, domain, forcing, options, n_indx)
         implicit none
         class(ioclient_t),  intent(inout)  :: this
         type(domain_t),     intent(inout)  :: domain
         type(boundary_t),   intent(in)     :: forcing
         type(options_t),    intent(in)     :: options(:)
         integer,            intent(in)     :: n_indx
-    end subroutine
+    end subroutine init_ioclient
 
       !>----------------------------------------------------------
       !! Push output data to IO buffer
@@ -128,9 +128,5 @@ module ioclient_interface
             type(domain_t),    intent(in) :: domain
         end subroutine
 
-      module subroutine close_files(this)
-          class(ioclient_t), intent(inout) :: this
-      end subroutine
-      
   end interface
 end module

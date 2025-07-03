@@ -1,6 +1,6 @@
-#ifdef _ACCEL
-#  include "module_mp_wsm3_accel.F"
-#else
+!#ifdef _ACCEL
+!#  include "module_mp_wsm3_accel.F"
+!#else
 ! #if ( RWORDSIZE == 4 )
 ! #  define VREC vsrec
 ! #  define VSQRT vssqrt
@@ -1600,4 +1600,4 @@ CONTAINS
       end subroutine effectRad_wsm3
 !-----------------------------------------------------------------------
 END MODULE module_mp_wsm3
-#endif
+!#endif

@@ -88,9 +88,9 @@ module output_interface
       procedure, public  :: set_attrs
       procedure, public  :: save_out_file
       procedure, public  :: save_rst_file
-      procedure, public  :: close_files
+      procedure, public  :: close_output_files
 
-      procedure, public  :: init
+      procedure, public  :: init => init_output
       procedure, public  :: init_restart
       procedure, private :: increase_var_capacity
       procedure, private :: add_to_output
@@ -103,13 +103,13 @@ module output_interface
       !! Initialize the object (e.g. allocate the variables array)
       !!
       !!----------------------------------------------------------
-      module subroutine init(this, options, its, ite, kts, kte, jts, jte, ide, kde, jde)
+      module subroutine init_output(this, options, its, ite, kts, kte, jts, jte, ide, kde, jde)
         implicit none
         class(output_t),  intent(inout)  :: this
         type(options_t),  intent(in)     :: options
         integer,          intent(in)     :: its, ite, kts, kte, jts, jte, ide, kde, jde
 
-      end subroutine
+      end subroutine init_output
 
       !>----------------------------------------------------------
       !! Initialize the output counter and file after a restart
@@ -184,7 +184,7 @@ module output_interface
         integer,          intent(in)    :: rst_var_indices(:)
     end subroutine
 
-      module subroutine close_files(this)
+      module subroutine close_output_files(this)
         implicit none
         class(output_t),   intent(inout)  :: this
       end subroutine

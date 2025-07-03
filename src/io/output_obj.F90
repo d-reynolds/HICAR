@@ -10,7 +10,7 @@ submodule(output_interface) output_implementation
 contains
 
 
-    module subroutine init(this, options, its, ite, kts, kte, jts, jte, ide, kde, jde)
+    module subroutine init_output(this, options, its, ite, kts, kte, jts, jte, ide, kde, jde)
         implicit none
         class(output_t),  intent(inout)  :: this
         type(options_t),  intent(in)     :: options
@@ -53,7 +53,7 @@ contains
 
         call this%add_variables(options%output%vars_for_output + options%vars_for_restart)
         
-    end subroutine init
+    end subroutine init_output
     
     !If this is a restart run, set output counter and filename to pick up
     !where we left off
@@ -884,7 +884,7 @@ contains
 
     end subroutine
 
-    module subroutine close_files(this)
+    module subroutine close_output_files(this)
         implicit none
         class(output_t),   intent(inout)  :: this
 
@@ -897,6 +897,6 @@ contains
             this%rst_ncfile_id = -1
         endif
 
-    end subroutine
+    end subroutine close_output_files
 
 end submodule

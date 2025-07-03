@@ -13,7 +13,7 @@ module mod_atm_utilities
     ! use data_structures
     use options_interface,  only : options_t
     use time_object,        only : Time_type
-    use iso_fortran_env,     only: real128 !!MJ added
+    use iso_fortran_env,     only: real64 !!MJ added
 
     implicit none
 
@@ -1219,7 +1219,7 @@ contains
     !! MJ added: this is Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
     !! MJ: note that this works everywhere and may be checked by https://gml.noaa.gov/grad/solcalc/index.html
     !! MJ: the only parameter needs to be given is https://gml.noaa.gov/grad/solcalc/index.html UTC Offset here referred to tzone=1 for centeral Erupe. HACK: this should be given by use in the namelist file
-    !! MJ: Julian_day is a large value, we need to use the real128 format when applying TJ scheme in HICAR.
+    !! MJ: Julian_day is a large value, we need to use the real64 format when applying TJ scheme in HICAR.
     function calc_solar_elevation(date, tzone, lon, lat, j, ims,ime, jms,jme, its,ite, solar_azimuth)
         implicit none
         real                       :: calc_solar_elevation(ims:ime)
@@ -1233,18 +1233,18 @@ contains
         
         integer :: i
         real, dimension(ims:ime) :: declination
-        real(real128) :: julian_day, julian_century!, tzone
-        real(real128) :: geom_mean_long_sun_deg, geom_mean_anom_sun_deg, eccent_earth_orbit
-        real(real128) :: sun_eq_of_ctr, sun_true_long_deg, sun_app_long_deg
-        real(real128) :: mean_obliq_ecliptic_deg, obliq_corr_deg, var_y, true_solar_time_min
+        real(real64) :: julian_day, julian_century!, tzone
+        real(real64) :: geom_mean_long_sun_deg, geom_mean_anom_sun_deg, eccent_earth_orbit
+        real(real64) :: sun_eq_of_ctr, sun_true_long_deg, sun_app_long_deg
+        real(real64) :: mean_obliq_ecliptic_deg, obliq_corr_deg, var_y, true_solar_time_min
         real :: hour_angle_deg, solar_zenith_angle_deg, solar_elev_angle_deg
         real :: lat_hr, lon_hr
         real :: approx_atm_refrac_deg, solar_elev_corr_atm_ref_deg, solar_azimuth_angle
 
         !These variables may only be updated some of the time
         real, save :: sun_declin_deg, eq_of_time_minutes, timeofday
-        real(real128), save :: last_sun_declin = -3600.0   !Date since last calculating the sun declination in seconds
-        real(real128), save :: last_date = -3600.0 !Date of last calculation of time-of-day in seconds
+        real(real64), save :: last_sun_declin = -3600.0   !Date since last calculating the sun declination in seconds
+        real(real64), save :: last_date = -3600.0 !Date of last calculation of time-of-day in seconds
     
         !!
         calc_solar_elevation = 0

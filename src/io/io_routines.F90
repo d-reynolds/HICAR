@@ -16,7 +16,7 @@
 !!------------------------------------------------------------
 module io_routines
     use netcdf
-    use iso_fortran_env, only: real64, real128, output_unit
+    use iso_fortran_env, only: real64, real64, output_unit
     use icar_constants, only: STD_OUT_PE
     implicit none
     ! maximum number of dimensions for a netCDF file
@@ -127,7 +127,7 @@ contains
     !!------------------------------------------------------------
     integer function io_nearest_time_step(filename, mjd)
         character(len=*),intent(in) :: filename
-        real(real128), intent(in) :: mjd
+        real(real64), intent(in) :: mjd
         real(real64), allocatable, dimension(:) :: time_data
         integer :: ncid,varid,dims(1),ntimes,i
 

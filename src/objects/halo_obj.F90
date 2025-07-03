@@ -272,7 +272,7 @@ end subroutine exch_var
 !! Initialize the arrays and co-arrays needed to perform a batch exchange
 !!
 !! -------------------------------
-module subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
+subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
     type(halo_t), intent(inout) :: this
     type(index_type), intent(in) :: adv_vars(:), exch_vars(:)
     type(MPI_comm), intent(in) :: comms
@@ -1409,7 +1409,7 @@ end subroutine
 !! Detect if neighbors are on shared memory hardware
 !!
 !! -------------------------------
-module subroutine detect_shared_memory(this, comms)
+subroutine detect_shared_memory(this, comms)
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     
@@ -1490,7 +1490,7 @@ module subroutine detect_shared_memory(this, comms)
                              this%east_shared .or. this%west_shared
 end subroutine detect_shared_memory
 
-module subroutine setup_batch_exch_north_wins(this, comms, info_in)
+subroutine setup_batch_exch_north_wins(this, comms, info_in)
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1527,7 +1527,7 @@ module subroutine setup_batch_exch_north_wins(this, comms, info_in)
     if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%north_batch_in_2d, [this%n_2d, nx, ny])
 end subroutine setup_batch_exch_north_wins
 
-module subroutine setup_batch_exch_south_wins(this, comms, info_in)
+subroutine setup_batch_exch_south_wins(this, comms, info_in)
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1564,7 +1564,7 @@ module subroutine setup_batch_exch_south_wins(this, comms, info_in)
     if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%south_batch_in_2d, [this%n_2d, nx, ny])
 end subroutine setup_batch_exch_south_wins
 
-module subroutine setup_batch_exch_east_wins(this, comms, info_in)
+subroutine setup_batch_exch_east_wins(this, comms, info_in)
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1602,7 +1602,7 @@ module subroutine setup_batch_exch_east_wins(this, comms, info_in)
 
 end subroutine setup_batch_exch_east_wins
 
-module subroutine setup_batch_exch_west_wins(this, comms, info_in)
+subroutine setup_batch_exch_west_wins(this, comms, info_in)
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1639,7 +1639,7 @@ module subroutine setup_batch_exch_west_wins(this, comms, info_in)
     if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%west_batch_in_2d, [this%n_2d, nx, ny])
 end subroutine setup_batch_exch_west_wins
 
-module subroutine setup_batch_exch_northwest_wins(this, comms, info_in)
+subroutine setup_batch_exch_northwest_wins(this, comms, info_in)
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1671,7 +1671,7 @@ module subroutine setup_batch_exch_northwest_wins(this, comms, info_in)
 
 end subroutine setup_batch_exch_northwest_wins
 
-module subroutine setup_batch_exch_northeast_wins(this, comms, info_in)
+subroutine setup_batch_exch_northeast_wins(this, comms, info_in)
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1703,7 +1703,7 @@ module subroutine setup_batch_exch_northeast_wins(this, comms, info_in)
 
 end subroutine setup_batch_exch_northeast_wins
 
-module subroutine setup_batch_exch_southwest_wins(this, comms, info_in)
+subroutine setup_batch_exch_southwest_wins(this, comms, info_in)
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1735,7 +1735,7 @@ module subroutine setup_batch_exch_southwest_wins(this, comms, info_in)
 
 end subroutine setup_batch_exch_southwest_wins
 
-module subroutine setup_batch_exch_southeast_wins(this, comms, info_in)
+subroutine setup_batch_exch_southeast_wins(this, comms, info_in)
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in

@@ -109,6 +109,7 @@ contains
         integer :: bot_in, bot_out, sou_in, sou_out, wes_in, wes_out, j_block, k_block, usign0, vsign0, wsign0
 
         !Initialize some internal variables
+        scale = 1.0
 
         ! Get upwind fluxes
 

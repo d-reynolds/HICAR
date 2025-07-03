@@ -23,7 +23,7 @@ submodule(ioclient_interface) ioclient_implementation
 
 contains        
     
-    module subroutine init(this, domain, forcing, options, n_indx)
+    module subroutine init_ioclient(this, domain, forcing, options, n_indx)
         implicit none
         class(ioclient_t),  intent(inout)  :: this
         type(domain_t),     intent(inout)  :: domain
@@ -80,9 +80,9 @@ contains
         ! Do MPI_Win_Post on read_buffer to indicate that we are open for delivery of input data
         call MPI_Win_Post(this%parent_group,0,this%read_win)
 
-    end subroutine init
+    end subroutine init_ioclient
 
-    module subroutine init_with_server(this)
+    subroutine init_with_server(this)
         implicit none
         class(ioclient_t),   intent(inout) :: this
 
@@ -450,7 +450,7 @@ contains
 
 
     !Necesary? Should communicate relevant post/wait calls and free window
-    module subroutine close_client(this)
+    subroutine close_client(this)
         implicit none
         class(ioclient_t), intent(inout) :: this
 

@@ -96,15 +96,15 @@ module domain_interface
 
 
   contains
-    procedure :: init
+    procedure :: init => init_domain
     procedure :: release
     procedure :: enforce_limits
 
     procedure :: batch_exch
-    procedure :: halo_3d_send_batch
-    procedure :: halo_3d_retrieve_batch
-    procedure :: halo_2d_send_batch
-    procedure :: halo_2d_retrieve_batch
+    procedure :: halo_3d_send
+    procedure :: halo_3d_retrieve
+    procedure :: halo_2d_send
+    procedure :: halo_2d_retrieve
 
     procedure :: get_initial_conditions
     procedure :: diagnostic_update
@@ -119,12 +119,12 @@ module domain_interface
   interface
 
     ! Set default component values
-    module subroutine init(this, options, nest_indx)
+    module subroutine init_domain(this, options, nest_indx)
         implicit none
         class(domain_t), intent(inout) :: this
         type(options_t), intent(inout) :: options
         integer,         intent(in)    :: nest_indx
-    end subroutine
+    end subroutine init_domain
 
     ! finalize domain object, freeing halo mpi windows
     module subroutine release(this)
@@ -138,24 +138,24 @@ module domain_interface
         logical, optional,   intent(in) :: two_d, exch_only
   end subroutine
 
-    module subroutine halo_3d_send_batch(this, exch_only)
+    module subroutine halo_3d_send(this, exch_only)
         implicit none
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: exch_only
     end subroutine
     
-    module subroutine halo_3d_retrieve_batch(this, exch_only)
+    module subroutine halo_3d_retrieve(this, exch_only)
       implicit none
       class(domain_t), intent(inout) :: this
       logical, optional,   intent(in) :: exch_only
   end subroutine
 
-  module subroutine halo_2d_send_batch(this)
+  module subroutine halo_2d_send(this)
     implicit none
     class(domain_t), intent(inout) :: this
   end subroutine
 
-  module subroutine halo_2d_retrieve_batch(this)
+  module subroutine halo_2d_retrieve(this)
     implicit none
     class(domain_t), intent(inout) :: this
   end subroutine

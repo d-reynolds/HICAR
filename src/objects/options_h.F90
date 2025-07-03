@@ -10,7 +10,7 @@ module options_interface
     implicit none
 
     private
-    public :: options_t, general_namelist, inter_nest_options_check
+    public :: options_t
 
     type :: options_t
         character(len=kMAX_STRING_LENGTH) :: comment
@@ -70,7 +70,7 @@ module options_interface
         procedure, public  :: init_namelist
         generic,   public  :: init => init_test
         generic,   public  :: init => init_namelist
-        procedure, public  :: check
+        procedure, public  :: verify_options
         procedure, public  :: setup_synthetic_forcing
         procedure, public  :: alloc_vars
         procedure, public  :: restart_vars
@@ -93,23 +93,23 @@ interface
         logical,            intent(in)     :: info_only, gen_nml
     end subroutine
 
-    module subroutine check(this)
+    module subroutine verify_options(this)
         implicit none
         class(options_t), intent(inout) :: this
     end subroutine
 
-    module subroutine inter_nest_options_check(options)
-        implicit none
-        type(options_t), intent(inout) :: options(:)
-    end subroutine
+    ! module subroutine inter_nest_options_check(options)
+    !     implicit none
+    !     type(options_t), intent(inout) :: options(:)
+    ! end subroutine
 
-    module subroutine general_namelist(filename, gen_options, n_indx, read_nml, info_only, gen_nml)
-        implicit none
-        character(len=*),             intent(in)    :: filename
-        type(general_options_type), intent(inout) :: gen_options
-        integer, intent(in) :: n_indx
-        logical, intent(in), optional  :: read_nml, info_only, gen_nml
-    end subroutine
+    ! module subroutine general_namelist(filename, gen_options, n_indx, read_nml, info_only, gen_nml)
+    !     implicit none
+    !     character(len=*),             intent(in)    :: filename
+    !     type(general_options_type), intent(inout) :: gen_options
+    !     integer, intent(in) :: n_indx
+    !     logical, intent(in), optional  :: read_nml, info_only, gen_nml
+    ! end subroutine
 
     module subroutine alloc_vars(this, input_vars, var_idx, error)
         implicit none

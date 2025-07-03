@@ -17,10 +17,11 @@
 !!
 !! ----------------------------------------------------------------------------
 module initialization
-    use options_interface,  only : options_t, general_namelist, inter_nest_options_check
+    use options_interface,  only : options_t
     use options_types,      only : general_options_type
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
+    use namelist_utils,     only : inter_nest_namelist_check
     use flow_object_interface, only : flow_obj_t, comp_arr_t
     use microphysics,               only : mp_init, mp_var_request
     use advection,                  only : adv_init, adv_var_request
@@ -179,23 +180,28 @@ contains
         character(len=*), intent(in) :: namelist_file
         logical, intent(in) :: info_only, gen_nml, only_namelist_check
 
-        type(general_options_type) :: dummy_general_options
-        integer :: nests, i
+        integer :: num_nests, i, nests(kMAX_NESTS), rc, name_unit
+        CHARACTER(LEN=200) :: error_msg
+        namelist /general/    nests
 
         ! We need at least one domain
-        nests = 1
+        num_nests = 1
 
         ! If we are generating or printing namelist option information, we don't want to read anything, and only need to run the init routine once
+        ! First thing, read from options file how many nests we have
         if ( .not.(info_only .or. gen_nml) )then
-            ! First thing, read from options file how many nests we have
-            call general_namelist(namelist_file,   dummy_general_options, 1, info_only=info_only, gen_nml=gen_nml)
-            nests = dummy_general_options%nests
+
+            open(io_newunit(name_unit), file=namelist_file)
+            read(name_unit,iostat=rc,nml=general,IOMSG=error_msg)
+            close(name_unit)
+
+            num_nests = nests(1)
         endif
 
-        allocate(options(nests))
+        allocate(options(num_nests))
 
         ! read in options file
-        do i = 1, nests
+        do i = 1, num_nests
             call options(i)%init(namelist_file, i, info_only=info_only, gen_nml=gen_nml)
             call collect_physics_requests(options(i))
 
@@ -203,11 +209,11 @@ contains
                 ! Setup options%forcing to expect synthetic forcing from parent domain
                 call options(i)%setup_synthetic_forcing()
             endif
-            call options(i)%check()
+            call options(i)%verify_options()
 
         enddo
 
-        call inter_nest_options_check(options)
+        call inter_nest_namelist_check(options)
 
         ! If this run was just done to check the namelist options, stop now
         if (only_namelist_check) then

@@ -40,8 +40,6 @@ program icar
     implicit none
 
     type(options_t), allocatable :: options(:)
-    ! type(domain_t) :: domain(kMAX_NESTS) ! Currently hard-coded, could be dynamic, but compile time on 
-    !                                      ! the Cray compiler is very slow for dynamically allocating large, derrived type arrays
     type(boundary_t), allocatable :: boundary(:)
     type(comp_arr_t)  :: components(kMAX_NESTS)
     type(ioclient_t), allocatable  :: ioclient(:)
@@ -57,9 +55,9 @@ program icar
 
     !Initialize MPI if needed
     init_flag = .False.
-    call MPI_initialized(init_flag, ierr)
+    call MPI_initialized(init_flag)
     if (.not.(init_flag)) then
-        call MPI_INIT(ierr)
+        call MPI_INIT()
         init_flag = .True.
     endif
 

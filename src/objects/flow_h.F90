@@ -10,9 +10,6 @@ implicit none
 private
 public :: flow_obj_t, comp_arr_t
 
-type comp_arr_t
-    class(flow_obj_t), allocatable :: comp
-end type comp_arr_t
 
 type flow_obj_t
 !   private
@@ -37,7 +34,11 @@ type flow_obj_t
         procedure, public :: next_flow_event
         procedure, public :: dead_or_asleep
         procedure, public :: check_ended
-    end type
+end type flow_obj_t
+
+type comp_arr_t
+    class(flow_obj_t), allocatable :: comp
+end type comp_arr_t
 
     interface
 

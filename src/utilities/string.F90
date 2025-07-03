@@ -9,7 +9,7 @@
 module string
 
     use iso_fortran_env, only : real32, real64
-
+    use icar_constants, only : kMAX_STRING_LENGTH
     implicit none
     !>-----------------------------
     !!  Generic interface to various types of string conversion functions
@@ -21,7 +21,6 @@ module string
         module procedure str_i
     end interface
 
-    integer,parameter::kMAX_STRING_LENGTH=100
 contains
     !>------------------------------
     !! Convert a string to a double precision real number

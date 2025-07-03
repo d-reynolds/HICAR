@@ -24,7 +24,8 @@ submodule(reader_interface) reader_implementation
 contains
 
 
-    module subroutine init(this, its, ite, kts, kte, jts, jte, options)
+    module subroutine init_reader(this, its, ite, kts, kte, jts, jte, options)
+        implicit none
         class(reader_t), intent(inout) :: this
         integer, intent(in) :: its, ite, kts, kte, jts, jte
         type(options_t), intent(in) :: options
@@ -70,7 +71,7 @@ contains
             endif
         end do
         
-    end subroutine init
+    end subroutine init_reader
 
     !>------------------------------------------------------------
     !! Reads a new set of forcing data for the next time step

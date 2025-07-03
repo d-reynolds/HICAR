@@ -37,7 +37,7 @@ contains
     !! Initialize the size of the domain
     !!
     !! -------------------------------
-    module subroutine init(this, options, nest_indx)
+    module subroutine init_domain(this, options, nest_indx)
         class(domain_t), intent(inout) :: this
         type(options_t), intent(inout) :: options
         integer, intent(in) :: nest_indx
@@ -61,9 +61,9 @@ contains
 
         call init_batch_exch(this)
 
-    end subroutine
+    end subroutine init_domain
 
-    module subroutine init_batch_exch(this)
+    subroutine init_batch_exch(this)
         implicit none
         class(domain_t), intent(inout) :: this
 
@@ -101,22 +101,22 @@ contains
 
         if (present(two_d)) then
             if (two_d) then
-                call this%halo_2d_send_batch()
-                call this%halo_2d_retrieve_batch()    
+                call this%halo_2d_send()
+                call this%halo_2d_retrieve()    
             endif
         else
             if (present(exch_only)) then
-                call this%halo_3d_send_batch(exch_only=exch_only)
-                call this%halo_3d_retrieve_batch(exch_only=exch_only)
+                call this%halo_3d_send(exch_only=exch_only)
+                call this%halo_3d_retrieve(exch_only=exch_only)
             else
-                call this%halo_3d_send_batch()
-                call this%halo_3d_retrieve_batch()    
+                call this%halo_3d_send()
+                call this%halo_3d_retrieve()    
             end if
         end if
 
     end subroutine batch_exch
 
-    module subroutine halo_3d_send_batch(this, exch_only)
+    module subroutine halo_3d_send(this, exch_only)
         implicit none
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: exch_only
@@ -128,9 +128,9 @@ contains
             call this%halo%halo_3d_send_batch(this%exch_vars, this%adv_vars, this%vars_3d)
         end if
 
-    end subroutine halo_3d_send_batch
+    end subroutine halo_3d_send
 
-    module subroutine halo_3d_retrieve_batch(this, exch_only)
+    module subroutine halo_3d_retrieve(this, exch_only)
         implicit none
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: exch_only
@@ -141,9 +141,9 @@ contains
             call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_3d)
         end if
 
-    end subroutine halo_3d_retrieve_batch
+    end subroutine halo_3d_retrieve
 
-    module subroutine halo_2d_send_batch(this)
+    module subroutine halo_2d_send(this)
         implicit none
         class(domain_t), intent(inout) :: this
 
@@ -151,9 +151,9 @@ contains
 
         call this%halo%halo_2d_send_batch(this%exch_vars, this%adv_vars, this%vars_2d)
 
-    end subroutine halo_2d_send_batch
+    end subroutine halo_2d_send
 
-    module subroutine halo_2d_retrieve_batch(this)
+    module subroutine halo_2d_retrieve(this)
         implicit none
         class(domain_t), intent(inout) :: this
 
@@ -161,7 +161,7 @@ contains
 
         call this%halo%halo_2d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_2d)
 
-    end subroutine halo_2d_retrieve_batch
+    end subroutine halo_2d_retrieve
 
     !> -------------------------------
     !! Release memory associated with the domain

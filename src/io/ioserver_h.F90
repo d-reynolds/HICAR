@@ -119,7 +119,7 @@ module ioserver_interface
         procedure, public  :: read_file
         procedure, public  :: read_restart_file
         procedure, public  :: close_files
-        procedure, public  :: init
+        procedure, public  :: init => init_ioserver
         procedure, private  :: setup_nest_types
         procedure, public  :: gather_forcing
         procedure, public  :: distribute_forcing
@@ -132,13 +132,13 @@ module ioserver_interface
         !! Initialize the object (e.g. allocate the variables array)
         !!
         !!----------------------------------------------------------
-        module subroutine init(this, options, nest_indx)
+        module subroutine init_ioserver(this, options, nest_indx)
             implicit none
             class(ioserver_t),   intent(inout) :: this
             type(options_t), intent(in)    :: options(:)
             integer,             intent(in)    :: nest_indx
 
-        end subroutine
+        end subroutine init_ioserver
 
         !>----------------------------------------------------------
         !! Increase the size of the variables array if necessary

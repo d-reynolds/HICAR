@@ -130,6 +130,7 @@ include(FetchContent)
 set (NETCDF_F90 "YES")
 find_package(MPI REQUIRED)
 find_package(OpenMP)
+find_package(OpenACC)
 find_package(FFTW REQUIRED)
 find_package(NetCDF REQUIRED)
 find_package(PETSc REQUIRED)
@@ -173,6 +174,14 @@ if (FSM)
 	target_include_directories(hicar_lib PUBLIC ${FSM_DIR}/build)
 	target_link_libraries(hicar_lib PUBLIC ${FSM2_LIB})
 endif()
+
+target_link_libraries(hicar_lib PUBLIC MPI::MPI_Fortran)
+target_include_directories(hicar_lib PUBLIC ${MPI_INCLUDE_DIR})
+
+if (OpenACC_Fortran_FOUND)
+	target_link_libraries(hicar_lib PUBLIC OpenACC::OpenACC_Fortran)
+endif()
+
 
 target_link_libraries(hicar_lib PUBLIC MPI::MPI_Fortran)
 target_include_directories(hicar_lib PUBLIC ${MPI_INCLUDE_DIR})
@@ -278,6 +287,13 @@ else()
 		set(CMAKE_Fortran_COMPILER_ID "mpif90")
 		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
 		set(COMPILER "gnu")
+	elseif (FC MATCHES "nvfortran")
+		set(CMAKE_Fortran_COMPILER "mpif90")
+		set(CMAKE_Fortran_COMPILER_ID "NVHPC")
+		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
+		set(COMPILER "nvfortran")
+		set(FC "mpif90")
+
 	else()
 		message(FATAL_ERROR "Unknown Fortran compiler (FC) specified")
 	endif()
@@ -305,6 +321,8 @@ if(MODE STREQUAL "debug")
 		target_compile_options(HICAR PUBLIC -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
 	elseif (COMPILER STREQUAL "cray")
 		target_compile_options(HICAR PUBLIC -h noomp -c -eI -g -O0) #-R cpbs --cray-print-opts
+	elseif (COMPILER STREQUAL "nvfortran")
+		target_compile_options(HICAR PUBLIC -O0) #-Mbounds -traceback -Minfo=accel)
 	endif()
 elseif(MODE STREQUAL "debugslow")
 	set(CMAKE_BUILD_TYPE Debug)
@@ -339,6 +357,8 @@ elseif(MODE STREQUAL "release")
 	elseif (COMPILER STREQUAL "cray")
 		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -c -eI -eZ)
 		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_cray")
+	elseif (COMPILER STREQUAL "nvfortran")
+		target_compile_options(HICAR PUBLIC -Ofast -stdpar=gpu -acc=gpu -march=native -gpu=ccnative,mem:managed -Minfo=accel)
 	endif()
 endif()
 
@@ -443,7 +463,7 @@ if (MPIEXEC_EXECUTABLE MATCHES "srun")
 	add_custom_target(check
 	COMMAND ${CMAKE_COMMAND} -E echo "Running code integration testes with srun..."	
 	COMMAND "${MPIEXEC_EXECUTABLE}" ${MPIEXEC_NUMPROC_FLAG} 4 ${SRUN_FLAGS_LIST} ${CMAKE_BINARY_DIR}/tests/${PROJECT_NAME}-tester
-	DEPENDS ${PROJECT_NAME}-tester 
+	DEPENDS download_test_data
 	WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 	COMMENT "Running integration test suite with 4 MPI processes"
 	VERBATIM
@@ -452,7 +472,7 @@ if (MPIEXEC_EXECUTABLE MATCHES "srun")
 	add_custom_target(test_cases
 	COMMAND ${CMAKE_COMMAND} -E echo "Running test cases..."
 	COMMAND "${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_case_runner.sh" ${PROJECT_SOURCE_DIR} "Standard,Standard_nested" ${SRUN_FLAGS_LIST_TEST_CASE} 
-	DEPENDS ${PROJECT_NAME}-tester 
+	DEPENDS download_test_data
 	WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
 	COMMENT "Running test case suite"
 	VERBATIM
@@ -462,7 +482,7 @@ else()
 	add_custom_target(check
 	COMMAND ${CMAKE_COMMAND} -E echo "Running code integration testes with MPI..."
 	COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 ${CMAKE_BINARY_DIR}/tests/${PROJECT_NAME}-tester
-	DEPENDS ${PROJECT_NAME}-tester 
+	DEPENDS download_test_data
 	WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 	COMMENT "Running integration test suite with 4 MPI processes"
 	VERBATIM
@@ -471,7 +491,7 @@ else()
 	add_custom_target(test_cases
 	COMMAND ${CMAKE_COMMAND} -E echo "Running test cases..."
 	COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_case_runner.sh ${PROJECT_SOURCE_DIR} Standard,Standard_restart
-	DEPENDS ${PROJECT_NAME}-tester 
+	DEPENDS download_test_data
 	WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
 	COMMENT "Running test case suite"
 	VERBATIM

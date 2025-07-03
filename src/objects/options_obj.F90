@@ -10,6 +10,7 @@ submodule(options_interface) options_implementation
     use output_metadata,            only : get_varname, get_varindx
     use namelist_utils,             only : set_nml_var, set_nml_var_default, set_namelist, write_nml_file_end
     use iso_fortran_env
+
     implicit none
 
 
@@ -126,121 +127,6 @@ contains
 
     end subroutine init_namelist
 
-    !> -------------------------------
-    !! Check options for consistency among different nests
-    !!
-    !! -------------------------------
-    subroutine inter_nest_options_check(options)
-        implicit none
-        type(options_t), intent(inout) :: options(:)
-
-        integer :: i, n, child_nest_indx
-        integer :: new_restartinterval
-        type(Time_type) :: parent_restart_time, child_restart_time, new_child_restart_time, loop_strt_time, child_strt_time
-        type(time_delta_t) :: nest_start_offset, helper_delta, new_restart_delta, tmp_delta
-
-        do i = 1, size(options)
-            !See if we are the head of a nest chain, and if we have children
-            if (options(i)%general%parent_nest == 0 .and. size(options(i)%general%child_nests) > 0) then
-                call helper_delta%set(options(i)%restart%restart_count*options(i)%output%outputinterval)
-
-                loop_strt_time = options(i)%general%start_time
-                if (options(i)%restart%restart) loop_strt_time = options(i)%restart%restart_time
-
-                parent_restart_time = loop_strt_time + helper_delta
-
-                !Loop through all child nests in the chain
-                do n = i+1, size(options)
-
-                    child_nest_indx = n
-                    child_strt_time = options(child_nest_indx)%general%start_time
-                    if (options(child_nest_indx)%restart%restart) child_strt_time = options(child_nest_indx)%restart%restart_time
-
-                    ! If we have hit another root nest, then we are done with this chain
-                    if (options(child_nest_indx)%general%parent_nest == 0) exit
-
-                    if (child_nest_indx <= i) then
-                        if (STD_OUT_PE) write(*,*) "  ERROR: Child nest index ",child_nest_indx," is less than the parent nest index ",i
-                        stop
-                    endif
-
-                    !! All forcing%inputinterval should be the same
-                    if (.not.(options(i)%forcing%inputinterval == options(child_nest_indx)%forcing%inputinterval)) then
-                        if (STD_OUT_PE) write(*,*) "  ERROR: Forcing dt for nest ", child_nest_indx, " does not match the parent nest"
-                        stop
-                    endif
-
-                    !! Start and end times of a nest should be within the span of the parent nest run time
-                    if (loop_strt_time > child_strt_time) then
-                        if (STD_OUT_PE) write(*,*) "  ERROR: Start time of nest ", child_nest_indx, " is before the start time of the parent nest"
-                        stop
-                    endif
-                    if (options(i)%general%end_time < options(child_nest_indx)%general%end_time) then
-                        if (STD_OUT_PE) write(*,*) "  ERROR: End time of nest ", child_nest_indx, " is after the end time of the parent nest"
-                        stop
-                    endif
-
-                    !! Ensure that the child nest dx is actually smaller than the parent nest
-                    if (options(i)%domain%dx <= options(child_nest_indx)%domain%dx) then
-                        if (STD_OUT_PE) write(*,*) "  ERROR: dx of nest ", child_nest_indx, " is not smaller than the parent nest."
-                        if (STD_OUT_PE) write(*,*) "  ERROR: This is sort of useless, so it was probably done in error"
-                        stop
-                    endif
-
-                    ! from here on, we just want the given simulation start times, not the restart times
-                    child_strt_time = options(child_nest_indx)%general%start_time
-                    loop_strt_time = options(i)%general%start_time
-                    parent_restart_time = loop_strt_time + helper_delta
-
-                    !! Check that, for a given chain of nests, the time at which restart files are output is the same for all nests
-                    !Compute when the first restart time is for the child nest
-                    call helper_delta%set(options(child_nest_indx)%restart%restart_count*options(child_nest_indx)%output%outputinterval)
-                    child_restart_time = child_strt_time + helper_delta
-                    nest_start_offset = child_strt_time - loop_strt_time
-
-                    ! If the two times are different, warn the user
-                    if ((parent_restart_time+nest_start_offset) /= child_restart_time) then
-                        !Try to set the restart interval for the child nest to match the parent nest restart output time
-                        new_restart_delta = parent_restart_time+nest_start_offset-child_strt_time
-                        new_restartinterval = (new_restart_delta%seconds())/options(child_nest_indx)%output%outputinterval
-                        
-                        call helper_delta%set(new_restartinterval*options(child_nest_indx)%output%outputinterval)
-                        child_restart_time = child_strt_time + helper_delta
-                        if ((parent_restart_time+nest_start_offset) == child_restart_time) then
-                            call set_nml_var(options(child_nest_indx)%restart%restart_count, new_restartinterval, 'restartinterval')
-                            if (STD_OUT_PE) write(*,*) "  ATTENTION: Restart interval for nest ", child_nest_indx, " has been set to match the"
-                            if (STD_OUT_PE) write(*,*) "  ATTENTION: first restart date of the parent nest."
-                            if (STD_OUT_PE) write(*,*) "  ATTENTION: Restart interval for nest ", child_nest_indx, " is now: ", new_restartinterval
-                            if (STD_OUT_PE) write(*,*) "  ATTENTION: First restart time for nest ", child_nest_indx, " is now: ", trim(child_restart_time%as_string())
-                        else
-                            !If this does not work, error out and report to the user
-                            if (STD_OUT_PE) write(*,*) "  ERROR: Restart interval for nest ", child_nest_indx, " does not match the parent nest"
-                            if (STD_OUT_PE) write(*,*) "  ERROR: Restart interval for nest ", child_nest_indx, " is: ", options(child_nest_indx)%restart%restart_count
-                            if (STD_OUT_PE) write(*,*) "  ERROR: First restart time for nest ", child_nest_indx, " is: ", trim(child_restart_time%as_string())
-                            if (STD_OUT_PE) write(*,*) "  ERROR: This time is calculated as start_time + restartinterval*outputinterval"
-                            child_restart_time = parent_restart_time+nest_start_offset
-                            if (STD_OUT_PE) write(*,*) "  ERROR: First restart time for nest ", child_nest_indx, " should be: ", trim(child_restart_time%as_string())
-                            if (STD_OUT_PE) write(*,*) "  ERROR: Please adjust the restartinterval and outputinterval for this nest to match the parent nest"
-                            stop
-                        end if
-                    end if
-
-                    !! Check that, for a given chain of nests, the start times for all nests are separated by an integer
-                    ! multiple of the input interval
-
-                    ! Should take the difference between child and parent start times, and divide by the input interval
-                    ! If this is not an integer, then the start times are not separated by an integer multiple of the input interval
-                    tmp_delta = options(child_nest_indx)%general%start_time - options(i)%general%start_time
-                    if (mod(tmp_delta%seconds(), options(child_nest_indx)%forcing%inputinterval) /= 0) then
-                        if (STD_OUT_PE) write(*,*) "  ERROR: Start time for nest ", child_nest_indx, " is not an integer multiple"
-                        if (STD_OUT_PE) write(*,*) "  ERROR: of the inputinterval from the start time of the parent nest"
-                        stop
-                    endif
-                enddo
-            endif
-        enddo
-
-    end subroutine inter_nest_options_check
 
     !> -------------------------------
     !! Checks options in the options data structure for consistency
@@ -248,7 +134,7 @@ contains
     !! Stops or prints a large warning depending on warning level requested and error found
     !!
     !! -------------------------------
-    subroutine check(this)
+    module subroutine verify_options(this)
         ! Minimal error checking on option settings
         implicit none
         class(options_t), intent(inout)::this
@@ -483,7 +369,7 @@ contains
         ! -------------------------------------
         ! Check that the restart interval is a multiple of the input interval
 
-    end subroutine check
+    end subroutine verify_options
 
     !> -------------------------------
     !! Read physics options to use from a namelist file

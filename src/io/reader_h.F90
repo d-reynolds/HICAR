@@ -53,18 +53,19 @@ module reader_interface
 
       integer :: curfile, curstep
   contains
-      procedure, public :: init
+      procedure, public :: init => init_reader
       procedure, public :: read_next_step
       procedure, public :: close_file
   end type
 
   interface
 
-    module subroutine init(this, its, ite, kts, kte, jts, jte, options)
+    module subroutine init_reader(this, its, ite, kts, kte, jts, jte, options)
+        implicit none
         class(reader_t), intent(inout) :: this
         integer, intent(in) :: its, ite, kts, kte, jts, jte
         type(options_t), intent(in) :: options
-    end subroutine
+    end subroutine init_reader
 
       !>----------------------------------------------------------
       !! Read the next timestep (time) from the input file list

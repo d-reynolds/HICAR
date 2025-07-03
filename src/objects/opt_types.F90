@@ -1,6 +1,6 @@
 module options_types
 
-    use icar_constants,             only : kMAX_STRING_LENGTH, MAXLEVELS, kMAX_FILE_LENGTH, MAX_NUMBER_FILES, kMAX_NAME_LENGTH, kMAX_STORAGE_VARS, kMAX_NAME_LENGTH
+    use icar_constants,             only : MAXLEVELS, kMAX_FILE_LENGTH, MAX_NUMBER_FILES, kMAX_NAME_LENGTH, kMAX_STORAGE_VARS, kMAX_NAME_LENGTH
     use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
 

@@ -27,7 +27,7 @@ contains
     !! Distributes initial conditions to all other images
     !!
     !!------------------------------------------------------------
-    module subroutine init(this, options, domain_lat, domain_lon, parent_options)
+    module subroutine init_boundary(this, options, domain_lat, domain_lon, parent_options)
         class(boundary_t),    intent(inout) :: this
         type(options_t),      intent(inout) :: options
         real, dimension(:,:), intent(in)    :: domain_lat
@@ -75,7 +75,7 @@ contains
 
         call setup_boundary_geo(this, options%domain%longitude_system)
 
-    end subroutine
+    end subroutine init_boundary
 
 
     !>------------------------------------------------------------

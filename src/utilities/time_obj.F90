@@ -203,7 +203,7 @@ contains
     module function get_seconds(this) result(seconds)
         implicit none
         class(Time_type) :: this
-        real(real128) :: seconds
+        real(real64) :: seconds
 
         seconds = this%current_date_time * 86400.0D0
     end function get_seconds
@@ -219,7 +219,7 @@ contains
     module function get_mjd(this) result(mjd)
         implicit none
         class(Time_type) :: this
-        real(real128) :: mjd
+        real(real64) :: mjd
 
         mjd = this%current_date_time
     end function get_mjd
@@ -238,10 +238,10 @@ contains
     function gregorian_julian_day(year, month, day, hour, minute, second) result(julian_day)
         implicit none
         integer, intent(in) :: year, month, day, hour, minute, second
-        real(real128) :: julian_day
-        real(real128) :: d,m,y
+        real(real64) :: julian_day
+        real(real64) :: d,m,y
         integer :: a,b
-        real(real128) :: internal_seconds
+        real(real64) :: internal_seconds
 
         internal_seconds = second
         a = (14-month)/12
@@ -269,7 +269,7 @@ contains
         implicit none
         class(Time_type), intent(in) :: this
         integer, intent(in) :: year, month, day, hour, minute, second
-        real(real128) :: date_to_mjd, internal_seconds
+        real(real64) :: date_to_mjd, internal_seconds
 
         internal_seconds = second
         if (this%calendar==GREGORIAN) then
@@ -298,7 +298,7 @@ contains
         implicit none
         class(Time_type), intent(in) :: this
         integer, intent(in) :: year, month, day, hour, minute, second
-        real(real128) :: date_to_jd
+        real(real64) :: date_to_jd
 
         if (this%calendar==GREGORIAN) then
             date_to_jd = gregorian_julian_day(year, month, day, hour, minute, second)
@@ -327,7 +327,7 @@ contains
         integer :: y=4716,j=1401,m=2,n=12,r=4,p=1461
         integer :: v=3,u=5,s=153,w=2,B=274277,C=-38
         integer ::f,e,g,h, jday
-        real(real128) :: day_fraction, mjd
+        real(real64) :: day_fraction, mjd
 
         mjd = this%current_date_time+1d-5 ! add less than one second
 
@@ -463,7 +463,7 @@ contains
         real, intent(in), optional  :: lon
 
         real :: offset
-        real(real128) :: year_start
+        real(real64) :: year_start
 
         integer :: year, month, day, hour, minute, second
 
@@ -569,7 +569,7 @@ contains
     module subroutine set_from_mjd(this, days)
         implicit none
         class(Time_type), intent(inout) :: this
-        real(real128), intent(in) :: days
+        real(real64), intent(in) :: days
         integer :: year, month, day, hour, minute, second
 
         this%current_date_time = days

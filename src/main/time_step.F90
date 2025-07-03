@@ -342,8 +342,8 @@ contains
                 if (options%general%debug) call domain_check(domain, "init", fix=.True.)
 
                 call domain%send_timer%start()
-                call domain%halo_3d_send_batch()
-                call domain%halo_2d_send_batch()
+                call domain%halo_3d_send()
+                call domain%halo_2d_send()
                 call domain%send_timer%stop()
     
                 call domain%rad_timer%start()
@@ -363,8 +363,8 @@ contains
                 call domain%pbl_timer%stop()
 
                 call domain%ret_timer%start()
-                call domain%halo_3d_retrieve_batch()
-                call domain%halo_2d_retrieve_batch()
+                call domain%halo_3d_retrieve()
+                call domain%halo_2d_retrieve()
                 call integrate_physics_tendencies(domain, options, real(dt%seconds()))
                 !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
                 call domain%ret_timer%stop()

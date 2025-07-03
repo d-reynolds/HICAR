@@ -12,7 +12,7 @@
 !!------------------------------------------------------------
 module time_object
     use time_delta_object, only : time_delta_t
-    use iso_fortran_env, only: real128
+    use iso_fortran_env, only: real64
 
     implicit none
 
@@ -39,7 +39,7 @@ module time_object
         integer, dimension(13) :: month_start
         integer :: year, month, day, hour, minute, second
 
-        real(real128) :: current_date_time = 0
+        real(real64) :: current_date_time = 0
 
 
       contains
@@ -151,7 +151,7 @@ interface
     module function get_seconds(this) result(seconds)
         implicit none
         class(Time_type) :: this
-        real(real128) :: seconds
+        real(real64) :: seconds
 
     end function get_seconds
 
@@ -178,7 +178,7 @@ interface
     module function get_mjd(this) result(mjd)
         implicit none
         class(Time_type) :: this
-        real(real128) :: mjd
+        real(real64) :: mjd
 
     end function get_mjd
 
@@ -207,7 +207,7 @@ interface
         implicit none
         class(Time_type), intent(in) :: this
         integer, intent(in) :: year, month, day, hour, minute, second
-        real(real128) :: date_to_mjd
+        real(real64) :: date_to_mjd
 
     end function date_to_mjd
     
@@ -222,7 +222,7 @@ interface
         implicit none
         class(Time_type), intent(in) :: this
         integer, intent(in) :: year, month, day, hour, minute, second
-        real(real128) :: date_to_jd
+        real(real64) :: date_to_jd
 
     end function date_to_jd
     
@@ -310,7 +310,7 @@ interface
     module subroutine set_from_mjd(this, days)
         implicit none
         class(Time_type), intent(inout) :: this
-        real(real128), intent(in) :: days
+        real(real64), intent(in) :: days
 
     end subroutine set_from_mjd
 

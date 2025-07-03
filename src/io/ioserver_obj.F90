@@ -25,7 +25,7 @@ submodule(ioserver_interface) ioserver_implementation
 contains
 
 
-    module subroutine init(this, options, nest_indx)
+    module subroutine init_ioserver(this, options, nest_indx)
         class(ioserver_t),  intent(inout)  :: this
         type(options_t), intent(in)     :: options(:)
         integer,            intent(in)     :: nest_indx
@@ -123,11 +123,11 @@ contains
             ! that the restart counter should be auto-incremented to 2 (1 + 1) here 
             this%restart_counter = this%restart_counter + 1
         endif
-    end subroutine
+    end subroutine init_ioserver
 
     ! This subroutine creates MPI datatypes which are used to collect domain data from all parent ioserver processes
     ! which our child ioserver process needs
-    subroutine setup_nest_types(this, child_ioserver, send_nest_types, buffer_nest_types)
+    module subroutine setup_nest_types(this, child_ioserver, send_nest_types, buffer_nest_types)
         class(ioserver_t), intent(inout) :: this
         type(ioserver_t), intent(in)    :: child_ioserver
         type(MPI_Datatype), intent(out) :: send_nest_types(:), buffer_nest_types(:)
@@ -878,7 +878,7 @@ contains
                 
         ! close files
         call this%reader%close_file()
-        call this%outputer%close_files()
+        call this%outputer%close_output_files()
 
     end subroutine 
     

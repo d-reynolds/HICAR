@@ -131,7 +131,7 @@ contains
     end subroutine check_ended
 
 
-    function dead_or_asleep(this) result(doa)
+    module function dead_or_asleep(this) result(doa)
         implicit none
         class(flow_obj_t), intent(inout) :: this
         logical :: doa
