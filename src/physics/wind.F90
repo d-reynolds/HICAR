@@ -10,23 +10,16 @@
 module wind    
 
     use linear_theory_winds, only : linear_perturb, setup_linwinds
-    use wind_iterative,      only : calc_iter_winds, init_iter_winds
+    ! use wind_iterative,      only : calc_iter_winds, init_iter_winds
     use wind_iterative_old,      only : calc_iter_winds_old, init_iter_winds_old
-
-    !use mod_blocking,        only : update_froude_number, initialize_blocking
-    use variable_interface,       only : variable_t
-    use iso_fortran_env
+    use iso_fortran_env, only : output_unit
     use icar_constants
     use domain_interface,  only : domain_t
-    use boundary_interface,only : boundary_t
     use options_interface, only : options_t
-    use grid_interface,    only : grid_t
     use wind_surf, only         : calc_Sx, apply_Sx
     use wind_thermal, only      : apply_thermal_winds, init_thermal_winds
-    use io_routines, only : io_read, io_write
     use mod_atm_utilities,   only : calc_froude, calc_Ri, calc_dry_stability
     use array_utilities,      only : smooth_array
-    use time_delta_object,  only : time_delta_t
 
     implicit none
     private

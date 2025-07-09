@@ -37,19 +37,18 @@ module microphysics
     use module_mp_simple,           only: mp_simple_driver
     use module_mp_jensen_ishmael,   only: mp_jensen_ishmael, jensen_ishmael_init
 
-    use time_object,                only: Time_type
     use options_interface,          only: options_t
     use domain_interface,           only: domain_t
     use wind,                       only: calc_w_real
 
     implicit none
+    private
 
     ! permit the microphysics to update on a longer time step than the advection
     integer :: update_interval
     real*8 :: last_model_time
     ! temporary variables
     real,allocatable,dimension(:,:) :: SR, last_rain, last_snow, last_graup, refl_10cm
-
 
     public :: mp, mp_var_request
 contains

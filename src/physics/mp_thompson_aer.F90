@@ -51,7 +51,8 @@
 ! #endif
 
       IMPLICIT NONE
-
+      PRIVATE
+      PUBLIC :: mp_gt_driver_aer, thompson_aer_init
       LOGICAL, PARAMETER, PRIVATE:: iiwarm = .false.
       LOGICAL, PRIVATE:: is_aerosol_aware = .false.
       ! $omp threadprivate(is_aerosol_aware)

@@ -47,6 +47,8 @@ module radiation
     integer :: its, ite, jts, jte, kts, kte
     integer :: ids, ide, jds, jde, kds, kde
 
+    private
+    public :: radiation_init, ra_var_request, rad_apply_dtheta, rad
     
 contains
 

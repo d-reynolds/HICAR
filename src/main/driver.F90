@@ -19,22 +19,17 @@
 program icar
     use iso_fortran_env
     use mpi_f08
+#ifdef _OPENACC
+    use openacc
+#endif
     use options_interface,  only : options_t
-    use flow_object_interface, only : flow_obj_t, comp_arr_t
-    use domain_interface,   only : domain_t
+    use flow_object_interface, only : comp_arr_t
     use boundary_interface, only : boundary_t
-    use output_interface,   only : output_t
-    use time_step,          only : step                ! Advance the model forward in time
-    use initialization,     only : split_processes, welcome_message, init_options, init_model
-    use timer_interface,    only : timer_t
-    use time_object,        only : Time_type
-    use time_delta_object,  only : time_delta_t
-    use icar_constants
-    use ioserver_interface, only : ioserver_t
     use ioclient_interface, only : ioclient_t
-    use io_routines,        only : io_write
+
+    use initialization,     only : split_processes, init_options
+    use icar_constants
     use namelist_utils,     only : get_nml_var_default
-    use land_surface,               only : lsm_init
     use output_metadata,    only : list_output_vars
     use flow_events,        only : component_init, component_loop, component_program_end
     implicit none
@@ -49,6 +44,11 @@ program icar
     logical :: init_flag, info_only, gen_nml, only_namelist_check
     logical :: start_time_match = .False.
     character(len=kMAX_FILE_LENGTH) :: namelist_file
+#ifdef _OPENACC
+    integer :: dev, devNum, local_rank
+    type(MPI_Comm) :: local_comm
+    integer(acc_device_kind) :: devtype
+#endif
 
     ! Read command line options to determine what kind of run this is
     call read_co(namelist_file, info_only, gen_nml, only_namelist_check)
@@ -61,21 +61,25 @@ program icar
         init_flag = .True.
     endif
 
+#ifdef _OPENACC
+!
+! ****** Set the Accelerator device number based on local rank
+!
+     call MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, &
+          MPI_INFO_NULL, local_comm)
+     call MPI_Comm_rank(local_comm, local_rank)
+     devtype = acc_get_device_type()
+     devNum = acc_get_num_devices(devtype)
+     dev = mod(local_rank,devNum)
+     call acc_set_device_num(dev, devtype)
+     call acc_init(devtype)
+# endif
+
     call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
     STD_OUT_PE = (PE_RANK_GLOBAL==0)
 
     !-----------------------------------------
     !  Model Initialization
-    
-
-    if (STD_OUT_PE .and. .not.(gen_nml .or. only_namelist_check .or. info_only)) then
-        call welcome_message()
-        write(*,'(/ A)') "--------------------------------------------------------"
-        write(*,'(A)')   "Initializing Options"
-        write(*,'(A /)') "--------------------------------------------------------"
-        flush(output_unit)
-
-    endif
 
     ! Reads user supplied model options
     call init_options(options, namelist_file, info_only=info_only, gen_nml=gen_nml, only_namelist_check=only_namelist_check)

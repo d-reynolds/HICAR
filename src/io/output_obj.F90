@@ -444,15 +444,16 @@ contains
         type(Time_type),                 intent(in)    :: time
         type(MPI_Comm),                  intent(in)    :: par_comms
         integer,                         intent(in)    :: var_indx_list(:)
-
+        type(MPI_Info) :: par_comm_info
         integer :: err
         
         ! open file
+        call MPI_Comm_get_info(par_comms, par_comm_info)
         err = nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), this%active_nc_id, &
-                comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL)
+                comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL)
         if (err /= NF90_NOERR) then
             call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id, &
-                    comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL), "Opening:"//trim(filename))
+                    comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL), "Opening:"//trim(filename))
         else
             ! in case we need to add a new variable when setting up variables
             call check_ncdf(nf90_redef(this%active_nc_id), "Setting redefine mode for: "//trim(filename))

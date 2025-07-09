@@ -4,13 +4,10 @@ module boundary_interface
     use netcdf
     use options_interface,        only : options_t
     use variable_dict_interface,  only : var_dict_t
-    use variable_interface,       only : variable_t
     use time_object,              only : Time_type
     use time_delta_object,        only : time_delta_t
     use data_structures,          only : interpolable_type
     use icar_constants,           only : kMAX_NAME_LENGTH, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH
-    use grid_interface,           only : grid_t
-    use flow_object_interface,     only : flow_obj_t
     implicit none
 
     private

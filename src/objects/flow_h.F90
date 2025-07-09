@@ -3,8 +3,6 @@ module flow_object_interface
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
     use options_interface,     only : options_t
-    use icar_constants,     only : STD_OUT_PE
-    use iso_fortran_env,    only : output_unit
 implicit none
 
 private

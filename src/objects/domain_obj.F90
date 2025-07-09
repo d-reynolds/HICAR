@@ -185,34 +185,42 @@ contains
         n_vars = 0
         do i = 1, size(kADV_VARS)
             var_indx = get_varindx(trim(kADV_VARS(i)))
-            if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
+            endif
         enddo
-        allocate(this%adv_vars(n_vars))
+        if (n_vars > 0) allocate(this%adv_vars(n_vars))
         n_vars = 0
 
         do i = 1, size(kADV_VARS)
             var_indx = get_varindx(trim(kADV_VARS(i)))
-            if (this%var_indx(var_indx)%v > 0) then
-                n_vars = n_vars + 1
-                this%adv_vars(n_vars)%n = this%var_indx(var_indx)%n
-                this%adv_vars(n_vars)%v = this%var_indx(var_indx)%v
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) then
+                    n_vars = n_vars + 1
+                    this%adv_vars(n_vars)%n = this%var_indx(var_indx)%n
+                    this%adv_vars(n_vars)%v = this%var_indx(var_indx)%v
+                endif
             endif
         enddo
 
         n_vars = 0
         do i = 1, size(kEXCH_VARS)
             var_indx = get_varindx(trim(kEXCH_VARS(i)))
-            if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
+            endif
         enddo
-        allocate(this%exch_vars(n_vars))
+        if (n_vars > 0) allocate(this%exch_vars(n_vars))
         n_vars = 0
 
         do i = 1, size(kEXCH_VARS)
             var_indx = get_varindx(trim(kEXCH_VARS(i)))
-            if (this%var_indx(var_indx)%v > 0) then
-                n_vars = n_vars + 1
-                this%exch_vars(n_vars)%n = this%var_indx(var_indx)%n
-                this%exch_vars(n_vars)%v = this%var_indx(var_indx)%v
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) then
+                    n_vars = n_vars + 1
+                    this%exch_vars(n_vars)%n = this%var_indx(var_indx)%n
+                    this%exch_vars(n_vars)%v = this%var_indx(var_indx)%v
+                endif
             endif
         enddo
 

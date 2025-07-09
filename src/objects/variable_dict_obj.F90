@@ -27,7 +27,7 @@ contains
     !! Typically assumes lazy instantiation, e.g. not initialized until used
     !!
     !!------------------------------------------------
-    module subroutine init(this)
+    module subroutine init_var_dict(this)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
 
@@ -45,7 +45,7 @@ contains
 
         this%initialized = .True.
 
-    end subroutine
+    end subroutine init_var_dict
 
 
     !>------------------------------------------------

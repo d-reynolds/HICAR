@@ -766,6 +766,7 @@ contains
         integer :: i, n_3d, n_2d, nx, ny, i_s_re, i_e_re, j_s_re, j_e_re
         integer :: ncid, var_id, dimid_3d(4), nz, err, varid, start_3d(4), cnt_3d(4), start_2d(3), cnt_2d(3), msg_size
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+        type(MPI_Info) :: IO_Comms_info
         real, allocatable :: data3d(:,:,:,:), restart_data_3d(:,:,:,:), restart_data_2d(:,:,:)
         type(variable_t)  :: var
         character(len=kMAX_NAME_LENGTH) :: name
@@ -808,8 +809,9 @@ contains
             write(*,*) " ------------------ "
         endif
 
+        call MPI_Comm_get_info(this%IO_Comms, IO_Comms_info)
         err = nf90_open(restart_in_file, IOR(nf90_nowrite,NF90_NETCDF4), ncid, &
-                comm = this%IO_Comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL)
+                comm = this%IO_Comms%MPI_VAL, info = IO_Comms_info%MPI_VAL)
         
         ! setup start/count arrays accordingly. k_s_w and k_e_w forseen to always cover the bounds of what k_s_re and k_e_re would be
         ! This is because the domain is only decomposed in 2D.

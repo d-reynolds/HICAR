@@ -9,7 +9,6 @@
 module variable_dict_interface
     ! variable type to store... this could be made unlimited but that complicates use
     use variable_interface,     only : variable_t
-    use output_metadata,        only : get_varname
     use icar_constants
 
     !>------------------------------------------------
@@ -55,7 +54,7 @@ module variable_dict_interface
         procedure :: add_var            ! store a variable with a given key
         procedure :: sort_by_kVARS
 
-        procedure :: init               ! initialize the dictionary (e.g. allocate the var_list)
+        procedure :: init => init_var_dict  ! initialize the dictionary (e.g. allocate the var_list)
     end type
 
 interface
@@ -65,10 +64,10 @@ interface
     !!
     !!------------------------------------------------
 
-    module subroutine init(this)
+    module subroutine init_var_dict(this)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
-    end subroutine
+    end subroutine init_var_dict
 
 
     !>-------------------------

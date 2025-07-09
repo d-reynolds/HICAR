@@ -13,10 +13,6 @@ module nest_manager
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
     use flow_object_interface, only : flow_obj_t, comp_arr_t
-    use boundary_interface, only : boundary_t
-    use ioclient_interface, only : ioclient_t
-    use time_object,     only : Time_type
-    use time_delta_object,     only : time_delta_t
     use initialization,             only : init_model_state
     use microphysics,               only : mp_init
     use advection,                  only : adv_init
@@ -28,7 +24,6 @@ module nest_manager
     use wind,                       only : init_winds
     use icar_constants
     use iso_fortran_env
-    use mpi_f08
 
 
     ! use io_routines,                only : io_read, &
@@ -44,12 +39,7 @@ module nest_manager
     private
     integer :: current_nest = -1
 
-    public:: end_nest_context, start_nest_context, wake_nest
-    public:: switch_nest_context
-    public:: any_nests_not_done
-    public:: nest_next_up
-    public:: should_update_nests
-    public:: can_update_child_nest
+    public:: end_nest_context, start_nest_context, wake_nest, switch_nest_context, any_nests_not_done, nest_next_up, should_update_nests, can_update_child_nest
 
 
 contains
@@ -114,12 +104,9 @@ contains
         
     end subroutine  end_nest_context
 
-    subroutine wake_nest(options, domain, boundary, ioclient)
+    subroutine wake_nest(domain)
         implicit none
-        type(options_t), intent(inout) :: options
         type(domain_t), intent(inout) :: domain
-        type(boundary_t), intent(inout) :: boundary
-        type(ioclient_t), intent(inout) :: ioclient
 
 
         ! If we have an active context and it is not us, end the context
@@ -127,7 +114,6 @@ contains
             call end_nest_context()
         endif
 
-        call init_model_state(options, domain, boundary, ioclient)
 
         current_nest = domain%nest_indx
 

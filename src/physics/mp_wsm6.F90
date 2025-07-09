@@ -12,6 +12,10 @@
 MODULE module_mp_wsm6
 
    use mod_wrf_constants
+  implicit none
+
+  private
+  public :: wsm6, wsm6init
 
    REAL, PARAMETER, PRIVATE :: dtcldcr     = 120. ! maximum time step for minor loops
    REAL, PARAMETER, PRIVATE :: n0r = 8.e6         ! intercept parameter rain

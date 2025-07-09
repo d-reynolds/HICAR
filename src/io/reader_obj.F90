@@ -81,6 +81,7 @@ contains
         class(reader_t), intent(inout) :: this
         real, allocatable, intent(inout) :: buffer(:,:,:,:)
         type(MPI_Comm), intent(in)              :: par_comms
+        type(MPI_Info) :: par_comm_info
 
         real, allocatable :: data3d_t(:,:,:,:), data3d(:,:,:)
         type(variable_t)  :: var
@@ -92,8 +93,9 @@ contains
 
         !See if we must open the file
         if (this%ncfile_id < 0) then
+            call MPI_Comm_get_info(par_comms, par_comm_info)
             call check_ncdf( nf90_open(this%file_list(this%curfile), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id, &
-                    comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL), " Opening file "//trim(this%file_list(this%curfile)))
+                    comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL), " Opening file "//trim(this%file_list(this%curfile)))
         endif
         
 
@@ -166,6 +168,8 @@ contains
 
         integer :: steps_in_file
         type(Time_type), allocatable :: times_in_file(:)
+        type(Time_type) :: time_tmp
+
 
         this%curstep = this%curstep + 1 ! this may be all we have to do most of the time
         ! check that we haven't stepped passed the end of the current file
@@ -195,8 +199,8 @@ contains
         if (.not.(this%eof)) then
             !Get time step of the next input step
             call read_times(this%file_list(this%curfile), this%time_var, times_in_file)
-
-            if ((times_in_file(this%curstep) - this%input_dt) >= this%model_end_time) then
+            time_tmp = times_in_file(this%curstep) - this%input_dt
+            if (time_tmp >= this%model_end_time) then
                 this%eof = .True.
             !Check if the next time step in the file is equal to the input time 
             else if (.not.(times_in_file(this%curstep) == this%input_time)) then

@@ -10,7 +10,7 @@
 module wind_thermal
     use domain_interface,  only : domain_t
     use options_interface, only : options_t
-    use io_routines,       only : io_write
+    ! use io_routines,       only : io_write
     use mod_wrf_constants, only : cp, epsilon, piconst
     use icar_constants,          only : kVARS
     implicit none

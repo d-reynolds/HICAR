@@ -8,11 +8,10 @@
 !!
 !! ----------------------------------------------------------------------------
 module time_step
-    use iso_fortran_env
+    use iso_fortran_env, only : output_unit
     use mpi_f08
     use microphysics,               only : mp
     use advection,                  only : advect
-    use mod_atm_utilities,          only : exner_function, compute_ivt, compute_iq
     use convection,                 only : convect
     use land_surface,               only : lsm, lsm_apply_fluxes
     use surface_layer,              only : sfc
@@ -20,17 +19,16 @@ module time_step
     use radiation,                  only : rad, rad_apply_dtheta
     use wind,                       only : balance_uvw, update_winds, update_wind_dqdt
     use domain_interface,           only : domain_t
-    use boundary_interface,         only : boundary_t
     use options_interface,          only : options_t
     use debug_module,               only : domain_check
-    use string,                     only : str
     use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
     use icar_constants,             only : STD_OUT_PE, kVARS
     implicit none
+
     private
-    double precision, parameter  :: DT_BIG = 36000.0
-    double precision  :: future_dt_seconds = DT_BIG
+    real, parameter  :: DT_BIG = 36000.0
+    real  :: future_dt_seconds = DT_BIG
     integer :: max_i, max_j, max_k
 
     public :: step, compute_dt
@@ -183,7 +181,7 @@ contains
         type(options_t),    intent(in)    :: options
         type(domain_t),     intent(in)    :: domain
 
-        double precision                  :: present_dt_seconds, seconds_out
+        real                  :: present_dt_seconds, seconds_out
         ! compute internal timestep dt to maintain stability
         ! courant condition for 3D advection. 
                 
@@ -207,7 +205,7 @@ contains
                         use_density=.false.)
                 
         !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
-        call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_DOUBLE, MPI_MIN, domain%compute_comms)
+        call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_REAL, MPI_MIN, domain%compute_comms)
         
         if (min(present_dt_seconds, future_dt_seconds)==seconds_out) then
             write(*,*) 'time_step determining i:      ',max_i
@@ -260,7 +258,7 @@ contains
         logical         :: last_loop, force_update_winds
 
         type(time_delta_t) :: time_step_size, dt_saver, max_dt
-        type(Time_type) :: next_input_tmp
+        type(Time_type) :: tmp_time
         type(time_delta_t), save      :: dt
 
         last_print_time = 0.0
@@ -272,9 +270,9 @@ contains
         force_update_winds = domain%sim_time%equals(options%general%start_time, precision=max_dt)
         if (options%restart%restart) force_update_winds = domain%sim_time%equals(options%restart%restart_time, precision=max_dt)
 
-        next_input_tmp = domain%next_input - domain%input_dt
+        tmp_time = domain%next_input - domain%input_dt
 
-        force_update_winds = (force_update_winds .or. domain%sim_time%equals(next_input_tmp, precision=max_dt) )
+        force_update_winds = (force_update_winds .or. domain%sim_time%equals(tmp_time, precision=max_dt) )
         ! Initialize to just over update_dt to force an update on first loop after input ingestion
         if  (force_update_winds) then
             last_wind_update = options%wind%update_dt%seconds() + 1
@@ -306,7 +304,8 @@ contains
             endif
             !call update_dt(dt, options, domain, end_time)
             ! Make sure we don't over step the forcing or output period
-            if ((domain%sim_time + dt) > end_time) then
+            tmp_time = domain%sim_time + dt
+            if (tmp_time > end_time) then
                 dt_saver = dt
                 dt = end_time - domain%sim_time
 

@@ -47,6 +47,8 @@
 !     USE module_domain, ONLY : HISTORY_ALARM, Is_alarm_tstep
 
       IMPLICIT NONE
+      PRIVATE
+      PUBLIC :: mp_gt_driver, thompson_init
 
       LOGICAL, PARAMETER, PRIVATE:: iiwarm = .false.
       INTEGER, PARAMETER, PRIVATE:: IFDRY = 0

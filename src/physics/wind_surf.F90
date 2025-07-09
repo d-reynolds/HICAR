@@ -11,7 +11,7 @@
 module wind_surf
     use domain_interface,  only : domain_t
     use options_interface, only : options_t
-    use io_routines,       only : io_write
+    ! use io_routines,       only : io_write
     use mod_atm_utilities,     only : calc_thresh_ang
     use icar_constants,    only : kVARS, STD_OUT_PE
 

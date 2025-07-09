@@ -2,7 +2,6 @@ module variable_interface
     use icar_constants,          only : kMAX_DIM_LENGTH, kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, kINTEGER, kREAL, kDOUBLE, STD_OUT_PE
     use grid_interface,          only : grid_t
     use meta_data_interface,     only : meta_data_t
-    use iso_fortran_env,         only : real64
 
     implicit none
 

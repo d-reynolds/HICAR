@@ -2,7 +2,6 @@ module halo_interface
         
     use grid_interface,           only : grid_t
     use variable_interface,       only : variable_t
-    use variable_dict_interface,  only : var_dict_t
     use timer_interface,          only : timer_t
     use data_structures,          only : index_type
 
@@ -110,7 +109,7 @@ module halo_interface
         logical :: use_shared_windows = .false.
 
     contains
-        procedure, public :: init
+        procedure, public :: init => init_halo 
         procedure, public :: finalize
         procedure, public :: exch_var
         ! procedure, public :: batch_exch
@@ -142,13 +141,13 @@ module halo_interface
 
 interface
 
-    module subroutine init(this, exch_vars, adv_vars, grid, comms)
+    module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
         implicit none
         class(halo_t), intent(inout) :: this
         type(index_type), intent(in) :: adv_vars(:), exch_vars(:)
         type(grid_t), intent(in) :: grid
         type(MPI_comm), intent(inout) :: comms
-    end subroutine init
+    end subroutine init_halo
 
     module subroutine finalize(this)
         implicit none

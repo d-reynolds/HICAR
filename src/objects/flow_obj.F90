@@ -1,4 +1,6 @@
 submodule(flow_object_interface) flow_obj_implementation
+    use icar_constants,     only : STD_OUT_PE
+    use iso_fortran_env,    only : output_unit
   implicit none
 
 contains
@@ -118,10 +120,12 @@ contains
     module subroutine check_ended(this)
         implicit none
         class(flow_obj_t), intent(inout) :: this
+        type(Time_type) :: time_tmp
 
         if (this%ended) return
 
-        if (this%sim_time + this%small_time_delta > this%end_time) then
+        time_tmp = this%sim_time + this%small_time_delta
+        if (time_tmp > this%end_time) then
             this%sim_time = this%end_time
             if (this%next_output > this%end_time) then
                 this%ended = .true.

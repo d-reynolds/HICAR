@@ -1,4 +1,6 @@
 module flow_events
+    use iso_fortran_env
+    use mpi_f08
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
@@ -9,10 +11,7 @@ module flow_events
     use nest_manager, only: any_nests_not_done, nest_next_up, should_update_nests, &
         can_update_child_nest, end_nest_context, switch_nest_context, wake_nest
     use time_step, only: step
-    use initialization, only: init_model
-    use time_object, only: Time_type
-    use iso_fortran_env
-    use mpi_f08
+    use initialization, only: init_model, init_model_state
     use wind_iterative, only: finalize_petsc
 
     implicit none
@@ -65,7 +64,9 @@ subroutine wake_component(comp_arr, options, boundary, ioclient)
 
             if (STD_OUT_PE) write(*,"(/ A22,I2,A2,A,A16)") "-------------- Domain ",options%nest_indx," (",trim(options%domain%init_conditions_file),") --------------"
             if (STD_OUT_PE) flush(output_unit)
-            call wake_nest(options, comp, boundary, ioclient)
+            
+            call wake_nest(comp)
+            call init_model_state(options, comp, boundary, ioclient)
 
             call comp%total_timer%stop()
             call comp%initialization_timer%stop() 

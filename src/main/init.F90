@@ -18,11 +18,10 @@
 !! ----------------------------------------------------------------------------
 module initialization
     use options_interface,  only : options_t
-    use options_types,      only : general_options_type
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
     use namelist_utils,     only : inter_nest_namelist_check
-    use flow_object_interface, only : flow_obj_t, comp_arr_t
+    use flow_object_interface, only : comp_arr_t
     use microphysics,               only : mp_init, mp_var_request
     use advection,                  only : adv_init, adv_var_request
     use radiation,                  only : radiation_init, ra_var_request
@@ -30,13 +29,13 @@ module initialization
     use planetary_boundary_layer,   only : pbl_init, pbl_var_request
     use land_surface,               only : lsm_init, lsm_var_request
     use surface_layer,              only : sfc_init, sfc_var_request
-    use io_routines,                only : io_read, io_write, io_newunit
     use wind,                       only : update_winds, init_winds, wind_var_request
+    use io_routines,                only : io_newunit
     use omp_lib,                    only : omp_get_max_threads
-    use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
+    use icar_constants
     use ioserver_interface,         only : ioserver_t
     use ioclient_interface,         only : ioclient_t
-    use iso_fortran_env
+    use iso_fortran_env,            only : output_unit
     use mpi_f08
 
     ! use io_routines,                only : io_read, &
@@ -50,7 +49,7 @@ module initialization
 
     implicit none
     private
-    public::split_processes, welcome_message, init_options, init_model, init_physics, init_model_state
+    public::split_processes, init_options, init_model, init_physics, init_model_state
 
 contains
 
@@ -142,17 +141,17 @@ contains
             associate(comp => components(n)%comp)
             select type (comp)
                 type is (domain_t)
-                    ! CALL MPI_Comm_dup( mainComms, components(n)%compute_comms, ierr )
-                    ! CALL MPI_Comm_dup( IOComms, ioclient(n)%parent_comms, ierr )
+                    CALL MPI_Comm_dup( mainComms, comp%compute_comms, ierr )
+                    CALL MPI_Comm_dup( IOComms, ioclient(n)%parent_comms, ierr )
 
-                    comp%compute_comms = mainComms
-                    ioclient(n)%parent_comms = IOComms
+                    ! comp%compute_comms = mainComms
+                    ! ioclient(n)%parent_comms = IOComms
                 type is (ioserver_t)
-                    ! CALL MPI_Comm_dup( mainComms, components(n)%IO_comms, ierr )
-                    ! CALL MPI_Comm_dup( IOComms, components(n)%client_comms, ierr )
+                    CALL MPI_Comm_dup( mainComms, comp%IO_comms, ierr )
+                    CALL MPI_Comm_dup( IOComms, comp%client_comms, ierr )
 
-                    comp%IO_comms = mainComms
-                    comp%client_comms = IOComms
+                    ! comp%IO_comms = mainComms
+                    ! comp%client_comms = IOComms
                 class default
                     ! some default behavior
             end select
@@ -180,9 +179,17 @@ contains
         character(len=*), intent(in) :: namelist_file
         logical, intent(in) :: info_only, gen_nml, only_namelist_check
 
-        integer :: num_nests, i, nests(kMAX_NESTS), rc, name_unit
-        CHARACTER(LEN=200) :: error_msg
-        namelist /general/    nests
+        integer :: num_nests, i, rc, name_unit, io_stat, equals_pos
+        character(len=200) :: line, text
+
+        if (STD_OUT_PE .and. .not.(gen_nml .or. only_namelist_check .or. info_only)) then
+            call welcome_message()
+            write(*,'(/ A)') "--------------------------------------------------------"
+            write(*,'(A)')   "Initializing Options"
+            write(*,'(A /)') "--------------------------------------------------------"
+            flush(output_unit)
+        endif
+
 
         ! We need at least one domain
         num_nests = 1
@@ -190,12 +197,22 @@ contains
         ! If we are generating or printing namelist option information, we don't want to read anything, and only need to run the init routine once
         ! First thing, read from options file how many nests we have
         if ( .not.(info_only .or. gen_nml) )then
-
-            open(io_newunit(name_unit), file=namelist_file)
-            read(name_unit,iostat=rc,nml=general,IOMSG=error_msg)
+            open(io_newunit(name_unit), file=namelist_file, status='old')
+            do
+                read(name_unit, '(A)', iostat=io_stat) line
+                if (io_stat /= 0) exit
+                
+                text = adjustl(text)
+                ! Look for the variable nests in the line
+                if (text(1:6) == "nests ") then
+                    equals_pos = index(line, "=")
+                    if (equals_pos > 0) then
+                        read(line(equals_pos+1:), *) num_nests
+                        exit
+                    endif
+                endif
+            end do
             close(name_unit)
-
-            num_nests = nests(1)
         endif
 
         allocate(options(num_nests))

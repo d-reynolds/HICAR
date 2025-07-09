@@ -38,7 +38,6 @@ module land_surface
     use module_water_simple, only : water_simple
     use module_water_lake,   only : lake, lakeini, nlevsoil, nlevsnow, nlevlake
     use mod_atm_utilities,   only : sat_mr, calc_Richardson_nr, calc_solar_elevation
-    use time_object,         only : Time_type
     use icar_constants,      only : kVARS, kLSM_NOAH, kLSM_NOAHMP, kSM_FSM, kMAX_NESTS
     use options_interface,   only : options_t
     use domain_interface,    only : domain_t

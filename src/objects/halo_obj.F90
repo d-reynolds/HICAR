@@ -23,7 +23,7 @@ contains
 !! Initialize the exchange arrays and dimensions
 !!
 !! -------------------------------
-module subroutine init(this, exch_vars, adv_vars, grid, comms)
+module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
     class(halo_t), intent(inout) :: this
     type(index_type), intent(in) :: adv_vars(:), exch_vars(:)
     type(grid_t), intent(in) :: grid
@@ -140,7 +140,7 @@ module subroutine init(this, exch_vars, adv_vars, grid, comms)
     !...and the larger 3D halo for batch exchanges
     call setup_batch_exch(this, exch_vars, adv_vars, comms)
 
-end subroutine init
+end subroutine init_halo
 
 module subroutine finalize(this)
     class(halo_t), intent(inout) :: this
