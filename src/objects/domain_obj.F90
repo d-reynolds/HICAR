@@ -205,6 +205,7 @@ contains
 
         n_vars = 0
         do i = 1, size(kEXCH_VARS)
+            if (kEXCH_VARS(i)=="") cycle
             var_indx = get_varindx(trim(kEXCH_VARS(i)))
             if (var_indx > 0) then
                 if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
@@ -214,6 +215,7 @@ contains
         n_vars = 0
 
         do i = 1, size(kEXCH_VARS)
+            if (kEXCH_VARS(i)=="") cycle
             var_indx = get_varindx(trim(kEXCH_VARS(i)))
             if (var_indx > 0) then
                 if (this%var_indx(var_indx)%v > 0) then
