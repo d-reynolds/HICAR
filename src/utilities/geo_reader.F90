@@ -217,7 +217,8 @@ contains
     integer function minxw(xw,longrid,xpos,ypos,lon)
         implicit none
         integer, intent(in) :: xw, xpos, ypos
-        real,    intent(in) :: longrid(:,:), lon
+        real,    intent(in) :: lon
+        real, allocatable, intent(in) :: longrid(:,:)
         real    :: curdist, dx
         integer :: ime
 
@@ -244,7 +245,8 @@ contains
     !!------------------------------------------------------------
     integer function minyw(yw,latgrid,xpos,ypos,lat)
         integer, intent(in) :: yw, xpos, ypos
-        real,    intent(in) :: latgrid(:,:), lat
+        real,    intent(in) :: lat
+        real, allocatable, intent(in) :: latgrid(:,:)
         real    :: curdist, dx
         integer :: jme
 
@@ -866,8 +868,8 @@ contains
     !!------------------------------------------------------------
     subroutine boundary_interpolate(fieldout, fieldin, geolut)
         implicit none
-        real,intent(inout)::fieldout(:,:,:)
-        real,intent(in)::fieldin(:,:,:)
+        real, allocatable, intent(inout)::fieldout(:,:,:)
+        real, allocatable, intent(in)::fieldin(:,:,:)
         type(geo_look_up_table),intent(in)::geolut
         integer::nx,nz,ny
         integer :: ims,ime,jms,jme,kms,kme
@@ -953,8 +955,8 @@ contains
     !!------------------------------------------------------------
     subroutine geo_interp(fieldout, fieldin, geolut, boundary_only)
         implicit none
-        real,                   intent(inout) :: fieldout(:,:,:)
-        real,                   intent(in)    :: fieldin(:,:,:)
+        real,  allocatable,     intent(inout) :: fieldout(:,:,:)
+        real,  allocatable,     intent(in)    :: fieldin(:,:,:)
         type(geo_look_up_table),intent(in)    :: geolut
         logical,                intent(in),   optional :: boundary_only
 
@@ -1026,8 +1028,8 @@ contains
     !!------------------------------------------------------------
     subroutine geo_interp2d(fieldout, fieldin, geolut)
         implicit none
-        real, dimension(:,:),   intent(inout) :: fieldout
-        real, dimension(:,:),   intent(in)    :: fieldin
+        real, allocatable, dimension(:,:),   intent(inout) :: fieldout
+        real, allocatable, dimension(:,:),   intent(in)    :: fieldin
         type(geo_look_up_table),intent(in)    :: geolut
 
         integer :: i,k,l,ny,nx,localx,localy

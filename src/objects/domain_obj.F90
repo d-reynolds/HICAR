@@ -900,10 +900,10 @@ contains
     subroutine setup_geo(geo, latitude, longitude, longitude_system, z)
         implicit none
         type(interpolable_type),  intent(inout) :: geo
-        real,                     intent(in)    :: latitude(:,:)
-        real,                     intent(in)    :: longitude(:,:)
+        real, allocatable,        intent(in)    :: latitude(:,:)
+        real, allocatable,        intent(in)    :: longitude(:,:)
         integer,                  intent(in)    :: longitude_system
-        real, optional,           intent(in)    :: z(:,:,:)
+        real, allocatable , optional, intent(in)    :: z(:,:,:)
         if (allocated(geo%lat)) deallocate(geo%lat)
         allocate( geo%lat, source=latitude)
 
@@ -2547,7 +2547,7 @@ contains
         end if
         
 
-    end subroutine
+    end subroutine setup_geo_interpolation
 
     subroutine init_relax_filters(this,options)
         implicit none
@@ -3044,7 +3044,7 @@ contains
     !! -------------------------------
     subroutine interpolate_variable(var_data, input_data, forcing, dom, interpolate_agl_in, var_is_u, var_is_v, nsmooth)
         implicit none
-        real,            intent(inout) :: var_data(:,:,:)
+        real,  allocatable, intent(inout) :: var_data(:,:,:)
         type(variable_t),   intent(inout) :: input_data
         type(boundary_t),   intent(in)    :: forcing
         type(domain_t),     intent(in)    :: dom
