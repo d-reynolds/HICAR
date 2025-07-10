@@ -48,6 +48,9 @@ contains
 
         integer :: i, j, k
 
+        !$acc enter data create(usign, vsign, wsign)
+        !$acc data present(u, v, w)
+        !$acc parallel loop gang vector collapse(3)
         do i = its-1,ite+1
             do j = jts-1,jte+1
                 do k = kms,kme
@@ -87,7 +90,17 @@ contains
                 end do
             end do
         end do
+
+        !$acc end data
+
     end subroutine set_sign_arrays
+
+    subroutine clear_flux_sign_arrays()
+        implicit none
+
+        !$acc exit data delete(usign, vsign, wsign)
+
+    end subroutine clear_flux_sign_arrays
 
     subroutine WRF_flux_corr(q,u,v,w,flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up,dz,denom)
         implicit none
@@ -101,8 +114,8 @@ contains
         real, dimension(its-1:ite+2,kms:kme+1,jts-1:jte+2),intent(inout)    :: flux_z, flux_z_up
         
         
-        real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+1)   :: scale_in, scale_out, q3, q4
-        real :: dz_t_i, jaco_rho_t_i, fx, fx1, fy, fy1, fz, fz1, qmax, qmin, q_i, q_j, q_k, q0, temp, flux_in, flux_out
+        real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+1)   :: scale_in, scale_out
+        real :: dz_t_i, fx, fx1, fy, fy1, fz, fz1, qmax, qmin, q_i, q_j, q_k, q0, temp, flux_in, flux_out
         integer :: i, j ,k
         real :: scale
         real :: flux_x_up_0, flux_y_up_0, flux_z_up_0, flux_x_up_1, flux_y_up_1, flux_z_up_1
@@ -113,22 +126,17 @@ contains
 
         ! Get upwind fluxes
 
+        !$acc data present(q,u,v,w,flux_x,flux_y,flux_z,flux_x_up,flux_y_up,flux_z_up,dz,denom,usign,vsign,wsign) &
+        !$acc create(scale_in,scale_out)
+
         call upwind_flux3(q,u,v,w,flux_x_up,flux_z_up,flux_y_up,dz,denom)
 
-        ! Next compute max and min possible fluxes
-        ! $omp parallel default(none) &
-        ! $omp shared(q,flux_x_up,flux_y_up,flux_z_up,flux_x,flux_y,flux_z) &
-        ! $omp shared(scale_in,scale_out) &
-        ! $omp shared(dz,denom,usign,vsign,wsign) &
-        ! $omp private(i,j,k, scale, usign0, vsign0, wsign0, q0, q_i, q_j, q_k, qmin, qmax, dz_t_i) &
-        ! $omp private(fx, fx1, fy, fy1, fz, fz1, temp, flux_in, flux_out) &
-        ! $omp private(flux_x_up_0, flux_y_up_0, flux_z_up_0, flux_x_up_1, flux_y_up_1, flux_z_up_1) &
-        ! $omp firstprivate(its, ite, jts, jte, kms,kme)
-        ! $omp do
-        ! do j = jts-1, jte+1 
-        !     do k = kms, kme
-        !         do i = its-1, ite+1
-        do concurrent (j = jts-1:jte+1, k = kms:kme, i = its-1:ite+1)
+        ! Next compute max and min possible fluxes        
+        !$acc parallel 
+        !$acc loop gang vector collapse(3)
+        do j = jts-1, jte+1 
+            do k = kms, kme
+                do i = its-1, ite+1
                     usign0 = usign(i,k,j)
                     vsign0 = vsign(i,k,j)
                     wsign0 = wsign(i,k,j)
@@ -175,7 +183,7 @@ contains
 
                     !Store reused variables to minimize memory accesses
                     dz_t_i   = 1./dz(i,k,j)
-                    ! jaco_rho_t_i = denom(i,k,j)
+
                     flux_x_up_1 = flux_x_up(i+1,k,j)
                     flux_y_up_1 = flux_y_up(i,k,j+1)
                     flux_z_up_1 = flux_z_up(i,k+1,j)
@@ -186,9 +194,6 @@ contains
                     fy = flux_y(i,k,j)-flux_y_up_0; fy1 = flux_y(i,k,j+1)-flux_y_up_1
                     fz = flux_z(i,k,j)-flux_z_up_0; fz1 = flux_z(i,k+1,j)-flux_z_up_1
                                                 
-                    ! flux_x(i,k,j) = flux_x_up_0 - flux_x_up_1
-                    ! flux_y(i,k,j) = flux_y_up_0 - flux_y_up_1
-                    ! flux_z(i,k,j) = flux_z(i,k,j) - flux_z_up(i,k,j)
                     !Compute concentration if upwind only was used
                     temp  = q0 - ((flux_x_up_1 - flux_x_up_0) + &
                                         (flux_y_up_1 - flux_y_up_0) + &
@@ -207,16 +212,14 @@ contains
     
                     scale_in(i,k,j) = (qmax-temp)/(flux_in  + 0.000000001)
                     scale_out(i,k,j) = (temp-qmin)/(flux_out+ 0.000000001)
-            !     enddo
-            ! enddo
+                enddo
+            enddo
         enddo
-        ! $OMP END DO
 
-        ! $omp do
-        ! do j = jts-1, jte+1 
-        !     do k = kms, kme
-        !         do i = its-1, ite+1
-        do concurrent (j = jts:jte+1, k = kms:kme, i = its:ite+1)
+        !$acc loop gang vector collapse(3)
+        do j = jts-1, jte+1 
+            do k = kms, kme
+                do i = its-1, ite+1
                     flux_x(i,k,j) = flux_x(i,k,j) - flux_x_up(i,k,j)
                     if (flux_x(i,k,j) > 0) then
                         scale = max(0.0,min(scale_in(i,k,j),scale_out(i-1,k,j),1.0))
@@ -253,48 +256,27 @@ contains
                         flux_z(i,k,j) = scale*flux_z(i,k,j) + flux_z_up(i,k,j)
                     endif
 
-            !     enddo
-            ! enddo
+                enddo
+            enddo
         enddo
 
-        do concurrent (j = jts:jte+1, i = its:ite+1)
-            flux_z(i,kme+1,j) = flux_z(i,kme+1,j) - flux_z_up(i,kme+1,j)
+        !$acc loop gang vector collapse(2)
+        do j = jts, jte+1 
+            do i = its, ite+1
+                flux_z(i,kme+1,j) = flux_z(i,kme+1,j) - flux_z_up(i,kme+1,j)
 
-            if (abs(flux_z(i,kme+1,j)) > 0) then
-                scale = max(0.0,min(scale_in(i,kme,j),scale_out(i,kme,j),1.0))
-            else
-                scale = 1.0
-            endif
+                if (abs(flux_z(i,kme+1,j)) > 0) then
+                    scale = max(0.0,min(scale_in(i,kme,j),scale_out(i,kme,j),1.0))
+                else
+                    scale = 1.0
+                endif
 
-            flux_z(i,kme+1,j) = scale*flux_z(i,kme+1,j) + flux_z_up(i,kme+1,j)
+                flux_z(i,kme+1,j) = scale*flux_z(i,kme+1,j) + flux_z_up(i,kme+1,j)
+            enddo
         enddo
-        ! $omp end do
-        ! $omp end parallel
-        ! do concurrent (j = jts:jte+1, k = kms:kme, i = its:ite+1)
-        !     flux_x (i,k,j) = flux_x (i,k,j) - flux_x_up(i,k,j)
-        !     if (flux_x(i,k,j) > 0) then
-        !         flux_x(i,k,j) = min(scale_in(i,k,j),scale_out(i-1,k,j))*flux_x(i,k,j) + flux_x_up(i,k,j)
-        !     else
-        !         flux_x(i,k,j) = min(scale_out(i,k,j),scale_in(i-1,k,j))*flux_x(i,k,j) + flux_x_up(i,k,j)
-        !     endif
-        ! enddo
-        ! do concurrent (j = jts:jte+1, k = kms:kme, i = its:ite+1)
-        !     flux_y(i,k,j) = flux_y(i,k,j) - flux_y_up(i,k,j)
 
-        !     if (flux_y(i,k,j) > 0) then
-        !         flux_y(i,k,j) = min(scale_in(i,k,j),scale_out(i,k,j-1))*flux_y(i,k,j) + flux_y_up(i,k,j)
-        !     else
-        !         flux_y(i,k,j) = min(scale_out(i,k,j),scale_in(i,k,j-1))*flux_y(i,k,j) + flux_y_up(i,k,j)
-        !     endif
-        ! enddo
-        ! do concurrent (j = jts:jte+1, k = kms+1:kme, i = its:ite+1)
-        !     flux_z(i,k,j) = flux_z(i,k,j) - flux_z_up(i,k,j)
-        !     if (flux_z(i,k,j) > 0) then
-        !         flux_z(i,k,j) = min(scale_in(i,k,j),scale_out(i,k-1,j))*flux_z(i,k,j) + flux_z_up(i,k,j)
-        !     else
-        !         flux_z(i,k,j) = min(scale_out(i,k,j),scale_in(i,k-1,j))*flux_z(i,k,j) + flux_z_up(i,k,j)
-        !     endif
-        ! enddo
+        !$acc end parallel
+        !$acc end data
 
     end subroutine WRF_flux_corr
 
@@ -321,13 +303,21 @@ contains
         !Upwind fluxes for first (half of a )step already calculated in advection flux function -- apply them first here
 
         !Update intermediate concentration
-        dumb_q = q
-        ! $omp parallel default(none) &
-        ! $omp shared(dumb_q, flux_x, flux_y, flux_z) &
-        ! $omp shared(q, u, v, w, dz, denom) &
-        ! $omp private(i,j,k, j_block, k_block, bot, wes, sou, tmp, abs_tmp) &
-        ! $omp firstprivate(its, ite, jts, jte, kms,kme, ims, ime, jms, jme)
-        ! $omp do schedule(static) collapse(2)
+
+        !$acc data present(q,u,v,w,flux_x,flux_y,flux_z,dz,denom) &
+        !$acc create(dumb_q)
+        !$acc parallel
+        
+        !$acc loop gang vector collapse(3)
+        do j = jms,jme
+        do k = kms,kme
+        do i = ims,ime
+            dumb_q(i,k,j) = q(i,k,j)
+        enddo
+        enddo
+        enddo
+
+        !$acc loop gang vector collapse(3)
         do j = jts-1, jte+1
             do k = kms, kme
                 do i = its-1, ite+1
@@ -338,10 +328,9 @@ contains
                 enddo
             enddo
         enddo
-        ! $omp end do
 
         !Now compute upwind fluxes after second step
-        ! $omp do collapse(2)
+        !$acc loop gang vector collapse(3)
         do j = jts-1, jte+2
             do k = kms, kme
                 do i = its-1, ite+2
@@ -361,15 +350,18 @@ contains
                 enddo
             enddo
         enddo
-        ! $omp end do nowait
-        ! $omp end parallel
+
         !Handle top and bottom boundaries for z here
+        !$acc loop gang vector collapse(2)
         do j = jts-1,jte+1
             do i = its-1,ite+1
                 flux_z(i,kme+1,j) = flux_z(i,kme+1,j) + 0.5*dumb_q(i,kme,j) * w(i,kme,j)
                 flux_z(i,kms,j) = 0.0
             enddo
         enddo
+
+        !$acc end parallel
+        !$acc end data
                                         
     end subroutine upwind_flux3
 end module adv_fluxcorr
