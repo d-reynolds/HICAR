@@ -49,7 +49,7 @@ contains
         integer :: i, j, k
 
         !$acc enter data create(usign, vsign, wsign)
-        !$acc data present(u, v, w)
+        !$acc data present(u, v, w, usign, vsign, wsign)
         !$acc parallel loop gang vector collapse(3)
         do i = its-1,ite+1
             do j = jts-1,jte+1
@@ -217,9 +217,9 @@ contains
         enddo
 
         !$acc loop gang vector collapse(3)
-        do j = jts-1, jte+1 
+        do j = jts, jte+1 
             do k = kms, kme
-                do i = its-1, ite+1
+                do i = its, ite+1
                     flux_x(i,k,j) = flux_x(i,k,j) - flux_x_up(i,k,j)
                     if (flux_x(i,k,j) > 0) then
                         scale = max(0.0,min(scale_in(i,k,j),scale_out(i-1,k,j),1.0))
@@ -274,7 +274,6 @@ contains
                 flux_z(i,kme+1,j) = scale*flux_z(i,kme+1,j) + flux_z_up(i,kme+1,j)
             enddo
         enddo
-
         !$acc end parallel
         !$acc end data
 
@@ -306,17 +305,12 @@ contains
 
         !$acc data present(q,u,v,w,flux_x,flux_y,flux_z,dz,denom) &
         !$acc create(dumb_q)
-        !$acc parallel
         
-        !$acc loop gang vector collapse(3)
-        do j = jms,jme
-        do k = kms,kme
-        do i = ims,ime
-            dumb_q(i,k,j) = q(i,k,j)
-        enddo
-        enddo
-        enddo
+        !$acc kernels
+        dumb_q = q
+        !$acc end kernels
 
+        !$acc parallel
         !$acc loop gang vector collapse(3)
         do j = jts-1, jte+1
             do k = kms, kme

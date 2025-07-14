@@ -124,10 +124,10 @@ contains
             !Subset global solution to local grid so that we can access ghost-points
             call DMGlobalToLocal(da,b,INSERT_VALUES,localX,ierr)
 
-            call DMDAVecGetArrayF90(da,localX,lambda, ierr)
+            call DMDAVecGetArrayReadF90(da,localX,lambda, ierr)
 
             call calc_updated_winds(domain, lambda, adv_den)
-            call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
+            call DMDAVecRestoreArrayReadF90(da,localX,lambda, ierr)
             !Exchange u and v, since the outer points are not updated in above function
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
@@ -710,14 +710,14 @@ contains
 
         do i=1,options%general%nests
             call KSPCreate(domain%compute_comms%MPI_VAL,ksp(i),ierr)
+            call KSPSetType(ksp(i),KSPFBCGS,ierr) !KSPFBCGS <-- this one tested to give fastest convergence...
+                                            !KSPPIPEGCR <-- this one used previously...
             call KSPSetFromOptions(ksp(i),ierr)
             call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_FALSE,ierr)
             call KSPGetPC(ksp(i),precond,ierr)
             call PCFactorSetUseInPlace(precond,PETSC_TRUE,ierr)
             call PCFactorSetReuseOrdering(precond,PETSC_TRUE,ierr)
 
-            call KSPSetType(ksp(i),KSPFBCGS,ierr) !KSPFBCGS <-- this one tested to give fastest convergence...
-                                            !KSPPIPEGCR <-- this one used previously...
         enddo
         initialized = .True.
 
@@ -745,6 +745,7 @@ contains
 
         PetscInt       one, iter
         PetscErrorCode ierr
+        PetscBool :: has_cuda
         ISLocalToGlobalMapping isltog
 
         ! call finalize routine to deallocate any arrays that are already allocated. 
@@ -759,12 +760,23 @@ contains
         call init_module_vars(domain)
 
         one = 1
+        has_cuda = PETSC_FALSE
 
         call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
                           xl, PETSC_NULL_INTEGER_ARRAY ,yl,da,ierr)
 
-        call DMSetMatType(da,MATIS,ierr)
+        
+
+        call PetscHasExternalPackage('cuda', has_cuda, ierr)
+
+        if (has_cuda .eqv. PETSC_TRUE) then
+            call DMSetMatType(da,MATMPIAIJCUSPARSE ,ierr)
+            call DMSetVecType(da,VECMPICUDA,ierr)
+        else
+            call DMSetMatType(da,MATIS,ierr)
+        endif
+
         call DMSetFromOptions(da,ierr)
         call DMSetUp(da,ierr)
 

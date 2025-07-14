@@ -45,7 +45,7 @@ program icar
     logical :: start_time_match = .False.
     character(len=kMAX_FILE_LENGTH) :: namelist_file
 #ifdef _OPENACC
-    integer :: dev, devNum, local_rank
+    integer :: dev, devNum, local_rank, comm_size
     type(MPI_Comm) :: local_comm
     integer(acc_device_kind) :: devtype
 #endif
@@ -68,11 +68,15 @@ program icar
      call MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, &
           MPI_INFO_NULL, local_comm)
      call MPI_Comm_rank(local_comm, local_rank)
+     call MPI_Comm_size(local_comm, comm_size)
+
      devtype = acc_get_device_type()
      devNum = acc_get_num_devices(devtype)
      dev = mod(local_rank,devNum)
-     call acc_set_device_num(dev, devtype)
-     call acc_init(devtype)
+     if ((local_rank + 1) < comm_size) then
+        call acc_set_device_num(dev, devtype)
+        call acc_init(devtype)
+     endif
 # endif
 
     call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)

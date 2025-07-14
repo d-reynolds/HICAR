@@ -99,6 +99,8 @@ contains
 
         if (horder==1) then
             t_factor_compact = 0.5  * t_factor
+            !$acc parallel 
+            !$acc loop gang vector collapse(3)
             do j = j_s, j_e
                 do k = kms+1, kme
                     do i = i_s, i_e
@@ -120,7 +122,7 @@ contains
                 enddo
             enddo
 
-
+            !$acc loop gang vector collapse(2)
             do j = j_s, j_e
                 do k = kms, kme
                     qn1 = q(i_e,k,j)
@@ -131,7 +133,7 @@ contains
                 enddo
             enddo
 
-
+            !$acc loop gang vector collapse(2)
             do k = kms, kme
                 do i = i_s, i_e
                     qn3 = q(i,k,j_e)
@@ -142,6 +144,7 @@ contains
                 enddo
             enddo
 
+            !$acc loop gang vector collapse(2)
             do j = j_s, j_e
                 do i = i_s, i_e
                     qn3 = q(i,kms,j-1)
@@ -155,10 +158,13 @@ contains
                     flux_y(i, kms, j) = ((v + ABS(v)) * qn3 + (v - ABS(v)) * q0) * t_factor_compact
                 enddo
             enddo
+
+            !$acc end parallel
+
         else if (horder==3) then
             ! coef = (1./12) * t_factor
-            !$acc parallel 
-            !$acc loop gang vector collapse(3)
+
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = j_s,j_e 
             do k = kms,kme
             do i = i_s,i_e+1
@@ -175,7 +181,7 @@ contains
             enddo
             enddo
 
-            !$acc loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) async(2)
             do j = j_s,j_e+1
             do k = kms,kme
             do i = i_s,i_e
@@ -191,7 +197,7 @@ contains
             enddo
             enddo
             enddo
-            !$acc end parallel
+
         else if (horder==5) then
             coef = (1./60)*t_factor
             do concurrent (j = j_s:j_e, k = kms:kme, i = i_s:i_e+1)
@@ -231,7 +237,7 @@ contains
             enddo
         else if (vorder==3) then
             ! coef = (1./12)*t_factor
-            !$acc parallel 
+            !$acc parallel async(3)
             !$acc loop gang vector collapse(3)
             do j = j_s,j_e
             do k = kms+2,kme-1
@@ -314,8 +320,8 @@ contains
                 flux_z(i,kme+1,j) = q(i,kme,j) * W_m(i,kme,j) * t_factor
             enddo
         enddo
-
-    !$acc end data
+        !$acc wait(1,2,3)
+        !$acc end data
     end subroutine flux3
 
     subroutine flux3_w_up(q,U_m,V_m,W_m,flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up)
@@ -334,8 +340,7 @@ contains
 
         if (horder==3) then
             coef = (1./12)
-            !$acc parallel 
-            !$acc loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = j_s,j_e 
             do k = kms,kme
             do i = i_s,i_e+1
@@ -354,7 +359,7 @@ contains
             enddo
             enddo
             enddo
-            !$acc loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) async(2)
             do j = j_s,j_e+1
             do k = kms,kme
             do i = i_s,i_e
@@ -373,7 +378,7 @@ contains
             enddo
             enddo
             enddo
-            !$acc end parallel
+
         else if (horder==5) then
             coef = (1./60)
             !DIR$ UNROLL 5
@@ -420,7 +425,7 @@ contains
             enddo
         else if (vorder==3) then
             coef = (1./12)
-            !$acc parallel 
+            !$acc parallel async(3)
             !$acc loop gang vector collapse(3)
             do j = j_s,j_e
             do k = kms+2,kme-1
@@ -521,6 +526,7 @@ contains
             enddo
         enddo
 
+        !$acc wait(1,2,3)
         !$acc end data
     end subroutine flux3_w_up
 
