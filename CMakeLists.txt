@@ -43,8 +43,16 @@ if (NOT DEFINED MPICH_DIR AND DEFINED ENV{MPICH_DIR})
 endif()
 
 
+# Track if user explicitly set OPENACC flag before option() creates cache entry
+if(DEFINED OPENACC)
+	set(OPENACC_SET_BY_USER TRUE)
+else()
+	set(OPENACC_SET_BY_USER FALSE)
+endif()
+
 option(ASSERTIONS "Check logical assertions at runtime" ON)
 option(FSM "Link to the FSM2 snow model, requires separate compilation of the FSM2 model" ON)
+option(OPENACC "Enable OpenACC support for GPU acceleration" OFF)
 option(SRUN_FLAGS "srun flags to use for running the test cases" "")
 #########################################
 
@@ -99,125 +107,6 @@ add_executable(HICAR ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
 
 set_property(TARGET hicar_lib PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
 set_property(TARGET HICAR PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
-
-###########################################################
-############### Find or install dependencies ##############
-message(STATUS "")
-message(STATUS "Searching for dependencies...")
-list(APPEND CMAKE_MESSAGE_INDENT "  ")
-
-include(GNUInstallDirs)
-
-# set root of location to find PETSc's pkg-config
-set(PETSC "${PETSC_DIR}/${PETSC_ARCH}")
-set(ENV{PKG_CONFIG_PATH} "$ENV{PKG_CONFIG_PATH}:${PETSC}/lib/pkgconfig")
-
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${PETSC} ${FFTW_DIR} ${NETCDF_DIR}  ${MPI_DIR} ${FSM_DIR})
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${PETSC}/lib/pkgconfig/" ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR})
-
-find_package(PkgConfig REQUIRED)
-include(FetchContent)
-
-# 1. Check if not already included via Cray Module and ftn
-# 2. If not included via Cray module, link to the package libraries manually
-
-# 3. If not found, try to find package using find library
-# 4. If not found, try to find package using find package
-# 5. If not on machine, try to fetch and install package
-# 5. Enforce requirement, check that package was found/installed
-
-# 6. Link to the package libraries
-set (NETCDF_F90 "YES")
-find_package(MPI REQUIRED)
-find_package(OpenMP)
-find_package(OpenACC)
-find_package(FFTW REQUIRED)
-find_package(NetCDF REQUIRED)
-find_package(PETSc REQUIRED)
-
-if (PETSC_FOUND)
-	if (${PETSC_VERSION} VERSION_GREATER_EQUAL 3.23)
-		message(FATAL_ERROR "PETSc version ${PETSC_VERSION} is greater than or equal to 3.23, code currently only supports versions less than 3.23.")
-	endif()
-	target_link_libraries(hicar_lib PUBLIC ${PETSC_LIBRARIES})
-	target_include_directories(hicar_lib PUBLIC ${PETSC_INCLUDES})
-endif()
-
-
-if(OpenMP_CXX_FOUND)
-        target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_CXX)
-elseif(OpenMP_Fortran_FOUND)
-	target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_Fortran)
-endif()
-
-if (FFTW_FOUND)
-	target_link_libraries(hicar_lib PUBLIC ${FFTW_LIBRARIES})
-	target_include_directories(hicar_lib PUBLIC ${FFTW_INCLUDES})
-endif()
-
-if (NETCDF_FOUND)
-	#This is the most robust way to find the NetCDF flags -- covering both custom installs, static or shared, and cray PEs
-	execute_process(COMMAND nf-config --flibs OUTPUT_VARIABLE NETCDF_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
-	#if the nf-config method worked...
-	if(${NETCDF_FLAGS} MATCHES "-lnetcdff")
-		target_link_libraries(hicar_lib PUBLIC ${NETCDF_FLAGS})
-	else()
-	#else hope that the library flags as found by find_package are enough (should be as long as netCDF is a shared library)
-		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
-	endif()
-	target_include_directories(hicar_lib PUBLIC ${NETCDF_INCLUDES})
-endif()
-
-
-if (FSM)
-	find_library(FSM2_LIB NAMES FSM2 REQUIRED)
-	target_include_directories(hicar_lib PUBLIC ${FSM_DIR}/build)
-	target_link_libraries(hicar_lib PUBLIC ${FSM2_LIB})
-endif()
-
-if (OpenACC_Fortran_FOUND)
-	target_link_libraries(hicar_lib PUBLIC OpenACC::OpenACC_Fortran)
-endif()
-
-target_link_libraries(hicar_lib PUBLIC MPI::MPI_Fortran)
-target_include_directories(hicar_lib PUBLIC ${MPI_INCLUDE_DIR})
-
-# add include directory for the model itself
-target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
-
-
-# link the hicar_lib library to the HICAR executable
-target_link_libraries(HICAR PUBLIC hicar_lib)
-###########################################################
-
-
-###########################################################
-############### Download supporting run files ##############
-
-# Fetch specific folders from icar_supporting_files repo
-FetchContent_Declare(
-	icar_supporting_files
-	GIT_REPOSITORY    https://github.com/NCAR/icar_supporting_files.git
-	GIT_TAG           main
-)
-
-# Download the repo but don't build it
-FetchContent_MakeAvailable(icar_supporting_files)
-
-# Copy only specific folders to the run directory
-file(COPY "${icar_supporting_files_SOURCE_DIR}/mp_support" DESTINATION "${PROJECT_SOURCE_DIR}/run")
-file(COPY "${icar_supporting_files_SOURCE_DIR}/rrtmg_support" DESTINATION "${PROJECT_SOURCE_DIR}/run")
-
-# Clean up downloaded repo to save space
-file(REMOVE_RECURSE "${icar_supporting_files_SOURCE_DIR}")
-file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/icar_supporting_files-subbuild")
-file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/icar_supporting_files-build")
-
-list(POP_BACK CMAKE_MESSAGE_INDENT)
-message(STATUS "...done searching for dependencies")
-
-###########################################################
-
 
 ############################################
 ############## Auto-detect  ################
@@ -289,6 +178,11 @@ else()
 		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
 		set(COMPILER "nvfortran")
 		set(FC "nvfortran")
+		# Auto-enable OpenACC for NVFortran if not explicitly set
+		if (NOT OPENACC_SET_BY_USER)
+			set(OPENACC ON CACHE BOOL "Enable OpenACC support for GPU acceleration" FORCE)
+			message(STATUS "Auto-enabling OpenACC support for NVFortran compiler")
+		endif()
 
 	else()
 		message(FATAL_ERROR "Unknown Fortran compiler (FC) specified")
@@ -302,6 +196,137 @@ list(POP_BACK CMAKE_MESSAGE_INDENT)
 message(STATUS "...done auto-detecting the environment")
 
 ################################################
+
+
+###########################################################
+############### Find or install dependencies ##############
+message(STATUS "")
+message(STATUS "Searching for dependencies...")
+list(APPEND CMAKE_MESSAGE_INDENT "  ")
+
+include(GNUInstallDirs)
+
+# set root of location to find PETSc's pkg-config
+set(PETSC "${PETSC_DIR}/${PETSC_ARCH}")
+set(ENV{PKG_CONFIG_PATH} "$ENV{PKG_CONFIG_PATH}:${PETSC}/lib/pkgconfig")
+
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${PETSC} ${FFTW_DIR} ${NETCDF_DIR}  ${MPI_DIR} ${FSM_DIR})
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${PETSC}/lib/pkgconfig/" ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR})
+
+find_package(PkgConfig REQUIRED)
+include(FetchContent)
+
+# 1. Check if not already included via Cray Module and ftn
+# 2. If not included via Cray module, link to the package libraries manually
+
+# 3. If not found, try to find package using find library
+# 4. If not found, try to find package using find package
+# 5. If not on machine, try to fetch and install package
+# 5. Enforce requirement, check that package was found/installed
+
+# 6. Link to the package libraries
+set (NETCDF_F90 "YES")
+find_package(MPI REQUIRED)
+find_package(OpenMP)
+find_package(FFTW REQUIRED)
+find_package(NetCDF REQUIRED)
+find_package(PETSc REQUIRED)
+
+# Handle OpenACC flag and library detection
+if(OPENACC)
+	find_package(OpenACC)
+	if(NOT OpenACC_Fortran_FOUND)
+		message(WARNING "OpenACC support requested but OpenACC library not found. Disabling OpenACC support.")
+		set(OPENACC OFF CACHE BOOL "Enable OpenACC support for GPU acceleration" FORCE)
+	else()
+		message(STATUS "OpenACC support enabled")
+	endif()
+endif()
+
+if (PETSC_FOUND)
+	if (${PETSC_VERSION} VERSION_GREATER_EQUAL 3.23)
+		message(FATAL_ERROR "PETSc version ${PETSC_VERSION} is greater than or equal to 3.23, code currently only supports versions less than 3.23.")
+	endif()
+	target_link_libraries(hicar_lib PUBLIC ${PETSC_LIBRARIES})
+	target_include_directories(hicar_lib PUBLIC ${PETSC_INCLUDES})
+endif()
+
+
+if(OpenMP_CXX_FOUND)
+        target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_CXX)
+elseif(OpenMP_Fortran_FOUND)
+	target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_Fortran)
+endif()
+
+if (FFTW_FOUND)
+	target_link_libraries(hicar_lib PUBLIC ${FFTW_LIBRARIES})
+	target_include_directories(hicar_lib PUBLIC ${FFTW_INCLUDES})
+endif()
+
+if (NETCDF_FOUND)
+	#This is the most robust way to find the NetCDF flags -- covering both custom installs, static or shared, and cray PEs
+	execute_process(COMMAND nf-config --flibs OUTPUT_VARIABLE NETCDF_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+	#if the nf-config method worked...
+	if(${NETCDF_FLAGS} MATCHES "-lnetcdff")
+		target_link_libraries(hicar_lib PUBLIC ${NETCDF_FLAGS})
+	else()
+	#else hope that the library flags as found by find_package are enough (should be as long as netCDF is a shared library)
+		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
+	endif()
+	target_include_directories(hicar_lib PUBLIC ${NETCDF_INCLUDES})
+endif()
+
+
+if (FSM)
+	find_library(FSM2_LIB NAMES FSM2 REQUIRED)
+	target_include_directories(hicar_lib PUBLIC ${FSM_DIR}/build)
+	target_link_libraries(hicar_lib PUBLIC ${FSM2_LIB})
+endif()
+
+if (OpenACC_Fortran_FOUND AND OPENACC)
+	target_link_libraries(hicar_lib PUBLIC OpenACC::OpenACC_Fortran)
+endif()
+
+target_link_libraries(hicar_lib PUBLIC MPI::MPI_Fortran)
+target_include_directories(hicar_lib PUBLIC ${MPI_INCLUDE_DIR})
+
+# add include directory for the model itself
+target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
+
+
+# link the hicar_lib library to the HICAR executable
+target_link_libraries(HICAR PUBLIC hicar_lib)
+###########################################################
+
+
+###########################################################
+############### Download supporting run files ##############
+
+# Fetch specific folders from icar_supporting_files repo
+FetchContent_Declare(
+	icar_supporting_files
+	GIT_REPOSITORY    https://github.com/NCAR/icar_supporting_files.git
+	GIT_TAG           main
+)
+
+# Download the repo but don't build it
+FetchContent_MakeAvailable(icar_supporting_files)
+
+# Copy only specific folders to the run directory
+file(COPY "${icar_supporting_files_SOURCE_DIR}/mp_support" DESTINATION "${PROJECT_SOURCE_DIR}/run")
+file(COPY "${icar_supporting_files_SOURCE_DIR}/rrtmg_support" DESTINATION "${PROJECT_SOURCE_DIR}/run")
+
+# Clean up downloaded repo to save space
+file(REMOVE_RECURSE "${icar_supporting_files_SOURCE_DIR}")
+file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/icar_supporting_files-subbuild")
+file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/icar_supporting_files-build")
+
+list(POP_BACK CMAKE_MESSAGE_INDENT)
+message(STATUS "...done searching for dependencies")
+
+###########################################################
+
+
 
 
 ##########################################################
@@ -318,7 +343,11 @@ if(MODE STREQUAL "debug")
 	elseif (COMPILER STREQUAL "cray")
 		target_compile_options(HICAR PUBLIC -h noomp -c -eI -g -O0) #-R cpbs --cray-print-opts
 	elseif (COMPILER STREQUAL "nvfortran")
-		target_compile_options(HICAR PUBLIC -O0 -g -traceback -Mnoopenmp -Mbounds -Minfo=accel -Mpreprocess -march=native -acc=gpu -gpu=mem:separate,ccnative,deepcopy) # -acc=gpu -gpu=ccnative,mem:managed ) #-Mbounds -traceback -Minfo=accel)
+		if(OPENACC)
+			target_compile_options(HICAR PUBLIC -O0 -g -traceback -Mnoopenmp -Mbounds -Minfo=accel -Mpreprocess -march=native -acc=gpu -gpu=mem:separate,ccnative,deepcopy)
+		else()
+			target_compile_options(HICAR PUBLIC -O0 -g -traceback -Mnoopenmp -Mbounds -Mpreprocess -march=native)
+		endif()
 	endif()
 elseif(MODE STREQUAL "debugslow")
 	set(CMAKE_BUILD_TYPE Debug)
@@ -347,14 +376,18 @@ elseif(MODE STREQUAL "release")
 	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR")
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -O3 -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
+		target_compile_options(HICAR PUBLIC -O3 -fopenmp -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
 		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -c -eI -eZ)
 		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_cray")
 	elseif (COMPILER STREQUAL "nvfortran")
-		target_compile_options(HICAR PUBLIC -O3 -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative,deepcopy)
+		if(OPENACC)
+			target_compile_options(HICAR PUBLIC -O3 -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative,deepcopy)
+		else()
+			target_compile_options(HICAR PUBLIC -O3 -march=native)
+		endif()
 	endif()
 endif()
 
@@ -406,6 +439,11 @@ if (FSM)
 	message(STATUS "  FSM:    ${FSM_DIR}")
 else()
 	message(STATUS "  FSM:    Not Used")
+endif()
+if (OPENACC AND OpenACC_Fortran_FOUND)
+	message(STATUS "  OpenACC: Enabled")
+else()
+	message(STATUS "  OpenACC: Not Used")
 endif()
 message(STATUS "")
 #######################################################

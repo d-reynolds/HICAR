@@ -333,24 +333,29 @@ contains
         end do
 
         !divide dz differences by dz. Note that dz will be horizontally constant
-        !$acc loop seq
-        do k=k_s,k_e
-            !$acc loop gang vector collapse(2)
-            do j = j_s, j_e
+        !$acc parallel loop gang vector collapse(3)
+        do j = j_s, j_e
+            do k=k_s,k_e
                 do i = i_start, i_end
                     u_dlambdz(i,k,j) = u_temp(i,k+1,j) - u_temp(i,k-1,j)
                     u_dlambdz(i,k,j) = u_dlambdz(i,k,j)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
                 end do
             end do
-            !$acc loop gang vector collapse(2)
-            do j = j_start, j_end
+        enddo
+
+        !$acc parallel loop gang vector collapse(3)
+        do j = j_start, j_end
+            do k=k_s,k_e
                 do i = i_s, i_e
                     v_dlambdz(i,k,j) = v_temp(i,k+1,j) - v_temp(i,k-1,j)
                     v_dlambdz(i,k,j) = v_dlambdz(i,k,j)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
                 end do
             end do
-            !$acc loop gang vector collapse(2)
-            do j = j_s-1, j_e+1
+        enddo
+
+        !$acc parallel loop gang vector collapse(3)
+        do j = j_s-1, j_e+1
+            do k=k_s,k_e
                 do i = i_s-1, i_e+1
                     dlambdz(i,k,j) = lambda(i,k+1,j) - lambda(i,k-1,j)
                     dlambdz(i,k,j) = dlambdz(i,k,j)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))

@@ -40,7 +40,7 @@ contains
             end do
 
             !By definition, a restart time has to lay on an output time, so this is valid
-            call this%next_output%set(this%next_output%mjd() + this%output_dt%days())
+            call this%next_output%set(options%restart%restart_time%mjd() + this%output_dt%days())
 
         endif
 

@@ -11,6 +11,7 @@ submodule(halo_interface) halo_implementation
 use icar_constants
 use iso_fortran_env
 use output_metadata,            only : get_varmeta, get_varindx
+use meta_data_interface,        only : meta_data_t
 use, intrinsic :: iso_c_binding
 
 implicit none
