@@ -1019,6 +1019,11 @@ contains
         n_smoothing_passes = 5
         nsmooth_gridcells = 20 !int(500 / domain%dx)
         
+        do k = kms,kme
+            z_mean =SUM(domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(ims:ime,k,jms:jme))/SIZE(domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(ims:ime,k,jms:jme))
+            if (z_mean > RI_Z_MAX .and. Ri_k_max==0) Ri_k_max = max(2,k-1)
+        enddo
+
         !$acc data present(domain) create(u_m,v_m,u_shear,v_shear,winddir,wind_speed,temp_froude,stability,dir_indices)
 
         !$acc kernels
@@ -1039,9 +1044,9 @@ contains
             ubound_terrain = ubound(domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d,4)
             !Compute wind direction for each cell on mass grid
             !$acc parallel loop gang vector collapse(3)
-            do i = ims, ime
+            do j = jms, jme
                 do k=kms, kme
-                    do j = jms, jme
+                    do i = ims, ime
                         winddir(i,k,j) = ATAN(-u_m(i,k,j),-v_m(i,k,j))*rad2deg
                         if(winddir(i,k,j) <= 0.0) winddir(i,k,j) = winddir(i,k,j)+360
                         if(winddir(i,k,j) == 360.0) winddir(i,k,j) = 0.0
@@ -1052,9 +1057,9 @@ contains
             
             !Build grid of Sx values based on wind direction at that cell
             !$acc parallel loop gang vector collapse(3)
-            do i = ims, ime
+            do j = jms, jme
                 do k = kms, kme
-                    do j = jms, jme
+                    do i = ims, ime
                         temp_froude(i,k,j) = domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(i,k,j,dir_indices(i,k,j))
                     enddo
                 end do
@@ -1065,9 +1070,9 @@ contains
         !Since we will loop up to nz-1, we set all Ri here to 10
 
         !$acc parallel loop gang vector collapse(3)
-        do i = ims,ime
+        do j = jms, jme
             do k = kms, kme
-                do j = jms,jme
+                do i = ims, ime
                     wind_speed(i,k,j) = sqrt( (u_m(i,k,j))**2 + (v_m(i,k,j))**2 )
                     domain%vars_3d(domain%var_indx(kVARS%froude)%v)%data_3d(i,k,j) = 0.1
                     domain%vars_3d(domain%var_indx(kVARS%blk_ri)%v)%data_3d(i,k,j) = 10.0
@@ -1075,16 +1080,10 @@ contains
             enddo
         enddo
 
-        !$acc parallel loop gang vector collapse(1)
-        do k = kms,kme
-            z_mean =SUM(domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(ims:ime,k,jms:jme))/SIZE(domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(ims:ime,k,jms:jme))
-            if (z_mean > RI_Z_MAX .and. Ri_k_max==0) Ri_k_max = max(2,k-1)
-        enddo
-
         !$acc parallel loop gang vector collapse(3)
-        do i = ims, ime
+        do j = jms, jme
             do k=kms, kme-1
-                do j = jms, jme
+                do i = ims, ime
                     th_bot = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i,kms,j)
                     th_top = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i,Ri_k_max,j)
                     z_bot  = domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i,kms,j)
@@ -1099,9 +1098,9 @@ contains
 
         if (options%wind%alpha_const<0 .and. (options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS)) then
             !$acc parallel loop gang vector collapse(3)
-            do i = ims, ime
+            do j = jms, jme
                 do k=kms, kme-1
-                    do j = jms, jme
+                    do i = ims, ime
 
                         th_bot = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i,k,j)
                         th_top = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i,k+1,j)

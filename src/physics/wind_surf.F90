@@ -374,17 +374,17 @@ contains
         real, intent(inout) :: u(ims:ime+1,kms:kme,jms:jme), v(ims:ime,kms:kme,jms:jme+1)
         integer, intent(in)                   :: its, ite, jts, jte, ims, ime, kms, kme, jms, jme
         
-        real, allocatable, dimension(:,:)   :: x_norm, y_norm, thresh_ang
-        real, allocatable, dimension(:,:,:) :: Sx_U_corr, Sx_V_corr, Sx_curr, Sx_corr, TPI_corr
+        real, allocatable, dimension(:,:)   :: x_norm, y_norm
+        real, allocatable, dimension(:,:,:) :: Sx_U_corr, Sx_V_corr, Sx_curr, Sx_corr, TPI_corr, thresh_ang
 
         integer ::  i, j, k
-        real    ::  Ri_num, WS, max_spd
+        real    ::  Ri_num, WS, max_spd, slope_tmp
                         
         
         allocate(x_norm(ims:ime,jms:jme))
         allocate(y_norm(ims:ime,jms:jme))
-        allocate(thresh_ang(ims:ime,jms:jme))
-       
+
+        allocate(thresh_ang(ims:ime,kms:Sx_k_max,jms:jme))
         allocate(Sx_curr(ims:ime,kms:Sx_k_max,jms:jme))
         allocate(Sx_corr(ims:ime,kms:Sx_k_max,jms:jme))
         allocate(TPI_corr(ims:ime,kms:Sx_k_max,jms:jme))
@@ -399,32 +399,43 @@ contains
         Sx_curr = 0
         thresh_ang = 0.
         max_spd = 0.
-        Sx_corr = 0
-        TPI_corr = 0
+        Sx_corr = 0.
+        TPI_corr = 0.
+        Sx_U_corr = 0.0
+        Sx_V_corr = 0.0
+        x_norm = 0.0
+        y_norm = 0.0
+        !$acc end kernels
 
         !Calculate horizontal normal vector components of terrain
-        thresh_ang = sqrt( dzdx(ims:ime,kms,jms:jme)**2+dzdy(ims:ime,kms,jms:jme)**2)
-        where(.not.(thresh_ang == 0.)) x_norm = -dzdx(ims:ime,kms,jms:jme)/thresh_ang
-        where(.not.(thresh_ang == 0.)) y_norm = -dzdy(ims:ime,kms,jms:jme)/thresh_ang
-        thresh_ang = 0.
-        !$acc end kernels
+        !$acc parallel loop gang vector collapse(2)
+        do j = jms, jme
+            do i = ims, ime
+                slope_tmp = sqrt( dzdx(i,kms,j)**2+dzdy(i,kms,j)**2)
+                if (slope_tmp /= 0.0) then
+                    x_norm(i,j) = -dzdx(i,kms,j)/slope_tmp
+                    y_norm(i,j) = -dzdy(i,kms,j)/slope_tmp
+                endif
+            enddo
+        enddo
 
         !Pick appropriate Sx for wind direction
         call pick_Sx(Sx, Sx_curr, u, v,ims,ime,kms,kme,jms,jme)
         
+
         !Loop through i,j
         !$acc parallel loop gang vector collapse(3)
-        do i = ims, ime
-            do j = jms, jme
-                !Loop through vertical column
-                do k = kms, Sx_k_max
+        do j = jms, jme
+            !Loop through vertical column
+            do k = kms, Sx_k_max
+                do i = ims, ime
                     !Compute threshold separation angle from atmospheric conditions
                     !If we are potentially sheltered (on a lee-slope)
                     if (Sx_curr(i,1,j) > 0)  then
                 
                         Ri_num = Ri(i,1,j)
                         WS = sqrt( u(i,1,j)**2 + v(i,1,j)**2 )
-                        thresh_ang(i,j) = calc_thresh_ang(Ri_num,WS)
+                        thresh_ang(i,k,j) = calc_thresh_ang(Ri_num,WS)
                         
                         !if (Ri_num <= 0.) then
                         !    max_spd = 0.3*Ri_num+0.3
@@ -437,9 +448,23 @@ contains
               
                         !Consider sheltering corrections
                         !If surface was sheltered and we are still sheltered
-                        if ((Sx_curr(i,kms,j) > thresh_ang(i,j)) .and. (Sx_curr(i,k,j) > thresh_ang(i,j))) then
+                        if ((Sx_curr(i,kms,j) > thresh_ang(i,k,j)) .and. (Sx_curr(i,k,j) > thresh_ang(i,k,j))) then
                             !Sheltered correction
-                            Sx_corr(i,k,j) = (Sx_curr(i,k,j)-thresh_ang(i,j))/Sx_scale_ang
+                            Sx_corr(i,k,j) = (Sx_curr(i,k,j)-thresh_ang(i,k,j))/Sx_scale_ang
+                            
+                            !Dummy bounding of corrections, for safety
+                            if (Sx_corr(i,k,j) < 0.0) then
+                                Sx_corr(i,k,j) = 0.0
+                             end if
+                            if (Sx_corr(i,k,j) > 1.0) then
+                                Sx_corr(i,k,j) = 1.0
+                            end if
+
+                            Sx_corr(i,k,j) = 2*Sx_corr(i,k,j)*(x_norm(i,j)*( (u(i+1,k,j)+u(i,k,j))/2 ) + &
+                                                               y_norm(i,j)*( (v(i,k,j+1)+v(i,k,j))/2 ))
+                            Sx_U_corr(i,k,j) = Sx_corr(i,k,j)*x_norm(i,j)
+                            Sx_V_corr(i,k,j) = Sx_corr(i,k,j)*y_norm(i,j)
+
                         end if
                     endif
 
@@ -448,22 +473,20 @@ contains
                     if ((k <= TPI_k_max) .and. (TPI(i,j) < 0)) then
                         !Scale TPI correction and exposure with height so we smoothly merge with forcing data
                         TPI_corr(i,k,j) = (TPI(i,j)/TPI_scale) * (1.0*(TPI_k_max+1-k)/TPI_k_max) !This is setup such that valleys <= -100
+
+                        !Dummy bounding of corrections, for safety
+                        if (TPI_corr(i,k,j) < -0.5) then
+                            TPI_corr(i,k,j) = -0.5
+                        end if
+                        if (TPI_corr(i,k,j) > 0.0) then
+                            TPI_corr(i,k,j) = 0.0
+                        end if
                     end if
                 end do
             end do
         end do
 
         !$acc kernels
-        !Dummy bounding of corrections, for safety
-        TPI_corr  = min(max(TPI_corr,-0.5),0.0)
-        Sx_corr = min(max(Sx_corr,0.0),1.0)
-    
-        do k=kms,Sx_k_max
-            Sx_corr(:,k,:) = 2*Sx_corr(:,k,:)*(x_norm*( (u(ims+1:ime+1,k,:)+u(ims:ime,k,:))/2 ) + &
-                                 y_norm*( (v(:,k,jms+1:jme+1)+v(:,k,jms:jme))/2 ))
-            Sx_U_corr(:,k,:) = Sx_corr(:,k,:)*x_norm
-            Sx_V_corr(:,k,:) = Sx_corr(:,k,:)*y_norm
-        enddo
         !Finally, apply TPI and Sx corrections, staggering corrections to U/V grids
         u(ims+1:ime,kms:Sx_k_max,:) = u(ims+1:ime,kms:Sx_k_max,:) - ( (Sx_U_corr(ims+1:ime,:,:) + Sx_U_corr(ims:ime-1,:,:))/2 )
         u(ims,kms:Sx_k_max,:) = u(ims,kms:Sx_k_max,:) - Sx_U_corr(ims,:,:)
@@ -491,28 +514,35 @@ contains
         real, intent(in)       :: u(ims:ime+1,kms:kme,jms:jme), v(ims:ime,kms:kme,jms:jme+1)
         integer, intent(in)    :: ims, ime, kms, kme, jms, jme
 
-        real, allocatable, dimension(:,:,:)   :: winddir, u_m, v_m
+        real, allocatable, dimension(:,:,:)   :: u_m, v_m
         integer, allocatable                ::  dir_indices(:,:,:)
         integer ::  i, j, k
+        real    ::  winddir
         
                 
-        allocate(winddir(ims:ime,kms:Sx_k_max,jms:jme))
         allocate(u_m(ims:ime,kms:Sx_k_max,jms:jme))
         allocate(v_m(ims:ime,kms:Sx_k_max,jms:jme))
         allocate(dir_indices(ims:ime,kms:Sx_k_max,jms:jme))
 
         !$acc data present(Sx, u, v, Sx_curr) &
-        !$acc create(winddir, u_m, v_m, dir_indices)
+        !$acc create(u_m, v_m, dir_indices)
         !$acc kernels
         u_m = (u(ims:ime,1:Sx_k_max,:) + u(ims+1:ime+1,1:Sx_k_max,:))/2
         v_m = (v(:,1:Sx_k_max,jms:jme) + v(:,1:Sx_k_max,jms+1:jme+1))/2
-        
-        !Compute wind direction for each cell on mass grid
-        winddir = atan2(-u_m,-v_m)*rad2deg
-        where(winddir < 0.0) winddir = winddir+360
-        where(winddir == 360.0) winddir = 0.0
-        dir_indices = int(winddir/5)+1
         !$acc end kernels
+
+        !Compute wind direction for each cell on mass grid
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, Sx_k_max
+                do i = ims, ime
+                    winddir = atan2(-u_m(i,k,j),-v_m(i,k,j))*rad2deg
+                    if(winddir < 0.0) winddir = winddir+360
+                    if(winddir == 360.0) winddir = 0.0
+                    dir_indices(i,k,j) = int(winddir/5)+1
+                enddo
+            enddo
+        enddo
 
         !Build grid of Sx values based on wind direction at that cell
         !$acc parallel loop gang vector collapse(3)
