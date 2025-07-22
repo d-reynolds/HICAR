@@ -515,6 +515,10 @@ contains
         class(Time_type), intent(inout) :: this
         character (len=*), intent(in) :: date
 
+        if (this%get_calendar() == NOCALENDAR) then
+            call this%set_calendar(kDEFAULT_CALENDAR)
+        end if
+
         read(date(1:4), *) this%year
         read(date(6:7), *) this%month
         read(date(9:10),*) this%day
@@ -545,6 +549,10 @@ contains
         integer, intent(in), optional :: hour, minute, second
         integer :: set_hour, set_minute, set_second
 
+        if (this%get_calendar() == NOCALENDAR) then
+            call this%set_calendar(kDEFAULT_CALENDAR)
+        end if
+
         set_hour=0; set_minute=0; set_second=0
         if (present(hour))   set_hour = hour
         if (present(minute)) set_minute = minute
@@ -571,6 +579,10 @@ contains
         class(Time_type), intent(inout) :: this
         real(real64), intent(in) :: days
         integer :: year, month, day, hour, minute, second
+
+        if (this%get_calendar() == NOCALENDAR) then
+            call this%set_calendar(kDEFAULT_CALENDAR)
+        end if
 
         this%current_date_time = days
 

@@ -17,7 +17,7 @@ module output_interface
   use icar_constants
   use variable_interface,       only : variable_t
   use meta_data_interface,      only : meta_data_t
-  use time_object,              only : Time_type, THREESIXTY, GREGORIAN, NOCALENDAR, NOLEAP
+  use time_object,              only : Time_type
   use options_interface,        only : options_t
 
   implicit none

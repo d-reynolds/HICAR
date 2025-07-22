@@ -1,5 +1,5 @@
 submodule(flow_object_interface) flow_obj_implementation
-    use icar_constants,     only : STD_OUT_PE
+    use icar_constants,     only : STD_OUT_PE, STD_OUT_PE_IO
     use iso_fortran_env,    only : output_unit
     use string,             only : as_string
   implicit none
@@ -25,7 +25,7 @@ contains
         this%ended = .false.
         this%nest_indx = nest_indx
 
-        call this%small_time_delta%set(1)
+        call this%small_time_delta%set(1.0)
 
         if (options%restart%restart) then
             this%sim_time = options%restart%restart_time
@@ -211,7 +211,14 @@ contains
         end if
 
         if (next_flow_event < this%sim_time) then
-            if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but the next flow event is less than the sim time."
+            write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but the next flow event is less than the sim time."
+            if (next_flow_event == this%next_output) then
+                write(*,*) "Next flow event was found to be an output, timestamp is: ", trim(as_string(this%next_output)), " and sim time is: ", trim(as_string(this%sim_time))
+            elseif (next_flow_event == this%next_input) then
+                write(*,*) "Next flow event was found to be an input, timestamp is: ", trim(as_string(this%next_input)), " and sim time is: ", trim(as_string(this%sim_time))
+            else
+                write(*,*) "Next flow event was found to be the end time, timestamp is: ", trim(as_string(this%end_time)), " and sim time is: ", trim(as_string(this%sim_time))
+            end if
             stop "CONTROL FLOW ERROR, EXITING 7"
         end if
         if (next_flow_event > this%end_time) then

@@ -951,6 +951,8 @@ contains
         call set_nml_var(start_date_checked, start_date(n_indx), 'start_date', start_date(1))
         call set_nml_var(end_date_checked, end_date(n_indx), 'end_date', end_date(1))
 
+        kDEFAULT_CALENDAR = gen_options%calendar
+
         if (.not.(read_namelist)) return
 
         if (trim(start_date_checked)/="") then

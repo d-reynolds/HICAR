@@ -13,14 +13,10 @@
 module time_object
     use time_delta_object, only : time_delta_t
     use iso_fortran_env, only: real64
-
+    use icar_constants
     implicit none
 
     private
-
-    integer, parameter :: kMAX_STRING_LENGTH = 1024
-    integer, parameter, public :: GREGORIAN=0, NOLEAP=1, THREESIXTY=2, NOCALENDAR=-1
-    integer, parameter, public :: NON_VALID_YEAR = -9999
 
     !>------------------------------------------------------------
     !!  date / time Object
@@ -35,7 +31,7 @@ module time_object
         integer :: month_zero= 1
         integer :: day_zero  = 1
         integer :: hour_zero = 0
-        integer :: calendar
+        integer :: calendar  = NOCALENDAR
         integer, dimension(13) :: month_start
         integer :: year, month, day, hour, minute, second
 

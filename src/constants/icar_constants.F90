@@ -28,6 +28,12 @@ module icar_constants
     integer, parameter :: kMAX_ATTR_LENGTH =   256
     integer, parameter :: kMAX_STRING_LENGTH = 256  ! maximum length of other strings (e.g. netcdf attributes)
 
+    ! calendar information
+    character(len=20)          :: kDEFAULT_CALENDAR = "GREGORIAN"  ! default calendar type
+    integer, parameter, public :: GREGORIAN=0, NOLEAP=1, THREESIXTY=2, NOCALENDAR=-1
+    integer, parameter, public :: NON_VALID_YEAR = -9999
+
+
     ! maximum number of nests
     integer, parameter :: kMAX_NESTS = 10
     !>--------------------------------------------
