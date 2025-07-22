@@ -391,28 +391,29 @@ contains
         allocate(Sx_U_corr(ims:ime,kms:Sx_k_max,jms:jme))
         allocate(Sx_V_corr(ims:ime,kms:Sx_k_max,jms:jme))
 
+        !$acc data present(Sx, TPI, u, v, Ri, dzdx, dzdy) &
+        !$acc create(x_norm, y_norm, thresh_ang, Sx_curr, Sx_corr, TPI_corr, Sx_U_corr, Sx_V_corr)
+
         !Initialize Sx_curr. This will keep the border values from being updated
+        !$acc kernels
         Sx_curr = 0
-        
         thresh_ang = 0.
         max_spd = 0.
-        
+        Sx_corr = 0
+        TPI_corr = 0
+
         !Calculate horizontal normal vector components of terrain
         thresh_ang = sqrt( dzdx(ims:ime,kms,jms:jme)**2+dzdy(ims:ime,kms,jms:jme)**2)
         where(.not.(thresh_ang == 0.)) x_norm = -dzdx(ims:ime,kms,jms:jme)/thresh_ang
         where(.not.(thresh_ang == 0.)) y_norm = -dzdy(ims:ime,kms,jms:jme)/thresh_ang
         thresh_ang = 0.
-        
+        !$acc end kernels
+
         !Pick appropriate Sx for wind direction
-        do k = kms, Sx_k_max
-            call pick_Sx(Sx(:,k,:,:), Sx_curr(:,k,:), u(:,k,:), v(:,k,:),ims,ime,jms,jme)
-        end do
-        
-        !Initialize Sx and TPI corr
-        Sx_corr = 0
-        TPI_corr = 0
+        call pick_Sx(Sx, Sx_curr, u, v,ims,ime,kms,kme,jms,jme)
         
         !Loop through i,j
+        !$acc parallel loop gang vector collapse(3)
         do i = ims, ime
             do j = jms, jme
                 !Loop through vertical column
@@ -451,6 +452,8 @@ contains
                 end do
             end do
         end do
+
+        !$acc kernels
         !Dummy bounding of corrections, for safety
         TPI_corr  = min(max(TPI_corr,-0.5),0.0)
         Sx_corr = min(max(Sx_corr,0.0),1.0)
@@ -477,43 +480,51 @@ contains
         v(:,kms:Sx_k_max,jms+1:jme) = v(:,kms:Sx_k_max,jms+1:jme) * (1 + (TPI_corr(:,:,jms+1:jme)+TPI_corr(:,:,jms:jme-1))/2 )
         v(:,kms:Sx_k_max,jms) = v(:,kms:Sx_k_max,jms) * (1+TPI_corr(:,:,jms))
         v(:,kms:Sx_k_max,jme+1) = v(:,kms:Sx_k_max,jme+1) * (1+TPI_corr(:,:,jme))
-
+        !$acc end kernels
+        !$acc end data
     end subroutine apply_Sx
     
-    subroutine pick_Sx(Sx,Sx_curr,u,v,ims,ime,jms,jme)
+    subroutine pick_Sx(Sx,Sx_curr,u,v,ims,ime,kms,kme,jms,jme)
         implicit none
-        real, intent(in)       :: Sx(ims:ime,jms:jme,1:72)
-        real, intent(inout)    :: Sx_curr(ims:ime,jms:jme)
-        real, intent(in)       :: u(ims:ime+1,jms:jme), v(ims:ime,jms:jme+1)
-        integer, intent(in)    :: ims, ime, jms, jme
+        real, intent(in)       :: Sx(ims:ime,kms:kme,jms:jme,1:72)
+        real, intent(inout)    :: Sx_curr(ims:ime,kms:Sx_k_max,jms:jme)
+        real, intent(in)       :: u(ims:ime+1,kms:kme,jms:jme), v(ims:ime,kms:kme,jms:jme+1)
+        integer, intent(in)    :: ims, ime, kms, kme, jms, jme
 
-        real, allocatable, dimension(:,:)   :: winddir, u_m, v_m
-        integer, allocatable                ::  dir_indices(:,:)
-        integer ::  i, j
+        real, allocatable, dimension(:,:,:)   :: winddir, u_m, v_m
+        integer, allocatable                ::  dir_indices(:,:,:)
+        integer ::  i, j, k
         
                 
-        allocate(winddir(ims:ime,jms:jme))
-        allocate(u_m(ims:ime,jms:jme))
-        allocate(v_m(ims:ime,jms:jme))
-        allocate(dir_indices(ims:ime,jms:jme))
+        allocate(winddir(ims:ime,kms:Sx_k_max,jms:jme))
+        allocate(u_m(ims:ime,kms:Sx_k_max,jms:jme))
+        allocate(v_m(ims:ime,kms:Sx_k_max,jms:jme))
+        allocate(dir_indices(ims:ime,kms:Sx_k_max,jms:jme))
 
-        u_m = (u(ims:ime,:) + u(ims+1:ime+1,:))/2
-        v_m = (v(:,jms:jme) + v(:,jms+1:jme+1))/2
+        !$acc data present(Sx, u, v, Sx_curr) &
+        !$acc create(winddir, u_m, v_m, dir_indices)
+        !$acc kernels
+        u_m = (u(ims:ime,1:Sx_k_max,:) + u(ims+1:ime+1,1:Sx_k_max,:))/2
+        v_m = (v(:,1:Sx_k_max,jms:jme) + v(:,1:Sx_k_max,jms+1:jme+1))/2
         
         !Compute wind direction for each cell on mass grid
         winddir = atan2(-u_m,-v_m)*rad2deg
         where(winddir < 0.0) winddir = winddir+360
         where(winddir == 360.0) winddir = 0.0
         dir_indices = int(winddir/5)+1
-                
+        !$acc end kernels
+
         !Build grid of Sx values based on wind direction at that cell
-        do i = ims, ime
-            do j = jms, jme
-                Sx_curr(i,j) = Sx(i,j,dir_indices(i,j))
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, Sx_k_max
+                do i = ims, ime
+                    Sx_curr(i,k,j) = Sx(i,k,j,dir_indices(i,k,j))
+                end do
             end do
         end do
         
-
+        !$acc end data
         
     end subroutine pick_Sx
 

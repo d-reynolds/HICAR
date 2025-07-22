@@ -228,7 +228,7 @@ contains
                 if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
             endif
         enddo
-        if (n_vars > 0) allocate(this%adv_vars(n_vars))
+        allocate(this%adv_vars(n_vars))
         n_vars = 0
 
         do i = 1, size(kADV_VARS)
@@ -250,7 +250,7 @@ contains
                 if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
             endif
         enddo
-        if (n_vars > 0) allocate(this%exch_vars(n_vars))
+        allocate(this%exch_vars(n_vars))
         n_vars = 0
 
         do i = 1, size(kEXCH_VARS)
@@ -364,7 +364,7 @@ contains
             density =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d / (R_d * temperature*(1+qv)) ! kg/m^3
         else
             !$acc kernels if(.not.(forcing_update_only))
-            exner = (pressure / 100000) ** (R_d/cp) !exner_function(pressure)
+            exner = exner_function(pressure)
             temperature = potential_temperature * exner
             density =  pressure / (R_d * temperature*(1+qv)) ! kg/m^3
             !$acc end kernels

@@ -433,6 +433,7 @@ contains
     !!
     !!----------------------------------------------------------
     pure elemental function calc_dry_stability(th_top, th_bot, z_top, z_bot, th_surf) result(BV_freq)
+        !$acc routine seq
         implicit none
         real, intent(in) :: th_top, th_bot, z_top, z_bot
         real, optional, intent(in) :: th_surf
@@ -470,6 +471,7 @@ contains
     !!
     !!----------------------------------------------------------
     pure function calc_froude(brunt_vaisalla_frequency, barrier_height, wind_speed) result(froude)
+        !$acc routine seq
         implicit none
         real, intent(in) :: brunt_vaisalla_frequency    ! [ 1 / s ]
         real, intent(in) :: barrier_height              ! [ m ]
@@ -489,6 +491,7 @@ contains
     
     
     pure function calc_Ri(BV_frequency_sq, u_shear, v_shear, dz) result(Ri)
+        !$acc routine seq
         implicit none
         real, intent(in) :: BV_frequency_sq    ! [ 1 / s ]
         real, intent(in) :: u_shear                  ! [ m / s ]
@@ -509,6 +512,7 @@ contains
 
     
     pure function calc_thresh_ang(Ri,WS) result(theta)
+        !$acc routine seq
         implicit none
         real, intent(in) :: Ri
         real, intent(in) :: WS
@@ -697,8 +701,8 @@ contains
     !! Compute exner function to convert potential_temperature to temperature
     !!
     !! -------------------------------
-    ! !$acc routine seq
     elemental function exner_function(pressure) result(exner)
+        !$acc routine seq
         implicit none
         real, intent(in) :: pressure
         real :: exner
@@ -706,7 +710,7 @@ contains
         real, parameter :: rd_cp = 0.2857  ! Pre-computed R_d/cp
 
         exner = (pressure / po) ** rd_cp
-    end function
+    end function exner_function
 
 
 !+---+-----------------------------------------------------------------+
