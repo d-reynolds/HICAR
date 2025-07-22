@@ -50,7 +50,8 @@ module microphysics
     ! temporary variables
     real,allocatable,dimension(:,:) :: SR, last_rain, last_snow, last_graup, refl_10cm
 
-    public :: mp, mp_var_request
+    public :: mp, mp_var_request, mp_init
+    
 contains
 
 

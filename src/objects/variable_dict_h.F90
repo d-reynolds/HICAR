@@ -18,7 +18,7 @@ module variable_dict_interface
     !!
     !!------------------------------------------------
     type var_dict_element
-        character(len=kMAX_NAME_LENGTH) :: name         ! serves as the dictionary key
+        integer :: id         ! serves as the dictionary key
         type(variable_t)                :: var          ! store the primary dictionary variable for the key name
     end type
 
@@ -85,10 +85,10 @@ interface
         logical :: boolean
     end function
 
-    module function next(this, name, err) result(var_data)
+    module function next(this, id, err) result(var_data)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
-        character(len=*),    intent(out),   optional :: name
+        integer,             intent(out),   optional :: id
         integer,             intent(out),   optional :: err
         type(variable_t)                    :: var_data
     end function
@@ -101,18 +101,18 @@ interface
     !! Primary subroutines to add and retrieve elements
     !!
     !!-------------------------
-    module function get_var(this, varname, err, indx) result(var_data)
+    module function get_var(this, in_id, err, indx) result(var_data)
         implicit none
         class(var_dict_t),   intent(in) :: this
-        character(len=*),    intent(in) :: varname
+        integer,             intent(in) :: in_id
         integer,             intent(out),   optional :: err, indx
         type(variable_t)                :: var_data
     end function
 
-    module subroutine add_var(this, varname, var_data, save_state, err)
+    module subroutine add_var(this, in_id, var_data, save_state, err)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
-        character(len=*),    intent(in)     :: varname
+        integer,             intent(in)     :: in_id
         type(variable_t),    intent(in)     :: var_data
         logical,             intent(in), optional :: save_state
         integer,             intent(out),optional :: err

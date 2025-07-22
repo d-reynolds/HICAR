@@ -10,6 +10,9 @@ module string
 
     use iso_fortran_env, only : real32, real64
     use icar_constants, only : kMAX_STRING_LENGTH
+    use time_object, only : Time_type
+    use timer_interface, only : timer_t
+    use time_delta_object, only : time_delta_t
     implicit none
     !>-----------------------------
     !!  Generic interface to various types of string conversion functions
@@ -19,6 +22,12 @@ module string
         module procedure str_d
         module procedure str_r
         module procedure str_i
+    end interface
+
+    interface as_string
+        module procedure :: as_string_dt
+        module procedure :: as_string_time
+        module procedure :: as_string_timer
     end interface
 
 contains
@@ -185,5 +194,81 @@ contains
         str_out = trim(str_out)
 
     end function to_lower
+
+        !>------------------------------
+    !! Convert a double precision real number to a string
+    !!
+    !!  Optionally specify a format string
+    !!
+    !!------------------------------
+    function as_string_dt(time) result(pretty_string)
+        implicit none
+        type(time_delta_t), intent(in) :: time                       ! double precision value to be converted
+        character(len=kMAX_STRING_LENGTH)  :: pretty_string
+
+        if (abs(time%seconds()) < 1) then
+            write(pretty_string,"(F8.4,A)") time%seconds(), " seconds"
+        elseif (abs(time%seconds()) <= 60) then
+            write(pretty_string,"(F6.2,A)") time%seconds(), " seconds"
+        elseif (abs(time%minutes()) <= 60) then
+            write(pretty_string,"(F6.2,A)") time%minutes(), " minutes"
+        elseif (abs(time%hours()) <= 24) then
+            write(pretty_string,"(F6.2,A)") time%hours(), " hours"
+        elseif (abs(time%days()) <= 365) then
+            write(pretty_string,"(F10.2,A)") time%days(), " days"
+        else
+            write(pretty_string,"(F10.2,A,F6.1,A)") time%days(), " days (roughly ",time%days()/365.25, " years)"
+        endif
+    end function as_string_dt
+
+    elemental function as_string_time(time, input_format) result(pretty_string)
+        implicit none
+        type(Time_type), intent(in) :: time
+        character(len=*), intent(in), optional :: input_format
+        character(len=kMAX_STRING_LENGTH) :: pretty_string
+        character(len=kMAX_STRING_LENGTH) :: format
+        integer :: i
+
+        associate(year  => time%year,   &
+                  month => time%month,  &
+                  day   => time%day,    &
+                  hour  => time%hour,   &
+                  minute=> time%minute, &
+                  second=> time%second  &
+                  )
+
+        if (present(input_format)) then
+            format = input_format
+        else
+            ! this is the default format string to generate "YYYY/MM/DD hh:mm:ss"
+            format = '(I4,"/",I0.2,"/",I0.2," ",I0.2,":",I0.2,":",I0.2)'
+        endif
+
+        ! this and the format statement above are the important bits
+        write(pretty_string, format) year, month, day, hour, minute, second
+
+        end associate
+
+    end function as_string_time
+
+    function as_string_timer(time, format) result(pretty_string)
+        type(timer_t),    intent(in)        :: time
+        character(len=*), intent(in), optional :: format
+
+        character(len=25) :: pretty_string ! return value
+
+        real :: temporary_time
+
+
+        temporary_time = time%get_time()
+
+        ! if the user specified a format string, use that when creating the output
+        if (present(format)) then
+            write(pretty_string,format) temporary_time
+        else
+            write(pretty_string,*) temporary_time
+        endif
+
+    end function as_string_timer
 
 end module string

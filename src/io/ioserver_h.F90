@@ -14,13 +14,9 @@ module ioserver_interface
   use mpi_f08
   use netcdf
   use icar_constants
-  use variable_interface, only : variable_t
   use reader_interface,   only : reader_t
   use output_interface,   only : output_t
   use options_interface,  only : options_t
-  use time_object,        only : Time_type
-  use time_delta_object,  only : time_delta_t
-  use boundary_interface, only : boundary_t
   use flow_object_interface, only : flow_obj_t
   
   implicit none

@@ -12,7 +12,7 @@ module adv_fluxcorr
     private
     integer :: ims, ime, jms, jme, kms, kme, its, ite, jts, jte
 
-    public :: WRF_flux_corr, init_fluxcorr, set_sign_arrays
+    public :: WRF_flux_corr, init_fluxcorr, set_sign_arrays, clear_flux_sign_arrays
     integer, allocatable, dimension(:,:,:)   :: usign, vsign, wsign
 
 contains
@@ -132,8 +132,7 @@ contains
         call upwind_flux3(q,u,v,w,flux_x_up,flux_z_up,flux_y_up,dz,denom)
 
         ! Next compute max and min possible fluxes        
-        !$acc parallel 
-        !$acc loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3)
         do j = jts-1, jte+1 
             do k = kms, kme
                 do i = its-1, ite+1
@@ -215,7 +214,7 @@ contains
                 enddo
             enddo
         enddo
-
+        !$acc parallel
         !$acc loop gang vector collapse(3)
         do j = jts, jte+1 
             do k = kms, kme
@@ -310,8 +309,7 @@ contains
         dumb_q = q
         !$acc end kernels
 
-        !$acc parallel
-        !$acc loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3)
         do j = jts-1, jte+1
             do k = kms, kme
                 do i = its-1, ite+1
@@ -324,6 +322,7 @@ contains
         enddo
 
         !Now compute upwind fluxes after second step
+        !$acc parallel
         !$acc loop gang vector collapse(3)
         do j = jts-1, jte+2
             do k = kms, kme

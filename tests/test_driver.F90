@@ -11,6 +11,9 @@ program test_driver
     use test_advect, only : collect_advect_suite
     use test_control_flow, only : collect_control_flow_suite
     use mpi_f08
+#ifdef _OPENACC
+    use openacc
+#endif
     use iso_fortran_env
     use icar_constants, only: STD_OUT_PE
     use string, only: to_lower
@@ -22,16 +25,38 @@ program test_driver
     logical :: init_flag, verbose
     logical :: no_test_run = .True.
     character(len=9) :: file
+#ifdef _OPENACC
+    integer :: dev, devNum, local_rank, comm_size
+    type(MPI_Comm) :: local_comm
+    integer(acc_device_kind) :: devtype
+#endif
 
     stat = 0
 
     !Initialize MPI if needed
     init_flag = .False.
-    call MPI_initialized(init_flag, ierr)
+    call MPI_initialized(init_flag)
     if (.not.(init_flag)) then
-        call MPI_INIT(ierr)
+        call MPI_INIT()
         init_flag = .True.
     endif
+#ifdef _OPENACC
+!
+! ****** Set the Accelerator device number based on local rank
+!
+     call MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, &
+          MPI_INFO_NULL, local_comm)
+     call MPI_Comm_rank(local_comm, local_rank)
+     call MPI_Comm_size(local_comm, comm_size)
+
+     devtype = acc_get_device_type()
+     devNum = acc_get_num_devices(devtype)
+     dev = mod(local_rank,devNum)
+     if ((local_rank + 1) < comm_size) then
+        call acc_set_device_num(dev, devtype)
+        call acc_init(devtype)
+     endif
+# endif
 
 
     call MPI_Comm_Rank(MPI_COMM_WORLD,my_index,ierr)
@@ -122,6 +147,6 @@ program test_driver
       error stop
     end if
 
-    call MPI_Finalize(ierr)
+    call MPI_Finalize()
   
   end program test_driver

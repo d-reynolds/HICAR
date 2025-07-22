@@ -7,7 +7,7 @@ module boundary_interface
     use time_object,              only : Time_type
     use time_delta_object,        only : time_delta_t
     use data_structures,          only : interpolable_type
-    use icar_constants,           only : kMAX_NAME_LENGTH, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH
+    use icar_constants,           only : kMAX_NAME_LENGTH, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH, kVARS
     implicit none
 
     private
@@ -70,14 +70,14 @@ module boundary_interface
         type(options_t), optional, intent(in)    :: parent_options
     end subroutine init_boundary
 
-    module subroutine init_local(this, options, file_list, var_list, dim_list, start_time, &
+    module subroutine init_local(this, options, file_list, var_list, dim_list, var_indx, start_time, &
                                  lat_var, lon_var, z_var, time_var, p_var, domain_lat, domain_lon)
         implicit none
         class(boundary_t),               intent(inout)  :: this
         type(options_t),                 intent(inout)  :: options
         character(len=kMAX_FILE_LENGTH), intent(in)     :: file_list(:)
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
-        integer,                         intent(in)     :: dim_list (:)
+        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list(:)
+        integer,                         intent(in)     :: dim_list(:), var_indx(:)
         type(Time_type),                 intent(in)     :: start_time
         character(len=kMAX_NAME_LENGTH), intent(in)     :: lat_var
         character(len=kMAX_NAME_LENGTH), intent(in)     :: lon_var
@@ -88,10 +88,10 @@ module boundary_interface
         real, dimension(:,:), intent(in)                :: domain_lon
     end subroutine
 
-    module subroutine init_local_asnest(this, var_list, dim_list, domain_lat, domain_lon, parent_options)
+    module subroutine init_local_asnest(this, var_list, dim_list, var_indx, domain_lat, domain_lon, parent_options)
         class(boundary_t),               intent(inout)  :: this
         character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
-        integer,                         intent(in)     :: dim_list (:)
+        integer,                         intent(in)     :: dim_list (:), var_indx(:)
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
         type(options_t),                 intent(in)     :: parent_options

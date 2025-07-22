@@ -16,9 +16,10 @@ module wind_iterative_old
     !include 'petsc/finclude/petscdm.h'
     !include 'petsc/finclude/petscdmda.h'
     
-#include <petsc/finclude/petscksp.h>
-#include <petsc/finclude/petscdm.h>
-#include <petsc/finclude/petscdmda.h>
+#include "petscversion.h"
+#include "petsc/finclude/petscksp.h"
+#include "petsc/finclude/petscdm.h"
+#include "petsc/finclude/petscdmda.h"
 
     use domain_interface,  only : domain_t
     !use options_interface, only : options_t
@@ -47,9 +48,9 @@ module wind_iterative_old
 
 
     type(tKSP), allocatable, dimension(:) ::    ksp
-    DM             da
-    Vec            localX, b
-    Mat            arr_A
+    type(tDM)             da
+    type(tVec)            localX, b
+    type(tMat)            arr_A
 
 contains
 
@@ -74,7 +75,7 @@ contains
         PetscScalar,pointer :: lambda(:,:,:)
         logical             :: update
 
-        integer k !, i_s, i_e, k_s, k_e, j_s, j_e
+        integer i, j, k 
         
         PetscErrorCode ierr
 
@@ -87,8 +88,18 @@ contains
         if (present(update_in)) update=update_in
                 
         !Initialize div to be the initial divergence of the input wind field
-        div = div_in(i_s:i_e,k_s:k_e,j_s:j_e) 
-        alpha = alpha_in(i_s:i_e,k_s:k_e,j_s:j_e) 
+        !$acc data present(div_in, alpha_in, div, alpha)
+        !$acc parallel loop gang vector collapse(3)
+        do j = j_s, j_e
+            do k = k_s, k_e
+                do i = i_s, i_e
+                    div(i,k,j) = div_in(i,k,j)
+                    alpha(i,k,j) = alpha_in(i,k,j)
+                end do
+            end do
+        end do
+        !$acc update host(alpha)
+        !$acc end data 
 
         ! set minimum number of iterations for ksp solver
         rtol = 1.0e-5
@@ -125,25 +136,25 @@ contains
             call DMGlobalToLocal(da,b,INSERT_VALUES,localX,ierr)
 
             call DMDAVecGetArrayReadF90(da,localX,lambda, ierr)
-
+            !$acc data present(domain) copyin(lambda)
             call calc_updated_winds(domain, lambda, adv_den)
+            !$acc end data
             call DMDAVecRestoreArrayReadF90(da,localX,lambda, ierr)
-            !Exchange u and v, since the outer points are not updated in above function
-            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
-            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
+
+          else
+            if (STD_OUT_PE) write(*,*) 'WARNING: PETSc did not converge, PETSc reason was: ', reason
+            if (STD_OUT_PE) flush(output_unit)
         endif
     end subroutine calc_iter_winds_old
 
     subroutine calc_updated_winds(domain,lambda,adv_den) !u, v, w, jaco_u,jaco_v,jaco_w,u_dzdx,v_dzdy,lambda, ids, ide, jds, jde)
         type(domain_t), intent(inout) :: domain
-        !real, intent(inout), dimension(:,:,:)  :: u,v,w
-        !real, intent(in), dimension(:,:,:)     :: jaco_u,jaco_v,jaco_w, u_dzdx, v_dzdy
         PetscScalar, intent(in), pointer       :: lambda(:,:,:)
         logical,     intent(in)                :: adv_den
 
 
         real, allocatable, dimension(:,:,:)    :: u_dlambdz, v_dlambdz, dlambdz, u_temp, v_temp, lambda_too, rho, rho_u, rho_v
-        integer k, i_start, i_end, j_start, j_end 
+        integer i, j, k, i_start, i_end, j_start, j_end 
 
         i_start = i_s
         i_end   = i_e+1
@@ -161,75 +172,229 @@ contains
         allocate(rho_u(i_start:i_end,k_s:k_e,j_s:j_e))
         allocate(rho_v(i_s:i_e,k_s:k_e,j_start:j_end))
 
+        ! Create GPU data for local arrays
+        !$acc enter data create(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v)
+        !$acc data present(domain, lambda, u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, alpha, dz_if)
+
+        !$acc kernels
         rho = 1.0
         rho_u = 1.0
         rho_v = 1.0
+        !$acc end kernels
+
+        if (adv_den) then
+            !$acc parallel loop gang vector collapse(3)
+            do j = domain%jms, domain%jme
+                do k = k_s, k_e
+                    do i = domain%ims, domain%ime
+                        rho(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d(i,k,j)
+                    end do
+                end do
+            end do
+        endif
         
-        if (adv_den) rho(domain%ims:domain%ime,:,domain%jms:domain%jme)=domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d(domain%ims:domain%ime,:,domain%jms:domain%jme)
-        
+        ! Calculate rho_u and rho_v with GPU kernels
+        !$acc parallel
         if (i_s==domain%grid%ids .and. i_e==domain%grid%ide) then
-            rho_u(i_start+1:i_end-1,:,j_s:j_e) = 0.5*(rho(i_start+1:i_end-1,:,j_s:j_e) + rho(i_start:i_end-2,:,j_s:j_e))
-            rho_u(i_end,:,j_s:j_e) = rho(i_end-1,:,j_s:j_e)
-            rho_u(i_start,:,j_s:j_e) = rho(i_start,:,j_s:j_e)
+            !$acc loop gang vector collapse(3)
+            do j = j_s, j_e
+                do k = k_s, k_e
+                    do i = i_start+1, i_end-1
+                        rho_u(i,k,j) = 0.5*(rho(i,k,j) + rho(i-1,k,j))
+                    end do
+                end do
+            end do
+            !$acc loop gang vector collapse(2)
+            do j = j_s, j_e
+                do k = k_s, k_e
+                    rho_u(i_end,k,j) = rho(i_end-1,k,j)
+                    rho_u(i_start,k,j) = rho(i_start,k,j)
+                end do
+            end do
         else if (i_s==domain%grid%ids) then
-            rho_u(i_start+1:i_end,:,j_s:j_e) = 0.5*(rho(i_start+1:i_end,:,j_s:j_e) + rho(i_start:i_end-1,:,j_s:j_e))
-            rho_u(i_start,:,j_s:j_e) = rho(i_start,:,j_s:j_e)
+            !$acc loop gang vector collapse(3)
+            do j = j_s, j_e
+                do k = k_s, k_e
+                    do i = i_start+1, i_end
+                        rho_u(i,k,j) = 0.5*(rho(i,k,j) + rho(i-1,k,j))
+                    end do
+                end do
+            end do
+            !$acc loop gang vector collapse(2)
+            do j = j_s, j_e
+                do k = k_s, k_e
+                    rho_u(i_start,k,j) = rho(i_start,k,j)
+                end do
+            end do
         else if (i_e==domain%grid%ide) then
-            rho_u(i_start:i_end-1,:,j_s:j_e) = 0.5*(rho(i_start:i_end-1,:,j_s:j_e) + rho(i_start-1:i_end-2,:,j_s:j_e))
-            rho_u(i_end,:,j_s:j_e) = rho(i_end-1,:,j_s:j_e)
+            !$acc loop gang vector collapse(3)
+            do j = j_s, j_e
+                do k = k_s, k_e
+                    do i = i_start, i_end-1
+                        rho_u(i,k,j) = 0.5*(rho(i,k,j) + rho(i-1,k,j))
+                    end do
+                end do
+            end do
+            !$acc loop gang vector collapse(2)
+            do j = j_s, j_e
+                do k = k_s, k_e
+                    rho_u(i_end,k,j) = rho(i_end-1,k,j)
+                end do
+            end do
         else
-            rho_u(i_start:i_end,:,j_s:j_e) = 0.5*(rho(i_start:i_end,:,j_s:j_e) + rho(i_start-1:i_end-1,:,j_s:j_e))
+            !$acc loop gang vector collapse(3)
+            do j = j_s, j_e
+                do k = k_s, k_e
+                    do i = i_start, i_end
+                        rho_u(i,k,j) = 0.5*(rho(i,k,j) + rho(i-1,k,j))
+                    end do
+                end do
+            end do
         endif
+        !$acc end parallel
         
+        !$acc parallel
         if (j_s==domain%grid%jds .and. j_e==domain%grid%jde) then
-            rho_v(i_s:i_e,:,j_start+1:j_end-1) = 0.5*(rho(i_s:i_e,:,j_start+1:j_end-1) + rho(i_s:i_e,:,j_start:j_end-2))
-            rho_v(i_s:i_e,:,j_start) = rho(i_s:i_e,:,j_start)
-            rho_v(i_s:i_e,:,j_end) = rho(i_s:i_e,:,j_end-1)
+            !$acc loop gang vector collapse(3)
+            do j = j_start+1, j_end-1
+                do k = k_s, k_e
+                    do i = i_s, i_e
+                        rho_v(i,k,j) = 0.5*(rho(i,k,j) + rho(i,k,j-1))
+                    end do
+                end do
+            end do
+            !$acc loop gang vector collapse(2)
+            do k = k_s, k_e
+                do i = i_s, i_e
+                    rho_v(i,k,j_start) = rho(i,k,j_start)
+                    rho_v(i,k,j_end) = rho(i,k,j_end-1)
+                end do
+            end do
         else if (j_s==domain%grid%jds) then
-            rho_v(i_s:i_e,:,j_start+1:j_end) = 0.5*(rho(i_s:i_e,:,j_start+1:j_end) + rho(i_s:i_e,:,j_start:j_end-1))
-            rho_v(i_s:i_e,:,j_start) = rho(i_s:i_e,:,j_start)
+            !$acc loop gang vector collapse(3)
+            do j = j_start+1, j_end
+                do k = k_s, k_e
+                    do i = i_s, i_e
+                        rho_v(i,k,j) = 0.5*(rho(i,k,j) + rho(i,k,j-1))
+                    end do
+                end do
+            end do
+            !$acc loop gang vector collapse(2)
+            do k = k_s, k_e
+                do i = i_s, i_e
+                    rho_v(i,k,j_start) = rho(i,k,j_start)
+                end do
+            end do
         else if (j_e==domain%grid%jde) then
-            rho_v(i_s:i_e,:,j_start:j_end-1) = 0.5*(rho(i_s:i_e,:,j_start:j_end-1) + rho(i_s:i_e,:,j_start-1:j_end-2))
-            rho_v(i_s:i_e,:,j_end) = rho(i_s:i_e,:,j_end-1)
+            !$acc loop gang vector collapse(3)
+            do j = j_start, j_end-1
+                do k = k_s, k_e
+                    do i = i_s, i_e
+                        rho_v(i,k,j) = 0.5*(rho(i,k,j) + rho(i,k,j-1))
+                    end do
+                end do
+            end do
+            !$acc loop gang vector collapse(2)
+            do k = k_s, k_e
+                do i = i_s, i_e
+                    rho_v(i,k,j_end) = rho(i,k,j_end-1)
+                end do
+            end do
         else
-            rho_v(i_s:i_e,:,j_start:j_end) = 0.5*(rho(i_s:i_e,:,j_start:j_end) + rho(i_s:i_e,:,j_start-1:j_end-1))
+            !$acc loop gang vector collapse(3)
+            do j = j_start, j_end
+                do k = k_s, k_e
+                    do i = i_s, i_e
+                        rho_v(i,k,j) = 0.5*(rho(i,k,j) + rho(i,k,j-1))
+                    end do
+                end do
+            end do
         endif
+        !$acc end parallel
         
-        !stager lambda to u grid
-        u_temp = (lambda(i_start:i_end,k_s-1:k_e+1,j_s:j_e) + lambda(i_start-1:i_end-1,k_s-1:k_e+1,j_s:j_e)) / 2 
+        !stager lambda to u grid - GPU computation
+        !$acc parallel loop gang vector collapse(3)
+        do j = j_s, j_e
+            do k = k_s-1, k_e+1
+                do i = i_start, i_end
+                    u_temp(i,k,j) = (lambda(i,k,j) + lambda(i-1,k,j)) / 2 
+                end do
+            end do
+        end do
 
-        !stager lambda to v grid
-        v_temp = (lambda(i_s:i_e,k_s-1:k_e+1,j_start:j_end) + lambda(i_s:i_e,k_s-1:k_e+1,j_start-1:j_end-1)) / 2 
+        !stager lambda to v grid - GPU computation
+        !$acc parallel loop gang vector collapse(3)
+        do j = j_start, j_end
+            do k = k_s-1, k_e+1
+                do i = i_s, i_e
+                    v_temp(i,k,j) = (lambda(i,k,j) + lambda(i,k,j-1)) / 2 
+                end do
+            end do
+        end do
 
-        !divide dz differennces by dz. Note that dz will be horizontally constant
+        !divide dz differences by dz. Note that dz will be horizontally constant
+        !$acc loop seq
         do k=k_s,k_e
-            u_dlambdz(:,k,:) = u_temp(:,k+1,:) - u_temp(:,k-1,:)
-            v_dlambdz(:,k,:) = v_temp(:,k+1,:) - v_temp(:,k-1,:)
-        
-            u_dlambdz(:,k,:) = u_dlambdz(:,k,:)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
-            v_dlambdz(:,k,:) = v_dlambdz(:,k,:)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
-
-            dlambdz(i_s-1:i_e+1,k,j_s-1:j_e+1) = lambda(i_s-1:i_e+1,k+1,j_s-1:j_e+1) - lambda(i_s-1:i_e+1,k-1,j_s-1:j_e+1)
-            dlambdz(:,k,:) = dlambdz(:,k,:)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
+            !$acc loop gang vector collapse(2)
+            do j = j_s, j_e
+                do i = i_start, i_end
+                    u_dlambdz(i,k,j) = u_temp(i,k+1,j) - u_temp(i,k-1,j)
+                    u_dlambdz(i,k,j) = u_dlambdz(i,k,j)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
+                end do
+            end do
+            !$acc loop gang vector collapse(2)
+            do j = j_start, j_end
+                do i = i_s, i_e
+                    v_dlambdz(i,k,j) = v_temp(i,k+1,j) - v_temp(i,k-1,j)
+                    v_dlambdz(i,k,j) = v_dlambdz(i,k,j)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
+                end do
+            end do
+            !$acc loop gang vector collapse(2)
+            do j = j_s-1, j_e+1
+                do i = i_s-1, i_e+1
+                    dlambdz(i,k,j) = lambda(i,k+1,j) - lambda(i,k-1,j)
+                    dlambdz(i,k,j) = dlambdz(i,k,j)/(dz_if(i_s,k+1,j_s)+dz_if(i_s,k,j_s))
+                end do
+            end do
         enddo
 
+        ! Update wind fields on GPU
+        !$acc parallel loop gang vector collapse(3)
+        do j = j_s, j_e
+            do k = k_s, k_e
+                do i = i_start, i_end
+                    domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i,k,j) + &
+                                                        0.5*((lambda(i,k,j) - &
+                                                        lambda(i-1,k,j))/dx - &
+        domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i,k,j)*(u_dlambdz(i,k,j))/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i,k,j))/(rho_u(i,k,j))
+                end do
+            end do
+        end do
+        
+        !$acc parallel loop gang vector collapse(3)
+        do j = j_start, j_end
+            do k = k_s, k_e
+                do i = i_s, i_e
+                    domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i,k,j) + &
+                                                        0.5*((lambda(i,k,j) - &
+                                                        lambda(i,k,j-1))/dx - &
+        domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i,k,j)*(v_dlambdz(i,k,j))/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i,k,j))/(rho_v(i,k,j))
+                end do
+            end do
+        end do
+        
+        !$acc parallel loop gang vector collapse(3)
+        do j = j_s, j_e
+            do k = k_s, k_e
+                do i = i_s, i_e
+                    domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i,k,j) + &
+                        0.5*(alpha(i,k,j)**2)*dlambdz(i,k,j)/domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i,k,j)
+                end do
+            end do
+        end do
 
-        !PETSc arrays are zero-indexed
-        
-        domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i_start:i_end,:,j_s:j_e) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i_start:i_end,:,j_s:j_e) + &
-                                                        0.5*((lambda(i_start:i_end,k_s:k_e,j_s:j_e) - &
-                                                        lambda(i_start-1:i_end-1,k_s:k_e,j_s:j_e))/dx - &
-        domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_start:i_end,:,j_s:j_e)*(u_dlambdz)/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))/(rho_u(i_start:i_end,:,j_s:j_e))!domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_start:i_end,:,j_s:j_e))
-        
-        domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i_s:i_e,:,j_start:j_end) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i_s:i_e,:,j_start:j_end) + &
-                                                        0.5*((lambda(i_s:i_e,k_s:k_e,j_start:j_end) - &
-                                                        lambda(i_s:i_e,k_s:k_e,j_start-1:j_end-1))/dx - &
-        domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i_s:i_e,:,j_start:j_end)*(v_dlambdz)/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))/(rho_v(i_s:i_e,:,j_start:j_end))!domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_start:j_end))
-        
-        domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i_s:i_e,:,j_s:j_e) = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i_s:i_e,:,j_s:j_e) + &
-                    0.5*(alpha**2)*dlambdz(i_s:i_e,:,j_s:j_e)/domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,:,j_s:j_e)
-
-        ! domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) = 0.5*((lambda(i_s:i_e,k_s:k_e,j_s:j_e) - lambda(i_s-1:i_e-1,k_s:k_e,j_s:j_e))/dx - u_dlambdz(i_s:i_e,k_s:k_e,j_s:j_e))
+        !$acc end data
+        !$acc exit data delete(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v)
 
     end subroutine calc_updated_winds
 
@@ -237,14 +402,14 @@ contains
         implicit none
         
         PetscErrorCode  ierr
-        KSP ksp
-        Vec vec_b, x
-        ! integer dummy(*)
-        DM             dm
+        type(tKSP) ksp
+        type(tVec) vec_b, x
+        type(tDM)             dm
 
         PetscInt       i,j,k,mx,my,mz,xm,ym,zm,xs,ys,zs
         DMDALocalInfo       :: info(DMDA_LOCAL_INFO_SIZE)
         PetscScalar,pointer :: barray(:,:,:)
+        PetscBool :: has_cuda
 
         call KSPGetDM(ksp,dm,ierr)
         
@@ -260,33 +425,58 @@ contains
         ys = info(DMDA_LOCAL_INFO_ZS)
         zs = info(DMDA_LOCAL_INFO_YS)
 
-        call DMDAVecGetArrayF90(dm,vec_b,barray, ierr)
+        ! Check if CUDA is available and use GPU-aware array access
+        call PetscHasExternalPackage('cuda', has_cuda, ierr)
         
-        
-        do j=ys,(ys+ym-1)
-            do k=zs,(zs+zm-1)
-                do i=xs,(xs+xm-1)
-                    !For global boundary conditions
-                    if (i.le.0 .or. j.le.0 .or. k.eq.0 .or. &
-                        i.ge.mx-1 .or. j.ge.my-1 .or. k.eq.mz-1) then
-                        barray(i,k,j) = 0.0
-                    else
-                        barray(i,k,j) = -2*div(i,k,j)
-                    endif
+        if (has_cuda .eqv. PETSC_TRUE) then
+            ! Use CUDA-aware array access to keep data on GPU
+            call DMDAVecGetArrayF90(dm,vec_b,barray, ierr)
+            
+            !$acc parallel present(div) copy(barray)
+            !$acc loop gang vector collapse(3)
+            do j=ys,(ys+ym-1)
+                do k=zs,(zs+zm-1)
+                    do i=xs,(xs+xm-1)
+                        !For global boundary conditions
+                        if (i.le.0 .or. j.le.0 .or. k.eq.0 .or. &
+                            i.ge.mx-1 .or. j.ge.my-1 .or. k.eq.mz-1) then
+                            barray(i,k,j) = 0.0
+                        else
+                            barray(i,k,j) = -2*div(i,k,j)
+                        endif
+                    enddo
                 enddo
             enddo
-        enddo
+            !$acc end parallel
+        else
+            ! Fallback to CPU version
+            call DMDAVecGetArrayF90(dm,vec_b,barray, ierr)
+            
+            do j=ys,(ys+ym-1)
+                do k=zs,(zs+zm-1)
+                    do i=xs,(xs+xm-1)
+                        !For global boundary conditions
+                        if (i.le.0 .or. j.le.0 .or. k.eq.0 .or. &
+                            i.ge.mx-1 .or. j.ge.my-1 .or. k.eq.mz-1) then
+                            barray(i,k,j) = 0.0
+                        else
+                            barray(i,k,j) = -2*div(i,k,j)
+                        endif
+                    enddo
+                enddo
+            enddo
+        endif
 
         call DMDAVecRestoreArrayF90(dm,vec_b,barray, ierr)
     end subroutine ComputeRHS
 
     subroutine ComputeMatrix(ksp,array_A)
         implicit none
-        KSP ksp
-        Mat array_A!,array_B
+        type(tKSP) ksp
+        type(tMat) array_A!,array_B
 
         PetscErrorCode  ierr
-        DM             da
+        type(tDM)             da
         PetscInt       i,j,k,mx,my,mz,xm,ym,zm,xs,ys,zs,i1,i2,i6,i15
         DMDALocalInfo  info(DMDA_LOCAL_INFO_SIZE)
         PetscScalar    v(15)
@@ -672,7 +862,12 @@ contains
         if (allocated(M_coef)) deallocate(M_coef)
         if (allocated(N_coef)) deallocate(N_coef)
         if (allocated(O_coef)) deallocate(O_coef)
-        if (allocated(div)) deallocate(div)
+        
+        ! Clean up GPU data before deallocating
+        if (allocated(div)) then
+            !$acc exit data delete(dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma, dz_if, alpha, div)
+            deallocate(div)
+        endif
         if (allocated(dz_if)) deallocate(dz_if)
         if (allocated(jaco)) deallocate(jaco)
         if (allocated(dzdx)) deallocate(dzdx)
@@ -700,7 +895,7 @@ contains
         type(domain_t), intent(in) :: domain
         type(options_t), intent(in) :: options
         PetscErrorCode ierr
-        PC precond
+        type(tPC) precond
         integer :: i
 
         PETSC_COMM_WORLD = domain%compute_comms%MPI_VAL
@@ -795,7 +990,7 @@ contains
         implicit none
         type(domain_t), intent(in) :: domain
 
-        integer :: ierr, k, i_s_bnd, i_e_bnd, j_s_bnd, j_e_bnd
+        integer :: ierr, i, j, k, i_s_bnd, i_e_bnd, j_s_bnd, j_e_bnd
 
         i_s = domain%its
         i_e = domain%ite
@@ -853,22 +1048,65 @@ contains
             yl = 0
 
             dx = domain%dx
-            dzdx = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e) 
-            dzdy = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
-            jaco = domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,k_s:k_e,j_s:j_e)
-
-            dzdx_surf = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)
-            dzdy_surf = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)
-
-            dzdx_surf(i_s_bnd:i_e_bnd,j_s:j_e) = (domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s_bnd+1:i_e_bnd+1,j_s:j_e)-domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s_bnd-1:i_e_bnd-1,j_s:j_e))/(2*dx)
-            dzdy_surf(i_s:i_e,j_s_bnd:j_e_bnd) = (domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s:i_e,j_s_bnd+1:j_e_bnd+1)-domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i_s:i_e,j_s_bnd-1:j_e_bnd-1))/(2*dx)
             
-            dz_if(:,k_s+1:k_e,:) = (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s+1:k_e,j_s:j_e) + &
-                                   domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s:k_e-1,j_s:j_e))/2
-            dz_if(:,k_s,:) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_s,j_s:j_e)
-            dz_if(:,k_e+1,:) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s:i_e,k_e,j_s:j_e)
-            sigma = dz_if(:,k_s:k_e,:)/dz_if(:,k_s+1:k_e+1,:)
+            ! Create GPU data for persistent arrays
+            !$acc enter data create(dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma, dz_if, alpha, div)
             
+            !$acc data present_or_copy(domain) present(dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, dz_if, sigma)
+            
+            !$acc parallel loop gang vector collapse(3)
+            do j = j_s, j_e
+                do k = k_s+1, k_e
+                    do i = i_s, i_e
+                        dz_if(i,k,j) = (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j) + &
+                                       domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k-1,j))/2
+                    end do
+                end do
+            end do            
+
+            !$acc parallel loop gang vector collapse(2)
+            do j = j_s, j_e
+                do i = i_s, i_e
+                    dz_if(i,k_s,j) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k_s,j)
+                    dz_if(i,k_e+1,j) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k_e,j)
+
+
+                    dzdx_surf(i,j) = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i,k_s,j)
+                    dzdy_surf(i,j) = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i,k_s,j)
+                enddo
+            end do
+            
+            !$acc parallel loop gang vector collapse(3)
+            do j = j_s, j_e
+                do k = k_s, k_e
+                    do i = i_s, i_e
+                        dzdx(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i,k,j)
+                        dzdy(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i,k,j)
+                        jaco(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i,k,j)
+                        sigma(i,k,j) = dz_if(i,k,j)/dz_if(i,k+1,j)
+                    end do
+                end do
+            end do
+
+            ! Update surface derivatives for interior points
+            !$acc parallel loop gang vector collapse(2)
+            do j = j_s, j_e
+                do i = i_s_bnd, i_e_bnd
+                    dzdx_surf(i,j) = (domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i+1,j) - &
+                                     domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i-1,j))/(2*dx)
+                end do
+            end do
+            !$acc parallel loop gang vector collapse(2)
+            do j = j_s_bnd, j_e_bnd
+                do i = i_s, i_e
+                    dzdy_surf(i,j) = (domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i,j+1) - &
+                                     domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i,j-1))/(2*dx)
+                end do
+            end do
+            !$acc update host(dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, dz_if, sigma)
+
+            !$acc end data
+
             !Calculate how global grid is decomposed for DMDA
             !subtract halo size from boundaries of each cell to get x/y extent
             if (domain%grid%yimg == 1) xl(domain%grid%ximg) = domain%grid%nx-hs*2

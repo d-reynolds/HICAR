@@ -157,8 +157,8 @@ interface
     module subroutine exch_var(this, var, do_dqdt, corners)
         implicit none
         class(halo_t),     intent(inout) :: this
-        type(variable_t),  intent(inout) :: var
-        logical,          intent(in), optional :: do_dqdt, corners
+        type(variable_t), intent(inout) :: var
+        logical, optional, intent(in) :: do_dqdt, corners
     end subroutine exch_var
 
 

@@ -29,8 +29,6 @@ module grid_interface
         integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
                     its,ite, jts,jte, kts,kte    ! for the data tile to process   (t)
 
-        character(len=kMAX_DIM_LENGTH), allocatable :: dimensions(:)
-
         type(MPI_Datatype) :: NS_halo
         type(MPI_Datatype) :: NS_win_halo
 

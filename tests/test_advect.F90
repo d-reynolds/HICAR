@@ -177,11 +177,13 @@ module test_advect
             if (domain%west_boundary) domain%vars_3d(domain%adv_vars(i)%v)%data_3d(var_grid%ims:var_grid%its-1,:,:) = initial_val
         end do
 
+        !$acc data copy(domain, kVARS)
+
         ! exchange to get each others values in the halo regions
         call domain%batch_exch()
 
         dt = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
-                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, options%domain%dz_levels, &
+                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
@@ -194,6 +196,7 @@ module test_advect
             call advect(domain, options, dt, flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
             call domain%batch_exch()
         end do
+        !$acc end data
 
         ! test that all of the tile indices of temperature for the domain object are the same as the intial value
         do i = 1, size(domain%adv_vars)

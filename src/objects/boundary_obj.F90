@@ -9,14 +9,15 @@ submodule(boundary_interface) boundary_implementation
     use array_utilities,        only : interpolate_in_z
     use io_routines,            only : io_getdims, io_read, io_maxDims, io_variable_is_present, io_write
     use time_io,                only : read_times, find_timestep_in_filelist
-    use string,                 only : str
+    use string,                 only : str, as_string
     use mod_atm_utilities,      only : rh_to_mr, relative_humidity, compute_3d_p, compute_3d_z, exner_function
     use geo,                    only : standardize_coordinates
     use vertical_interpolation, only : vLUT, vinterp
     use timer_interface,    only : timer_t
     use debug_module,           only : check_ncdf
     use mod_wrf_constants,      only : gravity
-    use icar_constants,         only : STD_OUT_PE, kMAX_FILE_LENGTH
+    use variable_interface,     only : variable_t
+    use icar_constants,         only : STD_OUT_PE, kMAX_FILE_LENGTH, kVARS
     implicit none
 contains
 
@@ -36,12 +37,12 @@ contains
 
         type(Time_type) :: strt_time
         character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
-        integer,                         allocatable :: var_dimensions(:)
+        integer,                         allocatable :: var_dimensions(:), var_indx(:)
 
 
         ! the parameters option type can't contain allocatable arrays because it is a coarray
         ! so we need to allocate the vars_to_read and var_dimensions outside of the options type
-        call setup_variable_lists(options%forcing%vars_to_read, options%forcing%dim_list, vars_to_read, var_dimensions)
+        call setup_variable_lists(options%forcing%vars_to_read, options%forcing%dim_list, options, vars_to_read, var_dimensions, var_indx)
 
         strt_time = options%general%start_time
         if (options%restart%restart) strt_time = options%restart%restart_time
@@ -52,14 +53,14 @@ contains
         ! also need to explicitly save lat and lon data
         ! if (STD_OUT_PE) then
         if (present(parent_options)) then
-            call this%init_local_asnest(vars_to_read, var_dimensions,   &
+            call this%init_local_asnest(vars_to_read, var_dimensions, var_indx,   &
                                     domain_lat,        &
                                     domain_lon,       &
                                     parent_options)
         else
             call this%init_local(options,                           &
                                     options%forcing%boundary_files, &
-                                    vars_to_read, var_dimensions,   &
+                                    vars_to_read, var_dimensions, var_indx,  &
                                     strt_time,                      &
                                     options%forcing%latvar,         &
                                     options%forcing%lonvar,         &
@@ -83,13 +84,13 @@ contains
     !! Reads initial conditions from the forcing file
     !!
     !!------------------------------------------------------------
-    module subroutine init_local(this, options, file_list, var_list, dim_list, start_time, &
+    module subroutine init_local(this, options, file_list, var_list, dim_list, var_indx, start_time, &
                                  lat_var, lon_var, z_var, time_var, p_var, domain_lat, domain_lon)
         class(boundary_t),               intent(inout)  :: this
         type(options_t),                 intent(inout)  :: options
         character(len=kMAX_FILE_LENGTH), intent(in)     :: file_list(:)
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
-        integer,                         intent(in)     :: dim_list (:)
+        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list(:)
+        integer,                         intent(in)     :: dim_list(:), var_indx(:)
         type(Time_type),                 intent(in)     :: start_time
         character(len=kMAX_NAME_LENGTH), intent(in)     :: lat_var
         character(len=kMAX_NAME_LENGTH), intent(in)     :: lon_var
@@ -99,7 +100,6 @@ contains
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
 
-        type(variable_t)  :: test_variable
         real, allocatable :: temp_z(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:), lat_1d(:), lon_1d(:)
         integer, allocatable :: lat_dims(:), lon_dims(:)
         real :: neg_z
@@ -223,7 +223,7 @@ contains
 
         ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
         do i=1, size(var_list)
-            call add_var_to_dict(this, var_list(i), dim_list(i), [(this%ite-this%its+1), nz, (this%jte-this%jts+1)])
+            call add_var_to_dict(this, var_list(i), dim_list(i), var_indx(i), [(this%ite-this%its+1), nz, (this%jte-this%jts+1)])
         end do
 
 
@@ -234,15 +234,13 @@ contains
     !! Reads initial conditions from the forcing file
     !!
     !!------------------------------------------------------------
-    module subroutine init_local_asnest(this, var_list, dim_list, domain_lat, domain_lon, parent_options)
+    module subroutine init_local_asnest(this, var_list, dim_list, var_indx, domain_lat, domain_lon, parent_options)
         class(boundary_t),               intent(inout)  :: this
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
-        integer,                         intent(in)     :: dim_list (:)
+        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list(:)
+        integer,                         intent(in)     :: dim_list(:), var_indx(:)
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
         type(options_t),                 intent(in)     :: parent_options
-
-        type(variable_t)  :: test_variable
         
         integer :: i
         real, allocatable, dimension(:,:) :: parent_nest_lat, parent_nest_lon
@@ -294,7 +292,7 @@ contains
 
         ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
         do i=1, size(var_list)
-            call add_var_to_dict(this, var_list(i), dim_list(i), [(this%ite-this%its+1), this%kte, (this%jte-this%jts+1)])
+            call add_var_to_dict(this, var_list(i), dim_list(i), var_indx(i), [(this%ite-this%its+1), this%kte, (this%jte-this%jts+1)])
         end do
 
     end subroutine
@@ -318,7 +316,7 @@ contains
         
         if (error==1) then
             if (STD_OUT_PE) write(*,*) 'ERROR: Could not find the first time step in forcing files'
-            if (STD_OUT_PE) write(*,*) 'ERROR: Time: ',time%as_string()
+            if (STD_OUT_PE) write(*,*) 'ERROR: Time: ',as_string(time)
             if (STD_OUT_PE) write(*,*) 'ERROR: step returned was: ',this%firststep
             stop "Ran out of files to process while searching for matching time variable!"
         endif
@@ -441,11 +439,11 @@ contains
     !! Variable is then added to a master variable dictionary
     !!
     !!------------------------------------------------------------
-    subroutine add_var_to_dict(this, var_name, ndims, dims)
+    subroutine add_var_to_dict(this, var_name, ndims, indx, dims)
         implicit none
         type(boundary_t), intent(inout) :: this
         character(len=*), intent(in)    :: var_name
-        integer,          intent(in)    :: ndims
+        integer,          intent(in)    :: ndims, indx
         integer,          intent(in)    :: dims(3)
 
         real, allocatable :: temp_2d_data(:,:)
@@ -453,19 +451,19 @@ contains
         type(variable_t)  :: new_variable
 
         if (ndims==2) then
-            call new_variable%initialize( [dims(1),dims(3)] )
-            call this%variables%add_var(var_name, new_variable)
+            call new_variable%initialize( indx, [dims(1),dims(3)] )
+            call this%variables%add_var(indx, new_variable)
 
         elseif (ndims==3) then
-            call new_variable%initialize( dims )
-            call this%variables%add_var(var_name, new_variable)
+            call new_variable%initialize( indx, dims )
+            call this%variables%add_var(indx, new_variable)
 
         ! these variables are computed (e.g. pressure from height or height from pressure)
         elseif (ndims==-3) then
-            call new_variable%initialize( dims )
+            call new_variable%initialize( indx, dims )
             new_variable%computed = .True.
 
-            call this%variables%add_var(var_name, new_variable)
+            call this%variables%add_var(indx, new_variable)
         endif
 
     end subroutine
@@ -479,18 +477,18 @@ contains
         type(interpolable_type) :: input_geo
         real, allocatable :: temp_3d(:,:,:)
         real :: neg_z
-        character(len=kMAX_NAME_LENGTH) :: name
+        integer :: id
 
 
         associate(list => this%variables)
 
-        input_z = list%get_var(options%forcing%zvar)
+        input_z = list%get_var(kVARS%z)
 
         if (options%forcing%z_is_geopotential) then
             input_z%data_3d = input_z%data_3d / gravity
             !neg_z = minval(input_z%data_3d)
             ! if (neg_z < 0.0) input_z%data_3d = input_z%data_3d - neg_z
-            call list%add_var(options%forcing%zvar, input_z)
+            call list%add_var(kVARS%z, input_z)
         endif
 
         ! if (options%forcing%z_is_on_interface) then
@@ -507,7 +505,7 @@ contains
         call list%reset_iterator()
         do while (list%has_more_elements())
             ! get the next variable in the structure
-            var = list%next(name)
+            var = list%next(id)
 
             if (var%three_d) then
                 ! need to vinterp this dataset to the original vertical levels (if necessary)
@@ -516,7 +514,7 @@ contains
                 call vinterp(var%data_3d, temp_3d, input_geo%vert_lut)
 
             endif
-            call list%add_var(name, var)
+            call list%add_var(id, var)
 
         end do
         end associate
@@ -532,10 +530,9 @@ contains
         integer           :: err
         type(variable_t)  :: var, pvar, tvar
 
-        integer :: nx,ny,nz
+        integer :: nx,ny,nz, var_id
         real, allocatable :: temp_z(:,:,:)
         real :: neg_z
-        character(len=kMAX_NAME_LENGTH) :: name
 
         associate(list => this%variables)
 
@@ -548,9 +545,9 @@ contains
         endif
 
         if (options%forcing%t_offset /= 0) then
-            tvar = list%get_var(options%forcing%tvar)
+            tvar = list%get_var(kVARS%potential_temperature)
             tvar%data_3d = tvar%data_3d + options%forcing%t_offset
-            call list%add_var(options%forcing%tvar, tvar)
+            call list%add_var(kVARS%potential_temperature, tvar)
         endif
 
         ! loop through the list of variables that need to be read in
@@ -558,15 +555,15 @@ contains
         do while (list%has_more_elements())
 
             ! get the next variable in the structure
-            var = list%next(name)
+            var = list%next(var_id)
 
             if (var%computed) then
 
-                if (trim(name) == trim(options%forcing%zvar)) then
+                if (var_id == kVARS%z) then
                     call compute_z_update(this, list, options)
                 endif
 
-                if (trim(name) == trim(options%forcing%pvar)) then
+                if (var_id == kVARS%pressure) then
                     call compute_p_update(this, list, options)
                 endif
 
@@ -574,15 +571,15 @@ contains
         end do
 
         if (.not.options%forcing%t_is_potential) then
-            tvar = list%get_var(options%forcing%tvar)
-            pvar = list%get_var(options%forcing%pvar)    
+            tvar = list%get_var(kVARS%potential_temperature)
+            pvar = list%get_var(kVARS%pressure)    
             tvar%data_3d = tvar%data_3d / exner_function(pvar%data_3d)
-            call list%add_var(options%forcing%tvar, tvar)
+            call list%add_var(kVARS%potential_temperature, tvar)
         endif
 
         if (options%forcing%limit_rh) call limit_rh(list, options)
         !limit sea surface temperature to be >= 273.15 (i.e. cannot freeze)
-        call limit_2d_var(list, options%forcing%sst_var, min_val=273.15)
+        call limit_2d_var(list, kVARS%sst, min_val=273.15)
 
         end associate
 
@@ -603,9 +600,9 @@ contains
         integer           :: err
         type(variable_t)  :: pvar, tvar, qvar
 
-        tvar = list%get_var(options%forcing%tvar)
-        pvar = list%get_var(options%forcing%pvar)
-        qvar = list%get_var(options%forcing%qvvar)
+        tvar = list%get_var(kVARS%potential_temperature)
+        pvar = list%get_var(kVARS%pressure)
+        qvar = list%get_var(kVARS%water_vapor)
 
         if (maxval(qvar%data_3d) > 2) then
             qvar%data_3d = qvar%data_3d/100.0
@@ -617,7 +614,7 @@ contains
             qvar%data_3d = rh_to_mr(qvar%data_3d, tvar%data_3d, pvar%data_3d)
         endif
 
-        call list%add_var(options%forcing%qvvar, qvar)
+        call list%add_var(kVARS%water_vapor, qvar)
 
     end subroutine compute_mixing_ratio_from_rh
 
@@ -632,9 +629,9 @@ contains
         real :: rh, t
         integer :: i,j,k
 
-        tvar = list%get_var(options%forcing%tvar)
-        pvar = list%get_var(options%forcing%pvar)
-        qvar = list%get_var(options%forcing%qvvar)
+        tvar = list%get_var(kVARS%potential_temperature)
+        pvar = list%get_var(kVARS%pressure)
+        qvar = list%get_var(kVARS%water_vapor)
 
         do j = lbound(tvar%data_3d, 3), ubound(tvar%data_3d, 3)
             do k = lbound(tvar%data_3d, 2), ubound(tvar%data_3d, 2)
@@ -652,23 +649,24 @@ contains
             enddo
         enddo
 
-        call list%add_var(options%forcing%qvvar, qvar)
+        call list%add_var(kVARS%water_vapor, qvar)
 
     end subroutine limit_rh
 
     ! set minimum and/or maximum values on any 2D forcing variable (e.g. sst_var, rain_var)
-    subroutine limit_2d_var(list, varname, min_val, max_val)
+    subroutine limit_2d_var(list, var_id, min_val, max_val)
         implicit none
         type(var_dict_t),   intent(inout)   :: list
-        character(len=*),   intent(in)      :: varname
+        integer,            intent(in)      :: var_id
         real, optional,     intent(in)      :: min_val
         real, optional,     intent(in)      :: max_val
 
         type(variable_t)  :: var
+        integer :: err
 
-        if (trim(varname) == "") return
-
-        var = list%get_var(varname)
+        var = list%get_var(var_id,err=err)
+        
+        if (err > 0) return
 
         if (present(min_val)) then
             where(var%data_2d < min_val) var%data_2d = min_val
@@ -677,7 +675,7 @@ contains
         if (present(max_val)) then
             where(var%data_2d > max_val) var%data_2d = max_val
         endif
-        call list%add_var(varname, var)
+        call list%add_var(var_id, var)
 
     end subroutine limit_2d_var
 
@@ -689,11 +687,11 @@ contains
         integer           :: err
         type(variable_t)  :: qvar
 
-        qvar = list%get_var(options%forcing%qvvar)
+        qvar = list%get_var(kVARS%water_vapor)
 
         qvar%data_3d = qvar%data_3d / (1 - qvar%data_3d)
 
-        call list%add_var(options%forcing%qvvar, qvar)
+        call list%add_var(kVARS%water_vapor, qvar)
 
     end subroutine compute_mixing_ratio_from_sh
 
@@ -709,12 +707,12 @@ contains
 
         real, allocatable :: t(:,:,:)
 
-        qvar = list%get_var(options%forcing%qvvar)
-        tvar = list%get_var(options%forcing%tvar)
-        zvar = list%get_var(options%forcing%hgtvar)
-        var = list%get_var(options%forcing%pvar, err)
+        qvar = list%get_var(kVARS%water_vapor)
+        tvar = list%get_var(kVARS%potential_temperature)
+        zvar = list%get_var(kVARS%terrain)
+        var = list%get_var(kVARS%pressure, err)
 
-        pvar = list%get_var(options%forcing%pslvar, err)
+        pvar = list%get_var(kVARS%sea_surface_pressure, err)
 
         allocate(t, mold=tvar%data_3d)
         if (options%forcing%t_is_potential) then
@@ -728,7 +726,7 @@ contains
             call compute_3d_z(var%data_3d, pvar%data_2d, this%z, t, qvar%data_3d)
 
         else
-            pvar = list%get_var(options%forcing%psvar, err)
+            pvar = list%get_var(kVARS%surface_pressure, err)
             if (err == 0) then
                 call compute_3d_z(var%data_3d, pvar%data_2d, this%z, t, qvar%data_3d, zvar%data_2d)
             else
@@ -736,9 +734,9 @@ contains
                 error stop
             endif
         endif
-        zvar = list%get_var(options%forcing%zvar)
+        zvar = list%get_var(kVARS%z)
         zvar%data_3d = this%z
-        call list%add_var(options%forcing%zvar, zvar)
+        call list%add_var(kVARS%z, zvar)
 
     end subroutine compute_z_update
 
@@ -753,17 +751,17 @@ contains
 
         if (options%forcing%t_is_potential) stop "Need real air temperature to compute pressure"
 
-        qvar = list%get_var(options%forcing%qvvar)
-        tvar = list%get_var(options%forcing%tvar)
-        pvar = list%get_var(options%forcing%pvar)
+        qvar = list%get_var(kVARS%water_vapor)
+        tvar = list%get_var(kVARS%potential_temperature)
+        pvar = list%get_var(kVARS%pressure)
 
-        psvar = list%get_var(options%forcing%psvar, err)
-        zvar = list%get_var(options%forcing%hgtvar, hgterr)
+        psvar = list%get_var(kVARS%surface_pressure, err)
+        zvar = list%get_var(kVARS%terrain, hgterr)
 
         if ((err + hgterr) == 0) then
             call compute_3d_p(pvar%data_3d, psvar%data_2d, this%z, tvar%data_3d, qvar%data_3d, zvar%data_2d)
         else
-            psvar = list%get_var(options%forcing%pslvar, err)
+            psvar = list%get_var(kVARS%sea_surface_pressure, err)
 
             if (err == 0) then
                 call compute_3d_p(pvar%data_3d, psvar%data_2d, this%z, tvar%data_3d, qvar%data_3d)
@@ -773,7 +771,7 @@ contains
                 error stop
             endif
         endif
-        call list%add_var(options%forcing%pvar, pvar)
+        call list%add_var(kVARS%pressure, pvar)
 
 
     end subroutine compute_p_update
@@ -786,12 +784,13 @@ contains
     !! Count the number of variables specified, then allocate and store those variables in a list just their size.
     !! The master list will have all variables, but not all will be set
     !!------------------------------------------------------------
-    subroutine setup_variable_lists(master_var_list, master_dim_list, vars_to_read, var_dimensions)
+    subroutine setup_variable_lists(master_var_list, master_dim_list, opt, vars_to_read, var_dimensions, var_indx)
         implicit none
         character(len=kMAX_NAME_LENGTH), intent(in)                 :: master_var_list(:)
         integer,                         intent(in)                 :: master_dim_list(:)
+        type(options_t),                 intent(in)                 :: opt
         character(len=kMAX_NAME_LENGTH), intent(inout), allocatable :: vars_to_read(:)
-        integer,                         intent(inout), allocatable :: var_dimensions(:)
+        integer,                         intent(inout), allocatable :: var_dimensions(:), var_indx(:)
 
         integer :: n_valid_vars
         integer :: i, curvar, err
@@ -809,6 +808,9 @@ contains
         allocate(var_dimensions(  n_valid_vars), stat=err)
         if (err /= 0) stop "var_dimensions: Allocation request denied"
 
+        allocate(var_indx(  n_valid_vars), stat=err)
+        if (err /= 0) stop "var_dimensions: Allocation request denied"
+
         curvar = 1
         do i=1, size(master_var_list)
             if (trim(master_var_list(i)) /= '') then
@@ -817,6 +819,53 @@ contains
                 ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)
                 curvar = curvar + 1
             endif
+        enddo
+
+        do i=1,size(vars_to_read)
+            if (vars_to_read(i) == opt%forcing%latvar) var_indx(i) = kVARS%latitude
+            if (vars_to_read(i) == opt%forcing%lonvar) var_indx(i) = kVARS%longitude
+            if (vars_to_read(i) == opt%forcing%uvar) var_indx(i) = kVARS%u
+            if (vars_to_read(i) == opt%forcing%ulat) var_indx(i) = kVARS%u_latitude
+            if (vars_to_read(i) == opt%forcing%ulon) var_indx(i) = kVARS%u_longitude
+            if (vars_to_read(i) == opt%forcing%vvar) var_indx(i) = kVARS%v
+            if (vars_to_read(i) == opt%forcing%vlat) var_indx(i) = kVARS%v_latitude
+            if (vars_to_read(i) == opt%forcing%vlon) var_indx(i) = kVARS%v_longitude
+            if (vars_to_read(i) == opt%forcing%wvar) var_indx(i) = kVARS%w
+            if (vars_to_read(i) == opt%forcing%pvar) var_indx(i) = kVARS%pressure
+            if (vars_to_read(i) == opt%forcing%tvar) var_indx(i) = kVARS%potential_temperature
+            if (vars_to_read(i) == opt%forcing%qvvar) var_indx(i) = kVARS%water_vapor
+            if (vars_to_read(i) == opt%forcing%qcvar) var_indx(i) = kVARS%cloud_water_mass
+            if (vars_to_read(i) == opt%forcing%qivar) var_indx(i) = kVARS%ice_mass
+            if (vars_to_read(i) == opt%forcing%qrvar) var_indx(i) = kVARS%rain_mass
+            if (vars_to_read(i) == opt%forcing%qsvar) var_indx(i) = kVARS%snow_mass
+            if (vars_to_read(i) == opt%forcing%qgvar) var_indx(i) = kVARS%graupel_mass
+            if (vars_to_read(i) == opt%forcing%i2mvar) var_indx(i) = kVARS%ice2_mass
+            if (vars_to_read(i) == opt%forcing%i3mvar) var_indx(i) = kVARS%ice3_mass
+            if (vars_to_read(i) == opt%forcing%qncvar) var_indx(i) = kVARS%cloud_number
+            if (vars_to_read(i) == opt%forcing%qnivar) var_indx(i) = kVARS%ice_number
+            if (vars_to_read(i) == opt%forcing%qnrvar) var_indx(i) = kVARS%rain_number
+            if (vars_to_read(i) == opt%forcing%qnsvar) var_indx(i) = kVARS%snow_number
+            if (vars_to_read(i) == opt%forcing%qngvar) var_indx(i) = kVARS%graupel_number
+            if (vars_to_read(i) == opt%forcing%i2nvar) var_indx(i) = kVARS%ice2_number
+            if (vars_to_read(i) == opt%forcing%i3nvar) var_indx(i) = kVARS%ice3_number
+            if (vars_to_read(i) == opt%forcing%i1avar) var_indx(i) = kVARS%ice1_a
+            if (vars_to_read(i) == opt%forcing%i1cvar) var_indx(i) = kVARS%ice1_c
+            if (vars_to_read(i) == opt%forcing%i2avar) var_indx(i) = kVARS%ice2_a
+            if (vars_to_read(i) == opt%forcing%i2cvar) var_indx(i) = kVARS%ice2_c
+            if (vars_to_read(i) == opt%forcing%i3avar) var_indx(i) = kVARS%ice3_a
+            if (vars_to_read(i) == opt%forcing%i3cvar) var_indx(i) = kVARS%ice3_c
+            if (vars_to_read(i) == opt%forcing%hgtvar) var_indx(i) = kVARS%terrain
+            if (vars_to_read(i) == opt%forcing%pslvar) var_indx(i) = kVARS%sea_surface_pressure
+            if (vars_to_read(i) == opt%forcing%psvar) var_indx(i) = kVARS%surface_pressure
+            if (vars_to_read(i) == opt%forcing%sst_var) var_indx(i) = kVARS%sst
+            if (vars_to_read(i) == opt%forcing%pblhvar) var_indx(i) = kVARS%hpbl
+            if (vars_to_read(i) == opt%forcing%shvar) var_indx(i) = kVARS%sensible_heat
+            if (vars_to_read(i) == opt%forcing%lhvar) var_indx(i) = kVARS%latent_heat
+            if (vars_to_read(i) == opt%forcing%zvar) var_indx(i) = kVARS%z
+            if (vars_to_read(i) == opt%forcing%swdown_var) var_indx(i) = kVARS%shortwave
+            if (vars_to_read(i) == opt%forcing%lwdown_var) var_indx(i) = kVARS%longwave
+            if (vars_to_read(i) == opt%forcing%time_var) var_indx(i) = 1000
+
         enddo
     end subroutine
 

@@ -17,7 +17,9 @@ submodule(ioserver_interface) ioserver_implementation
   use iso_fortran_env
   use iso_c_binding
   use output_metadata,          only : get_varindx
-  use string,                   only : split_str
+  use meta_data_interface,      only : meta_data_t
+  use time_object,        only : Time_type
+  use string,                   only : split_str, as_string
   use io_routines,              only : check_file_exists
   use time_io,                    only : find_timestep_in_file
   implicit none
@@ -30,7 +32,6 @@ contains
         type(options_t), intent(in)     :: options(:)
         integer,            intent(in)     :: nest_indx
 
-        type(variable_t) :: var
         integer ::  n, n_3d, n_2d, var_indx, out_i, rst_i, some_child_id, ierr
         
         ! Call the parent type's init procedure
@@ -79,7 +80,7 @@ contains
         this%k_e_f = options(nest_indx)%domain%nz
 
         do n = 1,this%outputer%n_vars
-            if (this%outputer%variables(n)%three_d) then
+            if (this%outputer%var_meta(n)%three_d) then
                 this%n_w_3d = this%n_w_3d+1
         !         if(this%outputer%variables(n)%dim_len(2) > this%k_e_w) this%k_e_w = this%outputer%variables(n)%dim_len(2)
             endif
@@ -106,7 +107,7 @@ contains
         rst_i = 1
         
         do n=1,this%outputer%n_vars
-            var_indx = get_varindx(this%outputer%variables(n)%name)
+            var_indx = get_varindx(this%outputer%var_meta(n)%name)
             if (options(nest_indx)%output%vars_for_output(var_indx) > 0) then
                 this%out_var_indices(out_i) = n
                 out_i = out_i + 1
@@ -573,21 +574,21 @@ contains
             n_3d = 0
             do n = 1,this%outputer%n_vars 
 
-                if (this%outputer%variables(n)%two_d) n_2d = n_2d + 1
-                if (this%outputer%variables(n)%three_d) n_3d = n_3d + 1
+                if (this%outputer%var_meta(n)%two_d) n_2d = n_2d + 1
+                if (this%outputer%var_meta(n)%three_d) n_3d = n_3d + 1
 
                 ! If this variable is not in the output list, and this is not a restart write, and this is not the first write, skip it
                 if (.not.(should_write_restart) .and. .not.(ANY(this%out_var_indices==n)) .and. .not.(this%first_write) ) cycle
 
-                x_stag = this%outputer%variables(n)%xstag
-                y_stag = this%outputer%variables(n)%ystag
+                x_stag = this%outputer%var_meta(n)%xstag
+                y_stag = this%outputer%var_meta(n)%ystag
 
-                if (this%outputer%variables(n)%two_d) then
+                if (this%outputer%var_meta(n)%two_d) then
                     this%outputer%variables(n)%data_2d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
                         this%write_buffer_2d(i)%buff(n_2d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
-                elseif (this%outputer%variables(n)%three_d) then
+                elseif (this%outputer%var_meta(n)%three_d) then
                     this%outputer%variables(n)%data_3d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),:,(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
-                        this%write_buffer_3d(i)%buff(n_3d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:this%outputer%variables(n)%dim_len(2),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
+                        this%write_buffer_3d(i)%buff(n_3d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:this%outputer%var_meta(n)%dim_len(2),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
                 endif
             enddo
         enddo
@@ -764,11 +765,11 @@ contains
         type(options_t),     intent(in)    :: options
 
         integer :: i, n_3d, n_2d, nx, ny, i_s_re, i_e_re, j_s_re, j_e_re
-        integer :: ncid, var_id, dimid_3d(4), nz, err, varid, start_3d(4), cnt_3d(4), start_2d(3), cnt_2d(3), msg_size
+        integer :: ncid, file_var_id, dimid_3d(4), nz, err, varid, start_3d(4), cnt_3d(4), start_2d(3), cnt_2d(3), msg_size
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
         type(MPI_Info) :: IO_Comms_info
         real, allocatable :: data3d(:,:,:,:), restart_data_3d(:,:,:,:), restart_data_2d(:,:,:)
-        type(variable_t)  :: var
+        type(meta_data_t)  :: var_meta
         character(len=kMAX_NAME_LENGTH) :: name
         character(len=kMAX_FILE_LENGTH) :: base_rst_file_name, tmp_str, restart_in_file
         character(len=kMAX_STRING_LENGTH), allocatable :: tokens(:)
@@ -792,7 +793,7 @@ contains
 
         write(restart_in_file, '(A,A,".nc")')    &
                 trim(base_rst_file_name),   &
-                trim(options%restart%restart_time%as_string('(I4,"-",I0.2,"-",I0.2,"_",I0.2,"-",I0.2,"-",I0.2)'))
+                trim(as_string(options%restart%restart_time,'(I4,"-",I0.2,"-",I0.2,"_",I0.2,"-",I0.2,"-",I0.2)'))
 
         call check_file_exists(restart_in_file, message='Restart file does not exist.')
 
@@ -803,7 +804,7 @@ contains
             write(*,*) " ------------------ "
             write(*,*) "RESTART INFORMATION"
             write(*,*) "mjd",         options%restart%restart_time%mjd()
-            write(*,*) "date:",       trim(options%restart%restart_time%as_string())
+            write(*,*) "date:",       trim(as_string(options%restart%restart_time))
             write(*,*) "file:",   trim(restart_in_file)
             write(*,*) "forcing step",options%restart%restart_step_in_file
             write(*,*) " ------------------ "
@@ -824,28 +825,28 @@ contains
         n_3d = 1
 
         do i = 1,size(this%rst_var_indices)
-            var = this%outputer%variables(this%rst_var_indices(i))
-            name = var%name
-            call check_ncdf( nf90_inq_varid(ncid, name, var_id), " Getting var ID for "//trim(name))
-            call check_ncdf( nf90_var_par_access(ncid, var_id, nf90_collective))
+            var_meta = this%outputer%var_meta(this%rst_var_indices(i))
+            name = var_meta%name
+            call check_ncdf( nf90_inq_varid(ncid, name, file_var_id), " Getting var ID for "//trim(name))
+            call check_ncdf( nf90_var_par_access(ncid, file_var_id, nf90_collective))
             
-            nx = cnt_3d(1) + var%xstag
-            ny = cnt_3d(2) + var%ystag
+            nx = cnt_3d(1) + var_meta%xstag
+            ny = cnt_3d(2) + var_meta%ystag
 
-            if (var%three_d) then
+            if (var_meta%three_d) then
                 ! Get length of z dim
-                call check_ncdf( nf90_inquire_variable(ncid, var_id, dimids = dimid_3d), " Getting dim IDs for "//trim(name))
+                call check_ncdf( nf90_inquire_variable(ncid, file_var_id, dimids = dimid_3d), " Getting dim IDs for "//trim(name))
                 call check_ncdf( nf90_inquire_dimension(ncid, dimid_3d(3), len = nz), " Getting z dim len for "//trim(name))
                 
                 if (allocated(data3d)) deallocate(data3d)
                 allocate(data3d(nx,ny,nz,1))
-                call check_ncdf( nf90_get_var(ncid, var_id, data3d, start=start_3d, count=(/ nx, ny, nz /)), " Getting 3D var "//trim(name))
+                call check_ncdf( nf90_get_var(ncid, file_var_id, data3d, start=start_3d, count=(/ nx, ny, nz /)), " Getting 3D var "//trim(name))
 
-                restart_data_3d(n_3d,this%i_s_re:this%i_e_re+var%xstag,1:nz,this%j_s_re:this%j_e_re+var%ystag) = &
+                restart_data_3d(n_3d,this%i_s_re:this%i_e_re+var_meta%xstag,1:nz,this%j_s_re:this%j_e_re+var_meta%ystag) = &
                         reshape(data3d(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
                 n_3d = n_3d+1
-            else if (var%two_d) then
-                call check_ncdf( nf90_get_var(ncid, var_id, restart_data_2d(n_2d,this%i_s_re:this%i_e_re+var%xstag,this%j_s_re:this%j_e_re+var%ystag), &
+            else if (var_meta%two_d) then
+                call check_ncdf( nf90_get_var(ncid, file_var_id, restart_data_2d(n_2d,this%i_s_re:this%i_e_re+var_meta%xstag,this%j_s_re:this%j_e_re+var_meta%ystag), &
                         start=start_2d, count=(/ nx, ny /)), " Getting 2D "//trim(name))
                         n_2d = n_2d+1
             endif

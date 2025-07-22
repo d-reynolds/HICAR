@@ -1,6 +1,6 @@
 module namelist_utils
     use netcdf
-    use string,           only  : str
+    use string,           only  : str, as_string
     use ieee_arithmetic
     use icar_constants,    only : STD_OUT_PE, MAXLEVELS, kMAX_NESTS, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH, kVERSION_STRING, &
                                   kREAL_NO_VAL, kINT_NO_VAL, kCHAR_NO_VAL
@@ -45,7 +45,7 @@ contains
 
         integer :: i, n, child_nest_indx
         integer :: new_restartinterval
-        type(Time_type) :: parent_restart_time, child_restart_time, new_child_restart_time, loop_strt_time, child_strt_time
+        type(Time_type) :: parent_restart_time, child_restart_time, new_child_restart_time, loop_strt_time, child_strt_time, parent_offset_time
         type(time_delta_t) :: nest_start_offset, helper_delta, new_restart_delta, tmp_delta
 
         do i = 1, size(options)
@@ -56,7 +56,7 @@ contains
                 loop_strt_time = options(i)%general%start_time
                 if (options(i)%restart%restart) loop_strt_time = options(i)%restart%restart_time
 
-                parent_restart_time = loop_strt_time + helper_delta
+                call parent_restart_time%set(loop_strt_time%mjd() + helper_delta%days())
 
                 !Loop through all child nests in the chain
                 do n = i+1, size(options)
@@ -99,36 +99,39 @@ contains
                     ! from here on, we just want the given simulation start times, not the restart times
                     child_strt_time = options(child_nest_indx)%general%start_time
                     loop_strt_time = options(i)%general%start_time
-                    parent_restart_time = loop_strt_time + helper_delta
+                    call parent_restart_time%set(loop_strt_time%mjd() + helper_delta%days())
 
                     !! Check that, for a given chain of nests, the time at which restart files are output is the same for all nests
                     !Compute when the first restart time is for the child nest
                     call helper_delta%set(options(child_nest_indx)%restart%restart_count*options(child_nest_indx)%output%outputinterval)
-                    child_restart_time = child_strt_time + helper_delta
+                    call child_restart_time%set(child_strt_time%mjd() + helper_delta%days())
+
                     nest_start_offset = child_strt_time - loop_strt_time
 
                     ! If the two times are different, warn the user
-                    if ((parent_restart_time+nest_start_offset) /= child_restart_time) then
+                    call parent_offset_time%set(parent_restart_time%mjd() + nest_start_offset%days())
+                    if (parent_offset_time /= child_restart_time) then
                         !Try to set the restart interval for the child nest to match the parent nest restart output time
-                        new_restart_delta = parent_restart_time+nest_start_offset-child_strt_time
+                        new_restart_delta = parent_offset_time-child_strt_time
                         new_restartinterval = (new_restart_delta%seconds())/options(child_nest_indx)%output%outputinterval
                         
                         call helper_delta%set(new_restartinterval*options(child_nest_indx)%output%outputinterval)
-                        child_restart_time = child_strt_time + helper_delta
-                        if ((parent_restart_time+nest_start_offset) == child_restart_time) then
+                        call child_restart_time%set(child_strt_time%mjd() + helper_delta%days())
+
+                        if (parent_offset_time == child_restart_time) then
                             call set_nml_var(options(child_nest_indx)%restart%restart_count, new_restartinterval, 'restartinterval')
                             if (STD_OUT_PE) write(*,*) "  ATTENTION: Restart interval for nest ", child_nest_indx, " has been set to match the"
                             if (STD_OUT_PE) write(*,*) "  ATTENTION: first restart date of the parent nest."
                             if (STD_OUT_PE) write(*,*) "  ATTENTION: Restart interval for nest ", child_nest_indx, " is now: ", new_restartinterval
-                            if (STD_OUT_PE) write(*,*) "  ATTENTION: First restart time for nest ", child_nest_indx, " is now: ", trim(child_restart_time%as_string())
+                            if (STD_OUT_PE) write(*,*) "  ATTENTION: First restart time for nest ", child_nest_indx, " is now: ", trim(as_string(child_restart_time))
                         else
                             !If this does not work, error out and report to the user
                             if (STD_OUT_PE) write(*,*) "  ERROR: Restart interval for nest ", child_nest_indx, " does not match the parent nest"
                             if (STD_OUT_PE) write(*,*) "  ERROR: Restart interval for nest ", child_nest_indx, " is: ", options(child_nest_indx)%restart%restart_count
-                            if (STD_OUT_PE) write(*,*) "  ERROR: First restart time for nest ", child_nest_indx, " is: ", trim(child_restart_time%as_string())
+                            if (STD_OUT_PE) write(*,*) "  ERROR: First restart time for nest ", child_nest_indx, " is: ", trim(as_string(child_restart_time))
                             if (STD_OUT_PE) write(*,*) "  ERROR: This time is calculated as start_time + restartinterval*outputinterval"
-                            child_restart_time = parent_restart_time+nest_start_offset
-                            if (STD_OUT_PE) write(*,*) "  ERROR: First restart time for nest ", child_nest_indx, " should be: ", trim(child_restart_time%as_string())
+                            child_restart_time = parent_offset_time
+                            if (STD_OUT_PE) write(*,*) "  ERROR: First restart time for nest ", child_nest_indx, " should be: ", trim(as_string(child_restart_time))
                             if (STD_OUT_PE) write(*,*) "  ERROR: Please adjust the restartinterval and outputinterval for this nest to match the parent nest"
                             stop
                         end if

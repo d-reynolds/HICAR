@@ -697,15 +697,15 @@ contains
     !! Compute exner function to convert potential_temperature to temperature
     !!
     !! -------------------------------
+    ! !$acc routine seq
     elemental function exner_function(pressure) result(exner)
         implicit none
         real, intent(in) :: pressure
         real :: exner
+        real, parameter :: po = 100000.0
+        real, parameter :: rd_cp = 0.2857  ! Pre-computed R_d/cp
 
-        associate(po=>100000) !, R_d=>287.058, cp=>1003.5)
-            exner = (pressure / po) ** (R_d/cp)
-
-        end associate
+        exner = (pressure / po) ** rd_cp
     end function
 
 

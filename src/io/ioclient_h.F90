@@ -17,7 +17,6 @@ module ioclient_interface
   use boundary_interface, only : boundary_t
   use domain_interface,   only : domain_t
   use options_interface,  only : options_t
-  use options_types,      only : forcing_options_type
 
 !  use time_object,        only : Time_type, THREESIXTY, GREGORIAN, NOCALENDAR, NOLEAP
 

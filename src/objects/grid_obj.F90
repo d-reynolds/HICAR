@@ -197,32 +197,14 @@ contains
 
       if (nx == 0 .and. ny == 0 .and. nz > 1) then
         this%is1d = .True.
-        if (allocated(this%dimensions)) deallocate(this%dimensions)
-        allocate(this%dimensions(1))
-        this%dimensions(1) = "height"
         return ! no need to do domain decomposition
       else if (nx > 0 .and. ny > 0 .and. nz < 1) then
         this%is2d = .True.
-        if (allocated(this%dimensions)) deallocate(this%dimensions)
-        allocate(this%dimensions(2))
-        this%dimensions(1) = "lat"
-        this%dimensions(2) = "lon"
       else if (nx > 0 .and. ny > 0 .and. nz > 0) then
         if (present(n_4d)) then
             this%is4d = .True.
-            if (allocated(this%dimensions)) deallocate(this%dimensions)
-            allocate(this%dimensions(4))
-            this%dimensions(1) = "lat"
-            this%dimensions(2) = "height"
-            this%dimensions(3) = "lon"
-            this%dimensions(4) = "azim"
         else
             this%is3d = .True.
-            if (allocated(this%dimensions)) deallocate(this%dimensions)
-            allocate(this%dimensions(3))
-            this%dimensions(1) = "lat"
-            this%dimensions(2) = "height"
-            this%dimensions(3) = "lon"
         endif
     endif
     if ( .not.(present(comms) .and. present(image)) ) return

@@ -65,6 +65,9 @@ target_link_libraries(
 )
 
 target_link_libraries("${PROJECT_NAME}-tester" PUBLIC MPI::MPI_Fortran)
+if (OpenACC_Fortran_FOUND)
+	target_link_libraries("${PROJECT_NAME}-tester" PUBLIC OpenACC::OpenACC_Fortran)
+endif()
 
 target_include_directories("${PROJECT_NAME}-tester" PUBLIC ${CMAKE_BINARY_DIR})
 
@@ -84,6 +87,8 @@ elseif (COMPILER STREQUAL "intel")
   target_compile_options("${PROJECT_NAME}-tester" PUBLIC -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
 elseif (COMPILER STREQUAL "cray")
   target_compile_options("${PROJECT_NAME}-tester" PUBLIC -h noomp -c -eI -G0 -m2 -rl -R bcdsp) #-R cpbs --cray-print-opts
+elseif (COMPILER STREQUAL "nvfortran")
+		target_compile_options("${PROJECT_NAME}-tester" PUBLIC -O3 -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative,deepcopy)
 endif()
 
 # Create a custom target for downloading test data

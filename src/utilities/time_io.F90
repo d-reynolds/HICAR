@@ -2,10 +2,10 @@ module time_io
 
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
-    use string,             only : get_integer
+    use string,             only : get_integer, as_string
     use io_routines,        only : io_read, io_read_attribute
     use iso_fortran_env,    only: real64, real64
-    use icar_constants,     only: kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, STD_OUT_PE
+    use icar_constants,     only: kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, STD_OUT_PE, kOUTPUT_FMT
 
     implicit none
 
@@ -63,9 +63,9 @@ contains
             else
                 if (STD_OUT_PE) write(*,*) "ERROR: Unable to find requested date in file."
                 if (STD_OUT_PE) write(*,*) "Filename: ",trim(filename)
-                if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
-                if (STD_OUT_PE) write(*,*) "First time in file : ", trim(times_in_file(1)%as_string())
-                if (STD_OUT_PE) write(*,*) " Last time in file : ", trim(times_in_file(n)%as_string())
+                if (STD_OUT_PE) write(*,*) "  time  : ",trim(as_string(time))
+                if (STD_OUT_PE) write(*,*) "First time in file : ", trim(as_string(times_in_file(1)))
+                if (STD_OUT_PE) write(*,*) " Last time in file : ", trim(as_string(times_in_file(n)))
                 stop "Unable to find date in file"
             endif
         endif
@@ -231,7 +231,7 @@ contains
                 if (STD_OUT_PE) write(*,*) "First filename:           ",trim(filelist(1))
                 if (STD_OUT_PE) write(*,*) "Last (existing) filename: ",trim(filelist(nup))
                 if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
-                if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
+                if (STD_OUT_PE) write(*,*) "  time  : ",trim(as_string(time))
                 stop "Unable to find date in file"
             endif
         endif
@@ -294,7 +294,7 @@ contains
                             if (STD_OUT_PE) write(*,*) "We have collapsed onto two files, but no time was found."
                             if (STD_OUT_PE) write(*,*) "This, despite a non-exact time search. Gnarly bug."
                             if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
-                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
+                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(as_string(time))
                             if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
                             stop "Unable to find date in file"
                         else
@@ -302,7 +302,7 @@ contains
                             if (STD_OUT_PE) write(*,*) "We have collapsed onto two files, but no time was found."
                             if (STD_OUT_PE) write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
                             if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
-                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
+                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(as_string(time))
                             if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
                             stop "Unable to find date in file"
                         endif
@@ -331,7 +331,7 @@ contains
                             if (STD_OUT_PE) write(*,*) "Time appears to lay between two files."
                             if (STD_OUT_PE) write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
                             if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
-                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
+                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(as_string(time))
                             if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
                             stop "Unable to find date in file"
                         endif
@@ -428,7 +428,7 @@ contains
         if (present(units)) then
             use_units = units
         else
-            use_units = time%units()
+            write(use_units,kOUTPUT_FMT) time%year_zero,time%month_zero,time%day_zero,time%hour_zero
         endif
 
         call time%date(year, month, day, hour, minute, seconds)
@@ -446,7 +446,8 @@ contains
                 if (seconds > 30) then
                     call output_time%set(year, month, day, hour, minute, seconds)
                     call half_minute%set(seconds=30)
-                    output_time = output_time + half_minute
+                    call output_time%set(output_time%mjd() + half_minute%days())
+
                     ! get a new date after adding 30 seconds
                     call output_time%date(year, month, day, hour, minute, seconds)
                     ! use that date after setting seconds to 0 this rounds the old date up by up to 30s

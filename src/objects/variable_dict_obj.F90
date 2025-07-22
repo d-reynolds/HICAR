@@ -51,14 +51,14 @@ contains
     !>------------------------------------------------
     !! Retrieve a variable for a given key
     !!
-    !! @param varname : The key to look for in the dictionary
+    !! @param in_id   : The key to look for in the dictionary
     !! @param err     : optional, if available this will be set to indicate if the key is not found
     !!
     !!------------------------------------------------
-    module function get_var(this, varname, err, indx) result(var_data)
+    module function get_var(this, in_id, err, indx) result(var_data)
         implicit none
         class(var_dict_t),   intent(in) :: this
-        character(len=*),    intent(in) :: varname
+        integer,             intent(in) :: in_id
         integer,             intent(out),  optional :: err, indx
 
         type(variable_t)                :: var_data
@@ -85,7 +85,7 @@ contains
         do i = 1, this%n_vars
 
             ! if this key matches the supplied key, return the variable
-            if (trim(this%var_list(i)%name) == trim(varname)) then
+            if (this%var_list(i)%id == in_id) then
                 var_data = this%var_list(i)%var
                 if (present(indx)) indx = i
                 return
@@ -97,7 +97,7 @@ contains
             err = 1
         else
             ! if the user did not request an error code, then we have to stop
-            write(*,*) "Searching for : "//trim(varname)
+            write(*,*) "Searching for variable of id: ",in_id
             stop "ERROR: var not found in dictionary"
         endif
 
@@ -106,16 +106,16 @@ contains
     !>------------------------------------------------
     !! Add a supplied variable to the dictionary using the key supplied
     !!
-    !! @param varname       key to store for the var_data supplied
+    !! @param in_id         key to store for the var_data supplied
     !! @param var_data      variable to store associated with key
     !! @param save_state    optional store the input array data in a locally allocated array instead of just pointing to it
     !! @param err           optional value to store an error code in so execution doesn't have to stop
     !!
     !!------------------------------------------------
-    module subroutine add_var(this, varname, var_data, save_state, err)
+    module subroutine add_var(this, in_id, var_data, save_state, err)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
-        character(len=*),    intent(in)     :: varname
+        integer,             intent(in)     :: in_id
         type(variable_t),    intent(in)     :: var_data
         logical,             intent(in), optional :: save_state
         integer,             intent(out),optional :: err
@@ -141,7 +141,7 @@ contains
         endif
 
         ! check if an entry with varname is already in dictionary
-        var = this%get_var(trim(varname),err=error, indx=indx)
+        var = this%get_var(in_id,err=error, indx=indx)
 
         ! if we get an error, then we need to add a new entry
         if (error == 0) then
@@ -158,7 +158,7 @@ contains
             this%n_vars = this%n_vars + 1
             indx = this%n_vars
 
-            this%var_list(indx)%name = varname
+            this%var_list(indx)%id = in_id
 
             ! warning, this copies all information directly from the var_data into the dict, including the POINTER to the data
             this%var_list(indx)%var  = var_data
@@ -211,8 +211,8 @@ contains
         
         do i = 1,kMAX_STORAGE_VARS
             !Get the data for the variable name. Returns 1 if not found
-            var = this%get_var(trim(get_varname(i)),err=err)
-            if (err==0) call sorted%add_var(trim(get_varname(i)),var)
+            var = this%get_var(i,err=err)
+            if (err==0) call sorted%add_var(i,var)
         enddo
 
         this%var_list = sorted%var_list
@@ -256,10 +256,10 @@ contains
     !! @param err      optional, returns an error if there are no variables left to iterate
     !!
     !!------------------------------------------------
-    module function next(this, name, err) result(var_data)
+    module function next(this, id, err) result(var_data)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
-        character(len=*),    intent(out),   optional :: name
+        integer,             intent(out),   optional :: id
         integer,             intent(out),   optional :: err
         type(variable_t)                    :: var_data
 
@@ -270,7 +270,7 @@ contains
             var_data = this%var_list(this%current_variable)%var
 
             ! if requested, get the variable name too
-            if (present(name)) name = this%var_list(this%current_variable)%name
+            if (present(id)) id = this%var_list(this%current_variable)%id
 
             ! step the iterator forward
             this%current_variable = this%current_variable + 1

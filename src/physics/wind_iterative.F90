@@ -16,6 +16,7 @@ module wind_iterative
     !include 'petsc/finclude/petscdm.h'
     !include 'petsc/finclude/petscdmda.h'
     
+#include "petscversion.h"
 #include <petsc/finclude/petscksp.h>
 #include <petsc/finclude/petscdm.h>
 #include <petsc/finclude/petscdmda.h>
@@ -128,8 +129,6 @@ contains
             call calc_updated_winds(domain, lambda, adv_den)
             call DMDAVecRestoreArrayF90(da,localX,lambda, ierr)
             !Exchange u and v, since the outer points are not updated in above function
-            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
-            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
         endif
     end subroutine calc_iter_winds
 

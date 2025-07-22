@@ -14,11 +14,10 @@
 !! 
 !!----------------------------------------------------------
 submodule(reader_interface) reader_implementation
-  use debug_module,           only : check_ncdf
-  use variable_interface,     only : variable_t
+  use debug_module,       only : check_ncdf
   use timer_interface,    only : timer_t
-
-  use time_io,                only : read_times, find_timestep_in_filelist
+  use string,             only : as_string
+  use time_io,            only : read_times, find_timestep_in_filelist
   implicit none
 
 contains
@@ -33,7 +32,7 @@ contains
         
         integer, allocatable                         :: var_dimensions(:)
         character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
-        type(variable_t) :: new_variable
+        type(meta_data_t) :: var_meta
         integer :: i, dims(3)
         
 
@@ -60,15 +59,29 @@ contains
         call setup_variable_lists(options%forcing%vars_to_read, options%forcing%dim_list, vars_to_read, var_dimensions)
 
         this%n_vars = size(vars_to_read)
+        allocate(this%var_meta(this%n_vars))
 
         do i=1, this%n_vars
+
+            var_meta%name = trim(vars_to_read(i))
+            if (allocated(var_meta%dim_len)) deallocate(var_meta%dim_len)
+
             if (var_dimensions(i)==2) then
-                call new_variable%initialize( [dims(1),dims(3)] )
-                call this%variables%add_var(vars_to_read(i), new_variable)
+                allocate(var_meta%dim_len(2))
+                var_meta%dim_len(1) = dims(1)
+                var_meta%dim_len(2) = dims(3)
+                var_meta%three_d = .False.
+                var_meta%two_d = .True.
+
             elseif (var_dimensions(i)==3) then
-                call new_variable%initialize( dims )
-                call this%variables%add_var(vars_to_read(i), new_variable)
+                allocate(var_meta%dim_len(3))
+                var_meta%dim_len(1) = dims(1)
+                var_meta%dim_len(2) = dims(2)
+                var_meta%dim_len(3) = dims(3)
+                var_meta%three_d = .True.
+                var_meta%two_d = .False.
             endif
+            this%var_meta(i) = var_meta
         end do
         
     end subroutine init_reader
@@ -84,7 +97,7 @@ contains
         type(MPI_Info) :: par_comm_info
 
         real, allocatable :: data3d_t(:,:,:,:), data3d(:,:,:)
-        type(variable_t)  :: var
+        type(meta_data_t)  :: var
         character(len=kMAX_NAME_LENGTH) :: name
         integer :: nx, ny, nz, err, varid, n, ndims, start_3d_t(4), cnt_3d_t(4), start_2d_t(3), cnt_2d_t(3), start_3d(3), cnt_3d(3), start_2d(2), cnt_2d(2)
 
@@ -109,50 +122,43 @@ contains
         cnt_2d_t = (/ (this%ite-this%its+1),(this%jte-this%jts+1),1 /)
         cnt_3d = (/ (this%ite-this%its+1),(this%jte-this%jts+1),(this%kte-this%kts+1) /)
         cnt_2d = (/ (this%ite-this%its+1),(this%jte-this%jts+1) /)
-
-        associate(list => this%variables)
             
         ! loop through the list of variables that need to be read in
-        call list%reset_iterator()
-        n = 1
-        do while (list%has_more_elements())
+        do n = 1, size(this%var_meta)
             ! get the next variable in the structure
-            var = list%next(name)
-            if (var%var_id < 0) call check_ncdf( nf90_inq_varid(this%ncfile_id, name, var%var_id), " Getting var ID for "//trim(name))
-            call check_ncdf( nf90_var_par_access(this%ncfile_id, var%var_id, nf90_collective))
+            var = this%var_meta(n)
+            if (var%file_var_id < 0) call check_ncdf( nf90_inq_varid(this%ncfile_id, var%name, var%file_var_id), " Getting var ID for "//trim(name))
+            call check_ncdf( nf90_var_par_access(this%ncfile_id, var%file_var_id, nf90_collective))
 
             !get number of dimensions
-            call check_ncdf( nf90_inquire_variable(this%ncfile_id, var%var_id, ndims = ndims), " Getting dim length for "//trim(name))
+            call check_ncdf( nf90_inquire_variable(this%ncfile_id, var%file_var_id, ndims = ndims), " Getting dim length for "//trim(name))
 
             if (var%three_d) then
-                nx = size(var%data_3d, 1)
-                ny = size(var%data_3d, 3)
-                nz = size(var%data_3d, 2)
+                nx = var%dim_len(1)
+                ny = var%dim_len(3)
+                nz = var%dim_len(2)
 
                 if (ndims > 3) then
                     if (allocated(data3d_t)) deallocate(data3d_t)
                     allocate(data3d_t(nx,ny,nz,1))
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, data3d_t, start=start_3d_t, count=cnt_3d_t), " Getting 3D var "//trim(name))
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d_t, start=start_3d_t, count=cnt_3d_t), " Getting 3D var "//trim(name))
                     buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d_t(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
                 else
                     if (allocated(data3d)) deallocate(data3d)
                     allocate(data3d(nx,ny,nz))
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, data3d, start=start_3d, count=cnt_3d), " Getting 3D var "//trim(name))
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d, start=start_3d, count=cnt_3d), " Getting 3D var "//trim(name))
                     buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d(:,:,:), shape=[nx,nz,ny], order=[1,3,2])
                 endif
             else if (var%two_d) then
                 if (ndims > 2) then
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, buffer(n,:,1,:), start=start_2d_t, count=cnt_2d_t), " Getting 2D "//trim(name))
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, buffer(n,:,1,:), start=start_2d_t, count=cnt_2d_t), " Getting 2D "//trim(name))
                 else
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, buffer(n,:,1,:), start=start_2d, count=cnt_2d), " Getting 2D "//trim(name))
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, buffer(n,:,1,:), start=start_2d, count=cnt_2d), " Getting 2D "//trim(name))
                 endif
             endif
 
-            n = n+1
         end do
         
-        end associate
-
         call update_forcing_step(this)
 
     end subroutine
@@ -174,7 +180,8 @@ contains
         this%curstep = this%curstep + 1 ! this may be all we have to do most of the time
         ! check that we haven't stepped passed the end of the current file
         steps_in_file = get_n_timesteps(this, this%time_var, 0)
-        this%input_time = this%input_time + this%input_dt
+
+        call this%input_time%set(this%input_time%mjd() + this%input_dt%days())
 
         if (steps_in_file < this%curstep) then
             ! close current file
@@ -199,14 +206,16 @@ contains
         if (.not.(this%eof)) then
             !Get time step of the next input step
             call read_times(this%file_list(this%curfile), this%time_var, times_in_file)
-            time_tmp = times_in_file(this%curstep) - this%input_dt
+            
+            call time_tmp%set(times_in_file(this%curstep)%mjd() - this%input_dt%days())
+
             if (time_tmp >= this%model_end_time) then
                 this%eof = .True.
             !Check if the next time step in the file is equal to the input time 
             else if (.not.(times_in_file(this%curstep) == this%input_time)) then
                 ! warn the user and exit
-                write(*,*) "Warning: The next time step in the file is not equal to the input time.  The next time step in the file is: ", times_in_file(this%curstep)%as_string()
-                write(*,*) "The input time is: ", this%input_time%as_string()
+                write(*,*) "Warning: The next time step in the file is not equal to the input time.  The next time step in the file is: ", as_string(times_in_file(this%curstep))
+                write(*,*) "The input time is: ", as_string(this%input_time)
                 write(*,*) "The current file is: ", this%file_list(this%curfile)
                 write(*,*) "The current step is: ", this%curstep
                 stop

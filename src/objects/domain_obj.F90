@@ -12,19 +12,16 @@ submodule(domain_interface) domain_implementation
     use mod_atm_utilities,    only : exner_function, update_pressure, compute_ivt, compute_iq
     use icar_constants
     use string,               only : str
+    use meta_data_interface,  only : meta_data_t
     use io_routines,          only : io_write, io_read
     use geo,                  only : geo_lut, geo_interp, geo_interp2d, standardize_coordinates
     use array_utilities,      only : array_offset_x, array_offset_y, smooth_array, smooth_array_2d, make_2d_x, make_2d_y
     use vertical_interpolation,only : vinterp, vLUT
     use output_metadata,            only : get_varname, get_varmeta, get_varindx
-    use mod_wrf_constants,    only : gravity, R_d, KARMAN
+    use mod_wrf_constants,    only : gravity, R_d, KARMAN, cp
     use iso_fortran_env
 
     implicit none
-
-    interface setup
-        module procedure setup_var
-    end interface
     
     real, parameter::deg2rad=0.017453293 !2*pi/360
     integer :: FILTER_WIDTH = 7
@@ -67,13 +64,13 @@ contains
         implicit none
         class(domain_t), intent(inout) :: this
 
-        type(variable_t) :: tmp_var
+        type(meta_data_t) :: tmp_var
         integer :: i
 
 
         ! pack adv_vars with the variables to advect
         do i = 1,size(this%adv_vars)
-            tmp_var = get_varmeta(get_varindx(this%adv_vars(i)%n))
+            tmp_var = get_varmeta(this%adv_vars(i)%id)
             if (tmp_var%three_d) then
                 this%n_adv_3d = this%n_adv_3d + 1
             end if
@@ -82,7 +79,7 @@ contains
 
         ! pack adv_vars with the variables to advect
         do i = 1,size(this%exch_vars)
-            tmp_var = get_varmeta(get_varindx(this%exch_vars(i)%n))
+            tmp_var = get_varmeta(this%exch_vars(i)%id)
             if (tmp_var%three_d) then
                 this%n_exch_3d = this%n_exch_3d + 1
             end if
@@ -98,7 +95,7 @@ contains
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: two_d, exch_only
 
-
+        !$acc data present(this)
         if (present(two_d)) then
             if (two_d) then
                 call this%halo_2d_send()
@@ -113,6 +110,7 @@ contains
                 call this%halo_3d_retrieve()    
             end if
         end if
+        !$acc end data
 
     end subroutine batch_exch
 
@@ -121,13 +119,13 @@ contains
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: exch_only
 
-
+        !$acc data present(this)
         if (present(exch_only)) then
             call this%halo%halo_3d_send_batch(this%exch_vars, this%adv_vars, this%vars_3d, exch_var_only=exch_only)
         else
             call this%halo%halo_3d_send_batch(this%exch_vars, this%adv_vars, this%vars_3d)
         end if
-
+        !$acc end data
     end subroutine halo_3d_send
 
     module subroutine halo_3d_retrieve(this, exch_only)
@@ -135,12 +133,13 @@ contains
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: exch_only
 
+        !$acc data present(this)
         if (present(exch_only)) then
             call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_3d, exch_var_only=exch_only)
         else
             call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_3d)
         end if
-
+        !$acc end data
     end subroutine halo_3d_retrieve
 
     module subroutine halo_2d_send(this)
@@ -149,8 +148,9 @@ contains
 
         if (this%n_exch_2d + this%n_adv_2d == 0) return
 
+        !$acc data present(this)
         call this%halo%halo_2d_send_batch(this%exch_vars, this%adv_vars, this%vars_2d)
-
+        !$acc end data
     end subroutine halo_2d_send
 
     module subroutine halo_2d_retrieve(this)
@@ -159,8 +159,9 @@ contains
 
         if (this%n_exch_2d + this%n_adv_2d == 0) return
 
+        !$acc data present(this)
         call this%halo%halo_2d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_2d)
-
+        !$acc end data
     end subroutine halo_2d_retrieve
 
     !> -------------------------------
@@ -178,13 +179,51 @@ contains
         class(domain_t), intent(inout) :: this
         type(options_t), intent(in)    :: options
 
-        type(variable_t) :: tmp_var
-        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx
+        type(meta_data_t) :: tmp_var
+        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(22), kEXCH_VARS(7)
+        
+        kADV_VARS = (/kVARS%potential_temperature,&
+                      kVARS%water_vapor,&
+                      kVARS%cloud_water_mass,&
+                      kVARS%cloud_number,&
+                      kVARS%rain_mass,&
+                      kVARS%rain_number,&
+                      kVARS%snow_mass,&
+                      kVARS%snow_number,&
+                      kVARS%graupel_mass,&
+                      kVARS%graupel_number,&
+                      kVARS%ice_mass,&
+                      kVARS%ice_number,&
+                      kVARS%ice1_a,&
+                      kVARS%ice1_c,&
+                      kVARS%ice2_mass,&
+                      kVARS%ice2_number,&
+                      kVARS%ice2_a,&
+                      kVARS%ice2_c,&
+                      kVARS%ice3_mass,&
+                      kVARS%ice3_number,&
+                      kVARS%ice3_a,&
+                      kVARS%ice3_c/)
+
+        kEXCH_VARS = (/0,&
+                       0,&
+                       0,&
+                       0,&
+                       0,&
+                       0,&
+                       0/)
+        ! kEXCH_VARS = (/"hfss ",&
+        !                "tsfe ",&
+        !                "Ds   ",&
+        !                "scfe ",&
+        !                "Sice ",&
+        !                "Sliq ",&
+        !                "Nsnow"/)
 
         !Advection variables -- these are exchanged AND advected
         n_vars = 0
         do i = 1, size(kADV_VARS)
-            var_indx = get_varindx(trim(kADV_VARS(i)))
+            var_indx = kADV_VARS(i)
             if (var_indx > 0) then
                 if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
             endif
@@ -193,11 +232,11 @@ contains
         n_vars = 0
 
         do i = 1, size(kADV_VARS)
-            var_indx = get_varindx(trim(kADV_VARS(i)))
+            var_indx = kADV_VARS(i)
             if (var_indx > 0) then
                 if (this%var_indx(var_indx)%v > 0) then
                     n_vars = n_vars + 1
-                    this%adv_vars(n_vars)%n = this%var_indx(var_indx)%n
+                    this%adv_vars(n_vars)%id = this%var_indx(var_indx)%id
                     this%adv_vars(n_vars)%v = this%var_indx(var_indx)%v
                 endif
             endif
@@ -205,8 +244,8 @@ contains
 
         n_vars = 0
         do i = 1, size(kEXCH_VARS)
-            if (kEXCH_VARS(i)=="") cycle
-            var_indx = get_varindx(trim(kEXCH_VARS(i)))
+            if (kEXCH_VARS(i)==0) cycle
+            var_indx = kEXCH_VARS(i)
             if (var_indx > 0) then
                 if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
             endif
@@ -215,12 +254,12 @@ contains
         n_vars = 0
 
         do i = 1, size(kEXCH_VARS)
-            if (kEXCH_VARS(i)=="") cycle
-            var_indx = get_varindx(trim(kEXCH_VARS(i)))
+            if (kEXCH_VARS(i)==0) cycle
+            var_indx = kEXCH_VARS(i)
             if (var_indx > 0) then
                 if (this%var_indx(var_indx)%v > 0) then
                     n_vars = n_vars + 1
-                    this%exch_vars(n_vars)%n = this%var_indx(var_indx)%n
+                    this%exch_vars(n_vars)%id = this%var_indx(var_indx)%id
                     this%exch_vars(n_vars)%v = this%var_indx(var_indx)%v
                 endif
             endif
@@ -236,7 +275,7 @@ contains
                 
                 if (tmp_var%name == "") cycle
                 n_vars = n_vars + 1
-                this%vars_to_out(i)%n = this%var_indx(i)%n
+                this%vars_to_out(i)%id = this%var_indx(i)%id
                 this%vars_to_out(i)%v = this%var_indx(i)%v
             endif
         enddo
@@ -294,6 +333,7 @@ contains
         forcing_update_only = .False.
         if (present(forcing_update)) forcing_update_only = forcing_update
 
+        !$acc data present_or_copy(this) create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3) if(.not.(forcing_update_only))
         associate(ims => this%ims, ime => this%ime,                             &
                   jms => this%jms, jme => this%jme,                             &
                   ids => this%ids, ide => this%ide,                             &
@@ -317,210 +357,257 @@ contains
                   v_mass                => this%vars_3d(this%var_indx(kVARS%v_mass)%v)%data_3d,                 &
                   potential_temperature => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d )
 
-                !Calculation of density
-                if (forcing_update_only) then
-                    exner = exner_function(this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d)
-                    temperature = potential_temperature * exner
-                    density =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d / (R_d * temperature*(1+qv)) ! kg/m^3
-                else
-                    exner = exner_function(pressure)
-                    temperature = potential_temperature * exner
-                    density =  pressure / (R_d * temperature*(1+qv)) ! kg/m^3
-                endif
+        !Calculation of density
+        if (forcing_update_only) then
+            exner = exner_function(this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d)
+            temperature = potential_temperature * exner
+            density =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d / (R_d * temperature*(1+qv)) ! kg/m^3
+        else
+            !$acc kernels if(.not.(forcing_update_only))
+            exner = (pressure / 100000) ** (R_d/cp) !exner_function(pressure)
+            temperature = potential_temperature * exner
+            density =  pressure / (R_d * temperature*(1+qv)) ! kg/m^3
+            !$acc end kernels
+        endif
         
 
         ! differences between forcing data at the boudnary and the internal model state can lead to strong discontinuities in temperature and qv
         ! these then affect density, leading to discontinuities in density, and thus winds. So, here we set the density for points on the "frame"
         ! to be the same as the density in the first cell within the physics region of the domain
-                if (ims==ids) then
-                    do j = jms,jme
-                        do k = kms,kme
-                            do i = ims,its-1
-                                temperature(i,k,j) = potential_temperature(its,k,j) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,j))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,j))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-                if (ime==ide) then
-                    do j = jms,jme
-                        do k = kms,kme
-                            do i = ite+1,ime
-                                temperature(i,k,j) = potential_temperature(ite,k,j) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,j))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,j))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-                if (jms==jds) then
-                    do j = jms,jts-1
-                        do k = kms,kme
-                            do i = ims,ime
-                                temperature(i,k,j) = potential_temperature(i,k,jts) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jts))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jts))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-                if (jme==jde) then
-                    do j = jte+1,jme
-                        do k = kms,kme
-                            do i = ims,ime
-                                temperature(i,k,j) = potential_temperature(i,k,jte) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jte))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jte))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-
-                if (ims==ids .and. jms==jds) then
-                    do j = jms,jts-1
-                        do k = kms,kme
-                            do i = ims,its-1
-                                temperature(i,k,j) = potential_temperature(its,k,jts) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jts))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jts))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-
-                if (ims==ids .and. jme==jde) then
-                    do j = jte+1,jme
-                        do k = kms,kme
-                            do i = ims,its-1
-                                temperature(i,k,j) = potential_temperature(its,k,jte) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jte))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jte))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-
-                if (ime==ide .and. jms==jds) then
-                    do j = jms,jts-1
-                        do k = kms,kme
-                            do i = ite+1,ime
-                                temperature(i,k,j) = potential_temperature(ite,k,jts) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jts))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jts))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-
-                if (ime==ide .and. jme==jde) then
-                    do j = jte+1,jme
-                        do k = kms,kme
-                            do i = ite+1,ime
-                                temperature(i,k,j) = potential_temperature(ite,k,jte) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jte))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jte))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-        
-                if (forcing_update_only) return
-
-        
-        temperature_i(ims:ime,kms,jms:jme) = temperature(ims:ime,kms,jms:jme) + (temperature(ims:ime,kms,jms:jme) - temperature(ims:ime,kms+1,jms:jme)) * 0.5
-        pressure_i(ims:ime,kms,jms:jme) = pressure(ims:ime,kms,jms:jme) + (pressure(ims:ime,kms,jms:jme) - pressure(ims:ime,kms+1,jms:jme)) * 0.5
-
-        do j = jms,jme
-            do k = kms+1,kme
-                do i = ims,ime
-                    pressure_i(i,k,j) = (dz_i(i,k,j)*pressure(i,k-1,j)+dz_i(i,k-1,j)*pressure(i,k,j))/((dz_i(i,k-1,j)+dz_i(i,k,j)))
-                    temperature_i(i,k,j) = (dz_i(i,k,j)*temperature(i,k-1,j)+dz_i(i,k-1,j)*temperature(i,k,j))/((dz_i(i,k-1,j)+dz_i(i,k,j)))
-                enddo
-            enddo
-        enddo
-        temperature_i(ims:ime,kme+1,jms:jme) = temperature(ims:ime,kme,jms:jme) + (temperature(ims:ime,kme,jms:jme) - temperature(ims:ime,kme-1,jms:jme)) * 0.5
-        pressure_i(ims:ime,kme+1,jms:jme) = pressure(ims:ime,kme,jms:jme) + (pressure(ims:ime,kme,jms:jme) - pressure(ims:ime,kme-1,jms:jme)) * 0.5
-
-        if (this%var_indx(kVARS%u_mass)%v > 0) then
+        if (ims==ids) then
+            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
             do j = jms,jme
                 do k = kms,kme
-                    do i = ims,ime
-                        u_mass(i,k,j) = (u(i+1,k,j) + u(i,k,j)) * 0.5
-                        v_mass(i,k,j) = (v(i,k,j+1) + v(i,k,j)) * 0.5
+                    do i = ims,its-1
+                        temperature(i,k,j) = potential_temperature(its,k,j) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,j))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,j))) ! kg/m^3
+                        endif
                     enddo
                 enddo
             enddo
         endif
-                
-        if (this%var_indx(kVARS%surface_pressure)%v > 0) then
-            psfc = pressure_i(ims:ime, kms, jms:jme)
+        if (ime==ide) then
+            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            do j = jms,jme
+                do k = kms,kme
+                    do i = ite+1,ime
+                        temperature(i,k,j) = potential_temperature(ite,k,j) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,j))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,j))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
         endif
-        if (this%var_indx(kVARS%ivt)%v > 0) then
-            call compute_ivt(this%vars_2d(this%var_indx(kVARS%ivt)%v)%data_2d, qv, u_mass, v_mass, pressure_i(:,kms:kme,:))
+        if (jms==jds) then
+            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            do j = jms,jts-1
+                do k = kms,kme
+                    do i = ims,ime
+                        temperature(i,k,j) = potential_temperature(i,k,jts) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jts))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jts))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
         endif
-        if (this%var_indx(kVARS%iwv)%v > 0) then
-            call compute_iq(this%vars_2d(this%var_indx(kVARS%iwv)%v)%data_2d, qv, pressure_i(:,kms:kme,:))
-        endif
-        if (this%var_indx(kVARS%iwl)%v > 0) then
-            mod_temp_3d = 0
-            if (this%var_indx(kVARS%cloud_water_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%cloud_water_mass)%v)%data_3d(i,k,j)
-            if (this%var_indx(kVARS%rain_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%rain_mass)%v)%data_3d(i,k,j)
-            call compute_iq(this%vars_2d(this%var_indx(kVARS%iwl)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
-        endif
-        if (this%var_indx(kVARS%iwi)%v > 0) then
-            mod_temp_3d = 0
-            if (this%var_indx(kVARS%ice_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%ice_mass)%v)%data_3d(i,k,j)
-            if (this%var_indx(kVARS%snow_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%snow_mass)%v)%data_3d(i,k,j)
-            if (this%var_indx(kVARS%graupel_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%graupel_mass)%v)%data_3d(i,k,j)
-            call compute_iq(this%vars_2d(this%var_indx(kVARS%iwi)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
-        endif
-        
-        ! temporary constant
-        if (this%var_indx(kVARS%roughness_z0)%v > 0) then
-            ! use log-law of the wall to convert from first model level to surface
-            surf_temp_1 = karman / log((this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(ims:ime,kms,jms:jme) - this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d(ims:ime,jms:jme)) / this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d(ims:ime,jms:jme))
-            ! use log-law of the wall to convert from surface to 10m height
-            surf_temp_2 = log(10.0 / this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d(ims:ime,jms:jme)) / karman
+        if (jme==jde) then 
+            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            do j = jte+1,jme
+                do k = kms,kme
+                    do i = ims,ime
+                        temperature(i,k,j) = potential_temperature(i,k,jte) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jte))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jte))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
         endif
 
-        if (this%var_indx(kVARS%u_10m)%v > 0) then
-            surf_temp_3                         = u_mass      (ims:ime,kms,jms:jme) * surf_temp_1
-            this%vars_2d(this%var_indx(kVARS%u_10m)%v)%data_2d(ims:ime,jms:jme) = surf_temp_3     * surf_temp_2
-            surf_temp_3                         = v_mass      (ims:ime,kms,jms:jme) * surf_temp_1
-            this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d(ims:ime,jms:jme) = surf_temp_3     * surf_temp_2
+        if (ims==ids .and. jms==jds) then
+            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            do j = jms,jts-1
+                do k = kms,kme
+                    do i = ims,its-1
+                        temperature(i,k,j) = potential_temperature(its,k,jts) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jts))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jts))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
         endif
 
-        if (this%var_indx(kVARS%ustar)%v > 0) then
-            ! now calculate master ustar based on U and V combined in quadrature
-            this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d(its:ite,jts:jte) = sqrt(u_mass(its:ite,kms,jts:jte)**2 + v_mass(its:ite,kms,jts:jte)**2) * surf_temp_1(its:ite,jts:jte)
+        if (ims==ids .and. jme==jde) then
+            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            do j = jte+1,jme
+                do k = kms,kme
+                    do i = ims,its-1
+                        temperature(i,k,j) = potential_temperature(its,k,jte) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jte))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jte))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
         endif
-        
+
+        if (ime==ide .and. jms==jds) then
+            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            do j = jms,jts-1
+                do k = kms,kme
+                    do i = ite+1,ime
+                        temperature(i,k,j) = potential_temperature(ite,k,jts) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jts))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jts))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
+        endif
+
+        if (ime==ide .and. jme==jde) then
+            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            do j = jte+1,jme
+                do k = kms,kme
+                    do i = ite+1,ime
+                        temperature(i,k,j) = potential_temperature(ite,k,jte) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jte))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jte))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
+        endif
+
+        if (.not.(forcing_update_only)) then
+            !$acc parallel loop gang vector collapse(2) wait(1) async(2)
+            do j = jms,jme
+                do i = ims,ime
+                    temperature_i(i,kms,j) = temperature(i,kms,j) + (temperature(i,kms,j) - temperature(i,kms+1,j)) * 0.5
+                    pressure_i(i,kms,j) = pressure(i,kms,j) + (pressure(i,kms,j) - pressure(i,kms+1,j)) * 0.5
+                enddo
+            enddo
+
+            !$acc parallel loop gang vector collapse(3)  wait(2) async(3)
+            do j = jms,jme
+                do k = kms+1,kme
+                    do i = ims,ime
+                        pressure_i(i,k,j) = (dz_i(i,k,j)*pressure(i,k-1,j)+dz_i(i,k-1,j)*pressure(i,k,j))/((dz_i(i,k-1,j)+dz_i(i,k,j)))
+                        temperature_i(i,k,j) = (dz_i(i,k,j)*temperature(i,k-1,j)+dz_i(i,k-1,j)*temperature(i,k,j))/((dz_i(i,k-1,j)+dz_i(i,k,j)))
+                    enddo
+                enddo
+            enddo
+
+            !$acc parallel loop gang vector collapse(2)  wait(3) async(4)
+            do j = jms,jme
+                do i = ims,ime
+                    temperature_i(i,kme+1,j) = temperature(i,kme,j) + (temperature(i,kme,j) - temperature(i,kme-1,j)) * 0.5
+                    pressure_i(i,kme+1,j) = pressure(i,kme,j) + (pressure(i,kme,j) - pressure(i,kme-1,j)) * 0.5
+                enddo
+            enddo
+
+            if (this%var_indx(kVARS%u_mass)%v > 0) then
+                !$acc parallel loop gang vector collapse(3) async(5)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                            u_mass(i,k,j) = (u(i+1,k,j) + u(i,k,j)) * 0.5
+                            v_mass(i,k,j) = (v(i,k,j+1) + v(i,k,j)) * 0.5
+                        enddo
+                    enddo
+                enddo
+            endif
+
+            if (this%var_indx(kVARS%surface_pressure)%v > 0) then
+                !$acc parallel loop gang vector collapse(2) async(6)
+                do j = jms,jme
+                    do i = ims,ime
+                        psfc(i,j) = pressure_i(i, kms, j)
+                    enddo
+                enddo
+            endif
+
+            ! if (this%var_indx(kVARS%ivt)%v > 0) then
+            !     call compute_ivt(this%vars_2d(this%var_indx(kVARS%ivt)%v)%data_2d, qv, u_mass, v_mass, pressure_i(:,kms:kme,:))
+            ! endif
+            ! if (this%var_indx(kVARS%iwv)%v > 0) then
+            !     call compute_iq(this%vars_2d(this%var_indx(kVARS%iwv)%v)%data_2d, qv, pressure_i(:,kms:kme,:))
+            ! endif
+            ! if (this%var_indx(kVARS%iwl)%v > 0) then
+            !     mod_temp_3d = 0
+            !     if (this%var_indx(kVARS%cloud_water_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%cloud_water_mass)%v)%data_3d(i,k,j)
+            !     if (this%var_indx(kVARS%rain_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%rain_mass)%v)%data_3d(i,k,j)
+            !     call compute_iq(this%vars_2d(this%var_indx(kVARS%iwl)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
+            ! endif
+            ! if (this%var_indx(kVARS%iwi)%v > 0) then
+            !     mod_temp_3d = 0
+            !     if (this%var_indx(kVARS%ice_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%ice_mass)%v)%data_3d(i,k,j)
+            !     if (this%var_indx(kVARS%snow_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%snow_mass)%v)%data_3d(i,k,j)
+            !     if (this%var_indx(kVARS%graupel_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%graupel_mass)%v)%data_3d(i,k,j)
+            !     call compute_iq(this%vars_2d(this%var_indx(kVARS%iwi)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
+            ! endif
+            
+            ! temporary constant
+            if (this%var_indx(kVARS%roughness_z0)%v > 0) then
+                !$acc parallel loop gang vector collapse(2) async(7)
+                do j = jms,jme
+                    do i = ims,ime
+                        ! use log-law of the wall to convert from first model level to surface
+                        surf_temp_1(i,j) = karman / log((this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(i,kms,j) - this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d(i,j)) / this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d(i,j))
+                        ! use log-law of the wall to convert from surface to 10m height
+                        surf_temp_2(i,j) = log(10.0 / this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d(i,j)) / karman
+                    enddo
+                enddo
+            endif
+
+            if (this%var_indx(kVARS%u_10m)%v > 0) then
+                !$acc parallel loop gang vector collapse(2) wait(5,7) async(8)
+                do j = jms,jme
+                    do i = ims,ime
+                        surf_temp_3(i,j)                         = u_mass      (i,kms,j) * surf_temp_1(i,j)
+                        this%vars_2d(this%var_indx(kVARS%u_10m)%v)%data_2d(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
+                        surf_temp_3(i,j)                         = v_mass      (i,kms,j) * surf_temp_1(i,j)
+                        this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
+                    enddo
+                enddo
+            endif
+
+            if (this%var_indx(kVARS%ustar)%v > 0) then
+                !$acc parallel loop gang vector collapse(2) wait(5,7) async(8)
+                do j = jts,jte
+                    do i = its,ite
+                        ! now calculate master ustar based on U and V combined in quadrature
+                        this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d(i,j) = sqrt(u_mass(i,kms,j)**2 + v_mass(i,kms,j)**2) * surf_temp_1(i,j)
+                    enddo
+                enddo
+            endif
+
+        endif
+
         end associate
+        !$acc wait(1,2,3,4,5,6,7,8)
+
+        !$acc end data
 
     end subroutine diagnostic_update
 
@@ -535,9 +622,11 @@ contains
         integer :: i,j
 
         integer :: ims, ime, jms, jme, kms, kme
-        type(variable_t) :: tmp_var, forcing_var_hi
+        type(meta_data_t) :: var_meta
+        type(variable_t)  :: tmp_var, forcing_var_hi
         type(grid_t)     :: grid
-        integer :: n_dims, n_one_d, n_two_d, n_three_d, n_four_d, n_forcing_var
+        integer :: n_one_d, n_two_d, n_three_d, n_four_d, n_forcing_var
+        logical :: is_forcing_var
 
         if (STD_OUT_PE) print *,"  Initializing variables"
         if (STD_OUT_PE) flush(output_unit)
@@ -550,19 +639,19 @@ contains
         do i = 1, kMAX_STORAGE_VARS
             if (0<opt%vars_to_allocate(i)) then
                 ! get the variable meta data defined in var_defs.F90
-                tmp_var = get_varmeta(i,opt)
+                var_meta = get_varmeta(i,opt,forcing_var=is_forcing_var)
 
-                if (tmp_var%one_d) then
+                if (var_meta%one_d) then
                     n_one_d = n_one_d + 1
-                else if (tmp_var%two_d) then
+                else if (var_meta%two_d) then
                     n_two_d = n_two_d + 1
-                else if (tmp_var%three_d) then
+                else if (var_meta%three_d) then
                     n_three_d = n_three_d + 1
-                else if (tmp_var%four_d) then
+                else if (var_meta%four_d) then
                     n_four_d = n_four_d + 1
                 endif
                                         
-                if (tmp_var%forcing_var /= "") then
+                if (is_forcing_var) then
                     n_forcing_var = n_forcing_var + 1
                 endif
 
@@ -584,44 +673,42 @@ contains
         do i = 1, kMAX_STORAGE_VARS
             if (0<opt%vars_to_allocate(i)) then
                 ! get the variable meta data defined in var_defs.F90
-                tmp_var = get_varmeta(i,opt)
+                var_meta = get_varmeta(i,opt,forcing_var=is_forcing_var)
                 
                 ! test if variable even has an entry
-                if (tmp_var%name == "") cycle 
+                if (var_meta%name == "") cycle 
 
-                n_dims = size(tmp_var%dimensions)
-
-                if (tmp_var%one_d) then
+                if (var_meta%one_d) then
                     grid = this%column_grid
-                else if (tmp_var%two_d) then
-                    if (tmp_var%dimensions(1) == "lon_x_global") then
+                else if (var_meta%two_d) then
+                    if (var_meta%dimensions(1) == "lon_x_global") then
                         grid = this%global_grid_2d
-                    elseif (tmp_var%dimensions(1) == "lon_x_neighbor") then
+                    elseif (var_meta%dimensions(1) == "lon_x_neighbor") then
                         grid = this%neighbor_grid_2d
                     else
                         grid = this%grid2d
-                        if (tmp_var%xstag > 0) grid = this%u_grid2d
-                        if (tmp_var%ystag > 0) grid = this%v_grid2d
+                        if (var_meta%xstag > 0) grid = this%u_grid2d
+                        if (var_meta%ystag > 0) grid = this%v_grid2d
                     endif
-                else if (tmp_var%three_d) then
-                    if (tmp_var%dimensions(1) == "lon_x_global") then
-                        if (tmp_var%dimensions(2) == "level_i") then
+                else if (var_meta%three_d) then
+                    if (var_meta%dimensions(1) == "lon_x_global") then
+                        if (var_meta%dimensions(2) == "level_i") then
                             grid = this%global_grid8w
-                        else if (tmp_var%dimensions(2) == "level") then
+                        else if (var_meta%dimensions(2) == "level") then
                             grid = this%global_grid
                         endif
-                    elseif (tmp_var%dimensions(1) == "lon_x_neighbor") then
-                        if (tmp_var%dimensions(2) == "level_i") then
+                    elseif (var_meta%dimensions(1) == "lon_x_neighbor") then
+                        if (var_meta%dimensions(2) == "level_i") then
                             grid = this%neighbor_grid8w
-                        else if (tmp_var%dimensions(2) == "level") then
+                        else if (var_meta%dimensions(2) == "level") then
                             grid = this%neighbor_grid
                         endif
                     else
-                        select case (tmp_var%dimensions(2))
+                        select case (var_meta%dimensions(2))
                             case ("level")
                                 grid = this%grid
-                                if (tmp_var%xstag > 0) grid = this%u_grid
-                                if (tmp_var%ystag > 0) grid = this%v_grid
+                                if (var_meta%xstag > 0) grid = this%u_grid
+                                if (var_meta%ystag > 0) grid = this%v_grid
                             case ("level_i")
                                 grid = this%grid8w
                             case ("nsoil")
@@ -650,7 +737,7 @@ contains
                                 grid = this%grid_hlm
                         end select
                     endif
-                else if (tmp_var%four_d) then
+                else if (var_meta%four_d) then
                     grid = this%grid_Sx
                 endif            
 
@@ -667,23 +754,20 @@ contains
                     endif
                 endif
 
+                call tmp_var%initialize(i, grid, forcing_var=is_forcing_var)
+
                 ! test if forcing var is empty
-                if (trim(tmp_var%forcing_var) == '') then
-                    call setup(tmp_var, grid, dtype=tmp_var%dtype)
-                else
-                    call setup(tmp_var, grid, forcing_var=trim(tmp_var%forcing_var), force_boundaries=tmp_var%force_boundaries, dtype=tmp_var%dtype)
+                if (is_forcing_var) then
 
                     n_forcing_var = n_forcing_var + 1
-                    call forcing_var_hi%initialize( grid, forcing_var=trim(tmp_var%forcing_var))
-                    forcing_var_hi%name = trim(tmp_var%name)
-
-                    this%forcing_var_indx(i)%n = trim(tmp_var%name)
+                    call forcing_var_hi%initialize(i, grid, forcing_var=is_forcing_var)
+                    this%forcing_var_indx(i)%id = i
                     this%forcing_var_indx(i)%v = n_forcing_var
 
                     this%forcing_hi(this%forcing_var_indx(i)%v) = forcing_var_hi
                 endif
 
-                this%var_indx(i)%n = trim(tmp_var%name)
+                this%var_indx(i)%id = i
                 if (tmp_var%one_d) then
                     n_one_d = n_one_d + 1
                     this%var_indx(i)%v = n_one_d
@@ -721,41 +805,6 @@ contains
 
     end subroutine
 
-    !> -------------------------------
-    !! Setup a regular variable.
-    !!
-    !! Initializes the variable
-    !! including the forcing_variable if it was set
-    !! and adds that variable to the list of variables that has forcing data if the list is supplied
-    !! and the forcing_var is both present and not blank ("")
-    !!
-    !! -------------------------------
-    subroutine setup_var(var, grid, forcing_var, force_boundaries, dtype)
-        implicit none
-        type(variable_t),   intent(inout) :: var
-        type(grid_t),       intent(in)    :: grid
-        character(len=*),   intent(in),   optional :: forcing_var
-        logical,            intent(in),   optional :: force_boundaries
-        integer,            intent(in),   optional :: dtype
-
-        if (present(forcing_var)) then
-            if (present(dtype)) then
-                call var%initialize(grid, forcing_var=forcing_var, dtype=dtype)
-            else
-                call var%initialize(grid, forcing_var=forcing_var)
-            endif
-            var%forcing_var = forcing_var
-            if (present(force_boundaries)) var%force_boundaries = force_boundaries
-        else
-
-            if (present(dtype)) then
-                call var%initialize(grid, dtype=dtype)
-            else
-                call var%initialize(grid)
-            endif
-        endif
-
-    end subroutine
 
     !> ---------------------------------
     !! Read the core model variables from disk
@@ -2428,7 +2477,7 @@ contains
             ! if we are a nest, and the parent domain's global z field was not yet set at the time of
             ! initialization.
             if (.not.forcing%z_is_set) then
-                temporary_data = forcing%variables%get_var(options%forcing%zvar)
+                temporary_data = forcing%variables%get_var(kVARS%z)
                 forcing%z = temporary_data%data_3d
             endif
 
@@ -2667,44 +2716,40 @@ contains
         implicit none
         class(domain_t),    intent(inout) :: this
 
-        type(time_delta_t)  :: dt
         ! temporary to hold the variable to be interpolated to
-        type(variable_t) :: var_to_update
         integer :: i, var_indx
+        real :: dt_seconds
 
-        dt = this%next_input - this%sim_time
+        dt_seconds = this%next_input%seconds() - this%sim_time%seconds()
 
         ! check if the difference between the simulation time and next_input is less than an input_dt
         ! if so, this signals that we are in between two input times, so advance the state of the variables%data_3d
         ! to the simulation time
 
         !include "-1" to accomodate rounding errors
-        if (dt%seconds() < (this%input_dt%seconds()-1)) call dt%set(seconds= (this%input_dt%seconds() - dt%seconds()) )
+        if (dt_seconds < (this%input_dt%seconds()-1)) dt_seconds = this%input_dt%seconds() - dt_seconds
+
 
         ! Now iterate through the dictionary as long as there are more elements present
         do i = 1,size(this%forcing_hi)
             !Update delta fields on the high-resolution forcing varaibles...
-
             if (this%forcing_hi(i)%two_d) then
-                this%forcing_hi(i)%dqdt_2d = (this%forcing_hi(i)%dqdt_2d - this%forcing_hi(i)%data_2d) / dt%seconds()
+                this%forcing_hi(i)%dqdt_2d = (this%forcing_hi(i)%dqdt_2d - this%forcing_hi(i)%data_2d) / dt_seconds
             else if (this%forcing_hi(i)%three_d) then
-                this%forcing_hi(i)%dqdt_3d = (this%forcing_hi(i)%dqdt_3d - this%forcing_hi(i)%data_3d) / dt%seconds()
+                this%forcing_hi(i)%dqdt_3d = (this%forcing_hi(i)%dqdt_3d - this%forcing_hi(i)%data_3d) / dt_seconds
             endif
 
             ! now update delta fields for domain variables
-            var_indx = get_varindx(trim(this%forcing_hi(i)%name))
-            var_to_update = get_varmeta(var_indx)
+            var_indx = this%forcing_hi(i)%id
 
-            if (var_to_update%force_boundaries) cycle
-
-            if (var_to_update%two_d) then
-                this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d = (this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d - this%vars_2d(this%var_indx(var_indx)%v)%data_2d) / dt%seconds()
-            else if (var_to_update%three_d) then
-                this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d = (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d - this%vars_3d(this%var_indx(var_indx)%v)%data_3d) / dt%seconds()
+            if (.not.(this%forcing_hi(i)%force_boundaries)) then
+                if (this%forcing_hi(i)%two_d) then
+                    this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d = (this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d - this%vars_2d(this%var_indx(var_indx)%v)%data_2d) / dt_seconds
+                else if (this%forcing_hi(i)%three_d) then
+                    this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d = (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d - this%vars_3d(this%var_indx(var_indx)%v)%data_3d) / dt_seconds
+                endif
             endif
-            
         enddo
-
 
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
@@ -2728,22 +2773,24 @@ contains
         real, intent(in)                  :: dt
         integer :: ims, ime, jms, jme
         ! temporary to hold the variable to be interpolated to
-        type(variable_t) :: var_to_update
+        type(meta_data_t) :: var_to_update
         integer :: i, k, j, var_indx, n
         real    :: dt_h
         logical :: do_boundary, is_wind, is_w_real
         
+        !$acc data present(this)
+
         !calculate dt in units of hours
         dt_h = dt/3600.0
 
+        !$acc parallel 
         do n = 1,size(this%forcing_hi)
 
-            var_indx = get_varindx(trim(this%forcing_hi(n)%name))
-            var_to_update = get_varmeta(var_indx)            
+            var_indx = this%forcing_hi(n)%id
             is_w_real = (this%var_indx(var_indx)%v == this%var_indx(kVARS%w_real)%v)
             is_wind = (this%var_indx(var_indx)%v == this%var_indx(kVARS%u)%v) .or. (this%var_indx(var_indx)%v == this%var_indx(kVARS%v)%v) .or. is_w_real
 
-            if (var_to_update%two_d) then
+            if (this%forcing_hi(n)%two_d) then
                 ims = this%vars_2d(this%var_indx(var_indx)%v)%grid%ims
                 ime = this%vars_2d(this%var_indx(var_indx)%v)%grid%ime
                 jms = this%vars_2d(this%var_indx(var_indx)%v)%grid%jms
@@ -2753,34 +2800,40 @@ contains
                     (jms < this%jds+this%grid%halo_size+FILTER_WIDTH) .or. (jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
 
                 ! apply forcing throughout the domain for 2D diagnosed variables (e.g. SST, SW)
-                if (.not.(var_to_update%force_boundaries)) then
-                    do concurrent (j = jms:jme, i = ims:ime)
-                        this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) + (this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d(i,j) * dt)
-                        this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = max(this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j),0.0)
+                if (.not.(this%forcing_hi(n)%force_boundaries)) then
+                    !$acc loop gang vector collapse(2)
+                    do j = jms,jme
+                        do i = ims,ime
+                            this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) + (this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d(i,j) * dt)
+                            this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = max(this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j),0.0)
+                        enddo
                     enddo
                 else if (do_boundary) then
                     if (any(this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d > 0.0)) then
                         !Update forcing data to current time step
-                        do concurrent (j = jms:jme, i = ims:ime)
-                            if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) > 0.0) then
-                                this%forcing_hi(n)%data_2d(i,j) = this%forcing_hi(n)%data_2d(i,j) + (this%forcing_hi(n)%dqdt_2d(i,j) * dt)
-                                this%forcing_hi(n)%data_2d(i,j) = max(this%forcing_hi(n)%data_2d(i,j),0.0)
+                        !$acc loop gang vector collapse(2)
+                        do j = jms,jme
+                            do i = ims,ime
+                                if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) > 0.0) then
+                                    this%forcing_hi(n)%data_2d(i,j) = this%forcing_hi(n)%data_2d(i,j) + (this%forcing_hi(n)%dqdt_2d(i,j) * dt)
+                                    this%forcing_hi(n)%data_2d(i,j) = max(this%forcing_hi(n)%data_2d(i,j),0.0)
 
-                                if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) == 1.0) then
-                                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%forcing_hi(n)%data_2d(i,j)
-                                else
-                                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) + &
-                                                    (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) * dt_h) * &
-                                                    (this%forcing_hi(n)%data_2d(i,j) - this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j))
+                                    if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) == 1.0) then
+                                        this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%forcing_hi(n)%data_2d(i,j)
+                                    else
+                                        this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) + &
+                                                        (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) * dt_h) * &
+                                                        (this%forcing_hi(n)%data_2d(i,j) - this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j))
 
-                                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = max(this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j),0.0)
+                                        this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = max(this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j),0.0)
+                                    endif
                                 endif
-                            endif
+                            enddo
                         enddo
                     endif
                 endif 
 
-            else if (var_to_update%three_d) then
+            else if (this%forcing_hi(n)%three_d) then
                 ims = this%vars_3d(this%var_indx(var_indx)%v)%grid%ims
                 ime = this%vars_3d(this%var_indx(var_indx)%v)%grid%ime
                 jms = this%vars_3d(this%var_indx(var_indx)%v)%grid%jms
@@ -2792,39 +2845,51 @@ contains
 
                 ! only apply forcing data on the boundaries for advected scalars (e.g. temperature, humidity)
                 ! applying forcing to the edges has already been handeled when updating dqdt using the relaxation filter
-                if (.not.(var_to_update%force_boundaries)) then
-                    do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
-                        this%forcing_hi(n)%data_3d(i,k,j)    = this%forcing_hi(n)%data_3d(i,k,j) + (this%forcing_hi(n)%dqdt_3d(i,k,j) * dt)
-                        if (.not.(is_wind)) this%forcing_hi(n)%data_3d(i,k,j) = max(this%forcing_hi(n)%data_3d(i,k,j),0.0)
+                if (.not.(this%forcing_hi(n)%force_boundaries)) then
+                    !$acc loop gang vector collapse(3)
+                    do j = jms,jme
+                        do k = this%kms,this%kme
+                            do i = ims,ime
+                                this%forcing_hi(n)%data_3d(i,k,j)    = this%forcing_hi(n)%data_3d(i,k,j) + (this%forcing_hi(n)%dqdt_3d(i,k,j) * dt)
+                                if (.not.(is_wind)) this%forcing_hi(n)%data_3d(i,k,j) = max(this%forcing_hi(n)%data_3d(i,k,j),0.0)
 
-                        if (.not.(is_w_real)) this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
-                                                        (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d(i,k,j) * dt)
-                                                        
-                        if (.not.(is_wind)) this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = max(this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j),0.0)
+                                if (.not.(is_w_real)) this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
+                                                                (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d(i,k,j) * dt)
+                                                                
+                                if (.not.(is_wind)) this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = max(this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j),0.0)
+                            enddo
+                        enddo
                     enddo
                 else if (do_boundary) then
                     if (any(this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d > 0.0)) then
                         !Update forcing data to current time step
-                        do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
-                            if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) > 0.0) then
-                                this%forcing_hi(n)%data_3d(i,k,j) = this%forcing_hi(n)%data_3d(i,k,j) + (this%forcing_hi(n)%dqdt_3d(i,k,j) * dt)
-                                this%forcing_hi(n)%data_3d(i,k,j) = max(this%forcing_hi(n)%data_3d(i,k,j),0.0)
+                        !$acc loop gang vector collapse(3)
+                        do j = jms,jme
+                            do k = this%kms,this%kme
+                                do i = ims,ime
+                                    if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) > 0.0) then
+                                        this%forcing_hi(n)%data_3d(i,k,j) = this%forcing_hi(n)%data_3d(i,k,j) + (this%forcing_hi(n)%dqdt_3d(i,k,j) * dt)
+                                        this%forcing_hi(n)%data_3d(i,k,j) = max(this%forcing_hi(n)%data_3d(i,k,j),0.0)
 
-                                if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) == 1.0) then
-                                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%forcing_hi(n)%data_3d(i,k,j)
-                                else
-                                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
-                                                    (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) * dt_h) * &
-                                                    (this%forcing_hi(n)%data_3d(i,k,j) - this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j))
+                                        if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) == 1.0) then
+                                            this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%forcing_hi(n)%data_3d(i,k,j)
+                                        else
+                                            this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
+                                                            (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) * dt_h) * &
+                                                            (this%forcing_hi(n)%data_3d(i,k,j) - this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j))
 
-                                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = max(this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j),0.0)
-                                endif
-                            endif
+                                            this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = max(this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j),0.0)
+                                        endif
+                                    endif
+                                enddo
+                            enddo
                         enddo
                     endif
                 endif
             endif
         enddo
+        !$acc end parallel 
+        !$acc end data
 
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
@@ -2851,38 +2916,33 @@ contains
         ! internal field always present for value of optional "update"
         logical :: update_only
         ! temporary to hold the variable to be interpolated to
-        type(variable_t) :: var_to_interpolate
+        type(meta_data_t) :: var_to_interpolate
         ! temporary to hold the forcing variable to be interpolated from
         type(variable_t) :: input_data
 
         ! number of layers has to be used when subsetting for update_pressure (for now)
         integer :: nz, i, var_indx, pressure_indx, pot_temp_indx
-        logical :: var_is_u, var_is_v, var_is_pressure, var_is_potential_temp, agl_interp
+        logical :: var_is_u, var_is_v, var_is_pressure, var_is_potential_temp, agl_interp, force_boundaries
 
         update_only = .False.
         if (present(update)) update_only = update
 
-
         ! Now iterate through the dictionary as long as there are more elements present
         do i = 1,size(this%forcing_hi)
 
-            var_indx = get_varindx(trim(this%forcing_hi(i)%name))
-            var_to_interpolate = get_varmeta(var_indx)
+            ! var_indx = get_varindx(trim(this%forcing_hi(i)%name))
+            var_indx = this%forcing_hi(i)%id
 
-            if (var_to_interpolate%two_d) then
-                var_to_interpolate = this%vars_2d(this%var_indx(var_indx)%v)
-            else if (var_to_interpolate%three_d) then
-                var_to_interpolate = this%vars_3d(this%var_indx(var_indx)%v)
-            endif
+            var_to_interpolate = get_varmeta(var_indx, force_boundaries=force_boundaries)
 
             ! get the associated forcing data
-            input_data = forcing%variables%get_var(var_to_interpolate%forcing_var)
+            input_data = forcing%variables%get_var(var_indx)
             ! interpolate
-            if (var_to_interpolate%two_d) then
+            if (input_data%two_d) then
                 if (update_only) then
                     call geo_interp2d(this%forcing_hi(i)%dqdt_2d, input_data%data_2d, forcing%geo%geolut)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    if (.not.(var_to_interpolate%force_boundaries)) this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d = this%forcing_hi(i)%dqdt_2d
+                    if (.not.(force_boundaries)) this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d = this%forcing_hi(i)%dqdt_2d
                 else
                     call geo_interp2d(this%forcing_hi(i)%data_2d, input_data%data_2d, forcing%geo%geolut)
                     !If this is an initialization step, copy high res directly over to domain
@@ -2890,10 +2950,10 @@ contains
                 endif
             else
 
-                var_is_pressure = (trim(var_to_interpolate%forcing_var) == trim(this%vars_3d(this%var_indx(kVARS%pressure)%v)%forcing_var))
-                var_is_potential_temp = (trim(var_to_interpolate%forcing_var) == trim(this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%forcing_var))
-                var_is_u = (trim(var_to_interpolate%forcing_var) == trim(this%vars_3d(this%var_indx(kVARS%u)%v)%forcing_var))
-                var_is_v = (trim(var_to_interpolate%forcing_var) == trim(this%vars_3d(this%var_indx(kVARS%v)%v)%forcing_var))
+                var_is_pressure = (input_data%id == kVARS%pressure)
+                var_is_potential_temp = (input_data%id == kVARS%potential_temperature)
+                var_is_u = (input_data%id == kVARS%u)
+                var_is_v = (input_data%id == kVARS%v)
                 !If we are dealing with anything but pressure and temperature (basically mass/number species), consider height above ground
                 !for interpolation. If the user has not selected AGL interpolation in the namelist, this will result in standard z-interpolation
                 agl_interp = .not.(var_is_pressure .or. var_is_potential_temp)
@@ -2903,7 +2963,7 @@ contains
                     call interpolate_variable(this%forcing_hi(i)%dqdt_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    if (.not.(var_to_interpolate%force_boundaries).and..not.var_is_u.and..not.var_is_v) this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d = this%forcing_hi(i)%dqdt_3d
+                    if (.not.(force_boundaries).and..not.var_is_u.and..not.var_is_v) this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d = this%forcing_hi(i)%dqdt_3d
                 else
                     call interpolate_variable(this%forcing_hi(i)%data_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
@@ -2913,7 +2973,7 @@ contains
                 if (var_is_pressure) pressure_indx = i
                 if (var_is_potential_temp) pot_temp_indx = i
             endif
-            call forcing%variables%add_var(var_to_interpolate%forcing_var, input_data)
+            call forcing%variables%add_var(var_indx, input_data)
         enddo
 
         !Adjust potential temperature (first) and pressure (second) to account for points below forcing grid

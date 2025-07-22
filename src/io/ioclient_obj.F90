@@ -17,7 +17,7 @@ submodule(ioclient_interface) ioclient_implementation
   use iso_fortran_env
   use, intrinsic :: iso_c_binding
   use output_metadata,          only : get_varindx, get_varmeta
-
+  use meta_data_interface,      only : meta_data_t
 
   implicit none
 
@@ -210,7 +210,8 @@ contains
         class(ioclient_t),   intent(inout) :: this
         type(domain_t),   intent(inout)    :: domain
         
-        type(variable_t) :: var, tmp_var
+        type(variable_t) :: var
+        type(meta_data_t) :: tmp_var
         integer :: i, n_3d, n_2d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w
                         
         n_3d = 1
@@ -233,7 +234,7 @@ contains
             else if (tmp_var%three_d) then
                 var = domain%vars_3d(domain%vars_to_out(i)%v)
             else
-                write(*,*) 'Error: Variable ', domain%vars_to_out(i)%n, ' not found in parent domain: ', domain%nest_indx
+                write(*,*) 'Error: Variable ', tmp_var%name, ' not found in parent domain: ', domain%nest_indx
                 stop
             endif
             
@@ -280,7 +281,8 @@ contains
         class(ioclient_t),   intent(inout) :: this
         type(domain_t),      intent(in)    :: domain
 
-        type(variable_t) :: var, tmp_var
+        type(variable_t) :: var
+        type(meta_data_t) :: tmp_var
         integer :: i, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, var_indx
 
         n_3d = 1
@@ -335,8 +337,7 @@ contains
         type(domain_t),   intent(inout)  :: domain
 
         type(variable_t)     :: var
-        integer :: i, n, nx, ny
-        character(len=kMAX_NAME_LENGTH) :: varname
+        integer :: i, n, nx, ny, var_id
                 
         n = 1
         nx = this%i_e_r - this%i_s_r + 1
@@ -352,7 +353,7 @@ contains
 
         do while (forcing%variables%has_more_elements())
             ! get the next variable in the structure
-            var = forcing%variables%next(name=varname)
+            var = forcing%variables%next(var_id)
             if (var%computed) then
                 cycle
             else
@@ -367,7 +368,7 @@ contains
                 endif
                 n = n+1
             endif
-            call forcing%variables%add_var(varname, var)
+            call forcing%variables%add_var(var_id, var)
         enddo
     
         ! Do MPI_Win_Post on read_buffer to indicate that we are open for delivery of new input data
@@ -385,7 +386,8 @@ contains
         type(domain_t),   intent(inout)  :: domain
         type(options_t),  intent(in)     :: options
 
-        type(variable_t)     :: var, tmp_var
+        type(meta_data_t)     :: tmp_var
+        type(variable_t)      :: var
         integer :: i, n_2d, n_3d, nx, ny, i_s_re, i_e_re, j_s_re, j_e_re
         character(len=kMAX_NAME_LENGTH) :: varname
 
@@ -400,6 +402,12 @@ contains
         n_2d = 1
         
         do i = 1, kMAX_STORAGE_VARS
+
+            !See if var is in restart vars
+            if (options%vars_for_restart(i) <= 0) then
+                cycle
+            endif
+
             ! get the next variable in the structure
             if (domain%vars_to_out(i)%v <= 0) cycle
             tmp_var = get_varmeta(i)
@@ -408,14 +416,10 @@ contains
             else if (tmp_var%three_d) then
                 var = domain%vars_3d(domain%vars_to_out(i)%v)
             else
-                write(*,*) 'Error: Variable ', domain%vars_to_out(i)%n, ' not found in parent domain: ', domain%nest_indx
+                write(*,*) 'Error: Variable ', tmp_var%name, ' not found in parent domain: ', domain%nest_indx
                 stop
             endif
 
-            !See if var is in restart vars
-            if (options%vars_for_restart(get_varindx(var%name)) <= 0) then
-                cycle
-            endif
 
             i_s_re = this%i_s_re; i_e_re = this%i_e_re
             j_s_re = this%j_s_re; j_e_re = this%j_e_re

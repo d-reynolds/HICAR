@@ -318,7 +318,7 @@ if(MODE STREQUAL "debug")
 	elseif (COMPILER STREQUAL "cray")
 		target_compile_options(HICAR PUBLIC -h noomp -c -eI -g -O0) #-R cpbs --cray-print-opts
 	elseif (COMPILER STREQUAL "nvfortran")
-		target_compile_options(HICAR PUBLIC -O0 -g -traceback -Mnoopenmp -Mbounds -Minfo=accel -Mpreprocess -march=native) # -acc=gpu -gpu=ccnative,mem:managed ) #-Mbounds -traceback -Minfo=accel)
+		target_compile_options(HICAR PUBLIC -O0 -g -traceback -Mnoopenmp -Mbounds -Minfo=accel -Mpreprocess -march=native -acc=gpu -gpu=mem:separate,ccnative,deepcopy) # -acc=gpu -gpu=ccnative,mem:managed ) #-Mbounds -traceback -Minfo=accel)
 	endif()
 elseif(MODE STREQUAL "debugslow")
 	set(CMAKE_BUILD_TYPE Debug)
@@ -347,14 +347,14 @@ elseif(MODE STREQUAL "release")
 	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR")
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -O3 -fopenmp -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
+		target_compile_options(HICAR PUBLIC -O3 -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
 		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -c -eI -eZ)
 		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_cray")
 	elseif (COMPILER STREQUAL "nvfortran")
-		target_compile_options(HICAR PUBLIC -O3 -Mnoopenmp -Minfo=accel -Mpreprocess -march=native -acc=gpu -gpu=mem:separate,ccnative) #)
+		target_compile_options(HICAR PUBLIC -O3 -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative,deepcopy)
 	endif()
 endif()
 
@@ -459,7 +459,7 @@ if (MPIEXEC_EXECUTABLE MATCHES "srun")
 	add_custom_target(check
 	COMMAND ${CMAKE_COMMAND} -E echo "Running code integration testes with srun..."	
 	COMMAND "${MPIEXEC_EXECUTABLE}" ${MPIEXEC_NUMPROC_FLAG} 4 ${SRUN_FLAGS_LIST} ${CMAKE_BINARY_DIR}/tests/${PROJECT_NAME}-tester
-	DEPENDS download_test_data
+	DEPENDS ${PROJECT_NAME}-tester 
 	WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 	COMMENT "Running integration test suite with 4 MPI processes"
 	VERBATIM
@@ -478,7 +478,7 @@ else()
 	add_custom_target(check
 	COMMAND ${CMAKE_COMMAND} -E echo "Running code integration testes with MPI..."
 	COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 ${CMAKE_BINARY_DIR}/tests/${PROJECT_NAME}-tester
-	DEPENDS download_test_data
+	DEPENDS ${PROJECT_NAME}-tester 
 	WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 	COMMENT "Running integration test suite with 4 MPI processes"
 	VERBATIM

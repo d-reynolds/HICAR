@@ -1,45 +1,11 @@
 module output_metadata
 
     use icar_constants
-    use variable_interface,     only : variable_t
-    use meta_data_interface,    only : attribute_t
+    use meta_data_interface,    only : attribute_t, meta_data_t
     use string,       only : to_lower
     use iso_fortran_env, only : output_unit
     use options_interface, only : options_t
     implicit none
-
-    character(len=18) :: one_d_column_dimensions(1)         = [character(len=18) :: "level"]
-    character(len=18) :: two_d_dimensions(2)                = [character(len=18) :: "lon_x","lat_y"]
-    character(len=18) :: two_d_t_dimensions(3)              = [character(len=18) :: "lon_x","lat_y","time"]
-    character(len=18) :: two_d_u_dimensions(2)              = [character(len=18) :: "lon_u","lat_y"]
-    character(len=18) :: two_d_v_dimensions(2)              = [character(len=18) :: "lon_x","lat_v"]
-    character(len=18) :: two_d_global_dimensions(2)         = [character(len=18) :: "lon_x_global","lat_y_global"]
-    character(len=18) :: two_d_neighbor_dimensions(2)       = [character(len=18) :: "lon_x_neighbor","lat_y_neighbor"]
-    character(len=18) :: three_d_u_t_dimensions(4)          = [character(len=18) :: "lon_u","level","lat_y","time"]
-    character(len=18) :: three_d_v_t_dimensions(4)          = [character(len=18) :: "lon_x","level","lat_v","time"]
-    character(len=18) :: three_d_u_dimensions(3)            = [character(len=18) :: "lon_u","level","lat_y"]
-    character(len=18) :: three_d_v_dimensions(3)            = [character(len=18) :: "lon_x","level","lat_v"]
-    character(len=18) :: three_d_dimensions(3)              = [character(len=18) :: "lon_x","level","lat_y"]
-    character(len=18) :: three_d_global_dimensions(3)       = [character(len=18) :: "lon_x_global","level","lat_y_global"]
-    character(len=18) :: three_d_neighbor_dimensions(3)     = [character(len=18) :: "lon_x_neighbor","level","lat_y_neighbor"]
-    character(len=18) :: three_d_global_interface_dimensions(3)       = [character(len=18) :: "lon_x_global","level_i","lat_y_global"]
-    character(len=18) :: three_d_neighbor_interface_dimensions(3)     = [character(len=18) :: "lon_x_neighbor","level_i","lat_y_neighbor"]
-    character(len=18) :: three_d_t_dimensions(4)            = [character(len=18) :: "lon_x","level","lat_y","time"]
-    character(len=18) :: three_d_interface_dimensions(3)    = [character(len=18) :: "lon_x","level_i","lat_y"]
-    character(len=18) :: three_d_t_interface_dimensions(4)  = [character(len=18) :: "lon_x","level_i","lat_y","time"]
-    character(len=18) :: three_d_hlm_dimensions(3)          = [character(len=18) :: "lon_x","azimuth","lat_y"]
-    character(len=18) :: three_d_t_soil_dimensions(4)       = [character(len=18) :: "lon_x","nsoil","lat_y","time"]
-    character(len=18) :: three_d_t_snow_dimensions(4)       = [character(len=18) :: "lon_x","nsnow","lat_y","time"]
-    character(len=18) :: three_d_t_snowsoil_dimensions(4)   = [character(len=18) :: "lon_x","nsnowsoil","lat_y","time"]
-    character(len=18) :: three_d_soilcomp_dimensions(3)     = [character(len=18) :: "lon_x","nsoil_composition","lat_y"]
-    character(len=18) :: three_d_crop_dimensions(3)         = [character(len=18) :: "lon_x","crop","lat_y"]
-    character(len=18) :: three_d_t_gecros_dimensions(4)     = [character(len=18) :: "lon_x","gecros","lat_y","time"]
-    character(len=18) :: three_d_t_month_dimensions(4)          = [character(len=18) :: "lon_x","month","lat_y","time"]
-    character(len=18) :: three_d_t_lake_dimensions(4)           = [character(len=18) :: "lon_x","nlevlake","lat_y","time"]
-    character(len=18) :: three_d_t_lake_soisno_dimensions(4)    = [character(len=18) :: "lon_x","nlevsoisno","lat_y","time"] !grid_lake_soisno
-    character(len=18) :: three_d_t_lake_soisno_1_dimensions(4)  = [character(len=18) :: "lon_x","nlevsoisno_1","lat_y","time"]
-    character(len=18) :: three_d_t_lake_soi_dimensions(4)       = [character(len=18) :: "lon_x","nlevsoi_lake","lat_y","time"] !grid_lake_soi
-    character(len=18) :: four_d_azim_dimensions(4)                = [character(len=18) :: "lon_x","level","lat_y","Sx_azimuth"]
 
     ! type(variable_t), allocatable, target :: var_meta(:)
 
@@ -97,29 +63,29 @@ contains
 
     !     meta_data = var_meta(var_idx)
 
-    !     meta_data%two_d     = input_var%two_d
-    !     meta_data%three_d   = input_var%three_d
-    !     meta_data%grid      = input_var%grid
+    !     meta_data%two_d     = input_var_meta%two_d
+    !     meta_data%three_d   = input_var_meta%three_d
+    !     meta_data%grid      = input_var_meta%grid
 
     !     if(meta_data%two_d) then
-    !         if (allocated(input_var%dim_len)) allocate(meta_data%dim_len,source=input_var%dim_len)
-    !         if (allocated(input_var%global_dim_len)) allocate(meta_data%global_dim_len,source=input_var%global_dim_len)
+    !         if (allocated(input_var_meta%dim_len)) allocate(meta_data%dim_len,source=input_var_meta%dim_len)
+    !         if (allocated(input_var_meta%global_dim_len)) allocate(meta_data%global_dim_len,source=input_var_meta%global_dim_len)
 
-    !         meta_data%data_2d => input_var%data_2d
+    !         meta_data%data_2d => input_var_meta%data_2d
     !     else
-    !         if (allocated(input_var%dim_len)) then
+    !         if (allocated(input_var_meta%dim_len)) then
     !             allocate(meta_data%dim_len(3))
-    !             meta_data%dim_len(1) = input_var%dim_len(1)
-    !             meta_data%dim_len(2) = input_var%dim_len(3)
-    !             meta_data%dim_len(3) = input_var%dim_len(2)
+    !             meta_data%dim_len(1) = input_var_meta%dim_len(1)
+    !             meta_data%dim_len(2) = input_var_meta%dim_len(3)
+    !             meta_data%dim_len(3) = input_var_meta%dim_len(2)
     !         endif
-    !         if (allocated(input_var%global_dim_len)) then
+    !         if (allocated(input_var_meta%global_dim_len)) then
     !             allocate(meta_data%global_dim_len(3))
-    !             meta_data%global_dim_len(1) = input_var%global_dim_len(1)
-    !             meta_data%global_dim_len(2) = input_var%global_dim_len(3)
-    !             meta_data%global_dim_len(3) = input_var%global_dim_len(2)
+    !             meta_data%global_dim_len(1) = input_var_meta%global_dim_len(1)
+    !             meta_data%global_dim_len(2) = input_var_meta%global_dim_len(3)
+    !             meta_data%global_dim_len(3) = input_var_meta%global_dim_len(2)
     !         endif
-    !         meta_data%data_3d => input_var%data_3d
+    !         meta_data%data_3d => input_var_meta%data_3d
     !     endif
 
     ! end function get_metadata_var
@@ -233,7 +199,7 @@ contains
         implicit none
         integer, intent(in)             :: var_idx
         character(len=kMAX_NAME_LENGTH) :: name       ! function result
-        type(variable_t)                 :: var
+        type(meta_data_t)               :: var_meta
 
         if (var_idx>kMAX_STORAGE_VARS) then
             stop "Invalid variable metadata requested"
@@ -241,8 +207,8 @@ contains
         ! initialize the module level constant data structure
         !if (.not.allocated(var_meta)) call init_var_meta()
 
-        var = get_varmeta(var_idx)
-        name = var%name
+        var_meta = get_varmeta(var_idx)
+        name = var_meta%name
 
     end function get_varname
 
@@ -255,14 +221,14 @@ contains
         implicit none
         character(len=*), intent(in) :: var_name       
         integer                                     :: indx  ! function result
-        type(variable_t)                            :: var
+        type(meta_data_t)               :: var_meta
 
         ! initialize the module level constant data structure
         !if (.not.allocated(var_meta)) call init_var_meta()
 
         do indx = 1, kMAX_STORAGE_VARS
-            var = get_varmeta(indx)
-            if (var%name == trim(var_name)) return
+            var_meta = get_varmeta(indx)
+            if (var_meta%name == trim(var_name)) return
         enddo
 
         if (indx>kMAX_STORAGE_VARS) then
@@ -271,9 +237,9 @@ contains
 
     end function get_varindx
 
-    function get_var_matchinfo(var,request_string) result(match_info)
+    function get_var_matchinfo(var_meta,request_string) result(match_info)
         implicit none
-        type(variable_t), intent(in) :: var
+        type(meta_data_t), intent(in) :: var_meta
         character(len=*), intent(in) :: request_string
 
         logical     :: match_info
@@ -286,16 +252,16 @@ contains
         !if (.not.allocated(var_meta)) call init_var_meta()
         
         ! check if any part of request_string is in the description or name of the variable
-        if (index(to_lower(var%name), trim(to_lower(request_string))) > 0) then
+        if (index(to_lower(var_meta%name), trim(to_lower(request_string))) > 0) then
             match_info = .True.
         else
             ! loop through each element of the attribute array
-            do i=1,var%n_attrs
+            do i=1,var_meta%n_attrs
                 ! ignore the "units" and "coordinates" attributes
-                if (index(var%attributes(i)%name, "units") > 0) cycle
-                if (index(var%attributes(i)%name, "coordinates") > 0) cycle
+                if (index(var_meta%attributes(i)%name, "units") > 0) cycle
+                if (index(var_meta%attributes(i)%name, "coordinates") > 0) cycle
 
-                if (index(to_lower(var%attributes(i)%value), trim(to_lower(request_string))) > 0) then
+                if (index(to_lower(var_meta%attributes(i)%value), trim(to_lower(request_string))) > 0) then
                     match_info = .True.
                     exit
                 endif
@@ -307,7 +273,7 @@ contains
         implicit none
         character(len=*), intent(in) :: keywords(:)
 
-        type(variable_t) :: var
+        type(meta_data_t) :: var_meta
         integer :: i, j, k, match_count
         character(len=kMAX_NAME_LENGTH) :: dimensions
 
@@ -325,30 +291,30 @@ contains
 
         do i=1,kMAX_STORAGE_VARS
             match_count = 0
-            var = get_varmeta(i)
+            var_meta = get_varmeta(i)
             !check if name is not an empty string
-            if (len_trim(var%name) == 0) cycle
+            if (len_trim(var_meta%name) == 0) cycle
             do k = 1,size(keywords)
-                if (get_var_matchinfo(var, keywords(k))) then
+                if (get_var_matchinfo(var_meta, keywords(k))) then
                     match_count = match_count + 1
                 endif
             enddo
             if (match_count == size(keywords)) then
                 dimensions = ""
-                do j = 1,var%n_dimensions
-                    dimensions = trim(dimensions)//trim(var%dimensions(j))//", "
+                do j = 1,size(var_meta%dimensions)
+                    dimensions = trim(dimensions)//trim(var_meta%dimensions(j))//", "
                 enddo
                 ! remove the trailing space
                 dimensions = trim(dimensions)
                 !remove trailing comma
                 dimensions = dimensions(1:len_trim(dimensions)-1)
 
-                if (STD_OUT_PE) write(*,*) "Name: ",trim(var%name)
+                if (STD_OUT_PE) write(*,*) "Name: ",trim(var_meta%name)
                 if (STD_OUT_PE) write(*,*) 
-                if (STD_OUT_PE) write(*,"(A25,A)") "   namelist name: ",trim(var%name)
+                if (STD_OUT_PE) write(*,"(A25,A)") "   namelist name: ",trim(var_meta%name)
                 if (STD_OUT_PE) write(*,"(A25,A1,A,A1)") "   dimensions: ","[",trim(dimensions),"]"
-                do j=1,var%n_attrs
-                    if (STD_OUT_PE) write(*,"(A25,A)") (trim(var%attributes(j)%name)//": "),trim(var%attributes(j)%value)
+                do j=1,var_meta%n_attrs
+                    if (STD_OUT_PE) write(*,"(A25,A)") (trim(var_meta%attributes(j)%name)//": "),trim(var_meta%attributes(j)%value)
                 enddo
                 if (STD_OUT_PE) write(*,*) "-------------------------------------------------"
             endif
@@ -360,53 +326,63 @@ contains
     !! Initialize the module level master data structure
     !!
     !!------------------------------------------------------------
-    function get_varmeta(var_idx, opt) result(var)
+    function get_varmeta(var_idx, opt, forcing_var, force_boundaries) result(var_meta)
         implicit none
         integer, intent(in) :: var_idx
         type(options_t), intent(in), optional :: opt
+        logical, intent(out), optional :: forcing_var, force_boundaries
 
-        type(variable_t) :: var
+        type(meta_data_t) :: var_meta
         integer :: i, j
 
         if (kVARS%last_var/=kMAX_STORAGE_VARS) then
             stop "ERROR: variable indicies not correctly initialized"
         endif
 
+        if (present(forcing_var)) then
+            if (present(opt)) then
+                forcing_var = .False.
+            else
+                stop 'Error in function get_varmeta: when forcing_var is passed in, the argument opt must also be passed'
+            endif
+        endif
+        if (present(force_boundaries)) force_boundaries = .True.
+
         ! allocate the actual data structure to be used
-        allocate(var%dim_len,source=(/ 0, 0, 0/))
+        allocate(var_meta%dim_len,source=(/ 0, 0, 0/))
 
         !>------------------------------------------------------------
         !!  U  East West Winds
         !!------------------------------------------------------------
         if (var_idx==kVARS%u) then
-            var%name        = "u"
-            var%dimensions  = three_d_u_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "grid_eastward_wind"),              &
+            var_meta%name        = "u"
+            var_meta%dimensions  = three_d_u_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "grid_eastward_wind"),              &
                                attribute_t("long_name",     "Grid relative eastward wind"),     &
                                attribute_t("units",         "m s-1"),                           &
                                attribute_t("coordinates",   "u_lat u_lon")]
-            var%force_boundaries = .False.
-            if (present(opt)) var%forcing_var = opt%forcing%uvar
+            if (present(force_boundaries)) force_boundaries = .False.
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%uvar /= "")
         !>------------------------------------------------------------
         !!  V  North South Winds
         !!------------------------------------------------------------
         else if (var_idx==kVARS%v) then
-            var%name        = "v"
-            var%dimensions  = three_d_v_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "grid_northward_wind"),             &
+            var_meta%name        = "v"
+            var_meta%dimensions  = three_d_v_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "grid_northward_wind"),             &
                                attribute_t("long_name",     "Grid relative northward wind"),    &
                                attribute_t("units",         "m s-1"),                           &
                                attribute_t("coordinates",   "v_lat v_lon")]
-            var%force_boundaries = .False.
-            if (present(opt)) var%forcing_var = opt%forcing%vvar
+            if (present(force_boundaries)) force_boundaries = .False.
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%vvar /= "")
 
         !>------------------------------------------------------------
         !!  W  Vertical Winds
         !!------------------------------------------------------------
         else if (var_idx==kVARS%w) then
-            var%name        = "w_grid"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "grid_upward_air_velocity"),    &
+            var_meta%name        = "w_grid"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "grid_upward_air_velocity"),    &
                                attribute_t("long_name",     "Vertical wind"),                   &
                                attribute_t("description",   "Vertical wind relative to the grid"),&
                                attribute_t("units",         "m s-1"),                           &
@@ -414,23 +390,23 @@ contains
         
 
         else if (var_idx==kVARS%w_real) then
-            var%name        = "w"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "upward_air_velocity"),             &
+            var_meta%name        = "w"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "upward_air_velocity"),             &
                                attribute_t("long_name",     "Vertical wind"),                   &
                                attribute_t("description",   "Vertical wind including u/v"),     &
                                attribute_t("units",         "m s-1"),                           &
                                attribute_t("coordinates",   "lat lon")]
-            var%force_boundaries = .False.
-            if (present(opt)) var%forcing_var = opt%forcing%wvar
+            if (present(force_boundaries)) force_boundaries = .False.
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%wvar /= "")
 
         !>------------------------------------------------------------
         !!  Brunt Vaisala frequency (squared)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%nsquared) then
-            var%name        = "nsquared"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "square_of_brunt_vaisala_frequency_in_air"),&
+            var_meta%name        = "nsquared"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "square_of_brunt_vaisala_frequency_in_air"),&
                                attribute_t("long_name",     "Burnt Vaisala frequency squared"), &
                                attribute_t("units",         "s-2"),                             &
                                attribute_t("coordinates",   "lat lon")]
@@ -439,22 +415,22 @@ contains
         !!  Air Pressure
         !!------------------------------------------------------------
         else if (var_idx==kVARS%pressure) then
-            var%name        = "pressure"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "air_pressure"),                    &
+            var_meta%name        = "pressure"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "air_pressure"),                    &
                                attribute_t("long_name",     "Pressure"),                        &
                                attribute_t("units",         "Pa"),                              &
                                attribute_t("coordinates",   "lat lon")]
-            var%force_boundaries = .False.
-            if (present(opt)) var%forcing_var = opt%forcing%pvar
+            if (present(force_boundaries)) force_boundaries = .False.
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%pvar /= "")
 
         !>------------------------------------------------------------
         !!  Air Pressure on interfaces between mass levels
         !!------------------------------------------------------------
         else if (var_idx==kVARS%pressure_interface) then
-            var%name        = "pressure_i"
-            var%dimensions  = three_d_t_interface_dimensions
-            var%attributes  = [attribute_t("standard_name", "air_pressure"),                    &
+            var_meta%name        = "pressure_i"
+            var_meta%dimensions  = three_d_t_interface_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "air_pressure"),                    &
                                attribute_t("long_name",     "Pressure"),                        &
                                attribute_t("units",         "Pa"),                              &
                                attribute_t("coordinates",   "lat lon")]
@@ -463,9 +439,9 @@ contains
         !!  Air Pressure on interfaces between mass levels
         !!------------------------------------------------------------
         else if (var_idx==kVARS%surface_pressure) then
-            var%name        = "psfc"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_air_pressure"),            &
+            var_meta%name        = "psfc"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_air_pressure"),            &
                                attribute_t("long_name",     "Surface Pressure"),                &
                                attribute_t("units",         "Pa"),                              &
                                attribute_t("coordinates",   "lat lon")]
@@ -474,21 +450,21 @@ contains
         !!  Potential Air Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%potential_temperature) then
-            var%name        = "potential_temperature"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "air_potential_temperature"),       &
+            var_meta%name        = "potential_temperature"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "air_potential_temperature"),       &
                                attribute_t("long_name",     "Potential Temperature"),           &
                                attribute_t("units",         "K"),                               &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%tvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%tvar /= "")
 
         !>------------------------------------------------------------
         !!  Real Air Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%temperature) then
-            var%name        = "temperature"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "air_temperature"),                 &
+            var_meta%name        = "temperature"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "air_temperature"),                 &
                                attribute_t("long_name",     "Temperature"),                     &
                                attribute_t("units",         "K"),                               &
                                attribute_t("coordinates",   "lat lon")]
@@ -497,224 +473,224 @@ contains
         !!  Water Vapor Mixing Ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%water_vapor) then
-            var%name        = "qv"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "mass_fraction_of_water_vapor_in_air"), &
+            var_meta%name        = "qv"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "mass_fraction_of_water_vapor_in_air"), &
                                attribute_t("long_name",     "Water Vapor Mixing Ratio"),            &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%qvvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qvvar /= "")
 
         !>------------------------------------------------------------
         !!  Cloud water (liquid) mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%cloud_water_mass) then
-            var%name        = "qc"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "cloud_liquid_water_mixing_ratio"),     &
+            var_meta%name        = "qc"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "cloud_liquid_water_mixing_ratio"),     &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%qcvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qcvar /= "")
 
         !>------------------------------------------------------------
         !!  Cloud water (liquid) number concentration
         !!------------------------------------------------------------
         else if (var_idx==kVARS%cloud_number) then
-            var%name        = "nc"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_cloud_droplets_in_air"), &
+            var_meta%name        = "nc"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "number_concentration_of_cloud_droplets_in_air"), &
                                attribute_t("units",         "cm-3"),                                              &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%qncvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qncvar /= "")
         !>------------------------------------------------------------
         !!  Cloud ice mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice_mass) then
-            var%name        = "qi"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "cloud_ice_mixing_ratio"),              &
+            var_meta%name        = "qi"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "cloud_ice_mixing_ratio"),              &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%qivar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qivar /= "")
         !>------------------------------------------------------------
         !!  Cloud ice number concentration
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice_number) then
-            var%name        = "ni"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_ice_crystals_in_air"), &
+            var_meta%name        = "ni"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "number_concentration_of_ice_crystals_in_air"), &
                                attribute_t("units",         "cm-3"),                                            &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%qnivar        
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qnivar /= "")        
         !>------------------------------------------------------------
         !!  Rain water mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%rain_mass) then
-            var%name        = "qr"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "mass_fraction_of_rain_in_air"),        &
+            var_meta%name        = "qr"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "mass_fraction_of_rain_in_air"),        &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%qrvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qrvar /= "")
         !>------------------------------------------------------------
         !!  Rain water number concentration
         !!------------------------------------------------------------
         else if (var_idx==kVARS%rain_number) then
-            var%name        = "nr"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_rain_particles_in_air"), &
+            var_meta%name        = "nr"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "number_concentration_of_rain_particles_in_air"), &
                                attribute_t("units",         "cm-3"),                                              &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%qnrvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qnrvar /= "")
         !>------------------------------------------------------------
         !!  Snow in air mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_mass) then
-            var%name        = "qs"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "mass_fraction_of_snow_in_air"),        &
+            var_meta%name        = "qs"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "mass_fraction_of_snow_in_air"),        &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%qsvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qsvar /= "")
         !>------------------------------------------------------------
         !!  Snow in air number concentration
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_number) then
-            var%name        = "ns"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_snow_particles_in_air"), &
+            var_meta%name        = "ns"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "number_concentration_of_snow_particles_in_air"), &
                                attribute_t("units",         "cm-3"),                                              &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%qnsvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qnsvar /= "")
         !>------------------------------------------------------------
         !!  Graupel mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%graupel_mass) then
-            var%name        = "qg"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "mass_fraction_of_graupel_in_air"),     &
+            var_meta%name        = "qg"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "mass_fraction_of_graupel_in_air"),     &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%qgvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qgvar /= "")
         !>------------------------------------------------------------
         !!  Graupel number concentration
         !!------------------------------------------------------------
         else if (var_idx==kVARS%graupel_number) then
-            var%name        = "ng"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "number_concentration_of_graupel_particles_in_air"), &
+            var_meta%name        = "ng"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "number_concentration_of_graupel_particles_in_air"), &
                                attribute_t("units",         "cm-3"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%qngvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qngvar /= "")
         !>------------------------------------------------------------
         !!  planar-nucleated a^2c mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice1_a) then
-            var%name        = "ice1_a"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "planar-nucleated a^2c mixing ratio"), &
+            var_meta%name        = "ice1_a"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "planar-nucleated a^2c mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%i1avar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%i1avar /= "")
         !>------------------------------------------------------------
         !!  planar-nucleated c^2a mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice1_c) then
-            var%name        = "ice1_c"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "planar-nucleated c^2a mixing ratio"), &
+            var_meta%name        = "ice1_c"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "planar-nucleated c^2a mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%i1cvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%i1cvar /= "")
         !>------------------------------------------------------------
         !!  columnar-nucleated mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice2_mass) then
-            var%name        = "ice2_mass"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "columnar-nucleated mixing ratio"), &
+            var_meta%name        = "ice2_mass"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "columnar-nucleated mixing ratio"), &
                                attribute_t("units",         "kg kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%i2mvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%i2mvar /= "")
         !>------------------------------------------------------------
         !!  columnar-nucleated number mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice2_number) then
-            var%name        = "ice2_number"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "columnar-nucleated number mixing ratio"), &
+            var_meta%name        = "ice2_number"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "columnar-nucleated number mixing ratio"), &
                                attribute_t("units",         "kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%i2nvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%i2nvar /= "")
         !>------------------------------------------------------------
         !!  columnar-nucleated a^2c mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice2_a) then
-            var%name        = "ice2_a"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "columnar-nucleated a^2c mixing ratio"), &
+            var_meta%name        = "ice2_a"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "columnar-nucleated a^2c mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%i2avar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%i2avar /= "")
         !>------------------------------------------------------------
         !!  columnar-nucleated c^2a mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice2_c) then
-            var%name        = "ice2_c"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "columnar-nucleated c^2a mixing ratio"), &
+            var_meta%name        = "ice2_c"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "columnar-nucleated c^2a mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%i2cvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%i2cvar /= "")
         !>------------------------------------------------------------
         !!  aggregate mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice3_mass) then
-            var%name        = "ice3_mass"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "aggregate mixing ratio"), &
+            var_meta%name        = "ice3_mass"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "aggregate mixing ratio"), &
                                attribute_t("units",         "kg kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%i3mvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%i3mvar /= "")
         !>------------------------------------------------------------
         !!  aggregate number mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice3_number) then
-            var%name        = "ice3_number"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "aggregate number mixing ratio"), &
+            var_meta%name        = "ice3_number"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "aggregate number mixing ratio"), &
                                attribute_t("units",         "kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%i3nvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%i3nvar /= "")
         !>------------------------------------------------------------
         !!  aggregate a^2c mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice3_a) then
-            var%name        = "ice3_a"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "aggregate a^2c mixing ratio"), &
+            var_meta%name        = "ice3_a"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "aggregate a^2c mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%i3avar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%i3avar /= "")
         !>------------------------------------------------------------
         !!  aggregate c^2a mixing ratio
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice3_c) then
-            var%name        = "ice3_c"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "aggregate c^2a mixing ratio"), &
+            var_meta%name        = "ice3_c"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "aggregate c^2a mixing ratio"), &
                                attribute_t("units",         "m^3 kg^-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
-            if (present(opt)) var%forcing_var = opt%forcing%i3cvar
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%i3cvar /= "")
 
         !>------------------------------------------------------------
         !!  Precipitation rate at the surface (requires tracking past precipitation amounts)
         !!------------------------------------------------------------
         ! else if (var_idx==kVARS%precip_rate)
-        !     var%name        = "precip_rate"
-        !     var%dimensions  = two_d_t_dimensions
-        !     var%unlimited_dim=.True.
-        !     var%attributes  = [attribute_t("standard_name",   "precipitation_flux"),      &
+        !     var_meta%name        = "precip_rate"
+        !     var_meta%dimensions  = two_d_t_dimensions
+        !     var_meta%unlimited_dim=.True.
+        !     var_meta%attributes  = [attribute_t("standard_name",   "precipitation_flux"),      &
         !                        attribute_t("units",           "kg m-2 s-1"),              &
         !                        attribute_t("coordinates",     "lat lon")]
         ! 
@@ -722,9 +698,9 @@ contains
         !!  Accumulated precipitation at the surface
         !!------------------------------------------------------------
         else if (var_idx==kVARS%precipitation) then
-            var%name        = "precipitation"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "precipitation_amount"),                &
+            var_meta%name        = "precipitation"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "precipitation_amount"),                &
                                attribute_t("units",         "kg m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -732,9 +708,9 @@ contains
         !!  Accumulated convective precipitation at the surface
         !!------------------------------------------------------------
         else if (var_idx==kVARS%convective_precipitation) then
-            var%name        = "cu_precipitation"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "convective_precipitation_amount"),     &
+            var_meta%name        = "cu_precipitation"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "convective_precipitation_amount"),     &
                                attribute_t("units",         "kg m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -742,9 +718,9 @@ contains
         !!  Accumulated snowfall at the surface
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snowfall) then
-            var%name        = "snowfall"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "snowfall_amount"),                     &
+            var_meta%name        = "snowfall"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "snowfall_amount"),                     &
                                attribute_t("units",         "kg m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -752,9 +728,9 @@ contains
         !!  Accumulated Graupel at the surface
         !!------------------------------------------------------------
         else if (var_idx==kVARS%graupel) then
-            var%name        = "graupel"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "graupel_amount"),                      &
+            var_meta%name        = "graupel"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "graupel_amount"),                      &
                                attribute_t("units",         "kg m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -762,9 +738,9 @@ contains
         !!  Exner function
         !!------------------------------------------------------------
         else if (var_idx==kVARS%exner) then
-            var%name        = "exner"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "exner_function_result"),           &
+            var_meta%name        = "exner"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "exner_function_result"),           &
                                attribute_t("units",         "K K-1"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -772,9 +748,9 @@ contains
         !!  Air Density
         !!------------------------------------------------------------
         else if (var_idx==kVARS%density) then
-            var%name        = "density"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "air_density"),                         &
+            var_meta%name        = "density"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "air_density"),                         &
                                attribute_t("units",         "kg m-3"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -782,9 +758,9 @@ contains
         !!  Vertical coordinate
         !!------------------------------------------------------------
         else if (var_idx==kVARS%z) then
-            var%name        = "z"
-            var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
+            var_meta%name        = "z"
+            var_meta%dimensions  = three_d_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -792,18 +768,18 @@ contains
         !!  Vertical coordinate on the interface between mass levels
         !!------------------------------------------------------------
         else if (var_idx==kVARS%z_interface) then
-            var%name        = "z_i"
-            var%dimensions  = three_d_interface_dimensions
-            var%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
+            var_meta%name        = "z_i"
+            var_meta%dimensions  = three_d_interface_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Vertical coordinate on the interface between mass levels on global grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%global_z_interface) then
-            var%name        = "global_z_i"
-            var%dimensions  = three_d_neighbor_interface_dimensions
-            var%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
+            var_meta%name        = "global_z_i"
+            var_meta%dimensions  = three_d_neighbor_interface_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
                     
@@ -811,9 +787,9 @@ contains
         !!  Vertical layer thickness
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dz) then
-            var%name        = "dz"
-            var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "layer_thickness between mass points"),                 &
+            var_meta%name        = "dz"
+            var_meta%dimensions  = three_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "layer_thickness between mass points"),                 &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -821,18 +797,18 @@ contains
         !!  Thickness of layers between interfaces
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dz_interface) then
-            var%name        = "dz_i"
-            var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "layer_thickness between k half-levels"),                 &
+            var_meta%name        = "dz_i"
+            var_meta%dimensions  = three_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "layer_thickness between k half-levels"),                 &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Thickness of layers between interfaces for global grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%global_dz_interface) then
-            var%name        = "global_dz_i"
-            var%dimensions  = three_d_neighbor_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "layer_thickness between k half-levels"),                 &
+            var_meta%name        = "global_dz_i"
+            var_meta%dimensions  = three_d_neighbor_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "layer_thickness between k half-levels"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
                     
@@ -840,9 +816,9 @@ contains
         !!  Change in height in x direction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dzdx) then
-            var%name        = "dzdx"
-            var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "dzdx of domain mesh"),                 &
+            var_meta%name        = "dzdx"
+            var_meta%dimensions  = three_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "dzdx of domain mesh"),                 &
                                attribute_t("units",         "-"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -850,18 +826,18 @@ contains
         !!  Change in height in y direction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dzdy) then
-            var%name        = "dzdy"
-            var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "dzdy of domain mesh"),                 &
+            var_meta%name        = "dzdy"
+            var_meta%dimensions  = three_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "dzdy of domain mesh"),                 &
                                attribute_t("units",         "-"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Change in height in x direction on the staggered u grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dzdx_u) then
-            var%name        = "dzdx_u"
-            var%dimensions  = three_d_u_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "dzdx of domain mesh on staggered u grid"),                 &
+            var_meta%name        = "dzdx_u"
+            var_meta%dimensions  = three_d_u_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "dzdx of domain mesh on staggered u grid"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         
@@ -869,162 +845,162 @@ contains
         !!  Change in height in y direction on the staggered v grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dzdy_v) then
-            var%name        = "dzdy_v"
-            var%dimensions  = three_d_v_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "dzdy of domain mesh on staggered v grid"),                 &
+            var_meta%name        = "dzdy_v"
+            var_meta%dimensions  = three_d_v_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "dzdy of domain mesh on staggered v grid"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  High-frequency terrain component
         !!------------------------------------------------------------
         else if (var_idx==kVARS%h1) then
-            var%name        = "h1"
-            var%dimensions  = two_d_neighbor_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "High-frequency terrain component"),                 &
+            var_meta%name        = "h1"
+            var_meta%dimensions  = two_d_neighbor_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "High-frequency terrain component"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Low-frequency terrain component
         !!------------------------------------------------------------
         else if (var_idx==kVARS%h2) then
-            var%name        = "h2"
-            var%dimensions  = two_d_neighbor_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Low-frequency terrain component"),                 &
+            var_meta%name        = "h2"
+            var_meta%dimensions  = two_d_neighbor_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Low-frequency terrain component"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  High-frequency terrain component on the staggered u grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%h1_u) then
-            var%name        = "h1_u"
-            var%dimensions  = two_d_u_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "High-frequency terrain component on staggered u grid"),                 &
+            var_meta%name        = "h1_u"
+            var_meta%dimensions  = two_d_u_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "High-frequency terrain component on staggered u grid"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Low-frequency terrain component on the staggered u grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%h2_u) then
-            var%name        = "h2_u"
-            var%dimensions  = two_d_u_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Low-frequency terrain component on staggered u grid"),                 &
+            var_meta%name        = "h2_u"
+            var_meta%dimensions  = two_d_u_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Low-frequency terrain component on staggered u grid"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  High-frequency terrain component on staggered v grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%h1_v) then
-            var%name        = "h1_v"
-            var%dimensions  = two_d_v_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "High-frequency terrain component on staggered v grid"),                 &
+            var_meta%name        = "h1_v"
+            var_meta%dimensions  = two_d_v_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "High-frequency terrain component on staggered v grid"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Low-frequency terrain component on staggered v grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%h2_v) then
-            var%name        = "h2_v"
-            var%dimensions  = two_d_v_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Low-frequency terrain component on staggered v grid"),                 &
+            var_meta%name        = "h2_v"
+            var_meta%dimensions  = two_d_v_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Low-frequency terrain component on staggered v grid"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  The Jacobian of the z-coordinate transform
         !!------------------------------------------------------------
         else if (var_idx==kVARS%jacobian) then
-            var%name        = "jacobian"
-            var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform"),                 &
+            var_meta%name        = "jacobian"
+            var_meta%dimensions  = three_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  The Jacobian of the z-coordinate transform on staggered u grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%jacobian_u) then
-            var%name        = "jacobian_u"
-            var%dimensions  = three_d_u_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on staggered u grid"),                 &
+            var_meta%name        = "jacobian_u"
+            var_meta%dimensions  = three_d_u_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on staggered u grid"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  The Jacobian of the z-coordinate transform on staggered v grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%jacobian_v) then
-            var%name        = "jacobian_v"
-            var%dimensions  = three_d_v_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on staggered v grid"),                 &
+            var_meta%name        = "jacobian_v"
+            var_meta%dimensions  = three_d_v_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on staggered v grid"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  The Jacobian of the z-coordinate transform on k half-levels
         !!------------------------------------------------------------
         else if (var_idx==kVARS%jacobian_w) then
-            var%name        = "jacobian_w"
-            var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on k half-levels"),                 &
+            var_meta%name        = "jacobian_w"
+            var_meta%dimensions  = three_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on k half-levels"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  sin of grid rotation from true north
         !!------------------------------------------------------------
         else if (var_idx==kVARS%sintheta) then
-            var%name        = "sintheta"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "sin of grid rotation from true north"),                 &
+            var_meta%name        = "sintheta"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "sin of grid rotation from true north"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  cos of grid rotation from true north
         !!------------------------------------------------------------
         else if (var_idx==kVARS%costheta) then
-            var%name        = "costheta"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "cos of grid rotation from true north"),                 &
+            var_meta%name        = "costheta"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "cos of grid rotation from true north"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Relaxation filter used for attenuating forcing of boundary forcing variables
         !!------------------------------------------------------------
         else if (var_idx==kVARS%relax_filter_2d) then
-            var%name        = "relax_filter_2d"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "2D relaxation filter used for attenuating forcing of boundary forcing variables"),                 &
+            var_meta%name        = "relax_filter_2d"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "2D relaxation filter used for attenuating forcing of boundary forcing variables"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Relaxation filter used for attenuating forcing of boundary forcing variables
         !!------------------------------------------------------------
         else if (var_idx==kVARS%relax_filter_3d) then
-            var%name        = "relax_filter_3d"
-            var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "3D relaxation filter used for attenuating forcing of boundary forcing variables"),                 &
+            var_meta%name        = "relax_filter_3d"
+            var_meta%dimensions  = three_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "3D relaxation filter used for attenuating forcing of boundary forcing variables"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  dz used for calculating advection
         !!------------------------------------------------------------
         else if (var_idx==kVARS%advection_dz) then
-            var%name        = "advection_dz"
-            var%dimensions  = three_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "dz used for calculating advection"),                 &
+            var_meta%name        = "advection_dz"
+            var_meta%dimensions  = three_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "dz used for calculating advection"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]                    
         !>------------------------------------------------------------
         !!  Global Terrain for the domain
         !!------------------------------------------------------------
         else if (var_idx==kVARS%global_terrain) then
-            var%name        = "global_terrain"
-            var%dimensions  = two_d_global_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Domain terrain"),                 &
+            var_meta%name        = "global_terrain"
+            var_meta%dimensions  = two_d_global_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Domain terrain"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Neighbor Terrain for the domain
         !!------------------------------------------------------------
         else if (var_idx==kVARS%neighbor_terrain) then
-            var%name        = "neighbor_terrain"
-            var%dimensions  = two_d_neighbor_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Domain terrain"),                 &
+            var_meta%name        = "neighbor_terrain"
+            var_meta%dimensions  = two_d_neighbor_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Domain terrain"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
                     
@@ -1032,54 +1008,54 @@ contains
         !!  Terrain slope
         !!------------------------------------------------------------
         else if (var_idx==kVARS%slope) then
-            var%name        = "slope"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "slope of the terrain"),                 &
+            var_meta%name        = "slope"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "slope of the terrain"),                 &
                                 attribute_t("units",         "rad"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Terrain slope in degrees
         !!------------------------------------------------------------
         else if (var_idx==kVARS%slope_angle) then
-            var%name        = "slope_angle"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "slope of the terrain"),                 &
+            var_meta%name        = "slope_angle"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "slope of the terrain"),                 &
                                 attribute_t("units",         "degrees"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Terrain aspect
         !!------------------------------------------------------------
         else if (var_idx==kVARS%aspect_angle) then
-            var%name        = "aspect_angle"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Aspect of the terrain"),                 &
+            var_meta%name        = "aspect_angle"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Aspect of the terrain"),                 &
                                 attribute_t("units",         "degrees"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Sky view fraction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%svf) then
-            var%name        = "svf"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "sky view fraction"),                 &
+            var_meta%name        = "svf"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "sky view fraction"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Horizon line matrix
         !!------------------------------------------------------------
         else if (var_idx==kVARS%hlm) then
-            var%name        = "hlm"
-            var%dimensions  = three_d_hlm_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Horizon line matrix"),                 &
+            var_meta%name        = "hlm"
+            var_meta%dimensions  = three_d_hlm_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Horizon line matrix"),                 &
                                 attribute_t("units",         "degrees"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Snow holding depth of terrain
         !!------------------------------------------------------------
         else if (var_idx==kVARS%shd) then
-            var%name        = "shd"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Snow holding depth of terrain"),                 &
+            var_meta%name        = "shd"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Snow holding depth of terrain"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
                                        
@@ -1087,9 +1063,9 @@ contains
         !!  Cloud cover fraction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%cloud_fraction) then
-            var%name        = "clt"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "cloud_area_fraction"),                 &
+            var_meta%name        = "clt"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "cloud_area_fraction"),                 &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1098,9 +1074,9 @@ contains
         !!  Effective cloud droplet radius
         !!------------------------------------------------------------
         else if (var_idx==kVARS%re_cloud) then
-            var%name        = "re_cloud"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "effective_radius_of_cloud_liquid_water_particles"), &
+            var_meta%name        = "re_cloud"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "effective_radius_of_cloud_liquid_water_particles"), &
                                attribute_t("units",         "m"),                                                &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1109,9 +1085,9 @@ contains
         !!  Effective cloud ice radius
         !!------------------------------------------------------------
         else if (var_idx==kVARS%re_ice) then
-            var%name        = "re_ice"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "effective_radius_of_stratiform_cloud_ice_particles"), &
+            var_meta%name        = "re_ice"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "effective_radius_of_stratiform_cloud_ice_particles"), &
                                attribute_t("units",         "m"),                                                  &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1120,9 +1096,9 @@ contains
         !!  Effective snow radius
         !!------------------------------------------------------------
         else if (var_idx==kVARS%re_snow) then
-            var%name        = "re_snow"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "effective_radius_of_stratiform_snow_particles"), &
+            var_meta%name        = "re_snow"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "effective_radius_of_stratiform_snow_particles"), &
                                attribute_t("units",         "m"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1131,9 +1107,9 @@ contains
         !!  Mass-weighted effective density of ice1 category
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice1_rho) then
-            var%name        = "ice1_rho"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "mass-weighted_effective_density_of_ice1"), &
+            var_meta%name        = "ice1_rho"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "mass-weighted_effective_density_of_ice1"), &
                                attribute_t("units",         "(kg m^-3)"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1142,9 +1118,9 @@ contains
         !!  Number-weighted aspect ratio of ice1 category
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice1_phi) then
-            var%name        = "ice1_AR"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "number-weighted_aspect_ratio_of_ice1_category"), &
+            var_meta%name        = "ice1_AR"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "number-weighted_aspect_ratio_of_ice1_category"), &
                                attribute_t("units",         "-"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1153,9 +1129,9 @@ contains
         !!  Mass-weighted fall speed of ice1 category
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice1_vmi) then
-            var%name        = "ice1_FS"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "planar-nucleated mass-weighted fall speeds (m s^-1)"), &
+            var_meta%name        = "ice1_FS"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "planar-nucleated mass-weighted fall speeds (m s^-1)"), &
                                attribute_t("units",         "-"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1165,9 +1141,9 @@ contains
         !!  Mass-weighted effective density of ice2 category
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice2_rho) then
-            var%name        = "ice2_rho"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "mass-weighted_effective_density_of_ice2"), &
+            var_meta%name        = "ice2_rho"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "mass-weighted_effective_density_of_ice2"), &
                                attribute_t("units",         "(kg m^-3)"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1176,9 +1152,9 @@ contains
         !!  Number-weighted aspect ratio of ice2 category
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice2_phi) then
-            var%name        = "ice2_AR"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "number-weighted_aspect_ratio_of_ice2_category"), &
+            var_meta%name        = "ice2_AR"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "number-weighted_aspect_ratio_of_ice2_category"), &
                                attribute_t("units",         "-"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1187,9 +1163,9 @@ contains
         !!  Mass-weighted fall speed of ice2 category
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice2_vmi) then
-            var%name        = "ice2_FS"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "columnar-nucleated mass-weighted fall speeds (m s^-1)"), &
+            var_meta%name        = "ice2_FS"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "columnar-nucleated mass-weighted fall speeds (m s^-1)"), &
                                attribute_t("units",         "-"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1198,9 +1174,9 @@ contains
         !!  Mass-weighted effective density of ice3 category
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice3_rho) then
-            var%name        = "ice3_rho"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "mass-weighted_effective_density_of_ice3"), &
+            var_meta%name        = "ice3_rho"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "mass-weighted_effective_density_of_ice3"), &
                                attribute_t("units",         "(kg m^-3)"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1209,9 +1185,9 @@ contains
         !!  Number-weighted aspect ratio of ice3 category
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice3_phi) then
-            var%name        = "ice3_AR"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "number-weighted_aspect_ratio_of_ice3_category"), &
+            var_meta%name        = "ice3_AR"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "number-weighted_aspect_ratio_of_ice3_category"), &
                                attribute_t("units",         "-"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1220,9 +1196,9 @@ contains
         !!  Mass-weighted fall speed of ice3 category
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice3_vmi) then
-            var%name        = "ice3_FS"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "aggregates mass-weighted fall speeds (m s^-1)"), &
+            var_meta%name        = "ice3_FS"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "aggregates mass-weighted fall speeds (m s^-1)"), &
                                attribute_t("units",         "-"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1232,9 +1208,9 @@ contains
         !!  Alpha weighting factor in variational wind solver
         !!------------------------------------------------------------
         else if (var_idx==kVARS%wind_alpha) then
-            var%name        = "wind_alpha"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Alpha weighting factor in variational wind solver"), &
+            var_meta%name        = "wind_alpha"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Alpha weighting factor in variational wind solver"), &
                                attribute_t("units",         "-"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1243,9 +1219,9 @@ contains
         !!  Froude number
         !!------------------------------------------------------------
         else if (var_idx==kVARS%froude) then
-            var%name        = "froude"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Froude number used to calculate wind_alpha"), &
+            var_meta%name        = "froude"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Froude number used to calculate wind_alpha"), &
                                attribute_t("units",         "-"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1254,36 +1230,36 @@ contains
         !!  Bulk richardson number
         !!------------------------------------------------------------
         else if (var_idx==kVARS%blk_ri) then
-            var%name        = "blk_ri"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Bulk richardson number used to calculate Sx sheltering"), &
+            var_meta%name        = "blk_ri"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Bulk richardson number used to calculate Sx sheltering"), &
                                attribute_t("units",         "-"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  blocking terrain from froude number calculation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%froude_terrain) then
-            var%name        = "froude_terrain"
-            var%dimensions  = four_d_azim_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Blocking terrain height used in calculation of froude number"), &
+            var_meta%name        = "froude_terrain"
+            var_meta%dimensions  = four_d_azim_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Blocking terrain height used in calculation of froude number"), &
                                 attribute_t("units",         "m"),                                                 &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Sx
         !!------------------------------------------------------------
         else if (var_idx==kVARS%Sx) then
-            var%name        = "Sx"
-            var%dimensions  = four_d_azim_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Maximum upwind slope"), &
+            var_meta%name        = "Sx"
+            var_meta%dimensions  = four_d_azim_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Maximum upwind slope"), &
                                 attribute_t("units",         "-"),                                                 &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  TPI
         !!------------------------------------------------------------
         else if (var_idx==kVARS%TPI) then
-            var%name        = "TPI"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Topographic position index"), &
+            var_meta%name        = "TPI"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Topographic position index"), &
                                 attribute_t("units",         "-"),                                                 &
                                 attribute_t("coordinates",   "lat lon")]
                                                                                                                                                                                                         
@@ -1292,9 +1268,9 @@ contains
         !!  Outgoing longwave radiation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%out_longwave_rad) then
-            var%name        = "rlut"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "toa_outgoing_longwave_flux"), &
+            var_meta%name        = "rlut"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "toa_outgoing_longwave_flux"), &
                                attribute_t("units",         "W m-2"),                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1303,9 +1279,9 @@ contains
         !!  Longwave cloud forcing
         !!------------------------------------------------------------
         else if (var_idx==kVARS%longwave_cloud_forcing) then
-            var%name        = "lwcf"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "longwave_cloud_forcing"), &
+            var_meta%name        = "lwcf"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "longwave_cloud_forcing"), &
                                attribute_t("units",         "W m-2"),                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1314,9 +1290,9 @@ contains
         !!  Shortwave cloud forcing
         !!------------------------------------------------------------
         else if (var_idx==kVARS%shortwave_cloud_forcing) then
-            var%name        = "swcf"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "shortwave_cloud_forcing"), &
+            var_meta%name        = "swcf"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "shortwave_cloud_forcing"), &
                                attribute_t("units",         "W m-2"),                       &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1325,9 +1301,9 @@ contains
         !!  Cosine solar zenith angle
         !!------------------------------------------------------------
         else if (var_idx==kVARS%cosine_zenith_angle) then
-            var%name        = "cosz"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "cosine_zenith_angle"), &
+            var_meta%name        = "cosz"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "cosine_zenith_angle"), &
                                attribute_t("units",         " "),                       &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1336,9 +1312,9 @@ contains
         !!  Tendency from short wave radiation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%tend_swrad) then
-            var%name        = "tend_swrad"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "sw_rad_tend"), &
+            var_meta%name        = "tend_swrad"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "sw_rad_tend"), &
                                attribute_t("units",         " "),               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1348,9 +1324,9 @@ contains
         !!  Surface emissivity
         !!------------------------------------------------------------
         else if (var_idx==kVARS%land_emissivity) then
-            var%name        = "emiss"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_longwave_emissivity"), &
+            var_meta%name        = "emiss"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_longwave_emissivity"), &
                                attribute_t("units",         " "),                           &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1359,9 +1335,9 @@ contains
         !!  Temperature on interface
         !!------------------------------------------------------------
         else if (var_idx==kVARS%temperature_interface) then
-            var%name        = "temperature_i"
-            var%dimensions  = three_d_t_interface_dimensions
-            var%attributes  = [attribute_t("standard_name", "air_temperature"),                    &
+            var_meta%name        = "temperature_i"
+            var_meta%dimensions  = three_d_t_interface_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "air_temperature"),                    &
                                attribute_t("long_name",     "Temperature"),                        &
                                attribute_t("units",         "K"),                                  &
                                attribute_t("coordinates",   "lat lon")]
@@ -1373,21 +1349,21 @@ contains
         !!  Downward Shortwave Radiation at the Surface (positive down)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%shortwave) then
-            var%name        = "rsds"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_downwelling_shortwave_flux_in_air"), &
+            var_meta%name        = "rsds"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_downwelling_shortwave_flux_in_air"), &
                                attribute_t("units",         "W m-2"),                                     &
                                attribute_t("coordinates",   "lat lon")]
-            var%force_boundaries = .False.
-            if (present(opt)) var%forcing_var = opt%forcing%swdown_var
+            if (present(force_boundaries)) force_boundaries = .False.
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%swdown_var /= "")
 
         !>------------------------------------------------------------
         !!  MJ: in OSHD as 'sdri' referring to 'direct shortwave radiation, per inclined surface area' accounted for shading and slope effects. Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
         !!------------------------------------------------------------
         else if (var_idx==kVARS%shortwave_direct) then
-            var%name        = "swtb"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_direct_downwelling_shortwave_flux_in_air"), &
+            var_meta%name        = "swtb"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_direct_downwelling_shortwave_flux_in_air"), &
                                attribute_t("long_name",     "direct shortwave radiation"), &
                                attribute_t("units",         "W m-2"),                                            &
                                attribute_t("coordinates",   "lat lon")]
@@ -1396,9 +1372,9 @@ contains
         !!  MJ: in OSHD as 'sdfd' referring to 'diffuse shortwave radiation, per horizontal surface area' accounted for partioning (based on transmisivity) and sky view fraction. Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
         !!------------------------------------------------------------
         else if (var_idx==kVARS%shortwave_diffuse) then
-            var%name        = "swtd"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_diffuse_downwelling_shortwave_flux_in_air"), &
+            var_meta%name        = "swtd"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_diffuse_downwelling_shortwave_flux_in_air"), &
                                attribute_t("long_name",     "diffuse shortwave radiation"), &
                                attribute_t("units",         "W m-2"),                                             &
                                attribute_t("coordinates",   "lat lon")]
@@ -1407,9 +1383,9 @@ contains
         !!  MJ: in OSHD as 'sdrd' referring to 'direct shortwave radiation, per horizontal surface area' only accounted for shading but not the slope effects. Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
         !!------------------------------------------------------------
         else if (var_idx==kVARS%shortwave_direct_above) then
-            var%name        = "sdrd"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "direct shortwave radiation, per horizontal surface area"), &
+            var_meta%name        = "sdrd"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "direct shortwave radiation, per horizontal surface area"), &
                                attribute_t("units",         "W m-2"),                                             &
                                attribute_t("coordinates",   "lat lon")]
                                 
@@ -1417,21 +1393,21 @@ contains
         !!  Downward Longwave Radiation at the Surface (positive down)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%longwave) then
-            var%name        = "lwtr"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_net_downward_longwave_flux"), &
+            var_meta%name        = "lwtr"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_net_downward_longwave_flux"), &
                                attribute_t("units",         "W m-2"),                                    &
                                attribute_t("coordinates",   "lat lon")]
-            var%force_boundaries = .False.
-            if (present(opt)) var%forcing_var = opt%forcing%lwdown_var
+            if (present(force_boundaries)) force_boundaries = .False.
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%lwdown_var /= "")
 
         !>------------------------------------------------------------
         !!  Total Absorbed Solar Radiation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%rad_absorbed_total) then
-            var%name        = "rad_absorbed_total"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "total_absorbed_radiation"),             &
+            var_meta%name        = "rad_absorbed_total"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "total_absorbed_radiation"),             &
                                attribute_t("units",         "W m-2"),                                    &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1439,9 +1415,9 @@ contains
         !!  Solar Radiation Absorbed by Vegetation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%rad_absorbed_veg) then
-            var%name        = "rad_absorbed_veg"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "radiation_absorbed_by_vegetation"),     &
+            var_meta%name        = "rad_absorbed_veg"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "radiation_absorbed_by_vegetation"),     &
                                attribute_t("units",         "W m-2"),                                    &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1449,9 +1425,9 @@ contains
         !!  Solar Radiation Absorbed by Bare Ground
         !!------------------------------------------------------------
         else if (var_idx==kVARS%rad_absorbed_bare) then
-            var%name        = "rad_absorbed_bare"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "radiation_absorbed_by_bare_ground"),    &
+            var_meta%name        = "rad_absorbed_bare"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "radiation_absorbed_by_bare_ground"),    &
                                attribute_t("units",         "W m-2"),                                    &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1459,9 +1435,9 @@ contains
         !!  Net Longwave Radiation (positive up)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%rad_net_longwave) then
-            var%name        = "rad_net_longwave"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "net_upward_longwave_flux_in_air"),          &
+            var_meta%name        = "rad_net_longwave"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "net_upward_longwave_flux_in_air"),          &
                                attribute_t("units",         "W m-2"),                                    &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1469,9 +1445,9 @@ contains
         !!  Upward Longwave Radiation at the Surface (positive up)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%longwave_up) then
-            var%name        = "rlus"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_upwelling_longwave_flux_in_air"),   &
+            var_meta%name        = "rlus"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_upwelling_longwave_flux_in_air"),   &
                                attribute_t("units",         "W m-2"),                                    &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1479,9 +1455,9 @@ contains
         !!  Ground Heat Flux (positive down)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ground_heat_flux) then
-            var%name        = "hfgs"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "upward_heat_flux_at_ground_level_in_soil"), &
+            var_meta%name        = "hfgs"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "upward_heat_flux_at_ground_level_in_soil"), &
                                attribute_t("units",         "W m-2"),                                    &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1489,10 +1465,10 @@ contains
         !!  Vegetation fraction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%vegetation_fraction) then
-            var%name        = "vegetation_fraction"
-            var%dimensions  = three_d_t_month_dimensions
-            var%dim_len(2)  = kMONTH_GRID_Z
-            var%attributes  = [attribute_t("standard_name", "vegetation_area_fraction"),            &
+            var_meta%name        = "vegetation_fraction"
+            var_meta%dimensions  = three_d_t_month_dimensions
+            var_meta%dim_len(2)  = kMONTH_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "vegetation_area_fraction"),            &
                                attribute_t("units",         "m2 m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1500,9 +1476,9 @@ contains
         !!  Annual Maximum Vegetation Fraction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%vegetation_fraction_max) then
-            var%name        = "vegetation_fraction_max"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "max_vegetation_area_fraction"),    &
+            var_meta%name        = "vegetation_fraction_max"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "max_vegetation_area_fraction"),    &
                                attribute_t("units",         "m2 m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1510,9 +1486,9 @@ contains
         !!  Noah-MP Output Vegetation Fraction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%vegetation_fraction_out) then
-            var%name        = "vegetation_fraction_out"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "vegetation_fraction_out"),         &
+            var_meta%name        = "vegetation_fraction_out"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "vegetation_fraction_out"),         &
                                attribute_t("units",         "m2 m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1520,30 +1496,30 @@ contains
         !!  Land cover type
         !!------------------------------------------------------------
         else if (var_idx==kVARS%veg_type) then
-            var%name        = "veg_type"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "vegetation_type"),                 &
+            var_meta%name        = "veg_type"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "vegetation_type"),                 &
                                attribute_t("units",      "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
-            var%dtype = kINTEGER
+            var_meta%dtype = kINTEGER
         !>------------------------------------------------------------
         !!  Land cover type
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_type) then
-            var%name        = "soil_type"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "soil_type"),                 &
+            var_meta%name        = "soil_type"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "soil_type"),                 &
                                attribute_t("units",      "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
-            var%dtype = kINTEGER
+            var_meta%dtype = kINTEGER
 
         !>------------------------------------------------------------
         !!  Leaf Mass
         !!------------------------------------------------------------
         else if (var_idx==kVARS%mass_leaf) then
-            var%name        = "mass_leaf"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "leaf_mass"),                      &
+            var_meta%name        = "mass_leaf"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "leaf_mass"),                      &
                                attribute_t("units",      "g m-2"),                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1551,9 +1527,9 @@ contains
         !!  Root Mass
         !!------------------------------------------------------------
         else if (var_idx==kVARS%mass_root) then
-            var%name        = "mass_root"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "root_mass"),                      &
+            var_meta%name        = "mass_root"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "root_mass"),                      &
                                attribute_t("units",      "g m-2"),                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1561,9 +1537,9 @@ contains
         !!  Stem Mass
         !!------------------------------------------------------------
         else if (var_idx==kVARS%mass_stem) then
-            var%name        = "mass_stem"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "stem_mass"),                      &
+            var_meta%name        = "mass_stem"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "stem_mass"),                      &
                                attribute_t("units",      "g m-2"),                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1571,9 +1547,9 @@ contains
         !!  Wood Mass
         !!------------------------------------------------------------
         else if (var_idx==kVARS%mass_wood) then
-            var%name        = "mass_wood"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "wood_mass"),                      &
+            var_meta%name        = "mass_wood"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "wood_mass"),                      &
                                attribute_t("units",      "g m-2"),                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1581,9 +1557,9 @@ contains
         !!  Leaf Area Index
         !!------------------------------------------------------------
         else if (var_idx==kVARS%lai) then
-            var%name        = "lai"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "leaf_area_index"),                     &
+            var_meta%name        = "lai"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "leaf_area_index"),                     &
                                attribute_t("units",         "m2 m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1591,9 +1567,9 @@ contains
         !!  Stem Area Index
         !!------------------------------------------------------------
         else if (var_idx==kVARS%sai) then
-            var%name        = "sai"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "stem_area_index"),                 &
+            var_meta%name        = "sai"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "stem_area_index"),                 &
                                attribute_t("units",         "m2 m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1601,9 +1577,9 @@ contains
         !!  Planting Date
         !!------------------------------------------------------------
         else if (var_idx==kVARS%date_planting) then
-            var%name        = "date_planting"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "planting_date"),                   &
+            var_meta%name        = "date_planting"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "planting_date"),                   &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1611,9 +1587,9 @@ contains
         !!  Harvesting Date
         !!------------------------------------------------------------
         else if (var_idx==kVARS%date_harvest) then
-            var%name        = "date_harvest"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "harvest_date"),                    &
+            var_meta%name        = "date_harvest"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "harvest_date"),                    &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1621,32 +1597,32 @@ contains
         !!  Crop Category
         !!------------------------------------------------------------
         else if (var_idx==kVARS%crop_category) then
-            var%name        = "crop_category"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "crop_category"),                   &
+            var_meta%name        = "crop_category"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "crop_category"),                   &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-            var%dtype = kINTEGER
+            var_meta%dtype = kINTEGER
 
         !>------------------------------------------------------------
         !!  Crop Type (Noah-MP initialization variable)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%crop_type) then
-            var%name        = "crop_type"
-            var%dimensions  = three_d_crop_dimensions
-            var%dim_len(2)  = kCROP_GRID_Z
-            var%attributes  = [attribute_t("non_standard_name", "crop_type"),                       &
+            var_meta%name        = "crop_type"
+            var_meta%dimensions  = three_d_crop_dimensions
+            var_meta%dim_len(2)  = kCROP_GRID_Z
+            var_meta%attributes  = [attribute_t("non_standard_name", "crop_type"),                       &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-            var%dtype = kINTEGER
+            var_meta%dtype = kINTEGER
 
         !>------------------------------------------------------------
         !!  Growing Season Growing Degree Days
         !!------------------------------------------------------------
         else if (var_idx==kVARS%growing_season_gdd) then
-            var%name        = "growing_season_gdd"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "growing_season_gdd"),              &
+            var_meta%name        = "growing_season_gdd"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "growing_season_gdd"),              &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1654,20 +1630,20 @@ contains
         !!  Irrigation Event Number, Sprinkler
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_eventno_sprinkler) then
-            var%name        = "irr_eventno_sprinkler"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_eventno_sprinkler"),           &
+            var_meta%name        = "irr_eventno_sprinkler"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_eventno_sprinkler"),           &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-            var%dtype = kINTEGER
+            var_meta%dtype = kINTEGER
 
         !>------------------------------------------------------------
         !!  Irrigation Fraction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_frac_total) then
-            var%name        = "irr_frac_total"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_frac_total"),                  &
+            var_meta%name        = "irr_frac_total"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_frac_total"),                  &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1675,9 +1651,9 @@ contains
         !!  Irrigation Fraction, Sprinkler
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_frac_sprinkler) then
-            var%name        = "irr_frac_sprinkler"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_frac_sprinkler"),              &
+            var_meta%name        = "irr_frac_sprinkler"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_frac_sprinkler"),              &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1685,9 +1661,9 @@ contains
         !!  Irrigation Fraction, Micro
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_frac_micro) then
-            var%name        = "irr_frac_micro"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_frac_micro"),                  &
+            var_meta%name        = "irr_frac_micro"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_frac_micro"),                  &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1695,9 +1671,9 @@ contains
         !!  Irrigation Fraction, Flood
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_frac_flood) then
-            var%name        = "irr_frac_flood"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_frac_flood"),                  &
+            var_meta%name        = "irr_frac_flood"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_frac_flood"),                  &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1705,31 +1681,31 @@ contains
         !!  Irrigation Event Number, Micro
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_eventno_micro) then
-            var%name        = "irr_eventno_micro"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_eventno_micro"),               &
+            var_meta%name        = "irr_eventno_micro"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_eventno_micro"),               &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-            var%dtype = kINTEGER
+            var_meta%dtype = kINTEGER
 
         !>------------------------------------------------------------
         !!  Irrigation Event Number, Flood
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_eventno_flood) then
-            var%name        = "irr_eventno_flood"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_eventno_flood"),               &
+            var_meta%name        = "irr_eventno_flood"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_eventno_flood"),               &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-            var%dtype = kINTEGER
+            var_meta%dtype = kINTEGER
 
         !>------------------------------------------------------------
         !!  Irrigation Water Amount to be Applied, Sprinkler
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_alloc_sprinkler) then
-            var%name        = "irr_alloc_sprinkler"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_alloc_sprinkler"),             &
+            var_meta%name        = "irr_alloc_sprinkler"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_alloc_sprinkler"),             &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1737,9 +1713,9 @@ contains
         !!  Irrigation Water Amount to be Applied, Micro
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_alloc_micro) then
-            var%name        = "irr_alloc_micro"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_alloc_micro"),                 &
+            var_meta%name        = "irr_alloc_micro"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_alloc_micro"),                 &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1747,9 +1723,9 @@ contains
         !!  Irrigation Water Amount to be Applied, Flood
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_alloc_flood) then
-            var%name        = "irr_alloc_flood"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_alloc_flood"),                 &
+            var_meta%name        = "irr_alloc_flood"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_alloc_flood"),                 &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1757,9 +1733,9 @@ contains
         !!  Loss of Sprinkler Irrigation Water to Evaporation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_evap_loss_sprinkler) then
-            var%name        = "irr_evap_loss_sprinkler"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_evap_loss_sprinkler"),         &
+            var_meta%name        = "irr_evap_loss_sprinkler"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_evap_loss_sprinkler"),         &
                                attribute_t("units",         "m timestep-1"),                        &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1767,9 +1743,9 @@ contains
         !!  Amount of Irrigation, Sprinkler
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_amt_sprinkler) then
-            var%name        = "irr_amt_sprinkler"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_amt_sprinkler"),               &
+            var_meta%name        = "irr_amt_sprinkler"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_amt_sprinkler"),               &
                                attribute_t("units",         "mm"),                                  &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1777,9 +1753,9 @@ contains
         !!  Amount of Irrigation, Micro
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_amt_micro) then
-            var%name        = "irr_amt_micro"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_amt_micro"),                   &
+            var_meta%name        = "irr_amt_micro"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_amt_micro"),                   &
                                attribute_t("units",         "mm"),                                  &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1787,18 +1763,18 @@ contains
         !!  Amount of Irrigation, Flood
         !!------------------------------------------------------------
         else if (var_idx==kVARS%irr_amt_flood) then
-            var%name        = "irr_amt_flood"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "irr_amt_flood"),                   &
+            var_meta%name        = "irr_amt_flood"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "irr_amt_flood"),                   &
                                attribute_t("units",         "mm"),                                  &
                                attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  latent heating from sprinkler evaporation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%evap_heat_sprinkler) then
-            var%name        = "evap_heat_sprinkler"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "latent heating from sprinkler evaporation"),                   &
+            var_meta%name        = "evap_heat_sprinkler"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "latent heating from sprinkler evaporation"),                   &
                                 attribute_t("units",         "W/m^2"),                                  &
                                 attribute_t("coordinates",   "lat lon")]
                     
@@ -1807,9 +1783,9 @@ contains
         !!  Mass of Agricultural Grain Produced
         !!------------------------------------------------------------
         else if (var_idx==kVARS%mass_ag_grain) then
-            var%name        = "mass_ag_grain"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "mass_agricultural_grain"),         &
+            var_meta%name        = "mass_ag_grain"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "mass_agricultural_grain"),         &
                                attribute_t("units",         "g m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1817,9 +1793,9 @@ contains
         !!  Growing Degree Days (based on 10C)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%growing_degree_days) then
-            var%name        = "growing_degree_days"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "growing_degree_days"),             &
+            var_meta%name        = "growing_degree_days"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "growing_degree_days"),             &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1827,20 +1803,20 @@ contains
         !!  Plant Growth Stage
         !!------------------------------------------------------------
         else if (var_idx==kVARS%plant_growth_stage) then
-            var%name        = "plant_growth_stage"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "plant_growth_stage"),              &
+            var_meta%name        = "plant_growth_stage"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "plant_growth_stage"),              &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-            var%dtype = kINTEGER
+            var_meta%dtype = kINTEGER
 
         !>------------------------------------------------------------
         !!  Net Ecosystem Exchange
         !!------------------------------------------------------------
         else if (var_idx==kVARS%net_ecosystem_exchange) then
-            var%name        = "net_ecosystem_exchange"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "net_ecosystem_exchange_expressed_as_carbon_dioxide"), &
+            var_meta%name        = "net_ecosystem_exchange"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "net_ecosystem_exchange_expressed_as_carbon_dioxide"), &
                                attribute_t("units",         "g m-2 s-1"),                                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1848,9 +1824,9 @@ contains
         !!  Gross Primary Productivity
         !!------------------------------------------------------------
         else if (var_idx==kVARS%gross_primary_prod) then
-            var%name        = "gross_primary_prod"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "gross_primary_productivity_of_biomass_expressed_as_carbon"), &
+            var_meta%name        = "gross_primary_prod"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "gross_primary_productivity_of_biomass_expressed_as_carbon"), &
                                attribute_t("units",         "g m-2 s-1"),                                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1858,9 +1834,9 @@ contains
         !!  Net Primary Productivity
         !!------------------------------------------------------------
         else if (var_idx==kVARS%net_primary_prod) then
-            var%name        = "net_primary_prod"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "net_primary_productivity_of_biomass_expressed_as_carbon"), &
+            var_meta%name        = "net_primary_prod"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "net_primary_productivity_of_biomass_expressed_as_carbon"), &
                                attribute_t("units",         "g m-2 s-1"),                                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1868,9 +1844,9 @@ contains
         !!  Absorbed Photosynthetically Active Radiation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%apar) then
-            var%name        = "apar"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "absorbed_photosynthetically_active_radiation"), &
+            var_meta%name        = "apar"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "absorbed_photosynthetically_active_radiation"), &
                                attribute_t("units",         "W m-2"),                                            &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1878,9 +1854,9 @@ contains
         !!  Total Photosynthesis
         !!------------------------------------------------------------
         else if (var_idx==kVARS%photosynthesis_total) then
-            var%name        = "photosynthesis_total"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "total_photosynthesis_expressed_as_carbon_dioxide"), &
+            var_meta%name        = "photosynthesis_total"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "total_photosynthesis_expressed_as_carbon_dioxide"), &
                                attribute_t("units",         "mmol m-2 s-1"),                                         &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1888,9 +1864,9 @@ contains
         !!  Total Leaf Stomatal Resistance
         !!------------------------------------------------------------
         else if (var_idx==kVARS%stomatal_resist_total) then
-            var%name        = "stomatal_resist_total"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "total_leaf_stomatal_resistance"),                   &
+            var_meta%name        = "stomatal_resist_total"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "total_leaf_stomatal_resistance"),                   &
                                attribute_t("units",         "s m-1"),                                                &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1898,9 +1874,9 @@ contains
         !!  Sunlit Leaf Stomatal Resistance
         !!------------------------------------------------------------
         else if (var_idx==kVARS%stomatal_resist_sun) then
-            var%name        = "stomatal_resist_sun"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "sunlif_leaf_stomatal_resistance"),                  &
+            var_meta%name        = "stomatal_resist_sun"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "sunlif_leaf_stomatal_resistance"),                  &
                                attribute_t("units",         "s m-1"),                                                &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1908,9 +1884,9 @@ contains
         !!  Shaded Leaf Stomatal Resistance
         !!------------------------------------------------------------
         else if (var_idx==kVARS%stomatal_resist_shade) then
-            var%name        = "stomatal_resist_shade"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "shaded_leaf_stomatal_resistance"),                 &
+            var_meta%name        = "stomatal_resist_shade"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "shaded_leaf_stomatal_resistance"),                 &
                                attribute_t("units",         "s m-1"),                                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1918,10 +1894,10 @@ contains
         !!  GECROS (Genotype-by-Envrionment interaction on CROp growth Simulator [Yin and van Laar, 2005]) crop model state
         !!------------------------------------------------------------
         else if (var_idx==kVARS%gecros_state) then
-            var%name        = "gecros_state"
-            var%dimensions  = three_d_t_gecros_dimensions
-            var%dim_len(2)  = kGECROS_GRID_Z
-            var%attributes  = [attribute_t("non_standard_name", "gecros_state"),                                    &
+            var_meta%name        = "gecros_state"
+            var_meta%dimensions  = three_d_t_gecros_dimensions
+            var_meta%dim_len(2)  = kGECROS_GRID_Z
+            var_meta%attributes  = [attribute_t("non_standard_name", "gecros_state"),                                    &
                                attribute_t("units",         "N/A"),                                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1929,9 +1905,9 @@ contains
         !!  Canopy Total Water Content
         !!------------------------------------------------------------
         else if (var_idx==kVARS%canopy_water) then
-            var%name        = "canopy_water"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "canopy_water_amount"),                 &
+            var_meta%name        = "canopy_water"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "canopy_water_amount"),                 &
                                attribute_t("units",         "kg m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1939,9 +1915,9 @@ contains
         !!  Canopy Frozen Water Content
         !!------------------------------------------------------------
         else if (var_idx==kVARS%canopy_water_ice) then
-            var%name        = "canopy_ice"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "canopy_snow_amount"),                  &
+            var_meta%name        = "canopy_ice"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "canopy_snow_amount"),                  &
                                attribute_t("units",         "kg m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1949,9 +1925,9 @@ contains
         !!  Canopy Liquid Water Content (in snow)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%canopy_water_liquid) then
-            var%name        = "canopy_liquid"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "canopy_liquid_water_amount"),      &
+            var_meta%name        = "canopy_liquid"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "canopy_liquid_water_amount"),      &
                                attribute_t("units",         "kg m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1959,9 +1935,9 @@ contains
         !!  Canopy Air Vapor Pressure
         !!------------------------------------------------------------
         else if (var_idx==kVARS%canopy_vapor_pressure) then
-            var%name        = "canopy_vapor_pressure"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "canopy_air_vapor_pressure"),       &
+            var_meta%name        = "canopy_vapor_pressure"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "canopy_air_vapor_pressure"),       &
                                attribute_t("units",         "Pa"),                                  &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1969,9 +1945,9 @@ contains
         !!  Canopy Air Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%canopy_temperature) then
-            var%name        = "canopy_temperature"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "canopy_air_temperature"),          &
+            var_meta%name        = "canopy_temperature"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "canopy_air_temperature"),          &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1979,9 +1955,9 @@ contains
         !!  Canopy Wetted/Snowed Fraction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%canopy_fwet) then
-            var%name        = "canopy_fwet"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "canopy_wetted_fraction"),          &
+            var_meta%name        = "canopy_fwet"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "canopy_wetted_fraction"),          &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1989,9 +1965,9 @@ contains
         !!  Vegetation Leaf Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%veg_leaf_temperature) then
-            var%name        = "veg_leaf_temperature"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "veg_leaf_temperature"),            &
+            var_meta%name        = "veg_leaf_temperature"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "veg_leaf_temperature"),            &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -1999,9 +1975,9 @@ contains
         !!  Ground Surface Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ground_surf_temperature) then
-            var%name        = "ground_surf_temperature"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "ground_surface_temperature"),      &
+            var_meta%name        = "ground_surf_temperature"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "ground_surface_temperature"),      &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2009,9 +1985,9 @@ contains
         !!  Between Gap Fraction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%frac_between_gap) then
-            var%name        = "frac_between_gap"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "between_gap_fraction"),            &
+            var_meta%name        = "frac_between_gap"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "between_gap_fraction"),            &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2019,9 +1995,9 @@ contains
         !!  Within Gap Fraction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%frac_within_gap) then
-            var%name        = "frac_within_gap"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "within_gap_fraction"),             &
+            var_meta%name        = "frac_within_gap"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "within_gap_fraction"),             &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2029,9 +2005,9 @@ contains
         !!  Under-Canopy Ground Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ground_temperature_canopy) then
-            var%name        = "ground_temperature_canopy"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "under_canopy_ground_temperature"), &
+            var_meta%name        = "ground_temperature_canopy"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "under_canopy_ground_temperature"), &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2039,9 +2015,9 @@ contains
         !!  Bare Ground Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ground_temperature_bare) then
-            var%name        = "ground_temperature_bare"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "bare_ground_temperature"),         &
+            var_meta%name        = "ground_temperature_bare"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "bare_ground_temperature"),         &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2049,9 +2025,9 @@ contains
         !!  Snowfall on the Ground
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snowfall_ground) then
-            var%name        = "snowfall_ground"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "ground_snow_rate"),                &
+            var_meta%name        = "snowfall_ground"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "ground_snow_rate"),                &
                                attribute_t("units",         "mm s-1"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2059,18 +2035,18 @@ contains
         !!  Rainfall on the Ground
         !!------------------------------------------------------------
         else if (var_idx==kVARS%rainfall_ground) then
-            var%name        = "rainfall_ground"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "ground_rain_rate"),                &
+            var_meta%name        = "rainfall_ground"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "ground_rain_rate"),                &
                                attribute_t("units",         "mm s-1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Last snowfall saved for LSM
         !!------------------------------------------------------------
         else if (var_idx==kVARS%lsm_last_snow) then
-            var%name        = "lsm_last_snow"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "snowfall at last lsm call"),                &
+            var_meta%name        = "lsm_last_snow"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "snowfall at last lsm call"),                &
                                 attribute_t("units",         "mm"),                              &
                                 attribute_t("coordinates",   "lat lon")]
                             
@@ -2078,9 +2054,9 @@ contains
         !!  Last precipitation saved for LSM
         !!------------------------------------------------------------
         else if (var_idx==kVARS%lsm_last_precip) then
-            var%name        = "lsm_last_precip"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "precipitation at last lsm call"),                &
+            var_meta%name        = "lsm_last_precip"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "precipitation at last lsm call"),                &
                                 attribute_t("units",         "mm"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
                     
@@ -2088,9 +2064,9 @@ contains
         !!  Snow water equivalent on the surface
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_water_equivalent) then
-            var%name        = "swet"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "snow water equivalent"),                 &
+            var_meta%name        = "swet"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "snow water equivalent"),                 &
                                attribute_t("units",         "kg m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2098,9 +2074,9 @@ contains
         !!  Snow water equivalent from previous timestep
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_water_eq_prev) then
-            var%name        = "swe_0"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "surface_snow_amount_prev"),        &
+            var_meta%name        = "swe_0"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "surface_snow_amount_prev"),        &
                                attribute_t("units",         "kg m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2108,10 +2084,10 @@ contains
         !!  Grid cell albedo
         !!------------------------------------------------------------
         else if (var_idx==kVARS%albedo) then
-            var%name        = "albedo"
-            var%dimensions  = three_d_t_month_dimensions
-            var%dim_len(2)  = kMONTH_GRID_Z
-            var%attributes  = [attribute_t("non_standard_name", "albedo"),            &
+            var_meta%name        = "albedo"
+            var_meta%dimensions  = three_d_t_month_dimensions
+            var_meta%dim_len(2)  = kMONTH_GRID_Z
+            var_meta%attributes  = [attribute_t("non_standard_name", "albedo"),            &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2120,9 +2096,9 @@ contains
         !!  Snow albedo from previous timestep
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_albedo_prev) then
-            var%name        = "snow_albedo_0"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "snowpack_albedo_prev"),            &
+            var_meta%name        = "snow_albedo_0"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "snowpack_albedo_prev"),            &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2130,10 +2106,10 @@ contains
         !!  Snow Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_temperature) then
-            var%name        = "snow_temperature"
-            var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(2)  = kSNOW_GRID_Z
-            var%attributes  = [attribute_t("standard_name", "temperature_in_surface_snow"),         &
+            var_meta%name        = "snow_temperature"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "temperature_in_surface_snow"),         &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2141,10 +2117,10 @@ contains
         !!  Snow Layer Depth
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_layer_depth) then
-            var%name        = "snow_layer_depth"
-            var%dimensions  = three_d_t_snowsoil_dimensions
-            var%dim_len(2)  = kSNOWSOIL_GRID_Z
-            var%attributes  = [attribute_t("non_standard_name", "snow_layer_depth"),                &
+            var_meta%name        = "snow_layer_depth"
+            var_meta%dimensions  = three_d_t_snowsoil_dimensions
+            var_meta%dim_len(2)  = kSNOWSOIL_GRID_Z
+            var_meta%attributes  = [attribute_t("non_standard_name", "snow_layer_depth"),                &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2152,10 +2128,10 @@ contains
         !!  Snow Layer Ice
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_layer_ice) then
-            var%name        = "snow_layer_ice"
-            var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(2)  = kSNOW_GRID_Z
-            var%attributes  = [attribute_t("non_standard_name", "snow_layer_ice_content"),          &
+            var_meta%name        = "snow_layer_ice"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("non_standard_name", "snow_layer_ice_content"),          &
                                attribute_t("units",         "mm"),                                  &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2163,10 +2139,10 @@ contains
         !!  Snow Layer Liquid Water
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_layer_liquid_water) then
-            var%name        = "snow_layer_liquid_water"
-            var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(2)  = kSNOW_GRID_Z
-            var%attributes  = [attribute_t("non_standard_name", "snow_layer_liquid_water_content"), &
+            var_meta%name        = "snow_layer_liquid_water"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("non_standard_name", "snow_layer_liquid_water_content"), &
                                attribute_t("units",         "mm"),                                  &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2174,9 +2150,9 @@ contains
         !!  Snow Age Factor
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_age_factor) then
-            var%name        = "tau_ss"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "snow_age_factor"),                 &
+            var_meta%name        = "tau_ss"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "snow_age_factor"),                 &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2184,9 +2160,9 @@ contains
         !!  Snow height
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_height) then
-            var%name        = "snow_height"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_snow_height"),                 &
+            var_meta%name        = "snow_height"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_snow_height"),                 &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2194,10 +2170,10 @@ contains
         !!  Number of Snowpack Layers
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_nlayers) then
-            var%name        = "snow_nlayers"
-            var%dimensions  = two_d_t_dimensions
-            var%dtype      = kINTEGER
-            var%attributes  = [attribute_t("non_standard_name", "snow_nlayers"),                    &
+            var_meta%name        = "snow_nlayers"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%dtype      = kINTEGER
+            var_meta%attributes  = [attribute_t("non_standard_name", "snow_nlayers"),                    &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2205,10 +2181,10 @@ contains
         !!  Soil water content
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_water_content) then
-            var%name        = "soil_water_content"
-            var%dimensions  = three_d_t_soil_dimensions
-            var%dim_len(2)  = kSOIL_GRID_Z
-            var%attributes  = [attribute_t("standard_name", "moisture_content_of_soil_layer"),      &
+            var_meta%name        = "soil_water_content"
+            var_meta%dimensions  = three_d_t_soil_dimensions
+            var_meta%dim_len(2)  = kSOIL_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "moisture_content_of_soil_layer"),      &
                                attribute_t("units",         "m3 m-3"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2216,10 +2192,10 @@ contains
         !!  Soil water content, of liquid water
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_water_content_liq) then
-            var%name        = "soil_water_content_liq"
-            var%dimensions  = three_d_t_soil_dimensions
-            var%dim_len(2)  = kSOIL_GRID_Z
-            var%attributes  = [attribute_t("standard_name", "liquid_moisture_content_of_soil_layer"),      &
+            var_meta%name        = "soil_water_content_liq"
+            var_meta%dimensions  = three_d_t_soil_dimensions
+            var_meta%dim_len(2)  = kSOIL_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "liquid_moisture_content_of_soil_layer"),      &
                                attribute_t("units",         "m3 m-3"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2227,10 +2203,10 @@ contains
         !!  Equilibrium Volumetric Soil Moisture
         !!------------------------------------------------------------
         else if (var_idx==kVARS%eq_soil_moisture) then
-            var%name        = "eq_soil_moisture"
-            var%dimensions  = three_d_t_soil_dimensions
-            var%dim_len(2)  = kSOIL_GRID_Z
-            var%attributes  = [attribute_t("non_standard_name", "equilibrium_volumetric_soil_moisture"), &
+            var_meta%name        = "eq_soil_moisture"
+            var_meta%dimensions  = three_d_t_soil_dimensions
+            var_meta%dim_len(2)  = kSOIL_GRID_Z
+            var_meta%attributes  = [attribute_t("non_standard_name", "equilibrium_volumetric_soil_moisture"), &
                                attribute_t("units",         "m3 m-3"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2238,9 +2214,9 @@ contains
         !!  Soil Moisture Content in the Layer Draining to Water Table when Deep
         !!------------------------------------------------------------
         else if (var_idx==kVARS%smc_watertable_deep) then
-            var%name        = "smc_watertable_deep"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "soil_moisture_content_in_layer_to_water_table_when_deep"), &
+            var_meta%name        = "smc_watertable_deep"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "soil_moisture_content_in_layer_to_water_table_when_deep"), &
                                attribute_t("units",         "m3 m-3"),                                                      & !units not defined in noahmpdrv (guess) then
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2248,9 +2224,9 @@ contains
         !!  Groundwater Recharge
         !!------------------------------------------------------------
         else if (var_idx==kVARS%recharge) then
-            var%name        = "recharge"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "groundwater_recharge"),            &
+            var_meta%name        = "recharge"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "groundwater_recharge"),            &
                                attribute_t("units",         "mm"),                                  & !units not defined in noahmpdrv (guess) then
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2258,9 +2234,9 @@ contains
         !!  Groundwater Recharge when Water Table is Deep
         !!------------------------------------------------------------
         else if (var_idx==kVARS%recharge_deep) then
-            var%name        = "recharge_deep"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "groundwater_recharge_deep"),           &
+            var_meta%name        = "recharge_deep"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "groundwater_recharge_deep"),           &
                                attribute_t("units",         "mm"),                                  & !units not defined in noahmpdrv (guess) then
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2268,9 +2244,9 @@ contains
         !!  Canopy Evaporation Rate
         !!------------------------------------------------------------
         else if (var_idx==kVARS%evap_canopy) then
-            var%name        = "evap_canopy"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "water_evaporation_flux_from_canopy"),  &
+            var_meta%name        = "evap_canopy"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "water_evaporation_flux_from_canopy"),  &
                                attribute_t("units",         "mm s-1"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2278,9 +2254,9 @@ contains
         !!  Soil Surface Evaporation Rate
         !!------------------------------------------------------------
         else if (var_idx==kVARS%evap_soil_surface) then
-            var%name        = "evap_soil_surface"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "water_evaporation_flux_from_soil"),    &
+            var_meta%name        = "evap_soil_surface"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "water_evaporation_flux_from_soil"),    &
                                attribute_t("units",         "mm s-1"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2288,9 +2264,9 @@ contains
         !!  Transpiration Rate
         !!------------------------------------------------------------
         else if (var_idx==kVARS%transpiration_rate) then
-            var%name        = "transpiration_rate"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "transpiration_rate"),              &
+            var_meta%name        = "transpiration_rate"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "transpiration_rate"),              &
                                attribute_t("units",         "mm s-1"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2298,18 +2274,18 @@ contains
         !!  Monin-Obukhov Length
         !!------------------------------------------------------------
         else if (var_idx==kVARS%mol) then
-            var%name        = "mol"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Monin-Obukhov Length"),                    &
+            var_meta%name        = "mol"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Monin-Obukhov Length"),                    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Shear velocity
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ustar) then
-            var%name        = "ustar"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "Shear velocity"),                    &
+            var_meta%name        = "ustar"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "Shear velocity"),                    &
                                 attribute_t("units",         "m/s"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
                     
@@ -2317,9 +2293,9 @@ contains
         !!  similarity stability function for momentum
         !!------------------------------------------------------------
         else if (var_idx==kVARS%psim) then
-            var%name        = "psih"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "similarity stability function for momentum"),                    &
+            var_meta%name        = "psih"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "similarity stability function for momentum"),                    &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
                             
@@ -2327,9 +2303,9 @@ contains
         !!  similarity stability function for heat
         !!------------------------------------------------------------
         else if (var_idx==kVARS%psih) then
-            var%name        = "psih"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "similarity stability function for heat"),                    &
+            var_meta%name        = "psih"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "similarity stability function for heat"),                    &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
                                                 
@@ -2337,9 +2313,9 @@ contains
         !!  integrated stability function for momentum
         !!------------------------------------------------------------
         else if (var_idx==kVARS%fm) then
-            var%name        = "fm"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "integrated stability function for momentum"),                    &
+            var_meta%name        = "fm"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "integrated stability function for momentum"),                    &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
                                                                     
@@ -2347,9 +2323,9 @@ contains
         !!  integrated stability function for heat
         !!------------------------------------------------------------
         else if (var_idx==kVARS%fh) then
-            var%name        = "fh"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "integrated stability function for heat"),                    &
+            var_meta%name        = "fh"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "integrated stability function for heat"),                    &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         
@@ -2358,9 +2334,9 @@ contains
         !!  Sensible Heat Exchange Coefficient, Vegetated
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ch_veg) then
-            var%name        = "ch_veg"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "ch_vegetated"),                    &
+            var_meta%name        = "ch_veg"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "ch_vegetated"),                    &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2368,9 +2344,9 @@ contains
         !!  Sensible Heat Exchange Coefficient at 2m, Vegetated
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ch_veg_2m) then
-            var%name        = "ch_veg_2m"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "ch_vegetated_2m"),                 &
+            var_meta%name        = "ch_veg_2m"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "ch_vegetated_2m"),                 &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2378,9 +2354,9 @@ contains
         !!  Sensible Heat Exchange Coefficient, Bare
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ch_bare) then
-            var%name        = "ch_bare"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "ch_bare_ground"),                  &
+            var_meta%name        = "ch_bare"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "ch_bare_ground"),                  &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2388,9 +2364,9 @@ contains
         !!  Sensible Heat Exchange Coefficient at 2m, Bare
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ch_bare_2m) then
-            var%name        = "ch_bare_2m"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "ch_bare_2m"),                      &
+            var_meta%name        = "ch_bare_2m"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "ch_bare_2m"),                      &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2398,9 +2374,9 @@ contains
         !!  Sensible Heat Exchange Coefficient, Under Canopy
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ch_under_canopy) then
-            var%name        = "ch_under_canopy"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "ch_under_canopy"),                 &
+            var_meta%name        = "ch_under_canopy"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "ch_under_canopy"),                 &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2408,9 +2384,9 @@ contains
         !!  Sensible Heat Exchange Coefficient, Leaf
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ch_leaf) then
-            var%name        = "ch_leaf"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "ch_leaf"),                         &
+            var_meta%name        = "ch_leaf"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "ch_leaf"),                         &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2418,9 +2394,9 @@ contains
         !!  Sensible Heat Flux, Vegetated Ground (+ to atmosphere)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%sensible_heat_veg) then
-            var%name        = "sensible_heat_veg"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "sensible_heat_veg"),               &
+            var_meta%name        = "sensible_heat_veg"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "sensible_heat_veg"),               &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2428,9 +2404,9 @@ contains
         !!  Sensible Heat Flux, Bare Ground (+ to atmosphere)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%sensible_heat_bare) then
-            var%name        = "sensible_heat_bare"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "sensible_heat_bare"),              &
+            var_meta%name        = "sensible_heat_bare"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "sensible_heat_bare"),              &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2438,9 +2414,9 @@ contains
         !!  Sensible Heat Flux, Canopy (+ to atmosphere)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%sensible_heat_canopy) then
-            var%name        = "sensible_heat_canopy"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "sensible_heat_canopy"),            &
+            var_meta%name        = "sensible_heat_canopy"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "sensible_heat_canopy"),            &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2448,9 +2424,9 @@ contains
         !!  Evaporation Heat Flux, Vegetated Ground (+ to atmosphere)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%evap_heat_veg) then
-            var%name        = "evap_heat_veg"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "evap_heat_veg"),                   &
+            var_meta%name        = "evap_heat_veg"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "evap_heat_veg"),                   &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2458,9 +2434,9 @@ contains
         !!  Evaporation Heat Flux, Bare Ground (+ to atmosphere)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%evap_heat_bare) then
-            var%name        = "evap_heat_bare"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "evap_heat_bare"),                  &
+            var_meta%name        = "evap_heat_bare"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "evap_heat_bare"),                  &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2468,9 +2444,9 @@ contains
         !! Evaporation Heat Flux, Canopy (+ to atmosphere)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%evap_heat_canopy) then
-            var%name        = "evap_heat_canopy"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "evap_heat_canopy"),                &
+            var_meta%name        = "evap_heat_canopy"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "evap_heat_canopy"),                &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2478,9 +2454,9 @@ contains
         !!  Transpiration Heat Flux (+ to atmosphere)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%transpiration_heat) then
-            var%name        = "transpiration_heat"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "transpiration_heat"),              &
+            var_meta%name        = "transpiration_heat"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "transpiration_heat"),              &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2488,9 +2464,9 @@ contains
         !!  Ground Heat Flux, Vegetated Ground (+ to soil)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ground_heat_veg) then
-            var%name        = "ground_heat_veg"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "ground_heat_veg"),                 &
+            var_meta%name        = "ground_heat_veg"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "ground_heat_veg"),                 &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2498,9 +2474,9 @@ contains
         !!  Ground Heat Flux, Bare Ground (+ to soil)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ground_heat_bare) then
-            var%name        = "ground_heat_bare"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "ground_heat_bare"),                &
+            var_meta%name        = "ground_heat_bare"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "ground_heat_bare"),                &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2508,9 +2484,9 @@ contains
         !!  Net Longwave Radiation Flux, Vegetated Ground (+ to atmosphere)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%net_longwave_veg) then
-            var%name        = "net_longwave_veg"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "net_longwave_veg"),                &
+            var_meta%name        = "net_longwave_veg"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "net_longwave_veg"),                &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2518,9 +2494,9 @@ contains
         !!  Net Longwave Radiation Flux, Bare Ground (+ to atmosphere)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%net_longwave_bare) then
-            var%name        = "net_longwave_bare"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "net_longwave_bare"),               &
+            var_meta%name        = "net_longwave_bare"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "net_longwave_bare"),               &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2528,9 +2504,9 @@ contains
         !!  Net Longwave Radiation Flux, Canopy (+ to atmosphere)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%net_longwave_canopy) then
-            var%name        = "net_longwave_canopy"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "net_longwave_canopy"),             &
+            var_meta%name        = "net_longwave_canopy"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "net_longwave_canopy"),             &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2538,9 +2514,9 @@ contains
         !!  Surface Runoff Rate
         !!------------------------------------------------------------
         else if (var_idx==kVARS%runoff_surface) then
-            var%name        = "runoff_surface"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_runoff_flux"),                 &
+            var_meta%name        = "runoff_surface"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_runoff_flux"),                 &
                                attribute_t("units",         "mm s-1"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2548,9 +2524,9 @@ contains
         !!  Subsurface Runoff Rate
         !!------------------------------------------------------------
         else if (var_idx==kVARS%runoff_subsurface) then
-            var%name        = "runoff_subsurface"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "subsurface_runoff_flux"),          &
+            var_meta%name        = "runoff_subsurface"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "subsurface_runoff_flux"),          &
                                attribute_t("units",         "mm s-1"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2558,9 +2534,9 @@ contains
         !!  Total Column Soil water content
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_totalmoisture) then
-            var%name        = "soil_column_total_water"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "soil_moisture_content"),               &
+            var_meta%name        = "soil_column_total_water"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "soil_moisture_content"),               &
                                attribute_t("units",         "kg m-2"),                              &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2568,10 +2544,10 @@ contains
         !!  Soil Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_temperature) then
-            var%name        = "soil_temperature"
-            var%dimensions  = three_d_t_soil_dimensions
-            var%dim_len(2)  = kSOIL_GRID_Z
-            var%attributes  = [attribute_t("standard_name", "soil_temperature"),                    &
+            var_meta%name        = "soil_temperature"
+            var_meta%dimensions  = three_d_t_soil_dimensions
+            var_meta%dim_len(2)  = kSOIL_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "soil_temperature"),                    &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2579,9 +2555,9 @@ contains
         !!  Deep Soil Temperature (time constant)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_deep_temperature) then
-            var%name        = "soil_deep_temperature"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "deep_soil_temperature"),           &
+            var_meta%name        = "soil_deep_temperature"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "deep_soil_temperature"),           &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2589,9 +2565,9 @@ contains
         !!  Stable Carbon Mass in Deep Soil
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_carbon_stable) then
-            var%name        = "soil_carbon_stable"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "slow_soil_pool_mass_content_of_carbon"), &
+            var_meta%name        = "soil_carbon_stable"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "slow_soil_pool_mass_content_of_carbon"), &
                                attribute_t("units",         "g m-2"),                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2599,9 +2575,9 @@ contains
         !!  Short-lived Carbon Mass in Shallow Soil
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_carbon_fast) then
-            var%name        = "soil_carbon_fast"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "fast_soil_pool_mass_content_of_carbon"), &
+            var_meta%name        = "soil_carbon_fast"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "fast_soil_pool_mass_content_of_carbon"), &
                                attribute_t("units",         "g m-2"),                                 &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2609,9 +2585,9 @@ contains
         !!  Soil Class, Layer 1
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_texture_1) then
-            var%name        = "soil_class_1"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "soil_class_layer1"),                 &
+            var_meta%name        = "soil_class_1"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "soil_class_layer1"),                 &
                                attribute_t("units",         "1"),                                     &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2619,9 +2595,9 @@ contains
         !!  Soil Class, Layer 2
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_texture_2) then
-            var%name        = "soil_class_2"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "soil_class_layer2"),                 &
+            var_meta%name        = "soil_class_2"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "soil_class_layer2"),                 &
                                attribute_t("units",         "1"),                                     &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2629,9 +2605,9 @@ contains
         !!  Soil Class, Layer 3
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_texture_3) then
-            var%name        = "soil_class_3"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "soil_class_layer3"),                 &
+            var_meta%name        = "soil_class_3"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "soil_class_layer3"),                 &
                                attribute_t("units",         "1"),                                     &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2639,9 +2615,9 @@ contains
         !!  Soil Class, Layer 4
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_texture_4) then
-            var%name        = "soil_class_4"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "soil_class_layer4"),                 &
+            var_meta%name        = "soil_class_4"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "soil_class_layer4"),                 &
                                attribute_t("units",         "1"),                                     &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2649,10 +2625,10 @@ contains
         !!  Soil Sand and Clay Composition by Layer
         !!------------------------------------------------------------
         else if (var_idx==kVARS%soil_sand_and_clay) then
-            var%name        = "soil_sand_and_clay_composition"
-            var%dimensions  = three_d_soilcomp_dimensions
-            var%dim_len(2)  = kSOILCOMP_GRID_Z
-            var%attributes  = [attribute_t("non_standard_name", "soil_sand_and_clay_composition"),    &
+            var_meta%name        = "soil_sand_and_clay_composition"
+            var_meta%dimensions  = three_d_soilcomp_dimensions
+            var_meta%dim_len(2)  = kSOILCOMP_GRID_Z
+            var_meta%attributes  = [attribute_t("non_standard_name", "soil_sand_and_clay_composition"),    &
                                attribute_t("units",         "1"),                                     &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2660,9 +2636,9 @@ contains
         !!  Water Table Depth
         !!------------------------------------------------------------
         else if (var_idx==kVARS%water_table_depth) then
-            var%name        = "water_table_depth"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "water_table_depth"),                    &
+            var_meta%name        = "water_table_depth"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "water_table_depth"),                    &
                                attribute_t("units",         "m"),                                    &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2670,9 +2646,9 @@ contains
         !!  Water in Aquifer
         !!------------------------------------------------------------
         else if (var_idx==kVARS%water_aquifer) then
-            var%name        = "water_aquifer"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "water_in_aquifer"),                 &
+            var_meta%name        = "water_aquifer"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "water_in_aquifer"),                 &
                                attribute_t("units",         "mm"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2680,9 +2656,9 @@ contains
         !!  Groundwater Storage
         !!------------------------------------------------------------
         else if (var_idx==kVARS%storage_gw) then
-            var%name        = "storage_gw"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "groundwater_storage"),              &
+            var_meta%name        = "storage_gw"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "groundwater_storage"),              &
                                attribute_t("units",         "mm"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2690,9 +2666,9 @@ contains
         !!  Lake Storage
         !!------------------------------------------------------------
         else if (var_idx==kVARS%storage_lake) then
-            var%name        = "storage_lake"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "lake_storage"),                     &
+            var_meta%name        = "storage_lake"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "lake_storage"),                     &
                                attribute_t("units",         "mm"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2700,9 +2676,9 @@ contains
         !!  Surface roughness length z0
         !!------------------------------------------------------------
         else if (var_idx==kVARS%roughness_z0) then
-            var%name        = "surface_roughness"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_roughness_length"),            &
+            var_meta%name        = "surface_roughness"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_roughness_length"),            &
                                attribute_t("long_name",     "Surface roughness length"),            &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -2711,9 +2687,9 @@ contains
         !!  Surface Radiative Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%surface_rad_temperature) then
-            var%name        = "surface_rad_temperature"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_radiative_temperature"),       &
+            var_meta%name        = "surface_rad_temperature"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_radiative_temperature"),       &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2721,9 +2697,9 @@ contains
         !!  2 meter air temperture
         !!------------------------------------------------------------
         else if (var_idx==kVARS%temperature_2m) then
-            var%name        = "taix"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "air_temperature"),                     &
+            var_meta%name        = "taix"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "air_temperature"),                     &
                                attribute_t("long_name",     "Bulk air temperature at 2m"),          &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -2732,9 +2708,9 @@ contains
         !!  2 meter Air Temperature over Vegetation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%temperature_2m_veg) then
-            var%name        = "temperature_2m_veg"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "air_temperature"),                     &
+            var_meta%name        = "temperature_2m_veg"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "air_temperature"),                     &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2742,9 +2718,9 @@ contains
         !!  2 meter Air Temperature over Bare Ground
         !!------------------------------------------------------------
         else if (var_idx==kVARS%temperature_2m_bare) then
-            var%name        = "temperature_2m_bare"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "air_temperature"),                     &
+            var_meta%name        = "temperature_2m_bare"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "air_temperature"),                     &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2752,9 +2728,9 @@ contains
         !!  2 meter Mixing Ratio over Vegetation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%mixing_ratio_2m_veg) then
-            var%name        = "mixing_ratio_2m_veg"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "mixing_ratio"),                    &
+            var_meta%name        = "mixing_ratio_2m_veg"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "mixing_ratio"),                    &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2762,9 +2738,9 @@ contains
         !!  2 meter Mixing Ratio over Bare Ground
         !!------------------------------------------------------------
         else if (var_idx==kVARS%mixing_ratio_2m_bare) then
-            var%name        = "mixing_ratio_2m_bare"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "mixing_ratio"),                    &
+            var_meta%name        = "mixing_ratio_2m_bare"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "mixing_ratio"),                    &
                                attribute_t("units",         "kg kg-1"),                             &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2772,9 +2748,9 @@ contains
         !!  2 meter specific humidity
         !!------------------------------------------------------------
         else if (var_idx==kVARS%humidity_2m) then
-            var%name        = "hus2m"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "specific_humidity"),                   &
+            var_meta%name        = "hus2m"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "specific_humidity"),                   &
                                attribute_t("units",         "kg kg-2"),                             &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2782,9 +2758,9 @@ contains
         !!  10 meter height V component of wind field
         !!------------------------------------------------------------
         else if (var_idx==kVARS%v_10m) then
-            var%name        = "v10m"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "northward_10m_wind_speed"),            &
+            var_meta%name        = "v10m"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "northward_10m_wind_speed"),            &
                                attribute_t("units",         "m s-1"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2792,18 +2768,18 @@ contains
         !!  10 meter height U component of the wind field
         !!------------------------------------------------------------
         else if (var_idx==kVARS%u_10m) then
-            var%name        = "u10m"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "eastward_10m_wind_speed"),             &
+            var_meta%name        = "u10m"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "eastward_10m_wind_speed"),             &
                                attribute_t("units",         "m s-1"),                               &
                                attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  V component of wind field averaged to the mass grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%v_mass) then
-            var%name        = "v_mass"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "northward wind, averaged to the mass grid"),            &
+            var_meta%name        = "v_mass"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "northward wind, averaged to the mass grid"),            &
                                 attribute_t("units",         "m s-1"),                               &
                                 attribute_t("coordinates",   "lat lon")]
                             
@@ -2811,9 +2787,9 @@ contains
         !!  U component of the wind field averaged to the mass grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%u_mass) then
-            var%name        = "u_mass"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "eastward_ wind, averaged to the mass grid"),             &
+            var_meta%name        = "u_mass"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "eastward_ wind, averaged to the mass grid"),             &
                                 attribute_t("units",         "m s-1"),                               &
                                 attribute_t("coordinates",   "lat lon")]
                     
@@ -2821,9 +2797,9 @@ contains
         !!  10 meter height wind speed magnitude, sqrt(u_10m**2+v_10m**2)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%windspd_10m) then
-            var%name        = "wnsx"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "wind speed magnitude"),             &
+            var_meta%name        = "wnsx"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "wind speed magnitude"),             &
                                attribute_t("units",         "m s-1"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2831,9 +2807,9 @@ contains
         !!  Momentum Drag Coefficient
         !!------------------------------------------------------------
         else if (var_idx==kVARS%coeff_momentum_drag) then
-            var%name        = "coeff_momentum_drag"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_drag_coefficient_for_momentum_in_air"), &
+            var_meta%name        = "coeff_momentum_drag"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_drag_coefficient_for_momentum_in_air"), &
                                attribute_t("units",         "1"),                                            &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2841,9 +2817,9 @@ contains
         !!  Sensible Heat Exchange Coefficient
         !!------------------------------------------------------------
         else if (var_idx==kVARS%chs) then
-            var%name        = "coeff_heat_exchange"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "sensible_heat_exchange_coefficient"), &
+            var_meta%name        = "coeff_heat_exchange"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "sensible_heat_exchange_coefficient"), &
                                attribute_t("units",         "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2851,9 +2827,9 @@ contains
         !!  Sensible Heat Exchange Coefficient, 2m
         !!------------------------------------------------------------
         else if (var_idx==kVARS%chs2) then
-            var%name        = "coeff_heat_exchange"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "sensible_heat_exchange_coefficient"), &
+            var_meta%name        = "coeff_heat_exchange"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "sensible_heat_exchange_coefficient"), &
                                attribute_t("units",         "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2861,9 +2837,9 @@ contains
         !!  Latent Heat Exchange Coefficient, 2m
         !!------------------------------------------------------------
         else if (var_idx==kVARS%cqs2) then
-            var%name        = "coeff_moisture_exchange"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "latent_heat_exchange_coefficient"), &
+            var_meta%name        = "coeff_moisture_exchange"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "latent_heat_exchange_coefficient"), &
                                attribute_t("units",         "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2872,9 +2848,9 @@ contains
         !!  Sensible Heat Exchange Coefficient 3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%coeff_heat_exchange_3d) then
-            var%name        = "coeff_heat_exchange_3d"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "sensible_heat_exchange_coefficient_3d"), &
+            var_meta%name        = "coeff_heat_exchange_3d"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "sensible_heat_exchange_coefficient_3d"), &
                                attribute_t("units",         "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2882,9 +2858,9 @@ contains
         !!  Momentum Exchange Coefficient 3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%coeff_momentum_exchange_3d) then
-            var%name        = "coeff_momentum_exchange_3d"
-            var%dimensions  = three_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "momentum_exchange_coefficient_3d"), &
+            var_meta%name        = "coeff_momentum_exchange_3d"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "momentum_exchange_coefficient_3d"), &
                                attribute_t("units",         "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2892,9 +2868,9 @@ contains
         !!  Sensible Heat Exchange Coefficient
         !!------------------------------------------------------------
         else if (var_idx==kVARS%br) then
-            var%name        = "sfc_Ri"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "bulk_richardson_num_from_SFC_scheme"), &
+            var_meta%name        = "sfc_Ri"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "bulk_richardson_num_from_SFC_scheme"), &
                                attribute_t("units",         "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2902,9 +2878,9 @@ contains
         !!  Sensible Heat Exchange Coefficient
         !!------------------------------------------------------------
         else if (var_idx==kVARS%QFX) then
-            var%name        = "moisture_flux"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "moisture_flux_from_surface"), &
+            var_meta%name        = "moisture_flux"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "moisture_flux_from_surface"), &
                                attribute_t("units",         "kg/m²/s"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2913,9 +2889,9 @@ contains
         !!  PBL height
         !!------------------------------------------------------------
         else if (var_idx==kVARS%hpbl) then
-            var%name        = "hpbl"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "height_of_planetary_boundary_layer"), &
+            var_meta%name        = "hpbl"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "height_of_planetary_boundary_layer"), &
                                attribute_t("units",         "m"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2923,20 +2899,20 @@ contains
         !!  PBL layer index
         !!------------------------------------------------------------
         else if (var_idx==kVARS%kpbl) then
-            var%name        = "kpbl"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "index_of_planetary_boundary_layer_height"), &
+            var_meta%name        = "kpbl"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "index_of_planetary_boundary_layer_height"), &
                                attribute_t("units",         "-"),                                      &
                                attribute_t("coordinates",   "lat lon")]
-            var%dtype = kINTEGER
+            var_meta%dtype = kINTEGER
         
         !>------------------------------------------------------------
         !!  Land surface radiative skin temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%skin_temperature) then
-            var%name        = "tsfe"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_temperature"),                 &
+            var_meta%name        = "tsfe"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_temperature"),                 &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2944,46 +2920,46 @@ contains
         !!  Land surface radiative skin temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%sst) then
-            var%name        = "sst"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "Sea Surface Temperature"),                 &
+            var_meta%name        = "sst"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "Sea Surface Temperature"),                 &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-            var%force_boundaries = .False.
-            if (present(opt)) var%forcing_var = opt%forcing%sst_var
+            if (present(force_boundaries)) force_boundaries = .False.
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%sst_var /= "")
 
         !>------------------------------------------------------------
         !!  Sensible heat flux from the surface (positive up)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%sensible_heat) then
-            var%name        = "hfss"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_upward_sensible_heat_flux"),   &
+            var_meta%name        = "hfss"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_upward_sensible_heat_flux"),   &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
-            var%force_boundaries = .False.
-            if (present(opt)) var%forcing_var = opt%forcing%shvar
+            if (present(force_boundaries)) force_boundaries = .False.
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%shvar /= "")
 
         !>------------------------------------------------------------
         !!  Latent heat flux from the surface (positive up)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%latent_heat) then
-            var%name        = "hfls"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "surface_upward_latent_heat_flux"),     &
+            var_meta%name        = "hfls"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_upward_latent_heat_flux"),     &
                                attribute_t("units",         "W m-2"),                               &
                                attribute_t("coordinates",   "lat lon")]
-            var%force_boundaries = .False.
-            if (present(opt)) var%forcing_var = opt%forcing%lhvar
+            if (present(force_boundaries)) force_boundaries = .False.
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%lhvar /= "")
 
         !>------------------------------------------------------------
         !!  Lake temperature 3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%t_lake3d) then
-            var%name        = "t_lake3d"
-            var%dimensions  = three_d_t_lake_dimensions
-            var%dim_len(2)  = kLAKE_Z
-            var%attributes  = [attribute_t("standard_name", "lake_water_temperature"),     &
+            var_meta%name        = "t_lake3d"
+            var_meta%dimensions  = three_d_t_lake_dimensions
+            var_meta%dim_len(2)  = kLAKE_Z
+            var_meta%attributes  = [attribute_t("standard_name", "lake_water_temperature"),     &
                                attribute_t("units",         "K"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -2991,10 +2967,10 @@ contains
         !!  Lake lake_icefraction_3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%lake_icefrac3d) then
-            var%name        = "lake_icefrac3d"
-            var%dimensions  = three_d_t_lake_dimensions
-            var%dim_len(2)  = kLAKE_Z
-            var%attributes  = [attribute_t("standard_name", "lake_icefraction_3d"),     &
+            var_meta%name        = "lake_icefrac3d"
+            var_meta%dimensions  = three_d_t_lake_dimensions
+            var_meta%dim_len(2)  = kLAKE_Z
+            var_meta%attributes  = [attribute_t("standard_name", "lake_icefraction_3d"),     &
                                attribute_t("units",         "-"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3002,10 +2978,10 @@ contains
         !!  Lake z_lake3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%z_lake3d) then
-            var%name        = "z_lake3d"
-            var%dimensions  = three_d_t_lake_dimensions
-            var%dim_len(2)  = kLAKE_Z
-            var%attributes  = [attribute_t("standard_name", "lake_layer_depth"),     &
+            var_meta%name        = "z_lake3d"
+            var_meta%dimensions  = three_d_t_lake_dimensions
+            var_meta%dim_len(2)  = kLAKE_Z
+            var_meta%attributes  = [attribute_t("standard_name", "lake_layer_depth"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3013,19 +2989,19 @@ contains
         !!  Lake dz_lake3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dz_lake3d) then
-            var%name        = "dz_lake3d"
-            var%dimensions  = three_d_t_lake_dimensions
-            var%dim_len(2)  = kLAKE_Z
-            var%attributes  = [attribute_t("standard_name", "lake_layer_thickness"),     &
+            var_meta%name        = "dz_lake3d"
+            var_meta%dimensions  = three_d_t_lake_dimensions
+            var_meta%dim_len(2)  = kLAKE_Z
+            var_meta%attributes  = [attribute_t("standard_name", "lake_layer_thickness"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  lake_depth
         !!------------------------------------------------------------
         else if (var_idx==kVARS%lake_depth) then
-            var%name        = "lake_depth"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "lake_depth"),     &
+            var_meta%name        = "lake_depth"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "lake_depth"),     &
                                 attribute_t("units",         "m"),                               &
                                 attribute_t("coordinates",   "lat lon")]
                     
@@ -3033,9 +3009,9 @@ contains
         !!  lake snl2d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snl2d) then
-            var%name        = "snl2d"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "lake_snow_layer_2d"),           &
+            var_meta%name        = "snl2d"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "lake_snow_layer_2d"),           &
                                attribute_t("units",         "-"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3043,9 +3019,9 @@ contains
         !!  lake_t_grnd2d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%t_grnd2d) then
-            var%name        = "t_grnd2d"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "t_grnd2d"),           &
+            var_meta%name        = "t_grnd2d"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "t_grnd2d"),           &
                                attribute_t("units",         "K"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3053,10 +3029,10 @@ contains
         !!  Lake t_soisno3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%t_soisno3d) then
-            var%name        = "t_soisno3d"
-            var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(2)  = kLAKE_SOISNO_Z
-            var%attributes  = [attribute_t("standard_name", "temperature_soil_snow_below_or_above_lake"),     &
+            var_meta%name        = "t_soisno3d"
+            var_meta%dimensions  = three_d_t_lake_soisno_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOISNO_Z
+            var_meta%attributes  = [attribute_t("standard_name", "temperature_soil_snow_below_or_above_lake"),     &
                                attribute_t("units",         "K"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3064,10 +3040,10 @@ contains
         !!  Lake h2osoi_ice3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%h2osoi_ice3d) then
-            var%name        = "h2osoi_ice3d"
-            var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(2)  = kLAKE_SOISNO_Z
-            var%attributes  = [attribute_t("standard_name", "h2osoi_ice3d"),     &
+            var_meta%name        = "h2osoi_ice3d"
+            var_meta%dimensions  = three_d_t_lake_soisno_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOISNO_Z
+            var_meta%attributes  = [attribute_t("standard_name", "h2osoi_ice3d"),     &
                                attribute_t("units",         ""),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3075,10 +3051,10 @@ contains
         !!  Lake soil/snowliquid water (kg/m2)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%h2osoi_liq3d) then
-            var%name        = "h2osoi_liq3d"
-            var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(2)  = kLAKE_SOISNO_Z
-            var%attributes  = [attribute_t("standard_name", "lake_soil_or_snow_liquid water_content"),     &
+            var_meta%name        = "h2osoi_liq3d"
+            var_meta%dimensions  = three_d_t_lake_soisno_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOISNO_Z
+            var_meta%attributes  = [attribute_t("standard_name", "lake_soil_or_snow_liquid water_content"),     &
                                attribute_t("units",         "kg/m2"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3086,10 +3062,10 @@ contains
         !!  Lake h2osoi_vol3d volumetric soil water (0<=h2osoi_vol<=watsat)[m3/m3]
         !!------------------------------------------------------------
         else if (var_idx==kVARS%h2osoi_vol3d) then
-            var%name        = "h2osoi_vol3d"
-            var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(2)  = kLAKE_SOISNO_Z
-            var%attributes  = [attribute_t("standard_name", "volumetric_soil_water"),     &
+            var_meta%name        = "h2osoi_vol3d"
+            var_meta%dimensions  = three_d_t_lake_soisno_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOISNO_Z
+            var_meta%attributes  = [attribute_t("standard_name", "volumetric_soil_water"),     &
                                attribute_t("units",         "m3/m3"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3097,10 +3073,10 @@ contains
         !!  Lake z3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%z3d) then
-            var%name        = "z3d"
-            var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(2)  = kLAKE_SOISNO_Z
-            var%attributes  = [attribute_t("standard_name", "layer_depth_for_lake_snow&soil"),     &
+            var_meta%name        = "z3d"
+            var_meta%dimensions  = three_d_t_lake_soisno_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOISNO_Z
+            var_meta%attributes  = [attribute_t("standard_name", "layer_depth_for_lake_snow&soil"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3108,10 +3084,10 @@ contains
         !!  Lake layer_thickness_for_lake_snow&soil
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dz3d) then
-            var%name        = "dz3d"
-            var%dimensions  = three_d_t_lake_soisno_dimensions
-            var%dim_len(2)  = kLAKE_SOISNO_Z
-            var%attributes  = [attribute_t("standard_name", "layer_thickness_for_lake_snow&soil"),     &
+            var_meta%name        = "dz3d"
+            var_meta%dimensions  = three_d_t_lake_soisno_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOISNO_Z
+            var_meta%attributes  = [attribute_t("standard_name", "layer_thickness_for_lake_snow&soil"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3119,10 +3095,10 @@ contains
         !!  Lake z3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%zi3d) then
-            var%name        = "zi3d"
-            var%dimensions  = three_d_t_lake_soisno_1_dimensions
-            var%dim_len(2)  = kLAKE_SOISNO_1_Z
-            var%attributes  = [attribute_t("standard_name", "interface_layer_depth_for_lake_snow&soil"),     &
+            var_meta%name        = "zi3d"
+            var_meta%dimensions  = three_d_t_lake_soisno_1_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOISNO_1_Z
+            var_meta%attributes  = [attribute_t("standard_name", "interface_layer_depth_for_lake_snow&soil"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3130,10 +3106,10 @@ contains
         !!  Lake watsat3d: volumetric soil water at saturation (porosity)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%watsat3d) then
-            var%name        = "watsat3d"
-            var%dimensions  = three_d_t_lake_soi_dimensions
-            var%dim_len(2)  = kLAKE_SOI_Z
-            var%attributes  = [attribute_t("standard_name", "volumetric soil water at saturation (porosity)"),     &
+            var_meta%name        = "watsat3d"
+            var_meta%dimensions  = three_d_t_lake_soi_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOI_Z
+            var_meta%attributes  = [attribute_t("standard_name", "volumetric soil water at saturation (porosity)"),     &
                                attribute_t("units",         ""),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3141,10 +3117,10 @@ contains
         !!  Lake csol3d: heat capacity, soil solids (J/m**3/Kelvin)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%csol3d) then
-            var%name        = "csol3d"
-            var%dimensions  = three_d_t_lake_soi_dimensions
-            var%dim_len(2)  = kLAKE_SOI_Z
-            var%attributes  = [attribute_t("standard_name", "heat capacity, soil solids "),     &
+            var_meta%name        = "csol3d"
+            var_meta%dimensions  = three_d_t_lake_soi_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOI_Z
+            var_meta%attributes  = [attribute_t("standard_name", "heat capacity, soil solids "),     &
                                attribute_t("units",         "(J/m**3/Kelvin)"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3152,10 +3128,10 @@ contains
         !!  Lake: thermal conductivity, soil minerals  [W/m-K]
         !!------------------------------------------------------------
         else if (var_idx==kVARS%tkmg3d) then
-            var%name        = "tkmg3d"
-            var%dimensions  = three_d_t_lake_soi_dimensions
-            var%dim_len(2)  = kLAKE_SOI_Z
-            var%attributes  = [attribute_t("standard_name", "thermal conductivity, soil minerals  [W/m-K]"),     &
+            var_meta%name        = "tkmg3d"
+            var_meta%dimensions  = three_d_t_lake_soi_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOI_Z
+            var_meta%attributes  = [attribute_t("standard_name", "thermal conductivity, soil minerals  [W/m-K]"),     &
                                attribute_t("units",         ""),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3163,9 +3139,9 @@ contains
         !!  Lake lakemask
         !!------------------------------------------------------------
         else if (var_idx==kVARS%lakemask) then
-            var%name        = "lakemask"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("standard_name", "lakemask"),     &
+            var_meta%name        = "lakemask"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "lakemask"),     &
                                attribute_t("units",         ""),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3173,9 +3149,9 @@ contains
         !!  Grid cell fractional sea ice lakemask
         !!------------------------------------------------------------
         else if (var_idx==kVARS%xice) then
-            var%name        = "xice"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("standard_name", "xice"),     &
+            var_meta%name        = "xice"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "xice"),     &
                                attribute_t("units",         ""),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3183,9 +3159,9 @@ contains
         !!  Lake lakedepth2d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%lakedepth2d) then
-            var%name        = "lakedepth2d"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("standard_name", "lake_depth"),     &
+            var_meta%name        = "lakedepth2d"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "lake_depth"),     &
                                attribute_t("units",         "m"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3193,9 +3169,9 @@ contains
         !!  lake savedtke12d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%savedtke12d) then
-            var%name        = "savedtke12d"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "savedtke12d"),           &
+            var_meta%name        = "savedtke12d"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "savedtke12d"),           &
                                attribute_t("units",         "-?"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3203,10 +3179,10 @@ contains
         !!  Lake: thermal conductivity, saturated soil [W/m-K]
         !!------------------------------------------------------------
         else if (var_idx==kVARS%tksatu3d) then
-            var%name        = "tksatu3d"
-            var%dimensions  = three_d_t_lake_soi_dimensions
-            var%dim_len(2)  = kLAKE_SOI_Z
-            var%attributes  = [attribute_t("standard_name", "thermal conductivity, saturated soil [W/m-K]"),     &
+            var_meta%name        = "tksatu3d"
+            var_meta%dimensions  = three_d_t_lake_soi_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOI_Z
+            var_meta%attributes  = [attribute_t("standard_name", "thermal conductivity, saturated soil [W/m-K]"),     &
                                attribute_t("units",         ""),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3214,10 +3190,10 @@ contains
         !!  Lake tkdry3d: thermal conductivity, dry soil (W/m/Kelvin)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%tkdry3d) then
-            var%name        = "tkdry3d"
-            var%dimensions  = three_d_t_lake_soi_dimensions
-            var%dim_len(2)  = kLAKE_SOI_Z
-            var%attributes  = [attribute_t("standard_name", "thermal conductivity, dry soil (W/m/Kelvin)"),     &
+            var_meta%name        = "tkdry3d"
+            var_meta%dimensions  = three_d_t_lake_soi_dimensions
+            var_meta%dim_len(2)  = kLAKE_SOI_Z
+            var_meta%attributes  = [attribute_t("standard_name", "thermal conductivity, dry soil (W/m/Kelvin)"),     &
                                attribute_t("units",         "?"),                               &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3228,9 +3204,9 @@ contains
         !!  Integrated Vapor Transport
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ivt) then
-            var%name        = "ivt"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "integrated_vapor_transport"),  &
+            var_meta%name        = "ivt"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "integrated_vapor_transport"),  &
                                attribute_t("units",         "kg m-1 s-1"),                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3239,9 +3215,9 @@ contains
         !!  Integrated Water Vapor
         !!------------------------------------------------------------
         else if (var_idx==kVARS%iwv) then
-            var%name        = "iwv"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "atmosphere_mass_content_of_water_vapor"),  &
+            var_meta%name        = "iwv"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "atmosphere_mass_content_of_water_vapor"),  &
                                attribute_t("units",         "kg m-2"),                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3250,9 +3226,9 @@ contains
         !!  Integrated Water Liquid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%iwl) then
-            var%name        = "iwl"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "atmosphere_mass_content_of_water_liquid"),  &
+            var_meta%name        = "iwl"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "atmosphere_mass_content_of_water_liquid"),  &
                                attribute_t("units",         "kg m-2"),                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3261,9 +3237,9 @@ contains
         !!  Integrated Water Ice
         !!------------------------------------------------------------
         else if (var_idx==kVARS%iwi) then
-            var%name        = "iwi"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "atmosphere_mass_content_of_water_ice"),  &
+            var_meta%name        = "iwi"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "atmosphere_mass_content_of_water_ice"),  &
                                attribute_t("units",         "kg m-2"),                      &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3272,19 +3248,19 @@ contains
         !!  Binary land mask (water vs land)
         !!------------------------------------------------------------
         else if (var_idx==kVARS%land_mask) then
-            var%name        = "land_mask"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "land_water_mask"),                 &
+            var_meta%name        = "land_mask"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "land_water_mask"),                 &
                                attribute_t("coordinates",       "lat lon")]
-            var%dtype = kINTEGER
+            var_meta%dtype = kINTEGER
 
         !>------------------------------------------------------------
         !!  Height of the terrain
         !!------------------------------------------------------------
         else if (var_idx==kVARS%terrain) then
-            var%name        = "terrain"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
+            var_meta%name        = "terrain"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3292,9 +3268,9 @@ contains
         !!  Latitude y coordinate
         !!------------------------------------------------------------
         else if (var_idx==kVARS%latitude) then
-            var%name        = "lat"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("standard_name", "latitude"),                            &
+            var_meta%name        = "lat"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "latitude"),                            &
                                attribute_t("units",         "degrees_north"),                       &
                                attribute_t("axis","Y")]
         
@@ -3302,9 +3278,9 @@ contains
         !!  Longitude x coordinate
         !!------------------------------------------------------------
         else if (var_idx==kVARS%longitude) then
-            var%name        = "lon"
-            var%dimensions  = two_d_dimensions
-            var%attributes  = [attribute_t("standard_name", "longitude"),                           &
+            var_meta%name        = "lon"
+            var_meta%dimensions  = two_d_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "longitude"),                           &
                                attribute_t("units",         "degrees_east"),                        &
                                attribute_t("axis","X")]
         
@@ -3312,9 +3288,9 @@ contains
         !!  Latitude y coordinate on the U-grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%u_latitude) then
-            var%name        = "u_lat"
-            var%dimensions  = two_d_u_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "latitude_on_u_grid"),              &
+            var_meta%name        = "u_lat"
+            var_meta%dimensions  = two_d_u_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "latitude_on_u_grid"),              &
                                attribute_t("units",         "degrees_north"),                       &
                                attribute_t("axis","Y")]
 
@@ -3322,9 +3298,9 @@ contains
         !!  Longitude x coordinate on the U-grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%u_longitude) then
-            var%name        = "u_lon"
-            var%dimensions  = two_d_u_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "longitude_on_u_grid"),             &
+            var_meta%name        = "u_lon"
+            var_meta%dimensions  = two_d_u_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "longitude_on_u_grid"),             &
                                attribute_t("units",         "degrees_east"),                        &
                                attribute_t("axis","X")]
 
@@ -3332,9 +3308,9 @@ contains
         !!  Latitude y coordinate on the V-grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%v_latitude) then
-            var%name        = "v_lat"
-            var%dimensions  = two_d_v_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "latitude_on_v_grid"),              &
+            var_meta%name        = "v_lat"
+            var_meta%dimensions  = two_d_v_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "latitude_on_v_grid"),              &
                                attribute_t("units",         "degrees_north"),                       &
                                attribute_t("axis","Y")]
 
@@ -3342,9 +3318,9 @@ contains
         !!  Longitude x coordinate on the V-grid
         !!------------------------------------------------------------
         else if (var_idx==kVARS%v_longitude) then
-            var%name        = "v_lon"
-            var%dimensions  = two_d_v_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "longitude_on_v_grid"),             &
+            var_meta%name        = "v_lon"
+            var_meta%dimensions  = two_d_v_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "longitude_on_v_grid"),             &
                                attribute_t("units",         "degrees_east"),                        &
                                attribute_t("axis","X")]
 
@@ -3354,10 +3330,10 @@ contains
         !!  Snow Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%Tsnow) then
-            var%name        = "Tsnow"
-            var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(2)  = kSNOW_GRID_Z
-            var%attributes  = [attribute_t("standard_name", "snow_temperature"),                    &
+            var_meta%name        = "Tsnow"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "snow_temperature"),                    &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3365,10 +3341,10 @@ contains
         !!  ice mass content of snow 
         !!------------------------------------------------------------
         else if (var_idx==kVARS%Sice) then
-            var%name        = "Sice"
-            var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(2)  = kSNOW_GRID_Z
-            var%attributes  = [attribute_t("standard_name", "snow_ice_content"),                    &
+            var_meta%name        = "Sice"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "snow_ice_content"),                    &
                                attribute_t("units",         "kg m-2"),                                   &
                                attribute_t("coordinates",   "lat lon")]
                        		
@@ -3376,10 +3352,10 @@ contains
         !!  water mass content of snow 
         !!------------------------------------------------------------
         else if (var_idx==kVARS%Sliq) then
-            var%name        = "Sliq"
-            var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(2)  = kSNOW_GRID_Z
-            var%attributes  = [attribute_t("standard_name", "snow_water_content"),                    &
+            var_meta%name        = "Sliq"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "snow_water_content"),                    &
                                attribute_t("units",         "kg m-2"),                                   &
                                attribute_t("coordinates",   "lat lon")]
                 		
@@ -3387,10 +3363,10 @@ contains
         !!  snow layer thicknes 
         !!------------------------------------------------------------
         else if (var_idx==kVARS%Ds) then
-            var%name        = "Ds"
-            var%dimensions  = three_d_t_snow_dimensions
-            var%dim_len(2)  = kSNOW_GRID_Z
-            var%attributes  = [attribute_t("standard_name", "snow_layer_thickness"),                    &
+            var_meta%name        = "Ds"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "snow_layer_thickness"),                    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
            
@@ -3398,9 +3374,9 @@ contains
         !!  fsnow from FSM
         !!------------------------------------------------------------
         else if (var_idx==kVARS%fsnow) then
-            var%name        = "scfe"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "snow covered fraction"),   &
+            var_meta%name        = "scfe"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "snow covered fraction"),   &
                                attribute_t("units",         "-"),                        &
                                attribute_t("coordinates",   "lat lon")]
         	
@@ -3408,9 +3384,9 @@ contains
         !!  Nsnow from FSM
         !!------------------------------------------------------------
         else if (var_idx==kVARS%Nsnow) then
-            var%name        = "Nsnow"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "Nsnow"),   &
+            var_meta%name        = "Nsnow"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "Nsnow"),   &
                                attribute_t("units",         "-"),                        &
                                attribute_t("coordinates",   "lat lon")]
         
@@ -3418,9 +3394,9 @@ contains
         !!  runoff_tstep from FSM
         !!------------------------------------------------------------
         else if (var_idx==kVARS%runoff_tstep) then
-            var%name        = "rotc"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "total runoff, aggregated per output interval during t-1->t"),   &
+            var_meta%name        = "rotc"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "total runoff, aggregated per output interval during t-1->t"),   &
                                attribute_t("units",         "kg m-2"),                        &
                                attribute_t("coordinates",   "lat lon")]
           
@@ -3428,9 +3404,9 @@ contains
         !!  meltflux_out_tstep from FSM
         !!------------------------------------------------------------
         else if (var_idx==kVARS%meltflux_out_tstep) then
-            var%name        = "romc"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "runoff from snow, aggregated per output interval during t-1->t"),   &
+            var_meta%name        = "romc"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "runoff from snow, aggregated per output interval during t-1->t"),   &
                                attribute_t("units",         "kg m-2"),                        &
                                attribute_t("coordinates",   "lat lon")]
           
@@ -3438,9 +3414,9 @@ contains
         !!  Sliq_out from FSM
         !!------------------------------------------------------------
         else if (var_idx==kVARS%Sliq_out) then
-            var%name        = "slqt"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "liquid water content"),   &
+            var_meta%name        = "slqt"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "liquid water content"),   &
                                attribute_t("units",         "kg m-2"),                        &
                                attribute_t("coordinates",   "lat lon")]
           
@@ -3448,9 +3424,9 @@ contains
         !!  saltation flux from FSM
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dSWE_salt) then
-            var%name        = "salt"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "saltation flux"),   &
+            var_meta%name        = "salt"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "saltation flux"),   &
                                attribute_t("units",         "kg m-2 t-1"),                        &
                                attribute_t("coordinates",   "lat lon")]
           
@@ -3458,9 +3434,9 @@ contains
         !!  suspension flux from FSM
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dSWE_susp) then
-            var%name        = "susp"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "suspension flux"),   &
+            var_meta%name        = "susp"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "suspension flux"),   &
                                attribute_t("units",         "kg m-2 t-1"),                        &
                                attribute_t("coordinates",   "lat lon")]
           
@@ -3468,9 +3444,9 @@ contains
         !!  blowing snow sublimation from FSM
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dSWE_subl) then
-            var%name        = "blow_subl"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "blowing-snow sublimation"),   &
+            var_meta%name        = "blow_subl"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing-snow sublimation"),   &
                                attribute_t("units",         "kg m-2 t-1"),                        &
                                attribute_t("coordinates",   "lat lon")]
           
@@ -3478,54 +3454,53 @@ contains
         !!  sliding snow transport from FSM
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dSWE_slide) then
-            var%name        = "slide"
-            var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("standard_name", "sliding snow transport"),   &
+            var_meta%name        = "slide"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "sliding snow transport"),   &
                                attribute_t("units",         "kg m-2 t-1"),                        &
                                attribute_t("coordinates",   "lat lon")]
         end if  
 
         ! loop through entire array setting n_dimensions and n_attrs based on the data that were supplied
-        if (var%name == "") return
+        if (var_meta%name == "") return
 
-        var%n_dimensions = size(var%dimensions)
-        var%n_attrs      = size(var%attributes)
-        var%unlimited_dim=.False.
+        var_meta%n_attrs      = size(var_meta%attributes)
+        var_meta%id = var_idx
 
-        do j = 1,size(var%dimensions)
-            if (var%dimensions(j) == "time") then
-                var%unlimited_dim=.True.
+        var_meta%unlimited_dim=.False.
+
+        do j = 1,size(var_meta%dimensions)
+            if (var_meta%dimensions(j) == "time") then
+                var_meta%unlimited_dim=.True.
             endif
-            if (var%dimensions(j) == "lon_u") then
-                var%xstag = 1
+            if (var_meta%dimensions(j) == "lon_u") then
+                var_meta%xstag = 1
             endif
-            if (var%dimensions(j) == "lat_v") then
-                var%ystag = 1
+            if (var_meta%dimensions(j) == "lat_v") then
+                var_meta%ystag = 1
             endif
         enddo
 
-        if (var%unlimited_dim) then
+        if (var_meta%unlimited_dim) then
                 !If time is one of the dimensions, and we only have 3 dimensions, then this is a 2D variable
-            if (size(var%dimensions) == 2) then
-                var%one_d = .True.
-            else if (size(var%dimensions) == 3) then
-                var%two_d = .True.
-            else if (size(var%dimensions) == 4) then
-                var%three_d = .True.
+            if (size(var_meta%dimensions) == 2) then
+                var_meta%one_d = .True.
+            else if (size(var_meta%dimensions) == 3) then
+                var_meta%two_d = .True.
+            else if (size(var_meta%dimensions) == 4) then
+                var_meta%three_d = .True.
             endif
-            var%n_dimensions = size(var%dimensions)-1
 
         else
-            if (size(var%dimensions) == 1) then
-                var%one_d = .True.
-            else if (size(var%dimensions) == 2) then
-                var%two_d = .True.
-            else if (size(var%dimensions) == 3) then
-                var%three_d = .True.
-            else if (size(var%dimensions) == 4) then
-                var%four_d = .True.
+            if (size(var_meta%dimensions) == 1) then
+                var_meta%one_d = .True.
+            else if (size(var_meta%dimensions) == 2) then
+                var_meta%two_d = .True.
+            else if (size(var_meta%dimensions) == 3) then
+                var_meta%three_d = .True.
+            else if (size(var_meta%dimensions) == 4) then
+                var_meta%four_d = .True.
             endif
-            var%n_dimensions = size(var%dimensions)
         endif
 
     end function get_varmeta

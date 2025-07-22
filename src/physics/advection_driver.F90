@@ -7,7 +7,7 @@
 !! ----------------------------------------------------------------------------
 module advection
     use icar_constants
-    use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind
+    use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, adv_std_clean_wind_arrays
     use adv_mpdata,                 only : mpdata_init, mpdata_advect3d, mpdata_compute_wind
     use adv_fluxcorr,               only : init_fluxcorr, set_sign_arrays, clear_flux_sign_arrays
     ! use debug_module,               only : domain_fix
@@ -76,17 +76,16 @@ contains
         type(variable_t) :: var_to_advect
         integer :: j, k, i, n
 
-        real, dimension(ims:ime,kms:kme,jms:jme) :: temp, result
+        real, dimension(ims:ime,kms:kme,jms:jme) :: temp
 
         real, allocatable :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
+
+        !$acc data present(domain,kVARS) create(temp)
+
         if (options%physics%advection==kADV_STD) then
 
             call adv_wind_time%start()
             call adv_std_compute_wind(domain,options,dt, U_m, V_m, W_m, denom)
-            call adv_wind_time%stop()
-            !$acc enter data copyin(U_m,V_m,W_m,denom,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d) create(temp,result)
-
-            call adv_wind_time%start()
             if (options%adv%flux_corr==kFLUXCOR_MONO) call set_sign_arrays(U_m,V_m,W_m)
             call adv_wind_time%stop()
 
@@ -95,39 +94,34 @@ contains
         endif
 
         do n = 1, size(domain%adv_vars)
+
+            !$acc kernels
+            temp = domain%vars_3d(domain%adv_vars(n)%v)%data_3d
+            !$acc end kernels
+
             if (options%time%RK3) then
                 if (options%physics%advection==kADV_STD) then
     
                     !Initial advection-tendency calculations
-                    temp  = domain%vars_3d(domain%adv_vars(n)%v)%data_3d
-                    !$acc update device(temp)
 
-                    !$acc kernels
-                    result = temp
-                    !$acc end kernels
-
-                    call adv_std_advect3d(result, temp, U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time,t_factor_in=0.333)
-                    call adv_std_advect3d(result, temp, U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time,t_factor_in=0.5)
-    
+                    call adv_std_advect3d(domain%vars_3d(domain%adv_vars(n)%v)%data_3d, temp, U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time,t_factor_in=0.333)
+                    call adv_std_advect3d(domain%vars_3d(domain%adv_vars(n)%v)%data_3d, temp, U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time,t_factor_in=0.5)
                     !final advection call with tendency-fluxes
-                    call adv_std_advect3d(result, temp, U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time,flux_corr_in=options%adv%flux_corr)
+                    call adv_std_advect3d(domain%vars_3d(domain%adv_vars(n)%v)%data_3d, temp, U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time,flux_corr_in=options%adv%flux_corr)
                     
-                    !$acc update host(result)
-                    domain%vars_3d(domain%adv_vars(n)%v)%data_3d = result
-                    
-
                 else if(options%physics%advection==kADV_MPDATA) then
                     ! Not yet implemented (is it compatable w/ RK3?)
                 endif
             else
                 if (options%physics%advection==kADV_STD) then
-                    call adv_std_advect3d(domain%vars_3d(domain%adv_vars(n)%v)%data_3d,domain%vars_3d(domain%adv_vars(n)%v)%data_3d, U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time)
+                    call adv_std_advect3d(domain%vars_3d(domain%adv_vars(n)%v)%data_3d,temp, U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time)
                 !else if(options%physics%advection==kADV_MPDATA) then                                    
                 !    call mpdata_advect3d(var, rho, jaco, dz, options)
                 endif
             endif
         enddo
-        !$acc exit data delete(U_m,V_m,W_m,denom,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,temp, result)
+        !$acc end data
+        call adv_std_clean_wind_arrays(U_m, V_m, W_m, denom)
         if (options%adv%flux_corr==kFLUXCOR_MONO) call clear_flux_sign_arrays()
 
     end subroutine advect

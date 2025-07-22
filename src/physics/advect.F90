@@ -17,13 +17,12 @@ module adv_std
     private
 
     integer :: ims, ime, jms, jme, kms, kme, its, ite, jts, jte, i_s, i_e, j_s, j_e, horder, vorder
-    real    :: dx
     !type(timer_t) :: flux_time, flux_up_time, flux_corr_time, sum_time
     ! For use advecting a (convective?) wind field
     ! real,dimension(:,:,:),allocatable :: U_4cu_u, V_4cu_u, W_4cu_u
     ! real,dimension(:,:,:),allocatable :: U_4cu_v, V_4cu_v, W_4cu_v
 
-    public :: adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind
+    public :: adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, adv_std_clean_wind_arrays
 
 contains
 
@@ -106,7 +105,6 @@ contains
                     do i = i_s, i_e
 
                         qn3 = q(i,k,j-1)
-                        qn2 = q(i,k-1,j)
                         qn1 = q(i-1,k,j)
                         q0 = q(i,k,j)
 
@@ -116,8 +114,6 @@ contains
                         v = V_m(i,k,j)
                         flux_y(i, k, j) = ((v + ABS(v)) * qn3 + (v - ABS(v)) * q0) * t_factor_compact
 
-                        w = W_m(i,k-1,j)
-                        flux_z(i,k,j) = ((w + ABS(w)) * qn2 +  (w - ABS(w)) * q0)  * t_factor_compact
                     enddo
                 enddo
             enddo
@@ -162,7 +158,7 @@ contains
             !$acc end parallel
 
         else if (horder==3) then
-            ! coef = (1./12) * t_factor
+            coef = (1./12) * t_factor
 
             !$acc parallel loop gang vector collapse(3) async(1)
             do j = j_s,j_e 
@@ -200,7 +196,11 @@ contains
 
         else if (horder==5) then
             coef = (1./60)*t_factor
-            do concurrent (j = j_s:j_e, k = kms:kme, i = i_s:i_e+1)
+            !$acc parallel
+            !$acc loop gang vector collapse(3)
+            do j = j_s,j_e
+            do k = kms,kme
+            do i = i_s,i_e+1
                 u = U_m(i,k,j)
                 q0  = q(i,k,j);   q1  = q(i+1,k,j); q2  = q(i+2,k,j)
                 qn1 = q(i-1,k,j); qn2 = q(i-2,k,j); qn3 = q(i-3,k,j)
@@ -212,7 +212,12 @@ contains
                 tmp = tmp - abs(u) * (10*(q0-qn1) - 5*(q1-qn2) + (q2-qn3))
                 flux_x(i,k,j) = tmp*coef
             enddo
-            do concurrent (j = j_s:j_e+1, k = kms:kme, i = i_s:i_e)
+            enddo
+            enddo
+            !$acc loop gang vector collapse(3)
+            do j = j_s,j_e+1
+            do k = kms,kme
+            do i = i_s,i_e
                 u = V_m(i,k,j)
                 q0  = q(i,k,j);   q1  = q(i,k,j+1); q2  = q(i,k,j+2)
                 qn1 = q(i,k,j-1); qn2 = q(i,k,j-2); qn3 = q(i,k,j-3)
@@ -223,10 +228,14 @@ contains
                 tmp = tmp - abs(u) * (10*(q0-qn1) -  5*(q1-qn2) + (q2-qn3))
                 flux_y(i,k,j) = tmp*coef
             enddo
+            enddo
+            enddo
+            !$acc end parallel
         endif
         
         if (vorder==1) then
             t_factor_compact = 0.5  * t_factor
+            !$acc parallel loop gang vector collapse(3)
             do j = j_s,j_e
                do k = kms+1,kme
                    do i = i_s,i_e
@@ -236,7 +245,7 @@ contains
                enddo
             enddo
         else if (vorder==3) then
-            ! coef = (1./12)*t_factor
+            coef = (1./12)*t_factor
             !$acc parallel async(3)
             !$acc loop gang vector collapse(3)
             do j = j_s,j_e
@@ -250,7 +259,7 @@ contains
                 tmp = u*tmp
                 !Application of 3rd order diffusive terms
                 tmp = tmp - abs(u) * (3 * (q0 - qn1) - (q1 - qn2))
-                flux_z(i,k,j) = tmp*(1./12) * (1./12)*t_factor               
+                flux_z(i,k,j) = tmp*coef        
             enddo
             enddo
             enddo
@@ -267,7 +276,11 @@ contains
             !$acc end parallel
         else if (vorder==5) then
             coef = (1./60)*t_factor
-            do concurrent (j = j_s:j_e, k = kms+3:kme-2, i = i_s:i_e)
+            !$acc parallel
+            !$acc loop gang vector collapse(3)
+            do j = j_s,j_e
+            do k = kms+3,kme-2
+            do i = i_s,i_e
                 u = W_m(i,k-1,j)
                 q0  = q(i,k,j);   q1  = q(i,k+1,j);  q2 = q(i,k+2,j)
                 qn1 = q(i,k-1,j); qn2 = q(i,k-2,j); qn3 = q(i,k-3,j)
@@ -278,7 +291,10 @@ contains
                 tmp = tmp - abs(u) * (10*(q0-qn1) -  5*(q1-qn2) + (q2-qn3))
                 flux_z(i,k,j) = tmp*coef
             enddo
+            enddo
+            enddo
             coef = (1./12)*t_factor
+            !$acc loop gang vector collapse(2)
             do j = j_s,j_e
                 do i = i_s,i_e
                     u = W_m(i,kms+1,j)
@@ -310,6 +326,7 @@ contains
                                        (u - ABS(u)) * q(i,kme,j))  * 0.5 * t_factor
                 enddo
             enddo
+            !$acc end parallel
         endif
                                                           
         !Handle top and bottom boundaries for z here
@@ -381,8 +398,11 @@ contains
 
         else if (horder==5) then
             coef = (1./60)
-            !DIR$ UNROLL 5
-            do concurrent (j = j_s:j_e, k = kms:kme, i = i_s:i_e+1)
+            !$acc parallel
+            !$acc loop gang vector collapse(3)
+            do j = j_s,j_e
+            do k = kms,kme
+            do i = i_s,i_e+1
                 u = U_m(i,k,j)
                 q0  = q(i,k,j);   q1  = q(i+1,k,j); q2  = q(i+2,k,j)
                 qn1 = q(i-1,k,j); qn2 = q(i-2,k,j); qn3 = q(i-3,k,j)
@@ -397,8 +417,12 @@ contains
                 !Application of Upwind fluxes to higher order fluxes -- needed for flux correction step
                 flux_x(i,k,j) = tmp*coef
             enddo
-            !DIR$ UNROLL 5
-            do concurrent (j = j_s:j_e+1, k = kms:kme, i = i_s:i_e)
+            enddo
+            enddo
+            !$acc loop gang vector collapse(3)
+            do j = j_s,j_e+1
+            do k = kms,kme
+            do i = i_s,i_e
                 u = V_m(i,k,j)
                 q0  = q(i,k,j);   q1  = q(i,k,j+1); q2  = q(i,k,j+2)
                 qn1 = q(i,k,j-1); qn2 = q(i,k,j-2); qn3 = q(i,k,j-3)
@@ -412,6 +436,9 @@ contains
                 !Application of Upwind fluxes to higher order fluxes -- needed for flux correction step
                 flux_y(i,k,j) = tmp*coef
             enddo
+            enddo
+            enddo
+            !$acc end parallel
         endif
 
         if (vorder==1) then
@@ -462,7 +489,11 @@ contains
 
         else if (vorder==5) then
             coef = (1./60)
-            do concurrent (j = j_s:j_e, k=kms+3:kme-2, i = i_s:i_e)
+            !$acc parallel
+            !$acc loop gang vector collapse(2)
+            do j = j_s,j_e
+            do k = kms+3,kme-2
+            do i = i_s,i_e
                 u = W_m(i,k-1,j)
                 q0  = q(i,k,j);   q1  = q(i,k+1,j);  q2 = q(i,k+2,j)
                 qn1 = q(i,k-1,j); qn2 = q(i,k-2,j); qn3 = q(i,k-3,j)
@@ -476,7 +507,10 @@ contains
                 !Application of Upwind fluxes to higher order fluxes -- needed for flux correction step
                 flux_z(i,k,j) = tmp*coef
             enddo
+            enddo
+            enddo
             coef = (1./12)
+            !$acc loop gang vector collapse(2)
             do j = j_s,j_e
                 do i = i_s,i_e
                     u = W_m(i,kms+1,j)
@@ -513,6 +547,7 @@ contains
                     flux_z_up(i,kme,j) = flux_z(i,kme,j) * 0.5 ! additional "0.5" since we only want half of the upwind step
                 enddo
             enddo
+            !$acc end parallel
         endif
                                                           
         !Handle top and bottom boundaries for z here
@@ -558,10 +593,11 @@ contains
         flux_corr = 0
         if (present(flux_corr_in)) flux_corr = flux_corr_in
 
-        !$acc data create(flux_x, flux_x_up, flux_y, flux_y_up, flux_z, flux_z_up) copyin(t_factor) &
+        !$acc data create(flux_x, flux_y, flux_z) copyin(t_factor) &
         !$acc present(denom, U_m, V_m, W_m, dz, qold, qfluxes)
 
         if (flux_corr > 0) then
+            !$acc data create(flux_x_up, flux_y_up, flux_z_up)
             call flux_up_time%start()
             call flux3_w_up(qfluxes,U_m, V_m, W_m, flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up)
             call flux_up_time%stop()
@@ -569,6 +605,7 @@ contains
             call flux_corr_time%start()
             call WRF_flux_corr(qold,U_m, V_m, W_m, flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up,dz,denom)
             call flux_corr_time%stop()
+            !$acc end data
         else
             call flux_time%start()
             call flux3(qfluxes,U_m, V_m, W_m, flux_x,flux_z,flux_y,t_factor)
@@ -635,8 +672,9 @@ contains
         real,intent(in)::dt
         
         integer :: i, j, k
-        real, dimension(domain%ims:domain%ime,domain%kms:domain%kme,domain%jms:domain%jme) :: rho
-        
+        real, dimension(ims:ime,kms:kme,jms:jme) :: rho
+        logical :: advect_density
+
         ! if arrays are already allocated for some reason, deallocate them first
         if (allocated(U_m)) deallocate(U_m)
         if (allocated(V_m)) deallocate(V_m)
@@ -648,10 +686,13 @@ contains
         allocate(V_m     (i_s:i_e+1,kms:kme,j_s:j_e+1))
         allocate(W_m     (i_s:i_e+1,kms:kme,j_s:j_e+1))
         allocate(denom   (ims:ime,  kms:kme,jms:jme  ))
-
-        dx = domain%dx
         
-        if (options%adv%advect_density) then
+        advect_density = options%adv%advect_density
+        !$acc enter data create(U_m,V_m,W_m,denom)
+
+        !$acc data present(domain,kVARS, U_m, V_m, W_m, denom) create(rho)
+        if (advect_density) then
+            !$acc parallel loop gang vector collapse(3)
             do i = ims,ime
                 do j = jms,jme
                     do k = kms,kme
@@ -660,6 +701,7 @@ contains
                 enddo
             enddo
         else
+            !$acc parallel loop gang vector collapse(3)
             do i = ims,ime
                 do j = jms,jme
                     do k = kms,kme
@@ -670,31 +712,63 @@ contains
         endif
 
         !Compute the denomenator for all of the flux summation terms here once
-        denom = 1/(rho*domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
 
-        do concurrent (j = j_s:j_e+1, k = kms:kme, i = i_s:i_e+1)
-            U_m(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i-1,k,j))*0.5 * &
-                    domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i,k,j) / domain%dx
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms,jme
+            do k = kms,kme
+                do i = ims,ime
+                    denom(i,k,j) = 1/(rho(i,k,j)*domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i,k,j))
+                enddo
+            enddo
         enddo
 
-        do concurrent (j = j_s:j_e+1, k = kms:kme, i = i_s:i_e+1)
-            V_m(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i,k,j-1))*0.5 * &
-                    domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i,k,j) / domain%dx
+        !$acc parallel
+        !$acc loop gang vector collapse(3)
+        do j = j_s,j_e+1
+            do k = kms,kme
+                do i = i_s,i_e+1
+                    U_m(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i-1,k,j))*0.5 * &
+                        domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i,k,j) / domain%dx
+                    V_m(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i,k,j) * dt * (rho(i,k,j)+rho(i,k,j-1))*0.5 * &
+                        domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i,k,j) / domain%dx
+                enddo
+            enddo
         enddo
 
-        do concurrent (j = j_s:j_e+1, k = kms:kme-1, i = i_s:i_e+1)
-            W_m(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j) * dt * domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d(i,k,j) * &
-                    ( rho(i,k,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j) + &
+        !$acc loop gang vector collapse(3)
+        do j = j_s,j_e+1
+            do k = kms,kme-1
+                do i = i_s,i_e+1
+                    W_m(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j) * dt * domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d(i,k,j) * &
+                        ( rho(i,k,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j) + &
                         rho(i,k+1,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j) ) / &
                         (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j)+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j))
+                enddo
+            enddo
         enddo
-
+        
+        !$acc loop gang vector collapse(2)
         do j = j_s,j_e+1
             do i = i_s,i_e+1
                 W_m(i,kme,j) = domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,kme,j) * dt * domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d(i,kme,j) * rho(i,kme,j)
             enddo
         enddo
+        !$acc end parallel
+        !$acc end data
 
     end subroutine adv_std_compute_wind
+
+    subroutine adv_std_clean_wind_arrays(U_m,V_m,W_m,denom)
+        implicit none
+        real, allocatable, dimension(:,:,:), intent(inout) :: U_m, V_m, W_m, denom
+
+        !$acc exit data delete(U_m,V_m,W_m,denom)
+        
+        if (allocated(U_m)) deallocate(U_m)
+        if (allocated(V_m)) deallocate(V_m)
+        if (allocated(W_m)) deallocate(W_m)
+        if (allocated(denom)) deallocate(denom)
+
+    end subroutine adv_std_clean_wind_arrays
 
 end module adv_std

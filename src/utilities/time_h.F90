@@ -50,9 +50,9 @@ module time_object
         procedure, public  :: year_fraction=>calc_year_fraction
         procedure, public  :: date_to_mjd => date_to_mjd
         procedure, public  :: date_to_jd => date_to_jd
-        procedure, public  :: as_string   => as_string
+        ! procedure, public  :: as_string   => as_string
         procedure, public  :: equals      => equals_with_precision
-        procedure, public  :: units       => units
+        ! procedure, public  :: units       => units
         procedure, public  :: get_calendar=> get_calendar
         procedure, public  :: get_month   => get_month
 
@@ -83,11 +83,11 @@ module time_object
         procedure, private :: less_or_eq
         generic,   public  :: operator(<=)   => less_or_eq
 
-        procedure, private :: addition
-        generic,   public  :: operator(+)    => addition
-        procedure, private :: difference_time_delta
+        ! procedure, private :: addition
+        ! generic,   public  :: operator(+)    => addition
+        ! procedure, private :: difference_time_delta
         procedure, private :: difference_times
-        generic,   public  :: operator(-)    => difference_time_delta, difference_times
+        generic,   public  :: operator(-)    => difference_times
 
     end type Time_type
 
@@ -320,25 +320,25 @@ interface
     !!  For example "days since 1858-11-17 00:00:00"
     !!
     !!------------------------------------------------------------
-    module function units(this)
-        implicit none
-        class(Time_type), intent(in)   :: this
-        character(len=kMAX_STRING_LENGTH) :: units
+    ! module function units(this)
+    !     implicit none
+    !     class(Time_type), intent(in)   :: this
+    !     character(len=kMAX_STRING_LENGTH) :: units
 
-    end function units
+    ! end function units
 
 
     !>------------------------------------------------------------
     !!  Convert the date object into a string in the 0-filled format : "YYYY/MM/DD hh:mm:ss"
     !!
     !!------------------------------------------------------------
-    module function as_string(this, input_format) result(pretty_string)
-        implicit none
-        class(Time_type), intent(in) :: this
-        character(len=*), intent(in), optional :: input_format
-        character(len=kMAX_STRING_LENGTH) :: pretty_string
+    ! module function as_string(this, input_format) result(pretty_string)
+    !     implicit none
+    !     class(Time_type), intent(in) :: this
+    !     character(len=*), intent(in), optional :: input_format
+    !     character(len=kMAX_STRING_LENGTH) :: pretty_string
 
-    end function as_string
+    ! end function as_string
 
     !>------------------------------------------------------------
     !!  Test that time 1 is greater than time 2
@@ -467,27 +467,27 @@ interface
     !!  Subtract two times and return a time_delta object
     !!
     !!------------------------------------------------------------
-    module function difference_time_delta(t1, dt) result(t2)
-        implicit none
-        class(Time_type),   intent(in) :: t1
-        type(time_delta_t), intent(in) :: dt
-        type(Time_type) :: t2
+    ! module function difference_time_delta(t1, dt) result(t2)
+    !     implicit none
+    !     class(Time_type),   intent(in) :: t1
+    !     type(time_delta_t), intent(in) :: dt
+    !     type(Time_type) :: t2
 
-    end function difference_time_delta
+    ! end function difference_time_delta
 
-    !>------------------------------------------------------------
-    !!  Add a given time delta to a time object
-    !!
-    !!  returns a new time object
-    !!
-    !!------------------------------------------------------------
-    module function addition(t1, dt) result(t2)
-        implicit none
-        class(Time_type),   intent(in) :: t1
-        type(time_delta_t), intent(in) :: dt
-        type(Time_type) :: t2
+    ! !>------------------------------------------------------------
+    ! !!  Add a given time delta to a time object
+    ! !!
+    ! !!  returns a new time object
+    ! !!
+    ! !!------------------------------------------------------------
+    ! module function addition(t1, dt) result(t2)
+    !     implicit none
+    !     class(Time_type),   intent(in) :: t1
+    !     type(time_delta_t), intent(in) :: dt
+    !     type(Time_type) :: t2
 
-    end function addition
+    ! end function addition
 
 end interface
 end module time_object

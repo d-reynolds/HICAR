@@ -584,56 +584,41 @@ contains
 
     end subroutine set_from_mjd
 
-    !>------------------------------------------------------------
-    !!  Create a formated "units" string for this object
-    !!
-    !!  For example "days since 1858-11-17 00:00:00"
-    !!
-    !!------------------------------------------------------------
-    module function units(this)
-        implicit none
-        class(Time_type), intent(in)   :: this
-        character(len=kMAX_STRING_LENGTH) :: units
-
-        write(units, '("days since ",i4,"-",i2.2,"-",i2.2," ",i2.2,":00:00")') &
-                this%year_zero,this%month_zero,this%day_zero,this%hour_zero
-
-    end function units
 
 
     !>------------------------------------------------------------
     !!  Convert the date object into a string in the 0-filled format : "YYYY/MM/DD hh:mm:ss"
     !!
     !!------------------------------------------------------------
-    module function as_string(this, input_format) result(pretty_string)
-        implicit none
-        class(Time_type), intent(in) :: this
-        character(len=*), intent(in), optional :: input_format
-        character(len=kMAX_STRING_LENGTH) :: pretty_string
-        character(len=kMAX_STRING_LENGTH) :: format
-        integer :: i
+    ! module function as_string(this, input_format) result(pretty_string)
+    !     implicit none
+    !     class(Time_type), intent(in) :: this
+    !     character(len=*), intent(in), optional :: input_format
+    !     character(len=kMAX_STRING_LENGTH) :: pretty_string
+    !     character(len=kMAX_STRING_LENGTH) :: format
+    !     integer :: i
 
-        associate(year  => this%year,   &
-                  month => this%month,  &
-                  day   => this%day,    &
-                  hour  => this%hour,   &
-                  minute=> this%minute, &
-                  second=> this%second  &
-                  )
+    !     associate(year  => this%year,   &
+    !               month => this%month,  &
+    !               day   => this%day,    &
+    !               hour  => this%hour,   &
+    !               minute=> this%minute, &
+    !               second=> this%second  &
+    !               )
 
-        if (present(input_format)) then
-            format = input_format
-        else
-            ! this is the default format string to generate "YYYY/MM/DD hh:mm:ss"
-            format = '(I4,"/",I0.2,"/",I0.2," ",I0.2,":",I0.2,":",I0.2)'
-        endif
+    !     if (present(input_format)) then
+    !         format = input_format
+    !     else
+    !         ! this is the default format string to generate "YYYY/MM/DD hh:mm:ss"
+    !         format = '(I4,"/",I0.2,"/",I0.2," ",I0.2,":",I0.2,":",I0.2)'
+    !     endif
 
-        ! this and the format statement above are the important bits
-        write(pretty_string, format) year, month, day, hour, minute, second
+    !     ! this and the format statement above are the important bits
+    !     write(pretty_string, format) year, month, day, hour, minute, second
 
-        end associate
+    !     end associate
 
-    end function as_string
+    ! end function as_string
 
     !>------------------------------------------------------------
     !!  Test that time 1 is greater than time 2
@@ -879,34 +864,34 @@ contains
     !!  Subtract a time_delta from a time object and return a time object
     !!
     !!------------------------------------------------------------
-    module function difference_time_delta(t1, dt) result(t2)
-        implicit none
-        class(Time_type),   intent(in) :: t1
-        type(time_delta_t), intent(in) :: dt
-        type(Time_type) :: t2
+    ! module function difference_time_delta(t1, dt) result(t2)
+    !     implicit none
+    !     class(Time_type),   intent(in) :: t1
+    !     type(time_delta_t), intent(in) :: dt
+    !     type(Time_type) :: t2
 
-        t2 = t1 ! set calendar startyear, etc.
+    !     t2 = t1 ! set calendar startyear, etc.
 
-        call t2%set(t1%mjd() - dt%days())
+    !     call t2%set(t1%mjd() - dt%days())
 
-    end function difference_time_delta
+    ! end function difference_time_delta
 
-    !>------------------------------------------------------------
-    !!  Add a given time delta to a time object
-    !!
-    !!  returns a new time object
-    !!
-    !!------------------------------------------------------------
-    module function addition(t1, dt) result(t2)
-        implicit none
-        class(Time_type),   intent(in) :: t1
-        type(time_delta_t), intent(in) :: dt
-        type(Time_type) :: t2
+    ! !>------------------------------------------------------------
+    ! !!  Add a given time delta to a time object
+    ! !!
+    ! !!  returns a new time object
+    ! !!
+    ! !!------------------------------------------------------------
+    ! module function addition(t1, dt) result(t2)
+    !     implicit none
+    !     class(Time_type),   intent(in) :: t1
+    !     type(time_delta_t), intent(in) :: dt
+    !     type(Time_type) :: t2
 
-        t2 = t1 ! set calendar startyear, etc.
+    !     t2 = t1 ! set calendar startyear, etc.
 
-        call t2%set(t1%mjd() + dt%days())
+    !     call t2%set(t1%mjd() + dt%days())
 
-    end function addition
+    ! end function addition
 
 end submodule time_implementation

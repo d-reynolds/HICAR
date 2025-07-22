@@ -4,6 +4,7 @@ module flow_events
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
+    use time_object,        only : Time_type
     use flow_object_interface, only : flow_obj_t, comp_arr_t
     use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
     use ioserver_interface,         only : ioserver_t
@@ -13,6 +14,7 @@ module flow_events
     use time_step, only: step
     use initialization, only: init_model, init_model_state
     use wind_iterative, only: finalize_petsc
+    use string, only : as_string
 
     implicit none
     private
@@ -133,6 +135,7 @@ subroutine update_component_nest(comp_arr,options,ioclient)
 
     class(flow_obj_t), allocatable :: child_nest
     integer :: n
+    type(Time_type) :: sim_time_safety_under
     ! check if the type of component is a domain or an ioserver
 
     associate (comp => comp_arr(options%nest_indx)%comp)
@@ -143,7 +146,7 @@ subroutine update_component_nest(comp_arr,options,ioclient)
             ! This call will gather the model state of the forcing fields from the nest parent
             if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",comp%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Gathering forcings"
-            if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(comp%sim_time%as_string())
+            if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(as_string(comp%sim_time))
             if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",comp%nest_indx," --------------"
             if (STD_OUT_PE_IO) flush(output_unit)
 
@@ -159,7 +162,9 @@ subroutine update_component_nest(comp_arr,options,ioclient)
                 associate (child_nest => comp_arr(options%general%child_nests(n))%comp)
                 select type(child_nest)
                 type is (ioserver_t)
-                    if ( (comp%sim_time >= child_nest%sim_time - comp%small_time_delta .and. .not.(child_nest%ended)) )then
+                    call sim_time_safety_under%set(child_nest%sim_time%mjd() - comp%small_time_delta%days())
+
+                    if ( (comp%sim_time >= sim_time_safety_under .and. .not.(child_nest%ended)) )then
                         ! This call will distribute the model state of the forcing fields to the child nest
                         ! if (STD_OUT_PE_IO) write(*,*) "Distributing forcings to child nest: ",options%general%child_nests(n)
                         call comp%distribute_forcing(child_nest, n)
@@ -182,7 +187,9 @@ subroutine update_component_nest(comp_arr,options,ioclient)
                 do n = 1, size(options%general%child_nests)
                     !Test if we can update the child nest
                     child_nest = comp_arr(options%general%child_nests(n))%comp
-                    if ( (comp%sim_time >= child_nest%sim_time - comp%small_time_delta .and. .not.(child_nest%ended)) )then
+                    call sim_time_safety_under%set(child_nest%sim_time%mjd() - comp%small_time_delta%days())
+
+                    if ( (comp%sim_time >= sim_time_safety_under .and. .not.(child_nest%ended)) )then
                             ! This call will distribute the model state of the forcing fields to the child nest
                         call MPI_Barrier(MPI_COMM_WORLD)
                     endif
@@ -209,8 +216,8 @@ subroutine component_write(component, ioclient)
         type is (ioserver_t)
             if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Writing out domain"
-            if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(component%sim_time%as_string())
-            if (STD_OUT_PE_IO) write(*,*) "  Next Output = ", trim(component%next_output%as_string())
+            if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(as_string(component%sim_time))
+            if (STD_OUT_PE_IO) write(*,*) "  Next Output = ", trim(as_string(component%next_output))
             if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component%nest_indx," --------------"
             if (STD_OUT_PE_IO) flush(output_unit)
             call component%write_file()
@@ -232,7 +239,7 @@ subroutine component_read(component, options, boundary, ioclient)
     type(options_t), intent(inout) :: options
     type(boundary_t), intent(inout) :: boundary
     type(ioclient_t), intent(inout) :: ioclient
-
+    type(Time_type) :: end_time_safety_under
     ! check if the type of component is a domain or an ioserver
     select type (component)
         type is (domain_t)
@@ -266,8 +273,8 @@ subroutine component_read(component, options, boundary, ioclient)
             !See if we even have files to read
             if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",component%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Reading in Boundary conditions"
-            if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(component%sim_time%as_string())
-            if (STD_OUT_PE_IO) write(*,*) "  Next Input = ", trim(component%next_input%as_string())
+            if (STD_OUT_PE_IO) write(*,*) "  Model time = ", trim(as_string(component%sim_time))
+            if (STD_OUT_PE_IO) write(*,*) "  Next Input = ", trim(as_string(component%next_input))
             if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",component%nest_indx," --------------"
             if (STD_OUT_PE_IO) flush(output_unit)
             call component%read_file()
@@ -282,7 +289,10 @@ subroutine component_read(component, options, boundary, ioclient)
             else
                 ! if ioclient comms is null, then we are acting as an ioserver
                 if (options%general%parent_nest == 0) then
-                    if (component%sim_time < (component%end_time-component%input_dt-component%input_dt)) then
+                    
+                    call end_time_safety_under%set(component%end_time%mjd() - component%input_dt%days()*2)
+
+                    if (component%sim_time < end_time_safety_under) then
                         call MPI_Barrier(MPI_COMM_WORLD)
                     endif
                 endif
@@ -305,10 +315,10 @@ subroutine component_main_loop(component, options)
             !
             ! -----------------------------------------------------
             if (STD_OUT_PE) write(*,*) "Running Physics"
-            if (STD_OUT_PE) write(*,*) "  Model time = ", trim(component%sim_time%as_string())
-            if (STD_OUT_PE) write(*,*) "   End  time = ", trim(component%end_time%as_string())
-            if (STD_OUT_PE) write(*,*) "  Next Input = ", trim(component%next_input%as_string())
-            if (STD_OUT_PE) write(*,*) "  Next Output= ", trim(component%next_output%as_string())
+            if (STD_OUT_PE) write(*,*) "  Model time = ", trim(as_string(component%sim_time))
+            if (STD_OUT_PE) write(*,*) "   End  time = ", trim(as_string(component%end_time))
+            if (STD_OUT_PE) write(*,*) "  Next Input = ", trim(as_string(component%next_input))
+            if (STD_OUT_PE) write(*,*) "  Next Output= ", trim(as_string(component%next_output))
             if (STD_OUT_PE) flush(output_unit)
             
             ! this is the meat of the model physics, run all the physics for the current time step looping over internal timesteps
@@ -318,10 +328,10 @@ subroutine component_main_loop(component, options)
         type is (ioserver_t)
             call component%set_sim_time(component%next_flow_event())
         class default
-            if (STD_OUT_PE) write(*,*) "  Model time = ", trim(component%sim_time%as_string())
-            if (STD_OUT_PE) write(*,*) "   End  time = ", trim(component%end_time%as_string())
-            if (STD_OUT_PE) write(*,*) "  Next Input = ", trim(component%next_input%as_string())
-            if (STD_OUT_PE) write(*,*) "  Next Output= ", trim(component%next_output%as_string())
+            if (STD_OUT_PE) write(*,*) "  Model time = ", trim(as_string(component%sim_time))
+            if (STD_OUT_PE) write(*,*) "   End  time = ", trim(as_string(component%end_time))
+            if (STD_OUT_PE) write(*,*) "  Next Input = ", trim(as_string(component%next_input))
+            if (STD_OUT_PE) write(*,*) "  Next Output= ", trim(as_string(component%next_output))
             if (STD_OUT_PE) flush(output_unit)
 
             call component%set_sim_time(component%next_flow_event())
@@ -423,8 +433,8 @@ subroutine component_program_end(component, options)
         write(*,'(/ A)') "------------------------------------------------------"
         write(*,'(A)')   "Simulation completed successfully!"
         write(*,'(A /)') "------------------------------------------------------"
-        write(*,*) "Model run from : ",trim(options(1)%general%start_time%as_string())
-        write(*,*) "           to  : ",trim(options(1)%general%end_time%as_string())
+        write(*,*) "Model run from : ",trim(as_string(options(1)%general%start_time))
+        write(*,*) "           to  : ",trim(as_string(options(1)%general%end_time))
         write(*,*) "Number of images:",i
         write(*,*) ""
         write(*,*) "Timing across all compute images:"
@@ -529,6 +539,12 @@ subroutine component_program_end(component, options)
                 t_val2 = comp%wind_timer%min(comp%compute_comms)
                 t_val3 = comp%wind_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "winds", ":", t_val, " | ", t_val2, " | ", t_val3
+#ifdef _OPENACC
+                t_val = comp%cpu_gpu_timer%mean(comp%compute_comms)
+                t_val2 = comp%cpu_gpu_timer%min(comp%compute_comms)
+                t_val3 = comp%cpu_gpu_timer%max(comp%compute_comms)
+                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "CPU-GPU transfers", ":", t_val, " | ", t_val2, " | ", t_val3
+#endif
                 if (STD_OUT_PE) flush(output_unit)
                 if ( ANY(options%physics%windtype == kITERATIVE_WINDS) .or. ANY(options%physics%windtype == kLINEAR_ITERATIVE_WINDS)) then
                     call finalize_petsc()

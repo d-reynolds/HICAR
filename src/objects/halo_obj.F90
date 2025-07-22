@@ -24,6 +24,7 @@ contains
 !!
 !! -------------------------------
 module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
+    implicit none
     class(halo_t), intent(inout) :: this
     type(index_type), intent(in) :: adv_vars(:), exch_vars(:)
     type(grid_t), intent(in) :: grid
@@ -31,6 +32,7 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
 
     type(MPI_Group) :: comp_proc, neighbor_group
     type(c_ptr) :: tmp_ptr
+    type(MPI_Info) :: info_in
     integer(KIND=MPI_ADDRESS_KIND) :: win_size
     integer :: current, my_index, n_neighbors, nx, nz, ny, ierr
     integer :: i,j,k, real_size
@@ -107,34 +109,74 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
     !We only want to set up remote windows for domain objects which are part of the actual domain
     if (.not.(comms == MPI_COMM_NULL)) then
 
+        call MPI_Info_create(info_in, ierr)
+#ifdef _OPENACC
+        ! Check if MPI supports CUDA-aware memory
+        call MPI_Info_set(info_in, "alloc_shm", ".true.", ierr)
+        ! Set memory type hint for GPU accessibility
+        call MPI_Info_set(info_in, "alloc_mem", "device", ierr)
+        call MPI_Info_set(info_in, "mpi_assert_memory_alloc_kinds", "gpu:device", ierr)
+        call MPI_Info_set(info_in, "cuda_aware", ".true.", ierr)
+#endif
         nx = this%grid%ns_halo_nx
         nz = this%grid%halo_nz
         ny = this%halo_size+1
         win_size = nx*nz*ny
-        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%south_in_win)
+
+#ifdef _OPENACC
+        allocate(this%south_in_3d(nx, nz, ny))
+        !$acc enter data copyin(this%south_in_3d)
+        !$acc host_data use_device(this%south_in_3d)
+        call MPI_WIN_CREATE(this%south_in_3d, win_size*real_size, real_size, info_in, comms, this%south_in_win, ierr)
+        !$acc end host_data
+#else
+        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%south_in_win)
         call C_F_POINTER(tmp_ptr, this%south_in_3d, [nx, nz, ny])
-        this%south_in_3d = 1
-        
-        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%north_in_win)
+#endif
+
+#ifdef _OPENACC
+        allocate(this%north_in_3d(nx, nz, ny))
+        !$acc enter data copyin(this%north_in_3d)
+        !$acc host_data use_device(this%north_in_3d)
+        call MPI_WIN_CREATE(this%north_in_3d, win_size*real_size, real_size, info_in, comms, this%north_in_win, ierr)
+        !$acc end host_data
+#else
+        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%north_in_win)
         call C_F_POINTER(tmp_ptr, this%north_in_3d, [nx, nz, ny])
-        this%north_in_3d = 1
+#endif
 
         nx = this%halo_size+1
         nz = this%grid%halo_nz
         ny = this%grid%ew_halo_ny
         win_size = nx*nz*ny
-        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%east_in_win)
-        call C_F_POINTER(tmp_ptr, this%east_in_3d, [nx, nz, ny])
-        this%east_in_3d = 2
 
-        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, MPI_INFO_NULL, comms, tmp_ptr, this%west_in_win)
+#ifdef _OPENACC
+        allocate(this%east_in_3d(nx, nz, ny))
+        !$acc enter data copyin(this%east_in_3d)
+        !$acc host_data use_device(this%east_in_3d)
+        call MPI_WIN_CREATE(this%east_in_3d, win_size*real_size, real_size, info_in, comms, this%east_in_win, ierr)
+        !$acc end host_data
+#else
+        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%east_in_win)
+        call C_F_POINTER(tmp_ptr, this%east_in_3d, [nx, nz, ny])
+#endif
+
+#ifdef _OPENACC
+        allocate(this%west_in_3d(nx, nz, ny))
+        !$acc enter data copyin(this%west_in_3d)
+        !$acc host_data use_device(this%west_in_3d)
+        call MPI_WIN_CREATE(this%west_in_3d, win_size*real_size, real_size, info_in, comms, this%west_in_win, ierr)
+        !$acc end host_data
+#else
+        call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%west_in_win)
         call C_F_POINTER(tmp_ptr, this%west_in_3d, [nx, nz, ny])
+#endif
+
+        this%north_in_3d = 1
+        this%south_in_3d = 1
+        this%east_in_3d = 1
         this%west_in_3d = 1
 
-        ! call MPI_Win_fence(0,this%south_in_win)
-        ! call MPI_Win_fence(0,this%north_in_win)
-        ! call MPI_Win_fence(0,this%east_in_win)
-        ! call MPI_Win_fence(0,this%west_in_win)
     endif
 
     !...and the larger 3D halo for batch exchanges
@@ -143,6 +185,7 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
 end subroutine init_halo
 
 module subroutine finalize(this)
+    implicit none
     class(halo_t), intent(inout) :: this
 
     integer :: ierr
@@ -207,6 +250,7 @@ end subroutine finalize
 !!
 !! -------------------------------
 module subroutine exch_var(this, var, do_dqdt, corners)
+    implicit none
     class(halo_t),     intent(inout) :: this
     type(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt, corners
@@ -220,6 +264,7 @@ module subroutine exch_var(this, var, do_dqdt, corners)
     do_corners=.False.
     if (present(corners)) do_corners=corners
 
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
     if (do_corners) then
 
         call MPI_Win_fence(0,this%south_in_win)
@@ -244,27 +289,26 @@ module subroutine exch_var(this, var, do_dqdt, corners)
         if (.not. this%south_boundary .and. .not.this%west_boundary)  call this%retrieve_southwest_halo(var, dqdt)
     endif
 
+    call MPI_Win_fence(0,this%south_in_win)
+    call MPI_Win_fence(0,this%north_in_win)
+    call MPI_Win_fence(0,this%east_in_win)
+    call MPI_Win_fence(0,this%west_in_win)
 
-        call MPI_Win_fence(0,this%south_in_win)
-        call MPI_Win_fence(0,this%north_in_win)
-        call MPI_Win_fence(0,this%east_in_win)
-        call MPI_Win_fence(0,this%west_in_win)
+    if (.not. this%north_boundary) call this%put_north(var, dqdt)
+    if (.not. this%south_boundary) call this%put_south(var, dqdt)
+    if (.not. this%east_boundary)  call this%put_east(var, dqdt)
+    if (.not. this%west_boundary)  call this%put_west(var, dqdt)
 
-        if (.not. this%north_boundary) call this%put_north(var, dqdt)
-        if (.not. this%south_boundary) call this%put_south(var, dqdt)
-        if (.not. this%east_boundary)  call this%put_east(var, dqdt)
-        if (.not. this%west_boundary)  call this%put_west(var, dqdt)
+    call MPI_Win_fence(0,this%south_in_win)
+    call MPI_Win_fence(0,this%north_in_win)
+    call MPI_Win_fence(0,this%east_in_win)
+    call MPI_Win_fence(0,this%west_in_win)
 
-        call MPI_Win_fence(0,this%south_in_win)
-        call MPI_Win_fence(0,this%north_in_win)
-        call MPI_Win_fence(0,this%east_in_win)
-        call MPI_Win_fence(0,this%west_in_win)
-
-        if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
-        if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
-        if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
-        if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
-
+    if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
+    if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
+    if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
+    if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
+    !$acc end data
 end subroutine exch_var
 
 
@@ -273,10 +317,11 @@ end subroutine exch_var
 !!
 !! -------------------------------
 subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
+    implicit none
     type(halo_t), intent(inout) :: this
     type(index_type), intent(in) :: adv_vars(:), exch_vars(:)
     type(MPI_comm), intent(in) :: comms
-    type(variable_t) :: var
+    type(meta_data_t) :: var
 
     integer :: nx, ny, nz = 0
     type(c_ptr) :: tmp_ptr, tmp_ptr_2d
@@ -297,7 +342,7 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
 
     ! Loop over all adv vars and count how many are 3D
     do i = 1,size(adv_vars)
-        var = get_varmeta(get_varindx(adv_vars(i)%n))
+        var = get_varmeta(adv_vars(i)%id)
         if (var%three_d) then
             this%n_3d = this%n_3d + 1
         end if
@@ -305,7 +350,7 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
 
     ! Loop over all exch vars and count how many are 3D
     do i = 1,size(exch_vars)
-        var = get_varmeta(get_varindx(exch_vars(i)%n))
+        var = get_varmeta(exch_vars(i)%id)
         if (var%three_d) then
             this%n_3d = this%n_3d + 1
         end if
@@ -320,6 +365,14 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
         call MPI_INFO_SET(info_in, 'same_size', '.true.')
         call MPI_INFO_SET(info_in, 'same_disp_unit', '.true.')
         ! call MPI_INFO_SET(info_in, 'alloc_shared_noncontig', '.true.')
+#ifdef _OPENACC
+        ! Check if MPI supports CUDA-aware memory
+        call MPI_Info_set(info_in, "alloc_shm", ".true.", ierr)
+        ! Set memory type hint for GPU accessibility
+        call MPI_Info_set(info_in, "alloc_mem", "device", ierr)
+        call MPI_Info_set(info_in, "mpi_assert_memory_alloc_kinds", "gpu:device", ierr)
+        call MPI_Info_set(info_in, "cuda_aware", ".true.", ierr)
+#endif
 
         !First do NS
         nx = this%grid%ns_halo_nx
@@ -540,6 +593,7 @@ end subroutine setup_batch_exch
 
 
 module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_var_only)
+    implicit none
     class(halo_t), intent(inout) :: this
     type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
     type(variable_t), intent(inout) :: var_data(:)
@@ -558,8 +612,6 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     exch_v_only = .False.
     if (present(exch_var_only)) exch_v_only=exch_var_only
 
-    ! call adv_vars%reset_iterator()
-    ! call exch_vars%reset_iterator()
     n = 1
     n_vars = size(var_data)
 
@@ -574,11 +626,15 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
 
     ! Now iterate through the dictionary as long as there are more elements present. If two processors are on shared memory
     ! this step will directly copy the data to the other PE
+
+    !$acc data present(this, exch_vars, adv_vars, var_data)
+
     if (.not.(exch_v_only)) then
         do i = 1, size(adv_vars)
             if (adv_vars(i)%v <= n_vars) then
                 !check that the variable indexed matches the name
-                if (var_data(adv_vars(i)%v)%name == adv_vars(i)%n) then
+                if (var_data(adv_vars(i)%v)%id == adv_vars(i)%id) then
+                    !$acc kernels
                     if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
                         var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte-this%halo_size+1):this%jte)
                     if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
@@ -596,6 +652,7 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
                         var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,this%jts:(this%jts+this%halo_size-1))
                     if (.not.(this%northeast_boundary)) this%northeast_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
                         var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,(this%jte-this%halo_size+1):this%jte)
+                    !$acc end kernels
                     n = n+1
                 endif
             endif
@@ -606,8 +663,9 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
      do i = 1, size(exch_vars)
         !check that the variable indexed matches the name
         if (exch_vars(i)%v <= n_vars) then
-            if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
+            if (var_data(exch_vars(i)%v)%id == exch_vars(i)%id) then
                 k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
+                !$acc kernels
                 if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
                     var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte-this%halo_size+1):this%jte)
                 if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
@@ -616,11 +674,16 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
                     var_data(exch_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,1:k_max,this%jts:this%jte)
                 if (.not.(this%west_boundary)) this%west_buffer_3d(n,:,1:k_max,1:(this%jte-this%jts+1)) = &
                     var_data(exch_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size)-1,1:k_max,this%jts:this%jte)
+                !$acc end kernels
                 n = n+1
             endif
         endif
     enddo
 
+    !$acc host_data use_device(this%south_buffer_3d, this%north_buffer_3d, &
+    !$acc this%east_buffer_3d, this%west_buffer_3d, &
+    !$acc this%northwest_buffer_3d, this%southeast_buffer_3d, &
+    !$acc this%southwest_buffer_3d, this%northeast_buffer_3d)
     if (.not.(this%south_boundary)) then
         if (.not.(this%south_shared)) then
             ! Use post-start-complete-wait for distributed memory
@@ -689,6 +752,8 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
                 this%corner_3d_win_halo_type, this%northeast_3d_win)
         endif
     endif
+    !$acc end host_data
+    !$acc end data
 
     if (.not.(this%north_boundary)) call MPI_Win_Complete(this%north_3d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Complete(this%south_3d_win)
@@ -702,6 +767,7 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
 end subroutine halo_3d_send_batch
 
 module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exch_var_only, wait_timer)
+    implicit none
     class(halo_t), intent(inout) :: this
     type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
     type(variable_t), intent(inout) :: var_data(:)
@@ -729,13 +795,15 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     n = 1
     n_vars = size(var_data)
 
+    !$acc data present(this, exch_vars, adv_vars, var_data)
+
     ! Now iterate through the dictionary as long as there are more elements present
     if (.not.(exch_v_only)) then
-
         do i = 1, size(adv_vars)
             if (adv_vars(i)%v <= n_vars) then
                 !check that the variable indexed matches the name
-                if (var_data(adv_vars(i)%v)%name == adv_vars(i)%n) then
+                if (var_data(adv_vars(i)%v)%id == adv_vars(i)%id) then
+                    !$acc kernels
                     if (.not.(this%north_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte+1):this%jme) = &
                             this%north_batch_in_3d(n,1:(this%ite-this%its+1),:,1:this%halo_size)
                     if (.not.(this%south_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,this%jms:(this%jts-1)) = &
@@ -753,6 +821,7 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
                             this%southwest_batch_in_3d(n,:,:,:)
                     if (.not.(this%northeast_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,(this%jte+1):this%jme) = &
                             this%northeast_batch_in_3d(n,:,:,:)
+                    !$acc end kernels
                     n = n+1
                 endif
             endif
@@ -762,8 +831,9 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     do i = 1, size(exch_vars)
         if (exch_vars(i)%v <= n_vars) then
             !check that the variable indexed matches the name
-            if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
+            if (var_data(exch_vars(i)%v)%id == exch_vars(i)%id) then
                 k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
+                !$acc kernels
                 if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte+1):this%jme) = &
                         this%north_batch_in_3d(n,1:(this%ite-this%its+1),1:k_max,:)
                 if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,this%jms:(this%jts-1)) = &
@@ -772,10 +842,13 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
                         this%east_batch_in_3d(n,:,1:k_max,1:(this%jte-this%jts+1))
                 if (.not.(this%west_boundary)) var_data(exch_vars(i)%v)%data_3d(this%ims:(this%its-1),1:k_max,this%jts:this%jte) = &
                         this%west_batch_in_3d(n,:,1:k_max,1:(this%jte-this%jts+1))
+                !$acc end kernels
                 n = n+1
             endif
         endif
     enddo
+
+    !$acc end data
     if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp, 0, this%north_3d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Post(this%south_neighbor_grp, 0, this%south_3d_win)
     if (.not.(this%east_boundary)) call MPI_Win_Post(this%east_neighbor_grp, 0, this%east_3d_win)
@@ -788,6 +861,7 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
 end subroutine halo_3d_retrieve_batch
 
 module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
+    implicit none
     class(halo_t), intent(inout) :: this
     type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
     type(variable_t), intent(inout) :: var_data(:)
@@ -811,11 +885,14 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
     n = 1
     n_vars = size(var_data)
 
+    !$acc data present(this, exch_vars, adv_vars, var_data)
+
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do i = 1, size(exch_vars)
         if (exch_vars(i)%v <= n_vars) then
             !check that the variable indexed matches the name
-            if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
+            if (var_data(exch_vars(i)%v)%id == exch_vars(i)%id) then
+                !$acc kernels
                 if (.not.(this%north_boundary)) this%north_buffer_2d(n,1:(this%ite-this%its+1),:) = &
                     var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte-this%halo_size+1):this%jte)
                 if (.not.(this%south_boundary)) this%south_buffer_2d(n,1:(this%ite-this%its+1),:) = &
@@ -824,12 +901,14 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
                     var_data(exch_vars(i)%v)%data_2d((this%ite-this%halo_size+1):this%ite,this%jts:this%jte)
                 if (.not.(this%west_boundary)) this%west_buffer_2d(n,:,1:(this%jte-this%jts+1)) = &
                     var_data(exch_vars(i)%v)%data_2d(this%its:(this%its+this%halo_size-1),this%jts:this%jte)
-
+                !$acc end kernels
                 n = n+1
             endif
         endif
     enddo
 
+    !$acc host_data use_device(this%south_buffer_2d, this%north_buffer_2d, &
+    !$acc this%east_buffer_2d, this%west_buffer_2d)
     if (.not.(this%north_boundary)) then
         if (.not.(this%north_shared)) then
             call MPI_Put(this%north_buffer_2d, size(this%north_buffer_2d), &
@@ -857,6 +936,8 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
                 MPI_REAL, 0, disp, size(this%west_buffer_2d), MPI_REAL, this%west_2d_win)
         endif
     endif
+    !$acc end host_data
+    !$acc end data
     if (.not.(this%north_boundary)) call MPI_Win_Complete(this%north_2d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Complete(this%south_2d_win)
     if (.not.(this%east_boundary)) call MPI_Win_Complete(this%east_2d_win)
@@ -865,6 +946,7 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
 end subroutine halo_2d_send_batch
 
 module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
+    implicit none
     class(halo_t), intent(inout) :: this
     type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
     type(variable_t), intent(inout) :: var_data(:)
@@ -872,33 +954,33 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
     integer :: n, i, n_vars
 
     if (this%n_2d <= 0) return
-    ! if (.not.(this%north_boundary)) call MPI_Win_fence(0, this%north_2d_win)
-    ! if (.not.(this%south_boundary)) call MPI_Win_fence(0, this%south_2d_win)
-    ! if (.not.(this%east_boundary)) call MPI_Win_fence(0, this%east_2d_win)
-    ! if (.not.(this%west_boundary)) call MPI_Win_fence(0, this%west_2d_win)
 
     if (.not.(this%north_boundary)) call MPI_Win_Wait(this%north_2d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_2d_win)
     if (.not.(this%east_boundary)) call MPI_Win_Wait(this%east_2d_win)
     if (.not.(this%west_boundary)) call MPI_Win_Wait(this%west_2d_win)
 
-    ! call exch_vars%reset_iterator()
     n = 1    
     n_vars = size(var_data)
+
+    !$acc data present(this, exch_vars, adv_vars, var_data)
 
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do i = 1, size(exch_vars)
         if (exch_vars(i)%v <= n_vars) then
             !check that the variable indexed matches the name
-            if (var_data(exch_vars(i)%v)%name == exch_vars(i)%n) then
+            if (var_data(exch_vars(i)%v)%id == exch_vars(i)%id) then
+                !$acc kernels
                 if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte+1):this%jme) = this%north_batch_in_2d(n,1:(this%ite-this%its+1),:)
                 if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,this%jms:(this%jts-1)) = this%south_batch_in_2d(n,1:(this%ite-this%its+1),:)
                 if (.not.(this%east_boundary)) var_data(exch_vars(i)%v)%data_2d((this%ite+1):this%ime,this%jts:this%jte) = this%east_batch_in_2d(n,:,1:(this%jte-this%jts+1))
                 if (.not.(this%west_boundary)) var_data(exch_vars(i)%v)%data_2d(this%ims:(this%its-1),this%jts:this%jte) = this%west_batch_in_2d(n,:,1:(this%jte-this%jts+1))
+                !$acc end kernels
                 n = n+1
             endif
         endif
     enddo
+    !$acc end data
 
     if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp, 0, this%north_2d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Post(this%south_neighbor_grp, 0, this%south_2d_win)
@@ -941,7 +1023,8 @@ end subroutine halo_2d_retrieve_batch
 ! end subroutine
 
 
-module subroutine put_north(this,var,do_dqdt)
+module subroutine put_north(this,var,do_dqdt)    
+    implicit none
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
@@ -955,6 +1038,8 @@ module subroutine put_north(this,var,do_dqdt)
   disp = 0
   msg_size = 1
 
+  !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+  !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
   if (var%two_d) then
       n = ubound(var%data_2d,2)
       nx = size(var%data_2d,1)
@@ -971,11 +1056,14 @@ module subroutine put_north(this,var,do_dqdt)
             var%grid%NS_halo, this%north_neighbor, disp, msg_size, var%grid%NS_win_halo, this%south_in_win)
       endif
   endif
+    !$acc end host_data
+    !$acc end data
 end subroutine
 
 
 
-module subroutine put_south(this,var,do_dqdt)
+module subroutine put_south(this,var,do_dqdt)    
+    implicit none
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
@@ -987,9 +1075,11 @@ module subroutine put_south(this,var,do_dqdt)
   if (present(do_dqdt)) dqdt=do_dqdt
   
   offs=var%ystag
-  
   disp = 0
   msg_size = 1
+
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
   if (var%two_d) then
       start = lbound(var%data_2d,2)
       nx = size(var%data_2d,1)
@@ -1006,10 +1096,13 @@ module subroutine put_south(this,var,do_dqdt)
             var%grid%NS_halo, this%south_neighbor, disp, msg_size, var%grid%NS_win_halo, this%north_in_win)
       endif
   endif
+    !$acc end host_data
+    !$acc end data
 end subroutine
 
 
-module subroutine put_east(this,var,do_dqdt)
+module subroutine put_east(this,var,do_dqdt)    
+    implicit none
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
@@ -1023,6 +1116,9 @@ module subroutine put_east(this,var,do_dqdt)
   offs=var%xstag
   disp = 0
   msg_size = 1
+
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
 
   if (var%two_d) then
       n = ubound(var%data_2d,1)
@@ -1040,12 +1136,15 @@ module subroutine put_east(this,var,do_dqdt)
             var%grid%EW_halo, this%east_neighbor, disp, msg_size, var%grid%EW_win_halo, this%west_in_win)
       endif
   endif
+    !$acc end host_data
+    !$acc end data
 end subroutine
 
 
 
 
-module subroutine put_west(this,var,do_dqdt)
+module subroutine put_west(this,var,do_dqdt)    
+    implicit none
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
@@ -1060,6 +1159,8 @@ module subroutine put_west(this,var,do_dqdt)
   disp = 0
   msg_size = 1
 
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
   if (var%two_d) then
       start = lbound(var%data_2d,1)
       ny = size(var%data_2d,2)
@@ -1076,9 +1177,13 @@ module subroutine put_west(this,var,do_dqdt)
             var%grid%EW_halo, this%west_neighbor, disp, msg_size, var%grid%EW_win_halo, this%east_in_win)
       endif
   endif
+    !$acc end host_data
+    !$acc end data
+
 end subroutine
 
-module subroutine retrieve_north_halo(this,var,do_dqdt)
+module subroutine retrieve_north_halo(this,var,do_dqdt)    
+    implicit none
   class(halo_t), intent(in) :: this
   class(variable_t), intent(inout) :: var
   logical, optional, intent(in) :: do_dqdt
@@ -1091,6 +1196,8 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
   offs_y=var%ystag
   offs_x=var%xstag
   
+  !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+  !$acc kernels
   if (var%two_d) then
       n = ubound(var%data_2d,2)
       nx = size(var%data_2d,1)
@@ -1104,9 +1211,12 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
           var%data_3d(var%grid%its:var%grid%ite-offs_x,var%grid%kts:var%grid%kte,n-this%halo_size+1-offs_y:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,var%grid%kts:var%grid%kte,1:(this%halo_size+offs_y))
       endif
   endif
+    !$acc end kernels
+    !$acc end data
 end subroutine
 
-module subroutine retrieve_south_halo(this,var,do_dqdt)
+module subroutine retrieve_south_halo(this,var,do_dqdt)    
+    implicit none
   class(halo_t), intent(in) :: this
   class(variable_t), intent(inout) :: var
   logical, optional, intent(in) :: do_dqdt
@@ -1119,7 +1229,9 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
   offs_y=var%ystag
   offs_x=var%xstag
 
-  
+  !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+  !$acc kernels
+
   if (var%two_d) then
       start = lbound(var%data_2d,2)
       nx = size(var%data_2d,1)
@@ -1133,9 +1245,12 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
           var%data_3d(var%grid%its:var%grid%ite-offs_x,var%grid%kts:var%grid%kte,start:start+this%halo_size-1) = this%south_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,var%grid%kts:var%grid%kte,1:this%halo_size)
       endif
   endif
+    !$acc end kernels
+    !$acc end data
 end subroutine
 
-module subroutine retrieve_east_halo(this,var,do_dqdt)
+module subroutine retrieve_east_halo(this,var,do_dqdt)    
+    implicit none
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
@@ -1148,6 +1263,8 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
   offs_y=var%ystag
   offs_x=var%xstag
 
+  !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+  !$acc kernels
   if (var%two_d) then
       n = ubound(var%data_2d,1)
       ny = size(var%data_2d,2)
@@ -1161,9 +1278,12 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
           var%data_3d(n-this%halo_size+1-offs_x:n,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte-offs_y) = this%east_in_3d(1:(this%halo_size+offs_x),var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size-offs_y)
       endif
   endif
+    !$acc end kernels
+    !$acc end data
 end subroutine
 
-module subroutine retrieve_west_halo(this,var,do_dqdt)
+module subroutine retrieve_west_halo(this,var,do_dqdt)    
+    implicit none
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
@@ -1176,6 +1296,8 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
   offs_y=var%ystag
   offs_x=var%xstag
   
+  !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+  !$acc kernels
   if (var%two_d) then
       start = lbound(var%data_2d,1)
       ny = size(var%data_2d,2)
@@ -1189,11 +1311,14 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
           var%data_3d(start:start+this%halo_size-1,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte-offs_y) = this%west_in_3d(1:this%halo_size,var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size-offs_y)
       endif
   endif
+    !$acc end kernels
+    !$acc end data
 end subroutine
 
 
 
-module subroutine put_northeast(this,var,do_dqdt)
+module subroutine put_northeast(this,var,do_dqdt)    
+    implicit none
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
@@ -1209,6 +1334,8 @@ module subroutine put_northeast(this,var,do_dqdt)
   disp = 0
   msg_size = 1
 
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
   if (var%two_d) then
         call MPI_Put(var%data_2d(var%grid%ite-this%halo_size+1-offs_x,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
@@ -1221,9 +1348,12 @@ module subroutine put_northeast(this,var,do_dqdt)
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
       endif
   endif
+    !$acc end host_data
+    !$acc end data
 end subroutine
 
-module subroutine put_northwest(this,var,do_dqdt)
+module subroutine put_northwest(this,var,do_dqdt)    
+    implicit none
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
@@ -1239,6 +1369,8 @@ module subroutine put_northwest(this,var,do_dqdt)
   disp = 0
   msg_size = 1
 
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
   if (var%two_d) then
         call MPI_Put(var%data_2d(var%grid%its,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
@@ -1251,10 +1383,13 @@ module subroutine put_northwest(this,var,do_dqdt)
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
       endif
   endif
+    !$acc end host_data
+    !$acc end data
 end subroutine
 
 
-module subroutine put_southwest(this,var,do_dqdt)
+module subroutine put_southwest(this,var,do_dqdt)    
+    implicit none
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
@@ -1268,6 +1403,8 @@ module subroutine put_southwest(this,var,do_dqdt)
   disp = 0
   msg_size = 1
 
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
   if (var%two_d) then
         call MPI_Put(var%data_2d(var%grid%its,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%east_in_win)
@@ -1280,9 +1417,12 @@ module subroutine put_southwest(this,var,do_dqdt)
             var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%east_in_win)
       endif
   endif
+    !$acc end host_data
+    !$acc end data
 end subroutine
 
-module subroutine put_southeast(this,var,do_dqdt)
+module subroutine put_southeast(this,var,do_dqdt)    
+    implicit none
   class(halo_t), intent(inout) :: this
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
@@ -1298,6 +1438,8 @@ module subroutine put_southeast(this,var,do_dqdt)
   disp = 0
   msg_size = 1
 
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
   if (var%two_d) then
         call MPI_Put(var%data_2d(var%grid%ite-this%halo_size+1-offs_x,var%grid%jts), msg_size, &
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
@@ -1310,10 +1452,13 @@ module subroutine put_southeast(this,var,do_dqdt)
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
       endif
   endif
+    !$acc end host_data
+    !$acc end data
 end subroutine
 
 
-module subroutine retrieve_northeast_halo(this,var,do_dqdt)
+module subroutine retrieve_northeast_halo(this,var,do_dqdt)    
+    implicit none
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
@@ -1326,6 +1471,8 @@ module subroutine retrieve_northeast_halo(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc kernels
   if (var%two_d) then
         var%data_2d(var%grid%ite+1-offs_x:var%grid%ime,var%grid%jte+1-offs_y:var%grid%jme) = this%east_in_3d(1:(this%halo_size+offs_x),1,1:(this%halo_size+offs_y))
   else
@@ -1335,9 +1482,12 @@ module subroutine retrieve_northeast_halo(this,var,do_dqdt)
           var%data_3d(var%grid%ite+1-offs_x:var%grid%ime,this%kts:this%kte,var%grid%jte+1-offs_y:var%grid%jme) = this%east_in_3d(1:(this%halo_size+offs_x),this%kts:this%kte,1:(this%halo_size+offs_y))
         endif
   endif
+    !$acc end kernels
+    !$acc end data
 end subroutine
 
-module subroutine retrieve_northwest_halo(this,var,do_dqdt)
+module subroutine retrieve_northwest_halo(this,var,do_dqdt)    
+    implicit none
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
@@ -1350,6 +1500,8 @@ module subroutine retrieve_northwest_halo(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc kernels
   if (var%two_d) then
         var%data_2d(var%grid%ims:var%grid%its-1,var%grid%jte+1-offs_y:var%grid%jme) = this%north_in_3d(1:this%halo_size,1,1:(this%halo_size+offs_y))
   else
@@ -1359,9 +1511,12 @@ module subroutine retrieve_northwest_halo(this,var,do_dqdt)
           var%data_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jte+1-offs_y:var%grid%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:(this%halo_size+offs_y))
       endif
   endif
+    !$acc end kernels
+    !$acc end data
 end subroutine
 
-module subroutine retrieve_southwest_halo(this,var,do_dqdt)
+module subroutine retrieve_southwest_halo(this,var,do_dqdt)    
+    implicit none
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
@@ -1371,6 +1526,8 @@ module subroutine retrieve_southwest_halo(this,var,do_dqdt)
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc kernels
   if (var%two_d) then
         var%data_2d(var%grid%ims:var%grid%its-1,var%grid%jms:var%grid%jts-1) = this%west_in_3d(1:this%halo_size,1,1:this%halo_size)
   else
@@ -1380,9 +1537,12 @@ module subroutine retrieve_southwest_halo(this,var,do_dqdt)
           var%data_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
       endif
   endif
+    !$acc end kernels
+    !$acc end data
 end subroutine
 
-module subroutine retrieve_southeast_halo(this,var,do_dqdt)
+module subroutine retrieve_southeast_halo(this,var,do_dqdt)    
+    implicit none
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
@@ -1394,6 +1554,9 @@ module subroutine retrieve_southeast_halo(this,var,do_dqdt)
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
+
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc kernels
   if (var%two_d) then
         var%data_2d(var%grid%ite+1-offs_x:var%grid%ime,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:(this%halo_size+offs_x),1,1:this%halo_size)
   else
@@ -1403,13 +1566,16 @@ module subroutine retrieve_southeast_halo(this,var,do_dqdt)
           var%data_3d(var%grid%ite+1-offs_x:var%grid%ime,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:(this%halo_size+offs_x),this%kts:this%kte,1:this%halo_size)
       endif
   endif
+    !$acc end kernels
+    !$acc end data
 end subroutine
 
 !> -------------------------------
 !! Detect if neighbors are on shared memory hardware
 !!
 !! -------------------------------
-subroutine detect_shared_memory(this, comms)
+subroutine detect_shared_memory(this, comms)    
+    implicit none
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     
@@ -1436,6 +1602,7 @@ subroutine detect_shared_memory(this, comms)
     this%southwest_shared = .false.
     this%southeast_shared = .false.
     
+#ifndef _OPENACC
     ! Check if each neighbor is in same shared memory space
     if (.not. this%north_boundary) then
         neighbor_rank = this%north_neighbor
@@ -1481,7 +1648,7 @@ subroutine detect_shared_memory(this, comms)
         call MPI_Group_translate_ranks(this%southeast_neighbor_grp, 1, [0], shared_comm_grp, neighbor_shared_rank, ierr)
         this%southeast_shared = (neighbor_shared_rank(1) /= MPI_UNDEFINED)
     endif
-    
+#endif
     ! Free the shared memory communicator
     call MPI_Comm_free(shared_comm, ierr)
     
@@ -1490,7 +1657,8 @@ subroutine detect_shared_memory(this, comms)
                              this%east_shared .or. this%west_shared
 end subroutine detect_shared_memory
 
-subroutine setup_batch_exch_north_wins(this, comms, info_in)
+subroutine setup_batch_exch_north_wins(this, comms, info_in)    
+    implicit none
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1516,6 +1684,23 @@ subroutine setup_batch_exch_north_wins(this, comms, info_in)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%halo_rank+this%grid%ximages/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
+#ifdef _OPENACC
+
+    allocate(this%north_batch_in_3d(this%n_3d, nx, nz, ny))
+    !$acc enter data copyin(this%north_batch_in_3d)
+    !$acc host_data use_device(this%north_batch_in_3d)
+    call MPI_WIN_CREATE(this%north_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%north_3d_win, ierr)
+    !$acc end host_data
+
+    if (this%n_2d > 0) then
+        allocate(this%north_batch_in_2d(this%n_2d, nx, ny))
+        !$acc enter data copyin(this%north_batch_in_2d)
+        !$acc host_data use_device(this%north_batch_in_2d)
+        call MPI_WIN_CREATE(this%north_batch_in_2d, win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, this%north_2d_win, ierr)
+        !$acc end host_data
+    endif
+
+#else
     if (this%north_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%north_3d_win, ierr)
         if (this%n_2d > 0) call MPI_WIN_ALLOCATE_SHARED(win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr_2d, this%north_2d_win, ierr)
@@ -1525,9 +1710,12 @@ subroutine setup_batch_exch_north_wins(this, comms, info_in)
     endif
     call C_F_POINTER(tmp_ptr, this%north_batch_in_3d, [this%n_3d, nx, nz, ny])
     if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%north_batch_in_2d, [this%n_2d, nx, ny])
+
+#endif
 end subroutine setup_batch_exch_north_wins
 
-subroutine setup_batch_exch_south_wins(this, comms, info_in)
+subroutine setup_batch_exch_south_wins(this, comms, info_in)    
+    implicit none
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1553,6 +1741,23 @@ subroutine setup_batch_exch_south_wins(this, comms, info_in)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank-this%grid%ximages, this%halo_rank/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
+#ifdef _OPENACC
+
+    allocate(this%south_batch_in_3d(this%n_3d, nx, nz, ny))
+    !$acc enter data copyin(this%south_batch_in_3d)
+    !$acc host_data use_device(this%south_batch_in_3d)
+    call MPI_WIN_CREATE(this%south_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%south_3d_win, ierr)
+    !$acc end host_data
+
+    if (this%n_2d > 0) then
+        allocate(this%south_batch_in_2d(this%n_2d, nx, ny))
+        !$acc enter data copyin(this%south_batch_in_2d)
+        !$acc host_data use_device(this%south_batch_in_2d)
+        call MPI_WIN_CREATE(this%south_batch_in_2d, win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, this%south_2d_win, ierr)
+        !$acc end host_data
+    endif
+
+#else
     if (this%south_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%south_3d_win)
         if (this%n_2d > 0) call MPI_WIN_ALLOCATE_SHARED(win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr_2d, this%south_2d_win, ierr)
@@ -1562,9 +1767,12 @@ subroutine setup_batch_exch_south_wins(this, comms, info_in)
     endif
     call C_F_POINTER(tmp_ptr, this%south_batch_in_3d, [this%n_3d, nx, nz, ny])
     if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%south_batch_in_2d, [this%n_2d, nx, ny])
+
+#endif
 end subroutine setup_batch_exch_south_wins
 
-subroutine setup_batch_exch_east_wins(this, comms, info_in)
+subroutine setup_batch_exch_east_wins(this, comms, info_in)    
+    implicit none
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1590,6 +1798,21 @@ subroutine setup_batch_exch_east_wins(this, comms, info_in)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%halo_rank+1/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
+#ifdef _OPENACC
+    allocate(this%east_batch_in_3d(this%n_3d, nx, nz, ny))
+    !$acc enter data copyin(this%east_batch_in_3d)
+    !$acc host_data use_device(this%east_batch_in_3d)
+    call MPI_WIN_CREATE(this%east_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%east_3d_win, ierr)
+    !$acc end host_data
+
+    if (this%n_2d > 0) then
+        allocate(this%east_batch_in_2d(this%n_2d, nx, ny))
+        !$acc enter data copyin(this%east_batch_in_2d)
+        !$acc host_data use_device(this%east_batch_in_2d)
+        call MPI_WIN_CREATE(this%east_batch_in_2d, win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, this%east_2d_win, ierr)
+        !$acc end host_data
+    endif
+#else
     if (this%east_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%east_3d_win, ierr)
         if (this%n_2d > 0) call MPI_WIN_ALLOCATE_SHARED(win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr_2d, this%east_2d_win, ierr)
@@ -1599,10 +1822,12 @@ subroutine setup_batch_exch_east_wins(this, comms, info_in)
     endif
     call C_F_POINTER(tmp_ptr, this%east_batch_in_3d, [this%n_3d, nx, nz, ny])
     if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%east_batch_in_2d, [this%n_2d, nx, ny])
+#endif
 
 end subroutine setup_batch_exch_east_wins
 
-subroutine setup_batch_exch_west_wins(this, comms, info_in)
+subroutine setup_batch_exch_west_wins(this, comms, info_in)    
+    implicit none
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1628,6 +1853,21 @@ subroutine setup_batch_exch_west_wins(this, comms, info_in)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank-1, this%halo_rank/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
+#ifdef _OPENACC
+    allocate(this%west_batch_in_3d(this%n_3d, nx, nz, ny))
+    !$acc enter data copyin(this%west_batch_in_3d)
+    !$acc host_data use_device(this%west_batch_in_3d)
+    call MPI_WIN_CREATE(this%west_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%west_3d_win, ierr)
+    !$acc end host_data
+
+    if (this%n_2d > 0) then
+        allocate(this%west_batch_in_2d(this%n_2d, nx, ny))
+        !$acc enter data copyin(this%west_batch_in_2d)
+        !$acc host_data use_device(this%west_batch_in_2d)
+        call MPI_WIN_CREATE(this%west_batch_in_2d, win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, this%west_2d_win, ierr)
+        !$acc end host_data
+    endif
+#else
     if (this%west_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%west_3d_win)
         if (this%n_2d > 0) call MPI_WIN_ALLOCATE_SHARED(win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr_2d, this%west_2d_win, ierr)
@@ -1637,9 +1877,11 @@ subroutine setup_batch_exch_west_wins(this, comms, info_in)
     endif
     call C_F_POINTER(tmp_ptr, this%west_batch_in_3d, [this%n_3d, nx, nz, ny])
     if (this%n_2d > 0) call C_F_POINTER(tmp_ptr_2d, this%west_batch_in_2d, [this%n_2d, nx, ny])
+#endif
 end subroutine setup_batch_exch_west_wins
 
-subroutine setup_batch_exch_northwest_wins(this, comms, info_in)
+subroutine setup_batch_exch_northwest_wins(this, comms, info_in)    
+    implicit none
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1662,16 +1904,24 @@ subroutine setup_batch_exch_northwest_wins(this, comms, info_in)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%halo_rank+this%grid%ximages-1/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
+#ifdef _OPENACC
+    allocate(this%northwest_batch_in_3d(this%n_3d, this%halo_size, nz, this%halo_size))
+    !$acc enter data copyin(this%northwest_batch_in_3d)
+    !$acc host_data use_device(this%northwest_batch_in_3d)
+    call MPI_WIN_CREATE(this%northwest_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%northwest_3d_win, ierr)
+    !$acc end host_data
+#else
     if (this%northwest_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%northwest_3d_win)
     else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%northwest_3d_win)
     endif
     call C_F_POINTER(tmp_ptr, this%northwest_batch_in_3d,[this%n_3d,this%halo_size,nz,this%halo_size])
-
+#endif
 end subroutine setup_batch_exch_northwest_wins
 
-subroutine setup_batch_exch_northeast_wins(this, comms, info_in)
+subroutine setup_batch_exch_northeast_wins(this, comms, info_in)    
+    implicit none
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1694,16 +1944,24 @@ subroutine setup_batch_exch_northeast_wins(this, comms, info_in)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%halo_rank+this%grid%ximages+1/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
+#ifdef _OPENACC
+    allocate(this%northeast_batch_in_3d(this%n_3d, this%halo_size, nz, this%halo_size))
+    !$acc enter data copyin(this%northeast_batch_in_3d)
+    !$acc host_data use_device(this%northeast_batch_in_3d)
+    call MPI_WIN_CREATE(this%northeast_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%northeast_3d_win, ierr)
+    !$acc end host_data
+#else
     if (this%northeast_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%northeast_3d_win)
     else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%northeast_3d_win)
     endif
     call C_F_POINTER(tmp_ptr,this%northeast_batch_in_3d,[this%n_3d,this%halo_size,nz,this%halo_size])
-
+#endif
 end subroutine setup_batch_exch_northeast_wins
 
-subroutine setup_batch_exch_southwest_wins(this, comms, info_in)
+subroutine setup_batch_exch_southwest_wins(this, comms, info_in)    
+    implicit none
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1726,16 +1984,24 @@ subroutine setup_batch_exch_southwest_wins(this, comms, info_in)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank-this%grid%ximages-1, this%halo_rank/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
+#ifdef _OPENACC
+    allocate(this%southwest_batch_in_3d(this%n_3d, this%halo_size, nz, this%halo_size))
+    !$acc enter data copyin(this%southwest_batch_in_3d)
+    !$acc host_data use_device(this%southwest_batch_in_3d)
+    call MPI_WIN_CREATE(this%southwest_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%southwest_3d_win, ierr)
+    !$acc end host_data
+#else
     if (this%southwest_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%southwest_3d_win)
     else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%southwest_3d_win)
     endif
     call C_F_POINTER(tmp_ptr,this%southwest_batch_in_3d,[this%n_3d,this%halo_size,nz,this%halo_size])
-
+#endif
 end subroutine setup_batch_exch_southwest_wins
 
-subroutine setup_batch_exch_southeast_wins(this, comms, info_in)
+subroutine setup_batch_exch_southeast_wins(this, comms, info_in)    
+    implicit none
     class(halo_t), intent(inout) :: this
     type(MPI_comm), intent(in) :: comms
     type(MPI_Info), intent(in) :: info_in
@@ -1758,13 +2024,20 @@ subroutine setup_batch_exch_southeast_wins(this, comms, info_in)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank-this%grid%ximages+1, this%halo_rank/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
 
+#ifdef _OPENACC
+    allocate(this%southeast_batch_in_3d(this%n_3d, this%halo_size, nz, this%halo_size))
+    !$acc enter data copyin(this%southeast_batch_in_3d)
+    !$acc host_data use_device(this%southeast_batch_in_3d)
+    call MPI_WIN_CREATE(this%southeast_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%southeast_3d_win, ierr)
+    !$acc end host_data
+#else
     if (this%southeast_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%southeast_3d_win)
     else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%southeast_3d_win)
     endif
     call C_F_POINTER(tmp_ptr,this%southeast_batch_in_3d,[this%n_3d,this%halo_size,nz,this%halo_size])
-
+#endif
 end subroutine setup_batch_exch_southeast_wins
 
 end submodule

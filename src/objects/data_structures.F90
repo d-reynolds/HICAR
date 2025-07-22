@@ -17,7 +17,7 @@ module data_structures
 
     type index_type
         integer :: v = -1
-        character(kMAX_NAME_LENGTH) :: n = ''
+        integer :: id = -1
     end type index_type
     ! contains the location of a specific grid point
     type position

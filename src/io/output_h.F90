@@ -19,7 +19,6 @@ module output_interface
   use meta_data_interface,      only : meta_data_t
   use time_object,              only : Time_type, THREESIXTY, GREGORIAN, NOCALENDAR, NOLEAP
   use options_interface,        only : options_t
-  use variable_dict_interface,  only : var_dict_t
 
   implicit none
 
@@ -39,9 +38,10 @@ module output_interface
       ! Note n_variables may be smaller then size(variables) so that it doesn't
       ! have to keep reallocating variables whenever something is added or removed
       integer, public :: n_vars = 0
+      type(meta_data_t), public, allocatable :: var_meta(:)
       type(variable_t), public, allocatable :: variables(:)
       ! time variable , publicis stored outside of the variable list... probably need to think about that some
-      type(variable_t) :: time
+      type(meta_data_t) :: time
 
       ! store status of the object
       logical :: is_initialized = .false.
@@ -75,12 +75,8 @@ module output_interface
 
       integer :: output_counter, output_count
 
-      integer :: global_dim_len(3)
+      integer :: file_dim_len(3)
 
-      ! list of netcdf dimension IDs
-      integer :: dim_ids(kMAX_DIMENSIONS)
-      ! name of the dimensions in the file
-      character(len=kMAX_DIM_LENGTH) :: dimensions(kMAX_DIMENSIONS)
       character(len=kMAX_NAME_LENGTH) :: time_units
 
   contains
@@ -149,7 +145,7 @@ module output_interface
       module subroutine add_to_output(this, in_variable)
           implicit none
           class(output_t),   intent(inout)  :: this
-          type(variable_t),  intent(in)     :: in_variable
+          type(meta_data_t), intent(in)     :: in_variable
       end subroutine
       
       !>----------------------------------------------------------

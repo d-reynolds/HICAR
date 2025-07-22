@@ -22,6 +22,7 @@ module nest_manager
     use land_surface,               only : lsm_init
     use surface_layer,              only : sfc_init
     use wind,                       only : init_winds
+    use time_object,                only : Time_type
     use icar_constants
     use iso_fortran_env
 
@@ -142,8 +143,11 @@ contains
         type(comp_arr_t), intent(in) :: flow_objs(:)
         type(options_t), intent(in) :: options
         logical :: next
+        type(Time_type) :: sim_time_safety_under
 
         next = .false.
+
+        call sim_time_safety_under%set(flow_objs(options%nest_indx)%comp%sim_time%mjd() - flow_objs(options%nest_indx)%comp%small_time_delta%days())
 
         ! If we are a child nest, not at the end of our run time...
         if (flow_objs(options%nest_indx)%comp%started .eqv. .False.) then
@@ -151,7 +155,7 @@ contains
             !safety check before indexing into flow_obj
             if (options%general%parent_nest == 0 .or. options%restart%restart) then
                 next = .true.
-            else if (flow_objs(options%nest_indx)%comp%sim_time - flow_objs(options%nest_indx)%comp%small_time_delta <= flow_objs(options%general%parent_nest)%comp%sim_time) then
+            else if (sim_time_safety_under <= flow_objs(options%general%parent_nest)%comp%sim_time) then
                 next = .true.
             endif
         end if
@@ -164,6 +168,7 @@ contains
         type(options_t), intent(in) :: options
         logical :: can_update
         integer :: n, num_children
+        type(Time_type) :: sim_time_safety_under
 
         can_update = .false.
 
@@ -175,7 +180,9 @@ contains
                 ! loop over children
                 do n = 1, num_children
                     ! If we are at or ahead of our child's time, and the child has not ended, then our child needs to be updated
-                    if ( flow_objs(options%nest_indx)%comp%sim_time >= flow_objs(options%general%child_nests(n))%comp%sim_time - flow_objs(options%nest_indx)%comp%small_time_delta) then
+                    call sim_time_safety_under%set(flow_objs(options%general%child_nests(n))%comp%sim_time%mjd() - flow_objs(options%nest_indx)%comp%small_time_delta%days())
+
+                    if ( flow_objs(options%nest_indx)%comp%sim_time >= sim_time_safety_under) then
                         if (flow_objs(options%general%child_nests(n))%comp%ended .eqv. .False.) then
                             can_update = .true.
                             return
@@ -192,10 +199,13 @@ contains
         class(flow_obj_t), intent(in) :: flow_obj
         class(flow_obj_t), intent(in) :: child_flow_obj
         logical :: ahead
-
+        type(Time_type) :: sim_time_safety_under
+        
         ahead = .false.
+        
+        call sim_time_safety_under%set(child_flow_obj%sim_time%mjd() - flow_obj%small_time_delta%days())
 
-        if (flow_obj%sim_time >= child_flow_obj%sim_time - flow_obj%small_time_delta) then
+        if (flow_obj%sim_time >= sim_time_safety_under) then
             ahead = .true.
         end if
 
@@ -206,8 +216,12 @@ contains
         class(flow_obj_t), intent(in) :: flow_obj
         class(flow_obj_t), intent(in) :: child_flow_obj
         logical :: can_update_child_nest
+        type(Time_type) :: sim_time_safety_under
+                
+        call sim_time_safety_under%set(child_flow_obj%sim_time%mjd() - flow_obj%small_time_delta%days())
 
-        can_update_child_nest = (flow_obj%sim_time >= child_flow_obj%sim_time - flow_obj%small_time_delta .and. .not.(child_flow_obj%ended))
+
+        can_update_child_nest = (flow_obj%sim_time >= sim_time_safety_under .and. .not.(child_flow_obj%ended))
 
     end function can_update_child_nest
 

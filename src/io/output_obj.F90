@@ -3,7 +3,7 @@ submodule(output_interface) output_implementation
   use debug_module,             only : check_ncdf
   use iso_fortran_env,          only : output_unit
   use time_io,                  only : get_output_time, find_timestep_in_filelist
-  use string,                   only : str, split_str
+  use string,                   only : str, split_str, as_string
   use io_routines,              only : io_newunit
   implicit none
 
@@ -21,7 +21,8 @@ contains
         character(len=kMAX_STRING_LENGTH) :: tmp_str
 
         allocate(this%variables(kINITIAL_VAR_SIZE))
-        
+        allocate(this%var_meta(kINITIAL_VAR_SIZE))
+
         this%n_vars = 0
         this%n_dims      = 0
         this%is_initialized = .True.
@@ -29,7 +30,7 @@ contains
         this%output_counter = 1
         
         this%its = its; this%ite = ite; this%kts = kts; this%kte = kte; this%jts = jts; this%jte = jte
-        this%global_dim_len = (/ide, jde, kde/)
+        this%file_dim_len = (/ide, jde, kde/)
 
         call set_attrs(this, options)
         
@@ -49,7 +50,7 @@ contains
         
         write(this%output_fn, '(A,A,".nc")')    &
                 trim(this%base_out_file_name),   &
-                trim(options%general%start_time%as_string(this%file_date_format))
+                trim(as_string(options%general%start_time,this%file_date_format))
 
         call this%add_variables(options%output%vars_for_output + options%vars_for_restart)
         
@@ -96,7 +97,7 @@ contains
             this%output_counter = 1
             write(this%output_fn, '(A,A,".nc")')    &
                 trim(this%base_out_file_name),   &
-                trim(options%restart%restart_time%as_string(this%file_date_format))
+                trim(as_string(options%restart%restart_time,this%file_date_format))
         endif
 
     end subroutine init_restart
@@ -192,11 +193,11 @@ contains
 
 
         call this%add_attribute("ids",str(1))
-        call this%add_attribute("ide",str(this%global_dim_len(1)))
+        call this%add_attribute("ide",str(this%file_dim_len(1)))
         call this%add_attribute("jds",str(1))
-        call this%add_attribute("jde",str(this%global_dim_len(2)))
+        call this%add_attribute("jde",str(this%file_dim_len(2)))
         call this%add_attribute("kds",str(1))
-        call this%add_attribute("kde",str(this%global_dim_len(3)))
+        call this%add_attribute("kde",str(this%file_dim_len(3)))
 
         !call this%add_attribute("ims",str(this%grid%ims))
         !call this%add_attribute("ime",str(this%grid%ime))
@@ -216,31 +217,35 @@ contains
 
     module subroutine add_to_output(this, in_variable)
         class(output_t),   intent(inout) :: this
-        type(variable_t),  intent(in) :: in_variable
+        type(meta_data_t),  intent(in) :: in_variable
         
         type(variable_t) :: variable
+        type(meta_data_t) :: var_meta
         integer :: n, nx, ny, nz
         
         nx = this%ite - this%its + 1 + in_variable%xstag
         ny = this%jte - this%jts + 1 + in_variable%ystag
         nz = this%kte - this%kts ! no "+1" since the writer nz bounds are domain%kts to domain%kte+1 by default
-        variable = in_variable
+        var_meta = in_variable
 
-        if (variable%three_d) then
-            if (in_variable%dimensions(2)== "level_i") nz = nz+1
+        if (var_meta%three_d) then
+            if (var_meta%dimensions(2)== "level_i") nz = nz+1
 
-            if (in_variable%dim_len(2)>0) nz = in_variable%dim_len(2)
+            if (var_meta%dim_len(2)>0) nz = var_meta%dim_len(2)
 
-            call variable%initialize((/nx, nz, ny/))
+            call variable%initialize(var_meta%id, (/nx, nz, ny/))
             variable%data_3d = kEMPT_BUFF
+            var_meta%dim_len = (/ nx, nz, ny /)
         else
-            call variable%initialize((/nx, ny/))
+            call variable%initialize(var_meta%id, (/nx, ny/))
             variable%data_2d = kEMPT_BUFF
+            var_meta%dim_len = (/ nx, ny /)
         endif
         if (this%n_vars == size(this%variables)) call this%increase_var_capacity()
 
         this%n_vars = this%n_vars + 1
         this%variables(this%n_vars) = variable
+        this%var_meta(this%n_vars) = var_meta
 
     end subroutine
 
@@ -255,7 +260,7 @@ contains
         if (this%output_counter > this%output_count) then
             write(this%output_fn, '(A,A,".nc")')    &
                 trim(this%base_out_file_name),   &
-                trim(time%as_string(this%file_date_format))
+                trim(as_string(time,this%file_date_format))
 
             this%output_counter = 1
             if (this%out_ncfile_id > 0) then
@@ -300,7 +305,7 @@ contains
         if (this%active_nc_id < 0) then
             write(this%restart_fn, '(A,A,".nc")')    &
                 trim(this%base_rst_file_name),   &
-                trim(time%as_string(this%file_date_format))
+                trim(as_string(time,this%file_date_format))
 
             call open_file(this, this%restart_fn, time, par_comms,rst_var_indices)
             this%rst_ncfile_id = this%active_nc_id
@@ -546,8 +551,8 @@ contains
 
         ! iterate through variables creating or setting up variable IDs if they exist, also dimensions
         do i=1,size(var_indx_list)            
-            call setup_dims_for_var(this, this%variables(var_indx_list(i)))
-            call setup_variable(this, this%variables(var_indx_list(i)))
+            call setup_dims_for_var(this, this%var_meta(var_indx_list(i)))
+            call setup_variable(this, this%var_meta(var_indx_list(i)))
         end do
 
         call setup_time_variable(this, time)
@@ -564,7 +569,6 @@ contains
         associate(var => this%time)
         var%name = "time"
         var%dimensions = [ "time" ]
-        var%n_dimensions = 1
 
         select case (time%calendar)
             case(GREGORIAN)
@@ -578,7 +582,7 @@ contains
         end select
 
 
-        err = nf90_inq_varid(this%active_nc_id, var%name, var%var_id)
+        err = nf90_inq_varid(this%active_nc_id, var%name, var%file_var_id)
 
         ! if the variable was not found in the netcdf file then we will define it.
         if (err /= NF90_NOERR) then
@@ -595,15 +599,16 @@ contains
                             var%dim_ids(1) ), "def_dim"//var%dimensions(1) )
             endif
 
-            call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_DOUBLE, var%dim_ids(1), var%var_id), "Defining time" )
-            call check_ncdf( nf90_put_att(this%active_nc_id, var%var_id,"standard_name","time"))
-            call check_ncdf( nf90_put_att(this%active_nc_id, var%var_id,"calendar",trim(calendar)))
-            call check_ncdf( nf90_put_att(this%active_nc_id, var%var_id,"units",time%units()))
-            call check_ncdf( nf90_put_att(this%active_nc_id, var%var_id,"UTCoffset","0"))
+            write(this%time_units,kOUTPUT_FMT) time%year_zero,time%month_zero,time%day_zero,time%hour_zero
 
-            this%time_units = time%units()
+            call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_DOUBLE, var%dim_ids(1), var%file_var_id), "Defining time" )
+            call check_ncdf( nf90_put_att(this%active_nc_id, var%file_var_id,"standard_name","time"))
+            call check_ncdf( nf90_put_att(this%active_nc_id, var%file_var_id,"calendar",trim(calendar)))
+            call check_ncdf( nf90_put_att(this%active_nc_id, var%file_var_id,"units",this%time_units))
+            call check_ncdf( nf90_put_att(this%active_nc_id, var%file_var_id,"UTCoffset","0"))
+
         else
-            err = nf90_get_att(this%active_nc_id, var%var_id, "units", this%time_units)
+            err = nf90_get_att(this%active_nc_id, var%file_var_id, "units", this%time_units)
         endif
         end associate
 
@@ -629,9 +634,8 @@ contains
         integer :: v_i_s_b, v_i_e_b, v_j_s_b, v_j_e_b
         integer :: v_i_s_b2, v_i_e_b2, v_j_s_b2, v_j_e_b2
     
-
         do i=1,size(var_indx_list)
-            associate(var => this%variables(var_indx_list(i)))                
+            associate(var => this%var_meta(var_indx_list(i)))                
                 k_s = this%kts
                 k_e = var%dim_len(2)
                 
@@ -648,13 +652,13 @@ contains
                 start_two_D_t_b = (/ this%start_3d_b(1), this%start_3d_b(2), current_step /)
                 start_two_D_t_b2 = (/ this%start_3d_b2(1), this%start_3d_b2(2), current_step /)
 
-                if (this%ite == this%global_dim_len(1)  .and. cnt_3d(1) > 0) cnt_3d(1) = cnt_3d(1) + var%xstag
-                if ((this%start_3d_b(1) - this%its + cnt_3d_b(1)) == this%global_dim_len(1)) cnt_3d_b(1) = cnt_3d_b(1) + var%xstag
-                if ((this%start_3d_b2(1) - this%its + cnt_3d_b2(1)) == this%global_dim_len(1)) cnt_3d_b2(1) = cnt_3d_b2(1) + var%xstag
+                if (this%ite == this%file_dim_len(1)  .and. cnt_3d(1) > 0) cnt_3d(1) = cnt_3d(1) + var%xstag
+                if ((this%start_3d_b(1) - this%its + cnt_3d_b(1)) == this%file_dim_len(1)) cnt_3d_b(1) = cnt_3d_b(1) + var%xstag
+                if ((this%start_3d_b2(1) - this%its + cnt_3d_b2(1)) == this%file_dim_len(1)) cnt_3d_b2(1) = cnt_3d_b2(1) + var%xstag
                 
-                if (this%jte == this%global_dim_len(2) .and. cnt_3d(2) > 0) cnt_3d(2) = cnt_3d(2) + var%ystag
-                if ((this%start_3d_b(2) - this%its + cnt_3d_b(2)) == this%global_dim_len(2)) cnt_3d_b(2) = cnt_3d_b(2) + var%ystag
-                if ((this%start_3d_b2(2) - this%jts + cnt_3d_b2(2)) == this%global_dim_len(2)) cnt_3d_b2(2) = cnt_3d_b2(2) + var%ystag
+                if (this%jte == this%file_dim_len(2) .and. cnt_3d(2) > 0) cnt_3d(2) = cnt_3d(2) + var%ystag
+                if ((this%start_3d_b(2) - this%its + cnt_3d_b(2)) == this%file_dim_len(2)) cnt_3d_b(2) = cnt_3d_b(2) + var%ystag
+                if ((this%start_3d_b2(2) - this%jts + cnt_3d_b2(2)) == this%file_dim_len(2)) cnt_3d_b2(2) = cnt_3d_b2(2) + var%ystag
 
                 v_i_s = this%start_3d(1) - this%its + 1
                 v_i_e = v_i_s + cnt_3d(1) - 1
@@ -692,86 +696,86 @@ contains
 
                 v_j_s_b2 = max(v_j_s_b2,1)
                 v_j_e_b2 = max(v_j_e_b2,1)
-                call check_ncdf( nf90_var_par_access(this%active_nc_id, var%var_id, nf90_collective))
+                call check_ncdf( nf90_var_par_access(this%active_nc_id, var%file_var_id, nf90_collective))
 
                 if (var%three_d) then
-                    var_3d = reshape(var%data_3d, &
-                        shape=(/ ubound(var%data_3d,1), ubound(var%data_3d,3), ubound(var%data_3d,2) /), order=[1,3,2])
+                    var_3d = reshape(this%variables(var_indx_list(i))%data_3d, &
+                        shape=(/ ubound(this%variables(var_indx_list(i))%data_3d,1), ubound(this%variables(var_indx_list(i))%data_3d,3), ubound(this%variables(var_indx_list(i))%data_3d,2) /), order=[1,3,2])
                     if (var%unlimited_dim) then
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, &
                             var_3d(v_i_s:v_i_e,v_j_s:v_j_e,k_s:k_e), start_three_D_t, count=(/cnt_3d(1), cnt_3d(2), cnt_3d(3), 1/)), "saving:"//trim(var%name) )
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, &
                             var_3d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b,k_s:k_e), start_three_D_t_b, count=(/cnt_3d_b(1), cnt_3d_b(2), cnt_3d_b(3), 1/)), "saving LL block:"//trim(var%name) )
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, &
                             var_3d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2,k_s:k_e), start_three_D_t_b2, count=(/cnt_3d_b2(1), cnt_3d_b2(2), cnt_3d_b2(3), 1/)), "saving UR block:"//trim(var%name) )
                     elseif (this%creating) then
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, var_3d(v_i_s:v_i_e,v_j_s:v_j_e,k_s:k_e), &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, var_3d(v_i_s:v_i_e,v_j_s:v_j_e,k_s:k_e), &
                             start=this%start_3d,count=cnt_3d ), "saving:"//trim(var%name) )
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, var_3d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b,k_s:k_e), &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, var_3d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b,k_s:k_e), &
                             start=this%start_3d_b,count=cnt_3d_b ), "saving LL block:"//trim(var%name) )
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, &
                             var_3d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2,k_s:k_e), start=this%start_3d_b2,&
                             count=cnt_3d_b2 ), "saving UR block:"//trim(var%name) )
                     endif
                 elseif (var%two_d) then
                     if (var%dtype == kREAL) then
                         if (var%unlimited_dim) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s:v_i_e,v_j_s:v_j_e), &
                                     start_two_D_t,count=(/ cnt_3d(1), cnt_3d(2), 1/)), "saving:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
                                 start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
                                 start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
                         elseif (this%creating) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s:v_i_e,v_j_s:v_j_e), &
                                         start=(/ this%start_3d(1), this%start_3d(2) /), &
                                         count=(/ cnt_3d(1), cnt_3d(2) /)), "saving:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
                                     start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
                                     count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
                                     start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
                                     count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
                         endif    
                     else if (var%dtype == kINTEGER) then
                         if (var%unlimited_dim) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s:v_i_e,v_j_s:v_j_e)), &
                                     start_two_D_t,count=(/ cnt_3d(1), cnt_3d(2), 1/)), "saving:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
                                 start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
                                 start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
                         elseif (this%creating) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s:v_i_e,v_j_s:v_j_e)), &
                                         start=(/ this%start_3d(1), this%start_3d(2) /), &
                                         count=(/ cnt_3d(1), cnt_3d(2) /)), "saving:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
                                     start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
                                     count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
                                     start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
                                     count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
                         endif    
     
                     ! elseif (var%dtype == kDOUBLE) then
                     !     if (var%unlimited_dim) then
-                    !         call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
+                    !         call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
                     !                 start_two_D_t,count=(/ cnt_3d(1), cnt_3d(2), 1/)), "saving:"//trim(var%name) )
                     !         if (this%blocked_UR .or. this%blocked_LL) then
-                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
                     !                 start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
-                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
                     !                 start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
                     !         endif
                     !     elseif (this%creating) then
-                    !         call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
+                    !         call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
                     !                     start=(/ this%start_3d(1), this%start_3d(2) /), &
                     !                     count=(/ cnt_3d(1), cnt_3d(2) /)), "saving:"//trim(var%name) )
                     !         if (this%blocked_UR .or. this%blocked_LL) then
-                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
                     !                     start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
                     !                     count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
-                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
                     !                     start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
                     !                     count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
                     !         endif
@@ -781,86 +785,86 @@ contains
             end associate
         end do
         
-        call check_ncdf( nf90_var_par_access(this%active_nc_id, this%time%var_id, nf90_collective))
+        call check_ncdf( nf90_var_par_access(this%active_nc_id, this%time%file_var_id, nf90_collective))
 
         output_time = get_output_time(time, units=this%time_units, round_seconds=.False.)
 
-        call check_ncdf( nf90_put_var(this%active_nc_id, this%time%var_id, dble(output_time%mjd()), [current_step] ),   &
+        call check_ncdf( nf90_put_var(this%active_nc_id, this%time%file_var_id, dble(output_time%mjd()), [current_step] ),   &
                     "saving:"//trim(this%time%name) )
 
     end subroutine save_data
 
-    subroutine setup_dims_for_var(this, var)
+    subroutine setup_dims_for_var(this, var_meta)
         implicit none
         class(output_t),    intent(inout) :: this
-        type(variable_t),   intent(inout) :: var
+        type(meta_data_t),   intent(inout) :: var_meta
         integer :: i, err, dim_len
         character(len=kMAX_DIM_LENGTH), allocatable :: dimensions(:)
         character(len=kMAX_DIM_LENGTH) :: tmp_dim
 
-        if (allocated(var%dim_ids)) deallocate(var%dim_ids)
+        if (allocated(var_meta%dim_ids)) deallocate(var_meta%dim_ids)
 
-        allocate(var%dim_ids(size(var%dimensions)))
+        allocate(var_meta%dim_ids(size(var_meta%dimensions)))
 
-        dimensions = var%dimensions
-        if (var%three_d .or. var%four_d) then
+        dimensions = var_meta%dimensions
+        if (var_meta%three_d .or. var_meta%four_d) then
             tmp_dim = dimensions(2)
             dimensions(2) = dimensions(3)
             dimensions(3) = tmp_dim
         endif
-        do i = 1, size(var%dim_ids)
+        do i = 1, size(var_meta%dim_ids)
 
             ! Try to find the dimension ID if it exists already.
-            err = nf90_inq_dimid(this%active_nc_id, trim(dimensions(i)), var%dim_ids(i))
+            err = nf90_inq_dimid(this%active_nc_id, trim(dimensions(i)), var_meta%dim_ids(i))
 
             ! probably the dimension doesn't exist in the file, so we will create it.
             if (err/=NF90_NOERR) then
                 ! assume that the last dimension should be the unlimited dimension (generally a good idea...)
-                if (var%unlimited_dim .and. (i==size(var%dim_ids)) .and. trim(dimensions(i))=="time") then
+                if (var_meta%unlimited_dim .and. (i==size(var_meta%dim_ids)) .and. trim(dimensions(i))=="time") then
                     call check_ncdf( nf90_def_dim(this%active_nc_id, trim(dimensions(i)), NF90_UNLIMITED, &
-                                var%dim_ids(i) ), "def_dim"//dimensions(i) )
+                                var_meta%dim_ids(i) ), "def_dim"//dimensions(i) )
                 else
-                    if (i == 1) dim_len = this%global_dim_len(1)+var%xstag
-                    if (i == 2) dim_len = this%global_dim_len(2)+var%ystag
-                    if (i == 3) dim_len = var%dim_len(2)
+                    if (i == 1) dim_len = this%file_dim_len(1)+var_meta%xstag
+                    if (i == 2) dim_len = this%file_dim_len(2)+var_meta%ystag
+                    if (i == 3) dim_len = var_meta%dim_len(2)
 
                     call check_ncdf( nf90_def_dim(this%active_nc_id, dimensions(i), dim_len,       &
-                                var%dim_ids(i) ), "def_dim"//dimensions(i) )
+                                var_meta%dim_ids(i) ), "def_dim"//dimensions(i) )
                 endif
             endif
         end do
 
     end subroutine setup_dims_for_var
 
-    subroutine setup_variable(this, var)
+    subroutine setup_variable(this, var_meta)
         implicit none
         class(output_t),   intent(inout) :: this
-        type(variable_t),  intent(inout) :: var
+        type(meta_data_t),  intent(inout) :: var_meta
         integer :: i, n, err
 
-        err = nf90_inq_varid(this%active_nc_id, var%name, var%var_id)
+        err = nf90_inq_varid(this%active_nc_id, var_meta%name, var_meta%file_var_id)
 
         ! if the variable was not found in the netcdf file then we will define it.
         if (err /= NF90_NOERR) then
         
-            if (var%dtype == kREAL) then
-                call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_REAL, var%dim_ids, var%var_id), &
-                        "Defining variable:"//trim(var%name) )
-            elseif (var%dtype == kINTEGER) then
-                call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_INT, var%dim_ids, var%var_id), &
-                        "Defining variable:"//trim(var%name) )
-            elseif (var%dtype == kDOUBLE) then
-                call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_DOUBLE, var%dim_ids, var%var_id), &
-                        "Defining variable:"//trim(var%name) )
+            if (var_meta%dtype == kREAL) then
+                call check_ncdf( nf90_def_var(this%active_nc_id, var_meta%name, NF90_REAL, var_meta%dim_ids, var_meta%file_var_id), &
+                        "Defining variable:"//trim(var_meta%name) )
+            elseif (var_meta%dtype == kINTEGER) then
+                call check_ncdf( nf90_def_var(this%active_nc_id, var_meta%name, NF90_INT, var_meta%dim_ids, var_meta%file_var_id), &
+                        "Defining variable:"//trim(var_meta%name) )
+            elseif (var_meta%dtype == kDOUBLE) then
+                call check_ncdf( nf90_def_var(this%active_nc_id, var_meta%name, NF90_DOUBLE, var_meta%dim_ids, var_meta%file_var_id), &
+                        "Defining variable:"//trim(var_meta%name) )
             endif
 
             ! setup attributes
-            do i=1,size(var%attributes)
+            do i=1,size(var_meta%attributes)
                 call check_ncdf( nf90_put_att(this%active_nc_id,                &
-                                         var%var_id,                    &
-                                         trim(var%attributes(i)%name),        &
-                                         trim(var%attributes(i)%value)),      &
-                            "saving attribute "//trim(var%attributes(i)%name)//" for "//trim(var%name))
+                                         var_meta%file_var_id,                    &
+                                         trim(var_meta%attributes(i)%name),        &
+                                         trim(var_meta%attributes(i)%value)),      &
+                            "saving attribute "//trim(var_meta%attributes(i)%name)//" for "//trim(var_meta%name))
             enddo
         endif
         
@@ -871,17 +875,24 @@ contains
         implicit none
         class(output_t),   intent(inout)  :: this
         type(variable_t),  allocatable :: new_variables(:)
+        type(meta_data_t), allocatable :: new_meta_data(:)
 
         ! assert allocated(this%variables)
         allocate(new_variables, source=this%variables)
+        allocate(new_meta_data, source=this%var_meta)
         ! new_variables = this%variables
 
         deallocate(this%variables)
+        deallocate(this%var_meta)
 
         allocate(this%variables(size(new_variables)*2))
         this%variables(:size(new_variables)) = new_variables
 
+        allocate(this%var_meta(size(new_meta_data)*2))
+        this%var_meta(:size(new_meta_data)) = new_meta_data
+
         deallocate(new_variables)
+        deallocate(new_meta_data)
 
     end subroutine
 

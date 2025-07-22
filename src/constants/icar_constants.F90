@@ -180,186 +180,187 @@ module icar_constants
         integer :: mixing_ratio_2m_veg = 134
         integer :: mixing_ratio_2m_bare = 135
         integer :: surface_pressure = 136
-        integer :: rad_absorbed_total = 137
-        integer :: rad_absorbed_veg = 138
-        integer :: rad_absorbed_bare = 139
-        integer :: rad_net_longwave = 140
-        integer :: longwave_up = 141
-        integer :: ground_heat_flux = 142
-        integer :: evap_canopy = 143
-        integer :: evap_soil_surface = 144
-        integer :: transpiration_rate = 145
-        integer :: ch_veg = 146
-        integer :: ch_veg_2m = 147
-        integer :: ch_bare = 148
-        integer :: ch_bare_2m = 149
-        integer :: ch_under_canopy = 150
-        integer :: ch_leaf = 151
-        integer :: sensible_heat_veg = 152
-        integer :: sensible_heat_bare = 153
-        integer :: sensible_heat_canopy = 154
-        integer :: evap_heat_veg = 155
-        integer :: evap_heat_bare = 156
-        integer :: evap_heat_canopy = 157
-        integer :: transpiration_heat = 158
-        integer :: ground_heat_veg = 159
-        integer :: ground_heat_bare = 160
-        integer :: net_longwave_veg = 161
-        integer :: net_longwave_bare = 162
-        integer :: net_longwave_canopy = 163
-        integer :: runoff_surface = 164
-        integer :: runoff_subsurface = 165
-        integer :: soil_totalmoisture = 166
-        integer :: soil_deep_temperature = 167
-        integer :: water_table_depth = 168
-        integer :: water_aquifer = 169
-        integer :: storage_gw = 170
-        integer :: storage_lake = 171
-        integer :: roughness_z0 = 172
-        integer :: snow_water_equivalent = 173
-        integer :: snow_water_eq_prev = 174
-        integer :: snow_albedo_prev = 175
-        integer :: snow_temperature = 176
-        integer :: snow_layer_depth = 177
-        integer :: snow_layer_ice = 178
-        integer :: snow_layer_liquid_water = 179
-        integer :: snow_age_factor = 180
-        integer :: snow_height = 181
-        integer :: snow_nlayers = 182
-        integer :: soil_water_content = 183
-        integer :: soil_water_content_liq = 184
-        integer :: eq_soil_moisture = 185
-        integer :: smc_watertable_deep = 186
-        integer :: recharge = 187
-        integer :: recharge_deep = 188
-        integer :: soil_temperature = 189
-        integer :: skin_temperature = 190
-        integer :: sst = 191
-        integer :: tend_qv_adv = 192
-        integer :: tend_qv_pbl = 193
-        integer :: tend_qv = 194
-        integer :: tend_th = 195
-        integer :: tend_th_pbl = 196
-        integer :: tend_qc = 197
-        integer :: tend_qc_pbl = 198
-        integer :: tend_qi = 199
-        integer :: tend_qi_pbl = 200
-        integer :: tend_qs = 201
-        integer :: tend_qr = 202
-        integer :: tend_u = 203
-        integer :: tend_v = 204
-        integer :: u_mass = 205
-        integer :: v_mass = 206
-        integer :: re_cloud = 207
-        integer :: re_ice = 208
-        integer :: re_snow = 209
-        integer :: ice1_rho = 210
-        integer :: ice1_phi = 211
-        integer :: ice1_vmi = 212
-        integer :: ice2_rho = 213
-        integer :: ice2_phi = 214
-        integer :: ice2_vmi = 215
-        integer :: ice3_rho = 216
-        integer :: ice3_phi = 217
-        integer :: ice3_vmi = 218
-        integer :: wind_alpha = 219
-        integer :: froude = 220
-        integer :: blk_ri = 221
-        integer :: out_longwave_rad = 222
-        integer :: longwave_cloud_forcing = 223
-        integer :: shortwave_cloud_forcing = 224
-        integer :: land_emissivity = 225
-        integer :: temperature_interface = 226
-        integer :: tend_swrad = 227
-        integer :: runoff_tstep = 228
-        integer :: Tsnow = 229
-        integer :: Sice = 230
-        integer :: Sliq = 231
-        integer :: Ds = 232
-        integer :: fsnow = 233
-        integer :: Nsnow = 234
-        integer :: dSWE_salt = 235
-        integer :: dSWE_susp = 236
-        integer :: dSWE_subl = 237
-        integer :: dSWE_slide = 238
-        integer :: meltflux_out_tstep = 239
-        integer :: Sliq_out = 240
-        integer :: kpbl = 241
-        integer :: hpbl = 242
-        integer :: lake_depth = 243
-        integer :: t_lake3d = 244
-        integer :: snl2d = 245
-        integer :: t_grnd2d = 246
-        integer :: lake_icefrac3d = 247
-        integer :: z_lake3d = 248
-        integer :: dz_lake3d = 249
-        integer :: t_soisno3d = 250
-        integer :: h2osoi_ice3d = 251
-        integer :: h2osoi_liq3d = 252
-        integer :: h2osoi_vol3d = 253
-        integer :: z3d = 254
-        integer :: dz3d = 255
-        integer :: watsat3d = 256
-        integer :: csol3d = 257
-        integer :: tkmg3d = 258
-        integer :: lakemask = 259
-        integer :: xice = 260
-        integer :: zi3d = 261
-        integer :: tksatu3d = 262
-        integer :: tkdry3d = 263
-        integer :: savedtke12d = 264
-        integer :: lakedepth2d = 265
-        integer :: ivt = 266
-        integer :: iwv = 267
-        integer :: iwl = 268
-        integer :: iwi = 269
+        integer :: sea_surface_pressure = 137
+        integer :: rad_absorbed_total = 138
+        integer :: rad_absorbed_veg = 139
+        integer :: rad_absorbed_bare = 140
+        integer :: rad_net_longwave = 141
+        integer :: longwave_up = 142
+        integer :: ground_heat_flux = 143
+        integer :: evap_canopy = 144
+        integer :: evap_soil_surface = 145
+        integer :: transpiration_rate = 146
+        integer :: ch_veg = 147
+        integer :: ch_veg_2m = 148
+        integer :: ch_bare = 149
+        integer :: ch_bare_2m = 150
+        integer :: ch_under_canopy = 151
+        integer :: ch_leaf = 152
+        integer :: sensible_heat_veg = 153
+        integer :: sensible_heat_bare = 154
+        integer :: sensible_heat_canopy = 155
+        integer :: evap_heat_veg = 156
+        integer :: evap_heat_bare = 157
+        integer :: evap_heat_canopy = 158
+        integer :: transpiration_heat = 159
+        integer :: ground_heat_veg = 160
+        integer :: ground_heat_bare = 161
+        integer :: net_longwave_veg = 162
+        integer :: net_longwave_bare = 163
+        integer :: net_longwave_canopy = 164
+        integer :: runoff_surface = 165
+        integer :: runoff_subsurface = 166
+        integer :: soil_totalmoisture = 167
+        integer :: soil_deep_temperature = 168
+        integer :: water_table_depth = 169
+        integer :: water_aquifer = 170
+        integer :: storage_gw = 171
+        integer :: storage_lake = 172
+        integer :: roughness_z0 = 173
+        integer :: snow_water_equivalent = 174
+        integer :: snow_water_eq_prev = 175
+        integer :: snow_albedo_prev = 176
+        integer :: snow_temperature = 177
+        integer :: snow_layer_depth = 178
+        integer :: snow_layer_ice = 179
+        integer :: snow_layer_liquid_water = 180
+        integer :: snow_age_factor = 181
+        integer :: snow_height = 182
+        integer :: snow_nlayers = 183
+        integer :: soil_water_content = 184
+        integer :: soil_water_content_liq = 185
+        integer :: eq_soil_moisture = 186
+        integer :: smc_watertable_deep = 187
+        integer :: recharge = 188
+        integer :: recharge_deep = 189
+        integer :: soil_temperature = 190
+        integer :: skin_temperature = 191
+        integer :: sst = 192
+        integer :: tend_qv_adv = 193
+        integer :: tend_qv_pbl = 194
+        integer :: tend_qv = 195
+        integer :: tend_th = 196
+        integer :: tend_th_pbl = 197
+        integer :: tend_qc = 198
+        integer :: tend_qc_pbl = 199
+        integer :: tend_qi = 200
+        integer :: tend_qi_pbl = 201
+        integer :: tend_qs = 202
+        integer :: tend_qr = 203
+        integer :: tend_u = 204
+        integer :: tend_v = 205
+        integer :: u_mass = 206
+        integer :: v_mass = 207
+        integer :: re_cloud = 208
+        integer :: re_ice = 209
+        integer :: re_snow = 210
+        integer :: ice1_rho = 211
+        integer :: ice1_phi = 212
+        integer :: ice1_vmi = 213
+        integer :: ice2_rho = 214
+        integer :: ice2_phi = 215
+        integer :: ice2_vmi = 216
+        integer :: ice3_rho = 217
+        integer :: ice3_phi = 218
+        integer :: ice3_vmi = 219
+        integer :: wind_alpha = 220
+        integer :: froude = 221
+        integer :: blk_ri = 222
+        integer :: out_longwave_rad = 223
+        integer :: longwave_cloud_forcing = 224
+        integer :: shortwave_cloud_forcing = 225
+        integer :: land_emissivity = 226
+        integer :: temperature_interface = 227
+        integer :: tend_swrad = 228
+        integer :: runoff_tstep = 229
+        integer :: Tsnow = 230
+        integer :: Sice = 231
+        integer :: Sliq = 232
+        integer :: Ds = 233
+        integer :: fsnow = 234
+        integer :: Nsnow = 235
+        integer :: dSWE_salt = 236
+        integer :: dSWE_susp = 237
+        integer :: dSWE_subl = 238
+        integer :: dSWE_slide = 239
+        integer :: meltflux_out_tstep = 240
+        integer :: Sliq_out = 241
+        integer :: kpbl = 242
+        integer :: hpbl = 243
+        integer :: lake_depth = 244
+        integer :: t_lake3d = 245
+        integer :: snl2d = 246
+        integer :: t_grnd2d = 247
+        integer :: lake_icefrac3d = 248
+        integer :: z_lake3d = 249
+        integer :: dz_lake3d = 250
+        integer :: t_soisno3d = 251
+        integer :: h2osoi_ice3d = 252
+        integer :: h2osoi_liq3d = 253
+        integer :: h2osoi_vol3d = 254
+        integer :: z3d = 255
+        integer :: dz3d = 256
+        integer :: watsat3d = 257
+        integer :: csol3d = 258
+        integer :: tkmg3d = 259
+        integer :: lakemask = 260
+        integer :: xice = 261
+        integer :: zi3d = 262
+        integer :: tksatu3d = 263
+        integer :: tkdry3d = 264
+        integer :: savedtke12d = 265
+        integer :: lakedepth2d = 266
+        integer :: ivt = 267
+        integer :: iwv = 268
+        integer :: iwl = 269
+        integer :: iwi = 270
         ! GRID VARIABLES
-        integer :: z = 270
-        integer :: z_interface = 271
-        integer :: dzdx = 272
-        integer :: dzdy = 273
-        integer :: dz = 274
-        integer :: dz_interface = 275
-        integer :: advection_dz = 276
-        integer :: dzdy_v = 277
-        integer :: dzdx_u = 278
-        integer :: jacobian = 279
-        integer :: jacobian_u = 280
-        integer :: jacobian_v = 281
-        integer :: jacobian_w = 282
-        integer :: land_mask = 283
-        integer :: terrain = 284
-        integer :: latitude = 285
-        integer :: longitude = 286
-        integer :: global_terrain = 287
-        integer :: global_dz_interface = 288
-        integer :: global_z_interface = 289
-        integer :: u_latitude = 290
-        integer :: u_longitude = 291
-        integer :: v_latitude = 292
-        integer :: v_longitude = 293
-        integer :: Sx = 294
-        integer :: TPI = 295
-        integer :: neighbor_terrain = 296
-        integer :: froude_terrain = 297
-        integer :: relax_filter_2d = 298
-        integer :: relax_filter_3d = 299
-        integer :: costheta = 300
-        integer :: sintheta = 301
-        integer :: cosine_zenith_angle = 302
-        integer :: slope = 303
-        integer :: slope_angle = 304
-        integer :: aspect_angle = 305
-        integer :: svf = 306
-        integer :: shd = 307
-        integer :: hlm = 308
-        integer :: h1 = 309
-        integer :: h2 = 310
-        integer :: h1_u = 311
-        integer :: h1_v = 312
-        integer :: h2_u = 313
-        integer :: h2_v = 314
-        integer :: last_var = 315
+        integer :: z = 271
+        integer :: z_interface = 272
+        integer :: dzdx = 273
+        integer :: dzdy = 274
+        integer :: dz = 275
+        integer :: dz_interface = 276
+        integer :: advection_dz = 277
+        integer :: dzdy_v = 278
+        integer :: dzdx_u = 279
+        integer :: jacobian = 280
+        integer :: jacobian_u = 281
+        integer :: jacobian_v = 282
+        integer :: jacobian_w = 283
+        integer :: land_mask = 284
+        integer :: terrain = 285
+        integer :: latitude = 286
+        integer :: longitude = 287
+        integer :: global_terrain = 288
+        integer :: global_dz_interface = 289
+        integer :: global_z_interface = 290
+        integer :: u_latitude = 291
+        integer :: u_longitude = 292
+        integer :: v_latitude = 293
+        integer :: v_longitude = 294
+        integer :: Sx = 295
+        integer :: TPI = 296
+        integer :: neighbor_terrain = 297
+        integer :: froude_terrain = 298
+        integer :: relax_filter_2d = 299
+        integer :: relax_filter_3d = 300
+        integer :: costheta = 301
+        integer :: sintheta = 302
+        integer :: cosine_zenith_angle = 303
+        integer :: slope = 304
+        integer :: slope_angle = 305
+        integer :: aspect_angle = 306
+        integer :: svf = 307
+        integer :: shd = 308
+        integer :: hlm = 309
+        integer :: h1 = 310
+        integer :: h2 = 311
+        integer :: h1_u = 312
+        integer :: h1_v = 313
+        integer :: h2_u = 314
+        integer :: h2_v = 315
+        integer :: last_var = 316
     end type var_constants_type
 
 
@@ -395,44 +396,42 @@ module icar_constants
     !                                                         291, 289, 293, 294, 295, 296, 297, 298, 299, 300,  &
     !                                                         301, 302, 303, 304, 305, 306, 307, 308, 309, 310)
 
-    character(len=kMAX_NAME_LENGTH) :: kADV_VARS(22) = (/"potential_temperature",&
-                                                         "qv                   ",&
-                                                         "qc                   ",&
-                                                         "qs                   ",&
-                                                         "qr                   ",&
-                                                         "qi                   ",&
-                                                         "qg                   ",&
-                                                         "ice2_mass            ",&
-                                                         "ice3_mass            ",&
-                                                         "nc                   ",&
-                                                         "ns                   ",&
-                                                         "nr                   ",&
-                                                         "ni                   ",&
-                                                         "ng                   ",&
-                                                         "ice2_number          ",&
-                                                         "ice3_number          ",&
-                                                         "ice1_a               ",&
-                                                         "ice1_c               ",&
-                                                         "ice2_a               ",&
-                                                         "ice2_c               ",&
-                                                         "ice3_a               ",&
-                                                         "ice3_c               "/)
 
 
-    ! character(len=kMAX_NAME_LENGTH) :: kEXCH_VARS(7) = (/"hfss ",&
-    !                                                     "tsfe ",&
-    !                                                     "Ds   ",&
-    !                                                     "scfe ",&
-    !                                                     "Sice ",&
-    !                                                     "Sliq ",&
-    !                                                     "Nsnow"/)
-    character(len=kMAX_NAME_LENGTH) :: kEXCH_VARS(7) = (/"",&
-                                                        "",&
-                                                        "",&
-                                                        "",&
-                                                        "",&
-                                                        "",&
-                                                        ""/)
+
+    character(len=18) :: one_d_column_dimensions(1)         = [character(len=18) :: "level"]
+    character(len=18) :: two_d_dimensions(2)                = [character(len=18) :: "lon_x","lat_y"]
+    character(len=18) :: two_d_t_dimensions(3)              = [character(len=18) :: "lon_x","lat_y","time"]
+    character(len=18) :: two_d_u_dimensions(2)              = [character(len=18) :: "lon_u","lat_y"]
+    character(len=18) :: two_d_v_dimensions(2)              = [character(len=18) :: "lon_x","lat_v"]
+    character(len=18) :: two_d_global_dimensions(2)         = [character(len=18) :: "lon_x_global","lat_y_global"]
+    character(len=18) :: two_d_neighbor_dimensions(2)       = [character(len=18) :: "lon_x_neighbor","lat_y_neighbor"]
+    character(len=18) :: three_d_u_t_dimensions(4)          = [character(len=18) :: "lon_u","level","lat_y","time"]
+    character(len=18) :: three_d_v_t_dimensions(4)          = [character(len=18) :: "lon_x","level","lat_v","time"]
+    character(len=18) :: three_d_u_dimensions(3)            = [character(len=18) :: "lon_u","level","lat_y"]
+    character(len=18) :: three_d_v_dimensions(3)            = [character(len=18) :: "lon_x","level","lat_v"]
+    character(len=18) :: three_d_dimensions(3)              = [character(len=18) :: "lon_x","level","lat_y"]
+    character(len=18) :: three_d_global_dimensions(3)       = [character(len=18) :: "lon_x_global","level","lat_y_global"]
+    character(len=18) :: three_d_neighbor_dimensions(3)     = [character(len=18) :: "lon_x_neighbor","level","lat_y_neighbor"]
+    character(len=18) :: three_d_global_interface_dimensions(3)       = [character(len=18) :: "lon_x_global","level_i","lat_y_global"]
+    character(len=18) :: three_d_neighbor_interface_dimensions(3)     = [character(len=18) :: "lon_x_neighbor","level_i","lat_y_neighbor"]
+    character(len=18) :: three_d_t_dimensions(4)            = [character(len=18) :: "lon_x","level","lat_y","time"]
+    character(len=18) :: three_d_interface_dimensions(3)    = [character(len=18) :: "lon_x","level_i","lat_y"]
+    character(len=18) :: three_d_t_interface_dimensions(4)  = [character(len=18) :: "lon_x","level_i","lat_y","time"]
+    character(len=18) :: three_d_hlm_dimensions(3)          = [character(len=18) :: "lon_x","azimuth","lat_y"]
+    character(len=18) :: three_d_t_soil_dimensions(4)       = [character(len=18) :: "lon_x","nsoil","lat_y","time"]
+    character(len=18) :: three_d_t_snow_dimensions(4)       = [character(len=18) :: "lon_x","nsnow","lat_y","time"]
+    character(len=18) :: three_d_t_snowsoil_dimensions(4)   = [character(len=18) :: "lon_x","nsnowsoil","lat_y","time"]
+    character(len=18) :: three_d_soilcomp_dimensions(3)     = [character(len=18) :: "lon_x","nsoil_composition","lat_y"]
+    character(len=18) :: three_d_crop_dimensions(3)         = [character(len=18) :: "lon_x","crop","lat_y"]
+    character(len=18) :: three_d_t_gecros_dimensions(4)     = [character(len=18) :: "lon_x","gecros","lat_y","time"]
+    character(len=18) :: three_d_t_month_dimensions(4)          = [character(len=18) :: "lon_x","month","lat_y","time"]
+    character(len=18) :: three_d_t_lake_dimensions(4)           = [character(len=18) :: "lon_x","nlevlake","lat_y","time"]
+    character(len=18) :: three_d_t_lake_soisno_dimensions(4)    = [character(len=18) :: "lon_x","nlevsoisno","lat_y","time"] !grid_lake_soisno
+    character(len=18) :: three_d_t_lake_soisno_1_dimensions(4)  = [character(len=18) :: "lon_x","nlevsoisno_1","lat_y","time"]
+    character(len=18) :: three_d_t_lake_soi_dimensions(4)       = [character(len=18) :: "lon_x","nlevsoi_lake","lat_y","time"] !grid_lake_soi
+    character(len=18) :: four_d_azim_dimensions(4)                = [character(len=18) :: "lon_x","level","lat_y","Sx_azimuth"]
+
 
     integer, parameter :: kINTEGER_BITS     = storage_size(kINTEGER_BITS)
     integer, parameter :: kMAX_STORAGE_VARS = storage_size(kVARS) / kINTEGER_BITS
@@ -453,7 +452,7 @@ module icar_constants
 !! ------------------------------------------------
     integer, parameter :: MAXLEVELS          =    500  ! maximum number of vertical layers (should typically be ~10-20)
     integer, parameter :: MAX_NUMBER_FILES   =  50000  ! maximum number of permitted input files (probably a bit extreme)
-
+    character(len=54), parameter :: kOUTPUT_FMT = '("days since ",i4,"-",i2.2,"-",i2.2," ",i2.2,":00:00")'
 
 !>------------------------------------------------
 !!  Default width of coarray halos, ideally might be physics dependant (e.g. based on advection spatial order)

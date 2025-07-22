@@ -5,7 +5,6 @@
 ! 
 module test_halo_exch
 
-    use variable_dict_interface, only: var_dict_t
     use variable_interface,      only: variable_t
     use mpi_f08
     use grid_interface, only: grid_t
@@ -159,7 +158,7 @@ module test_halo_exch
 
         type(halo_t) :: halo
         type(index_type), allocatable :: exch_vars(:), adv_vars(:)
-        type(variable_t) :: var, var_data(1), exch_var, exch_var_data(1)
+        type(variable_t) :: var, var_data(1), exch_var
         integer :: my_index
         integer :: ierr
         type(MPI_Comm) :: comms
@@ -191,51 +190,49 @@ module test_halo_exch
             call grid_3d%set_grid_dimensions( grid%nx_global, grid%ny_global, 20, image=my_index, comms=comms, adv_order=3)
 
             !initialize variables to exchange
-            call var%initialize(grid_3d,forcing_var="qv")
-            call exch_var%initialize(grid,forcing_var="snow")
+            call var%initialize(kVARS%water_vapor,grid_3d,forcing_var=.True.)
+            call exch_var%initialize(kVARS%snow_height,grid,forcing_var=.True.)
 
             allocate(exch_vars(1), adv_vars(1))
 
-            exch_var%name = "snow"
-            exch_var_data(1) = exch_var
+            exch_var%id = kVARS%snow_height
             exch_vars(1)%v = 1
-            exch_vars(1)%n = "snow"    
+            exch_vars%id = kVARS%snow_height
     
         else
             !initialize variables to exchange
-            call var%initialize(grid,forcing_var="qv")
+            call var%initialize(kVARS%water_vapor,grid,forcing_var=dqdt)
 
             allocate(exch_vars(0), adv_vars(1))
         endif
 
-        var%name = "qv"
+        var%id = kVARS%water_vapor
         var_data(1) = var
 
         adv_vars(1)%v = 1
-        adv_vars(1)%n = "qv"    
+        adv_vars(1)%id = kVARS%water_vapor
         if (grid%is2d) call halo%init(exch_vars, adv_vars, grid_3d, comms)
         if (grid%is3d) call halo%init(exch_vars, adv_vars, grid, comms)
 
+        !$acc data copy(halo, var_data, exch_var, var, exch_vars, adv_vars)
+        !$acc parallel loop collapse(3)
         do i = grid%its, grid%ite+grid%nx_e
             do j = grid%jts, grid%jte+grid%ny_e
                 do k = 1, max(1,grid%kte)
                     ! Set the interior values to the index values
                     if (grid%is3d) then
                         var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                        var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                        var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                        if (.not.(batch)) var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                        if (dqdt) var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
                     else
-                        exch_var_data(1)%data_2d(i,j) = i+(j-1)*grid%nx_global
                         exch_var%data_2d(i,j) = i+(j-1)*grid%nx_global
                     endif
                 end do
-                
             end do
         end do
         if (batch) then
             call halo%halo_3d_send_batch(exch_vars, adv_vars, var_data)
             call halo%halo_3d_retrieve_batch(exch_vars, adv_vars, var_data)
-            var = var_data(1)
         else
             if (grid%is3d) then
                 call halo%exch_var(var, do_dqdt=dqdt, corners=corners)
@@ -243,6 +240,9 @@ module test_halo_exch
                 call halo%exch_var(exch_var, corners=corners)
             endif
         endif
+        !$acc end data
+
+        if (batch) var = var_data(1)
 
         ! now loop through all memory indices and check that the value in var%data_3d
         ! is equal to the expected value. If the value is not equal to the expected value
@@ -306,7 +306,15 @@ module test_halo_exch
             !check that the eastern halo is filled with the value of my_index for the eastern neighbor
             if (.not.(east)) then
                 call test_failed(error, "Halo exch failed", "Failed for eastern halo exchange, "//trim(test_str))
-                ! write(*,*) "east data is: ", var%data_3d(grid%ite+1:grid%ime,1,grid%jts:grid%jte)
+                write(*,*) "east data is: ", var%data_3d(grid%ite+1:grid%ime,1,grid%jts:grid%jte)
+
+                write(*,*) "east data should be: "
+                do j = grid%jts, grid%jte
+                    do i = grid%ite+1, grid%ime
+                        write(*,*) i+(j-1)*grid%nx_global+(1-1)*grid%nx_global*grid%ny_global
+                    end do
+                end do
+
                 return
             endif
         endif
@@ -316,6 +324,15 @@ module test_halo_exch
             !check that the western halo is filled with the value of my_index for the western neighbor
             if (.not.(west)) then
                 call test_failed(error, "Halo exch failed", "Failed for western halo exchange, "//trim(test_str))
+                write(*,*) "west data is: ", var%data_3d(grid%ims:grid%its-1,1,grid%jts:grid%jte)
+                
+                write(*,*) "west data should be: "
+                do j = grid%jts, grid%jte
+                    do i = grid%ims, grid%its-1
+                        write(*,*) i+(j-1)*grid%nx_global+(1-1)*grid%nx_global*grid%ny_global
+                    end do
+                end do
+
                 return
             endif
         endif
@@ -325,6 +342,15 @@ module test_halo_exch
             !check that the southern halo is filled with the value of my_index for the southern neighbor
             if (.not.(south)) then
                 call test_failed(error, "Halo exch failed", "Failed for southern halo exchange, "//trim(test_str))
+                write(*,*) "south data is: ", var%data_3d(grid%its:grid%ite,1,grid%jms:grid%jts-1)
+
+                write(*,*) "south data should be: "
+                do j = grid%jms, grid%jts-1
+                    do i = grid%its, grid%ite
+                        write(*,*) i+(j-1)*grid%nx_global+(1-1)*grid%nx_global*grid%ny_global
+                    end do
+                end do
+
                 return
             endif
         endif
@@ -334,6 +360,14 @@ module test_halo_exch
             !check that the northern halo is filled with the value of my_index for the northern neighbor
             if (.not.(north)) then
                 call test_failed(error, "Halo exch failed", "Failed for northern halo exchange, "//trim(test_str))
+                write(*,*) "north data is: ", var%data_3d(grid%its:grid%ite,1,grid%jte+1:grid%jme)
+                write(*,*) "north data should be: "
+                
+                do j = grid%jte+1, grid%jme
+                    do i = grid%its, grid%ite
+                        write(*,*) i+(j-1)*grid%nx_global+(1-1)*grid%nx_global*grid%ny_global
+                    end do
+                end do
                 return
             endif
         endif
