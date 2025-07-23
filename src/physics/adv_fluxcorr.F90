@@ -51,9 +51,9 @@ contains
         !$acc enter data create(usign, vsign, wsign)
         !$acc data present(u, v, w, usign, vsign, wsign)
         !$acc parallel loop gang vector collapse(3)
-        do i = its-1,ite+1
-            do j = jts-1,jte+1
-                do k = kms,kme
+        do j = jts-1,jte+1
+            do k = kms,kme
+                do i = its-1,ite+1
                     if (u(i,k,j) > 0) then
                         usign(i,k,j) = -1
                     elseif (u(i+1,k,j) < 0) then

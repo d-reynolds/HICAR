@@ -237,6 +237,18 @@ MODULE MODULE_MP_MORR_TWO_MOMENT
      REAL, PRIVATE :: CONS21,CONS22,CONS23,CONS24,CONS25,CONS26,CONS27,CONS28,CONS29,CONS30
      REAL, PRIVATE :: CONS31,CONS32,CONS33,CONS34,CONS35,CONS36,CONS37,CONS38,CONS39,CONS40
      REAL, PRIVATE :: CONS41
+      !$acc declare create(QSMALL,RHOW, dcs, cons1, cons12, &
+      !$acc   IACT, INUM, NDCNST, ILIQ, INUC, IBASE, ISUB, IGRAUP, IHAIL, &
+      !$acc   AI, AC, AS, AR, AG, BI, BC, BS, BR, BG, RHOSU, RHOI, RHOSN, RHOG, &
+      !$acc   AIMM, BIMM, ECR, MI0, MG0, F1S, F2S, F1R, F2R, EII, ECI, RIN, CPW, &
+      !$acc   CI, DI, CS, DS, CG, DG, C1, K1, MW, OSM, VI, EPSM, RHOA, MAP, MA, RR, &
+      !$acc   BACT, RM1, RM2, NANEW1, NANEW2, SIG1, SIG2, F11, F12, F21, F22, MMULT, &
+      !$acc   LAMMAXI, LAMMINI, LAMMAXR, LAMMINR, LAMMAXS, LAMMINS, LAMMAXG, LAMMING, &
+      !$acc   CONS2, CONS3, CONS4, CONS5, CONS6, CONS7, CONS8, CONS9, CONS10, &
+      !$acc   CONS11, CONS13, CONS14, CONS15, CONS16, CONS17, CONS18, CONS19, CONS20, &
+      !$acc   CONS21, CONS22, CONS23, CONS24, CONS25, CONS26, CONS27, CONS28, CONS29, &
+      !$acc   CONS30, CONS31, CONS32, CONS33, CONS34, CONS35, CONS36, CONS37, CONS38, &
+      !$acc   CONS39, CONS40, CONS41)
 
 
 CONTAINS
@@ -721,6 +733,25 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    ! array to local variables
    DT = DT_IN
 
+   !$acc data present(TH, QV, QC, QR, QI, QS, QG, NI, NS, NR, NG, &
+   !$acc             RHO, PII, P, DZ, W,              &
+   !$acc             RAINNC, RAINNCV, SR,                    &
+   !$acc             SNOWNC,SNOWNCV,GRAUPELNC,GRAUPELNCV,    & 
+   !$acc             EFFC, EFFI, EFFS,                       &
+   !$acc             qrcuten, qscuten, qicuten,              & 
+   !$acc 		   ISED3D,SSED3D)                          &
+   !$acc      create(T, WVAR, EFFR, EFFG, &
+   !$acc             QC_TEND1D, QI_TEND1D, QNI_TEND1D, QR_TEND1D, &
+   !$acc             NI_TEND1D, NS_TEND1D, NR_TEND1D, &
+   !$acc             QC1D, QI1D, QR1D, NI1D, NS1D, NR1D, QS1D, &
+   !$acc             T_TEND1D, QV_TEND1D, T1D, QV1D, P1D, W1D, WVAR1D, &
+   !$acc             EFFC1D, EFFI1D, EFFS1D, EFFR1D, DZ1D, &
+   !$acc             QG_TEND1D, NG_TEND1D, QG1D, NG1D, EFFG1D, &
+   !$acc             qrcu1d, qscu1d, qicu1d, &
+   !$acc             QGSTEN, QRSTEN, QISTEN, QNISTEN, QCSTEN, &
+   !$acc             nc1d, nc_tend1d, C2PREC,CSED,ISED,SSED,GSED,RSED)
+
+   !$acc parallel loop gang vector collapse(3)
    DO I=ITS,ITE
    DO J=JTS,JTE
    DO K=KTS,KTE
@@ -750,6 +781,17 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    !$omp firstprivate(IHAIL,IGRAUP,ISUB,IBASE,INUC,ILIQ,NDCNST,INUM,IACT,DT) &
    !$omp firstprivate(its, ite, jts, jte, kts,kte)
    !$omp do schedule(dynamic)
+   !$acc parallel loop collapse(2) private(QC_TEND1D, QI_TEND1D, QNI_TEND1D, QR_TEND1D,            &
+   !$acc    NI_TEND1D, NS_TEND1D, NR_TEND1D,                                                  &
+   !$acc    QC1D, QI1D, QS1D, QR1D,NI1D, NS1D, NR1D,                                          &
+   !$acc    T_TEND1D,QV_TEND1D, T1D, QV1D, P1D, DZ1D, W1D, WVAR1D,                   &
+   !$acc    PRECPRT1D,SNOWRT1D,                                                               &
+   !$acc    SNOWPRT1D,GRPLPRT1D,                 & 
+   !$acc    EFFC1D,EFFI1D,EFFS1D,EFFR1D,DT,                                                   &
+   !$acc    QG_TEND1D,NG_TEND1D,QG1D,NG1D,EFFG1D, &
+   !$acc    qrcu1d, qscu1d, qicu1d, &
+   !$acc    QGSTEN,QRSTEN,QISTEN,QNISTEN,QCSTEN, &
+   !$acc    nc1d, nc_tend1d, iinum, C2PREC,CSED,ISED,SSED,GSED,RSED)
    do j=jts,jte      ! j loop (north-south)
    do i=its,ite      ! i loop (east-west)
    !
@@ -757,7 +799,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    !
 
 ! hm , initialize 1d tendency arrays to zero
-
+      !$acc loop vector
       do k=kts,kte   ! k loop (vertical)
 
           QC_TEND1D(k)  = 0.
@@ -808,6 +850,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    !       iinum=0
    !    ENDDO
    ! ELSE
+      !$acc loop vector
       DO k = kts, kte
          nc1d(k)=0. ! temporary placeholder, set to constant in microphysics subroutine
          iinum=1
@@ -838,6 +881,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    !
    ! Transfer 1D arrays back into 3D arrays
    !
+      !$acc loop vector
       do k=kts,kte
 
 ! hm, add tendencies to update global variables
@@ -928,7 +972,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    end do
    !$omp end do
    !$omp end parallel
-
+   !$acc end data
 END SUBROUTINE MP_MORR_TWO_MOMENT
 
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
@@ -2054,7 +2098,7 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
       DUMT = T3D(K)+DT*T3DTEN(K)
       DUMQV = QV3D(K)+DT*QV3DTEN(K)
 ! hm, add fix for low pressure, 5/12/10
-      dum=min(0.99*pres(k),POLYSVP(DUMT,0))
+      dum=min(0.99*pres(k),POLYSVP(T3D(K)+DT*T3DTEN(K),0))
       DUMQSS = EP_2*dum/(PRES(K)-dum)
       DUMQC = QC3D(K)+DT*QC3DTEN(K)
       DUMQC = MAX(DUMQC,0.)
@@ -3249,7 +3293,7 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
       DUMT = T3D(K)+DT*T3DTEN(K)
       DUMQV = QV3D(K)+DT*QV3DTEN(K)
 ! hm, add fix for low pressure, 5/12/10
-      dum=min(0.99*pres(k),POLYSVP(DUMT,0))
+      dum=min(0.99*pres(k),POLYSVP(T3D(K)+DT*T3DTEN(K),0))
       DUMQSS = EP_2*dum/(PRES(K)-dum)
       DUMQC = QC3D(K)+DT*QC3DTEN(K)
       DUMQC = MAX(DUMQC,0.)
@@ -4072,12 +4116,12 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 !  TYPE REFERS TO SATURATION WITH RESPECT TO LIQUID (0) OR ICE (1)
 
 ! REPLACE GOFF-GRATCH WITH FASTER FORMULATION FROM FLATAU ET AL. 1992, TABLE 4 (RIGHT-HAND COLUMN)
-
+      !$acc routine seq
       IMPLICIT NONE
 
       REAL DUM
-      REAL T
-      INTEGER TYPE
+      REAL, INTENT(IN) :: T
+      INTEGER, INTENT(IN) :: TYPE
 ! ice
       real a0i,a1i,a2i,a3i,a4i,a5i,a6i,a7i,a8i
       data a0i,a1i,a2i,a3i,a4i,a5i,a6i,a7i,a8i /&
@@ -4224,9 +4268,10 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
       implicit none
       INTEGER I,N
       LOGICAL PARITY
+      REAL, INTENT(IN) :: X
       REAL                                                          &
           CONV,EPS,FACT,HALF,ONE,RES,SUM,TWELVE,                    &
-          TWO,X,XBIG,XDEN,XINF,XMININ,XNUM,Y,Y1,YSQ,Z,ZERO
+          TWO,XBIG,XDEN,XINF,XMININ,XNUM,Y,Y1,YSQ,Z,ZERO
       REAL, DIMENSION(7) :: C
       REAL, DIMENSION(8) :: P
       REAL, DIMENSION(8) :: Q
@@ -4367,7 +4412,7 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 
       REAL FUNCTION DERF1(X)
       IMPLICIT NONE
-      REAL X
+      REAL, INTENT(IN) :: X
       REAL, DIMENSION(0 : 64) :: A, B
       REAL W,T,Y
       INTEGER K,I

@@ -693,18 +693,18 @@ contains
         !$acc data present(domain,kVARS, U_m, V_m, W_m, denom) create(rho)
         if (advect_density) then
             !$acc parallel loop gang vector collapse(3)
-            do i = ims,ime
-                do j = jms,jme
-                    do k = kms,kme
+            do j = jms,jme
+                do k = kms,kme
+                    do i = ims,ime
                         rho(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d(i,k,j)  
                     enddo
                 enddo
             enddo
         else
             !$acc parallel loop gang vector collapse(3)
-            do i = ims,ime
-                do j = jms,jme
-                    do k = kms,kme
+            do j = jms,jme
+                do k = kms,kme
+                    do i = ims,ime
                         rho(i,k,j) = 1
                     enddo
                 enddo
@@ -713,7 +713,7 @@ contains
 
         !Compute the denomenator for all of the flux summation terms here once
 
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) async(1)
         do j = jms,jme
             do k = kms,kme
                 do i = ims,ime
@@ -756,6 +756,7 @@ contains
         !$acc end parallel
         !$acc end data
 
+        !$acc wait(1)
     end subroutine adv_std_compute_wind
 
     subroutine adv_std_clean_wind_arrays(U_m,V_m,W_m,denom)

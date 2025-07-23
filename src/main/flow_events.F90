@@ -105,7 +105,7 @@ subroutine wake_component(comp_arr, options, boundary, ioclient)
                 endif
             else
                 if (options%general%parent_nest == 0) then
-                    call MPI_Barrier(MPI_COMM_WORLD)
+                    call component_read(comp,options,boundary,ioclient)
                 endif
                 if (.not.(options%restart%restart)) then
                     call comp%increment_output_time()
@@ -118,7 +118,7 @@ subroutine wake_component(comp_arr, options, boundary, ioclient)
                 endif
 
                 if (options%general%parent_nest == 0) then
-                    call MPI_Barrier(MPI_COMM_WORLD)
+                    call component_read(comp,options,boundary,ioclient)
                 endif
             endif
     end select
@@ -290,7 +290,7 @@ subroutine component_read(component, options, boundary, ioclient)
                 ! if ioclient comms is null, then we are acting as an ioserver
                 if (options%general%parent_nest == 0) then
                     
-                    call end_time_safety_under%set(component%end_time%mjd() - component%input_dt%days()*2)
+                    call end_time_safety_under%set(component%end_time%mjd() - component%input_dt%days())
 
                     if (component%sim_time < end_time_safety_under) then
                         call MPI_Barrier(MPI_COMM_WORLD)

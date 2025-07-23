@@ -370,6 +370,7 @@ contains
         integer,        intent(in)    :: ims,ime, jms,jme, kms,kme
         integer,        intent(in)    :: ids,ide, jds,jde, kds,kde
 
+        !$acc data present(domain) copyin(dt) copy(SR, last_rain, last_snow, last_graup, refl_10cm)
         ! run the thompson microphysics
         if (options%physics%microphysics==kMP_THOMPSON) then
             ! call the thompson microphysics
@@ -616,60 +617,9 @@ contains
                               jts = jts, jte = jte,                   &
                               kts = kts, kte = kte)
         endif
+        !$acc end data
 
     end subroutine process_subdomain
-
-    subroutine process_halo(domain, options, dt, halo,  &
-                            its,ite, jts,jte, kts,kte,  &
-                            ims,ime, jms,jme, kms,kme,  &
-                            ids,ide, jds,jde, kds,kde)
-        implicit none
-        type(domain_t), intent(inout) :: domain
-        type(options_t),intent(in)    :: options
-        real,           intent(in)    :: dt
-        integer,        intent(in)    :: halo
-        integer,        intent(in)    :: its,ite, jts,jte, kts,kte
-        integer,        intent(in)    :: ims,ime, jms,jme, kms,kme
-        integer,        intent(in)    :: ids,ide, jds,jde, kds,kde
-        integer :: halo_its,halo_ite, halo_jts,halo_jte, halo_kts,halo_kte
-
-        ! process the western halo
-        halo_ite = its+halo-1
-        call process_subdomain(domain, options, dt, &
-                    its,halo_ite, jts,jte, kts,kte, &
-                    ims,ime, jms,jme, kms,kme,      &
-                    ids,ide, jds,jde, kds,kde)
-
-
-        ! process the eastern halo
-        halo_its = ite-halo+1
-        call process_subdomain(domain, options, dt, &
-                    halo_its,ite, jts,jte, kts,kte, &
-                    ims,ime, jms,jme, kms,kme,      &
-                    ids,ide, jds,jde, kds,kde)
-
-        ! for the top and bottom halos, we no longer process the corner elements, so subset i tile
-        halo_its = its+halo
-        halo_ite = ite-halo
-
-        ! process the southern halo
-        halo_jte = jts+halo-1
-        call process_subdomain(domain, options, dt,           &
-                    halo_its,halo_ite, jts,halo_jte, kts,kte, &
-                    ims,ime, jms,jme, kms,kme,                &
-                    ids,ide, jds,jde, kds,kde)
-
-
-        ! process the northern halo
-        halo_jts = jte-halo+1
-        call process_subdomain(domain, options, dt,           &
-                    halo_its,halo_ite, halo_jts,jte, kts,kte, &
-                    ims,ime, jms,jme, kms,kme,                &
-                    ids,ide, jds,jde, kds,kde)
-
-
-    end subroutine process_halo
-
 
     !>----------------------------------------------------------
     !! Microphysical driver
@@ -683,12 +633,11 @@ contains
     !! @param   dt_in       Current driving time step (this is the advection step)
     !!
     !!----------------------------------------------------------
-    subroutine mp(domain, options, dt_in, halo, subset)
+    subroutine mp(domain, options, dt_in)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in)    :: options
         real,           intent(in)    :: dt_in
-        integer,        intent(in),   optional :: halo, subset
 
         real :: mp_dt
         integer ::ids,ide,jds,jde,kds,kde, itimestep=1
@@ -706,6 +655,8 @@ contains
         jds = domain%grid%jds;   jms = domain%grid%jms;   jts = domain%grid%jts
         jde = domain%grid%jde;   jme = domain%grid%jme;   jte = domain%grid%jte
         ny  = domain%grid%ny
+
+        !$acc data present(domain)
 
         ! if this is the first time mp is called, set last time such that mp will update
         if (last_model_time==-999) then
@@ -737,54 +688,22 @@ contains
                          domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, &
                          domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,   &
                          domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
-                         domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
-                             
+                         domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)                             
 
-            if (present(subset)) then
-                last_model_time = domain%sim_time%seconds()
-                call process_subdomain(domain, options, mp_dt,                 &
-                                       its = its + subset, ite = ite - subset, &
-                                       jts = jts + subset, jte = jte - subset, &
-                                       kts = kts,          kte = kte,          &
-                                       ims = ims, ime = ime,                   & ! memory dims
-                                       jms = jms, jme = jme,                   &
-                                       kms = kms, kme = kme,                   &
-                                       ids = ids, ide = ide,                   & ! domain dims
-                                       jds = jds, jde = jde,                   &
-                                       kds = kds, kde = kde)
-            endif
-
-            if (present(halo)) then
-                call process_halo(domain, options, mp_dt, halo, &
-                                       its = its, ite = ite,    &
-                                       jts = jts, jte = jte,    &
-                                       kts = kts, kte = kte,    &
-                                       ims = ims, ime = ime,    & ! memory dims
-                                       jms = jms, jme = jme,    &
-                                       kms = kms, kme = kme,    &
-                                       ids = ids, ide = ide,    & ! domain dims
-                                       jds = jds, jde = jde,    &
-                                       kds = kds, kde = kde)
-
-            endif
-
-            if ((.not.present(halo)).and.(.not.present(subset))) then
-                last_model_time = domain%sim_time%seconds()                             
-                call process_subdomain(domain, options, mp_dt,  &
-                                        its = its, ite = ite,    &
-                                        jts = jts, jte = jte,    &
-                                        kts = kts, kte = kte,    &
-                                        ims = ims, ime = ime,    & ! memory dims
-                                        jms = jms, jme = jme,    &
-                                        kms = kms, kme = kme,    &
-                                        ids = ids, ide = ide,    & ! domain dims
-                                        jds = jds, jde = jde,    &
-                                        kds = kds, kde = kde)
-
-            endif
+            last_model_time = domain%sim_time%seconds()                             
+            call process_subdomain(domain, options, mp_dt,  &
+                                    its = its, ite = ite,    &
+                                    jts = jts, jte = jte,    &
+                                    kts = kts, kte = kte,    &
+                                    ims = ims, ime = ime,    & ! memory dims
+                                    jms = jms, jme = jme,    &
+                                    kms = kms, kme = kme,    &
+                                    ids = ids, ide = ide,    & ! domain dims
+                                    jds = jds, jde = jde,    &
+                                    kds = kds, kde = kde)
 
         endif
-
+        !$acc end data
     end subroutine mp
 
     !>----------------------------------------------------------
