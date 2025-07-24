@@ -317,16 +317,16 @@ contains
                 endif
             endif
 
-            ! pointless if this is hgt_hi
+            ! pointless if this is the temperature variable, which is used as the reference
             if (.not.(name=='tvar')) then
-                ! now get the dimension lengths of the terrain height variable
+                ! now get the dimension lengths of the temperature variable
                 call check_variable_present(options%boundary_files(1), options%tvar)
                 !! then get the number of dimensions for the variable
                 call io_getdims(options%boundary_files(1), options%tvar, t_var_dims)
         !
                 call get_nml_var_metadata('tvar',group,description,default,min,max,type,values,units,t_dimensions)
 
-                ! reverse ordering of hgt_dimensions -- needed since fortran netCDF uses reverse ordering relative to python/nco
+                ! reverse ordering of dimensions -- needed since fortran netCDF uses reverse ordering relative to python/nco
                 allocate(t_dimensions_tmp(size(t_dimensions)))
                 t_dimensions_tmp = t_dimensions
                 do p=1,size(t_dimensions)
@@ -349,7 +349,9 @@ contains
                         ! check if the dimension length matches the terrain height variable
                         dim_len = var_dims(dim_indx)
                         if (name=='ulat' .and. dim_name=='X') dim_len = dim_len - 1
+                        if (name=='ulon' .and. dim_name=='X') dim_len = dim_len - 1
                         if (name=='vlat' .and. dim_name=='Y') dim_len = dim_len - 1
+                        if (name=='vlon' .and. dim_name=='Y') dim_len = dim_len - 1
                         if (name=='vvar' .and. dim_name=='Y' .and. dim_len == t_var_dims(p)+1) dim_len = dim_len - 1
                         if (name=='uvar' .and. dim_name=='X' .and. dim_len == t_var_dims(p)+1) dim_len = dim_len - 1
 
