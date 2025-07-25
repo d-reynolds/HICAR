@@ -470,7 +470,7 @@ contains
                              NS = domain%vars_3d(domain%var_indx(kVARS%snow_number)%v)%data_3d,             &
                              NR = domain%vars_3d(domain%var_indx(kVARS%rain_number)%v)%data_3d,             &
                              NG = domain%vars_3d(domain%var_indx(kVARS%graupel_number)%v)%data_3d,          &
-                             RHO = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,                &
+                             RHO_IN = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,                &
                              PII = domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,                  &
                              P = domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                 &
                              DT_IN = dt, DZ = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d,     &
