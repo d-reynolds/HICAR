@@ -967,6 +967,10 @@ contains
         integer :: i, max_level
         real :: s, n, s1, s2, gamma, gamma_min
         real :: b1_i, b1_mass, db1_i, db1_mass, b2_i, b2_mass, db2_i, db2_mass
+
+        real, allocatable :: vct_a(:)
+        real :: x1, a, b, c, jkr, x
+        integer :: nlevp1, jk
         
         associate(ims => this%ims,      ime => this%ime,                        &
             jms => this%jms,      jme => this%jme,                        &
@@ -977,6 +981,10 @@ contains
             z_interface           => this%vars_3d(this%var_indx(kVARS%z_interface)%v)%data_3d,            &
             nz                    => options%domain%nz,               &
             dz                    => options%domain%dz_levels,        &
+            auto_sleve            => options%domain%auto_sleve,      &
+            min_lay_thckn         => options%domain%height_lowest_level,        &
+            top_height            => options%domain%model_top_height,                &
+            stretch_fac           => options%domain%stretch_fac,              &
             dz_mass               => this%vars_3d(this%var_indx(kVARS%dz)%v)%data_3d,                &
             dz_interface          => this%vars_3d(this%var_indx(kVARS%dz_interface)%v)%data_3d,           &
             terrain               => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d,                &
@@ -1000,6 +1008,48 @@ contains
 
             ! Still not 100% convinced this works well in cases other than flat_z_height = 0 (w sleve). So for now best to keep at 0 when using sleve?
             max_level = nz !find_flat_model_level(options, nz, dz)
+
+            ! Implementation of ICON-like automatic level-generation, that is either cubic or quadratic (COSMO style) !!!!STILL EXPERIMENTAL!!!!
+            ! If auto_sleve is set to 0, then dz is not modified and the rest of the sleve setup is done normally.
+            ! If auto_sleve is set to 1, then dz is modified to be a cubic polynomial (Used in ICON if itype_laydistr==2).
+            ! If auto_sleve is set to 2, then dz is modified to be a quadratic polynomial (COSMO style, used in ICON if itype_laydistr==3).
+            ! Lowest layer thickness is set to min_lay_thickn, model top height is set to top_height, and stretch_fac is used to control the distribution of dz.
+            ! After automatic level generation, the new dz is used to calculate the SLEVE levels as usual.
+            if (auto_sleve .ge. 1) then
+
+                nlevp1 = nz + 1
+                allocate(vct_a(nlevp1))
+
+                select case (auto_sleve)
+                case (1)
+                    ! cubic polynomial (ICON itype_laydistr==2)
+                    x1 = (2*stretch_fac - 1)*min_lay_thckn
+                    b  = (top_height - x1/6*nz**3 - (min_lay_thckn - x1/6)*nz) &
+                        / (nz**2 - nz**3/3 - 2*nz/3)
+                    a  = (x1 - 2*b)/6
+                    c  = min_lay_thckn - (a + b)
+                    do jk = 1, nlevp1
+                        jkr      = real(nlevp1 - jk, wp)
+                        vct_a(jk)= a*jkr**3 + b*jkr**2 + c
+                    end do
+
+                case (2)
+                    ! quadratic polynomial (ICON itype_laydistr==3)
+                    do jk = 1, nlevp1
+                        x = real(nlevp1 - jk)/real(nz)
+                        vct_a(jk)= top_height * x * (stretch_fac*x + 1.0 - stretch_fac)
+                    end do
+
+                case default
+                    ! do nothing (could error)
+                end select
+
+                ! Overwrite dz: mass layers are differences of vct_a
+                do jk = 1, nz
+                    dz(jk) = vct_a(jk+1) - vct_a(jk)
+                end do
+                deallocate(vct_a)
+            end if
 
             smooth_height = sum(dz(1:max_level))!+dz(max_level)*0.5
 

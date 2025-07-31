@@ -1355,6 +1355,32 @@ contains
                 max = 1e6
                 default = "0.0"
                 group = "Domain"
+            case("auto_sleve")
+                description = "Integer that determines whether to create levels automatically when using sleve=.True. (As used in ICON)"//achar(10)//BLNK_CHR_N// &
+                    "Values: (0=No, 1=Parabolic level distribution, 2=Quadratic Level distribution (COSMO like))"
+                min = 0
+                max = 2
+                default = "0"
+                group = "Domain"
+            case("height_lowest_level")
+                description = "Lowest level height in meters, only used when auto_sleve=1 or 2."
+                min = 0.1
+                max = 1e6
+                default = "20.0"
+                group = "Domain"
+            case("model_top_height")
+                description = "Model top height in meters, only used when auto_sleve=1 or 2."
+                min = 0.1
+                max = 1e6
+                default = "10000.0"
+                group = "Domain"
+            case("stretch_fac")
+                description = "Factor that controls distribution of the vertical levels, only used when auto_sleve=1 or 2." //achar(10)//BLNK_CHR_N// &
+                    "Values: 0 results in linearly spaced levels, 1 results in a parabolic or quadratic distribution depending on auto_sleve."
+                min = 0.0
+                max = 1.0
+                default = "0.7"
+                group = "Domain"
             case("longitude_system")
                 description = "Longitude system, values: (0=Maintain Logitude, 1=Prime Centered, 2=Dateline Centered, 3=Guess Lon)"
                 allocate(values(4))
