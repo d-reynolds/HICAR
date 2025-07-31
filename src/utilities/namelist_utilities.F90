@@ -1357,7 +1357,7 @@ contains
                 group = "Domain"
             case("auto_sleve")
                 description = "Integer that determines whether to create levels automatically when using sleve=.True. (As used in ICON):"//achar(10)//BLNK_CHR_N// &
-                    "Values: (0=No, 1=Cubic polynomial level distribution, 2=Quadratic polynomial level distribution (COSMO like, most stable))"
+                    "Values: 0=No, 1=Cubic polynomial level distribution, 2=Quadratic polynomial level distribution (COSMO like, most stable)"
                 min = 0
                 max = 2
                 default = "0"
@@ -1376,7 +1376,8 @@ contains
                 group = "Domain"
             case("stretch_fac")
                 description = "Factor that controls distribution of the vertical levels, only used when auto_sleve=1 or 2." //achar(10)//BLNK_CHR_N// &
-                    "Values: 0 results in linearly spaced levels, 1 results in a parabolic or quadratic distribution depending on auto_sleve. Higher stretching is experimental but possible."
+                    "Values: 0 -> linearly spaced levels, 1 -> parabolic or quadratic distribution depending on auto_sleve." //achar(10)//BLNK_CHR_N// &
+                    "Higher stretching is experimental but possible."
                 min = 0.0
                 max = 10.0
                 default = "0.7"
