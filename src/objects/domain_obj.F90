@@ -1055,14 +1055,14 @@ contains
                         x_lin     = real(jk - 1) / real(nz)
                         vct_a(jk) = top_height * (exp(alpha*x_lin) - 1.0) / (exp_alpha - 1.0)
                     end do
-                    ! enforce exact minimum layer thickness by offsetting half-levels
-                    raw_dz1 = vct_a(2) - vct_a(1)
-                    dz1_offset  = min_lay_thckn - raw_dz1
-                    if (dz1_offset .ne. 0.0) then
-                        do jk = 2, nlevp1
-                            vct_a(jk) = vct_a(jk) + dz1_offset
-                        end do
-                    endif
+!                    ! enforce exact minimum layer thickness by offsetting half-levels
+!                    raw_dz1 = vct_a(2) - vct_a(1)
+!                    dz1_offset  = min_lay_thckn - raw_dz1
+!                    if (dz1_offset .ne. 0.0) then
+!                        do jk = 2, nlevp1
+!                            vct_a(jk) = vct_a(jk) + dz1_offset
+!                        end do
+!                    endif
 
                 case default
                     write(*,*) 'ERROR: auto_sleve must be 0,1,2 or 3. Not', auto_sleve
