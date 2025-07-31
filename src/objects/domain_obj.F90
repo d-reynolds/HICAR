@@ -969,7 +969,7 @@ contains
         real :: b1_i, b1_mass, db1_i, db1_mass, b2_i, b2_mass, db2_i, db2_mass
 
         real, allocatable :: vct_a(:), dz(:)
-        real :: x1, a, b, c, jkr, x, a_lin, b_lin
+        real :: x1, a, b, c, jkr, x, a_lin, b_lin, alpha, exp_alpha, x_lin, raw_dz1, dz1_offset
         integer :: nlevp1, jk
         
         associate(ims => this%ims,      ime => this%ime,                        &
@@ -1024,43 +1024,64 @@ contains
 
                 select case (auto_sleve)
                 case (1)
-                    ! cubic polynomial (ICON itype_laydistr==2), bottom-up indexing
-                    x1 = (2*stretch_fac - 1)*min_lay_thckn
-                    b  = (top_height - x1/6*nz**3 - (min_lay_thckn - x1/6)*nz) &
-                        / (nz**2 - nz**3/3 - 2*nz/3)
-                    a  = (x1 - 2*b)/6
+                    ! case 1: ICON-style cubic half-level polynomial (bottom-up)
+                    x1 = (2*stretch_fac - 1) * min_lay_thckn
+                    b  = ( top_height &
+                        - (x1/6)*nz**3 &
+                        - (min_lay_thckn - x1/6)*nz &
+                        ) / ( nz**2 - nz**3/3 - 2*nz/3 )
+                    a  = (x1 - 2*b) / 6
                     c  = min_lay_thckn - (a + b)
                     do jk = 1, nlevp1
-                        jkr       = real(jk - 1)          ! 0 at bottom, nz at top
+                        jkr       = real(jk - 1)       ! 0 at bottom, nz at top
                         vct_a(jk) = a*jkr**3 + b*jkr**2 + c
                     end do
 
                 case (2)
-                    ! quadratic polynomial with enforced min thickness, bottom-up indexing
+                    ! case 2: quadratic half-level with enforced min thickness
                     b_lin = real(nz) * min_lay_thckn / top_height
                     a_lin = 1.0 - b_lin
                     do jk = 1, nlevp1
-                        x         = real(jk - 1) / real(nz)  ! 0 at bottom, 1 at top
+                        x         = real(jk - 1) / real(nz)
                         vct_a(jk) = top_height * (a_lin*x**2 + b_lin*x)
                     end do
 
+                case (3)
+                    ! case 3: eta-style exponential half-level stretching with enforced minimum
+                    alpha     = stretch_fac
+                    exp_alpha = exp(alpha)
+                    ! compute raw exponential half-levels
+                    do jk = 1, nlevp1
+                        x_lin     = real(jk - 1) / real(nz)
+                        vct_a(jk) = top_height * (exp(alpha*x_lin) - 1.0) / (exp_alpha - 1.0)
+                    end do
+                    ! enforce exact minimum layer thickness by offsetting half-levels
+                    raw_dz1 = vct_a(2) - vct_a(1)
+                    dz1_offset  = min_lay_thckn - raw_dz1
+                    if (dz1_offset .ne. 0.0) then
+                        do jk = 2, nlevp1
+                            vct_a(jk) = vct_a(jk) + dz1_offset
+                        end do
+                    endif
+
                 case default
-                    ! should never get here
+                    write(*,*) 'ERROR: auto_sleve must be 0,1,2 or 3. Not', auto_sleve
+                    stop
                 end select
 
-                ! Overwrite dz: mass layers are differences of vct_a
+                ! compute full-layer thicknesses
                 do jk = 1, nz
                     dz(jk) = vct_a(jk+1) - vct_a(jk)
                 end do
 
                 ! Diagnostics
                 if (STD_OUT_PE) then
-                    write(*,*) "    Using automatic sleve level generation with auto_sleve = ", auto_sleve
-                    write(*,*) "    Vertical grid setup BEFORE SLEVE transformation:"
-                    write(*,*) "    Lowest 10 model layer heights dz(1:11) = ", dz(1:11), " m above gound."
-                    write(*,*) "    Model top (sum(dz))  = ", sum(dz), " m.a.s.l."
-                    write(*,*) "    Stretch factor = ", stretch_fac, &
-                            ",   min layer thickness = ", minval(dz), " m"
+                    write(*,*) '    Using automatic sleve level generation with auto_sleve = ', auto_sleve
+                    write(*,*) '    Vertical grid setup BEFORE SLEVE transformation:'
+                    write(*,*) '    Lowest 10 model layer heights dz(1:11) = ', dz(1:11), ' m above ground.'
+                    write(*,*) '    Model top (sum(dz))  = ', sum(dz), ' m.a.s.l.'
+                    write(*,*) '    Stretch factor = ', stretch_fac, &
+                            ',   min layer thickness = ', minval(dz), ' m'
                 endif
 
                 deallocate(vct_a)
@@ -1070,9 +1091,10 @@ contains
                 dz(1:nz) = dz_lev(1:nz)
 
             else
-                write(*,*) "ERROR: auto_sleve must be 0, 1 or 2. Not ", auto_sleve
+                write(*,*) 'ERROR: auto_sleve must be 0,1,2 or 3. Not', auto_sleve
                 stop
             endif
+
 
 
             smooth_height = sum(dz(1:max_level))!+dz(max_level)*0.5

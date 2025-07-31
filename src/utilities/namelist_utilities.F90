@@ -1356,10 +1356,11 @@ contains
                 default = "0.0"
                 group = "Domain"
             case("auto_sleve")
-                description = "Integer that determines whether to create levels automatically when using sleve=.True. (As used in ICON):"//achar(10)//BLNK_CHR_N// &
-                    "Values: 0=No, 1=Cubic polynomial level distribution, 2=Quadratic polynomial level distribution (COSMO like, most stable)"
+                description = "Integer that determines whether to create levels automatically when using sleve=.True. (As used in ICON):" //achar(10)//BLNK_CHR_N// &
+                    "Values: 0=No, 1=Cubic polynomial level distribution, 2=Quadratic polynomial level distribution (COSMO like, most stable)" //achar(10)//BLNK_CHR_N// &
+                    "        3=Eta style exponential level distribution (similar to WRF)."
                 min = 0
-                max = 2
+                max = 3
                 default = "0"
                 group = "Domain"
             case("height_lowest_level")
