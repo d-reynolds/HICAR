@@ -1356,8 +1356,8 @@ contains
                 default = "0.0"
                 group = "Domain"
             case("auto_sleve")
-                description = "Integer that determines whether to create levels automatically when using sleve=.True. (As used in ICON)"//achar(10)//BLNK_CHR_N// &
-                    "Values: (0=No, 1=Parabolic level distribution, 2=Quadratic Level distribution (COSMO like))"
+                description = "Integer that determines whether to create levels automatically when using sleve=.True. (As used in ICON):"//achar(10)//BLNK_CHR_N// &
+                    "Values: (0=No, 1=Cubic polynomial level distribution, 2=Quadratic polynomial level distribution (COSMO like, most stable))"
                 min = 0
                 max = 2
                 default = "0"
