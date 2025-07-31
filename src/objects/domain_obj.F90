@@ -1057,7 +1057,7 @@ contains
                 if (STD_OUT_PE) then
                     write(*,*) "    Using automatic sleve level generation with auto_sleve = ", auto_sleve
                     write(*,*) "    Vertical grid setup BEFORE SLEVE transformation:"
-                    write(*,*) "    Lowest half level height = ", vct_a(1), " m.a.s.l.,   dz(1) = ", dz(1), " m"
+                    write(*,*) "    Lowest 10 model layer heights dz(1:11) = ", dz(1:11), " m above gound."
                     write(*,*) "    Model top (sum(dz))  = ", sum(dz), " m.a.s.l."
                     write(*,*) "    Stretch factor = ", stretch_fac, &
                             ",   min layer thickness = ", minval(dz), " m"
@@ -1125,7 +1125,8 @@ contains
                 write(*,*) "    Using a sleve_n of ", options%domain%sleve_n
                 write(*,*) "    Smooth height is ", smooth_height, "m.a.s.l     (model top ", sum(dz(1:nz)), "m.a.s.l.)"
                 write(*,*) "    invertibility parameter gamma is: ", gamma_min
-                if(gamma_min <= 0) write(*,*) " CAUTION: coordinate transformation is not invertible (gamma <= 0 ) !!! reduce decay rate(s), and/or increase flat_z_height! When using sleve_auto, also reduce height_lowest_level and/or stretch_fac!"
+                if(gamma_min > 0 .and. gamma_min < 0.15) write(*,*) " CAUTION: coordinate transformation is close to being non-invertible (gamma < 0.15) ! Model might crash with Segmentation Violation. Reduce decay rate(s), and/or increase flat_z_height! When using sleve_auto, also reduce height_lowest_level and/or stretch_fac!"
+                if(gamma_min <= 0) write(*,*) " CAUTION: coordinate transformation is not invertible (gamma <= 0 ) !!! Reduce decay rate(s), and/or increase flat_z_height! When using sleve_auto, also reduce height_lowest_level and/or stretch_fac!"
                 ! if(options%general%debug)  write(*,*) "   (for (debugging) reference: 'gamma(n=1)'= ", gamma,")"
                 write(*,*) ""
                 flush(output_unit)
