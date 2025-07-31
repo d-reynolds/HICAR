@@ -1313,7 +1313,7 @@ contains
         
         ! if nz wasn't specified in the namelist, we assume a HUGE number of levels
         ! so now we have to figure out what the actual number of levels read was
-        if (ALL(dz_levels(:,n_indx)==kREAL_NO_VAL) .and. sleve==.True. .and. auto_sleve==0 .or. ALL(dz_levels(:,n_indx)==kREAL_NO_VAL) .and. sleve==.False.) then
+        if (ALL(dz_levels(:,n_indx)==kREAL_NO_VAL) .and. ( (sleve(n_indx) .eqv. .True. .and. auto_sleve(n_indx)==0) .or. (sleve(n_indx) .eqv. .False.) ) ) then
             if (STD_OUT_PE) write(*,*) "  WARNING: dz_levels not specified in namelist for domain: ", n_indx
             if (n_indx == 1) then
                 stop 'dz_levels must be specified in namelist for at least the first domain'

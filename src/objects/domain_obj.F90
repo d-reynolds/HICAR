@@ -968,7 +968,7 @@ contains
         real :: s, n, s1, s2, gamma, gamma_min
         real :: b1_i, b1_mass, db1_i, db1_mass, b2_i, b2_mass, db2_i, db2_mass
 
-        real, allocatable :: vct_a(:)
+        real, allocatable :: vct_a(:), dz(:)
         real :: x1, a, b, c, jkr, x
         integer :: nlevp1, jk
         
@@ -980,7 +980,7 @@ contains
             z_v                   => this%geo_v%z,                        &
             z_interface           => this%vars_3d(this%var_indx(kVARS%z_interface)%v)%data_3d,            &
             nz                    => options%domain%nz,               &
-            dz                    => options%domain%dz_levels,        &
+            dz_lev                => options%domain%dz_levels,        &
             auto_sleve            => options%domain%auto_sleve,      &
             min_lay_thckn         => options%domain%height_lowest_level,        &
             top_height            => options%domain%model_top_height,                &
@@ -1009,6 +1009,8 @@ contains
             ! Still not 100% convinced this works well in cases other than flat_z_height = 0 (w sleve). So for now best to keep at 0 when using sleve?
             max_level = nz !find_flat_model_level(options, nz, dz)
 
+            allocate(dz(nz))
+
             ! Implementation of ICON-like automatic level-generation, that is either cubic or quadratic (COSMO style) !!!!STILL EXPERIMENTAL!!!!
             ! If auto_sleve is set to 0, then dz is not modified and the rest of the sleve setup is done normally.
             ! If auto_sleve is set to 1, then dz is modified to be a cubic polynomial (Used in ICON if itype_laydistr==2).
@@ -1029,7 +1031,7 @@ contains
                     a  = (x1 - 2*b)/6
                     c  = min_lay_thckn - (a + b)
                     do jk = 1, nlevp1
-                        jkr      = real(nlevp1 - jk, wp)
+                        jkr      = real(nlevp1 - jk)
                         vct_a(jk)= a*jkr**3 + b*jkr**2 + c
                     end do
 
@@ -1049,6 +1051,15 @@ contains
                     dz(jk) = vct_a(jk+1) - vct_a(jk)
                 end do
                 deallocate(vct_a)
+
+            else if(auto_sleve == 0) then
+                ! do nothing, only set dz to dz_lev
+                dz(1:nz) = dz_lev(1:nz)
+
+            else
+                write(*,*) "ERROR: auto_sleve must be 0, 1 or 2. Not ", auto_sleve
+                stop
+
             end if
 
             smooth_height = sum(dz(1:max_level))!+dz(max_level)*0.5
@@ -1101,7 +1112,7 @@ contains
                 write(*,*) "    Using a sleve_n of ", options%domain%sleve_n
                 write(*,*) "    Smooth height is ", smooth_height, "m.a.s.l     (model top ", sum(dz(1:nz)), "m.a.s.l.)"
                 write(*,*) "    invertibility parameter gamma is: ", gamma_min
-                if(gamma_min <= 0) write(*,*) " CAUTION: coordinate transformation is not invertible (gamma <= 0 ) !!! reduce decay rate(s), and/or increase flat_z_height!"
+                if(gamma_min <= 0) write(*,*) " CAUTION: coordinate transformation is not invertible (gamma <= 0 ) !!! reduce decay rate(s), and/or increase flat_z_height! When using sleve_auto, also reduce height_lowest_level and/or stretch_fac!"
                 ! if(options%general%debug)  write(*,*) "   (for (debugging) reference: 'gamma(n=1)'= ", gamma,")"
                 write(*,*) ""
                 flush(output_unit)
@@ -1260,6 +1271,8 @@ contains
             z_interface  = global_z_interface(ims:ime,:,jms:jme)
             z            = neighbor_z(ims:ime,:,jms:jme)
             jacobian     = neighbor_jacobian(ims:ime,:,jms:jme)
+
+            deallocate(dz)
 
         end associate
         ! call array_offset_x(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
