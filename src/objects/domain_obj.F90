@@ -1024,26 +1024,26 @@ contains
 
                 select case (auto_sleve)
                 case (1)
-                    ! cubic polynomial (ICON itype_laydistr==2)
+                    ! cubic polynomial (ICON itype_laydistr==2), bottom-up indexing
                     x1 = (2*stretch_fac - 1)*min_lay_thckn
                     b  = (top_height - x1/6*nz**3 - (min_lay_thckn - x1/6)*nz) &
                         / (nz**2 - nz**3/3 - 2*nz/3)
                     a  = (x1 - 2*b)/6
                     c  = min_lay_thckn - (a + b)
                     do jk = 1, nlevp1
-                        jkr      = real(nlevp1 - jk)
+                        jkr       = real(jk - 1)          ! now 0 at bottom, nz at top
                         vct_a(jk)= a*jkr**3 + b*jkr**2 + c
                     end do
 
                 case (2)
-                    ! quadratic polynomial (ICON itype_laydistr==3)
+                    ! quadratic polynomial (ICON itype_laydistr==3), bottom-up indexing
                     do jk = 1, nlevp1
-                        x = real(nlevp1 - jk)/real(nz)
+                        x         = real(jk - 1) / real(nz)  ! 0 at bottom, 1 at top
                         vct_a(jk)= top_height * x * (stretch_fac*x + 1.0 - stretch_fac)
                     end do
 
                 case default
-                    ! do nothing (could error)
+                    ! should never get here
                 end select
 
                 ! Overwrite dz: mass layers are differences of vct_a
@@ -1051,25 +1051,24 @@ contains
                     dz(jk) = vct_a(jk+1) - vct_a(jk)
                 end do
 
-                ! Output lowest and most upper level heights of the actual dz array for control purposes
+                ! Diagnostics
                 if (STD_OUT_PE) then
                     write(*,*) "    Using automatic sleve level generation with auto_sleve = ", auto_sleve
                     write(*,*) "    Vertical grid setup BEFORE SLEVE transformation:"
-                    write(*,*) "    Lowest half level height is ", vct_a(1), " m.a.s.l., lowest full level height is dz(1) = ", dz(1), " m.a.s.l."
-                    write(*,*) "    Model top is at", sum(dz), " m.a.s.l."
-                    write(*,*) "    Stretch factor is ", stretch_fac, " and minimum layer thickness is ", minval(dz), " m."
+                    write(*,*) "    Lowest half level height = ", vct_a(1), " m.a.s.l.,   dz(1) = ", dz(1), " m"
+                    write(*,*) "    Model top (sum(dz))  = ", sum(dz), " m.a.s.l."
+                    write(*,*) "    Stretch factor = ", stretch_fac, ",   min layer thickness = ", minval(dz), " m"
                 endif
 
                 deallocate(vct_a)
 
-            else if(auto_sleve == 0) then
-                ! do nothing, only set dz to dz_lev
+            else if (auto_sleve == 0) then
+                ! no auto-sleve: preserve original dz_lev
                 dz(1:nz) = dz_lev(1:nz)
 
             else
                 write(*,*) "ERROR: auto_sleve must be 0, 1 or 2. Not ", auto_sleve
                 stop
-
             endif
 
             smooth_height = sum(dz(1:max_level))!+dz(max_level)*0.5
