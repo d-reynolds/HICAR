@@ -969,7 +969,7 @@ contains
         real :: b1_i, b1_mass, db1_i, db1_mass, b2_i, b2_mass, db2_i, db2_mass
 
         real, allocatable :: vct_a(:), dz(:)
-        real :: x1, a, b, c, jkr, x
+        real :: x1, a, b, c, jkr, x, a_lin, b_lin
         integer :: nlevp1, jk
         
         associate(ims => this%ims,      ime => this%ime,                        &
@@ -1031,15 +1031,17 @@ contains
                     a  = (x1 - 2*b)/6
                     c  = min_lay_thckn - (a + b)
                     do jk = 1, nlevp1
-                        jkr       = real(jk - 1)          ! now 0 at bottom, nz at top
-                        vct_a(jk)= a*jkr**3 + b*jkr**2 + c
+                        jkr       = real(jk - 1)          ! 0 at bottom, nz at top
+                        vct_a(jk) = a*jkr**3 + b*jkr**2 + c
                     end do
 
                 case (2)
-                    ! quadratic polynomial (ICON itype_laydistr==3), bottom-up indexing
+                    ! quadratic polynomial with enforced min thickness, bottom-up indexing
+                    b_lin = real(nz) * min_lay_thckn / top_height
+                    a_lin = 1.0 - b_lin
                     do jk = 1, nlevp1
                         x         = real(jk - 1) / real(nz)  ! 0 at bottom, 1 at top
-                        vct_a(jk)= top_height * x * (stretch_fac*x + 1.0 - stretch_fac)
+                        vct_a(jk) = top_height * (a_lin*x**2 + b_lin*x)
                     end do
 
                 case default
@@ -1057,7 +1059,8 @@ contains
                     write(*,*) "    Vertical grid setup BEFORE SLEVE transformation:"
                     write(*,*) "    Lowest half level height = ", vct_a(1), " m.a.s.l.,   dz(1) = ", dz(1), " m"
                     write(*,*) "    Model top (sum(dz))  = ", sum(dz), " m.a.s.l."
-                    write(*,*) "    Stretch factor = ", stretch_fac, ",   min layer thickness = ", minval(dz), " m"
+                    write(*,*) "    Stretch factor = ", stretch_fac, &
+                            ",   min layer thickness = ", minval(dz), " m"
                 endif
 
                 deallocate(vct_a)
@@ -1070,6 +1073,7 @@ contains
                 write(*,*) "ERROR: auto_sleve must be 0, 1 or 2. Not ", auto_sleve
                 stop
             endif
+
 
             smooth_height = sum(dz(1:max_level))!+dz(max_level)*0.5
 
