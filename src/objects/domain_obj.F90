@@ -1050,6 +1050,16 @@ contains
                 do jk = 1, nz
                     dz(jk) = vct_a(jk+1) - vct_a(jk)
                 end do
+
+                ! Output lowest and most upper level heights of the actual dz array for control purposes
+                if (STD_OUT_PE) then
+                    write(*,*) "    Using automatic sleve level generation with auto_sleve = ", auto_sleve
+                    write(*,*) "    Vertical grid setup BEFORE SLEVE transformation:"
+                    write(*,*) "    Lowest half level height is ", vct_a(1), " m.a.s.l., lowest full level height is dz(1) = ", dz(1), " m.a.s.l."
+                    write(*,*) "    Model top is at", sum(dz), " m.a.s.l."
+                    write(*,*) "    Stretch factor is ", stretch_fac, " and minimum layer thickness is ", minval(dz), " m."
+                endif
+
                 deallocate(vct_a)
 
             else if(auto_sleve == 0) then
@@ -1060,7 +1070,7 @@ contains
                 write(*,*) "ERROR: auto_sleve must be 0, 1 or 2. Not ", auto_sleve
                 stop
 
-            end if
+            endif
 
             smooth_height = sum(dz(1:max_level))!+dz(max_level)*0.5
 
