@@ -605,7 +605,7 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     integer :: n, k_max, msg_size, indx, i, n_vars
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
-    if (this%n_3d <= 0) return
+    if (this%n_3d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
     msg_size = 1
     disp = 0
@@ -779,7 +779,7 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     integer :: n, k_max, i, n_vars
     logical :: exch_v_only
 
-    if (this%n_3d <= 0) return
+    if (this%n_3d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
     exch_v_only = .False.
     if (present(exch_var_only)) exch_v_only=exch_var_only
@@ -870,7 +870,7 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
     integer :: n, msg_size, i, n_vars
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
-    if (this%n_2d <= 0) return
+    if (this%n_2d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
     msg_size = 1
     disp = 0
@@ -954,7 +954,7 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
     type(variable_t) :: var
     integer :: n, i, n_vars
 
-    if (this%n_2d <= 0) return
+    if (this%n_2d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
     if (.not.(this%north_boundary)) call MPI_Win_Wait(this%north_2d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_2d_win)

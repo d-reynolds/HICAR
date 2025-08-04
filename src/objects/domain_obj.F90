@@ -325,7 +325,6 @@ contains
         class(domain_t),  intent(inout)   :: this
         logical, intent(in), optional    :: forcing_update
         integer :: i, j, k
-        real :: qsum
         logical :: forcing_update_only
         real, dimension(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme) :: mod_temp_3d
         real, dimension(this%ims:this%ime, this%jms:this%jme) :: surf_temp_1, surf_temp_2, surf_temp_3
@@ -333,7 +332,7 @@ contains
         forcing_update_only = .False.
         if (present(forcing_update)) forcing_update_only = forcing_update
 
-        !$acc data present_or_copy(this) create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3) if(.not.(forcing_update_only))
+        !$acc data present_or_copy(this, kVARS) create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3)
         associate(ims => this%ims, ime => this%ime,                             &
                   jms => this%jms, jme => this%jme,                             &
                   ids => this%ids, ide => this%ide,                             &
@@ -358,24 +357,37 @@ contains
                   potential_temperature => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d )
 
         !Calculation of density
+
         if (forcing_update_only) then
-            exner = exner_function(this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d)
-            temperature = potential_temperature * exner
-            density =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d / (R_d * temperature*(1+qv)) ! kg/m^3
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                exner(i,k,j) = exner_function(this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j))
+                temperature(i,k,j) = potential_temperature(i,k,j) * exner(i,k,j)
+                density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,j))) ! kg/m^3
+            enddo
+            enddo
+            enddo
         else
-            !$acc kernels if(.not.(forcing_update_only))
-            exner = exner_function(pressure)
-            temperature = potential_temperature * exner
-            density =  pressure / (R_d * temperature*(1+qv)) ! kg/m^3
-            !$acc end kernels
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                exner(i,k,j) = exner_function(pressure(i,k,j))
+                temperature(i,k,j) = potential_temperature(i,k,j) * exner(i,k,j)
+                density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,j))) ! kg/m^3
+            enddo
+            enddo
+            enddo
         endif
-        
+
 
         ! differences between forcing data at the boudnary and the internal model state can lead to strong discontinuities in temperature and qv
         ! these then affect density, leading to discontinuities in density, and thus winds. So, here we set the density for points on the "frame"
         ! to be the same as the density in the first cell within the physics region of the domain
         if (ims==ids) then
-            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jms,jme
                 do k = kms,kme
                     do i = ims,its-1
@@ -390,7 +402,7 @@ contains
             enddo
         endif
         if (ime==ide) then
-            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jms,jme
                 do k = kms,kme
                     do i = ite+1,ime
@@ -405,7 +417,7 @@ contains
             enddo
         endif
         if (jms==jds) then
-            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jms,jts-1
                 do k = kms,kme
                     do i = ims,ime
@@ -420,7 +432,7 @@ contains
             enddo
         endif
         if (jme==jde) then 
-            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jte+1,jme
                 do k = kms,kme
                     do i = ims,ime
@@ -436,7 +448,7 @@ contains
         endif
 
         if (ims==ids .and. jms==jds) then
-            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jms,jts-1
                 do k = kms,kme
                     do i = ims,its-1
@@ -452,7 +464,7 @@ contains
         endif
 
         if (ims==ids .and. jme==jde) then
-            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jte+1,jme
                 do k = kms,kme
                     do i = ims,its-1
@@ -468,7 +480,7 @@ contains
         endif
 
         if (ime==ide .and. jms==jds) then
-            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jms,jts-1
                 do k = kms,kme
                     do i = ite+1,ime
@@ -484,7 +496,7 @@ contains
         endif
 
         if (ime==ide .and. jme==jde) then
-            !$acc parallel loop gang vector collapse(3) if(.not.(forcing_update_only)) async(1)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jte+1,jme
                 do k = kms,kme
                     do i = ite+1,ime
@@ -547,25 +559,25 @@ contains
                 enddo
             endif
 
-            ! if (this%var_indx(kVARS%ivt)%v > 0) then
-            !     call compute_ivt(this%vars_2d(this%var_indx(kVARS%ivt)%v)%data_2d, qv, u_mass, v_mass, pressure_i(:,kms:kme,:))
-            ! endif
-            ! if (this%var_indx(kVARS%iwv)%v > 0) then
-            !     call compute_iq(this%vars_2d(this%var_indx(kVARS%iwv)%v)%data_2d, qv, pressure_i(:,kms:kme,:))
-            ! endif
-            ! if (this%var_indx(kVARS%iwl)%v > 0) then
-            !     mod_temp_3d = 0
-            !     if (this%var_indx(kVARS%cloud_water_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%cloud_water_mass)%v)%data_3d(i,k,j)
-            !     if (this%var_indx(kVARS%rain_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%rain_mass)%v)%data_3d(i,k,j)
-            !     call compute_iq(this%vars_2d(this%var_indx(kVARS%iwl)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
-            ! endif
-            ! if (this%var_indx(kVARS%iwi)%v > 0) then
-            !     mod_temp_3d = 0
-            !     if (this%var_indx(kVARS%ice_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%ice_mass)%v)%data_3d(i,k,j)
-            !     if (this%var_indx(kVARS%snow_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%snow_mass)%v)%data_3d(i,k,j)
-            !     if (this%var_indx(kVARS%graupel_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%graupel_mass)%v)%data_3d(i,k,j)
-            !     call compute_iq(this%vars_2d(this%var_indx(kVARS%iwi)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
-            ! endif
+            if (this%var_indx(kVARS%ivt)%v > 0) then
+                call compute_ivt(this%vars_2d(this%var_indx(kVARS%ivt)%v)%data_2d, qv, u_mass, v_mass, pressure_i(:,kms:kme,:))
+            endif
+            if (this%var_indx(kVARS%iwv)%v > 0) then
+                call compute_iq(this%vars_2d(this%var_indx(kVARS%iwv)%v)%data_2d, qv, pressure_i(:,kms:kme,:))
+            endif
+            if (this%var_indx(kVARS%iwl)%v > 0) then
+                mod_temp_3d = 0
+                if (this%var_indx(kVARS%cloud_water_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%cloud_water_mass)%v)%data_3d(i,k,j)
+                if (this%var_indx(kVARS%rain_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%rain_mass)%v)%data_3d(i,k,j)
+                call compute_iq(this%vars_2d(this%var_indx(kVARS%iwl)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
+            endif
+            if (this%var_indx(kVARS%iwi)%v > 0) then
+                mod_temp_3d = 0
+                if (this%var_indx(kVARS%ice_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%ice_mass)%v)%data_3d(i,k,j)
+                if (this%var_indx(kVARS%snow_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%snow_mass)%v)%data_3d(i,k,j)
+                if (this%var_indx(kVARS%graupel_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%graupel_mass)%v)%data_3d(i,k,j)
+                call compute_iq(this%vars_2d(this%var_indx(kVARS%iwi)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
+            endif
             
             ! temporary constant
             if (this%var_indx(kVARS%roughness_z0)%v > 0) then

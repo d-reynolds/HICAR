@@ -305,9 +305,14 @@ contains
         !$acc data present(q,u,v,w,flux_x,flux_y,flux_z,dz,denom) &
         !$acc create(dumb_q)
         
-        !$acc kernels
-        dumb_q = q
-        !$acc end kernels
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms,jme
+        do k = kms,kme
+        do i = ims,ime
+            dumb_q(i,k,j) = q(i,k,j)
+        enddo
+        enddo
+        enddo
 
         !$acc parallel loop gang vector collapse(3)
         do j = jts-1, jte+1

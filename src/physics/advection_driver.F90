@@ -95,9 +95,14 @@ contains
 
         do n = 1, size(domain%adv_vars)
 
-            !$acc kernels
-            temp = domain%vars_3d(domain%adv_vars(n)%v)%data_3d
-            !$acc end kernels
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                temp(i,k,j) = domain%vars_3d(domain%adv_vars(n)%v)%data_3d(i,k,j)
+            enddo
+            enddo
+            enddo
 
             if (options%time%RK3) then
                 if (options%physics%advection==kADV_STD) then

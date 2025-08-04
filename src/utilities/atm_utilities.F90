@@ -32,6 +32,7 @@ contains
     !!
     !!----------------------------------------------------------
     subroutine compute_ivt(ivt, qv, u, v, pi)
+        !$acc routine seq
         implicit none
         real, intent(in),            dimension(:,:,:)   :: pi, qv, u, v
         real, intent(inout),         dimension(:,:)   :: ivt
@@ -70,6 +71,7 @@ contains
     !!
     !!----------------------------------------------------------
     subroutine compute_iq(iq, q, pi)
+        !$acc routine seq
         implicit none
         real, intent(in),            dimension(:,:,:)   :: pi, q
         real, intent(inout),         dimension(:,:)   :: iq

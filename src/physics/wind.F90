@@ -179,38 +179,41 @@ contains
         real,    dimension(ims:ime,kms:kme,jms:jme), intent(in)  :: div, dz, jaco_w, rho
         logical, intent(in)    :: adv_den
         
-        real, dimension(ims:ime,kms:kme-1,jms:jme) :: rho_i
+        real, dimension(ims:ime,kms:kme,jms:jme) :: rho_i
         
         !$acc data present(w, div, dz, jaco_w, rho) create(rho_i)
         !$acc kernels
         rho_i(:,kms:kme-1,:) = ( rho(:,kms:kme-1,:)*dz(:,kms+1:kme,:) + rho(:,kms+1:kme,:)*dz(:,kms:kme-1,:) ) / (dz(:,kms:kme-1,:)+dz(:,kms+1:kme,:))
-        
+        rho_i(:,kme,:) = rho(:,kme,:)
         w = 0
-        
+        !$acc end kernels
+
+        !$acc parallel loop gang collapse(2)
+        do j = j_s,j_e
+        do i = i_s,i_e
+        !$acc loop seq
         do k = kms,kme
             if (adv_den) then
                 if (k==kms) then
-                    w(i_s:i_e,k,j_s:j_e) = 0 - div(i_s:i_e,k,j_s:j_e) * dz(i_s:i_e,k,j_s:j_e) &
-                                                / (jaco_w(i_s:i_e,k,j_s:j_e) * rho_i(i_s:i_e,k,j_s:j_e) )
-                elseif (k==kme) then
-                    w(i_s:i_e,k,j_s:j_e) = ((w(i_s:i_e,k-1,j_s:j_e) * rho_i(i_s:i_e,k-1,j_s:j_e) &
-                                                * jaco_w(i_s:i_e,k-1,j_s:j_e)) - div(i_s:i_e,k,j_s:j_e) * &
-                                                dz(i_s:i_e,k,j_s:j_e)) / (jaco_w(i_s:i_e,k,j_s:j_e) * rho(i_s:i_e,k,j_s:j_e))
+                    w(i,k,j) = 0 - div(i,k,j) * dz(i,k,j) &
+                                                / (jaco_w(i,k,j) * rho_i(i,k,j) )
                 else
-                    w(i_s:i_e,k,j_s:j_e) = ( (w(i_s:i_e,k-1,j_s:j_e) * rho_i(i_s:i_e,k-1,j_s:j_e) * &
-                                jaco_w(i_s:i_e,k-1,j_s:j_e)) - div(i_s:i_e,k,j_s:j_e) * dz(i_s:i_e,k,j_s:j_e)) / &
-                                (jaco_w(i_s:i_e,k,j_s:j_e) *  rho_i(i_s:i_e,k,j_s:j_e) )
+                    w(i,k,j) = ( (w(i,k-1,j) * rho_i(i,k-1,j) &
+                                                * jaco_w(i,k-1,j)) - div(i,k,j) * &
+                                                dz(i,k,j)) / (jaco_w(i,k,j) *  rho_i(i,k,j))
                 endif
             else
                 if (k==kms) then
-                    w(i_s:i_e,k,j_s:j_e) = (0 - div(i_s:i_e,k,j_s:j_e) * dz(i_s:i_e,k,j_s:j_e)) / (jaco_w(i_s:i_e,k,j_s:j_e) )
+                    w(i,k,j) = (0 - div(i,k,j) * dz(i,k,j)) / (jaco_w(i,k,j) )
                 else 
-                    w(i_s:i_e,k,j_s:j_e) = (w(i_s:i_e,k-1,j_s:j_e) * jaco_w(i_s:i_e,k-1,j_s:j_e) - &
-                                                div(i_s:i_e,k,j_s:j_e) * dz(i_s:i_e,k,j_s:j_e))/ (jaco_w(i_s:i_e,k,j_s:j_e) )
+                    w(i,k,j) = (w(i,k-1,j) * jaco_w(i,k-1,j) - &
+                                                div(i,k,j) * dz(i,k,j))/ (jaco_w(i,k,j) )
                 end if
             end if
         end do
-        !$acc end kernels
+        end do
+        end do
+
         !$acc end data
     end subroutine
 
