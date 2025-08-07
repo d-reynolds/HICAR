@@ -1038,7 +1038,7 @@ contains
                     end do
 
                 case (2)
-                    ! case 2: quadratic half-level with enforced min thickness
+                    ! case 2: quadratic half-level polynomial
                     b_lin = real(nz) * min_lay_thckn / top_height
                     a_lin = 1.0 - b_lin
                     do jk = 1, nlevp1
@@ -1047,7 +1047,7 @@ contains
                     end do
 
                 case (3)
-                    ! case 3: eta-style exponential half-level stretching with enforced minimum
+                    ! case 3: eta-style exponential half-level stretching
                     alpha     = stretch_fac
                     exp_alpha = exp(alpha)
                     ! compute raw exponential half-levels
@@ -1069,7 +1069,7 @@ contains
                     stop
                 end select
 
-                ! compute full-layer thicknesses
+                ! compute layer thicknesses
                 do jk = 1, nz
                     dz(jk) = vct_a(jk+1) - vct_a(jk)
                 end do
