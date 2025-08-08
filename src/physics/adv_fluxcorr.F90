@@ -111,11 +111,11 @@ contains
         
         real, dimension(its-1:ite+2,kms:kme,  jts-1:jte+2),intent(inout)          :: flux_x, flux_x_up
         real, dimension(its-1:ite+2,kms:kme,  jts-1:jte+2),intent(inout)          :: flux_y, flux_y_up
-        real, dimension(its-1:ite+2,kms:kme+1,jts-1:jte+2),intent(inout)    :: flux_z, flux_z_up
+        real, dimension(its-1:ite+2,kms:kme+1,jts-1:jte+2),intent(inout)          :: flux_z, flux_z_up
         
         
         real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+1)   :: scale_in, scale_out
-        real :: dz_t_i, fx, fx1, fy, fy1, fz, fz1, qmax, qmin, q_i, q_j, q_k, q0, temp, flux_in, flux_out
+        real :: dz_t_i, fx, fx1, fy, fy1, fz, fz1, qmax, qmin, q_i, q_j, q_k, q0, temp, flux_in, flux_out, scale_in_cur, scale_out_cur
         integer :: i, j ,k
         real :: scale
         real :: flux_x_up_0, flux_y_up_0, flux_z_up_0, flux_x_up_1, flux_y_up_1, flux_z_up_1
@@ -126,13 +126,13 @@ contains
 
         ! Get upwind fluxes
 
-        !$acc data present(q,u,v,w,flux_x,flux_y,flux_z,flux_x_up,flux_y_up,flux_z_up,dz,denom,usign,vsign,wsign) &
+        !$acc data present(q,flux_x,flux_y,flux_z,flux_x_up,flux_y_up,flux_z_up,dz,denom,usign,vsign,wsign) &
         !$acc create(scale_in,scale_out)
 
         call upwind_flux3(q,u,v,w,flux_x_up,flux_z_up,flux_y_up,dz,denom)
 
         ! Next compute max and min possible fluxes        
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) async(1)
         do j = jts-1, jte+1 
             do k = kms, kme
                 do i = its-1, ite+1
@@ -182,79 +182,81 @@ contains
 
                     !Store reused variables to minimize memory accesses
                     dz_t_i   = 1./dz(i,k,j)
-
+                    
+                    ! Optimize flux calculations to reduce redundant memory accesses
+                    flux_x_up_0 = flux_x_up(i,k,j)
                     flux_x_up_1 = flux_x_up(i+1,k,j)
+                    flux_y_up_0 = flux_y_up(i,k,j)
                     flux_y_up_1 = flux_y_up(i,k,j+1)
                     flux_z_up_1 = flux_z_up(i,k+1,j)
-                    flux_x_up_0 = flux_x_up(i,k,j)
-                    flux_y_up_0 = flux_y_up(i,k,j)
-                    flux_z_up_0 = flux_z_up(i,k,j)
-                    fx = flux_x(i,k,j)-flux_x_up_0; fx1 = flux_x(i+1,k,j)-flux_x_up_1
-                    fy = flux_y(i,k,j)-flux_y_up_0; fy1 = flux_y(i,k,j+1)-flux_y_up_1
-                    fz = flux_z(i,k,j)-flux_z_up_0; fz1 = flux_z(i,k+1,j)-flux_z_up_1
-                                                
+
+                    fx = flux_x(i,k,j)-flux_x_up_0
+                    fx1 = flux_x(i+1,k,j)-flux_x_up_1
+                    fy = flux_y(i,k,j)-flux_y_up_0
+                    fy1 = flux_y(i,k,j+1)-flux_y_up_1
+                    fz1 = flux_z(i,k+1,j)-flux_z_up_1
+
+                    if (k == kms) then
+                        flux_z_up_0 = 0.0
+                        fz = 0.0
+                    else
+                        flux_z_up_0 = flux_z_up(i,k,j)
+                        fz = flux_z(i,k,j)-flux_z_up_0
+                    endif
+
                     !Compute concentration if upwind only was used
                     temp  = q0 - ((flux_x_up_1 - flux_x_up_0) + &
                                         (flux_y_up_1 - flux_y_up_0) + &
                                         (flux_z_up_1 - flux_z_up_0) * &
                                             dz_t_i)*denom(i,k,j)
-
-                    flux_in =  (( (abs(fx1)-fx1) + (abs(fx)+fx) ) + &
-                                ( (abs(fy1)-fy1) + (abs(fy)+fy) ) + &
-                                ( (abs(fz1)-fz1) + (abs(fz)+fz) ) * &
-                                    dz_t_i)*0.5*denom(i,k,j)
+                    ! Optimize flux_in and flux_out calculations using fewer operations
+                    ! flux_in = positive inflow, flux_out = positive outflow
+                    flux_in =  ((max(0.0,-fx1) + max(0.0,fx)) + &
+                                (max(0.0,-fy1) + max(0.0,fy)) + &
+                                (max(0.0,-fz1) + max(0.0,fz)) * &
+                                    dz_t_i)*denom(i,k,j)
             
-                    flux_out = (( (abs(fx1)+fx1) + (abs(fx)-fx) ) + &
-                                ( (abs(fy1)+fy1) + (abs(fy)-fy) ) + &
-                                ( (abs(fz1)+fz1) + (abs(fz)-fz) ) * &
-                                    dz_t_i)*0.5*denom(i,k,j)
+                    flux_out = ((max(0.0,fx1) + max(0.0,-fx)) + &
+                                (max(0.0,fy1) + max(0.0,-fy)) + &
+                                (max(0.0,fz1) + max(0.0,-fz)) * &
+                                    dz_t_i)*denom(i,k,j)
     
                     scale_in(i,k,j) = (qmax-temp)/(flux_in  + 0.000000001)
                     scale_out(i,k,j) = (temp-qmin)/(flux_out+ 0.000000001)
                 enddo
             enddo
         enddo
-        !$acc parallel
+
+        !$acc parallel async(2) wait(1)
         !$acc loop gang vector collapse(3)
         do j = jts, jte+1 
             do k = kms, kme
                 do i = its, ite+1
+                    scale_in_cur = scale_in(i,k,j)
+                    scale_out_cur = scale_out(i,k,j)
+                    
+                    ! X-direction flux correction
                     flux_x(i,k,j) = flux_x(i,k,j) - flux_x_up(i,k,j)
-                    if (flux_x(i,k,j) > 0) then
-                        scale = max(0.0,min(scale_in(i,k,j),scale_out(i-1,k,j),1.0))
-                    elseif(flux_x(i,k,j) < 0) then
-                        scale = max(0.0,min(scale_out(i,k,j),scale_in(i-1,k,j),1.0))
-                    else
-                        scale = 1.0
-                    endif
+                    scale = merge(max(0.0,min(scale_in_cur,scale_out(i-1,k,j),1.0)), &
+                                  max(0.0,min(scale_out_cur,scale_in(i-1,k,j),1.0)), &
+                                  flux_x(i,k,j) > 0.0)
                     flux_x(i,k,j) = scale*flux_x(i,k,j) + flux_x_up(i,k,j)
 
+                    ! Y-direction flux correction
                     flux_y(i,k,j) = flux_y(i,k,j) - flux_y_up(i,k,j)
-                    if (flux_y(i,k,j) > 0) then
-                        scale = max(0.0,min(scale_in(i,k,j),scale_out(i,k,j-1),1.0))
-                    elseif(flux_y(i,k,j) < 0) then
-                        scale = max(0.0,min(scale_out(i,k,j),scale_in(i,k,j-1),1.0))
-                    else
-                        scale = 1.0
-                    endif
+                    scale = merge(max(0.0,min(scale_in_cur,scale_out(i,k,j-1),1.0)), &
+                                  max(0.0,min(scale_out_cur,scale_in(i,k,j-1),1.0)), &
+                                  flux_y(i,k,j) > 0.0)
                     flux_y(i,k,j) = scale*flux_y(i,k,j) + flux_y_up(i,k,j)
 
-
-
+                    ! Z-direction flux correction (only for k > kms)
                     if (k > kms) then
                         flux_z(i,k,j) = flux_z(i,k,j) - flux_z_up(i,k,j)
-
-                        if (flux_z(i,k,j) > 0) then
-                            scale = max(0.0,min(scale_in(i,k,j),scale_out(i,k-1,j),1.0))
-                        elseif(flux_z(i,k,j) < 0) then
-                            scale = max(0.0,min(scale_out(i,k,j),scale_in(i,k-1,j),1.0))
-                        else
-                            scale = 1.0
-                        endif
-
+                        scale = merge(max(0.0,min(scale_in_cur,scale_out(i,k-1,j),1.0)), &
+                                      max(0.0,min(scale_out_cur,scale_in(i,k-1,j),1.0)), &
+                                      flux_z(i,k,j) > 0.0)
                         flux_z(i,k,j) = scale*flux_z(i,k,j) + flux_z_up(i,k,j)
                     endif
-
                 enddo
             enddo
         enddo
@@ -263,19 +265,14 @@ contains
         do j = jts, jte+1 
             do i = its, ite+1
                 flux_z(i,kme+1,j) = flux_z(i,kme+1,j) - flux_z_up(i,kme+1,j)
-
-                if (abs(flux_z(i,kme+1,j)) > 0) then
-                    scale = max(0.0,min(scale_in(i,kme,j),scale_out(i,kme,j),1.0))
-                else
-                    scale = 1.0
-                endif
-
+                scale = merge(max(0.0,min(scale_in(i,kme,j),scale_out(i,kme,j),1.0)), &
+                              1.0, abs(flux_z(i,kme+1,j)) > 0.0)
                 flux_z(i,kme+1,j) = scale*flux_z(i,kme+1,j) + flux_z_up(i,kme+1,j)
             enddo
         enddo
         !$acc end parallel
         !$acc end data
-
+        !$acc wait(2)
     end subroutine WRF_flux_corr
 
     subroutine upwind_flux3(q,u,v,w,flux_x,flux_z,flux_y,dz,denom)
@@ -291,7 +288,7 @@ contains
         
         real, dimension(ims:ime,  kms:kme,jms:jme) :: dumb_q
         integer :: i, j, k, bot, wes, sou
-        real    :: tmp, abs_tmp
+        real    :: tmp, abs_tmp, flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val
         
         !When using RK3, we may have a time step derived using a CFL constraint larger than 1
         !This means that our upwind advection here may be in violation of the CFL criterion,
@@ -305,29 +302,38 @@ contains
         !$acc data present(q,u,v,w,flux_x,flux_y,flux_z,dz,denom) &
         !$acc create(dumb_q)
         
-        !$acc parallel loop gang vector collapse(3)
-        do j = jms,jme
-        do k = kms,kme
-        do i = ims,ime
-            dumb_q(i,k,j) = q(i,k,j)
-        enddo
-        enddo
-        enddo
-
-        !$acc parallel loop gang vector collapse(3)
-        do j = jts-1, jte+1
+        !$acc parallel loop gang vector collapse(3) async(1) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val)
+        do j = jms, jme
             do k = kms, kme
-                do i = its-1, ite+1
-                    dumb_q(i,k,j)  = q(i,k,j) - ((flux_x(i+1,k,j) - flux_x(i,k,j)) + &
-                                                (flux_y(i,k,j+1) - flux_y(i,k,j)) + &
-                                                (flux_z(i,k+1,j) - flux_z(i,k,j)) / &
-                                                dz(i,k,j))*denom(i,k,j)
-                enddo
+            do i = ims, ime
+
+                if (i > ite+1 .or. i < its-1 .or. j > jte+1 .or. j < jts-1) then
+                    dumb_q(i,k,j) = q(i,k,j)
+                else
+                    ! Cache frequently accessed values to reduce memory traffic
+                    flux_diff_x = flux_x(i+1,k,j) - flux_x(i,k,j)
+                    flux_diff_y = flux_y(i,k,j+1) - flux_y(i,k,j)
+
+                    !if k is the bottom level, we expect no flux in/out of bottom boundary. In fact,
+                    !advection code is optimized such that no flux is ever calculated...
+                    if (k==kms) then
+                        flux_diff_z = flux_z(i,k+1,j)
+                    else
+                        flux_diff_z = flux_z(i,k+1,j) - flux_z(i,k,j)
+                    endif
+                    denom_val = denom(i,k,j)
+                    dz_val = dz(i,k,j)
+                    
+                    ! Perform advection calculation with cached values
+                    dumb_q(i,k,j) = q(i,k,j) - (flux_diff_x + flux_diff_y + flux_diff_z / dz_val) * denom_val
+                endif
+            enddo
             enddo
         enddo
 
+
         !Now compute upwind fluxes after second step
-        !$acc parallel
+        !$acc parallel wait(1) async(2)
         !$acc loop gang vector collapse(3)
         do j = jts-1, jte+2
             do k = kms, kme
@@ -336,15 +342,21 @@ contains
                     wes = max(i-1,ims)
                     sou = max(j-1,jms)
 
+                    ! X-direction flux - optimize using single calculation
                     tmp = u(i,k,j)
-                    abs_tmp = ABS(tmp)
-                    flux_x(i,k,j) = flux_x(i,k,j) + 0.5*((tmp + abs_tmp) * dumb_q(wes,k,j) + (tmp - abs_tmp) * dumb_q(i,k,j)) * 0.5
+                    flux_x(i,k,j) = flux_x(i,k,j) + 0.25 * (tmp * (dumb_q(wes,k,j) + dumb_q(i,k,j)) + &
+                                                                   abs(tmp) * (dumb_q(wes,k,j) - dumb_q(i,k,j)))
+                    
+                    ! Y-direction flux - optimize using single calculation  
                     tmp = v(i,k,j)
-                    abs_tmp = ABS(tmp)
-                    flux_y(i,k,j) = flux_y(i,k,j) + 0.5*((tmp + abs_tmp) * dumb_q(i,k,sou) + (tmp - abs_tmp) * dumb_q(i,k,j)) * 0.5
+                    flux_y(i,k,j) = flux_y(i,k,j) + 0.25 * (tmp * (dumb_q(i,k,sou) + dumb_q(i,k,j)) + &
+                                                                   abs(tmp) * (dumb_q(i,k,sou) - dumb_q(i,k,j)))
+                    
+                    ! Z-direction flux - optimize using single calculation
                     tmp = w(i,bot,j)
-                    abs_tmp = ABS(tmp)
-                    flux_z(i,k,j) = flux_z(i,k,j) + 0.5*((tmp + abs_tmp) * dumb_q(i,bot,j) + (tmp - abs_tmp) * dumb_q(i,k,j)) * 0.5
+                    flux_z(i,k,j) = flux_z(i,k,j) + 0.25 * (tmp * (dumb_q(i,bot,j) + dumb_q(i,k,j)) + &
+                                                                   abs(tmp) * (dumb_q(i,bot,j) - dumb_q(i,k,j)))
+
                 enddo
             enddo
         enddo
@@ -354,12 +366,12 @@ contains
         do j = jts-1,jte+1
             do i = its-1,ite+1
                 flux_z(i,kme+1,j) = flux_z(i,kme+1,j) + 0.5*dumb_q(i,kme,j) * w(i,kme,j)
-                flux_z(i,kms,j) = 0.0
+                ! flux_z(i,kms,j) = 0.0
             enddo
         enddo
 
         !$acc end parallel
         !$acc end data
-                                        
+        !$acc wait(2)
     end subroutine upwind_flux3
 end module adv_fluxcorr
