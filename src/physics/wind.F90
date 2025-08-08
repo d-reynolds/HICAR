@@ -138,7 +138,7 @@ contains
         
         ! Associate various variables from the domain data structure for easier access
 
-        !$acc data present_or_copy(domain%vars_3d, domain%var_indx, domain%dx, kVARS) create(divergence)
+        !$acc data copyin(kVARS) create(divergence)
         associate(dx => domain%dx, &
                     rho => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                     dz => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
@@ -334,7 +334,7 @@ contains
         type(domain_t), intent(inout) :: domain
         logical, intent(in) :: w_var_given
 
-        !$acc data present(domain%vars_3d, domain%forcing_hi, domain%var_indx, domain%forcing_var_indx)
+        !$acc data present(domain)
 
         !$acc parallel
         !Compute the forcing wind field at the next update step, assuming a linear interpolation through time
@@ -396,10 +396,11 @@ contains
         real, allocatable, dimension(:,:,:) :: div
         integer :: nx, ny, nz, it
         logical :: newinput, w_var_given
-        real :: wind_dt_seconds, tmp
+        real :: wind_dt_seconds, alpha_const_val
 
         w_var_given = (options%forcing%wvar/="")
         wind_dt_seconds = options%wind%update_dt%seconds()
+        alpha_const_val = options%wind%alpha_const
 
         newinput = .False.
         if (present(new_input)) newinput = new_input
@@ -410,7 +411,7 @@ contains
             return
         endif
 
-        !$acc data present_or_copy(domain, kVARS) create(div)
+        !$acc data present(domain) copyin(kVARS)
         if (first_wind) then            
             first_wind = .False.
 
@@ -550,13 +551,12 @@ contains
             if (options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS) then
                 allocate(div(ims:ime,kms:kme,jms:jme))
                 !$acc data create(div)
-                if (options%wind%alpha_const>0) then
-                    tmp = options%wind%alpha_const
+                if (alpha_const_val>0) then
                     !$acc parallel loop gang vector collapse(3)
                     do j = jms,jme
                         do k = kms,kme
                             do i = ims,ime
-                                domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d = tmp
+                                domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d(i,k,j) = alpha_const_val
                             enddo
                         enddo
                     enddo
@@ -618,13 +618,15 @@ contains
         type(domain_t), intent(inout)  :: domain
         real, intent(in)                :: dt
 
-        !$acc data present(domain%vars_3d, domain%var_indx, kVARS)
-        !$acc parallel
+        associate(u => domain%vars_3d(domain%var_indx(kVARS%u)%v), &
+                  v => domain%vars_3d(domain%var_indx(kVARS%v)%v))
+                  
+        !$acc parallel present(u, v)
         !$acc loop gang vector collapse(3)
         do j = jms, jme
             do k = kms, kme
                 do i = ims, ime+1
-                    domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i,k,j) = (domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i,k,j)-domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i,k,j))/dt
+                    u%dqdt_3d(i,k,j) = (u%dqdt_3d(i,k,j)-u%data_3d(i,k,j))/dt
                 enddo
             enddo
         enddo
@@ -633,12 +635,13 @@ contains
         do j = jms, jme+1
             do k = kms, kme
                 do i = ims, ime
-                    domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i,k,j) = (domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i,k,j)-domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i,k,j))/dt
+                    v%dqdt_3d(i,k,j) = (v%dqdt_3d(i,k,j)-v%data_3d(i,k,j))/dt
                 enddo
             enddo
         enddo
         !$acc end parallel
-        !$acc end data
+        end associate
+
         !If we are not using advect density, then balance_uvw will not be called every physics step, so compute a tendancy here
         ! if (.not.(options%adv%advect_density)) then
         !     domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = (domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d-domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d)/options%wind%update_dt%seconds()
@@ -661,8 +664,7 @@ contains
 
         allocate(zero_arr(ims:ime,kms:kme,jms:jme))
         zero_arr = 0.0
-        !$acc data present(domain%vars_3d, domain%var_indx, kVARS) copyin(zero_arr)
-
+        !$acc data copyin(zero_arr)
         !Call this, passing 0 for w_grid, to get vertical components of vertical motion
         call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v) %data_3d,      &
                         domain%vars_3d(domain%var_indx(kVARS%v)%v) %data_3d,      &
@@ -670,26 +672,33 @@ contains
                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d,      &
                         domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
                         domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
+        !$acc end data
 
+
+        associate(w => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                  w_real => domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
+                  advection_dz => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+                  jacobian_w => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
+
+        !$acc data present(w, w_real, advection_dz, jacobian_w)
         !apply any w_real
         !$acc parallel loop gang vector collapse(3)
         do j = jms, jme
             do k = kms, kme
                 do i = ims,ime
-                    domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j) = (domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i,k,j)-domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j))
+                    w(i,k,j) = (w_real(i,k,j)-w(i,k,j))
                 enddo
             enddo
         enddo
         !stagger w, which was just calculated at the mass points, to the vertical k-levels, so that we can calculate divergence with it
-        !$acc parallel loop gang vector collapse(2)
+        !$acc parallel loop gang collapse(2)
         do i = ims,ime
             do j = jms, jme
+                !$acc loop seq
                 do k = kms, kme-1
-                    domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j) = (domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j) + &
-                                                            domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k+1,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j))/ &
-                                        (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j)+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j))
-                    domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j) / domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d(i,k,j)
-
+                    w(i,k,j) = (w(i,k,j)*advection_dz(i,k+1,j) + w(i,k+1,j)*advection_dz(i,k,j))/ &
+                                        (advection_dz(i,k,j)+advection_dz(i,k+1,j))
+                    w(i,k,j) = w(i,k,j) / jacobian_w(i,k,j)
                 enddo
             enddo
         enddo
@@ -697,11 +706,11 @@ contains
         !$acc parallel loop gang vector collapse(2)
         do i = ims,ime
             do j = jms, jme
-                domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,kme,j) = 0.0
+                w(i,kme,j) = 0.0
             enddo
         enddo
-
         !$acc end data
+        end associate
 
     end subroutine calc_idealized_wgrid
     
@@ -723,34 +732,53 @@ contains
         alpha = 1.0 - 0.5*max(froude**4,0.00001)*(sqrt(1.0+4.0/max(froude**4,0.00001)) - 1.0) 
         alpha = sqrt(max(alpha,0.00001))
         alpha = min(max(alpha,alpha_min),alpha_max)
+        !set alpha at top of domain to 0.2 to limit flux accross upper boundary
+        alpha(:,kme,:) = alpha_min
+        !$acc end kernels
 
         ! Ensure that there are no sharp transitions in alpha at boundary, 
         ! which can leak boundary effects into model (very high w_grid values result)
         if (jms==jds) then
+            !$acc parallel loop gang vector collapse(3)
             do j = jms, jts-1
-                alpha(:,:,j) = alpha(:,:,jts)
-            end do
+            do k = kms, kme
+            do i = ims, ime
+                alpha(i,k,j) = alpha(i,k,jts)
+            enddo
+            enddo
+            enddo
         end if
         if (ims==ids) then
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms, jme
+            do k = kms, kme
             do i = ims, its-1
-                alpha(i,:,:) = alpha(its,:,:)
-            end do
+                alpha(i,k,j) = alpha(its,k,j)
+            enddo
+            enddo
+            enddo
         end if
         if (jme==jde) then
+            !$acc parallel loop gang vector collapse(3)
             do j = jte+1, jme
-                alpha(:,:,j) = alpha(:,:,jte)
-            end do
+            do k = kms, kme
+            do i = ims, ime
+                alpha(i,k,j) = alpha(i,k,jte)
+            enddo
+            enddo
+            enddo
         end if
         if (ime==ide) then
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms, jme
+            do k = kms, kme
             do i = ite+1, ime
-                alpha(i,:,:) = alpha(ite,:,:)
-            end do
+                alpha(i,k,j) = alpha(ite,k,j)
+            enddo
+            enddo
+            enddo
         end if
 
-        !set alpha at top of domain to 0.2 to limit flux accross upper boundary
-        alpha(:,kme,:) = alpha_min
-
-        !$acc end kernels
         !$acc end data
 
         !$acc update host(alpha)
@@ -770,28 +798,35 @@ contains
         real, intent(in), dimension(ims:ime,kms:kme,jms:jme+1)  :: v, dzdy_v
         real, intent(inout), dimension(ims:ime,kms:kme,jms:jme) :: w_real
         
-        integer :: z
+        integer :: k, i, j
                 
-        real, dimension(ims:ime,jms:jme)   :: lastw
+        real, dimension(ims:ime,kms:kme+1,jms:jme)   :: w_grid_ext
         real, dimension(ims:ime,jms:jme)   :: currw
         real, dimension(ims:ime+1,jms:jme) :: uw
         real, dimension(ims:ime,jms:jme+1) :: vw
 
-        !calculate the real vertical motions (including U*dzdx + V*dzdy)
-        lastw = 0
 
-        !$acc data present(u, v, w_grid, w_real, dzdx_u, dzdy_v, dzdx, dzdy, jaco) create(lastw,currw,uw,vw)
+        !$acc data present(u, v, w_grid, w_real, dzdx_u, dzdy_v, dzdx, dzdy, jaco) create(w_grid_ext)
+
+        !calculate the real vertical motions (including U*dzdx + V*dzdy)
         !$acc kernels
-        do z = kms, kme
+        w_grid_ext(:,kms,:) = 0
+        w_grid_ext(:,kms+1:kme+1,:) = w_grid
+        !$acc end kernels
+
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms, jme
+        do k = kms, kme
+        do i = ims, ime
 
             ! compute the U * dz/dx component of vertical motion
-            uw    =   u(ims:ime+1,z,jms:jme) !* dzdx_u(ims:ime+1,z,jms:jme) *
+            ! uw    =   u(ims:ime+1,k,jms:jme) !* dzdx_u(ims:ime+1,k,jms:jme) *
 
-            ! compute the V * dz/dy component of vertical motion
-            vw    =   v(ims:ime,z,jms:jme+1) !* dzdy_v(ims:ime,z,jms:jme+1)
+            ! ! compute the V * dz/dy component of vertical motion
+            ! vw    =   v(ims:ime,k,jms:jme+1) !* dzdy_v(ims:ime,k,jms:jme+1)
 
-            ! the W grid relative motion
-            currw = w_grid(ims:ime, z, jms:jme) !* jaco_w(ims:ime, z, jms:jme)
+            ! ! the W grid relative motion
+            ! currw = w_grid(ims:ime, k, jms:jme) !* jaco_w(ims:ime, k, jms:jme)
 
             ! if (options%physics%convection>0) then
             !     currw = currw + domain%w_cu(2:nx-1,z,2:ny-1) * domain%dz_inter(2:nx-1,z,2:ny-1) / domain%dx
@@ -799,12 +834,12 @@ contains
             
             ! compute the real vertical velocity of air by combining the different components onto the mass grid
             ! includes vertical interpolation between w_z-1/2 and w_z+1/2
-            w_real(ims:ime, z, jms:jme) = (uw(ims:ime,:) + uw(ims+1:ime+1,:))*0.5*dzdx(:,z,:) &
-                                                 +(vw(:,jms:jme) + vw(:,jms+1:jme+1))*0.5*dzdy(:,z,:) &
-                                                 +(lastw + currw)*jaco(:,z,:) * 0.5
-            lastw = currw ! could avoid this memcopy cost using pointers or a single manual loop unroll
+            w_real(i, k, j) = (u(i,k,j) + u(i+1,k,j))*0.5*dzdx(i,k,j) &
+                                                 +(v(i,k,j) + v(i,k,j+1))*0.5*dzdy(i,k,j) &
+                                                 +(w_grid_ext(i, k, j) + w_grid_ext(i, k+1, j))*jaco(i,k,j) * 0.5
         end do
-        !$acc end kernels
+        end do
+        end do
         !$acc end data
 
     end subroutine calc_w_real
@@ -986,13 +1021,6 @@ contains
     subroutine allocate_winds(domain, options)
         type(domain_t), intent(inout) :: domain
         type(options_t), intent(in) :: options
-        ! note w is special cased because it does not have a forcing variable, so it is not necessarily allocated automatically
-        if ((domain%var_indx(kVARS%w)%v > 0)) then
-            if (.not.(allocated(domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d))) then
-                allocate(domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(ims:ime,kms:kme,jms:jme))
-                domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = 0
-            endif
-        endif
         
         if (options%wind%Sx .and. (domain%var_indx(kVARS%Sx)%v > 0)) then
             if (STD_OUT_PE) write(*,*) "    Calculating Sx and TPI for wind modification"

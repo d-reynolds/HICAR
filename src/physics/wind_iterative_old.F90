@@ -11,11 +11,7 @@
 !!------------------------------------------------------------
 !#include <petsc/finclude/petscdmda.h90>
 
-module wind_iterative_old
-    !include 'petsc/finclude/petscksp.h'
-    !include 'petsc/finclude/petscdm.h'
-    !include 'petsc/finclude/petscdmda.h'
-    
+module wind_iterative_old    
 #include "petscversion.h"
 #include "petsc/finclude/petscksp.h"
 #include "petsc/finclude/petscdm.h"
@@ -75,8 +71,9 @@ contains
         PetscScalar,pointer :: lambda(:,:,:)
         logical             :: update
 
-        integer i, j, k 
-        
+        integer :: i, j, k 
+        logical :: varying_alpha
+
         PetscErrorCode ierr
 
         PetscInt       one, x_size, iteration, maxits
@@ -108,14 +105,16 @@ contains
         maxits = 1000
         call KSPSetTolerances(ksp(domain%nest_indx),PETSC_DETERMINE_REAL,PETSC_DETERMINE_REAL,dtol, maxits,ierr)
 
+        varying_alpha = .not.( ALL(alpha==minval(alpha)) )
         if (.not.(allocated(A_coef))) then
             ! Can't be called in module-level init function, since we first need alpha
             call initialize_coefs(domain)
-        elseif (.not.( ALL(alpha==minval(alpha)) )) then
+            call ComputeMatrix(ksp(domain%nest_indx),arr_A,prealloc=.True.)
+        elseif (varying_alpha) then
             call update_coefs(domain)
+            call ComputeMatrix(ksp(domain%nest_indx),arr_A)
         endif
 
-        call ComputeMatrix(ksp(domain%nest_indx),arr_A)
         call KSPSetOperators(ksp(domain%nest_indx),arr_A,arr_A,ierr)
         ! if (update) then
         !     call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_TRUE,ierr)
@@ -475,24 +474,31 @@ contains
         call DMDAVecRestoreArrayF90(dm,vec_b,barray, ierr)
     end subroutine ComputeRHS
 
-    subroutine ComputeMatrix(ksp,array_A)
+    subroutine ComputeMatrix(ksp,array_A,prealloc)
         implicit none
         type(tKSP) ksp
         type(tMat) array_A!,array_B
+        logical, intent(in), optional :: prealloc
 
         PetscErrorCode  ierr
         type(tDM)             da
         PetscInt       i,j,k,mx,my,mz,xm,ym,zm,xs,ys,zs,i1,i2,i6,i15
         DMDALocalInfo  info(DMDA_LOCAL_INFO_SIZE)
-        PetscScalar    v(15)
+        PetscScalar, allocatable, dimension(:) ::    v
+        PetscInt, allocatable, dimension(:) ::       row_indx, col_indx
         MatStencil     row(4),col(4,15),gnd_col(4,10),top_col(4,2)
 
         real :: denom
+        integer :: cnt, num_entries
+        logical :: prealloc_flag
 
         i1 = 1
         i2 = 2
         i6 = 10
         i15 = 15
+
+        prealloc_flag = .False.
+        if (present(prealloc)) prealloc_flag = prealloc
 
         call KSPGetDM(ksp,da,ierr)
 
@@ -508,38 +514,49 @@ contains
         ys = info(DMDA_LOCAL_INFO_ZS)
         zs = info(DMDA_LOCAL_INFO_YS)
         
+        num_entries = (xm)*(ym)*(zm)*15
+        allocate(row_indx((num_entries)), col_indx((num_entries)), v(num_entries))
+
+        row_indx = -1
+        col_indx = -1
+        cnt = 1
         do j=ys,(ys+ym-1)
         do k=zs,(zs+zm-1)
             do i=xs,(xs+xm-1)
                 row(MatStencil_i) = i
                 row(MatStencil_j) = k
                 row(MatStencil_k) = j
+                call DMDAMapMatStencilToGlobal(da,1,row,row_indx(cnt),ierr)
+
                 if (i.le.0 .or. j.le.0 .or. &
                     i.ge.mx-1 .or. j.ge.my-1) then
-                    v(1) = 1.0
-                    call MatSetValuesStencil(array_A,i1,row,i1,row,v,INSERT_VALUES, ierr)
+                    v(cnt) = 1.0
+                    call DMDAMapMatStencilToGlobal(da, 1, row, col_indx(cnt), ierr)
+                    cnt = cnt + 1
+
                 else if (k.eq.mz-1) then
                     !k
-                    v(1) = 1/dz_if(i,k,j)
+                    v(cnt) = 1/dz_if(i,k,j)
                     top_col(MatStencil_i,1) = i
                     top_col(MatStencil_j,1) = k
                     top_col(MatStencil_k,1) = j
                     !k - 1
-                    v(2) = -1/dz_if(i,k,j)
+                    v(cnt+1) = -1/dz_if(i,k,j)
                     top_col(MatStencil_i,2) = i
                     top_col(MatStencil_j,2) = k-1
                     top_col(MatStencil_k,2) = j
-                    call MatSetValuesStencil(array_A,i1,row,i2,top_col,v,INSERT_VALUES, ierr)
-
+                    call DMDAMapMatStencilToGlobal(da, 2, top_col, col_indx(cnt:cnt+1), ierr)
+                    row_indx(cnt:cnt+1) = row_indx(cnt)
+                    cnt = cnt + 2
                 else if (k.eq.0) then
                     denom = 2*(dzdx_surf(i,j)**2 + dzdy_surf(i,j)**2 + alpha(i,1,j)**2)/(jaco(i,1,j))
                     !k
-                    v(2) = -1/dz_if(i,k+1,j)
+                    v(cnt+1) = -1/dz_if(i,k+1,j)
                     gnd_col(MatStencil_i,2) = i
                     gnd_col(MatStencil_j,2) = k
                     gnd_col(MatStencil_k,2) = j
                     !k + 1
-                    v(1) = 1/dz_if(i,k+1,j)
+                    v(cnt) = 1/dz_if(i,k+1,j)
                     gnd_col(MatStencil_i,1) = i
                     gnd_col(MatStencil_j,1) = k+1
                     gnd_col(MatStencil_k,1) = j
@@ -547,134 +564,136 @@ contains
                     !Reminder: The equation for the lower BC has all of the lateral derivatives (dlambdadx, etc) NEGATIVE, hence opposite signs below
                     !If we are on left most border
                     !i - 1, k + 1
-                    v(3) = dzdx_surf(i,j)/(denom*2*dx)
+                    v(cnt+2) = dzdx_surf(i,j)/(denom*2*dx)
                     gnd_col(MatStencil_i,3) = i-1
                     gnd_col(MatStencil_j,3) = k
                     gnd_col(MatStencil_k,3) = j
                     !i + 1, k + 1
-                    v(4) = -dzdx_surf(i,j)/(denom*2*dx)
+                    v(cnt+3) = -dzdx_surf(i,j)/(denom*2*dx)
                     gnd_col(MatStencil_i,4) = i+1
                     gnd_col(MatStencil_j,4) = k
                     gnd_col(MatStencil_k,4) = j
                     !i - 1, k + 1
-                    v(5) = dzdx_surf(i,j)/(denom*2*dx)
+                    v(cnt+4) = dzdx_surf(i,j)/(denom*2*dx)
                     gnd_col(MatStencil_i,5) = i-1
                     gnd_col(MatStencil_j,5) = k+1
                     gnd_col(MatStencil_k,5) = j
                     !i + 1, k + 1
-                    v(6) = -dzdx_surf(i,j)/(denom*2*dx)
+                    v(cnt+5) = -dzdx_surf(i,j)/(denom*2*dx)
                     gnd_col(MatStencil_i,6) = i+1
                     gnd_col(MatStencil_j,6) = k+1
                     gnd_col(MatStencil_k,6) = j
                     !j - 1, k + 1
-                    v(7) = dzdy_surf(i,j)/(denom*2*dx)
+                    v(cnt+6) = dzdy_surf(i,j)/(denom*2*dx)
                     gnd_col(MatStencil_i,7) = i
                     gnd_col(MatStencil_j,7) = k
                     gnd_col(MatStencil_k,7) = j-1
                     !j + 1, k + 1
-                    v(8) = -dzdy_surf(i,j)/(denom*2*dx)
+                    v(cnt+7) = -dzdy_surf(i,j)/(denom*2*dx)
                     gnd_col(MatStencil_i,8) = i
                     gnd_col(MatStencil_j,8) = k
                     gnd_col(MatStencil_k,8) = j+1
                     !j - 1, k + 1
-                    v(9) = dzdy_surf(i,j)/(denom*2*dx)
+                    v(cnt+8) = dzdy_surf(i,j)/(denom*2*dx)
                     gnd_col(MatStencil_i,9) = i
                     gnd_col(MatStencil_j,9) = k+1
                     gnd_col(MatStencil_k,9) = j-1
                     !j + 1, k + 1
-                    v(10) = -dzdy_surf(i,j)/(denom*2*dx)
+                    v(cnt+9) = -dzdy_surf(i,j)/(denom*2*dx)
                     gnd_col(MatStencil_i,10) = i
                     gnd_col(MatStencil_j,10) = k+1
                     gnd_col(MatStencil_k,10) = j+1
-                    call MatSetValuesStencil(array_A,i1,row,i6,gnd_col,v,INSERT_VALUES, ierr)
+                    call DMDAMapMatStencilToGlobal(da, 10, gnd_col, col_indx(cnt:cnt+9), ierr)
+                    row_indx(cnt:cnt+9) = row_indx(cnt)
+                    cnt = cnt + 10
                 else
                     !j - 1, k - 1
-                    v(1) = O_coef(i,k,j)
+                    v(cnt) = O_coef(i,k,j)
                     col(MatStencil_i,1) = i
                     col(MatStencil_j,1) = k-1
                     col(MatStencil_k,1) = j-1
                     !i - 1, k - 1
-                    v(2) = K_coef(i,k,j)
+                    v(cnt+1) = K_coef(i,k,j)
                     col(MatStencil_i,2) = i-1
                     col(MatStencil_j,2) = k-1
                     col(MatStencil_k,2) = j
                     !j - 1, k + 1
-                    v(3) = M_coef(i,k,j)
+                    v(cnt+2) = M_coef(i,k,j)
                     col(MatStencil_i,3) = i
                     col(MatStencil_j,3) = k+1
                     col(MatStencil_k,3) = j-1
                     !i - 1, k + 1
-                    v(4) = I_coef(i,k,j)
+                    v(cnt+3) = I_coef(i,k,j)
                     col(MatStencil_i,4) = i-1
                     col(MatStencil_j,4) = k+1
                     col(MatStencil_k,4) = j
                     !k - 1
-                    v(5) = C_coef(i,k,j)
+                    v(cnt+4) = C_coef(i,k,j)
                     col(MatStencil_i,5) = i
                     col(MatStencil_j,5) = k-1
                     col(MatStencil_k,5) = j
                     !j - 1
-                    v(6) = G_coef(i,k,j)
+                    v(cnt+5) = G_coef(i,k,j)
                     col(MatStencil_i,6) = i
                     col(MatStencil_j,6) = k
                     col(MatStencil_k,6) = j-1
                     !i - 1
-                    v(7) = E_coef(i,k,j)
+                    v(cnt+6) = E_coef(i,k,j)
                     col(MatStencil_i,7) = i-1
                     col(MatStencil_j,7) = k
                     col(MatStencil_k,7) = j
                     !Center
-                    v(8) = A_coef(i,k,j)
+                    v(cnt+7) = A_coef(i,k,j)
                     col(MatStencil_i,8) = i
                     col(MatStencil_j,8) = k
                     col(MatStencil_k,8) = j
                     !i + 1
-                    v(9) = D_coef(i,k,j)
+                    v(cnt+8) = D_coef(i,k,j)
                     col(MatStencil_i,9) = i+1
                     col(MatStencil_j,9) = k
                     col(MatStencil_k,9) = j
                     !j + 1
-                    v(10) = F_coef(i,k,j)
+                    v(cnt+9) = F_coef(i,k,j)
                     col(MatStencil_i,10) = i
                     col(MatStencil_j,10) = k
                     col(MatStencil_k,10) = j+1
                     !k + 1
-                    v(11) = B_coef(i,k,j)
+                    v(cnt+10) = B_coef(i,k,j)
                     col(MatStencil_i,11) = i
                     col(MatStencil_j,11) = k+1
                     col(MatStencil_k,11) = j
                     !i + 1, k + 1
-                    v(12) = H_coef(i,k,j)
+                    v(cnt+11) = H_coef(i,k,j)
                     col(MatStencil_i,12) = i+1
                     col(MatStencil_j,12) = k+1
                     col(MatStencil_k,12) = j
                     !j + 1, k + 1
-                    v(13) = L_coef(i,k,j)
+                    v(cnt+12) = L_coef(i,k,j)
                     col(MatStencil_i,13) = i
                     col(MatStencil_j,13) = k+1
                     col(MatStencil_k,13) = j+1
                     !i + 1, k - 1
-                    v(14) = J_coef(i,k,j)
+                    v(cnt+13) = J_coef(i,k,j)
                     col(MatStencil_i,14) = i+1
                     col(MatStencil_j,14) = k-1
                     col(MatStencil_k,14) = j
                     !j + 1, k - 1
-                    v(15) = N_coef(i,k,j)
+                    v(cnt+14) = N_coef(i,k,j)
                     col(MatStencil_i,15) = i
                     col(MatStencil_j,15) = k-1
                     col(MatStencil_k,15) = j+1
-                    call MatSetValuesStencil(array_A,i1,row,i15,col,v,INSERT_VALUES, ierr)
+                    call DMDAMapMatStencilToGlobal(da, 15, col, col_indx(cnt:cnt+14), ierr)
+                    row_indx(cnt:cnt+14) = row_indx(cnt)
+                    cnt = cnt + 15
+
                 endif
             enddo
         enddo
         enddo
 
-        call MatAssemblyBegin(array_A,MAT_FINAL_ASSEMBLY,ierr)
-        call MatAssemblyEnd(array_A,MAT_FINAL_ASSEMBLY,ierr)
-        ! if (array_A .ne. array_B) then
-        !  call MatAssemblyBegin(array_A,MAT_FINAL_ASSEMBLY,ierr)
-        !  call MatAssemblyEnd(array_A,MAT_FINAL_ASSEMBLY,ierr)
-        ! endif
+        if (prealloc_flag) call MatSetPreallocationCOO(array_A,num_entries,row_indx,col_indx, ierr)
+        call MatSetValuesCOO(array_A,v,INSERT_VALUES, ierr)
+
 
     end subroutine ComputeMatrix
 
@@ -749,6 +768,23 @@ contains
 
         enddo
 
+        ! --------------------------------------------------------
+        ! Alternative method of calculating coefficients, save for posterity
+        ! --------------------------------------------------------
+        ! mixed_denom = 2*domain%dx*dz_if(:,k_s+1:k_e+1,:)*(sigma+sigma**2)*jaco
+
+        ! H_coef = -(sigma**2)*2*(dzdx)/mixed_denom
+        ! I_coef = (sigma**2)*2*(dzdx)/mixed_denom
+        ! J_coef = 2*(dzdx)/mixed_denom
+        ! K_coef = -2*(dzdx)/mixed_denom
+
+        ! L_coef = -(sigma**2)*2*(dzdy)/mixed_denom
+        ! M_coef = (sigma**2)*2*(dzdy)/mixed_denom
+        ! N_coef = 2*(dzdy)/mixed_denom
+        ! O_coef = -2*(dzdy)/mixed_denom
+        ! --------------------------------------------------------
+        ! End alternative method of calculating coefficients
+        ! --------------------------------------------------------
 
     end subroutine initialize_coefs
     
@@ -767,8 +803,92 @@ contains
         allocate(M_up(i_s:i_e,j_s:j_e))
         allocate(M_dwn(i_s:i_e,j_s:j_e))
         
-        mixed_denom = (dz_if(:,k_s+1:k_e+1,:)+dz_if(:,k_s:k_e,:))*2*domain%dx
+        ! --------------------------------------------------------
+        ! Alternative method of calculating coefficients, save for posterity
+        ! --------------------------------------------------------
+        ! allocate(dijacodx(i_s:i_e,k_s:k_e,j_s:j_e))
+        ! allocate(dijacody(i_s:i_e,k_s:k_e,j_s:j_e))
+        ! allocate(dzdxz(i_s:i_e,k_s:k_e,j_s:j_e))
+        ! allocate(dzdyz(i_s:i_e,k_s:k_e,j_s:j_e))
+        ! allocate(d2zdx(i_s:i_e,k_s:k_e,j_s:j_e))
+        ! allocate(d2zdy(i_s:i_e,k_s:k_e,j_s:j_e))
 
+        ! i_s_bnd = i_s
+        ! i_e_bnd = i_e
+        ! j_s_bnd = j_s
+        ! j_e_bnd = j_e
+        ! if (i_s==domain%grid%ids) then
+        !     i_s_bnd = i_s + 1
+        ! endif
+        ! if (i_e==domain%grid%ide) then
+        !     i_e_bnd = i_e - 1
+        ! endif
+        ! if (j_s==domain%grid%jds) then
+        !     j_s_bnd = j_s + 1
+        ! endif
+        ! if (j_e==domain%grid%jde) then
+        !     j_e_bnd = j_e - 1
+        ! endif
+        ! mixed_denom = dz_if(:,k_s+1:k_e+1,:)*(sigma+sigma**2)
+
+        ! ! dijaco -- Derivative of Inverse JACObian
+        ! dijacodx = (1/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_s+1:i_e+1,:,j_s:j_e) - &
+        !           1/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_s:i_e,:,j_s:j_e))/dx
+        ! dijacody = (1/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_s+1:j_e+1) - &
+        !           1/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e,:,j_s:j_e))/dx
+
+        ! dijacodx(i_s_bnd:i_e_bnd,:,:) = (1/domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s_bnd+1:i_e_bnd+1,:,j_s:j_e) - &
+        !           1/domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s_bnd-1:i_e_bnd-1,:,j_s:j_e))/(2*dx)
+        ! dijacody(:,:,j_s_bnd:j_e_bnd) = (1/domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,:,j_s_bnd+1:j_e_bnd+1) - &
+        !           1/domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i_s:i_e,:,j_s_bnd-1:j_e_bnd-1))/(2*dx)
+
+        ! d2zdx = (domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_s+1:i_e+1,:,j_s:j_e) - &
+        !           domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_s:i_e,:,j_s:j_e))/dx
+        ! d2zdy = (domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i_s:i_e,:,j_s+1:j_e+1) - &
+        !           domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i_s:i_e,:,j_s:j_e))/dx
+
+        ! d2zdx(i_s_bnd:i_e_bnd,:,:) = (domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i_s_bnd+1:i_e_bnd+1,:,j_s:j_e) - &
+        !        2*domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i_s_bnd:i_e_bnd,:,j_s:j_e)     + &
+        !          domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i_s_bnd-1:i_e_bnd-1,:,j_s:j_e))/(dx**2)
+
+        ! d2zdy(:,:,j_s_bnd:j_e_bnd) = (domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i_s:i_e,:,j_s_bnd+1:j_e_bnd+1) - &
+        !        2*domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i_s:i_e,:,j_s_bnd:j_e_bnd)     + &
+        !          domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i_s:i_e,:,j_s_bnd-1:j_e_bnd-1))/(dx**2)
+
+        ! dzdxz(:,k_s+1:k_e-1,:) = (sigma(:,k_s+1:k_e-1,:)**2)*dzdx(:,k_s+2:k_e,:) - (sigma(:,k_s+1:k_e-1,:)**2-1)*dzdx(:,k_s+1:k_e-1,:) - dzdx(:,k_s:k_e-2,:)
+        ! dzdxz = dzdxz/mixed_denom
+        ! dzdxz(:,k_s,:) = -(sigma(:,k_s+1,:)**2)*dzdx(:,k_s+2,:)/(dz_if(:,k_s+1,:)*(sigma(:,k_s+1,:)+1)) + &
+        !                   (sigma(:,k_s+1,:)+1)*dzdx(:,k_s+1,:)/dz_if(:,k_s+1,:) - &
+        !                   (2*sigma(:,k_s+1,:)+1)*dzdx(:,k_s,:)/(dz_if(:,k_s+1,:)*(sigma(:,k_s+1,:)+1))
+
+        ! dzdxz(:,k_e,:) = (dzdx(:,k_e-2,:))/(dz_if(:,k_e,:)*sigma(:,k_e-1,:)+dz_if(:,k_e,:)*sigma(:,k_e-1,:)**2) - &
+        !                    (sigma(:,k_e-1,:)+1)*(dzdx(:,k_e-1,:))/(dz_if(:,k_e,:)*sigma(:,k_e-1,:)) + &
+        !                     (2+sigma(:,k_e-1,:))*(dzdx(:,k_e,:))/(dz_if(:,k_e,:)*(sigma(:,k_e-1,:)+1))
+
+
+        ! dzdyz(:,k_s+1:k_e-1,:) = (sigma(:,k_s+1:k_e-1,:)**2)*dzdy(:,k_s+2:k_e,:) - (sigma(:,k_s+1:k_e-1,:)**2-1)*dzdy(:,k_s+1:k_e-1,:) - dzdy(:,k_s:k_e-2,:)
+        ! dzdyz = dzdyz/mixed_denom
+        ! dzdyz(:,k_s,:) = -(sigma(:,k_s+1,:)**2)*dzdy(:,k_s+2,:)/(dz_if(:,k_s+1,:)*(sigma(:,k_s+1,:)+1)) + &
+        !                   (sigma(:,k_s+1,:)+1)*dzdy(:,k_s+1,:)/dz_if(:,k_s+1,:) - &
+        !                   (2*sigma(:,k_s+1,:)+1)*dzdy(:,k_s,:)/(dz_if(:,k_s+1,:)*(sigma(:,k_s+1,:)+1))
+        ! dzdyz(:,k_e,:) = (dzdy(:,k_e-2,:))/(dz_if(:,k_e,:)*sigma(:,k_e-1,:)+dz_if(:,k_e,:)*sigma(:,k_e-1,:)**2) - &
+        !                   (sigma(:,k_e-1,:)+1)*(dzdy(:,k_e-1,:))/(dz_if(:,k_e,:)*sigma(:,k_e-1,:)) + &
+        !                    (2+sigma(:,k_e-1,:))*(dzdy(:,k_e,:))/(dz_if(:,k_e,:)*(sigma(:,k_e-1,:)+1))
+
+        ! !Numerical solution
+        ! X_coef = (-(d2zdx/jaco + dijacodx*dzdx + d2zdy/jaco + dijacody*dzdy) + &
+        !             (dzdxz*dzdx+dzdyz*dzdy)/(jaco**2)) /mixed_denom
+
+        ! B_coef = 2*sigma * ( (alpha**2 + dzdy**2 + dzdx**2)) / ((sigma+sigma**2)*dz_if(:,k_s+1:k_e+1,:)**2)
+        ! C_coef = 2*( (alpha**2 + dzdy**2 + dzdx**2)) / ((sigma+sigma**2)*dz_if(:,k_s+1:k_e+1,:)**2)
+                
+        ! B_coef = B_coef / (jaco**2)
+        ! C_coef = C_coef / (jaco**2)
+        ! --------------------------------------------------------
+        ! End alternative method of calculating coefficients
+        ! --------------------------------------------------------
+
+        mixed_denom = (dz_if(:,k_s+1:k_e+1,:)+dz_if(:,k_s:k_e,:))*2*domain%dx
         do k = k_s,k_e
             if (k == k_s) then
                 !Terms for dzdx
@@ -910,8 +1030,8 @@ contains
 
         do i=1,options%general%nests
             call KSPCreate(domain%compute_comms%MPI_VAL,ksp(i),ierr)
-            call KSPSetType(ksp(i),KSPFBCGS,ierr) !KSPFBCGS <-- this one tested to give fastest convergence...
-                                            !KSPPIPEGCR <-- this one used previously...
+            call KSPSetType(ksp(i),KSPPIPEGCR,ierr) !KSPPIPEGCR <-- this one tested to give fastest convergence...
+                                            !KSPFBCGS <-- this one used previously...
             call KSPSetFromOptions(ksp(i),ierr)
             call KSPSetReusePreconditioner(ksp(domain%nest_indx),PETSC_FALSE,ierr)
             call KSPGetPC(ksp(i),precond,ierr)
@@ -1057,7 +1177,7 @@ contains
             ! Create GPU data for persistent arrays
             !$acc enter data create(dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma, dz_if, alpha, div)
             
-            !$acc data present_or_copy(domain) present(dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, dz_if, sigma)
+            !$acc data present(domain, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, dz_if, sigma)
             
             !$acc parallel loop gang vector collapse(3)
             do j = j_s, j_e

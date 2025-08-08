@@ -12,10 +12,6 @@
 !#include <petsc/finclude/petscdmda.h90>
 
 module wind_iterative
-    !include 'petsc/finclude/petscksp.h'
-    !include 'petsc/finclude/petscdm.h'
-    !include 'petsc/finclude/petscdmda.h'
-    
 #include "petscversion.h"
 #include <petsc/finclude/petscksp.h>
 #include <petsc/finclude/petscdm.h>
