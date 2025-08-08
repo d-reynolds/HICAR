@@ -195,7 +195,7 @@ contains
         ! If this is the first step (future_dt_seconds has not yet been set)
         !if (future_dt_seconds == DT_BIG) then
 
-        !$acc data present(domain, dt)
+        !$acc data present(dt)
         present_dt_seconds = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
@@ -290,7 +290,7 @@ contains
         last_loop = .False.
 
         call domain%cpu_gpu_timer%start()
-        !$acc data copy(domain, kVARS) copyin(end_time) copyout(dt) create(tmp_time)
+        !$acc data copyin(end_time) copyout(dt) create(tmp_time)
         call domain%cpu_gpu_timer%stop()
 
         ! now just loop over internal timesteps computing all physics in order (operator splitting...)
@@ -410,8 +410,6 @@ contains
             last_wind_update = last_wind_update + dt%seconds()
         enddo
         call domain%cpu_gpu_timer%start()
-        !$acc update device(domain%sim_time, domain%ended, domain%mp_timer, domain%rad_timer, domain%pbl_timer, domain%lsm_timer, domain%forcing_timer, domain%send_timer, domain%wait_timer, domain%ret_timer, domain%adv_timer, domain%wind_bal_timer, &
-        !$acc               domain%diagnostic_timer, domain%forcing_timer, domain%wind_timer, domain%sum_timer, domain%flux_timer, domain%flux_up_timer, domain%flux_corr_timer, domain%adv_wind_timer, domain%cpu_gpu_timer)
         !$acc end data
         call domain%cpu_gpu_timer%stop()
 

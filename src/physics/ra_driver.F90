@@ -129,10 +129,6 @@ contains
 
         if (options%physics%radiation==kRA_RRTMG) then
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    RRTMG"
-            if(.not.allocated(domain%tend%th_lwrad)) &
-                allocate(domain%tend%th_lwrad(domain%ims:domain%ime,domain%kms:domain%kme,domain%jms:domain%jme))
-            if(.not.allocated(domain%tend%th_swrad)) &
-                allocate(domain%tend%th_swrad(domain%ims:domain%ime,domain%kms:domain%kme,domain%jms:domain%jme))
 
             if (options%physics%microphysics .ne. kMP_THOMP_AER) then
                if (STD_OUT_PE .and. .not.context_change)write(*,*) '    NOTE: When running RRTMG, microphysics option 5 works best.'
@@ -222,7 +218,7 @@ contains
                       kVARS%dz_interface, kVARS%skin_temperature,      kVARS%temperature,             kVARS%density,          &
                       kVARS%longwave_cloud_forcing,                    kVARS%land_emissivity,         kVARS%temperature_interface,  &
                       kVARS%cosine_zenith_angle,                       kVARS%shortwave_cloud_forcing, kVARS%tend_swrad,           &
-                      kVARS%cloud_fraction, kVARS%albedo])
+                      kVARS%tend_th_lwrad, kVARS%tend_th_swrad, kVARS%cloud_fraction, kVARS%albedo])
 
 
         ! List the variables that are required when restarting for the simple radiation code

@@ -370,7 +370,7 @@ contains
         integer,        intent(in)    :: ims,ime, jms,jme, kms,kme
         integer,        intent(in)    :: ids,ide, jds,jde, kds,kde
 
-        !$acc data present(domain) copyin(dt) copy(SR, last_rain, last_snow, last_graup, refl_10cm)
+        !$acc data create(SR, last_rain, last_snow, last_graup, refl_10cm)
         ! run the thompson microphysics
         if (options%physics%microphysics==kMP_THOMPSON) then
             ! call the thompson microphysics
@@ -656,8 +656,6 @@ contains
         jde = domain%grid%jde;   jme = domain%grid%jme;   jte = domain%grid%jte
         ny  = domain%grid%ny
 
-        !$acc data present(domain)
-
         ! if this is the first time mp is called, set last time such that mp will update
         if (last_model_time==-999) then
             last_model_time = (domain%sim_time%seconds() - max(real(update_interval), dt_in))
@@ -703,7 +701,7 @@ contains
                                     kds = kds, kde = kde)
 
         endif
-        !$acc end data
+
     end subroutine mp
 
     !>----------------------------------------------------------

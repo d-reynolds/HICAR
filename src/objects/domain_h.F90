@@ -51,7 +51,7 @@ module domain_interface
     real :: smooth_height, dx
     integer :: nsmooth
 
-    complex(C_DOUBLE_COMPLEX),  allocatable :: terrain_frequency(:,:) ! FFT(terrain)
+    ! complex(C_DOUBLE_COMPLEX),  allocatable :: terrain_frequency(:,:) ! FFT(terrain)
 
     type(variable_t), allocatable :: forcing_hi(:)
 
@@ -88,9 +88,6 @@ module domain_interface
 
     integer :: neighborhood_max ! The maximum neighborhood radius in indices
     
-    !! MJ added new vars needed for FSM
-    !real,allocatable :: FSM_slopemu
-
 
   contains
     procedure :: init => init_domain

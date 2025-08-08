@@ -122,8 +122,6 @@ contains
         allowed_to_read = .True.
         restart = .False.
         flag_qi = .true.
-        if (.not.allocated(domain%tend%qv_pbl)) allocate(domain%tend%qv_pbl(ims:ime,kms:kme,jms:jme))
-        domain%tend%qv_pbl=0
 
         if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing PBL Scheme"
 

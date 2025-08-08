@@ -68,6 +68,7 @@ module linear_theory_winds
     logical :: variable_N
     logical :: smooth_nsq
     real    :: N_squared
+    complex(C_DOUBLE_COMPLEX),  allocatable :: terrain_frequency(:,:) ! FFT(terrain)
 
     logical :: debug_print = .false.
 
@@ -666,8 +667,8 @@ contains
         ! the domain to work over
         nz = size(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,  2)
 
-        fftnx = size(domain%terrain_frequency, 1)
-        fftny = size(domain%terrain_frequency, 2)
+        fftnx = size(terrain_frequency, 1)
+        fftny = size(terrain_frequency, 2)
 
         call setup_remote_grids(u_grids, v_grids, domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, nz, &
         domain%grid%halo_size, domain%compute_comms)
@@ -804,7 +805,7 @@ contains
                                              domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d,                                      &
                                              domain%vars_3d(domain%var_indx(kVARS%global_z_interface)%v)%data_3d(:,z,:) - &
                                              domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d + domain%vars_3d(domain%var_indx(kVARS%global_dz_interface)%v)%data_3d(:,z,:),  &
-                                             minimum_layer_size, domain%terrain_frequency, lt_data_m)
+                                             minimum_layer_size, terrain_frequency, lt_data_m)
 
                     ! need to handle stagger (nxu /= nx) and the buffer around edges of the domain
                     if (nxu /= nx) then
@@ -1241,33 +1242,33 @@ contains
         call set_module_options(options)
 
         if (STD_OUT_PE) write(*,*) "Initializing linear winds"
-        if (.not.(allocated(domain%terrain_frequency))) then
+        ! if (.not.(allocated(domain%terrain_frequency))) then
+        if (allocated(terrain_frequency)) deallocate(terrain_frequency)
 
+        ! Create a buffer zone around the topography to smooth the edges
+        buffer = original_buffer
+        ! first create it including a 5 grid cell smoothing function
+        call add_buffer_topo(domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, complex_terrain_firstpass, 5, buffer)
+        buffer = 2
+        ! then further add a small (~2) grid cell buffer where all cells have the same value
+        call add_buffer_topo(real(real(complex_terrain_firstpass)), complex_terrain, 0, buffer, debug=options%general%debug)
+        buffer = buffer + original_buffer
 
-            ! Create a buffer zone around the topography to smooth the edges
-            buffer = original_buffer
-            ! first create it including a 5 grid cell smoothing function
-            call add_buffer_topo(domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, complex_terrain_firstpass, 5, buffer)
-            buffer = 2
-            ! then further add a small (~2) grid cell buffer where all cells have the same value
-            call add_buffer_topo(real(real(complex_terrain_firstpass)), complex_terrain, 0, buffer, debug=options%general%debug)
-            buffer = buffer + original_buffer
+        nx = size(complex_terrain, 1)
+        ny = size(complex_terrain, 2)
 
-            nx = size(complex_terrain, 1)
-            ny = size(complex_terrain, 2)
+        allocate(terrain_frequency(nx,ny))
 
-            allocate(domain%terrain_frequency(nx,ny))
-
-            ! calculate the fourier transform of the terrain for use in linear winds
-            plan = fftw_plan_dft_2d(ny, nx, complex_terrain, domain%terrain_frequency, FFTW_FORWARD, FFTW_ESTIMATE)
-            call fftw_execute_dft(plan, complex_terrain, domain%terrain_frequency)
-            call fftw_destroy_plan(plan)
-            ! normalize FFT by N - grid cells
-            domain%terrain_frequency = domain%terrain_frequency / (nx * ny)
-            ! shift the grid cell quadrants
-            ! need to test what effect all of the related shifts actually have...
-            call fftshift(domain%terrain_frequency)
-        endif
+        ! calculate the fourier transform of the terrain for use in linear winds
+        plan = fftw_plan_dft_2d(ny, nx, complex_terrain, terrain_frequency, FFTW_FORWARD, FFTW_ESTIMATE)
+        call fftw_execute_dft(plan, complex_terrain, terrain_frequency)
+        call fftw_destroy_plan(plan)
+        ! normalize FFT by N - grid cells
+        terrain_frequency = terrain_frequency / (nx * ny)
+        ! shift the grid cell quadrants
+        ! need to test what effect all of the related shifts actually have...
+        call fftshift(terrain_frequency)
+        ! endif
 
         if (linear_contribution/=1) then
             if (STD_OUT_PE) write(*,*) "  Using a fraction of the linear perturbation:",linear_contribution

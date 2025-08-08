@@ -229,15 +229,20 @@ contains
             ! get the next variable in the structure
             if (domain%vars_to_out(i)%v <= 0) cycle
             tmp_var = get_varmeta(i)
+
+            !$acc data present(domain)
             if (tmp_var%two_d) then
+                !$acc update host(domain%vars_2d(domain%vars_to_out(i)%v)%data_2d)
                 var = domain%vars_2d(domain%vars_to_out(i)%v)
             else if (tmp_var%three_d) then
+                !$acc update host(domain%vars_3d(domain%vars_to_out(i)%v)%data_3d)
                 var = domain%vars_3d(domain%vars_to_out(i)%v)
             else
                 write(*,*) 'Error: Variable ', tmp_var%name, ' not found in parent domain: ', domain%nest_indx
                 stop
             endif
-            
+            !$acc end data
+
             i_s_w = this%i_s_w; i_e_w = this%i_e_w
             j_s_w = this%j_s_w; j_e_w = this%j_e_w
             if (domain%ime == domain%ide) i_e_w = i_e_w+var%xstag !Add extra to accomodate staggered vars

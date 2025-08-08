@@ -13,7 +13,7 @@ module flow_events
         can_update_child_nest, end_nest_context, switch_nest_context, wake_nest
     use time_step, only: step
     use initialization, only: init_model, init_model_state
-    use wind_iterative, only: finalize_petsc
+    use wind_iterative_old, only: finalize_petsc
     use string, only : as_string
 
     implicit none

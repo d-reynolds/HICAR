@@ -1,5 +1,5 @@
 module variable_interface
-    use icar_constants,          only : kMAX_DIM_LENGTH, kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, kINTEGER, kREAL, kDOUBLE, STD_OUT_PE
+    use icar_constants,          only : kMAX_DIM_LENGTH, kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, kINTEGER, kREAL, kDOUBLE, STD_OUT_PE, kVARS
     use grid_interface,          only : grid_t
     use meta_data_interface,     only : meta_data_t, root_var_t
     implicit none

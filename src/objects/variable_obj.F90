@@ -107,8 +107,9 @@ contains
             if (err /= 0) stop "variable:grid:3d: Allocation request failed"
 
             this%data_3d = 0
-
-            if (this%forcing_var) then
+        
+            ! note w is special cased because it does not have a forcing variable, so it is not necessarily allocated automatically
+            if (this%forcing_var .or. this%id==kVARS%w) then
                 allocate(this%dqdt_3d(grid%ims:grid%ime,    &
                                         grid%kms:grid%kme,    &
                                         grid%jms:grid%jme), stat=err)
