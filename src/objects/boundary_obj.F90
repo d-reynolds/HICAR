@@ -830,7 +830,7 @@ contains
             if (vars_to_read(i) == opt%forcing%vvar) var_indx(i) = kVARS%v
             if (vars_to_read(i) == opt%forcing%vlat) var_indx(i) = kVARS%v_latitude
             if (vars_to_read(i) == opt%forcing%vlon) var_indx(i) = kVARS%v_longitude
-            if (vars_to_read(i) == opt%forcing%wvar) var_indx(i) = kVARS%w
+            if (vars_to_read(i) == opt%forcing%wvar) var_indx(i) = kVARS%w_real
             if (vars_to_read(i) == opt%forcing%pvar) var_indx(i) = kVARS%pressure
             if (vars_to_read(i) == opt%forcing%tvar) var_indx(i) = kVARS%potential_temperature
             if (vars_to_read(i) == opt%forcing%qvvar) var_indx(i) = kVARS%water_vapor

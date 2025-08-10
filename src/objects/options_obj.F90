@@ -141,9 +141,9 @@ contains
 
         integer :: i
 
-        ! Check that boundary conditions file exists
+        ! Check that static domain file exists
         if (trim(this%domain%init_conditions_file) /= '') then
-            call check_file_exists(trim(this%domain%init_conditions_file), message='A boundary conditions file does not exist.')
+            call check_file_exists(trim(this%domain%init_conditions_file), message='A static domain file does not exist.')
         endif
 
         ! Check that the output and restart folders exists

@@ -201,8 +201,8 @@ contains
             do
                 read(name_unit, '(A)', iostat=io_stat) line
                 if (io_stat /= 0) exit
-                
-                text = adjustl(text)
+
+                text = adjustl(line)
                 ! Look for the variable nests in the line
                 if (text(1:6) == "nests ") then
                     equals_pos = index(line, "=")

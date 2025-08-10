@@ -143,9 +143,13 @@ contains
                     ! Should take the difference between child and parent start times, and divide by the input interval
                     ! If this is not an integer, then the start times are not separated by an integer multiple of the input interval
                     tmp_delta = options(child_nest_indx)%general%start_time - options(i)%general%start_time
-                    if (mod(tmp_delta%seconds(), options(child_nest_indx)%forcing%inputinterval) /= 0) then
+                    if (min(mod(tmp_delta%seconds(), options(child_nest_indx)%forcing%inputinterval), &
+                            options(child_nest_indx)%forcing%inputinterval - mod(tmp_delta%seconds(), options(child_nest_indx)%forcing%inputinterval)) >= 1) then
                         if (STD_OUT_PE) write(*,*) "  ERROR: Start time for nest ", child_nest_indx, " is not an integer multiple"
                         if (STD_OUT_PE) write(*,*) "  ERROR: of the inputinterval from the start time of the parent nest"
+                        if (STD_OUT_PE) write(*,*) "  ERROR: Start time for nest: ", child_nest_indx, " is: ", trim(as_string(options(child_nest_indx)%general%start_time))
+                        if (STD_OUT_PE) write(*,*) "  ERROR: inputinterval is: ", options(child_nest_indx)%forcing%inputinterval
+                        if (STD_OUT_PE) write(*,*) "  ERROR: time delta calculated to be: ", trim(as_string(tmp_delta))
                         stop
                     endif
                 enddo
