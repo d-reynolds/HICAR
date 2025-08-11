@@ -464,7 +464,9 @@ contains
                         ! check if the dimension length matches the terrain height variable
                         dim_len = var_dims(dim_indx)
                         if (name=='ulat_hi' .and. dim_name=='X') dim_len = dim_len - 1
+                        if (name=='ulon_hi' .and. dim_name=='X') dim_len = dim_len - 1
                         if (name=='vlat_hi' .and. dim_name=='Y') dim_len = dim_len - 1
+                        if (name=='vlon_hi' .and. dim_name=='Y') dim_len = dim_len - 1
         !
                         if (dim_len /= hgt_var_dims(i)) then
                             if (STD_OUT_PE) write(*,*) "Error: dimension ",trim(dim_name)," on domain variable ", trim(name)
