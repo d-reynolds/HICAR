@@ -132,7 +132,8 @@ contains
 
         if (time_tmp > this%end_time) then
             this%sim_time = this%end_time
-            if (this%next_output > this%end_time) then
+            call time_tmp%set(this%next_output%mjd() - this%small_time_delta%days())
+            if (time_tmp > this%end_time) then
                 this%ended = .true.
             end if
         end if

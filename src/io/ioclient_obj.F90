@@ -313,7 +313,10 @@ contains
                 stop
             end if
 
+            ! !$acc data present(domain%vars_3d(domain%var_indx(var_indx)%v))
+            !$acc update host(domain%vars_3d(domain%var_indx(var_indx)%v)%data_3d)
             var = domain%vars_3d(domain%var_indx(var_indx)%v)
+            ! !$acc end data
 
             i_s_w = this%i_s_w; i_e_w = this%i_e_w
             j_s_w = this%j_s_w; j_e_w = this%j_e_w
@@ -436,11 +439,13 @@ contains
             if (var%three_d) then
                 domain%vars_3d(domain%vars_to_out(i)%v)%data_3d(i_s_re:i_e_re,1:var%dim_len(2),j_s_re:j_e_re) = &
                     this%write_buffer_3d(n_3d,1:nx,1:var%dim_len(2),1:ny)
+                !$acc update host(domain%vars_3d(domain%vars_to_out(i)%v)%data_3d)
                 n_3d = n_3d+1
             else
                 if (var%dtype == kREAL) then
                     domain%vars_2d(domain%vars_to_out(i)%v)%data_2d(i_s_re:i_e_re,j_s_re:j_e_re) = &
                         this%write_buffer_2d(n_2d,1:nx,1:ny)
+                    !$acc update host(domain%vars_2d(domain%vars_to_out(i)%v)%data_2d)
                 ! elseif (var%dtype == kDOUBLE) then
                 !     var%data_2dd(i_s_re:i_e_re,j_s_re:j_e_re) = &
                 !             dble(this%write_buffer_2d(n_2d,1:nx,1:ny))

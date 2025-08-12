@@ -308,12 +308,13 @@ contains
             do i = i_s,i_e
                 u = W_m(i,k-1,j)
                 qn1 = q(i,k-1,j); 
-                q0  = q(i,k,j);
                 if (k==kms+1 .or. k==kme) then
+                    q0  = q(i,k,j);
                     flux_z(i,k,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0)  * 0.5 * t_factor
                 elseif(k==kme+1) then
                     flux_z(i,k,j) = qn1 * u * t_factor
                 else 
+                    q0  = q(i,k,j);
                     q1  = q(i,k+1,j)
                     qn2 = q(i,k-2,j)
                     !Calculation of 4th order fluxes for later application of 3rd order diffusive terms
@@ -549,14 +550,15 @@ contains
             do i = i_s,i_e
                 u = W_m(i,k-1,j)
                 qn1 = q(i,k-1,j); 
-                q0  = q(i,k,j);
                 if (k==kms+1 .or. k==kme) then
+                    q0  = q(i,k,j);
                     flux_z(i,k,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0)  * 0.5
                     flux_z_up(i,k,j) = flux_z(i,k,j) * 0.5 ! additional "0.5" since we only want half of the upwind step
                 elseif(k==kme+1) then
                     flux_z(i,k,j) = qn1 * u
                     flux_z_up(i,k,j) = flux_z(i,k,j) * 0.5 ! additional "0.5" since we only want half of the upwind step
                 else 
+                    q0  = q(i,k,j)
                     q1  = q(i,k+1,j)
                     qn2 = q(i,k-2,j)
                     !Calculation of 4th order fluxes for later application of 3rd order diffusive terms

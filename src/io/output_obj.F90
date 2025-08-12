@@ -788,8 +788,7 @@ contains
         call check_ncdf( nf90_var_par_access(this%active_nc_id, this%time%file_var_id, nf90_collective))
 
         output_time = get_output_time(time, units=this%time_units, round_seconds=.False.)
-
-        call check_ncdf( nf90_put_var(this%active_nc_id, this%time%file_var_id, dble(output_time%mjd()), [current_step] ),   &
+        call check_ncdf( nf90_put_var(this%active_nc_id, this%time%file_var_id, dble(output_time%mjd()+5d-6), [current_step] ),   &
                     "saving:"//trim(this%time%name) )
 
     end subroutine save_data

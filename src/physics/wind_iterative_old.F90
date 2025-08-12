@@ -429,47 +429,24 @@ contains
         ys = info(DMDA_LOCAL_INFO_ZS)
         zs = info(DMDA_LOCAL_INFO_YS)
 
-        ! Check if CUDA is available and use GPU-aware array access
-        call PetscHasExternalPackage('cuda', has_cuda, ierr)
+        call DMDAVecGetArrayF90(dm,vec_b,barray, ierr)
         
-        if (has_cuda .eqv. PETSC_TRUE) then
-            ! Use CUDA-aware array access to keep data on GPU
-            call DMDAVecGetArrayF90(dm,vec_b,barray, ierr)
-            
-            !$acc parallel present(div) copy(barray)
-            !$acc loop gang vector collapse(3)
-            do j=ys,(ys+ym-1)
-                do k=zs,(zs+zm-1)
-                    do i=xs,(xs+xm-1)
-                        !For global boundary conditions
-                        if (i.le.0 .or. j.le.0 .or. k.eq.0 .or. &
-                            i.ge.mx-1 .or. j.ge.my-1 .or. k.eq.mz-1) then
-                            barray(i,k,j) = 0.0
-                        else
-                            barray(i,k,j) = -2*div(i,k,j)
-                        endif
-                    enddo
+        !$acc parallel present(div) copy(barray)
+        !$acc loop gang vector collapse(3)
+        do j=ys,(ys+ym-1)
+            do k=zs,(zs+zm-1)
+                do i=xs,(xs+xm-1)
+                    !For global boundary conditions
+                    if (i.le.0 .or. j.le.0 .or. k.eq.0 .or. &
+                        i.ge.mx-1 .or. j.ge.my-1 .or. k.eq.mz-1) then
+                        barray(i,k,j) = 0.0
+                    else
+                        barray(i,k,j) = -2*div(i,k,j)
+                    endif
                 enddo
             enddo
-            !$acc end parallel
-        else
-            ! Fallback to CPU version
-            call DMDAVecGetArrayF90(dm,vec_b,barray, ierr)
-            
-            do j=ys,(ys+ym-1)
-                do k=zs,(zs+zm-1)
-                    do i=xs,(xs+xm-1)
-                        !For global boundary conditions
-                        if (i.le.0 .or. j.le.0 .or. k.eq.0 .or. &
-                            i.ge.mx-1 .or. j.ge.my-1 .or. k.eq.mz-1) then
-                            barray(i,k,j) = 0.0
-                        else
-                            barray(i,k,j) = -2*div(i,k,j)
-                        endif
-                    enddo
-                enddo
-            enddo
-        endif
+        enddo
+        !$acc end parallel
 
         call DMDAVecRestoreArrayF90(dm,vec_b,barray, ierr)
     end subroutine ComputeRHS
@@ -1024,7 +1001,7 @@ contains
         integer :: i
 
         PETSC_COMM_WORLD = domain%compute_comms%MPI_VAL
-        call PetscInitialize(PETSC_NULL_CHARACTER, ierr)
+        call PetscInitialize(ierr)
 
         allocate(ksp(options%general%nests))
 
@@ -1080,23 +1057,24 @@ contains
         call init_module_vars(domain)
 
         one = 1
-        has_cuda = PETSC_FALSE
 
         call DMDACreate3d(domain%compute_comms%MPI_VAL,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DM_BOUNDARY_NONE,DMDA_STENCIL_BOX, &
                           (domain%ide+2),(domain%kde+2),(domain%jde+2),domain%grid%ximages,one,domain%grid%yimages,one,one, &
                           xl, PETSC_NULL_INTEGER_ARRAY ,yl,da,ierr)
 
         
+        call DMSetMatType(da,MATIS,ierr)
+
+#ifdef _OPENACC
+        has_cuda = PETSC_FALSE
 
         call PetscHasExternalPackage('cuda', has_cuda, ierr)
 
         if (has_cuda .eqv. PETSC_TRUE) then
             call DMSetMatType(da,MATMPIAIJCUSPARSE ,ierr)
             call DMSetVecType(da,VECMPICUDA,ierr)
-        else
-            call DMSetMatType(da,MATIS,ierr)
         endif
-
+#endif
         call DMSetFromOptions(da,ierr)
         call DMSetUp(da,ierr)
 
