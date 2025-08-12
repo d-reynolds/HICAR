@@ -951,7 +951,8 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! COUNTING/INDEX VARIABLES
 
      INTEGER N ! ,I
-     INTEGER, DIMENSION(ITS:ITE,JTS:JTE) ::   NSTEP ! NUMBER OF CLOUD DROPLETS IN CELL
+     INTEGER, DIMENSION(ITS:ITE,KMS:KME,JTS:JTE) ::   NSTEP ! NUMBER OF CLOUD DROPLETS IN CELL
+     INTEGER, DIMENSION(ITS:ITE,JTS:JTE) ::   NSTEP_FLAT ! NUMBER OF CLOUD DROPLETS IN CELL
 
 ! LTRUE IS ONLY USED TO SPEED UP THE CODE !!
 ! LTRUE, SWITCH = 0, NO HYDROMETEORS IN CELL,
@@ -1033,7 +1034,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    !$acc             DZQ, RHO, &
    !$acc             QG3DTEN, NG3DTEN, QG3D, NG3D, &
    !$acc             qrcu1d, qscu1d, qicu1d, &
-   !$acc             QGSTEN, QRSTEN, QISTEN, QNISTEN, QCSTEN, NSTEP, &
+   !$acc             QGSTEN, QRSTEN, QISTEN, QNISTEN, QCSTEN, NSTEP, NSTEP_FLAT, &
    !$acc             nc1d, nc_tend1d, C2PREC,CSED,ISED,SSED,GSED,RSED, &
    !$acc             lamg,acn,abi,arn,ain,agn,ltrue,n0s,qvqvs,qvi,pgam, &
    !$acc             qvqvsi,dv,eis,cdist1,xlf,xxlv,xxls,nc3d,lams,sc,asn, &
@@ -1174,7 +1175,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 
 ! ATMOSPHERIC PARAMETERS THAT VARY IN TIME AND HEIGHT
-   !$acc parallel loop gang vector collapse(3) async(2)
+   !$acc parallel loop gang vector collapse(3) async(1)
    do j=jts,jte      ! j loop (north-south)
    DO K = KTS,KTE
    do i=its,ite      ! i loop (east-west)
@@ -1182,6 +1183,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! SET LTRUE INITIALLY TO 0
 
                LTRUE(I,K,J) = 0
+               NSTEP(I,K,J) = 1
 
 ! NC3DTEN LOCAL ARRAY INITIALIZED
                NC3DTEN(I,K,J) = 0.
@@ -3253,17 +3255,12 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 !    call system_clock(start_t)
 
 !.......................................................................
-   !$acc parallel loop gang collapse(2) async(3) wait(2)
+   !$acc parallel loop gang vector collapse(3) async(2) wait(1)
    do j=jts,jte      ! j loop (north-south)
-   do i=its,ite      ! i loop (east-west)
+      do k = kts, kte
+         do i=its,ite      ! i loop (east-west)
 
-      LTRUE_COL = ANY(LTRUE(I,:,J).EQ.1)
-
-      NSTEP(I,J) = 1
-
-      IF (LTRUE_COL) THEN
-      !$acc loop seq
-      DO K = KTE,KTS,-1
+            ! IF (LTRUE(I,K,J).EQ.0) CYCLE
         DUMI(I,K,J) = QI3D(I,K,J)+QI3DTEN(I,K,J)*DT
         DUMQS(I,K,J) = QNI3D(I,K,J)+QNI3DTEN(I,K,J)*DT
         DUMR(I,K,J) = QR3D(I,K,J)+QR3DTEN(I,K,J)*DT
@@ -3409,9 +3406,22 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
       FG(I,K,J) = UMG
       FNG(I,K,J) = UNG
 
+      ENDDO
+      ENDDO
+      ENDDO
 ! V3.3 MODIFY FALLSPEED BELOW LEVEL OF PRECIP
 
-	IF (K.LE.KTE-1) THEN
+   !$acc parallel loop gang collapse(2) async(3) wait(2)
+   do j=jts,jte      ! j loop (north-south)
+   do i=its,ite      ! i loop (east-west)
+
+      LTRUE_COL = ANY(LTRUE(I,:,J).EQ.1)
+
+      IF (LTRUE_COL) THEN
+      !$acc loop seq
+      DO K = KTE-1,KTS,-1
+
+	! IF (K.LE.KTE-1) THEN
         IF (FR(I,K,J).LT.1.E-10) THEN
 	FR(I,K,J)=FR(I,K+1,J)
 	END IF
@@ -3442,13 +3452,25 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
         IF (FNG(I,K,J).LT.1.E-10) THEN
 	FNG(I,K,J)=FNG(I,K+1,J)
 	END IF
-	END IF ! K LE KTE-1
+	! END IF ! K LE KTE-1
+
+      END DO
+
+      ENDIF ! LTRUE_COL
+
+      END DO
+      END DO
 
 ! CALCULATE NUMBER OF SPLIT TIME STEPS
+   !$acc parallel loop gang vector collapse(3) async(4) wait(3)
+   do j=jts,jte      ! j loop (north-south)
+   DO K = KTS,KTE
+      do i=its,ite      ! i loop (east-west)
+
 
       RGVM = MAX(FR(I,K,J),FI(I,K,J),FS(I,K,J),FC(I,K,J),FNI(I,K,J),FNR(I,K,J),FNS(I,K,J),FNC(I,K,J),FG(I,K,J),FNG(I,K,J))
 ! VVT CHANGED IFIX -> INT (GENERIC FUNCTION)
-      NSTEP(I,J) = MAX(INT(RGVM*DT/DZQ(I,K,J)+1.),NSTEP(I,J))
+      NSTEP(I,K,J) = MAX(INT(RGVM*DT/DZQ(I,K,J)+1.),1)
 
 ! MULTIPLY VARIABLES BY RHO(I,K,J)
       DUMR(I,K,J) = DUMR(I,K,J)*RHO(I,K,J)
@@ -3463,16 +3485,30 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
       DUMFNG(I,K,J) = DUMFNG(I,K,J)*RHO(I,K,J)
 
       END DO
-
-      ENDIF ! LTRUE_COL
-
       END DO
       END DO
+
+      !$acc parallel loop gang vector collapse(2) wait(4)
+      do j = jts,jte
+      do i = its,ite
+            NSTEP_FLAT(i,j) = MAXVAL(NSTEP(i,:,j))
+      enddo
+      enddo
+
+      !$acc parallel loop gang vector collapse(3)
+      do j = jts,jte
+      do k = kts,kte
+      do i = its,ite
+            NSTEP(i,k,j) = NSTEP_FLAT(i,j)
+      enddo
+      enddo
+      enddo
+
 !    call system_clock(end_t)
 !       write(*,*) 'MP SED 1: ', end_t - start_t
 !    call system_clock(start_t)
 
-   !$acc parallel loop gang collapse(2) wait(3) async(4)
+   !$acc parallel loop gang collapse(2) async(5)
    do j=jts,jte      ! j loop (north-south)
    do i=its,ite      ! i loop (east-west)
       LTRUE_COL = ANY(LTRUE(I,:,J).EQ.1)
@@ -3480,7 +3516,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
       IF (LTRUE_COL) THEN
 
       !$acc loop seq
-      DO N = 1,NSTEP(I,J)
+      DO N = 1,NSTEP_FLAT(I,J)
 
       !$acc loop vector
       DO K = KTS,KTE
@@ -3497,86 +3533,93 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
       FALOUTNG(I,K,J) = FNG(I,K,J)*DUMFNG(I,K,J)
       END DO
 
-! TOP OF MODEL
-
-      K = KTE
-      FALTNDR = FALOUTR(I,K,J)/DZQ(I,K,J)
-      FALTNDI = FALOUTI(I,K,J)/DZQ(I,K,J)
-      FALTNDNI = FALOUTNI(I,K,J)/DZQ(I,K,J)
-      FALTNDS = FALOUTS(I,K,J)/DZQ(I,K,J)
-      FALTNDNS = FALOUTNS(I,K,J)/DZQ(I,K,J)
-      FALTNDNR = FALOUTNR(I,K,J)/DZQ(I,K,J)
-      FALTNDC = FALOUTC(I,K,J)/DZQ(I,K,J)
-      FALTNDNC = FALOUTNC(I,K,J)/DZQ(I,K,J)
-      FALTNDG = FALOUTG(I,K,J)/DZQ(I,K,J)
-      FALTNDNG = FALOUTNG(I,K,J)/DZQ(I,K,J)
-! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
-
-      QRSTEN(I,K,J) = QRSTEN(I,K,J)-FALTNDR/NSTEP(I,J)/RHO(I,K,J)
-      QISTEN(I,K,J) = QISTEN(I,K,J)-FALTNDI/NSTEP(I,J)/RHO(I,K,J)
-      NI3DTEN(I,K,J) = NI3DTEN(I,K,J)-FALTNDNI/NSTEP(I,J)/RHO(I,K,J)
-      QNISTEN(I,K,J) = QNISTEN(I,K,J)-FALTNDS/NSTEP(I,J)/RHO(I,K,J)
-      NS3DTEN(I,K,J) = NS3DTEN(I,K,J)-FALTNDNS/NSTEP(I,J)/RHO(I,K,J)
-      NR3DTEN(I,K,J) = NR3DTEN(I,K,J)-FALTNDNR/NSTEP(I,J)/RHO(I,K,J)
-      QCSTEN(I,K,J) = QCSTEN(I,K,J)-FALTNDC/NSTEP(I,J)/RHO(I,K,J)
-      NC3DTEN(I,K,J) = NC3DTEN(I,K,J)-FALTNDNC/NSTEP(I,J)/RHO(I,K,J)
-      QGSTEN(I,K,J) = QGSTEN(I,K,J)-FALTNDG/NSTEP(I,J)/RHO(I,K,J)
-      NG3DTEN(I,K,J) = NG3DTEN(I,K,J)-FALTNDNG/NSTEP(I,J)/RHO(I,K,J)
-
-      DUMR(I,K,J) = DUMR(I,K,J)-FALTNDR*DT/NSTEP(I,J)
-      DUMI(I,K,J) = DUMI(I,K,J)-FALTNDI*DT/NSTEP(I,J)
-      DUMFNI(I,K,J) = DUMFNI(I,K,J)-FALTNDNI*DT/NSTEP(I,J)
-      DUMQS(I,K,J) = DUMQS(I,K,J)-FALTNDS*DT/NSTEP(I,J)
-      DUMFNS(I,K,J) = DUMFNS(I,K,J)-FALTNDNS*DT/NSTEP(I,J)
-      DUMFNR(I,K,J) = DUMFNR(I,K,J)-FALTNDNR*DT/NSTEP(I,J)
-      DUMC(I,K,J) = DUMC(I,K,J)-FALTNDC*DT/NSTEP(I,J)
-      DUMFNC(I,K,J) = DUMFNC(I,K,J)-FALTNDNC*DT/NSTEP(I,J)
-      DUMG(I,K,J) = DUMG(I,K,J)-FALTNDG*DT/NSTEP(I,J)
-      DUMFNG(I,K,J) = DUMFNG(I,K,J)-FALTNDNG*DT/NSTEP(I,J)
-
       !$acc loop vector
-      DO K = KTE-1,KTS,-1
-      FALTNDR = (FALOUTR(I,K+1,J)-FALOUTR(I,K,J))/DZQ(I,K,J)
-      FALTNDI = (FALOUTI(I,K+1,J)-FALOUTI(I,K,J))/DZQ(I,K,J)
-      FALTNDNI = (FALOUTNI(I,K+1,J)-FALOUTNI(I,K,J))/DZQ(I,K,J)
-      FALTNDS = (FALOUTS(I,K+1,J)-FALOUTS(I,K,J))/DZQ(I,K,J)
-      FALTNDNS = (FALOUTNS(I,K+1,J)-FALOUTNS(I,K,J))/DZQ(I,K,J)
-      FALTNDNR = (FALOUTNR(I,K+1,J)-FALOUTNR(I,K,J))/DZQ(I,K,J)
-      FALTNDC = (FALOUTC(I,K+1,J)-FALOUTC(I,K,J))/DZQ(I,K,J)
-      FALTNDNC = (FALOUTNC(I,K+1,J)-FALOUTNC(I,K,J))/DZQ(I,K,J)
-      FALTNDG = (FALOUTG(I,K+1,J)-FALOUTG(I,K,J))/DZQ(I,K,J)
-      FALTNDNG = (FALOUTNG(I,K+1,J)-FALOUTNG(I,K,J))/DZQ(I,K,J)
+      DO K = KTE,KTS,-1
+      ! TOP OF MODEL
+      if (K==KTE) then
+            DUM1 = 1/DZQ(I,K,J)
+            FALTNDR = FALOUTR(I,K,J)*DUM1
+            FALTNDI = FALOUTI(I,K,J)*DUM1
+            FALTNDNI = FALOUTNI(I,K,J)*DUM1
+            FALTNDS = FALOUTS(I,K,J)*DUM1
+            FALTNDNS = FALOUTNS(I,K,J)*DUM1
+            FALTNDNR = FALOUTNR(I,K,J)*DUM1
+            FALTNDC = FALOUTC(I,K,J)*DUM1
+            FALTNDNC = FALOUTNC(I,K,J)*DUM1
+            FALTNDG = FALOUTG(I,K,J)*DUM1
+            FALTNDNG = FALOUTNG(I,K,J)*DUM1
+      ! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
 
-! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
+            DUM2 = 1/NSTEP(I,K,J)/RHO(I,K,J)
+            QRSTEN(I,K,J) = QRSTEN(I,K,J)-FALTNDR*DUM2
+            QISTEN(I,K,J) = QISTEN(I,K,J)-FALTNDI*DUM2
+            NI3DTEN(I,K,J) = NI3DTEN(I,K,J)-FALTNDNI*DUM2
+            QNISTEN(I,K,J) = QNISTEN(I,K,J)-FALTNDS*DUM2
+            NS3DTEN(I,K,J) = NS3DTEN(I,K,J)-FALTNDNS*DUM2
+            NR3DTEN(I,K,J) = NR3DTEN(I,K,J)-FALTNDNR*DUM2
+            QCSTEN(I,K,J) = QCSTEN(I,K,J)-FALTNDC*DUM2
+            NC3DTEN(I,K,J) = NC3DTEN(I,K,J)-FALTNDNC*DUM2
+            QGSTEN(I,K,J) = QGSTEN(I,K,J)-FALTNDG*DUM2
+            NG3DTEN(I,K,J) = NG3DTEN(I,K,J)-FALTNDNG*DUM2
 
-      QRSTEN(I,K,J) = QRSTEN(I,K,J)+FALTNDR/NSTEP(I,J)/RHO(I,K,J)
-      QISTEN(I,K,J) = QISTEN(I,K,J)+FALTNDI/NSTEP(I,J)/RHO(I,K,J)
-      NI3DTEN(I,K,J) = NI3DTEN(I,K,J)+FALTNDNI/NSTEP(I,J)/RHO(I,K,J)
-      QNISTEN(I,K,J) = QNISTEN(I,K,J)+FALTNDS/NSTEP(I,J)/RHO(I,K,J)
-      NS3DTEN(I,K,J) = NS3DTEN(I,K,J)+FALTNDNS/NSTEP(I,J)/RHO(I,K,J)
-      NR3DTEN(I,K,J) = NR3DTEN(I,K,J)+FALTNDNR/NSTEP(I,J)/RHO(I,K,J)
-      QCSTEN(I,K,J) = QCSTEN(I,K,J)+FALTNDC/NSTEP(I,J)/RHO(I,K,J)
-      NC3DTEN(I,K,J) = NC3DTEN(I,K,J)+FALTNDNC/NSTEP(I,J)/RHO(I,K,J)
-      QGSTEN(I,K,J) = QGSTEN(I,K,J)+FALTNDG/NSTEP(I,J)/RHO(I,K,J)
-      NG3DTEN(I,K,J) = NG3DTEN(I,K,J)+FALTNDNG/NSTEP(I,J)/RHO(I,K,J)
+            DUMT = DT/NSTEP(I,K,J)
+            DUMR(I,K,J) = DUMR(I,K,J)+FALTNDR*DUMT
+            DUMI(I,K,J) = DUMI(I,K,J)+FALTNDI*DUMT
+            DUMFNI(I,K,J) = DUMFNI(I,K,J)+FALTNDNI*DUMT
+            DUMQS(I,K,J) = DUMQS(I,K,J)+FALTNDS*DUMT
+            DUMFNS(I,K,J) = DUMFNS(I,K,J)+FALTNDNS*DUMT
+            DUMFNR(I,K,J) = DUMFNR(I,K,J)+FALTNDNR*DUMT
+            DUMC(I,K,J) = DUMC(I,K,J)+FALTNDC*DUMT
+            DUMFNC(I,K,J) = DUMFNC(I,K,J)+FALTNDNC*DUMT
+            DUMG(I,K,J) = DUMG(I,K,J)+FALTNDG*DUMT
+            DUMFNG(I,K,J) = DUMFNG(I,K,J)+FALTNDNG*DUMT
+      else
+            DUM1 = 1/DZQ(I,K,J)
 
-      DUMR(I,K,J) = DUMR(I,K,J)+FALTNDR*DT/NSTEP(I,J)
-      DUMI(I,K,J) = DUMI(I,K,J)+FALTNDI*DT/NSTEP(I,J)
-      DUMFNI(I,K,J) = DUMFNI(I,K,J)+FALTNDNI*DT/NSTEP(I,J)
-      DUMQS(I,K,J) = DUMQS(I,K,J)+FALTNDS*DT/NSTEP(I,J)
-      DUMFNS(I,K,J) = DUMFNS(I,K,J)+FALTNDNS*DT/NSTEP(I,J)
-      DUMFNR(I,K,J) = DUMFNR(I,K,J)+FALTNDNR*DT/NSTEP(I,J)
-      DUMC(I,K,J) = DUMC(I,K,J)+FALTNDC*DT/NSTEP(I,J)
-      DUMFNC(I,K,J) = DUMFNC(I,K,J)+FALTNDNC*DT/NSTEP(I,J)
-      DUMG(I,K,J) = DUMG(I,K,J)+FALTNDG*DT/NSTEP(I,J)
-      DUMFNG(I,K,J) = DUMFNG(I,K,J)+FALTNDNG*DT/NSTEP(I,J)
+            FALTNDR = (FALOUTR(I,K+1,J)-FALOUTR(I,K,J))*DUM1
+            FALTNDI = (FALOUTI(I,K+1,J)-FALOUTI(I,K,J))*DUM1
+            FALTNDNI = (FALOUTNI(I,K+1,J)-FALOUTNI(I,K,J))*DUM1
+            FALTNDS = (FALOUTS(I,K+1,J)-FALOUTS(I,K,J))*DUM1
+            FALTNDNS = (FALOUTNS(I,K+1,J)-FALOUTNS(I,K,J))*DUM1
+            FALTNDNR = (FALOUTNR(I,K+1,J)-FALOUTNR(I,K,J))*DUM1
+            FALTNDC = (FALOUTC(I,K+1,J)-FALOUTC(I,K,J))*DUM1
+            FALTNDNC = (FALOUTNC(I,K+1,J)-FALOUTNC(I,K,J))*DUM1
+            FALTNDG = (FALOUTG(I,K+1,J)-FALOUTG(I,K,J))*DUM1
+            FALTNDNG = (FALOUTNG(I,K+1,J)-FALOUTNG(I,K,J))*DUM1
 
-! FOR WRF-CHEM, NEED PRECIP RATES (UNITS OF KG/M^2/S)
-	  CSED(I,K,J)=CSED(I,K,J)+FALOUTC(I,K,J)/NSTEP(I,J)
-	  ISED(I,K,J)=ISED(I,K,J)+FALOUTI(I,K,J)/NSTEP(I,J)
-	  SSED(I,K,J)=SSED(I,K,J)+FALOUTS(I,K,J)/NSTEP(I,J)
-	  GSED(I,K,J)=GSED(I,K,J)+FALOUTG(I,K,J)/NSTEP(I,J)
-	  RSED(I,K,J)=RSED(I,K,J)+FALOUTR(I,K,J)/NSTEP(I,J)
+      ! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
+            DUM2 = 1/NSTEP(I,K,J)/RHO(I,K,J)
+
+            QRSTEN(I,K,J) = QRSTEN(I,K,J)+FALTNDR*DUM2
+            QISTEN(I,K,J) = QISTEN(I,K,J)+FALTNDI*DUM2
+            NI3DTEN(I,K,J) = NI3DTEN(I,K,J)+FALTNDNI*DUM2
+            QNISTEN(I,K,J) = QNISTEN(I,K,J)+FALTNDS*DUM2
+            NS3DTEN(I,K,J) = NS3DTEN(I,K,J)+FALTNDNS*DUM2
+            NR3DTEN(I,K,J) = NR3DTEN(I,K,J)+FALTNDNR*DUM2
+            QCSTEN(I,K,J) = QCSTEN(I,K,J)+FALTNDC*DUM2
+            NC3DTEN(I,K,J) = NC3DTEN(I,K,J)+FALTNDNC*DUM2
+            QGSTEN(I,K,J) = QGSTEN(I,K,J)+FALTNDG*DUM2
+            NG3DTEN(I,K,J) = NG3DTEN(I,K,J)+FALTNDNG*DUM2
+
+            DUMT = DT/NSTEP(I,K,J)
+            DUMR(I,K,J) = DUMR(I,K,J)+FALTNDR*DUMT
+            DUMI(I,K,J) = DUMI(I,K,J)+FALTNDI*DUMT
+            DUMFNI(I,K,J) = DUMFNI(I,K,J)+FALTNDNI*DUMT
+            DUMQS(I,K,J) = DUMQS(I,K,J)+FALTNDS*DUMT
+            DUMFNS(I,K,J) = DUMFNS(I,K,J)+FALTNDNS*DUMT
+            DUMFNR(I,K,J) = DUMFNR(I,K,J)+FALTNDNR*DUMT
+            DUMC(I,K,J) = DUMC(I,K,J)+FALTNDC*DUMT
+            DUMFNC(I,K,J) = DUMFNC(I,K,J)+FALTNDNC*DUMT
+            DUMG(I,K,J) = DUMG(I,K,J)+FALTNDG*DUMT
+            DUMFNG(I,K,J) = DUMFNG(I,K,J)+FALTNDNG*DUMT
+
+      ! FOR WRF-CHEM, NEED PRECIP RATES (UNITS OF KG/M^2/S)
+            CSED(I,K,J)=CSED(I,K,J)+FALOUTC(I,K,J)/NSTEP(I,K,J)
+            ISED(I,K,J)=ISED(I,K,J)+FALOUTI(I,K,J)/NSTEP(I,K,J)
+            SSED(I,K,J)=SSED(I,K,J)+FALOUTS(I,K,J)/NSTEP(I,K,J)
+            GSED(I,K,J)=GSED(I,K,J)+FALOUTG(I,K,J)/NSTEP(I,K,J)
+            RSED(I,K,J)=RSED(I,K,J)+FALOUTR(I,K,J)/NSTEP(I,K,J)
+      ENDIF
       END DO
 
 ! GET PRECIPITATION AND SNOWFALL ACCUMULATION DURING THE TIME STEP
@@ -3584,11 +3627,11 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! OF LIQUID WATER CANCELS THIS FACTOR OF 1000
 
         PRECPRT1D(I,J) = PRECPRT1D(I,J)+(FALOUTR(I,KTS,J)+FALOUTC(I,KTS,J)+FALOUTS(I,KTS,J)+FALOUTI(I,KTS,J)+FALOUTG(I,KTS,J))  &
-                     *DT/NSTEP(I,J)
-        SNOWRT1D(I,J) = SNOWRT1D(I,J)+(FALOUTS(I,KTS,J)+FALOUTI(I,KTS,J)+FALOUTG(I,KTS,J))*DT/NSTEP(I,J)
+                     *DT/NSTEP_FLAT(I,J)
+        SNOWRT1D(I,J) = SNOWRT1D(I,J)+(FALOUTS(I,KTS,J)+FALOUTI(I,KTS,J)+FALOUTG(I,KTS,J))*DT/NSTEP_FLAT(I,J)
 ! hm added 7/13/13
-        SNOWPRT1D(I,J) = SNOWPRT1D(I,J)+(FALOUTI(I,KTS,J)+FALOUTS(I,KTS,J))*DT/NSTEP(I,J)
-        GRPLPRT1D(I,J) = GRPLPRT1D(I,J)+(FALOUTG(I,KTS,J))*DT/NSTEP(I,J)
+        SNOWPRT1D(I,J) = SNOWPRT1D(I,J)+(FALOUTI(I,KTS,J)+FALOUTS(I,KTS,J))*DT/NSTEP_FLAT(I,J)
+        GRPLPRT1D(I,J) = GRPLPRT1D(I,J)+(FALOUTG(I,KTS,J))*DT/NSTEP_FLAT(I,J)
       
       END DO
 
@@ -3600,7 +3643,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 !       write(*,*) 'MP SED 2: ', end_t - start_t
 !    call system_clock(start_t)
 
-   !$acc parallel loop gang vector collapse(3) wait(4)
+   !$acc parallel loop gang vector collapse(3) wait(5)
    do j=jts,jte      ! j loop (north-south)
    do k=kts,kte
    do i=its,ite      ! i loop (east-west)
