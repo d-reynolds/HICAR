@@ -811,8 +811,9 @@ contains
         endif
 
         call MPI_Comm_get_info(this%IO_Comms, IO_Comms_info)
-        err = nf90_open(restart_in_file, IOR(nf90_nowrite,NF90_NETCDF4), ncid, &
-                comm = this%IO_Comms%MPI_VAL, info = IO_Comms_info%MPI_VAL)
+
+        call check_ncdf(nf90_open(restart_in_file, IOR(nf90_nowrite,NF90_NETCDF4), ncid, &
+                comm = this%IO_Comms%MPI_VAL, info = IO_Comms_info%MPI_VAL), " Opening file "//trim(restart_in_file))
         
         ! setup start/count arrays accordingly. k_s_w and k_e_w forseen to always cover the bounds of what k_s_re and k_e_re would be
         ! This is because the domain is only decomposed in 2D.

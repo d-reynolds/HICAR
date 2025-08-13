@@ -4,7 +4,8 @@ submodule(output_interface) output_implementation
   use iso_fortran_env,          only : output_unit
   use time_io,                  only : get_output_time, find_timestep_in_filelist
   use string,                   only : str, split_str, as_string
-  use io_routines,              only : io_newunit
+  use io_routines,              only : io_newunit, check_file_exists
+
   implicit none
 
 contains
@@ -72,7 +73,9 @@ contains
         error = 1
 
         call get_outputfiles(this,file_list)
-        
+
+        call check_file_exists(this%output_fn, message='Trying to initialize a restart run, but the supplied output file to append to: "'//trim(this%output_fn)//'" does not exist')
+
         if (size(file_list) > 0) then
             !Find output file and step in output filelist
             this%output_counter = find_timestep_in_filelist(file_list, 'time', options%restart%restart_time,this%output_fn,error=error)

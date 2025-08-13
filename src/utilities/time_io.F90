@@ -61,11 +61,11 @@ contains
             if (present(error)) then
                 error = 1
             else
-                if (STD_OUT_PE) write(*,*) "ERROR: Unable to find requested date in file."
-                if (STD_OUT_PE) write(*,*) "Filename: ",trim(filename)
-                if (STD_OUT_PE) write(*,*) "  time  : ",trim(as_string(time))
-                if (STD_OUT_PE) write(*,*) "First time in file : ", trim(as_string(times_in_file(1)))
-                if (STD_OUT_PE) write(*,*) " Last time in file : ", trim(as_string(times_in_file(n)))
+                 write(*,*) "ERROR: Unable to find requested date in file."
+                 write(*,*) "Filename: ",trim(filename)
+                 write(*,*) "  time  : ",trim(as_string(time))
+                write(*,*) "First time in file : ", trim(as_string(times_in_file(1)))
+                write(*,*) " Last time in file : ", trim(as_string(times_in_file(n)))
                 stop "Unable to find date in file"
             endif
         endif
@@ -227,11 +227,11 @@ contains
                 error = 1
                 found = .True.
             else
-                if (STD_OUT_PE) write(*,*) "ERROR: Requested date lays outside of filelist"
-                if (STD_OUT_PE) write(*,*) "First filename:           ",trim(filelist(1))
-                if (STD_OUT_PE) write(*,*) "Last (existing) filename: ",trim(filelist(nup))
-                if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
-                if (STD_OUT_PE) write(*,*) "  time  : ",trim(as_string(time))
+                write(*,*) "ERROR: Requested date lays outside of filelist"
+                write(*,*) "First filename:           ",trim(filelist(1))
+                write(*,*) "Last (existing) filename: ",trim(filelist(nup))
+                write(*,*) "  last attempted step  : ",step
+                write(*,*) "  time  : ",trim(as_string(time))
                 stop "Unable to find date in file"
             endif
         endif
@@ -287,23 +287,23 @@ contains
 
                 !Handle the limiting case
                 if (ndown==nup) then
-                    ndown=nup-1
+                    ndown=max(nup-1,1)
                     if (limit_loop) then
                         if (present(forward)) then
-                            if (STD_OUT_PE) write(*,*) "ERROR: Unable to find requested date in filelist."
-                            if (STD_OUT_PE) write(*,*) "We have collapsed onto two files, but no time was found."
-                            if (STD_OUT_PE) write(*,*) "This, despite a non-exact time search. Gnarly bug."
-                            if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
-                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(as_string(time))
-                            if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
+                            write(*,*) "ERROR: Unable to find requested date in filelist."
+                            write(*,*) "We have collapsed onto two files, but no time was found."
+                            write(*,*) "This, despite a non-exact time search. Gnarly bug."
+                            write(*,*) "First filename: ",trim(filelist(1))
+                            write(*,*) "  time  : ",trim(as_string(time))
+                            write(*,*) "  last attempted step  : ",step
                             stop "Unable to find date in file"
                         else
-                            if (STD_OUT_PE) write(*,*) "WARNING: Unable to find requested date in filelist."
-                            if (STD_OUT_PE) write(*,*) "We have collapsed onto two files, but no time was found."
-                            if (STD_OUT_PE) write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
-                            if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
-                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(as_string(time))
-                            if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
+                            write(*,*) "WARNING: Unable to find requested date in filelist."
+                            write(*,*) "We have collapsed onto two files, but no time was found."
+                            write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
+                            write(*,*) "First filename: ",trim(filelist(1))
+                            write(*,*) "  time  : ",trim(as_string(time))
+                            write(*,*) "  last attempted step  : ",step
                             stop "Unable to find date in file"
                         endif
                     endif    
@@ -327,12 +327,12 @@ contains
                                 found = .True.
                             endif
                         else
-                            if (STD_OUT_PE) write(*,*) "WARNING: Unable to find requested date in filelist."
-                            if (STD_OUT_PE) write(*,*) "Time appears to lay between two files."
-                            if (STD_OUT_PE) write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
-                            if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
-                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(as_string(time))
-                            if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
+                            write(*,*) "WARNING: Unable to find requested date in filelist."
+                            write(*,*) "Time appears to lay between two files."
+                            write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
+                            write(*,*) "First filename: ",trim(filelist(1))
+                            write(*,*) "  time  : ",trim(as_string(time))
+                            write(*,*) "  last attempted step  : ",step
                             stop "Unable to find date in file"
                         endif
                     endif
