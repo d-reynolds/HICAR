@@ -288,7 +288,7 @@ contains
         
         real, dimension(ims:ime,  kms:kme,jms:jme) :: dumb_q
         integer :: i, j, k, bot, wes, sou
-        real    :: tmp, abs_tmp, flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val
+        real    :: tmp, abs_tmp, flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val, q_cache(4)
         
         !When using RK3, we may have a time step derived using a CFL constraint larger than 1
         !This means that our upwind advection here may be in violation of the CFL criterion,
@@ -302,7 +302,7 @@ contains
         !$acc data present(q,u,v,w,flux_x,flux_y,flux_z,dz,denom) &
         !$acc create(dumb_q)
         
-        !$acc parallel loop gang vector collapse(3) async(1) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val)
+        !$acc parallel loop gang vector collapse(3) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val) async(1)
         do j = jms, jme
             do k = kms, kme
             do i = ims, ime
@@ -333,44 +333,51 @@ contains
 
 
         !Now compute upwind fluxes after second step
-        !$acc parallel wait(1) async(2)
-        !$acc loop gang vector collapse(3)
+        !!$acc parallel 
+        !$acc parallel loop gang vector collapse(3) private(q_cache, tmp) async(2) wait(1)
         do j = jts-1, jte+2
-            do k = kms, kme
+            do k = kms, kme+1
                 do i = its-1, ite+2
-                    bot = max(k-1,kms)
-                    wes = max(i-1,ims)
-                    sou = max(j-1,jms)
 
-                    ! X-direction flux - optimize using single calculation
-                    tmp = u(i,k,j)
-                    flux_x(i,k,j) = flux_x(i,k,j) + 0.25 * (tmp * (dumb_q(wes,k,j) + dumb_q(i,k,j)) + &
-                                                                   abs(tmp) * (dumb_q(wes,k,j) - dumb_q(i,k,j)))
-                    
-                    ! Y-direction flux - optimize using single calculation  
-                    tmp = v(i,k,j)
-                    flux_y(i,k,j) = flux_y(i,k,j) + 0.25 * (tmp * (dumb_q(i,k,sou) + dumb_q(i,k,j)) + &
-                                                                   abs(tmp) * (dumb_q(i,k,sou) - dumb_q(i,k,j)))
-                    
-                    ! Z-direction flux - optimize using single calculation
-                    tmp = w(i,bot,j)
-                    flux_z(i,k,j) = flux_z(i,k,j) + 0.25 * (tmp * (dumb_q(i,bot,j) + dumb_q(i,k,j)) + &
-                                                                   abs(tmp) * (dumb_q(i,bot,j) - dumb_q(i,k,j)))
+                    if (k <= kme) then
+                        q_cache(1) = dumb_q(i,k,j-1)
+                        if (k > kms) q_cache(2) = dumb_q(i,k-1,j)
+                        q_cache(3) = dumb_q(i-1,k,j)
+                        q_cache(4) = dumb_q(i,k,j)
 
+                        ! X-direction flux - optimize using single calculation
+                        tmp = u(i,k,j)
+                        flux_x(i,k,j) = flux_x(i,k,j) + 0.25 * (tmp * (q_cache(3) + q_cache(4)) + &
+                                                                    abs(tmp) * (q_cache(3) - q_cache(4)))
+
+                        ! Y-direction flux - optimize using single calculation
+                        tmp = v(i,k,j)
+                        flux_y(i,k,j) = flux_y(i,k,j) + 0.25 * (tmp * (q_cache(1) + q_cache(4)) + &
+                                                                    abs(tmp) * (q_cache(1) - q_cache(4)))
+
+                        if (k > kms) then
+                            ! Z-direction flux - optimize using single calculation
+                            tmp = w(i,k-1,j)
+                            flux_z(i,k,j) = flux_z(i,k,j) + 0.25 * (tmp * (q_cache(2) + q_cache(4)) + &
+                                                                        abs(tmp) * (q_cache(2) - q_cache(4)))
+                        endif
+                    else
+                        flux_z(i,k,j) = flux_z(i,k,j) + 0.5*dumb_q(i,k-1,j) * w(i,k-1,j)
+                    endif
                 enddo
             enddo
         enddo
 
-        !Handle top and bottom boundaries for z here
-        !$acc loop gang vector collapse(2)
-        do j = jts-1,jte+1
-            do i = its-1,ite+1
-                flux_z(i,kme+1,j) = flux_z(i,kme+1,j) + 0.5*dumb_q(i,kme,j) * w(i,kme,j)
-                ! flux_z(i,kms,j) = 0.0
-            enddo
-        enddo
+        ! !Handle top and bottom boundaries for z here
+        ! !$acc parallel loop gang vector collapse(2)
+        ! do j = jts-1,jte+1
+        !     do i = its-1,ite+1
+        !         flux_z(i,kme+1,j) = flux_z(i,kme+1,j) + 0.5*dumb_q(i,kme,j) * w(i,kme,j)
+        !         ! flux_z(i,kms,j) = 0.0
+        !     enddo
+        ! enddo
 
-        !$acc end parallel
+        !!$acc end parallel
         !$acc end data
         !$acc wait(2)
     end subroutine upwind_flux3

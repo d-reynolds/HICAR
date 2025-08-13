@@ -195,7 +195,6 @@ contains
                 tmp = tmp - abs_u_val * (3.0 * (q_cache(5) - q_cache(4)) - (q_cache(6) - q_cache(3)))
                 
                 ! Optimized upwind flux calculation using cached values
-                flux_x_up(i,k,j) = ((u_val + abs_u_val) * q_cache(4) + (u_val - abs_u_val) * q_cache(5)) * 0.25
                 flux_x(i,k,j) = tmp * coef
                 u_val = V_m(i,k,j)
                 abs_u_val = ABS(u_val)
@@ -208,7 +207,6 @@ contains
                 tmp = tmp - abs_u_val * (3.0 * (q_cache(5) - q_cache(2)) - (q_cache(7) - q_cache(1)))
 
                 ! Optimized upwind flux calculation using cached values
-                flux_y_up(i,k,j) = ((u_val + abs_u_val) * q_cache(2) + (u_val - abs_u_val) * q_cache(5)) * 0.25
                 flux_y(i,k,j) = tmp * coef
             enddo
             enddo
