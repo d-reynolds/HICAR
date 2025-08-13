@@ -132,9 +132,9 @@ contains
         logical, optional,   intent(in) :: exch_only
 
         if (present(exch_only)) then
-            call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_3d, exch_var_only=exch_only)
+            call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_3d, wait_timer=this%wait_timer, exch_var_only=exch_only)
         else
-            call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_3d)
+            call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_3d, wait_timer=this%wait_timer)
         end if
     end subroutine halo_3d_retrieve
 

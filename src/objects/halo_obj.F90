@@ -602,7 +602,7 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     
     type(variable_t) :: var
     logical :: exch_v_only
-    integer :: n, k_max, msg_size, indx, i, n_vars
+    integer :: n, p, k_max, msg_size, indx, i, j, k, n_vars
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
     if (this%n_3d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
@@ -631,29 +631,102 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     !$acc data present(this, exch_vars, adv_vars, var_data)
 
     if (.not.(exch_v_only)) then
-        do i = 1, size(adv_vars)
-            if (adv_vars(i)%v <= n_vars) then
+        do p = 1, size(adv_vars)
+            if (adv_vars(p)%v <= n_vars) then
                 !check that the variable indexed matches the name
-                if (var_data(adv_vars(i)%v)%id == adv_vars(i)%id) then
-                    !$acc kernels
-                    if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
-                        var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte-this%halo_size+1):this%jte)
-                    if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),:,:) = &
-                        var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,this%jts:(this%jts+this%halo_size-1))
-                    if (.not.(this%east_boundary)) this%east_buffer_3d(n,:,:,1:(this%jte-this%jts+1)) = &
-                        var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,this%jts:this%jte)
-                    if (.not.(this%west_boundary)) this%west_buffer_3d(n,:,:,1:(this%jte-this%jts+1)) = &
-                        var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,this%jts:this%jte)
+                if (var_data(adv_vars(p)%v)%id == adv_vars(p)%id) then
+                    if (.not.(this%north_boundary)) then
+                        !$acc parallel loop gang vector collapse(3)
+                        do j = 1,this%halo_size
+                        do k = this%kms,this%kme
+                        do i = this%its,this%ite
+                        this%north_buffer_3d(n,i-this%its+1,k,j) = &
+                            var_data(adv_vars(p)%v)%data_3d(i,k,(this%jte-this%halo_size+j))
+                        enddo
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%south_boundary)) then
+                        !$acc parallel loop gang vector collapse(3)
+                        do j = 1,this%halo_size
+                        do k = this%kms,this%kme
+                        do i = this%its,this%ite
+                        this%south_buffer_3d(n,i-this%its+1,k,j) = &
+                                var_data(adv_vars(p)%v)%data_3d(i,k,this%jts+j-1)
+                        enddo
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%east_boundary)) then
+                        !$acc parallel loop gang vector collapse(3)
+                        do j = this%jts,this%jte
+                        do k = this%kms,this%kme
+                        do i = 1,this%halo_size
+                        this%east_buffer_3d(n,i,k,j-this%jts+1) = &
+                            var_data(adv_vars(p)%v)%data_3d((this%ite-this%halo_size+i),k,j)
+                        enddo
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%west_boundary)) then
+                        !$acc parallel loop gang vector collapse(3)
+                        do j = this%jts,this%jte
+                        do k = this%kms,this%kme
+                        do i = 1,this%halo_size
+                        this%west_buffer_3d(n,i,k,j-this%jts+1) = &
+                            var_data(adv_vars(p)%v)%data_3d(this%its+i-1,k,j)
+                        enddo
+                        enddo
+                        enddo
+                    endif
 
-                    if (.not.(this%northwest_boundary)) this%northwest_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                        var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,(this%jte-this%halo_size+1):this%jte)
-                    if (.not.(this%southeast_boundary)) this%southeast_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                        var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,this%jts:(this%jts+this%halo_size-1))
-                    if (.not.(this%southwest_boundary)) this%southwest_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                        var_data(adv_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size-1),:,this%jts:(this%jts+this%halo_size-1))
-                    if (.not.(this%northeast_boundary)) this%northeast_buffer_3d(n,1:this%halo_size,:,1:this%halo_size) = &
-                        var_data(adv_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,:,(this%jte-this%halo_size+1):this%jte)
-                    !$acc end kernels
+                    if (.not.(this%northwest_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = 1,this%halo_size
+                    do k = this%kms,this%kme
+                    do i = 1,this%halo_size
+                        this%northwest_buffer_3d(n,i,k,j) = &
+                        var_data(adv_vars(p)%v)%data_3d(this%its+i-1,k,(this%jte-this%halo_size+j))
+                    enddo
+                    enddo
+                    enddo
+                    endif
+
+                    if (.not.(this%southeast_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = 1,this%halo_size
+                    do k = this%kms,this%kme
+                    do i = 1,this%halo_size
+                        this%southeast_buffer_3d(n,i,k,j) = &
+                        var_data(adv_vars(p)%v)%data_3d((this%ite-this%halo_size+i),k,this%jts+j-1)
+                    enddo
+                    enddo
+                    enddo
+                    endif
+                    
+                    if (.not.(this%southwest_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = 1,this%halo_size
+                    do k = this%kms,this%kme
+                    do i = 1,this%halo_size
+                        this%southwest_buffer_3d(n,i,k,j) = &
+                        var_data(adv_vars(p)%v)%data_3d(this%its+i-1,k,this%jts+j-1)
+                    enddo
+                    enddo
+                    enddo
+                    endif
+
+                    if (.not.(this%northeast_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = 1,this%halo_size
+                    do k = this%kms,this%kme
+                    do i = 1,this%halo_size
+                        this%northeast_buffer_3d(n,i,k,j) = &
+                        var_data(adv_vars(p)%v)%data_3d((this%ite-this%halo_size+i),k,(this%jte-this%halo_size+j))
+                    enddo
+                    enddo
+                    enddo
+                    endif
                     n = n+1
                 endif
             endif
@@ -661,21 +734,59 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     endif
 
     ! Now iterate through the exchange-only objects as long as there are more elements present
-     do i = 1, size(exch_vars)
+     do p = 1, size(exch_vars)
         !check that the variable indexed matches the name
-        if (exch_vars(i)%v <= n_vars) then
-            if (var_data(exch_vars(i)%v)%id == exch_vars(i)%id) then
-                k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
-                !$acc kernels
-                if (.not.(this%north_boundary)) this%north_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
-                    var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte-this%halo_size+1):this%jte)
-                if (.not.(this%south_boundary)) this%south_buffer_3d(n,1:(this%ite-this%its+1),1:k_max,:) = &
-                    var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,this%jts:(this%jts+this%halo_size-1))
-                if (.not.(this%east_boundary)) this%east_buffer_3d(n,:,1:k_max,1:(this%jte-this%jts+1)) = &
-                    var_data(exch_vars(i)%v)%data_3d((this%ite-this%halo_size+1):this%ite,1:k_max,this%jts:this%jte)
-                if (.not.(this%west_boundary)) this%west_buffer_3d(n,:,1:k_max,1:(this%jte-this%jts+1)) = &
-                    var_data(exch_vars(i)%v)%data_3d(this%its:(this%its+this%halo_size)-1,1:k_max,this%jts:this%jte)
-                !$acc end kernels
+        if (exch_vars(p)%v <= n_vars) then
+            if (var_data(exch_vars(p)%v)%id == exch_vars(p)%id) then
+                k_max = ubound(var_data(exch_vars(p)%v)%data_3d,2)
+
+                if (.not.(this%north_boundary)) then
+                !$acc parallel loop gang vector collapse(3)
+                do j = 1,this%halo_size
+                do k = 1,k_max
+                do i = this%its,this%ite
+                    this%north_buffer_3d(n,i-this%its+1,k,j) = &
+                        var_data(exch_vars(p)%v)%data_3d(i,k,(this%jte-this%halo_size+j))
+                enddo
+                enddo
+                enddo
+                endif
+
+                if (.not.(this%south_boundary)) then
+                !$acc parallel loop gang vector collapse(3)
+                do j = 1,this%halo_size
+                do k = 1,k_max
+                do i = this%its,this%ite
+                    this%south_buffer_3d(n,i-this%its+1,k,j) = &
+                        var_data(exch_vars(p)%v)%data_3d(i,k,this%jts+j-1)
+                enddo
+                enddo
+                enddo
+                endif
+
+                if (.not.(this%east_boundary)) then
+                !$acc parallel loop gang vector collapse(3)
+                do j = this%jts,this%jte
+                do k = 1,k_max
+                do i = 1,this%halo_size
+                    this%east_buffer_3d(n,i,k,j-this%jts+1) = &
+                        var_data(exch_vars(p)%v)%data_3d((this%ite-this%halo_size+i),k,j)
+                enddo
+                enddo
+                enddo
+                endif
+
+                if (.not.(this%west_boundary)) then
+                !$acc parallel loop gang vector collapse(3)
+                do j = this%jts,this%jte
+                do k = 1,k_max
+                do i = 1,this%halo_size
+                    this%west_buffer_3d(n,i,k,j-this%jts+1) = &
+                        var_data(exch_vars(p)%v)%data_3d(this%its+i-1,k,j)
+                enddo
+                enddo
+                enddo
+                endif
                 n = n+1
             endif
         endif
@@ -776,7 +887,7 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     type(timer_t), optional,     intent(inout)   :: wait_timer
 
     type(variable_t) :: var
-    integer :: n, k_max, i, n_vars
+    integer :: n, p, k_max, i, j, k, n_vars
     logical :: exch_v_only
 
     if (this%n_3d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
@@ -795,61 +906,171 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
 
     n = 1
     n_vars = size(var_data)
+    if (present(wait_timer)) call wait_timer%start()
 
     !$acc data present(this, exch_vars, adv_vars, var_data)
 
     ! Now iterate through the dictionary as long as there are more elements present
     if (.not.(exch_v_only)) then
-        do i = 1, size(adv_vars)
-            if (adv_vars(i)%v <= n_vars) then
+        do p = 1, size(adv_vars)
+            if (adv_vars(p)%v <= n_vars) then
                 !check that the variable indexed matches the name
-                if (var_data(adv_vars(i)%v)%id == adv_vars(i)%id) then
-                    !$acc kernels
-                    if (.not.(this%north_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,(this%jte+1):this%jme) = &
-                            this%north_batch_in_3d(n,1:(this%ite-this%its+1),:,1:this%halo_size)
-                    if (.not.(this%south_boundary)) var_data(adv_vars(i)%v)%data_3d(this%its:this%ite,:,this%jms:(this%jts-1)) = &
-                            this%south_batch_in_3d(n,1:(this%ite-this%its+1),:,1:this%halo_size)
-                    if (.not.(this%east_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,this%jts:this%jte) = &
-                            this%east_batch_in_3d(n,:,:,1:(this%jte-this%jts+1))
-                    if (.not.(this%west_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,this%jts:this%jte) = &
-                            this%west_batch_in_3d(n,:,:,1:(this%jte-this%jts+1))
+                if (var_data(adv_vars(p)%v)%id == adv_vars(p)%id) then
+                    if (.not.(this%north_boundary)) then
+                        !$acc parallel loop gang vector collapse(3)
+                        do j = 1,this%halo_size
+                        do k = this%kms,this%kme
+                        do i = this%its,this%ite
+                        var_data(adv_vars(p)%v)%data_3d(i,k,(this%jte+j)) = &
+                                this%north_batch_in_3d(n,i-this%its+1,k,j)
+                        enddo
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%south_boundary)) then
+                        !$acc parallel loop gang vector collapse(3)
+                        do j = 1,this%halo_size
+                        do k = this%kms,this%kme
+                        do i = this%its,this%ite
+                        var_data(adv_vars(p)%v)%data_3d(i,k,this%jms+j-1) = &
+                                this%south_batch_in_3d(n,i-this%its+1,k,j)
+                        enddo
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%east_boundary)) then
+                        !$acc parallel loop gang vector collapse(3)
+                        do j = this%jts,this%jte
+                        do k = this%kms,this%kme
+                        do i = 1,this%halo_size
+                        var_data(adv_vars(p)%v)%data_3d((this%ite+i),k,j) = &
+                                this%east_batch_in_3d(n,i,k,j-this%jts+1)
+                        enddo
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%west_boundary)) then
+                        !$acc parallel loop gang vector collapse(3)
+                        do j = this%jts,this%jte
+                        do k = this%kms,this%kme
+                        do i = 1,this%halo_size
+                        var_data(adv_vars(p)%v)%data_3d(this%ims+i-1,k,j) = &
+                                this%west_batch_in_3d(n,i,k,j-this%jts+1)
+                        enddo
+                        enddo
+                        enddo
+                    endif
+                    
+                    if (.not.(this%northwest_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = 1,this%halo_size
+                    do k = this%kms,this%kme
+                    do i = 1,this%halo_size
+                        var_data(adv_vars(p)%v)%data_3d(this%ims+i-1,k,(this%jte+j)) = &
+                            this%northwest_batch_in_3d(n,i,k,j)
+                    enddo
+                    enddo
+                    enddo
+                    endif
 
-                    if (.not.(this%northwest_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,(this%jte+1):this%jme) = &
-                            this%northwest_batch_in_3d(n,:,:,:)
-                    if (.not.(this%southeast_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,this%jms:(this%jts-1)) = &
-                            this%southeast_batch_in_3d(n,:,:,:)
-                    if (.not.(this%southwest_boundary)) var_data(adv_vars(i)%v)%data_3d(this%ims:(this%its-1),:,this%jms:(this%jts-1)) = &
-                            this%southwest_batch_in_3d(n,:,:,:)
-                    if (.not.(this%northeast_boundary)) var_data(adv_vars(i)%v)%data_3d((this%ite+1):this%ime,:,(this%jte+1):this%jme) = &
-                            this%northeast_batch_in_3d(n,:,:,:)
-                    !$acc end kernels
+                    if (.not.(this%southeast_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = 1,this%halo_size
+                    do k = this%kms,this%kme
+                    do i = 1,this%halo_size
+                        var_data(adv_vars(p)%v)%data_3d((this%ite+i),k,this%jms+j-1) = &
+                            this%southeast_batch_in_3d(n,i,k,j)
+                    enddo
+                    enddo
+                    enddo
+                    endif
+
+                    if (.not.(this%southwest_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = 1,this%halo_size
+                    do k = this%kms,this%kme
+                    do i = 1,this%halo_size
+                        var_data(adv_vars(p)%v)%data_3d(this%ims+i-1,k,this%jms+j-1) = &
+                            this%southwest_batch_in_3d(n,i,k,j)
+                    enddo
+                    enddo
+                    enddo
+                    endif
+
+                    if (.not.(this%northeast_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = 1,this%halo_size
+                    do k = this%kms,this%kme
+                    do i = 1,this%halo_size
+                        var_data(adv_vars(p)%v)%data_3d((this%ite+i),k,(this%jte+j)) = &
+                            this%northeast_batch_in_3d(n,i,k,j)
+                    enddo
+                    enddo
+                    enddo
+                    endif
                     n = n+1
                 endif
             endif
         enddo
     endif
     ! Now iterate through the exchange-only objects as long as there are more elements present
-    do i = 1, size(exch_vars)
-        if (exch_vars(i)%v <= n_vars) then
+    do p = 1, size(exch_vars)
+        if (exch_vars(p)%v <= n_vars) then
             !check that the variable indexed matches the name
-            if (var_data(exch_vars(i)%v)%id == exch_vars(i)%id) then
-                k_max = ubound(var_data(exch_vars(i)%v)%data_3d,2)
-                !$acc kernels
-                if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,(this%jte+1):this%jme) = &
-                        this%north_batch_in_3d(n,1:(this%ite-this%its+1),1:k_max,:)
-                if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_3d(this%its:this%ite,1:k_max,this%jms:(this%jts-1)) = &
-                        this%south_batch_in_3d(n,1:(this%ite-this%its+1),1:k_max,:)
-                if (.not.(this%east_boundary)) var_data(exch_vars(i)%v)%data_3d((this%ite+1):this%ime,1:k_max,this%jts:this%jte) = &
-                        this%east_batch_in_3d(n,:,1:k_max,1:(this%jte-this%jts+1))
-                if (.not.(this%west_boundary)) var_data(exch_vars(i)%v)%data_3d(this%ims:(this%its-1),1:k_max,this%jts:this%jte) = &
-                        this%west_batch_in_3d(n,:,1:k_max,1:(this%jte-this%jts+1))
-                !$acc end kernels
+            if (var_data(exch_vars(p)%v)%id == exch_vars(p)%id) then
+                k_max = ubound(var_data(exch_vars(p)%v)%data_3d,2)
+                if (.not.(this%north_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = 1,this%halo_size
+                    do k = 1,k_max
+                    do i = this%its,this%ite
+                    var_data(exch_vars(p)%v)%data_3d(i,k,(this%jte+j)) = &
+                            this%north_batch_in_3d(n,i-this%its+1,k,j)
+                    enddo
+                    enddo
+                    enddo
+                endif
+                if (.not.(this%south_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = 1,this%halo_size
+                    do k = 1,k_max
+                    do i = this%its,this%ite
+                    var_data(exch_vars(p)%v)%data_3d(i,k,this%jms+j-1) = &
+                            this%south_batch_in_3d(n,i-this%its+1,k,j)
+                    enddo
+                    enddo
+                    enddo
+                endif
+                if (.not.(this%east_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = this%jts,this%jte
+                    do k = 1,k_max
+                    do i = 1,this%halo_size
+                    var_data(exch_vars(p)%v)%data_3d((this%ite+i),k,j) = &
+                            this%east_batch_in_3d(n,i,k,j-this%jts+1)
+                    enddo
+                    enddo
+                    enddo
+                endif
+                if (.not.(this%west_boundary)) then
+                    !$acc parallel loop gang vector collapse(3)
+                    do j = this%jts,this%jte
+                    do k = 1,k_max
+                    do i = 1,this%halo_size
+                    var_data(exch_vars(p)%v)%data_3d(this%ims+i-1,k,j) = &
+                            this%west_batch_in_3d(n,i,k,j-this%jts+1)
+                    enddo
+                    enddo
+                    enddo
+                endif
                 n = n+1
             endif
         endif
     enddo
 
     !$acc end data
+    if (present(wait_timer)) call wait_timer%stop()
+
     if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp, 0, this%north_3d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Post(this%south_neighbor_grp, 0, this%south_3d_win)
     if (.not.(this%east_boundary)) call MPI_Win_Post(this%east_neighbor_grp, 0, this%east_3d_win)
@@ -867,7 +1088,7 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
     type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
     type(variable_t), intent(inout) :: var_data(:)
     type(variable_t) :: var
-    integer :: n, msg_size, i, n_vars
+    integer :: n, p, msg_size, i, j, k, n_vars
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
     if (this%n_2d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
@@ -889,20 +1110,46 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
     !$acc data present(this, exch_vars, adv_vars, var_data)
 
     ! Now iterate through the exchange-only objects as long as there are more elements present
-    do i = 1, size(exch_vars)
-        if (exch_vars(i)%v <= n_vars) then
+    do p = 1, size(exch_vars)
+        if (exch_vars(p)%v <= n_vars) then
             !check that the variable indexed matches the name
-            if (var_data(exch_vars(i)%v)%id == exch_vars(i)%id) then
-                !$acc kernels
-                if (.not.(this%north_boundary)) this%north_buffer_2d(n,1:(this%ite-this%its+1),:) = &
-                    var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte-this%halo_size+1):this%jte)
-                if (.not.(this%south_boundary)) this%south_buffer_2d(n,1:(this%ite-this%its+1),:) = &
-                    var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,this%jts:(this%jts+this%halo_size-1))
-                if (.not.(this%east_boundary)) this%east_buffer_2d(n,:,1:(this%jte-this%jts+1)) = &
-                    var_data(exch_vars(i)%v)%data_2d((this%ite-this%halo_size+1):this%ite,this%jts:this%jte)
-                if (.not.(this%west_boundary)) this%west_buffer_2d(n,:,1:(this%jte-this%jts+1)) = &
-                    var_data(exch_vars(i)%v)%data_2d(this%its:(this%its+this%halo_size-1),this%jts:this%jte)
-                !$acc end kernels
+            if (var_data(exch_vars(p)%v)%id == exch_vars(p)%id) then
+                    if (.not.(this%north_boundary)) then
+                        !$acc parallel loop gang vector collapse(2)
+                        do j = 1,this%halo_size
+                        do i = this%its,this%ite
+                        this%north_buffer_2d(n,i-this%its+1,j) = &
+                            var_data(exch_vars(p)%v)%data_2d(i,(this%jte-this%halo_size+j))
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%south_boundary)) then
+                        !$acc parallel loop gang vector collapse(2)
+                        do j = 1,this%halo_size
+                        do i = this%its,this%ite
+                        this%south_buffer_2d(n,i-this%its+1,j) = &
+                                var_data(exch_vars(p)%v)%data_2d(i,this%jts+j-1)
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%east_boundary)) then
+                        !$acc parallel loop gang vector collapse(2)
+                        do j = this%jts,this%jte
+                        do i = 1,this%halo_size
+                        this%east_buffer_2d(n,i,j-this%jts+1) = &
+                            var_data(exch_vars(p)%v)%data_2d((this%ite-this%halo_size+i),j)
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%west_boundary)) then
+                        !$acc parallel loop gang vector collapse(2)
+                        do j = this%jts,this%jte
+                        do i = 1,this%halo_size
+                        this%west_buffer_2d(n,i,j-this%jts+1) = &
+                            var_data(exch_vars(p)%v)%data_2d(this%its+i-1,j)
+                        enddo
+                        enddo
+                    endif
                 n = n+1
             endif
         endif
@@ -952,7 +1199,7 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
     type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
     type(variable_t), intent(inout) :: var_data(:)
     type(variable_t) :: var
-    integer :: n, i, n_vars
+    integer :: n, p, i, j, k, n_vars
 
     if (this%n_2d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
@@ -967,16 +1214,46 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
     !$acc data present(this, exch_vars, adv_vars, var_data)
 
     ! Now iterate through the exchange-only objects as long as there are more elements present
-    do i = 1, size(exch_vars)
-        if (exch_vars(i)%v <= n_vars) then
+    do p = 1, size(exch_vars)
+        if (exch_vars(p)%v <= n_vars) then
             !check that the variable indexed matches the name
-            if (var_data(exch_vars(i)%v)%id == exch_vars(i)%id) then
-                !$acc kernels
-                if (.not.(this%north_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,(this%jte+1):this%jme) = this%north_batch_in_2d(n,1:(this%ite-this%its+1),:)
-                if (.not.(this%south_boundary)) var_data(exch_vars(i)%v)%data_2d(this%its:this%ite,this%jms:(this%jts-1)) = this%south_batch_in_2d(n,1:(this%ite-this%its+1),:)
-                if (.not.(this%east_boundary)) var_data(exch_vars(i)%v)%data_2d((this%ite+1):this%ime,this%jts:this%jte) = this%east_batch_in_2d(n,:,1:(this%jte-this%jts+1))
-                if (.not.(this%west_boundary)) var_data(exch_vars(i)%v)%data_2d(this%ims:(this%its-1),this%jts:this%jte) = this%west_batch_in_2d(n,:,1:(this%jte-this%jts+1))
-                !$acc end kernels
+            if (var_data(exch_vars(p)%v)%id == exch_vars(p)%id) then
+                    if (.not.(this%north_boundary)) then
+                        !$acc parallel loop gang vector collapse(2)
+                        do j = 1,this%halo_size
+                        do i = this%its,this%ite
+                        var_data(exch_vars(p)%v)%data_2d(i,(this%jte+j)) = &
+                                this%north_batch_in_2d(n,i-this%its+1,j)
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%south_boundary)) then
+                        !$acc parallel loop gang vector collapse(2)
+                        do j = 1,this%halo_size
+                        do i = this%its,this%ite
+                        var_data(exch_vars(p)%v)%data_2d(i,this%jms+j-1) = &
+                                this%south_batch_in_2d(n,i-this%its+1,j)
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%east_boundary)) then
+                        !$acc parallel loop gang vector collapse(2)
+                        do j = this%jts,this%jte
+                        do i = 1,this%halo_size
+                        var_data(exch_vars(p)%v)%data_2d((this%ite+i),j) = &
+                                this%east_batch_in_2d(n,i,j-this%jts+1)
+                        enddo
+                        enddo
+                    endif
+                    if (.not.(this%west_boundary)) then
+                        !$acc parallel loop gang vector collapse(2)
+                        do j = this%jts,this%jte
+                        do i = 1,this%halo_size
+                        var_data(exch_vars(p)%v)%data_2d(this%ims+i-1,j) = &
+                                this%west_batch_in_2d(n,i,j-this%jts+1)
+                        enddo
+                        enddo
+                    endif
                 n = n+1
             endif
         endif
