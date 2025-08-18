@@ -177,7 +177,7 @@ module test_advect
             if (domain%west_boundary) domain%vars_3d(domain%adv_vars(i)%v)%data_3d(var_grid%ims:var_grid%its-1,:,:) = initial_val
         end do
 
-        !$acc data copy(domain, kVARS)
+        !$acc data copy(kVARS)
 
         ! exchange to get each others values in the halo regions
         call domain%batch_exch()
@@ -210,6 +210,8 @@ module test_advect
                 return
             end if
         end do
+        
+        call domain%release()
 
     end subroutine advect_standard
 

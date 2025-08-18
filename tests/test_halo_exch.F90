@@ -380,7 +380,7 @@ module test_halo_exch
             if (.not.(northeast)) then
                 ! write(*,*) "my_index is: ", my_index
                 ! write(*,*) "expected value is: ", my_index+grid%ximages+1
-                write(*,*) "corner data is: ", var%data_3d(grid%ite:grid%ime,1,grid%jte:grid%jme)
+                write(*,*) "northeast corner data is: ", var%data_3d(grid%ite:grid%ime,1,grid%jte:grid%jme)
                 call test_failed(error, "Halo exch failed", "Failed for north eastern halo exchange, "//trim(test_str))
                 return
             endif
@@ -392,7 +392,7 @@ module test_halo_exch
             if (.not.(northwest)) then
                 ! write(*,*) "my_index is: ", my_index
                 ! write(*,*) "expected value is: ", my_index+grid%ximages-1
-                write(*,*) "corner data is: ", var%data_3d(grid%ims:grid%its-1,1,grid%jte+1:grid%jme)
+                write(*,*) "northwest corner data is: ", var%data_3d(grid%ims:grid%its-1,1,grid%jte+1:grid%jme)
                 call test_failed(error, "Halo exch failed", "Failed for north western halo exchange, "//trim(test_str))
                 return
             endif
@@ -404,7 +404,7 @@ module test_halo_exch
             if (.not.(southeast)) then
                 ! write(*,*) "my_index is: ", my_index
                 ! write(*,*) "expected value is: ", my_index-grid%ximages+1
-                write(*,*) "corner data is: ", var%data_3d(grid%ite+1:grid%ime,1,grid%jms:grid%jts-1)
+                write(*,*) "southeast corner data is: ", var%data_3d(grid%ite+1:grid%ime,1,grid%jms:grid%jts-1)
                 call test_failed(error, "Halo exch failed", "Failed for south eastern halo exchange, "//trim(test_str))
                 return
             endif
@@ -416,7 +416,7 @@ module test_halo_exch
             if (.not.(southwest)) then
                 ! write(*,*) "my_index is: ", my_index
                 ! write(*,*) "expected value is: ", my_index-grid%ximages-1
-                write(*,*) "corner data is: ", var%data_3d(grid%ims:grid%its-1,1,grid%jms:grid%jts-1)
+                write(*,*) "southwest corner data is: ", var%data_3d(grid%ims:grid%its-1,1,grid%jms:grid%jts-1)
                 call test_failed(error, "Halo exch failed", "Failed for south western halo exchange, "//trim(test_str))
                 return
             endif

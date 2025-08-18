@@ -37,6 +37,9 @@ module initialization
     use ioclient_interface,         only : ioclient_t
     use iso_fortran_env,            only : output_unit
     use mpi_f08
+#ifdef _OPENACC
+    use openacc
+#endif
 
     ! use io_routines,                only : io_read, &
     !                                        io_write3d,io_write3di, io_write
@@ -61,8 +64,8 @@ contains
         integer, intent(in) :: n_nests
         type(options_t), intent(in) :: options
 
-        integer :: n, k, name_len, color, IOcolor, ierr, num_PE
-        integer :: num_threads, found, PE_RANK_GLOBAL, NUM_SERVERS, NUM_COMPUTE, NUM_IO_PER_NODE, NUM_PROC_PER_NODE
+        integer :: n, k, name_len, color, IOcolor, ierr, num_PE, devtype
+        integer :: num_threads, found, PE_RANK_GLOBAL, NUM_SERVERS, NUM_COMPUTE, NUM_IO_PER_NODE, NUM_PROC_PER_NODE, NUM_GPU_PER_NODE
 
         character(len=MPI_MAX_PROCESSOR_NAME) :: ENV_IO_PER_NODE
         type(MPI_Comm) :: globalComm, shared_comm, mainComms, IOComms
@@ -94,6 +97,11 @@ contains
         call MPI_Comm_Size(shared_comm,NUM_PROC_PER_NODE)
         call MPI_Comm_free(shared_comm, ierr)
         ! call MPI_Comm_free(globalComm, ierr)
+
+#ifdef _OPENACC
+        devtype = acc_get_device_type()
+        NUM_GPU_PER_NODE = acc_get_num_devices(devtype)
+#endif
 
 
         !Assign one io process per node, this results in best co-array transfer times
@@ -163,6 +171,9 @@ contains
             write(*,*) "  Number of IO elements:                  ",NUM_SERVERS
             write(*,*) "  Number of processing elements per node: ",NUM_PROC_PER_NODE
             write(*,*) "  Number of IO processes per node:        ",NUM_IO_PER_NODE
+#if defined(_OPENACC)
+            write(*,*) "  Number of GPUs used per node: ", NUM_GPU_PER_NODE
+#endif
 
 #if defined(_OPENMP)
             write(*,*) "  Max number of OpenMP Threads:           ",num_threads
