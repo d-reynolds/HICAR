@@ -39,10 +39,9 @@ program icar
     type(comp_arr_t)  :: components(kMAX_NESTS)
     type(ioclient_t), allocatable  :: ioclient(:)
     
-    integer :: i, ierr, exec_team, n_nests, n, old_nest, PE_RANK_GLOBAL
+    integer :: i, n_nests, PE_RANK_GLOBAL
     real :: t_val, t_val2, t_val3
-    logical :: init_flag, info_only, gen_nml, only_namelist_check
-    logical :: start_time_match = .False.
+    logical :: init_flag
     character(len=kMAX_FILE_LENGTH) :: namelist_file
 #ifdef _OPENACC
     integer :: dev, devNum, local_rank, comm_size
@@ -51,7 +50,7 @@ program icar
 #endif
 
     ! Read command line options to determine what kind of run this is
-    call read_co(namelist_file, info_only, gen_nml, only_namelist_check)
+    call read_co(namelist_file)
 
     !Initialize MPI if needed
     init_flag = .False.
@@ -86,7 +85,7 @@ program icar
     !  Model Initialization
 
     ! Reads user supplied model options
-    call init_options(options, namelist_file, info_only=info_only, gen_nml=gen_nml, only_namelist_check=only_namelist_check)
+    call init_options(options, namelist_file)
 
     if (STD_OUT_PE) write(*,'(/ A)') "--------------------------------------------------------"
     if (STD_OUT_PE) write(*,'(A)')   "Finished reading options, beginning processor assignment"
@@ -124,15 +123,16 @@ program icar
     CALL MPI_Finalize()
 
 contains
-    subroutine read_co(nml_file, info, gen_nml, only_namelist_check)
+    subroutine read_co(nml_file)
         implicit none
         character(len=kMAX_FILE_LENGTH), intent(out) :: nml_file
-        logical, intent(out) :: info, gen_nml, only_namelist_check
 
+        logical :: info, gen_nml, only_namelist_check
         integer :: cnt, p
         character(len=kMAX_FILE_LENGTH) :: first_arg, arg, default
         character(len=kMAX_FILE_LENGTH), allocatable :: keywords(:)
         logical :: file_exists
+        type(options_t), allocatable :: options(:)
 
         nml_file = ""
         info = .False.
@@ -234,6 +234,11 @@ contains
                 if (STD_OUT_PE) write(*,*) "Using options file = ", trim(nml_file)
                 stop "Options file does not exist. "
             endif
+        endif
+
+        if (gen_nml .or. only_namelist_check .or. info) then
+            call init_options(options, namelist_file, info_only=info, gen_nml=gen_nml, only_namelist_check=only_namelist_check)
+            stop
         endif
         STD_OUT_PE = .False.
     end subroutine

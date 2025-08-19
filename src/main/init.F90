@@ -188,12 +188,19 @@ contains
         implicit none
         type(options_t), allocatable, intent(out) :: options(:)
         character(len=*), intent(in) :: namelist_file
-        logical, intent(in) :: info_only, gen_nml, only_namelist_check
+        logical, intent(in), optional :: info_only, gen_nml, only_namelist_check
 
+        logical :: info = .False.
+        logical :: gennml = .False.
+        logical :: nml_check = .False.
         integer :: num_nests, i, rc, name_unit, io_stat, equals_pos
         character(len=200) :: line, text
 
-        if (STD_OUT_PE .and. .not.(gen_nml .or. only_namelist_check .or. info_only)) then
+        if (present(info_only)) info = info_only
+        if (present(gen_nml)) gennml = gen_nml
+        if (present(only_namelist_check)) nml_check = only_namelist_check
+
+        if (STD_OUT_PE .and. .not.(gennml .or. nml_check .or. info)) then
             call welcome_message()
             write(*,'(/ A)') "--------------------------------------------------------"
             write(*,'(A)')   "Initializing Options"
@@ -207,7 +214,7 @@ contains
 
         ! If we are generating or printing namelist option information, we don't want to read anything, and only need to run the init routine once
         ! First thing, read from options file how many nests we have
-        if ( .not.(info_only .or. gen_nml) )then
+        if ( .not.(info .or. gennml) )then
             open(io_newunit(name_unit), file=namelist_file, status='old')
             do
                 read(name_unit, '(A)', iostat=io_stat) line
@@ -230,7 +237,7 @@ contains
 
         ! read in options file
         do i = 1, num_nests
-            call options(i)%init(namelist_file, i, info_only=info_only, gen_nml=gen_nml)
+            call options(i)%init(namelist_file, i, info_only=info, gen_nml=gennml)
             call collect_physics_requests(options(i))
 
             if (options(i)%general%parent_nest > 0) then
@@ -244,7 +251,7 @@ contains
         call inter_nest_namelist_check(options)
 
         ! If this run was just done to check the namelist options, stop now
-        if (only_namelist_check) then
+        if (nml_check) then
             if (STD_OUT_PE) write(*,*) 'Namelist options check complete.'
             stop
         endif
