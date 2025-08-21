@@ -108,8 +108,7 @@ contains
         NUM_SERVERS = ceiling(num_PE*NUM_IO_PER_NODE*1.0/NUM_PROC_PER_NODE)
         NUM_COMPUTE = num_PE-NUM_SERVERS
 
-        STD_OUT_PE_IO = (PE_RANK_GLOBAL == NUM_PROC_PER_NODE-NUM_IO_PER_NODE) .and. (options%general%debug .or. STD_OUT_PE_IO)
-
+        STD_OUT_PE_IO = (PE_RANK_GLOBAL == ((NUM_PROC_PER_NODE/NUM_IO_PER_NODE)-1) ) .and. (options%general%debug .or. STD_OUT_PE_IO)
         
         if ((mod(NUM_COMPUTE,2) /= 0) .and. STD_OUT_PE) then
             write(*,*) 'WARNING: number of compute processes is odd-numbered.' 
