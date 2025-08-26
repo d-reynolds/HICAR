@@ -130,10 +130,11 @@ contains
 
         ! Get upwind fluxes
 
-        !$acc data present(q,flux_x,flux_y,flux_z,dz,denom,usign,vsign,wsign) &
-        !$acc create(scale_in,scale_out,flux_x_up,flux_y_up,flux_z_up)
-
+        !$acc enter data create(flux_x_up,flux_y_up,flux_z_up)
         call upwind_flux3(q,u,v,w,flux_x_up,flux_z_up,flux_y_up,dz,denom)
+
+        !$acc data present(q,flux_x,flux_y,flux_z,flux_x_up,flux_y_up,flux_z_up,dz,denom,usign,vsign,wsign) &
+        !$acc create(scale_in,scale_out)
 
         ! Next compute max and min possible fluxes        
         !$acc parallel loop gang vector collapse(3) async(1)
@@ -277,6 +278,9 @@ contains
         !$acc end parallel
         !$acc end data
         !$acc wait(2)
+
+        !$acc exit data delete(flux_x_up,flux_y_up,flux_z_up)
+
     end subroutine WRF_flux_corr
 
     subroutine upwind_flux3(q,u,v,w,flux_x,flux_z,flux_y,dz,denom)
