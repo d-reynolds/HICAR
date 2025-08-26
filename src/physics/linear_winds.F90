@@ -911,7 +911,8 @@ contains
         ! pointers to the u/v data to be updated so they can point to different places depending on the update flag
         real, allocatable :: u3d(:,:,:), v3d(:,:,:), nsquared(:,:,:)
 
-
+        !very lazy GPU integration -- just move all data from gpu to host, continue with calculation on host as before, then copy relevant fields back to gpu at the end
+        !$acc update host(domain)
         if (update) then
             u3d = domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d
             v3d = domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d
@@ -1164,15 +1165,31 @@ contains
         deallocate(u1d, v1d)
         !$omp end parallel
 
-        do k=1, nyv
-            do j=1, nz
-                do i=1, nxu
-                    if (i<=nx) domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
-                    if (k<=ny) domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+        if (update) then
+            do k=1, nyv
+                do j=1, nz
+                    do i=1, nxu
+                        if (i<=nx) domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+                        if (k<=ny) domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+                    enddo
                 enddo
             enddo
-        enddo
+            !$acc update device(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d)
+            !$acc update device(domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d)
+        else
+            do k=1, nyv
+                do j=1, nz
+                    do i=1, nxu
+                        if (i<=nx) domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+                        if (k<=ny) domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+                    enddo
+                enddo
+            enddo
+            !$acc update device(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d)
+            !$acc update device(domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d)
+        endif
         domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d = exp(domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d)
+        !$acc update device(domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d)
 
     end subroutine spatial_winds
 
