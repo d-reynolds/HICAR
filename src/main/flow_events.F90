@@ -492,10 +492,6 @@ subroutine component_program_end(component, options)
                 t_val2 = comp%flux_timer%min(comp%compute_comms)
                 t_val3 = comp%flux_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_flux", ":", t_val, " | ", t_val2, " | ", t_val3
-                t_val = comp%flux_up_timer%mean(comp%compute_comms)
-                t_val2 = comp%flux_up_timer%min(comp%compute_comms)
-                t_val3 = comp%flux_up_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_flux_up", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%flux_corr_timer%mean(comp%compute_comms)
                 t_val2 = comp%flux_corr_timer%min(comp%compute_comms)
                 t_val3 = comp%flux_corr_timer%max(comp%compute_comms)

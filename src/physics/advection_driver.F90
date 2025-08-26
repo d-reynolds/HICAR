@@ -68,12 +68,12 @@ contains
         endif
     end subroutine
     
-    subroutine advect(domain, options, dt,flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
+    subroutine advect(domain, options, dt,flux_time, flux_corr_time, sum_time, adv_wind_time)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in)    :: options
         real,intent(in) :: dt
-        type(timer_t), intent(inout) :: flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time
+        type(timer_t), intent(inout) :: flux_time, flux_corr_time, sum_time, adv_wind_time
         type(variable_t) :: var_to_advect
         integer :: n
 
@@ -105,7 +105,7 @@ contains
                 if (options%physics%advection==kADV_STD) then
     
                     call RK3_adv(domain%vars_3d(domain%adv_vars(n)%v)%data_3d, options, U_m, V_m, W_m, denom, &
-                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
+                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, flux_time, flux_corr_time, sum_time, adv_wind_time)
                     
                 else if(options%physics%advection==kADV_MPDATA) then
                     ! Not yet implemented (is it compatable w/ RK3?)
@@ -113,7 +113,7 @@ contains
             else
                 if (options%physics%advection==kADV_STD) then
                     call adv_std_advect3d(domain%vars_3d(domain%adv_vars(n)%v)%data_3d,domain%vars_3d(domain%adv_vars(n)%v)%data_3d, &
-                        U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_up_time, flux_corr_time, sum_time)
+                        U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_corr_time, sum_time)
                 !else if(options%physics%advection==kADV_MPDATA) then                                    
                 !    call mpdata_advect3d(var, rho, jaco, dz, options)
                 endif
@@ -125,12 +125,12 @@ contains
 
     end subroutine advect
 
-    subroutine RK3_adv(var, options, U_m, V_m, W_m, denom, dz, flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
+    subroutine RK3_adv(var, options, U_m, V_m, W_m, denom, dz, flux_time, flux_corr_time, sum_time, adv_wind_time)
         implicit none
         real, allocatable, intent(inout) :: var(:,:,:)
         type(options_t), intent(in) :: options
         real, allocatable, intent(in) :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:), dz(:,:,:)
-        type(timer_t), intent(inout) :: flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time
+        type(timer_t), intent(inout) :: flux_time, flux_corr_time, sum_time, adv_wind_time
 
         real , allocatable :: temp(:,:,:)
         integer :: j, k, i
@@ -150,10 +150,10 @@ contains
 
         !Initial advection-tendency calculations
 
-        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_up_time, flux_corr_time, sum_time,t_factor_in=0.333)
-        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_up_time, flux_corr_time, sum_time,t_factor_in=0.5)
+        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_corr_time, sum_time,t_factor_in=0.333)
+        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_corr_time, sum_time,t_factor_in=0.5)
         !final advection call with tendency-fluxes
-        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_up_time, flux_corr_time, sum_time,flux_corr_in=options%adv%flux_corr)
+        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_corr_time, sum_time,flux_corr_in=options%adv%flux_corr)
         
         !$acc end data
 

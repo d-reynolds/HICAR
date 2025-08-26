@@ -70,7 +70,7 @@ module domain_interface
                         output_timer, physics_timer, wind_timer, mp_timer, &
                         adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, &
                         send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, &
-                        flux_timer, flux_up_timer, flux_corr_timer, sum_timer, adv_wind_timer, cpu_gpu_timer
+                        flux_timer, flux_corr_timer, sum_timer, adv_wind_timer, cpu_gpu_timer
 
     ! contains the size of the domain (or the local tile?)
     integer :: nx, ny, nz, nx_global, ny_global

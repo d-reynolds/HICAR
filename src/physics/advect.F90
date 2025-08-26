@@ -21,7 +21,7 @@ module adv_std
     ! For use advecting a (convective?) wind field
     ! real,dimension(:,:,:),allocatable :: U_4cu_u, V_4cu_u, W_4cu_u
     ! real,dimension(:,:,:),allocatable :: U_4cu_v, V_4cu_v, W_4cu_v
-    real, dimension(:,:,:), allocatable   :: flux_x, flux_x_up, flux_y, flux_y_up, flux_z, flux_z_up
+    real, dimension(:,:,:), allocatable   :: flux_x, flux_y, flux_z
 
     public :: adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, adv_std_clean_wind_arrays
 
@@ -411,245 +411,8 @@ contains
         !$acc end data
     end subroutine flux3
 
-    subroutine flux3_w_up(q,U_m,V_m,W_m,flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up)
-        implicit none
-        real, dimension(ims:ime,  kms:kme,jms:jme),   intent(in)       :: q
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: U_m
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: V_m
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: W_m
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1),   intent(out)    :: flux_x, flux_x_up
-        real, dimension(i_s:i_e+1,  kms:kme,j_s:j_e+1), intent(out)    :: flux_y, flux_y_up
-        real, dimension(i_s:i_e+1,  kms:kme+1,j_s:j_e+1), intent(out)    :: flux_z, flux_z_up
-        integer :: i, j, k, top, bot, bot2, nor, sou, sou2, eas, wes, wes2
-        real :: tmp, coef, u, q0, q1, q2, qn1, qn2, qn3, abs_u, qin1, qin2, qi1, qk1, qj1, qkn1, qkn2, qjn1, qjn2
-        ! GPU optimization variables
-        real :: q_cache(7),  u_val, abs_u_val
 
-        !$acc data present(q,U_m,V_m,W_m,flux_x,flux_x_up,flux_y,flux_y_up,flux_z,flux_z_up)
-
-        if (horder==3) then
-            coef = (1./12)
-            !$acc parallel loop gang vector collapse(3) async(1) private(u_val, abs_u_val, q_cache, tmp)
-            do j = j_s,j_e+1
-            do k = kms,kme
-            do i = i_s,i_e+1
-                ! Cache q values to reduce memory accesses
-                q_cache(1) = q(i,k,j-2)  ! qn2
-                q_cache(2) = q(i,k,j-1)  ! qn1
-                q_cache(3) = q(i-2,k,j)  ! qn2
-                q_cache(4) = q(i-1,k,j)  ! qn1
-                q_cache(5) = q(i,k,j)    ! q0
-                q_cache(6) = q(i+1,k,j)  ! q1
-                q_cache(7) = q(i,k,j+1)  ! q1
-
-                u_val = U_m(i,k,j)
-                abs_u_val = ABS(u_val)
-                
-                ! Optimized 4th order flux calculation using cached values
-                tmp = 7.0 * (q_cache(5) + q_cache(4)) - (q_cache(6) + q_cache(3))
-                tmp = u_val * tmp
-                
-                ! Optimized 3rd order diffusive terms using cached values
-                tmp = tmp - abs_u_val * (3.0 * (q_cache(5) - q_cache(4)) - (q_cache(6) - q_cache(3)))
-                
-                ! Optimized upwind flux calculation using cached values
-                flux_x_up(i,k,j) = ((u_val + abs_u_val) * q_cache(4) + (u_val - abs_u_val) * q_cache(5)) * 0.25
-                flux_x(i,k,j) = tmp * coef
-
-                u_val = V_m(i,k,j)
-                abs_u_val = ABS(u_val)
-                
-                ! Optimized 4th order flux calculation using cached values
-                tmp = 7.0 * (q_cache(5) + q_cache(2)) - (q_cache(7) + q_cache(1))
-                tmp = u_val * tmp
-                
-                ! Optimized 3rd order diffusive terms using cached values
-                tmp = tmp - abs_u_val * (3.0 * (q_cache(5) - q_cache(2)) - (q_cache(7) - q_cache(1)))
-
-                ! Optimized upwind flux calculation using cached values
-                flux_y_up(i,k,j) = ((u_val + abs_u_val) * q_cache(2) + (u_val - abs_u_val) * q_cache(5)) * 0.25
-                flux_y(i,k,j) = tmp * coef
-            enddo
-            enddo
-            enddo
-
-        else if (horder==5) then
-            coef = (1./60)
-            !$acc parallel async(1)
-            !$acc loop gang vector collapse(3)
-            do j = j_s,j_e
-            do k = kms,kme
-            do i = i_s,i_e+1
-                u = U_m(i,k,j)
-                q0  = q(i,k,j);   q1  = q(i+1,k,j); q2  = q(i+2,k,j)
-                qn1 = q(i-1,k,j); qn2 = q(i-2,k,j); qn3 = q(i-3,k,j)
-
-                !Calculation of 6th order fluxes for later application of 5th order diffusive terms
-                tmp = 37*(q0+qn1) - 8*(q1+qn2) + (q2+qn3)
-                tmp = u*tmp
-                !Application of 5th order diffusive terms
-                tmp = tmp - abs(u) * (10*(q0-qn1) - 5*(q1-qn2) + (q2-qn3))
-                !Calculation of Upwind fluxes
-                flux_x_up(i,k,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0)  * 0.5 * 0.5 ! additional "0.5" since we only want half of the upwind step
-                !Application of Upwind fluxes to higher order fluxes -- needed for flux correction step
-                flux_x(i,k,j) = tmp*coef
-            enddo
-            enddo
-            enddo
-            !$acc loop gang vector collapse(3)
-            do j = j_s,j_e+1
-            do k = kms,kme
-            do i = i_s,i_e
-                u = V_m(i,k,j)
-                q0  = q(i,k,j);   q1  = q(i,k,j+1); q2  = q(i,k,j+2)
-                qn1 = q(i,k,j-1); qn2 = q(i,k,j-2); qn3 = q(i,k,j-3)
-                !Calculation of 6th order fluxes for later application of 5th order diffusive terms
-                tmp = 37*(q0+qn1) - 8*(q1+qn2) + (q2+qn3)
-                tmp = u*tmp
-                !Application of 5th order diffusive terms
-                tmp = tmp - abs(u) * (10*(q0-qn1) -  5*(q1-qn2) + (q2-qn3))
-                !Calculation of Upwind fluxes
-                flux_y_up(i,k,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0)  * 0.5 * 0.5 ! additional "0.5" since we only want half of the upwind step
-                !Application of Upwind fluxes to higher order fluxes -- needed for flux correction step
-                flux_y(i,k,j) = tmp*coef
-            enddo
-            enddo
-            enddo
-            !$acc end parallel
-        endif
-
-        if (vorder==1) then
-            !$acc parallel async(2)
-            !$acc loop gang vector collapse(3)
-            do j = j_s,j_e
-               do k = kms+1,kme
-                   do i = i_s,i_e
-                       flux_z(i,k,j) = ((W_m(i,k-1,j) + ABS(W_m(i,k-1,j))) * q(i,k-1,j) + &
-                                    (W_m(i,k-1,j) - ABS(W_m(i,k-1,j))) * q(i,k,j))  * 0.5
-                   enddo
-               enddo
-            enddo
-            !$acc loop gang vector collapse(2)
-            do j = j_s,j_e
-                do i = i_s,i_e
-                    ! flux_z(i,kms,j) = 0
-                    ! flux_z_up(i,kms,j) = 0
-                    flux_z(i,kme+1,j) = q(i,kme,j) * W_m(i,kme,j)
-                    flux_z_up(i,kme+1,j) = flux_z(i,kme+1,j) * 0.5 ! additional "0.5" since we only want half of the upwind step
-                enddo
-            enddo
-            !$acc end parallel
-
-        else if (vorder==3) then
-            coef = (1./12)
-            !$acc parallel loop gang vector collapse(3) async(2) private(u_val, abs_u_val, tmp)
-            do j = j_s,j_e
-            do k = kms+1,kme+1
-            do i = i_s,i_e
-                u = W_m(i,k-1,j)
-                qn1 = q(i,k-1,j); 
-                if (k==kms+1 .or. k==kme) then
-                    q0  = q(i,k,j);
-                    flux_z(i,k,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0)  * 0.5
-                    flux_z_up(i,k,j) = flux_z(i,k,j) * 0.5 ! additional "0.5" since we only want half of the upwind step
-                elseif(k==kme+1) then
-                    flux_z(i,k,j) = qn1 * u
-                    flux_z_up(i,k,j) = flux_z(i,k,j) * 0.5 ! additional "0.5" since we only want half of the upwind step
-                else 
-                    q0  = q(i,k,j)
-                    q1  = q(i,k+1,j)
-                    qn2 = q(i,k-2,j)
-                    !Calculation of 4th order fluxes for later application of 3rd order diffusive terms
-                    tmp = 7*(q0+qn1) - (q1+qn2)
-                    tmp = u*tmp
-                    !Application of 3rd order diffusive terms
-                    tmp = tmp - abs(u) * (3 * (q0 - qn1) - (q1 - qn2))
-                    !Calculation of Upwind fluxes
-                    flux_z_up(i,k,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0)  * 0.5 * 0.5 ! additional "0.5" since we only want half of the upwind step
-                    !Application of Upwind fluxes to higher order fluxes -- needed for flux correction step
-                    flux_z(i,k,j) = tmp*coef         
-                end if
-            enddo
-            enddo
-            enddo
-
-        else if (vorder==5) then
-            coef = (1./60)
-            !$acc parallel
-            !$acc loop gang vector collapse(3)
-            do j = j_s,j_e
-            do k = kms+3,kme-2
-            do i = i_s,i_e
-                u = W_m(i,k-1,j)
-                q0  = q(i,k,j);   q1  = q(i,k+1,j);  q2 = q(i,k+2,j)
-                qn1 = q(i,k-1,j); qn2 = q(i,k-2,j); qn3 = q(i,k-3,j)
-                !Calculation of 6th order fluxes for later application of 5th order diffusive terms
-                tmp = 37*(q0+qn1) - 8*(q1+qn2) + (q2+qn3)
-                tmp = u*tmp
-                !Application of 5th order diffusive terms
-                tmp = tmp - abs(u) * (10*(q0-qn1) -  5*(q1-qn2) + (q2-qn3))
-                !Calculation of Upwind fluxes
-                flux_z_up(i,k,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0)  * 0.5 * 0.5 ! additional "0.5" since we only want half of the upwind step
-                !Application of Upwind fluxes to higher order fluxes -- needed for flux correction step
-                flux_z(i,k,j) = tmp*coef
-            enddo
-            enddo
-            enddo
-            coef = (1./12)
-            !$acc loop gang vector collapse(2)
-            do j = j_s,j_e
-                do i = i_s,i_e
-
-                    ! flux_z(i,kms,j) = 0
-                    ! flux_z_up(i,kms,j) = 0
-
-                    u = W_m(i,kms,j)
-                    !Do simple upwind for the cells who's stencil does not allow higher-order
-                    flux_z(i,kms+1,j) = ((u + ABS(u)) * q(i,kms,j) + &
-                                         (u - ABS(u)) * q(i,kms+1,j))  * 0.5
-                    flux_z_up(i,kms+1,j) = flux_z(i,kms+1,j) * 0.5 ! additional "0.5" since we only want half of the upwind step
-
-                    u = W_m(i,kms+1,j)
-                    q0  = q(i,kms+2,j);   q1  = q(i,kms+3,j)
-                    qn1 = q(i,kms+1,j);   qn2 = q(i,kms,j)
-                    
-                    tmp = 7*(q0+qn1) - (q1+qn2)
-                    tmp = u*tmp
-                    !Application of 3rd order diffusive terms
-                    tmp = tmp - abs(u) * (3 * (q0 - qn1) - (q1 - qn2))
-                    flux_z(i,kms+2,j) = tmp*coef               
-                    flux_z_up(i,kms+2,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0)  * 0.5 * 0.5 ! additional "0.5" since we only want half of the upwind step
-
-                    u = W_m(i,kme-2,j)
-                    q0  = q(i,kme-1,j);   q1  = q(i,kme,j)
-                    qn1 = q(i,kme-2,j);   qn2 = q(i,kme-3,j)
-
-                    tmp = 7*(q0+qn1) - (q1+qn2)
-                    tmp = u*tmp
-                    !Application of 3rd order diffusive terms
-                    tmp = tmp - abs(u) * (3 * (q0 - qn1) - (q1 - qn2))
-                    flux_z(i,kme-1,j) = tmp*coef               
-                    flux_z_up(i,kme-1,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0)  * 0.5 * 0.5 ! additional "0.5" since we only want half of the upwind step
-
-
-                    u = W_m(i,kme-1,j)
-                    flux_z(i,kme,j) = ((u + ABS(u)) * q(i,kme-1,j) + &
-                                       (u - ABS(u)) * q(i,kme,j))  * 0.5
-                    flux_z_up(i,kme,j) = flux_z(i,kme,j) * 0.5 ! additional "0.5" since we only want half of the upwind step
-
-                    flux_z(i,kme+1,j) = q(i,kme,j) * W_m(i,kme,j)
-                    flux_z_up(i,kme+1,j) = flux_z(i,kme+1,j) * 0.5 ! additional "0.5" since we only want half of the upwind step
-
-                enddo
-            enddo
-            !$acc end parallel
-        endif
-                                                          
-        !$acc wait(1,2)
-        !$acc end data
-    end subroutine flux3_w_up
-
-    subroutine adv_std_advect3d(qfluxes,qold,U_m,V_m,W_m,denom,dz, flux_time, flux_up_time, flux_corr_time, sum_time, t_factor_in,flux_corr_in)
+    subroutine adv_std_advect3d(qfluxes,qold,U_m,V_m,W_m,denom,dz, flux_time, flux_corr_time, sum_time, t_factor_in,flux_corr_in)
         ! !DIR$ INLINEALWAYS adv_std_advect3d
         implicit none
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(inout)   :: qfluxes
@@ -658,7 +421,7 @@ contains
         real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: U_m
         real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: V_m
         real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: W_m
-        type(timer_t), intent(inout) :: flux_time, flux_up_time, flux_corr_time, sum_time
+        type(timer_t), intent(inout) :: flux_time, flux_corr_time, sum_time
         real, optional,                              intent(in)      :: t_factor_in
         integer, optional,                           intent(in)      :: flux_corr_in
 
@@ -674,18 +437,14 @@ contains
         flux_corr = 0
         if (present(flux_corr_in)) flux_corr = flux_corr_in
 
-        if (flux_corr > 0) then
-            call flux_up_time%start()
-            call flux3_w_up(qfluxes,U_m, V_m, W_m, flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up)
-            call flux_up_time%stop()
+        call flux_time%start()
+        call flux3(qfluxes,U_m, V_m, W_m, flux_x,flux_z,flux_y,t_factor)
+        call flux_time%stop()
 
+        if (flux_corr > 0) then
             call flux_corr_time%start()
-            call WRF_flux_corr(qold,U_m, V_m, W_m, flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up,dz,denom)
+            call WRF_flux_corr(qold,U_m, V_m, W_m, flux_x,flux_z,flux_y,dz,denom)
             call flux_corr_time%stop()
-        else
-            call flux_time%start()
-            call flux3(qfluxes,U_m, V_m, W_m, flux_x,flux_z,flux_y,t_factor)
-            call flux_time%stop()
         endif
         call sum_time%start()
         
@@ -767,11 +526,8 @@ contains
         if (allocated(W_m)) deallocate(W_m)
         if (allocated(denom)) deallocate(denom)
         if (allocated(flux_x)) deallocate(flux_x)
-        if (allocated(flux_x_up)) deallocate(flux_x_up)
         if (allocated(flux_y)) deallocate(flux_y)
-        if (allocated(flux_y_up)) deallocate(flux_y_up)
         if (allocated(flux_z)) deallocate(flux_z)
-        if (allocated(flux_z_up)) deallocate(flux_z_up)
 
         ! allocate the arrays
         allocate(U_m     (i_s:i_e+1,kms:kme,j_s:j_e+1))
@@ -779,14 +535,11 @@ contains
         allocate(W_m     (i_s:i_e+1,kms:kme,j_s:j_e+1))
         allocate(denom   (ims:ime,  kms:kme,jms:jme  ))
         allocate(flux_x(i_s:i_e+1,kms:kme,j_s:j_e+1))
-        allocate(flux_x_up(i_s:i_e+1,kms:kme,j_s:j_e+1))
         allocate(flux_y(i_s:i_e+1,  kms:kme,j_s:j_e+1))
-        allocate(flux_y_up(i_s:i_e+1,  kms:kme,j_s:j_e+1))
         allocate(flux_z(i_s:i_e+1,  kms:kme+1,j_s:j_e+1))
-        allocate(flux_z_up(i_s:i_e+1,  kms:kme+1,j_s:j_e+1))
 
         advect_density = options%adv%advect_density
-        !$acc enter data create(U_m,V_m,W_m,denom, flux_x, flux_y, flux_z, flux_x_up, flux_y_up, flux_z_up)
+        !$acc enter data create(U_m,V_m,W_m,denom, flux_x, flux_y, flux_z)
 
 
         !$acc data present(u,v,w,density,jaco,jaco_u,jaco_v,jaco_w,dz, dx, U_m, V_m, W_m, denom) create(rho)
@@ -861,7 +614,7 @@ contains
         implicit none
         real, allocatable, dimension(:,:,:), intent(inout) :: U_m, V_m, W_m, denom
 
-        !$acc exit data delete(U_m,V_m,W_m,denom, flux_x, flux_y, flux_z, flux_x_up, flux_y_up, flux_z_up)
+        !$acc exit data delete(U_m,V_m,W_m,denom, flux_x, flux_y, flux_z)
         
         if (allocated(U_m)) deallocate(U_m)
         if (allocated(V_m)) deallocate(V_m)
@@ -870,9 +623,6 @@ contains
         if (allocated(flux_x)) deallocate(flux_x)
         if (allocated(flux_y)) deallocate(flux_y)
         if (allocated(flux_z)) deallocate(flux_z)
-        if (allocated(flux_x_up)) deallocate(flux_x_up)
-        if (allocated(flux_y_up)) deallocate(flux_y_up)
-        if (allocated(flux_z_up)) deallocate(flux_z_up)
 
     end subroutine adv_std_clean_wind_arrays
 

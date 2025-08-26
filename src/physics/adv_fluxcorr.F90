@@ -102,19 +102,23 @@ contains
 
     end subroutine clear_flux_sign_arrays
 
-    subroutine WRF_flux_corr(q,u,v,w,flux_x,flux_z,flux_y,flux_x_up,flux_z_up,flux_y_up,dz,denom)
+    subroutine WRF_flux_corr(q,u,v,w,flux_x,flux_z,flux_y,dz,denom)
         implicit none
         real, dimension(ims:ime,  kms:kme,jms:jme),    intent(in) :: q, dz, denom
         real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+2),  intent(in) :: w
         real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+2),  intent(in) :: u
         real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+2),  intent(in) :: v
         
-        real, dimension(its-1:ite+2,kms:kme,  jts-1:jte+2),intent(inout)          :: flux_x, flux_x_up
-        real, dimension(its-1:ite+2,kms:kme,  jts-1:jte+2),intent(inout)          :: flux_y, flux_y_up
-        real, dimension(its-1:ite+2,kms:kme+1,jts-1:jte+2),intent(inout)          :: flux_z, flux_z_up
+        real, dimension(its-1:ite+2,kms:kme,  jts-1:jte+2),intent(inout)          :: flux_x
+        real, dimension(its-1:ite+2,kms:kme,  jts-1:jte+2),intent(inout)          :: flux_y
+        real, dimension(its-1:ite+2,kms:kme+1,jts-1:jte+2),intent(inout)          :: flux_z
         
         
         real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+1)   :: scale_in, scale_out
+        real, dimension(its-1:ite+2,kms:kme,  jts-1:jte+2)   :: flux_x_up
+        real, dimension(its-1:ite+2,kms:kme,  jts-1:jte+2)   :: flux_y_up
+        real, dimension(its-1:ite+2,kms:kme+1,jts-1:jte+2)   :: flux_z_up
+
         real :: dz_t_i, fx, fx1, fy, fy1, fz, fz1, qmax, qmin, q_i, q_j, q_k, q0, temp, flux_in, flux_out, scale_in_cur, scale_out_cur
         integer :: i, j ,k
         real :: scale
@@ -126,8 +130,8 @@ contains
 
         ! Get upwind fluxes
 
-        !$acc data present(q,flux_x,flux_y,flux_z,flux_x_up,flux_y_up,flux_z_up,dz,denom,usign,vsign,wsign) &
-        !$acc create(scale_in,scale_out)
+        !$acc data present(q,flux_x,flux_y,flux_z,dz,denom,usign,vsign,wsign) &
+        !$acc create(scale_in,scale_out,flux_x_up,flux_y_up,flux_z_up)
 
         call upwind_flux3(q,u,v,w,flux_x_up,flux_z_up,flux_y_up,dz,denom)
 
@@ -301,6 +305,44 @@ contains
 
         !$acc data present(q,u,v,w,flux_x,flux_y,flux_z,dz,denom) &
         !$acc create(dumb_q)
+
+
+        !Now compute upwind fluxes after second step
+        !!$acc parallel 
+        !$acc parallel loop gang vector collapse(3) private(q_cache, tmp) async(2) wait(1)
+        do j = jts-1, jte+2
+            do k = kms, kme+1
+                do i = its-1, ite+2
+
+                    if (k <= kme) then
+                        q_cache(1) = q(i,k,j-1)
+                        if (k > kms) q_cache(2) = q(i,k-1,j)
+                        q_cache(3) = q(i-1,k,j)
+                        q_cache(4) = q(i,k,j)
+
+                        ! X-direction flux - optimize using single calculation
+                        tmp = u(i,k,j)
+                        flux_x(i,k,j) = 0.25 * (tmp * (q_cache(3) + q_cache(4)) + &
+                                                                    abs(tmp) * (q_cache(3) - q_cache(4)))
+
+                        ! Y-direction flux - optimize using single calculation
+                        tmp = v(i,k,j)
+                        flux_y(i,k,j) = 0.25 * (tmp * (q_cache(1) + q_cache(4)) + &
+                                                                    abs(tmp) * (q_cache(1) - q_cache(4)))
+
+                        if (k > kms) then
+                            ! Z-direction flux - optimize using single calculation
+                            tmp = w(i,k-1,j)
+                            flux_z(i,k,j) = 0.25 * (tmp * (q_cache(2) + q_cache(4)) + &
+                                                                        abs(tmp) * (q_cache(2) - q_cache(4)))
+                        endif
+                    else
+                        flux_z(i,k,j) = 0.5*q(i,k-1,j) * w(i,k-1,j)
+                    endif
+                enddo
+            enddo
+        enddo
+
         
         !$acc parallel loop gang vector collapse(3) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val) async(1)
         do j = jms, jme
