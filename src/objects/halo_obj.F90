@@ -2183,7 +2183,12 @@ subroutine setup_batch_exch_north_wins(this, comms, info_in)
     nz = this%grid%halo_nz
     win_size = nx*nz*ny*this%n_3d
     win_size_2d = nx*ny*this%n_2d
-
+    if (win_size <= 0) then
+        write(*,*) "ERROR in setup batch_exch: north win, nx: ",nx
+        write(*,*) "ERROR in setup batch_exch: north win, ny: ",ny
+        write(*,*) "ERROR in setup batch_exch: north win, nz: ",nz
+        write(*,*) "ERROR in setup batch_exch: north win, n_3d: ",this%n_3d
+    endif
     ! Create a group for the north-south exchange
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%halo_rank+this%grid%ximages/), tmp_MPI_grp, ierr)
@@ -2240,7 +2245,12 @@ subroutine setup_batch_exch_south_wins(this, comms, info_in)
     nz = this%grid%halo_nz
     win_size = nx*nz*ny*this%n_3d
     win_size_2d = nx*ny*this%n_2d
-
+    if (win_size <= 0) then
+        write(*,*) "ERROR in setup batch_exch: south win, nx: ",nx
+        write(*,*) "ERROR in setup batch_exch: south win, ny: ",ny
+        write(*,*) "ERROR in setup batch_exch: south win, nz: ",nz
+        write(*,*) "ERROR in setup batch_exch: south win, n_3d: ",this%n_3d
+    endif
     ! Create a group for the north-south exchange
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank-this%grid%ximages, this%halo_rank/), tmp_MPI_grp, ierr)
@@ -2297,7 +2307,12 @@ subroutine setup_batch_exch_east_wins(this, comms, info_in)
     ny = this%grid%ew_halo_ny
     win_size = nx*nz*ny*this%n_3d
     win_size_2d = nx*ny*this%n_2d
-
+    if (win_size <= 0) then
+        write(*,*) "ERROR in setup batch_exch: east win, nx: ",nx
+        write(*,*) "ERROR in setup batch_exch: east win, ny: ",ny
+        write(*,*) "ERROR in setup batch_exch: east win, nz: ",nz
+        write(*,*) "ERROR in setup batch_exch: east win, n_3d: ",this%n_3d
+    endif 
     ! Create a group for the east-west exchange
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%halo_rank+1/), tmp_MPI_grp, ierr)
@@ -2352,7 +2367,12 @@ subroutine setup_batch_exch_west_wins(this, comms, info_in)
     ny = this%grid%ew_halo_ny
     win_size = nx*nz*ny*this%n_3d
     win_size_2d = nx*ny*this%n_2d
-
+    if (win_size <= 0) then
+        write(*,*) "ERROR in setup batch_exch: west win, nx: ",nx
+        write(*,*) "ERROR in setup batch_exch: west win, ny: ",ny
+        write(*,*) "ERROR in setup batch_exch: west win, nz: ",nz
+        write(*,*) "ERROR in setup batch_exch: west win, n_3d: ",this%n_3d
+    endif
     ! Create a group for the east-west exchange
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank-1, this%halo_rank/), tmp_MPI_grp, ierr)
@@ -2403,6 +2423,11 @@ subroutine setup_batch_exch_northwest_wins(this, comms, info_in)
     !NW
     nz = this%grid%halo_nz
     win_size = this%halo_size*nz*this%halo_size*this%n_3d
+    if (win_size <= 0) then
+        write(*,*) "ERROR in setup batch_exch: northwest win, halo_size: ",this%halo_size
+        write(*,*) "ERROR in setup batch_exch: northwest win, nz: ",nz
+        write(*,*) "ERROR in setup batch_exch: northwest win, n_3d: ",this%n_3d
+    endif
 
     ! Create a group for the northwest-southwest exchange
     call MPI_Comm_group(comms, comp_proc)
@@ -2443,6 +2468,11 @@ subroutine setup_batch_exch_northeast_wins(this, comms, info_in)
     !NE
     nz = this%grid%halo_nz
     win_size = this%halo_size*nz*this%halo_size*this%n_3d
+    if (win_size <= 0) then
+        write(*,*) "ERROR in setup batch_exch: northeast win, halo_size: ",this%halo_size
+        write(*,*) "ERROR in setup batch_exch: northeast win, nz: ",nz
+        write(*,*) "ERROR in setup batch_exch: northeast win, n_3d: ",this%n_3d
+    endif
 
     ! Create a group for the northeast-southeast exchange
     call MPI_Comm_group(comms, comp_proc)
@@ -2483,6 +2513,11 @@ subroutine setup_batch_exch_southwest_wins(this, comms, info_in)
     !SW
     nz = this%grid%halo_nz
     win_size = this%halo_size*nz*this%halo_size*this%n_3d
+    if (win_size <= 0) then
+        write(*,*) "ERROR in setup batch_exch: southwest win, halo_size: ",this%halo_size
+        write(*,*) "ERROR in setup batch_exch: southwest win, nz: ",nz
+        write(*,*) "ERROR in setup batch_exch: southwest win, n_3d: ",this%n_3d
+    endif
 
     ! Create a group for the southwest-southeast exchange
     call MPI_Comm_group(comms, comp_proc)
@@ -2523,6 +2558,11 @@ subroutine setup_batch_exch_southeast_wins(this, comms, info_in)
     !SE
     nz = this%grid%halo_nz
     win_size = this%halo_size*nz*this%halo_size*this%n_3d
+    if (win_size <= 0) then
+        write(*,*) "ERROR in setup batch_exch: southeast win, halo_size: ",this%halo_size
+        write(*,*) "ERROR in setup batch_exch: southeast win, nz: ",nz
+        write(*,*) "ERROR in setup batch_exch: southeast win, n_3d: ",this%n_3d
+    endif
 
     ! Create a group for the southeast-southwest exchange
     call MPI_Comm_group(comms, comp_proc)

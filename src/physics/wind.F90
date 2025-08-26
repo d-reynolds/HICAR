@@ -76,7 +76,9 @@ contains
         call options%alloc_vars([kVARS%blk_ri, kVARS%froude])
 
         if (options%physics%windtype == kITERATIVE_WINDS .or. options%physics%windtype == kLINEAR_ITERATIVE_WINDS) then
-            call options%alloc_vars([kVARS%wind_alpha, kVARS%froude_terrain])
+            call options%alloc_vars([kVARS%wind_alpha])
+
+            if (options%wind%alpha_const<0) call options%alloc_vars([kVARS%froude_terrain])
 
             call options%restart_vars([kVARS%w_real])
         endif
@@ -592,7 +594,7 @@ contains
         elseif (options%physics%windtype==kOBRIEN_WINDS) then
             call Obrien_winds(domain, options, update_in=.True.)
         elseif (options%physics%windtype==kLINEAR_OBRIEN_WINDS) then
-            call linear_perturb(domain,options,options%lt%vert_smooth,.False.,options%adv%advect_density, update=.True.)
+            call linear_perturb(domain,options,options%lt%vert_smooth,.False.,options%adv%advect_density, update=.False.)
             call Obrien_winds(domain, options, update_in=.True.)
         endif
 

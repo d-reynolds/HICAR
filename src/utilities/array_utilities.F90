@@ -355,6 +355,7 @@ contains
         ncols = windowsize * 2 + 1
 
         !$omp do schedule(static)
+        !$acc kernels 
         do j=1,ny
 
             ! so we pre-compute the sum over rows for each column in the current window
@@ -414,6 +415,7 @@ contains
         enddo
         !$omp end do
         !$omp end parallel
+        !$acc end kernels 
 
     end subroutine smooth_array_3d
 
@@ -446,6 +448,7 @@ contains
     
         !$omp parallel private(i, j, starti, endi, startj, endj, runningsum, count)
         !$omp do schedule(static)
+        !$acc kernels 
         do j = 1, ny
             do i = 1, nx
                 runningsum = 0.0
@@ -460,6 +463,7 @@ contains
         end do
         !$omp end do
         !$omp end parallel
+        !$acc end kernels 
     
         deallocate(temp)
     
