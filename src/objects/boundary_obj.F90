@@ -125,8 +125,9 @@ contains
         elseif (size(lat_dims) == 2) then
             call io_read(this%firstfile, lat_var, temp_lat)
         elseif (size(lat_dims) == 3) then
+            !Third dimension is time, so we just subset to the first index
             call io_read(this%firstfile, lat_var, temp_z)
-            temp_lat = temp_z(1,:,:)
+            temp_lat = temp_z(:,:,1)
         else
             write(*,*) 'ERROR: lat dimension on forcing data is not 1D or 2D'
             stop
@@ -148,8 +149,9 @@ contains
         elseif (size(lon_dims) == 2) then
             call io_read(this%firstfile, lon_var, temp_lon)
         elseif (size(lon_dims) == 3) then
+            !Third dimension is time, so we just subset to the first index
             call io_read(this%firstfile, lon_var, temp_z)
-            temp_lon = temp_z(1,:,:)
+            temp_lon = temp_z(:,:,1)
         else
             write(*,*) 'ERROR: lon dimension on forcing data is not 1D or 2D'
             stop

@@ -395,9 +395,9 @@ contains
         character(len=kMAX_STRING_LENGTH) :: group, default, description, units
         real :: min, max
         integer, allocatable :: values(:), var_dims(:), t_var_dims(:)
-        integer :: p, dim_indx, dim_len, type
+        integer :: p, dim_indx, dim_len, type, n, cnt
         character(len=kMAX_STRING_LENGTH) :: dim_name
-        character(len=1), allocatable :: dimensions(:), t_dimensions(:), dimensions_tmp(:), t_dimensions_tmp(:)
+        character(len=3), allocatable :: dimensions(:), t_dimensions(:), dimensions_tmp(:), t_dimensions_tmp(:)
         logical :: no_check_flag, is_latlon
 
         if (present(no_check)) then
@@ -419,7 +419,7 @@ contains
 
                 is_latlon =  ( (index(name,'lat') > 0) .or. (index(name,'lon') > 0))
 
-                if ( (size(dimensions)-1) == size(var_dims) .and. (dimensions(1) == 'T' .or. dimensions(1) == '(T)')) then
+                if ( (size(dimensions)-1) == size(var_dims) .and. (trim(dimensions(1)) == 'T' .or. trim(dimensions(1)) == '(T)')) then
                     allocate(dimensions_tmp,source=dimensions)
                     deallocate(dimensions)
                     allocate(dimensions(size(dimensions_tmp)-1))
@@ -433,13 +433,19 @@ contains
 
                 if (is_latlon .and. (size(var_dims)==1)) then
                     if (STD_OUT_PE) write(*,*) "Forcing variable ", trim(name), " is 1D."
+                    allocate(dimensions_tmp,source=dimensions)
+                    deallocate(dimensions)
+                    allocate(dimensions(size(dimensions_tmp)-1))
 
                     if (index(name,'lat') > 0) then
                         dimensions = dimensions_tmp(1:size(dimensions_tmp)-1)
                     else
                         dimensions = dimensions_tmp(2:size(dimensions_tmp))
                     endif
-                elseif ( (size(dimensions)>size(var_dims)) .or. (size(dimensions)-1) < size(var_dims) ) then
+                    deallocate(dimensions_tmp)
+                endif
+
+                if ( (size(dimensions)/=size(var_dims)) ) then
                     if (STD_OUT_PE) write(*,*) "Error: ", trim(name), " has the wrong number of dimensions, should be: ", size(dimensions)
                     error stop
                 endif
@@ -500,7 +506,12 @@ contains
         if (present(i)) then
             options%vars_to_read(i) = var_val
             ! only count spatial dimensions
-            options%dim_list(i) = count(.not.(dimensions=='T'))
+            cnt = 0
+            do n = 1,size(dimensions)
+                if ((trim(dimensions(n)) /= 'T') .and. (trim(dimensions(n)) /= '(T)')) cnt = cnt + 1
+            end do
+            options%dim_list(i) = cnt
+
             i = i + 1
         endif
         var = var_val
@@ -1783,21 +1794,21 @@ contains
             case ("hgtvar")
                 description = "Name of the terrain height variable in forcing file (REQUIRED)"
                 units = "meters"
-                allocate(dimensions(2))
+                allocate(dimensions(3))
                 dimensions = ["(T)", "Y", "X"]
                 group = "Forcing"
                 type = 1
             case ("latvar")
                 description = "Name of the latitude variable in forcing file (REQUIRED)"
                 units = "degrees"
-                allocate(dimensions(2))
+                allocate(dimensions(3))
                 dimensions = ["(T)", "Y", "X"]
                 group = "Forcing"
                 type = 1
             case ("lonvar")
                 description = "Name of the longitude variable in forcing file (REQUIRED)"
                 units = "degrees"
-                allocate(dimensions(2))
+                allocate(dimensions(3))
                 dimensions = ["(T)", "Y", "X"]
                 group = "Forcing"
                 type = 1
@@ -1817,14 +1828,14 @@ contains
             case ("ulat")
                 description = "Name of the latitude variable on the staggered U-grid in forcing file"
                 units = "degrees"
-                allocate(dimensions(2))
+                allocate(dimensions(3))
                 dimensions = ["(T)", "Y", "X"]
                 group = "Forcing"
                 type = 1
             case ("ulon")
                 description = "Name of the longitude variable on the staggered U-grid in forcing file"
                 units = "degrees"
-                allocate(dimensions(2))
+                allocate(dimensions(3))
                 dimensions = ["(T)", "Y", "X"]
                 group = "Forcing"
                 type = 1
@@ -1838,14 +1849,14 @@ contains
             case ("vlat")
                 description = "Name of the latitude variable on the staggered V-grid in forcing file"
                 units = "degrees"
-                allocate(dimensions(2))
+                allocate(dimensions(3))
                 dimensions = ["(T)", "Y", "X"]
                 group = "Forcing"
                 type = 1
             case ("vlon")
                 description = "Name of the longitude variable on the staggered V-grid in forcing file"
                 units = "degrees"
-                allocate(dimensions(2))
+                allocate(dimensions(3))
                 dimensions = ["(T)", "Y", "X"]
                 group = "Forcing"
                 type = 1

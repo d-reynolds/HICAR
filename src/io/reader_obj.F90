@@ -98,7 +98,6 @@ contains
 
         real, allocatable :: data3d_t(:,:,:,:), data3d(:,:,:)
         type(meta_data_t)  :: var
-        character(len=kMAX_NAME_LENGTH) :: name
         integer :: nx, ny, nz, err, varid, n, ndims, start_3d_t(4), cnt_3d_t(4), start_2d_t(3), cnt_2d_t(3), start_3d(3), cnt_3d(3), start_2d(2), cnt_2d(2)
 
         if (allocated(buffer)) deallocate(buffer)
@@ -127,11 +126,11 @@ contains
         do n = 1, size(this%var_meta)
             ! get the next variable in the structure
             var = this%var_meta(n)
-            if (var%file_var_id < 0) call check_ncdf( nf90_inq_varid(this%ncfile_id, var%name, var%file_var_id), " Getting var ID for "//trim(name))
+            if (var%file_var_id < 0) call check_ncdf( nf90_inq_varid(this%ncfile_id, var%name, var%file_var_id), " Getting var ID for "//trim(var%name))
             call check_ncdf( nf90_var_par_access(this%ncfile_id, var%file_var_id, nf90_collective))
 
             !get number of dimensions
-            call check_ncdf( nf90_inquire_variable(this%ncfile_id, var%file_var_id, ndims = ndims), " Getting dim length for "//trim(name))
+            call check_ncdf( nf90_inquire_variable(this%ncfile_id, var%file_var_id, ndims = ndims), " Getting dim length for "//trim(var%name))
 
             if (var%three_d) then
                 nx = var%dim_len(1)
@@ -141,19 +140,19 @@ contains
                 if (ndims > 3) then
                     if (allocated(data3d_t)) deallocate(data3d_t)
                     allocate(data3d_t(nx,ny,nz,1))
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d_t, start=start_3d_t, count=cnt_3d_t), " Getting 3D var "//trim(name))
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d_t, start=start_3d_t, count=cnt_3d_t), " Getting 3D var with time dim: "//trim(var%name))
                     buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d_t(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
                 else
                     if (allocated(data3d)) deallocate(data3d)
                     allocate(data3d(nx,ny,nz))
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d, start=start_3d, count=cnt_3d), " Getting 3D var "//trim(name))
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d, start=start_3d, count=cnt_3d), " Getting 3D var: "//trim(var%name))
                     buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d(:,:,:), shape=[nx,nz,ny], order=[1,3,2])
                 endif
             else if (var%two_d) then
                 if (ndims > 2) then
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, buffer(n,:,1,:), start=start_2d_t, count=cnt_2d_t), " Getting 2D "//trim(name))
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, buffer(n,:,1,:), start=start_2d_t, count=cnt_2d_t), " Getting 2D var with time dim: "//trim(var%name))
                 else
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, buffer(n,:,1,:), start=start_2d, count=cnt_2d), " Getting 2D "//trim(name))
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, buffer(n,:,1,:), start=start_2d, count=cnt_2d), " Getting 2D var: "//trim(var%name))
                 endif
             endif
 
