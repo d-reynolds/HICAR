@@ -65,13 +65,15 @@ contains
         real :: dt
 
         ! locals
-        integer :: i, j, k, zoffset
-        real :: maxwind3d, maxwind1d, current_wind3d, current_wind1d, sqrt3
+        integer :: i, j, k, indx(3)
+        real :: maxwind3d, maxwind1d, maxwind, sqrt3
+        real, dimension(its:ite, kms:kme, jts:jte) :: CFL_wind3d, CFL_wind1d
 
         sqrt3 = sqrt(3.0)
 
-        maxwind1d = 0
-        maxwind3d = 0
+        CFL_wind3d = 0
+        CFL_wind1d = 0
+
         max_i = 1
         max_j = 1
         max_k = 1
@@ -79,38 +81,23 @@ contains
         ! to ensure we are stable for 3D advection we'll use the average "max" wind speed
         ! but that average has to be divided by sqrt(3) for stability in 3 dimensional advection
 
-        !$acc data present(u, v, w, rho, dz, dx)
-
-        !$acc parallel loop reduction(max:maxwind3d, maxwind1d)
+        !$acc parallel loop gang vector collapse(3) present(u, v, w, rho, dz, dx) copy(CFL_wind3d, CFL_wind1d)
         do j=jts,jte
-            !$acc loop reduction(max:maxwind3d, maxwind1d)
             do k=kms,kme
-                if (k==kms) then
-                    zoffset = 0
-                else
-                    zoffset = -1
-                endif
-
-                !$acc loop reduction(max:maxwind3d, maxwind1d)
                 do i=its,ite
-                    current_wind3d = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
+                    CFL_wind3d(i,k,j) = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
                                     +max(abs(v(i,k,j)), abs(v(i,k,j+1))) / dx &
-                                    +max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) / dz(i,k,j)
+                                    +max(abs(w(i,k,j)), abs(w(i,max(1,k-1),j))) / dz(i,k,j)
                                     
-                    current_wind1d = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
+                    CFL_wind1d(i,k,j) = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
                                          ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
-                                         ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(i,k,j) ))
-                    if (current_wind3d > maxwind3d) then
-                        max_i = i
-                        max_j = j
-                        max_k = k
-                    endif
-                    maxwind3d = max(maxwind3d, current_wind3d)
-                    maxwind1d = max(maxwind1d, current_wind1d)
+                                         ( max( abs(w(i,k,j)), abs(w(i,max(1,k-1),j)) ) / dz(i,k,j) ))
                 ENDDO
             ENDDO
         ENDDO
-        !$acc end data
+
+        maxwind3d = maxval(CFL_wind3d)
+        maxwind1d = maxval(CFL_wind1d)
 
         ! According to the WRF technical documentation, the CFL condition for 3D advection is
         ! obtained by taking the CFL criterion for the 1D case and dividing by sqrt(3).
@@ -119,12 +106,26 @@ contains
         ! relax to the 1D case for one-dimensional winds. Since the CFL constraint on vertical
         ! winds is often much less than 1, the criterion has a maximum of roughly 2x the 1D case.
 
-        ! In practical experience, the 1D CFL winds, multiplied by sqrt(3) (for 3 dimensions)
+        ! In practical experience, the WRF case
         ! is often sufficiently stable. So, to allow for faster time steps, we make this the
         ! maximum limiting wind speed condition.
-        maxwind3d = min(maxwind3d,maxwind1d*sqrt3)
+        maxwind = min(maxwind3d,maxwind1d*sqrt3)
 
-        dt = CFL / maxwind3d
+        if (maxwind == maxwind1d*sqrt3) then
+            !get index of maxval in maxwind1d, breaking into i, j, and k indices
+            indx = findloc(CFL_wind1d,maxwind1d)
+        else
+            !get index of maxval in maxwind3d, breaking into i, j, and k indices
+            indx = findloc(CFL_wind3d,maxwind3d)
+        endif
+
+        max_i = indx(1)+its-1
+        max_k = indx(2)
+        max_j = indx(3)+jts-1
+
+        !$acc update host(u, v, w)
+
+        dt = CFL / maxwind
 
         ! If we have too small a time step throw an error
         ! something is probably wrong in the physics or input data
@@ -189,6 +190,7 @@ contains
         type(domain_t),     intent(in)    :: domain
 
         real                  :: present_dt_seconds, seconds_out
+        integer :: max_i_loc, max_j_loc, max_k_loc
         ! compute internal timestep dt to maintain stability
         ! courant condition for 3D advection. 
                 
@@ -202,7 +204,10 @@ contains
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
                         use_density=.false.)
-        
+        max_i_loc = max_i
+        max_j_loc = max_j
+        max_k_loc = max_k
+
         future_dt_seconds = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
@@ -214,6 +219,12 @@ contains
         call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_REAL, MPI_MIN, domain%compute_comms)
         
         if (min(present_dt_seconds, future_dt_seconds)==seconds_out) then
+
+            if (future_dt_seconds>present_dt_seconds) then
+                max_i = max_i_loc
+                max_j = max_j_loc
+                max_k = max_k_loc
+            endif
             write(*,*) 'time_step determining i:      ',max_i
             write(*,*) 'time_step determining j:      ',max_j
             write(*,*) 'time_step determining k:      ',max_k
@@ -222,9 +233,9 @@ contains
                 write(*,*) 'time_step determining u: ',domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(max_i,max_k,max_j)
                 write(*,*) 'time_step determining v: ',domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(max_i,max_k,max_j)
             else
-                write(*,*) 'time_step determining w_grid: ',domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining u: ',domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining v: ',domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining w_grid: ',domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(max_i_loc,max_k_loc,max_j_loc)
+                write(*,*) 'time_step determining u: ',domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(max_i_loc,max_k_loc,max_j_loc)
+                write(*,*) 'time_step determining v: ',domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(max_i_loc,max_k_loc,max_j_loc)
             endif
             write(*,*) 'time_step determining w_real: ',domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(max_i,max_k,max_j)
             write(*,*) 'time_step determining jaco: ',domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(max_i,max_k,max_j)
@@ -390,7 +401,7 @@ contains
                 
 
                 call domain%adv_timer%start()
-                call advect(domain, options, real(dt%seconds()),domain%flux_timer, domain%flux_up_timer, domain%flux_corr_timer, domain%sum_timer, domain%adv_wind_timer)
+                call advect(domain, options, real(dt%seconds()),domain%flux_timer, domain%flux_corr_timer, domain%sum_timer, domain%adv_wind_timer)
                 !call domain%enforce_limits()
                 if (options%general%debug) call domain_check(domain, "advect(domain", fix=.True.)
                 call domain%adv_timer%stop()
