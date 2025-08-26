@@ -64,11 +64,16 @@ contains
         integer, intent(in) :: n_nests
         type(options_t), intent(in) :: options
 
-        integer :: n, k, name_len, color, IOcolor, ierr, num_PE, devtype
-        integer :: num_threads, found, PE_RANK_GLOBAL, NUM_SERVERS, NUM_COMPUTE, NUM_IO_PER_NODE, NUM_PROC_PER_NODE, NUM_GPU_PER_NODE
-
+        integer :: n, k, name_len, color, IOcolor, ierr, num_PE
+        integer :: num_threads, found, PE_RANK_GLOBAL, NUM_SERVERS, NUM_COMPUTE, NUM_IO_PER_NODE, NUM_PROC_PER_NODE
         character(len=MPI_MAX_PROCESSOR_NAME) :: ENV_IO_PER_NODE
         type(MPI_Comm) :: globalComm, shared_comm, mainComms, IOComms
+
+#ifdef _OPENACC
+        integer :: dev, local_rank, comm_size, NUM_GPU_PER_NODE
+        type(MPI_Comm) :: local_comm
+        integer(acc_device_kind) :: devtype
+#endif
 
 #if defined(_OPENMP)
         num_threads = omp_get_max_threads()
@@ -98,11 +103,25 @@ contains
         call MPI_Comm_free(shared_comm, ierr)
         ! call MPI_Comm_free(globalComm, ierr)
 
-#ifdef _OPENACC
-        devtype = acc_get_device_type()
-        NUM_GPU_PER_NODE = acc_get_num_devices(devtype)
-#endif
 
+        !limit NUM_IO_PER_NODE to be less than or equal to NUM_PROC_PER_NODE
+        if (NUM_IO_PER_NODE > NUM_PROC_PER_NODE) then
+            NUM_IO_PER_NODE = NUM_PROC_PER_NODE
+            if (STD_OUT_PE) write(*,*) "WARNING: NUM_IO_PER_NODE was set greater than the number of processing elements per node. Setting NUM_IO_PER_NODE to ",NUM_IO_PER_NODE
+        endif
+
+        !Ensure that NUM_PROC_PER_NODE is evenly divisible by NUM_IO_PER_NODE. If not, decrement
+        ! NUM_IO_PER_NODE until this is true
+        if (mod(NUM_PROC_PER_NODE, NUM_IO_PER_NODE) /= 0) then
+            do while (mod(NUM_PROC_PER_NODE, NUM_IO_PER_NODE) /= 0)
+                NUM_IO_PER_NODE = NUM_IO_PER_NODE - 1
+                if (NUM_IO_PER_NODE < 1) then
+                    write(*,*) "ERROR: NUM_IO_PER_NODE has been reduced to zero."
+                    stop
+                endif
+            end do
+            if (STD_OUT_PE) write(*,*) "WARNING: NUM_IO_PER_NODE was not evenly divisible by NUM_IO_PER_NODE. Setting NUM_IO_PER_NODE to ",NUM_IO_PER_NODE
+        endif
 
         !Assign one io process per node, this results in best co-array transfer times
         NUM_SERVERS = ceiling(num_PE*NUM_IO_PER_NODE*1.0/NUM_PROC_PER_NODE)
@@ -164,6 +183,30 @@ contains
             end select
             end associate
         enddo
+
+#ifdef _OPENACC
+    !
+    ! ****** Set the Accelerator device number based on local rank
+    !
+    call MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, &
+        MPI_INFO_NULL, local_comm)
+    call MPI_Comm_rank(local_comm, local_rank)
+    call MPI_Comm_size(local_comm, comm_size)
+    
+    if (color == kCOMPUTE_TEAM) then
+        devtype = acc_get_device_type()
+        NUM_GPU_PER_NODE = acc_get_num_devices(devtype)
+
+        !get our local rank, not counting IO processes
+        local_rank = local_rank - floor(1.0*local_rank/(comm_size/NUM_IO_PER_NODE))
+        !divy up GPUs according to local rank
+        dev = mod(local_rank,NUM_GPU_PER_NODE)
+
+        call acc_set_device_num(dev, devtype)
+        call acc_init(devtype)
+    endif
+# endif
+
         if (STD_OUT_PE) then
             write(*,*) "  Number of processing elements:          ",num_PE
             write(*,*) "  Number of compute elements:             ",NUM_COMPUTE

@@ -19,9 +19,6 @@
 program icar
     use iso_fortran_env
     use mpi_f08
-#ifdef _OPENACC
-    use openacc
-#endif
     use options_interface,  only : options_t
     use flow_object_interface, only : comp_arr_t
     use boundary_interface, only : boundary_t
@@ -43,11 +40,6 @@ program icar
     real :: t_val, t_val2, t_val3
     logical :: init_flag
     character(len=kMAX_FILE_LENGTH) :: namelist_file
-#ifdef _OPENACC
-    integer :: dev, devNum, local_rank, comm_size
-    type(MPI_Comm) :: local_comm
-    integer(acc_device_kind) :: devtype
-#endif
 
     ! Read command line options to determine what kind of run this is
     call read_co(namelist_file)
@@ -59,24 +51,6 @@ program icar
         call MPI_INIT()
         init_flag = .True.
     endif
-
-#ifdef _OPENACC
-!
-! ****** Set the Accelerator device number based on local rank
-!
-     call MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, &
-          MPI_INFO_NULL, local_comm)
-     call MPI_Comm_rank(local_comm, local_rank)
-     call MPI_Comm_size(local_comm, comm_size)
-
-     devtype = acc_get_device_type()
-     devNum = acc_get_num_devices(devtype)
-     dev = mod(local_rank,devNum)
-     if ((local_rank + 1) < comm_size) then
-        call acc_set_device_num(dev, devtype)
-        call acc_init(devtype)
-     endif
-# endif
 
     call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
     STD_OUT_PE = (PE_RANK_GLOBAL==0)
