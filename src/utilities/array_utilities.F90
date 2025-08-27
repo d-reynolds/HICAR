@@ -355,7 +355,8 @@ contains
         ncols = windowsize * 2 + 1
 
         !$omp do schedule(static)
-        !$acc kernels 
+        ! !$acc data present_or_copy(wind) copyin(inputwind) create(rowsums,rowmeans)
+        ! !$acc parallel loop gang 
         do j=1,ny
 
             ! so we pre-compute the sum over rows for each column in the current window
@@ -364,6 +365,7 @@ contains
                 ! effectively assumes it was set up for the grid cell before the first grid cell
                 ! the first time through the loop will remove one iteration of outer row grid cells
                 rowsums = inputwind(1:nx,j,1) * (windowsize+2)
+                ! !$acc loop
                 do i=2, min(windowsize,nz)
                     rowsums = rowsums + inputwind(1:nx, j, i)
                 enddo
@@ -374,6 +376,7 @@ contains
 
             ! don't parallelize over this loop because it is much more efficient to be able to assume
             ! that you ran the previous row in serial for the slow (ydim=3) case
+            ! !$acc loop gang
             do k=1,nz ! note this is y for ydim=3
                 ! ydim=3 for the main model grid which is large and takes a long time
                 if (ydim==3) then
@@ -388,6 +391,7 @@ contains
                     cursum = sum(rowmeans(2:windowsize)) + rowmeans(1) * (windowsize+2)
                 endif
 
+                ! !$acc loop vector
                 do i=1,nx
                     if (ydim==3) then
                         startx = max(2, i - windowsize)
@@ -415,7 +419,8 @@ contains
         enddo
         !$omp end do
         !$omp end parallel
-        !$acc end kernels 
+        ! !$acc update host(wind)
+        ! !$acc end data 
 
     end subroutine smooth_array_3d
 
@@ -448,7 +453,8 @@ contains
     
         !$omp parallel private(i, j, starti, endi, startj, endj, runningsum, count)
         !$omp do schedule(static)
-        !$acc kernels 
+        !$acc data present_or_copy(input) copyin(temp)
+        !$acc parallel loop gang vector collapse(2)
         do j = 1, ny
             do i = 1, nx
                 runningsum = 0.0
@@ -463,7 +469,8 @@ contains
         end do
         !$omp end do
         !$omp end parallel
-        !$acc end kernels 
+        !$acc update host(input)
+        !$acc end data 
     
         deallocate(temp)
     

@@ -271,7 +271,7 @@ contains
             do i = its, ite+1
                 flux_z(i,kme+1,j) = flux_z(i,kme+1,j) - flux_z_up(i,kme+1,j)
                 scale = merge(max(0.0,min(scale_in(i,kme,j),scale_out(i,kme,j),1.0)), &
-                              1.0, abs(flux_z(i,kme+1,j)) > 0.0)
+                              1.0, flux_z(i,kme+1,j) > 0.0)
                 flux_z(i,kme+1,j) = scale*flux_z(i,kme+1,j) + flux_z_up(i,kme+1,j)
             enddo
         enddo
@@ -312,8 +312,8 @@ contains
 
 
         !Now compute upwind fluxes after second step
-        !!$acc parallel 
-        !$acc parallel loop gang vector collapse(3) private(q_cache, tmp) async(2) wait(1)
+
+        !$acc parallel loop gang vector collapse(3) private(q_cache, tmp) async(1)
         do j = jts-1, jte+2
             do k = kms, kme+1
                 do i = its-1, ite+2
@@ -348,7 +348,7 @@ contains
         enddo
 
         
-        !$acc parallel loop gang vector collapse(3) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val) async(1)
+        !$acc parallel loop gang vector collapse(3) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val) async(2) wait(1)
         do j = jms, jme
             do k = kms, kme
             do i = ims, ime
@@ -379,8 +379,8 @@ contains
 
 
         !Now compute upwind fluxes after second step
-        !!$acc parallel 
-        !$acc parallel loop gang vector collapse(3) private(q_cache, tmp) async(2) wait(1)
+
+        !$acc parallel loop gang vector collapse(3) private(q_cache, tmp) async(3) wait(2)
         do j = jts-1, jte+2
             do k = kms, kme+1
                 do i = its-1, ite+2
@@ -414,17 +414,7 @@ contains
             enddo
         enddo
 
-        ! !Handle top and bottom boundaries for z here
-        ! !$acc parallel loop gang vector collapse(2)
-        ! do j = jts-1,jte+1
-        !     do i = its-1,ite+1
-        !         flux_z(i,kme+1,j) = flux_z(i,kme+1,j) + 0.5*dumb_q(i,kme,j) * w(i,kme,j)
-        !         ! flux_z(i,kms,j) = 0.0
-        !     enddo
-        ! enddo
-
-        !!$acc end parallel
         !$acc end data
-        !$acc wait(2)
+        !$acc wait(3)
     end subroutine upwind_flux3
 end module adv_fluxcorr
