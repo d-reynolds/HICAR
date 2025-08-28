@@ -103,7 +103,7 @@ module test_advect
         type(options_t) :: options
         type(variable_t) :: var
         type(grid_t)     :: var_grid
-        type(timer_t) :: flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time
+        type(timer_t) :: flux_time, flux_corr_time, sum_time, adv_wind_time
         real :: max_u, max_v, max_w, max_wind
         real :: dt, t_step_f, initial_val, spatial_constraint
         integer :: fluxcorr
@@ -193,7 +193,7 @@ module test_advect
 
         ! loop 10 times, calling advect and halo_exchange
         do l = 1, 100
-            call advect(domain, options, dt, flux_time, flux_up_time, flux_corr_time, sum_time, adv_wind_time)
+            call advect(domain, options, dt, flux_time, flux_corr_time, sum_time, adv_wind_time)
             call domain%batch_exch()
         end do
         !$acc end data

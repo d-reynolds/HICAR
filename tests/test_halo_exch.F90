@@ -51,7 +51,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 23, 25, 20, image=my_index, comms=comms, adv_order=3)
+        call grid%set_grid_dimensions( 171, 517, 20, image=my_index, comms=comms, adv_order=3)
 
         call halo_exch_standard(grid,error,batch_in=.True.,test_str_in="batch exchange")
 
@@ -71,7 +71,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 23, 25, 20, image=my_index, comms=comms, adv_order=3)
+        call grid%set_grid_dimensions( 171, 517, 20, image=my_index, comms=comms, adv_order=3)
 
         call halo_exch_standard(grid,error,test_str_in="var exchange")
         if (allocated(error)) return
@@ -94,7 +94,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 23, 25, 0, image=my_index, global_nz=20, comms=comms, adv_order=3)
+        call grid%set_grid_dimensions( 171, 517, 20, image=my_index, global_nz=20, comms=comms, adv_order=3)
 
         call halo_exch_standard(grid,error,test_str_in="var exchange")
         if (allocated(error)) return
@@ -117,7 +117,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 23, 25, 20, image=my_index, comms=comms, adv_order=3, nx_extra = 1)
+        call grid%set_grid_dimensions( 171, 517, 20, image=my_index, comms=comms, adv_order=3, nx_extra = 1)
 
         call halo_exch_standard(grid,error,test_str_in="var staggered on u grid")
         if (allocated(error)) return
@@ -140,7 +140,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 23, 25, 20, image=my_index, comms=comms, adv_order=3, ny_extra = 1)
+        call grid%set_grid_dimensions( 171, 517, 20, image=my_index, comms=comms, adv_order=3, ny_extra = 1)
 
         call halo_exch_standard(grid,error,test_str_in="var staggered on v grid")
         if (allocated(error)) return
@@ -200,6 +200,10 @@ module test_halo_exch
             exch_vars%id = kVARS%snow_height
     
         else
+
+            !in case input grid has staggered dimensions, create a clean grid here with no stagger. This will be used to initialize the halo object
+            call grid_3d%set_grid_dimensions( grid%nx_global-grid%nx_e, grid%ny_global-grid%ny_e, 20, image=my_index, comms=comms, adv_order=3)
+
             !initialize variables to exchange
             call var%initialize(kVARS%water_vapor,grid,forcing_var=dqdt)
 
@@ -211,13 +215,12 @@ module test_halo_exch
 
         adv_vars(1)%v = 1
         adv_vars(1)%id = kVARS%water_vapor
-        if (grid%is2d) call halo%init(exch_vars, adv_vars, grid_3d, comms)
-        if (grid%is3d) call halo%init(exch_vars, adv_vars, grid, comms)
+        call halo%init(exch_vars, adv_vars, grid_3d, comms)
 
         !$acc data copy(halo, var_data, exch_var, var, exch_vars, adv_vars)
         !$acc parallel loop collapse(3)
-        do i = grid%its, grid%ite+grid%nx_e
-            do j = grid%jts, grid%jte+grid%ny_e
+        do i = grid%its, grid%ite
+            do j = grid%jts, grid%jte
                 do k = 1, max(1,grid%kte)
                     ! Set the interior values to the index values
                     if (grid%is3d) then
@@ -269,22 +272,22 @@ module test_halo_exch
                         if (i < grid%its) then
                             if (j < grid%jts) then
                                 southwest = .False.
-                            elseif (j > grid%jte-grid%ny_e) then
+                            elseif (j > grid%jte) then
                                 northwest = .False.
                             else
                                 west = .False.
                             endif
-                        elseif (i > grid%ite-grid%nx_e) then
+                        elseif (i > grid%ite) then
                             if (j < grid%jts) then
                                 southeast = .False.
-                            elseif (j > grid%jte-grid%ny_e) then
+                            elseif (j > grid%jte) then
                                 northeast = .False.
                             else
                                 east = .False.
                             endif
                         elseif (j < grid%jts) then
                             south = .False.
-                        elseif (j > grid%jte-grid%ny_e) then
+                        elseif (j > grid%jte) then
                             north = .False.
                         else
                             interior = .False.
