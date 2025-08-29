@@ -1795,21 +1795,21 @@ contains
                 description = "Name of the terrain height variable in forcing file (REQUIRED)"
                 units = "meters"
                 allocate(dimensions(3))
-                dimensions = ["(T)", "Y", "X"]
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("latvar")
                 description = "Name of the latitude variable in forcing file (REQUIRED)"
                 units = "degrees"
                 allocate(dimensions(3))
-                dimensions = ["(T)", "Y", "X"]
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("lonvar")
                 description = "Name of the longitude variable in forcing file (REQUIRED)"
                 units = "degrees"
                 allocate(dimensions(3))
-                dimensions = ["(T)", "Y", "X"]
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("time_var")
@@ -1829,14 +1829,14 @@ contains
                 description = "Name of the latitude variable on the staggered U-grid in forcing file"
                 units = "degrees"
                 allocate(dimensions(3))
-                dimensions = ["(T)", "Y", "X"]
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("ulon")
                 description = "Name of the longitude variable on the staggered U-grid in forcing file"
                 units = "degrees"
                 allocate(dimensions(3))
-                dimensions = ["(T)", "Y", "X"]
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("vvar")
@@ -1850,14 +1850,14 @@ contains
                 description = "Name of the latitude variable on the staggered V-grid in forcing file"
                 units = "degrees"
                 allocate(dimensions(3))
-                dimensions = ["(T)", "Y", "X"]
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("vlon")
                 description = "Name of the longitude variable on the staggered V-grid in forcing file"
                 units = "degrees"
                 allocate(dimensions(3))
-                dimensions = ["(T)", "Y", "X"]
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("wvar")
