@@ -762,7 +762,12 @@ contains
                     endif
 
                 endif
-
+            else
+                !get point outside of set
+                if (current_err < best_err) then
+                    best_err = current_err
+                    find_surrounding = search_point
+                endif
             endif
         enddo
 
