@@ -6,12 +6,12 @@
 !!
 !!------------------------------------------------------------
 submodule(boundary_interface) boundary_implementation
-    use array_utilities,        only : interpolate_in_z
+    use array_utilities,        only : interpolate_in_z, array_offset_x, array_offset_y
     use io_routines,            only : io_getdims, io_read, io_maxDims, io_variable_is_present, io_write
     use time_io,                only : read_times, find_timestep_in_filelist
     use string,                 only : str
     use mod_atm_utilities,      only : rh_to_mr, relative_humidity, compute_3d_p, compute_3d_z, exner_function
-    use geo,                    only : standardize_coordinates
+    use geo,                    only : standardize_coordinates, geo_interp, geo_lut
     use vertical_interpolation, only : vLUT, vinterp
     use timer_interface,    only : timer_t
     use debug_module,           only : check_ncdf
@@ -36,7 +36,7 @@ contains
 
         type(Time_type) :: strt_time
         character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
-        integer,                         allocatable :: var_dimensions(:)
+        type(dim_arrays_type),           allocatable :: var_dimensions(:)
 
 
         ! the parameters option type can't contain allocatable arrays because it is a coarray
@@ -57,15 +57,9 @@ contains
                                     domain_lon,       &
                                     parent_options)
         else
-            call this%init_local(options,                           &
-                                    options%forcing%boundary_files, &
+            call this%init_local(options%forcing,                           &
                                     vars_to_read, var_dimensions,   &
                                     strt_time,                      &
-                                    options%forcing%latvar,         &
-                                    options%forcing%lonvar,         &
-                                    options%forcing%zvar,           &
-                                    options%forcing%time_var,       &
-                                    options%forcing%pvar,           &
                                     domain_lat,        &
                                     domain_lon)
         endif
@@ -73,64 +67,42 @@ contains
         ! call this%distribute_initial_conditions()
 
 
-        call setup_boundary_geo(this, options%domain%longitude_system)
+        call setup_boundary_geo(this, options%domain%longitude_system, options)
 
     end subroutine
 
-
-    !>------------------------------------------------------------
-    !! Set default component values
-    !! Reads initial conditions from the forcing file
-    !!
-    !!------------------------------------------------------------
-    module subroutine init_local(this, options, file_list, var_list, dim_list, start_time, &
-                                 lat_var, lon_var, z_var, time_var, p_var, domain_lat, domain_lon)
-        class(boundary_t),               intent(inout)  :: this
-        type(options_t),                 intent(inout)  :: options
-        character(len=kMAX_FILE_LENGTH), intent(in)     :: file_list(:)
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
-        integer,                         intent(in)     :: dim_list (:)
-        type(Time_type),                 intent(in)     :: start_time
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: lat_var
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: lon_var
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: z_var
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: time_var
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: p_var
-        real, dimension(:,:),            intent(in)     :: domain_lat
-        real, dimension(:,:),            intent(in)     :: domain_lon
-
-        type(variable_t)  :: test_variable
-        real, allocatable :: temp_z(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:), lat_1d(:), lon_1d(:)
+    subroutine read_latlon(file,latvar,lonvar,lat_out,lon_out)
+        implicit none
+        character(len=*), intent(in) :: file, latvar, lonvar
+        real, allocatable, intent(out) :: lat_out(:,:), lon_out(:,:)
+        real, allocatable :: lat_1d(:), lon_1d(:)
         integer, allocatable :: lat_dims(:), lon_dims(:)
-        real :: neg_z
-        integer :: i, nx, ny, nz, PE_RANK_GLOBAL, x_len, y_len
 
-        ! figure out while file and timestep contains the requested start_time
-        call set_firstfile_firststep(this, start_time, file_list, time_var)
+        integer :: i, x_len, y_len
 
         !See if lat and lon are 1D or 2D
-        call io_getdims(this%firstfile, lat_var, lat_dims)
-        call io_getdims(this%firstfile, lon_var, lon_dims)
+        call io_getdims(file, latvar, lat_dims)
+        call io_getdims(file, lonvar, lon_dims)
 
         if (size(lat_dims) == 1) then
-            call io_read(this%firstfile, lat_var, lat_1d)
+            call io_read(file, latvar, lat_1d)
 
             !This will always be the case for 1D or 2D lon
             x_len = lon_dims(1)
 
-            allocate(temp_lat(1:x_len,1:lat_dims(1)))
+            allocate(lat_out(1:x_len,1:lat_dims(1)))
             do i=1,x_len
-                temp_lat(i,:) = lat_1d
+                lat_out(i,:) = lat_1d
             end do
         elseif (size(lat_dims) == 2) then
-            call io_read(this%firstfile, lat_var, temp_lat)
+            call io_read(file, latvar, lat_out)
         else
             write(*,*) 'ERROR: lat dimension on forcing data is not 1D or 2D'
             stop
         endif
 
         if (size(lon_dims) == 1) then
-            call io_read(this%firstfile, lon_var, lon_1d)
+            call io_read(file, lonvar, lon_1d)
 
             if (size(lat_dims) == 1) then
                 y_len = lat_dims(1)
@@ -138,17 +110,44 @@ contains
                 y_len = lat_dims(2)
             endif
 
-            allocate(temp_lon(1:lon_dims(1),1:y_len))
+            allocate(lon_out(1:lon_dims(1),1:y_len))
             do i=1,y_len
-                temp_lon(:,i) = lon_1d
+                lon_out(:,i) = lon_1d
             end do
         elseif (size(lon_dims) == 2) then
-            call io_read(this%firstfile, lon_var, temp_lon)
+            call io_read(file, lonvar, lon_out)
         else
             write(*,*) 'ERROR: lon dimension on forcing data is not 1D or 2D'
             stop
         endif
 
+    end subroutine read_latlon
+
+    !>------------------------------------------------------------
+    !! Set default component values
+    !! Reads initial conditions from the forcing file
+    !!
+    !!------------------------------------------------------------
+    module subroutine init_local(this, options, var_list, dim_list, start_time, domain_lat, domain_lon)
+        implicit none
+        class(boundary_t),               intent(inout)  :: this
+        type(forcing_options_type),      intent(inout)  :: options
+        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
+        type(dim_arrays_type),           intent(in)     :: dim_list (:)
+        type(Time_type),                 intent(in)     :: start_time
+        real, dimension(:,:),            intent(in)     :: domain_lat
+        real, dimension(:,:),            intent(in)     :: domain_lon
+
+        type(variable_t)  :: zvar
+        real, allocatable :: temp_3d(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:), lat_1d(:), lon_1d(:)
+        real :: neg_z
+        integer :: i, nx, ny, nz, PE_RANK_GLOBAL
+        logical :: z_staggered
+
+        ! figure out while file and timestep contains the requested start_time
+        call set_firstfile_firststep(this, start_time, options%boundary_files, options%time_var)
+
+        call read_latlon(this%firstfile, options%latvar, options%lonvar, temp_lat, temp_lon)
         call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
 
         if (minval(domain_lat) < minval(temp_lat) .or. maxval(domain_lat) > maxval(temp_lat)) then
@@ -178,42 +177,82 @@ contains
         this%lat = temp_lat(this%its:this%ite,this%jts:this%jte)
         this%lon = temp_lon(this%its:this%ite,this%jts:this%jte)
 
-        ! read in the height coordinate of the input data
-        if (.not. options%forcing%compute_z) then
-            ! call io_read(file_list(this%curfile), z_var,   temp_z,   this%curstep)
-            call io_read(this%firstfile, z_var,   temp_z,   this%firststep)
-            nx = size(temp_z,1)
-            ny = size(temp_z,2)
-            nz = size(temp_z,3)
-            if (allocated(this%z)) deallocate(this%z)
-            allocate(this%z((this%ite-this%its+1),nz,(this%jte-this%jts+1)))
-            allocate(temp_z_trans(1:nx,1:nz,1:ny))
-            
-            temp_z_trans(1:nx,1:nz,1:ny) = reshape(temp_z, shape=[nx,nz,ny], order=[1,3,2])
-            this%z = temp_z_trans(this%its:this%ite,1:nz,this%jts:this%jte)
-            this%z_is_set = .True.
+        ! read in the u and v lat and lon data if specified
+        if (options%ulat /= "" .and. options%ulon /= "") then
 
-            if (options%forcing%z_is_geopotential) then
-                this%z = this%z / gravity
-                !neg_z = minval(temp_z)/ gravity
-                ! if (neg_z < 0.0) this%z = this%z - neg_z
+            call io_read(this%firstfile, options%uvar,   temp_3d,   this%firststep)
+            if (.not.(size(temp_3d,1) == this%ide+1 .and. size(temp_3d,2) == this%jde)) then
+                write(*,*) "ERROR: forcing variable uvar is not on the staggered u-grid, but lat/lon data for this grid (ulat and ulon) has been provided."
+                write(*,*) "ERROR: please make the dimensions of uvar and ulat/ulon consistent"
+                write(*,*) "       uvar size: ", size(temp_3d,1), " ", size(temp_3d,2)
+                write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
+                stop
             endif
 
-            if (options%forcing%z_is_on_interface) then
-                call interpolate_in_z(this%z)
-            endif
+            allocate(this%ulat((this%ite-this%its+2),(this%jte-this%jts+1)))
+            allocate(this%ulon((this%ite-this%its+2),(this%jte-this%jts+1)))
+            call read_latlon(this%firstfile, options%ulat, options%ulon, temp_lat, temp_lon)
 
+            this%ulat = temp_lat(this%its:this%ite+1,this%jts:this%jte)
+            this%ulon = temp_lon(this%its:this%ite+1,this%jts:this%jte)
+        elseif(options%ulat == "" .and. options%ulon == "") then
+            !ensure that uvar has the same dimensions at lat and lon
+            !read in uvar
+            call io_read(this%firstfile, options%uvar,   temp_3d,   this%firststep)
+            if (.not.(size(temp_3d,1) == this%ide .and. size(temp_3d,2) == this%jde)) then
+                write(*,*) "ERROR: forcing variable uvar is not on the mass-grid, and no lat/lon data for this grid (ulat and ulon) has been provided"
+                write(*,*) "       uvar size: ", size(temp_3d,1), " ", size(temp_3d,2)
+                write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
+                stop
+            endif
         else
-            call io_read(this%firstfile, p_var,   temp_z,   this%firststep)
-            nx = size(temp_z,1)
-            ny = size(temp_z,2)
-            nz = size(temp_z,3)
-
-            if (allocated(this%z)) deallocate(this%z)
-            allocate(this%z((this%ite-this%its+1),nz,(this%jte-this%jts+1)))
-
+            write(*,*) "ERROR: ulat and ulon must both be set or both be unset for forcing data"
+            stop
         endif
-        
+
+        if (options%vlat /= "" .and. options%vlon /= "") then
+
+            call io_read(this%firstfile, options%vvar,   temp_3d,   this%firststep)
+            if (.not.(size(temp_3d,1) == this%ide .and. size(temp_3d,2) == this%jde+1)) then
+                write(*,*) "ERROR: forcing variable vvar is not on the staggered v-grid, but lat/lon data for this grid (vlat and vlon) has been provided."
+                write(*,*) "ERROR: please make the dimensions of vvar and vlat/vlon consistent"
+                write(*,*) "       vvar size: ", size(temp_3d,1), " ", size(temp_3d,2)
+                write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
+                stop
+            endif
+
+            allocate(this%vlat((this%ite-this%its+1),(this%jte-this%jts+2)))
+            allocate(this%vlon((this%ite-this%its+1),(this%jte-this%jts+2)))
+
+            call read_latlon(this%firstfile, options%vlat, options%vlon, temp_lat, temp_lon)
+
+            this%vlat = temp_lat(this%its:this%ite,this%jts:this%jte+1)
+            this%vlon = temp_lon(this%its:this%ite,this%jts:this%jte+1)
+        elseif(options%vlat == "" .and. options%vlon == "") then
+            !ensure that vvar has the same dimensions at lat and lon
+            !read in vvar
+            call io_read(this%firstfile, options%vvar,   temp_3d,   this%firststep)
+            if (.not.(size(temp_3d,1) == this%ide .and. size(temp_3d,2) == this%jde)) then
+                write(*,*) "ERROR: forcing variable vvar is not on the mass-grid, and no lat/lon data for this grid (vlat and vlon) has been provided"
+                write(*,*) "       vvar size: ", size(temp_3d,1), " ", size(temp_3d,2)
+                write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
+                stop
+            endif
+        else
+            write(*,*) "ERROR: vlat and vlon must both be set or both be unset for forcing data"
+            stop
+        endif
+
+        ! read in the vertical dimension coordinate of the input data
+        call io_read(this%firstfile, options%tvar,   temp_3d,   this%firststep)
+
+        nx = size(temp_3d,1)
+        ny = size(temp_3d,2)
+        nz = size(temp_3d,3)
+
+        if (allocated(this%z)) deallocate(this%z)
+        allocate(this%z((this%ite-this%its+1),nz,(this%jte-this%jts+1)))
+
         this%kts = 1
         this%kte = nz
 
@@ -223,9 +262,39 @@ contains
 
         ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
         do i=1, size(var_list)
-            call add_var_to_dict(this, var_list(i), dim_list(i), [(this%ite-this%its+1), nz, (this%jte-this%jts+1)])
+            call add_var_to_dict(this, var_list(i), dim_list(i)%num_dims, dim_list(i)%dims)
         end do
 
+        if (.not. options%compute_z) then
+            z_staggered = .False.
+
+            call io_read(this%firstfile, options%zvar,   temp_3d,   this%firststep)
+            nx = size(temp_3d,1)
+            ny = size(temp_3d,2)
+
+            ! handle case that height is staggered in z dimension
+            if (size(temp_3d,3) == nz+1) then
+                nz = size(temp_3d,3)
+                z_staggered = .True.
+            elseif(size(temp_3d,3) == nz) then
+                nz = size(temp_3d,3)
+            else
+                !error
+                write(*,*) "ERROR: Incompatible vertical dimension sizes on forcing variable: ",options%zvar
+                write(*,*) "  Expected: ", nz, " or ", nz+1, " Found: ", size(temp_3d,3)
+                stop
+            endif
+
+            allocate(temp_z_trans(1:nx,1:nz,1:ny))
+            
+            temp_z_trans(1:nx,1:nz,1:ny) = reshape(temp_3d, shape=[nx,nz,ny], order=[1,3,2])
+
+            if (z_staggered) call interpolate_in_z(temp_z_trans)
+
+            zvar = this%variables%get_var(options%zvar)
+            zvar%data_3d = temp_z_trans(this%its:this%ite,this%kts:this%kte,this%jts:this%jte)
+            call this%variables%add_var(options%zvar, zvar)
+        endif
 
     end subroutine
 
@@ -237,12 +306,10 @@ contains
     module subroutine init_local_asnest(this, var_list, dim_list, domain_lat, domain_lon, parent_options)
         class(boundary_t),               intent(inout)  :: this
         character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
-        integer,                         intent(in)     :: dim_list (:)
+        type(dim_arrays_type),           intent(in)     :: dim_list (:)
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
         type(options_t),                 intent(in)     :: parent_options
-
-        type(variable_t)  :: test_variable
         
         integer :: i
         real, allocatable, dimension(:,:) :: parent_nest_lat, parent_nest_lon
@@ -255,6 +322,8 @@ contains
         !  read in latitude and longitude coordinate data
         call io_read(parent_options%domain%init_conditions_file, parent_options%domain%lat_hi, parent_nest_lat)
         call io_read(parent_options%domain%init_conditions_file, parent_options%domain%lon_hi, parent_nest_lon)
+        
+        call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%lat_hi, parent_options%domain%lon_hi, parent_nest_lat, parent_nest_lon)
 
         if (minval(domain_lat) < minval(parent_nest_lat) .or. maxval(domain_lat) > maxval(parent_nest_lat)) then
             write(*,*) 'ERROR: Nested domain not contained within parent domain: ',trim(parent_options%domain%init_conditions_file)
@@ -278,6 +347,34 @@ contains
         this%lat = parent_nest_lat(this%its:this%ite,this%jts:this%jte)
         this%lon = parent_nest_lon(this%its:this%ite,this%jts:this%jte)
 
+        allocate(this%ulat((this%ite-this%its+2),(this%jte-this%jts+1)))
+        allocate(this%ulon((this%ite-this%its+2),(this%jte-this%jts+1)))
+
+        !see if ulat and ulon were given to parent domain
+        if (parent_options%domain%ulon_hi /= "" .and. parent_options%domain%ulat_hi /= "") then
+            call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%ulat_hi, parent_options%domain%ulon_hi, parent_nest_lat, parent_nest_lon)
+
+            this%ulat = parent_nest_lat(this%its:this%ite+1,this%jts:this%jte)
+            this%ulon = parent_nest_lon(this%its:this%ite+1,this%jts:this%jte)
+        else
+            call array_offset_x(this%lon, this%ulon)
+            call array_offset_x(this%lat, this%ulat)
+        endif
+
+        allocate(this%vlat((this%ite-this%its+1),(this%jte-this%jts+2)))
+        allocate(this%vlon((this%ite-this%its+1),(this%jte-this%jts+2)))
+
+        !see if vlat and vlon were given to parent domain
+        if (parent_options%domain%vlon_hi /= "" .and. parent_options%domain%vlat_hi /= "") then
+            call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%vlat_hi, parent_options%domain%vlon_hi, parent_nest_lat, parent_nest_lon)
+
+            this%vlat = parent_nest_lat(this%its:this%ite,this%jts:this%jte+1)
+            this%vlon = parent_nest_lon(this%its:this%ite,this%jts:this%jte+1)
+        else
+            call array_offset_y(this%lon, this%vlon)
+            call array_offset_y(this%lat, this%vlat)
+        endif
+
         ! Get the height coordinate of the parent nest
         this%kts = 1
         this%kte = parent_options%domain%nz
@@ -285,8 +382,6 @@ contains
         if (allocated(this%z)) deallocate(this%z)
         allocate(this%z((this%ite-this%its+1),this%kte,(this%jte-this%jts+1)))
         this%z = 0.0 !parent_nest_z(this%its:this%ite,1:this%kte,this%jts:this%jte)
-        ! Set this flag here so that we will set z later in domain%setup_geo_interpolation to be the z data read from forcing data
-        this%z_is_set = .False.
 
         ! if (this%ite < this%its) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
         ! if (this%kte < this%kts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
@@ -294,7 +389,7 @@ contains
 
         ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
         do i=1, size(var_list)
-            call add_var_to_dict(this, var_list(i), dim_list(i), [(this%ite-this%its+1), this%kte, (this%jte-this%jts+1)])
+            call add_var_to_dict(this, var_list(i), dim_list(i)%num_dims, dim_list(i)%dims)
         end do
 
     end subroutine
@@ -383,6 +478,10 @@ contains
         this%ite = min(this%ite + 8,nx)
         this%jts = max(this%jts - 8,1)
         this%jte = min(this%jte + 8,ny)
+        this%ids = lbound(temp_lat,1)
+        this%ide = ubound(temp_lat,1)
+        this%jds = lbound(temp_lon,2)
+        this%jde = ubound(temp_lon,2)
 
         ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
         ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  d_ims: ',d_ims,'  d_ime: ',d_ime,'  d_jms: ',d_jms,'  d_jme: ',d_jme
@@ -402,11 +501,11 @@ contains
     !! Setup the main geo structure in the boundary structure
     !!
     !!------------------------------------------------------------
-    subroutine setup_boundary_geo(this, longitude_system)
+    subroutine setup_boundary_geo(this, longitude_system, options)
         implicit none
         type(boundary_t), intent(inout) :: this
         integer,          intent(in)    :: longitude_system
-
+        type(options_t),  intent(in)    :: options
 
         if (allocated(this%geo%lat)) deallocate(this%geo%lat)
         allocate( this%geo%lat, source=this%lat)
@@ -416,17 +515,31 @@ contains
 
         call standardize_coordinates(this%geo, longitude_system)
 
-        this%geo_u   = this%geo
-        this%geo_v   = this%geo
-        this%geo_agl = this%geo
+        if (allocated(this%ulat) .and. allocated(this%ulon)) then
+            if (allocated(this%geo_u%lat)) deallocate(this%geo_u%lat)
+            allocate( this%geo_u%lat, source=this%ulat)
 
+            if (allocated(this%geo_u%lon)) deallocate(this%geo_u%lon)
+            allocate( this%geo_u%lon, source=this%ulon)
 
-        if ( allocated(this%z) )  then
-            ! geo%z will be interpolated from this%z to the high-res grids for vinterp in domain... not a great separation
-            ! here we save the original z dataset so that it can be used to interpolate varying z through time.
-            if (allocated(this%original_geo%z)) deallocate(this%original_geo%z)
-            allocate( this%original_geo%z, source=this%z)
+            call standardize_coordinates(this%geo_u, longitude_system)
+        else
+            this%geo_u   = this%geo
         endif
+
+        if (allocated(this%vlat) .and. allocated(this%vlon)) then
+            if (allocated(this%geo_v%lat)) deallocate(this%geo_v%lat)
+            allocate( this%geo_v%lat, source=this%vlat)
+
+            if (allocated(this%geo_v%lon)) deallocate(this%geo_v%lon)
+            allocate( this%geo_v%lon, source=this%vlon)
+
+            call standardize_coordinates(this%geo_v, longitude_system)
+        else
+            this%geo_v   = this%geo
+        endif
+
+        this%geo_agl = this%geo
 
     end subroutine
 
@@ -451,18 +564,31 @@ contains
         real, allocatable :: temp_2d_data(:,:)
         real, allocatable :: temp_3d_data(:,:,:)
         type(variable_t)  :: new_variable
+        logical :: computed_flag
+        integer :: nx, ny, nz
+
+        ! these variables are computed (e.g. pressure from height or height from pressure)
+        computed_flag = (len_trim(var_name) > 9 .and. var_name(max(1,len_trim(var_name)-8):len_trim(var_name)) == "_computed")
+
+        nx = (this%ite - this%its + 1)
+        nz = this%kte
+        ny = (this%jte - this%jts + 1)
+
+        !handle staggered variables
+        if (.not.(computed_flag)) then
+            if (dims(1) == this%ide+1) nx = nx+1
+            if (dims(2) == this%jde+1) ny = ny+1
+        endif
 
         if (ndims==2) then
-            call new_variable%initialize( [dims(1),dims(3)] )
+            call new_variable%initialize( [nx,ny] )
             call this%variables%add_var(var_name, new_variable)
 
         elseif (ndims==3) then
-            call new_variable%initialize( dims )
+            call new_variable%initialize( [nx,nz,ny] )
             call this%variables%add_var(var_name, new_variable)
-
-        ! these variables are computed (e.g. pressure from height or height from pressure)
-        elseif (ndims==-3) then
-            call new_variable%initialize( dims )
+        elseif (computed_flag) then
+            call new_variable%initialize( [nx,nz,ny] )
             new_variable%computed = .True.
 
             call this%variables%add_var(var_name, new_variable)
@@ -470,38 +596,83 @@ contains
 
     end subroutine
 
-    module subroutine interpolate_original_levels(this, options)
+    module subroutine setup_z(this, options)
         implicit none
         class(boundary_t),   intent(inout)   :: this
         type(options_t),     intent(in)      :: options
 
-        type(variable_t)        :: input_z, var
-        type(interpolable_type) :: input_geo
-        real, allocatable :: temp_3d(:,:,:)
-        real :: neg_z
-        character(len=kMAX_NAME_LENGTH) :: name
-
+        type(variable_t)        :: input_z, phbase
 
         associate(list => this%variables)
-
         input_z = list%get_var(options%forcing%zvar)
 
         if (options%forcing%z_is_geopotential) then
+            ! see if the user has provided a base geopotential height field
+            if (options%forcing%phbvar/="") then
+                phbase = list%get_var(options%forcing%phbvar)
+                input_z%data_3d = input_z%data_3d + phbase%data_3d
+            endif
             input_z%data_3d = input_z%data_3d / gravity
             !neg_z = minval(input_z%data_3d)
             ! if (neg_z < 0.0) input_z%data_3d = input_z%data_3d - neg_z
             call list%add_var(options%forcing%zvar, input_z)
         endif
 
-        ! if (options%forcing%z_is_on_interface) then
-        !     call interpolate_in_z(input_z%data_3d)
-        ! endif
+        if (allocated(this%z)) deallocate(this%z)
+        allocate(this%z,source=input_z%data_3d)
+        end associate
 
-        allocate(input_geo%z, source=input_z%data_3d)
+        if (.not.(allocated(this%original_geo%z)) )  then
+
+            ! geo%z will be interpolated from this%z to the high-res grids for vinterp in domain... not a great separation
+            ! here we save the original z dataset so that it can be used to interpolate varying z through time.
+            allocate( this%original_geo%z, source=this%z)
+
+            this%mass_to_u%lat = this%geo%lat
+            this%mass_to_u%lon = this%geo%lon
+            this%mass_to_v%lat = this%geo%lat
+            this%mass_to_v%lon = this%geo%lon
+
+            call geo_LUT(this%geo_u, this%mass_to_u)
+            call geo_LUT(this%geo_v, this%mass_to_v)
+
+            if (allocated(this%original_geo_u%z)) deallocate(this%original_geo_u%z)
+            if (allocated(this%original_geo_v%z)) deallocate(this%original_geo_v%z)
+            allocate(this%original_geo_u%z(lbound(this%geo_u%lon,1):ubound(this%geo_u%lon,1), this%kts:this%kte, lbound(this%geo_u%lon,2):ubound(this%geo_u%lon,2)))            
+            allocate(this%original_geo_v%z(lbound(this%geo_v%lat,1):ubound(this%geo_v%lat,1), this%kts:this%kte, lbound(this%geo_v%lat,2):ubound(this%geo_v%lat,2)))     
+
+            call geo_interp(this%original_geo_u%z,   this%z, this%mass_to_u%geolut)
+            call geo_interp(this%original_geo_v%z,   this%z, this%mass_to_v%geolut)
+        endif
+
+    end subroutine setup_z
+
+    module subroutine interpolate_original_levels(this, options)
+        implicit none
+        class(boundary_t),   intent(inout)   :: this
+        type(options_t),     intent(in)      :: options
+
+        type(variable_t)        :: input_z, var
+        type(interpolable_type) :: input_geo, input_geo_u, input_geo_v
+        real, allocatable :: temp_3d(:,:,:)
+        real :: neg_z
+        character(len=kMAX_NAME_LENGTH) :: name
+
+        call this%setup_z(options)
+
+        allocate(input_geo%z, source=this%z)
+        allocate(input_geo_u%z(lbound(this%geo_u%lon,1):(ubound(this%geo_u%lon,1)),lbound(this%z,2):ubound(this%z,2),lbound(this%geo_u%lon,2):ubound(this%geo_u%lon,2)))
+        allocate(input_geo_v%z(lbound(this%geo_v%lat,1):ubound(this%geo_v%lat,1),lbound(this%z,2):ubound(this%z,2),lbound(this%geo_v%lat,2):(ubound(this%geo_v%lat,2))))
+
+        call geo_interp(input_geo_u%z, input_geo%z, this%mass_to_u%geolut)
+        call geo_interp(input_geo_v%z, input_geo%z, this%mass_to_v%geolut)
 
         ! create a vertical interpolation look up table for the current time step
         call vLUT(this%original_geo, input_geo)
+        call vLUT(this%original_geo_u, input_geo_u)
+        call vLUT(this%original_geo_v, input_geo_v)
 
+        associate(list => this%variables)
 
         ! loop through the list of variables that were read in and might need to be interpolated in 3D
         call list%reset_iterator()
@@ -513,7 +684,14 @@ contains
                 ! need to vinterp this dataset to the original vertical levels (if necessary)
 
                 temp_3d = var%data_3d
-                call vinterp(var%data_3d, temp_3d, input_geo%vert_lut)
+
+                if (size(temp_3d,1) == (this%ite-this%its+2)) then
+                    call vinterp(var%data_3d, temp_3d, input_geo_u%vert_lut)
+                elseif (size(temp_3d,3) == (this%jte-this%jts+2)) then
+                    call vinterp(var%data_3d, temp_3d, input_geo_v%vert_lut)
+                else
+                    call vinterp(var%data_3d, temp_3d, input_geo%vert_lut)
+                endif
 
             endif
             call list%add_var(name, var)
@@ -530,14 +708,22 @@ contains
         type(options_t),     intent(in)      :: options
 
         integer           :: err
-        type(variable_t)  :: var, pvar, tvar
+        type(variable_t)  :: var, pvar, tvar, pbvar
 
         integer :: nx,ny,nz
-        real, allocatable :: temp_z(:,:,:)
         real :: neg_z
         character(len=kMAX_NAME_LENGTH) :: name
+        logical :: z_is_computed = .False.
 
         associate(list => this%variables)
+
+        !Add base pressure to pressure, if provided
+        pbvar = list%get_var(options%forcing%pbvar, err)
+        if (err == 0) then
+            pvar = list%get_var(options%forcing%pvar)
+            pvar%data_3d = pvar%data_3d + pbvar%data_3d
+            call list%add_var(options%forcing%pvar, pvar)
+        endif
 
         if (options%forcing%qv_is_relative_humidity) then
             call compute_mixing_ratio_from_rh(list, options)
@@ -564,6 +750,7 @@ contains
 
                 if (trim(name) == trim(options%forcing%zvar)) then
                     call compute_z_update(this, list, options)
+                    z_is_computed = .True.
                 endif
 
                 if (trim(name) == trim(options%forcing%pvar)) then
@@ -587,10 +774,9 @@ contains
         end associate
 
         ! if the vertical levels of the forcing data change over time, they need to be interpolated to the original levels here.
-        if (options%forcing%time_varying_z) then
+        if (options%forcing%time_varying_z .and. .not.(z_is_computed)) then
             call this%interpolate_original_levels(options)
         endif
-
 
     end subroutine update_computed_vars
 
@@ -607,6 +793,7 @@ contains
         pvar = list%get_var(options%forcing%pvar)
         qvar = list%get_var(options%forcing%qvvar)
 
+        if (pvar%computed) stop "Need pressure as input to compute mixing ratio from relative humidity"
         if (maxval(qvar%data_3d) > 2) then
             qvar%data_3d = qvar%data_3d/100.0
         endif
@@ -789,9 +976,9 @@ contains
     subroutine setup_variable_lists(master_var_list, master_dim_list, vars_to_read, var_dimensions)
         implicit none
         character(len=kMAX_NAME_LENGTH), intent(in)                 :: master_var_list(:)
-        integer,                         intent(in)                 :: master_dim_list(:)
+        type(dim_arrays_type),           intent(in)                 :: master_dim_list(:)
         character(len=kMAX_NAME_LENGTH), intent(inout), allocatable :: vars_to_read(:)
-        integer,                         intent(inout), allocatable :: var_dimensions(:)
+        type(dim_arrays_type),           intent(inout), allocatable :: var_dimensions(:)
 
         integer :: n_valid_vars
         integer :: i, curvar, err
@@ -813,7 +1000,8 @@ contains
         do i=1, size(master_var_list)
             if (trim(master_var_list(i)) /= '') then
                 vars_to_read(curvar) = master_var_list(i)
-                var_dimensions(curvar) = master_dim_list(i)
+                var_dimensions(curvar)%num_dims = master_dim_list(i)%num_dims
+                var_dimensions(curvar)%dims = master_dim_list(i)%dims
                 ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)
                 curvar = curvar + 1
             endif

@@ -3,6 +3,7 @@ module options_types
     use icar_constants,             only : kMAX_STRING_LENGTH, MAXLEVELS, kMAX_FILE_LENGTH, MAX_NUMBER_FILES, kMAX_NAME_LENGTH, kMAX_STORAGE_VARS, kMAX_NAME_LENGTH
     use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
+    use data_structures,            only : dim_arrays_type
 
     implicit none
 
@@ -313,7 +314,6 @@ module options_types
 
     end type general_options_type
 
-
     ! ------------------------------------------------
     ! store forcing related options
     ! ------------------------------------------------
@@ -323,7 +323,6 @@ module options_types
         logical :: qv_is_spec_humidity  ! if true the input water vapor is assumed to be specific humidity instead of mixing ratio
         logical :: t_is_potential       ! if true the input temperature is interpreted as potential temperature
         logical :: z_is_geopotential    ! if true the z variable is interpreted as geopotential height
-        logical :: z_is_on_interface    ! if true the z variable is interpreted as residing at model level interfaces
         logical :: time_varying_z       ! read in a new z coordinate every time step and interpolate accordingly
         logical :: relax_filters       ! should use smoothly varying relaxation filters to nudge forcing at the boundaries
 
@@ -335,7 +334,7 @@ module options_types
 
         ! variable names from init/BC/wind/... files
         character (len=kMAX_NAME_LENGTH) :: latvar="",lonvar="",uvar="",ulat="",ulon="",vvar="",vlat="",vlon="",wvar="", &
-                        pvar="",tvar="",qvvar="",qcvar="",qivar="",qrvar="",qsvar="",qgvar="",i2mvar="",i3mvar="",&
+                        pvar="",pbvar="",phbvar="",tvar="",qvvar="",qcvar="",qivar="",qrvar="",qsvar="",qgvar="",i2mvar="",i3mvar="",&
                         qncvar="",qnivar="",qnrvar="",qnsvar="",qngvar="",i2nvar="",i3nvar="",&
                         i1avar="",i1cvar="",i2avar="",i2cvar="",i3avar="",i3cvar="",hgtvar="", &
                         pslvar="", psvar="", sst_var="", pblhvar="", &
@@ -345,7 +344,7 @@ module options_types
 
         ! The following are NOT read from the namelist -- instead they are set/calculated from other options which ARE read from the namelist
         character(len=kMAX_NAME_LENGTH) :: vars_to_read(kMAX_STORAGE_VARS)
-        integer                     :: dim_list(    kMAX_STORAGE_VARS)
+        type(dim_arrays_type) :: dim_list(kMAX_STORAGE_VARS)
 
         character (len=kMAX_FILE_LENGTH), dimension(:), allocatable :: boundary_files
         type(time_delta_t) :: input_dt  ! store in_dt as a time delta object

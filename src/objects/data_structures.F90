@@ -15,6 +15,11 @@ module data_structures
 !   various data structures for use in geographic interpolation routines
 ! ------------------------------------------------
 
+    type :: dim_arrays_type
+        integer, allocatable :: dims(:)
+        integer :: num_dims
+    end type dim_arrays_type
+
     type index_type
         integer :: v = -1
         character(kMAX_NAME_LENGTH) :: n = ''

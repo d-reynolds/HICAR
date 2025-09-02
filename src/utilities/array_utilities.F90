@@ -98,25 +98,41 @@ contains
     end subroutine make_2d_y
 
 
-    subroutine interpolate_in_z(input)
+    subroutine interpolate_in_z(input, zdim)
         implicit none
         real, allocatable, intent(inout) :: input(:,:,:)
+        integer, intent(in), optional :: zdim
 
-        real, allocatable :: temp_z(:,:,:)
-        integer :: nx, ny, nz
-
+        real, allocatable :: temp_array(:,:,:)
+        integer :: nx, ny, nz, z_dimension
+        
+        ! Set default zdim to 2 if not provided
+        z_dimension = 2
+        if (present(zdim)) z_dimension = zdim
+        
         nx = size(input, 1)
-        nz = size(input, 2)
-        ny = size(input, 3)
-
-        allocate(temp_z(nx,nz,ny))
-        temp_z = input
-
+        ny = size(input, 2)  
+        nz = size(input, 3)
+        
+        allocate(temp_array(nx, ny, nz))
+        temp_array = input
+        
         deallocate(input)
-        allocate(input(nx,nz-1,ny))
-
-        input = (temp_z(:,1:nz-1,:) + temp_z(:,2:nz,:))/2
-
+        
+        ! Compute linear average along the specified dimension
+        if (z_dimension == 1) then
+            allocate(input(nx-1, ny, nz))
+            input = (temp_array(1:nx-1,:,:) + temp_array(2:nx,:,:)) / 2.0
+        else if (z_dimension == 2) then
+            allocate(input(nx, ny-1, nz))
+            input = (temp_array(:,1:ny-1,:) + temp_array(:,2:ny,:)) / 2.0
+        else if (z_dimension == 3) then
+            allocate(input(nx, ny, nz-1))
+            input = (temp_array(:,:,1:nz-1) + temp_array(:,:,2:nz)) / 2.0
+        end if
+        
+        deallocate(temp_array)
+        
     end subroutine interpolate_in_z
 
     subroutine array_offset_x_3d(input_array, output_array)

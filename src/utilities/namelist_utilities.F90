@@ -282,7 +282,7 @@ contains
         call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
 
         ! see if user wants to use this variable anyways
-        if (.not.(var_val =="") .and. .not.(no_check_flag)) then
+        if (.not.(trim(var_val) == "") .and. .not.(no_check_flag) .and. .not.(trim(var_val) == kCHAR_NO_VAL)) then
             ! first check if variable is present in the domain file
             call check_variable_present(options%boundary_files(1), var_val)
             ! then get the number of dimensions for the variable
@@ -323,7 +323,7 @@ contains
                 call check_variable_present(options%boundary_files(1), options%tvar)
                 !! then get the number of dimensions for the variable
                 call io_getdims(options%boundary_files(1), options%tvar, t_var_dims)
-        !
+        
                 call get_nml_var_metadata('tvar',group,description,default,min,max,type,values,units,t_dimensions)
 
                 ! reverse ordering of dimensions -- needed since fortran netCDF uses reverse ordering relative to python/nco
@@ -354,6 +354,17 @@ contains
                         if (name=='vlon' .and. dim_name=='Y') dim_len = dim_len - 1
                         if (name=='vvar' .and. dim_name=='Y' .and. dim_len == t_var_dims(p)+1) dim_len = dim_len - 1
                         if (name=='uvar' .and. dim_name=='X' .and. dim_len == t_var_dims(p)+1) dim_len = dim_len - 1
+                        if (dim_name=='Z' .and. dim_len == t_var_dims(p)+1) then
+                            if (STD_OUT_PE) write(*,*) "--------------------------------------------------------------------------------"
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: vertical dimension ",trim(dim_name)," on forcing variable ", trim(name)
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: has dimension length:",var_dims(dim_indx)
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: variable: ",trim(options%tvar)," has length: ", t_var_dims(p), "for the same dimension"
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: We are interpreting this as variable ",trim(name), " being on"
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: the k-level interfaces, and will automatically linearly interpolate"
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: it to the mass-points"
+                            if (STD_OUT_PE) write(*,*) "--------------------------------------------------------------------------------"
+                            dim_len = dim_len - 1
+                        endif
 
                         if (dim_len /= t_var_dims(p)) then
                             if (STD_OUT_PE) write(*,*) "Error: dimension ",trim(dim_name)," on forcing variable ", trim(name)
@@ -366,22 +377,33 @@ contains
                     endif
                 end do
             endif
+        ! Check if the variable was not set. In this case, we just set it to be blank ("")
+        elseif (trim(var_val) == kCHAR_NO_VAL) then
+            var = ""
+            return
         endif
+
+        ! if (var == kCHAR_NO_VAL) then
+        !     var = ""
+            ! if (STD_OUT_PE) write(*,*) "Error: '", trim(name), "' is not set to any value (i.e. is still ",(kCHAR_NO_VAL),")"
+            ! error stop
+        ! endif
 
         ! if i is present, then we want to add this variable to the vars-to-read list
         if (present(i)) then
             options%vars_to_read(i) = var_val
             ! only count spatial dimensions
-            options%dim_list(i) = count(.not.(dimensions=='T'))
+            options%dim_list(i)%num_dims = count(.not.(dimensions=='T'))
+
+            if (options%dim_list(i)%num_dims /= size(dimensions)) then
+                options%dim_list(i)%dims = pack(var_dims, .not.(dimensions=='T'))
+            else
+                options%dim_list(i)%dims = var_dims
+            endif
             i = i + 1
         endif
         var = var_val
 
-        ! Check if the variable was not set. This would be an error
-        if (var == kCHAR_NO_VAL .and. default /= kCHAR_NO_VAL) then
-            if (STD_OUT_PE) write(*,*) "Error: '", trim(name), "' is not set to any value (i.e. is still ",(kCHAR_NO_VAL),")"
-            error stop
-        endif
 
     end subroutine set_char_forcing_nml_var
 
@@ -1237,7 +1259,7 @@ contains
                 type = 1
             case ("interactive")
                 description = "Interactive flag, prints out model progress during physics timesteps (T/F)"
-                default = ".False."
+                default = ".True."
                 group = "General"
                 type = 1
             case ("calendar")
@@ -1642,11 +1664,6 @@ contains
                 default = ".False."
                 group = "Forcing"
                 type = 1
-            case ("z_is_on_interface")
-                description = "Forcing Z variable is on interface levels (T/F)"
-                default = ".False."
-                group = "Forcing"
-                type = 1
             case ("time_varying_z")
                 description = "Forcing Z variable is time varying (T/F)"
                 default = ".False."
@@ -1745,6 +1762,20 @@ contains
             case ("pvar")
                 description = "Name of the pressure variable in forcing file"
                 units = "Pa"
+                allocate(dimensions(4))
+                dimensions = ["T", "Z", "Y", "X"]
+                group = "Forcing"
+                type = 1
+            case ("pbvar")
+                description = "Name of the base pressure variable in forcing file"
+                units = "Pa"
+                allocate(dimensions(4))
+                dimensions = ["T", "Z", "Y", "X"]
+                group = "Forcing"
+                type = 1
+            case ("phbvar")
+                description = "Name of the base geopotential variable in forcing file"
+                units = "m^2/s^2"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
