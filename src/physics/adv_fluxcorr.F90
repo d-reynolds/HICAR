@@ -137,7 +137,7 @@ contains
         !$acc create(scale_in,scale_out)
 
         ! Next compute max and min possible fluxes        
-        !$acc parallel loop gang vector collapse(3) async(1)
+        !$acc parallel loop gang vector tile(32,4,1) async(1)
         do j = jts-1, jte+1 
             do k = kms, kme
                 do i = its-1, ite+1
@@ -232,8 +232,7 @@ contains
             enddo
         enddo
 
-        !$acc parallel async(2) wait(1)
-        !$acc loop gang vector collapse(3)
+        !$acc parallel loop gang vector tile(32,4,1) async(2) wait(1)
         do j = jts, jte+1 
             do k = kms, kme
                 do i = its, ite+1
@@ -266,7 +265,7 @@ contains
             enddo
         enddo
 
-        !$acc loop gang vector collapse(2)
+        !$acc parallel loop gang vector collapse(2) async(3) wait(2)
         do j = jts, jte+1 
             do i = its, ite+1
                 flux_z(i,kme+1,j) = flux_z(i,kme+1,j) - flux_z_up(i,kme+1,j)
@@ -277,7 +276,7 @@ contains
         enddo
         !$acc end parallel
         !$acc end data
-        !$acc wait(2)
+        !$acc wait(3)
 
         !$acc exit data delete(flux_x_up,flux_y_up,flux_z_up)
 
@@ -313,7 +312,7 @@ contains
 
         !Now compute upwind fluxes after second step
 
-        !$acc parallel loop gang vector collapse(3) private(q_cache, tmp) async(1)
+        !$acc parallel loop gang vector tile(32,4,1) private(q_cache, tmp) async(1)
         do j = jts-1, jte+2
             do k = kms, kme+1
                 do i = its-1, ite+2
@@ -348,7 +347,7 @@ contains
         enddo
 
         
-        !$acc parallel loop gang vector collapse(3) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val) async(2) wait(1)
+        !$acc parallel loop gang vector tile(32,4,1) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val) async(2) wait(1)
         do j = jms, jme
             do k = kms, kme
             do i = ims, ime
@@ -380,7 +379,7 @@ contains
 
         !Now compute upwind fluxes after second step
 
-        !$acc parallel loop gang vector collapse(3) private(q_cache, tmp) async(3) wait(2)
+        !$acc parallel loop gang vector tile(32,4,1) private(q_cache, tmp) async(3) wait(2)
         do j = jts-1, jte+2
             do k = kms, kme+1
                 do i = its-1, ite+2
