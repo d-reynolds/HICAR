@@ -339,7 +339,7 @@ contains
 
             if (real(dt%seconds()) > 1e-3) then
 
-                if (options%general%debug) call domain_check(domain, "init", fix=.True.)
+                ! if (options%general%debug) call domain_check(domain, "init", fix=.True.)
 
                 call domain%send_timer%start()
                 call domain%halo_3d_send_batch()
@@ -348,7 +348,7 @@ contains
     
                 call domain%rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
-                if (options%general%debug) call domain_check(domain, "rad(domain", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "rad(domain")
                 call domain%rad_timer%stop()
 
 
@@ -379,7 +379,7 @@ contains
                 call domain%adv_timer%start()
                 call advect(domain, options, real(dt%seconds()),domain%flux_timer, domain%flux_up_timer, domain%flux_corr_timer, domain%sum_timer, domain%adv_wind_timer)
                 !call domain%enforce_limits()
-                if (options%general%debug) call domain_check(domain, "advect(domain", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "advect(domain")
                 call domain%adv_timer%stop()
 
                 
@@ -387,7 +387,7 @@ contains
                 call domain%mp_timer%start()
 
                 call mp(domain, options, real(dt%seconds()))
-                if (options%general%debug) call domain_check(domain, "mp_halo", fix=.True.)
+                if (options%general%debug) call domain_check(domain, "mp_halo")
                 call domain%mp_timer%stop()
                 
 
