@@ -2851,9 +2851,9 @@ contains
         !!  Sensible Heat Exchange Coefficient, 2m
         !!------------------------------------------------------------
         else if (var_idx==kVARS%chs2) then
-            var%name        = "coeff_heat_exchange"
+            var%name        = "coeff_heat_exchange_2m"
             var%dimensions  = two_d_t_dimensions
-            var%attributes  = [attribute_t("non_standard_name", "sensible_heat_exchange_coefficient"), &
+            var%attributes  = [attribute_t("non_standard_name", "sensible_heat_exchange_coefficient_at_2m"), &
                                attribute_t("units",         "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         
