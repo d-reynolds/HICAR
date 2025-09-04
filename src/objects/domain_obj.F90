@@ -2814,12 +2814,39 @@ contains
         integer :: ims, ime, jms, jme, kms, kme
         ! temporary to hold the variable to be interpolated to
         type(meta_data_t) :: var_to_update
-        integer :: i, k, j, var_indx, n
+        integer :: i, k, j, p, var_indx, n
+        integer, dimension(4) :: ims_b, ime_b, jms_b, jme_b
         real    :: dt_h
-        logical :: do_boundary, is_wind, is_w_real
+        logical :: do_boundary, do_west, do_east, do_north, do_south, is_wind, is_w_real
 
         !calculate dt in units of hours
         dt_h = dt/3600.0
+
+        ims_b = 0; ime_b = 0; jms_b = 0; jme_b = 0
+
+        do_west = (this%ims < this%ids+this%grid%halo_size+FILTER_WIDTH)
+        do_east = (this%ime > this%ide-this%grid%halo_size-FILTER_WIDTH)
+        do_north = (this%jms < this%jds+this%grid%halo_size+FILTER_WIDTH)
+        do_south = (this%jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
+
+        do_boundary = (do_west .or. do_east .or. do_north .or. do_south)
+
+        if (do_boundary) then
+            if (do_west) ims_b(1) = this%ims; ime_b(1) = this%ims+FILTER_WIDTH+this%grid%halo_size; jms_b(1) = this%jms; jme_b(1) = this%jme;
+            if (do_east) ims_b(2) = this%ime-FILTER_WIDTH-this%grid%halo_size; ime_b(2) = this%ime; jms_b(2) = this%jms; jme_b(2) = this%jme;
+            if (do_north) ims_b(3) = this%ims; ime_b(3) = this%ime; jms_b(3) = this%jms+FILTER_WIDTH+this%grid%halo_size; jme_b(3) = this%jme;
+            if (do_south) ims_b(4) = this%ims; ime_b(4) = this%ime; jms_b(4) = this%jms; jme_b(4) = this%jms-FILTER_WIDTH-this%grid%halo_size;
+
+            ! limit vertical extent of west and east boundaries to the extent of the north/south indices
+            ! this prevents double-calculating points in the corners
+            if (do_west .and. do_south) jms_b(1) = max(jms_b(1),jms_b(4))
+            if (do_east .and. do_south) jms_b(2) = max(jms_b(2),jms_b(4))
+
+            if (do_west .and. do_north) jme_b(1) = min(jme_b(1),jme_b(3))
+            if (do_east .and. do_north) jme_b(2) = min(jme_b(2),jme_b(3))
+        endif
+
+        !$acc data copyin(ims_b,ime_b,jms_b,jme_b)
 
         do n = 1,size(this%forcing_hi)
 
@@ -2832,9 +2859,6 @@ contains
                 jms = this%vars_2d(this%var_indx(var_indx)%v)%grid%jms
                 jme = this%vars_2d(this%var_indx(var_indx)%v)%grid%jme
     
-                do_boundary = (ims < this%ids+this%grid%halo_size+FILTER_WIDTH) .or. (ime > this%ide-this%grid%halo_size-FILTER_WIDTH) .or. &
-                    (jms < this%jds+this%grid%halo_size+FILTER_WIDTH) .or. (jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
-
                 associate( forcing => this%forcing_hi(n), var => this%vars_2d(this%var_indx(var_indx)%v), relax_filter => this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d)
 
                 ! apply forcing throughout the domain for 2D diagnosed variables (e.g. SST, SW)
@@ -2847,11 +2871,13 @@ contains
                         enddo
                     enddo
                 else if (do_boundary) then
-                    if (any(relax_filter > 0.0)) then
+                    !$acc parallel present(var,forcing,relax_filter,ims_b,ime_b,jms_b,jme_b) 
+                    do p = 1,4
+                        if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
-                        !$acc parallel loop gang vector collapse(2) present(var, forcing, relax_filter)
-                        do j = jms,jme
-                            do i = ims,ime
+                        !$acc loop gang vector collapse(2)
+                        do j = jms_b(p),jme_b(p)
+                            do i = ims_b(p),ime_b(p)
                                 if (relax_filter(i,j) > 0.0) then
                                     forcing%data_2d(i,j) = forcing%data_2d(i,j) + (forcing%dqdt_2d(i,j) * dt)
                                     forcing%data_2d(i,j) = max(forcing%data_2d(i,j),0.0)
@@ -2868,7 +2894,8 @@ contains
                                 endif
                             enddo
                         enddo
-                    endif
+                    enddo
+                    !$acc end parallel
                 endif 
                 end associate
             else if (this%forcing_hi(n)%three_d) then
@@ -2878,10 +2905,6 @@ contains
                 kme = this%kme
                 jms = this%vars_3d(this%var_indx(var_indx)%v)%grid%jms
                 jme = this%vars_3d(this%var_indx(var_indx)%v)%grid%jme
-
-                !see if we are on the boundary of the domain
-                do_boundary = (ims < this%ids+this%grid%halo_size+FILTER_WIDTH) .or. (ime > this%ide-this%grid%halo_size-FILTER_WIDTH) .or. &
-                               (jms < this%jds+this%grid%halo_size+FILTER_WIDTH) .or. (jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
 
                 associate( forcing => this%forcing_hi(n), var => this%vars_3d(this%var_indx(var_indx)%v), relax_filter => this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d)
 
@@ -2903,12 +2926,14 @@ contains
                         enddo
                     enddo
                 else if (do_boundary) then
-                    if (any(relax_filter > 0.0)) then
+                    !$acc parallel present(var,forcing,relax_filter,ims_b,ime_b,jms_b,jme_b)
+                    do p = 1,4
+                        if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
-                        !$acc parallel loop gang vector collapse(3) present(var, forcing, relax_filter)
-                        do j = jms,jme
+                        !$acc loop gang vector collapse(3)
+                        do j = jms_b(p),jme_b(p)
                             do k = kms, kme
-                                do i = ims,ime
+                                do i = ims_b(p),ime_b(p)
                                     if (relax_filter(i,k,j) > 0.0) then
                                         forcing%data_3d(i,k,j) = forcing%data_3d(i,k,j) + (forcing%dqdt_3d(i,k,j) * dt)
                                         forcing%data_3d(i,k,j) = max(forcing%data_3d(i,k,j),0.0)
@@ -2926,12 +2951,14 @@ contains
                                 enddo
                             enddo
                         enddo
-                    endif
+                    enddo
+                    !$acc end parallel
+
                 endif
                 end associate
             endif
         enddo
-
+        !$acc end data
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
         ! if (.not.(options%adv%advect_density)) then
