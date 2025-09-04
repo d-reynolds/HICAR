@@ -134,6 +134,7 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%south_in_win)
         call C_F_POINTER(tmp_ptr, this%south_in_3d, [nx, nz, ny])
 #endif
+        allocate(this%south_in_buffer(1:this%grid%ns_halo_nx, 1:nz, 1:this%halo_size+1))
 
 #ifdef _OPENACC
         allocate(this%north_in_3d(nx, nz, ny))
@@ -145,6 +146,7 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%north_in_win)
         call C_F_POINTER(tmp_ptr, this%north_in_3d, [nx, nz, ny])
 #endif
+        allocate(this%north_in_buffer(1:this%grid%ns_halo_nx, 1:nz, 1:this%halo_size+1))
 
         nx = this%halo_size+1
         nz = this%grid%halo_nz
@@ -161,6 +163,7 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%east_in_win)
         call C_F_POINTER(tmp_ptr, this%east_in_3d, [nx, nz, ny])
 #endif
+        allocate(this%east_in_buffer(1:this%halo_size+1, 1:nz, 1:this%grid%ew_halo_ny))
 
 #ifdef _OPENACC
         allocate(this%west_in_3d(nx, nz, ny))
@@ -172,6 +175,7 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%west_in_win)
         call C_F_POINTER(tmp_ptr, this%west_in_3d, [nx, nz, ny])
 #endif
+        allocate(this%west_in_buffer(1:this%halo_size+1, 1:nz, 1:this%grid%ew_halo_ny))
 
         this%north_in_3d = 1
         this%south_in_3d = 1
@@ -265,7 +269,6 @@ module subroutine exch_var(this, var, do_dqdt, corners)
     do_corners=.False.
     if (present(corners)) do_corners=corners
 
-    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
     if (do_corners) then
 
         call MPI_Win_fence(0,this%south_in_win)
@@ -309,7 +312,7 @@ module subroutine exch_var(this, var, do_dqdt, corners)
     if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
     if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
     if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
-    !$acc end data
+
 end subroutine exch_var
 
 
@@ -1038,7 +1041,7 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
                     if (.not.(this%northeast_boundary)) then
                         associate(buff => this%northeast_batch_in_3d)
                         !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,this%halo_size
+                        do j = 1,halo_size
                         do k = kms,kme
                         do i = 1,halo_size
                             var((ite+i),k,(jte+j)) = buff(n,i,k,j)
@@ -1355,7 +1358,6 @@ module subroutine put_north(this,var,do_dqdt)
   integer :: n, nx, offs, msg_size, i, k, j, indx_start
   logical :: dqdt
   INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-  real, allocatable :: tmp(:,:,:)
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
@@ -1365,14 +1367,13 @@ module subroutine put_north(this,var,do_dqdt)
   msg_size = 1
   indx_start = var%grid%jte-offs-var%grid%halo_size+1
 
-  allocate(tmp(1:var%grid%ns_halo_nx, 1:max(1,var%grid%nz), 1:var%grid%halo_size+1))
-  !$acc data present(var) create(tmp)
+  !$acc data present(var, this%north_in_buffer)
 
   if (var%two_d) then
     !$acc parallel loop gang vector collapse(2)
     do j = indx_start, var%grid%jte
         do i = var%grid%its, var%grid%ite
-            tmp(i-var%grid%its+1,1,j-indx_start+1) = var%data_2d(i,j)
+            this%north_in_buffer(i-var%grid%its+1,1,j-indx_start+1) = var%data_2d(i,j)
         enddo
     enddo
   else
@@ -1381,7 +1382,7 @@ module subroutine put_north(this,var,do_dqdt)
           do j = indx_start, var%grid%jte
             do k = var%grid%kts, var%grid%kte
                 do i = var%grid%its, var%grid%ite
-                    tmp(i-var%grid%its+1,k-var%grid%kts+1,j-indx_start+1) = var%dqdt_3d(i,k,j)
+                    this%north_in_buffer(i-var%grid%its+1,k-var%grid%kts+1,j-indx_start+1) = var%dqdt_3d(i,k,j)
                 enddo
             enddo
           enddo
@@ -1390,15 +1391,15 @@ module subroutine put_north(this,var,do_dqdt)
           do j = indx_start, var%grid%jte
             do k = var%grid%kts, var%grid%kte
                 do i = var%grid%its, var%grid%ite
-                    tmp(i-var%grid%its+1,k-var%grid%kts+1,j-indx_start+1) = var%data_3d(i,k,j)
+                    this%north_in_buffer(i-var%grid%its+1,k-var%grid%kts+1,j-indx_start+1) = var%data_3d(i,k,j)
                 enddo
             enddo
           enddo
       endif
   endif
 
-  !$acc host_data use_device(tmp)
-  call MPI_Put(tmp, msg_size, &
+  !$acc host_data use_device(this%north_in_buffer)
+  call MPI_Put(this%north_in_buffer, msg_size, &
       var%grid%NS_halo, this%north_neighbor, disp, msg_size, var%grid%NS_win_halo, this%south_in_win)
   !$acc end host_data
 
@@ -1415,7 +1416,6 @@ module subroutine put_south(this,var,do_dqdt)
   integer :: start, nx, offs, msg_size, i, k, j, indx_end
   logical :: dqdt
   INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-  real, allocatable :: tmp(:,:,:)
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
@@ -1425,14 +1425,13 @@ module subroutine put_south(this,var,do_dqdt)
   msg_size = 1
   indx_end = var%grid%jts+offs+var%grid%halo_size-1
 
-  allocate(tmp(1:var%grid%ns_halo_nx, 1:max(1,var%grid%nz), 1:var%grid%halo_size+1))
-  !$acc data present(var) create(tmp)
+  !$acc data present(var, this%south_in_buffer)
 
   if (var%two_d) then
           !$acc parallel loop gang vector collapse(2)
           do j = var%grid%jts, indx_end
             do i = var%grid%its, var%grid%ite
-              tmp(i-var%grid%its+1,1,j-var%grid%jts+1) = var%data_2d(i,j)
+              this%south_in_buffer(i-var%grid%its+1,1,j-var%grid%jts+1) = var%data_2d(i,j)
             enddo
           enddo
   else
@@ -1441,7 +1440,7 @@ module subroutine put_south(this,var,do_dqdt)
           do j = var%grid%jts, indx_end
             do k = var%grid%kts, var%grid%kte
               do i = var%grid%its, var%grid%ite
-                tmp(i-var%grid%its+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%dqdt_3d(i,k,j)
+                this%south_in_buffer(i-var%grid%its+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%dqdt_3d(i,k,j)
               enddo
             enddo
           enddo
@@ -1450,15 +1449,15 @@ module subroutine put_south(this,var,do_dqdt)
           do j = var%grid%jts, indx_end
             do k = var%grid%kts, var%grid%kte
               do i = var%grid%its, var%grid%ite
-                tmp(i-var%grid%its+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%data_3d(i,k,j)
+                this%south_in_buffer(i-var%grid%its+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%data_3d(i,k,j)
               enddo
             enddo
           enddo
       endif
   endif
 
-  !$acc host_data use_device(tmp)
-  call MPI_Put(tmp, msg_size, &
+  !$acc host_data use_device(this%south_in_buffer)
+  call MPI_Put(this%south_in_buffer, msg_size, &
       var%grid%NS_halo, this%south_neighbor, disp, msg_size, var%grid%NS_win_halo, this%north_in_win)
   !$acc end host_data
 
@@ -1475,7 +1474,6 @@ module subroutine put_east(this,var,do_dqdt)
   integer :: n, ny, msg_size, offs, i, k, j, indx_start
   logical :: dqdt
   INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-  real, allocatable :: tmp(:,:,:)
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
@@ -1485,14 +1483,13 @@ module subroutine put_east(this,var,do_dqdt)
   msg_size = 1
   indx_start = var%grid%ite-offs-var%grid%halo_size+1
 
-  allocate(tmp(1:var%grid%halo_size+1, 1:max(1,var%grid%nz), 1:var%grid%ew_halo_ny))
-  !$acc data present(var) create(tmp)
-    
+  !$acc data present(var, this%east_in_buffer)
+
   if (var%two_d) then
     !$acc parallel loop gang vector collapse(2)
     do j = var%grid%jts, var%grid%jte
         do i = indx_start, var%grid%ite
-            tmp(i-indx_start+1,1,j-var%grid%jts+1) = var%data_2d(i,j)
+            this%east_in_buffer(i-indx_start+1,1,j-var%grid%jts+1) = var%data_2d(i,j)
         enddo
     enddo
   else
@@ -1501,7 +1498,7 @@ module subroutine put_east(this,var,do_dqdt)
           do j = var%grid%jts, var%grid%jte
             do k = var%grid%kts, var%grid%kte
                 do i = indx_start, var%grid%ite
-                    tmp(i-indx_start+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%dqdt_3d(i,k,j)
+                    this%east_in_buffer(i-indx_start+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%dqdt_3d(i,k,j)
                 enddo
             enddo
           enddo
@@ -1510,15 +1507,15 @@ module subroutine put_east(this,var,do_dqdt)
           do j = var%grid%jts, var%grid%jte
             do k = var%grid%kts, var%grid%kte
                 do i = indx_start, var%grid%ite
-                    tmp(i-indx_start+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%data_3d(i,k,j)
+                    this%east_in_buffer(i-indx_start+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%data_3d(i,k,j)
                 enddo
             enddo
           enddo
       endif
   endif
 
-  !$acc host_data use_device(tmp)
-  call MPI_Put(tmp, msg_size, &
+  !$acc host_data use_device(this%east_in_buffer)
+  call MPI_Put(this%east_in_buffer, msg_size, &
   var%grid%EW_halo, this%east_neighbor, disp, msg_size, var%grid%EW_win_halo, this%west_in_win)
   !$acc end host_data
 
@@ -1536,7 +1533,6 @@ module subroutine put_west(this,var,do_dqdt)
   integer :: start, ny, msg_size, offs, i, k, j, indx_end
   logical :: dqdt
   INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-  real, allocatable :: tmp(:,:,:)
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
@@ -1546,15 +1542,14 @@ module subroutine put_west(this,var,do_dqdt)
   msg_size = 1
   indx_end = var%grid%its+offs+var%grid%halo_size-1
 
-  allocate(tmp(1:var%grid%halo_size+1, 1:max(1,var%grid%nz), 1:var%grid%ew_halo_ny))
 
-    !$acc data present(var) create(tmp)
+    !$acc data present(var, this%west_in_buffer)
 
   if (var%two_d) then
           !$acc parallel loop gang vector collapse(2)
           do j = var%grid%jts, var%grid%jte
             do i = var%grid%its, indx_end
-              tmp(i-var%grid%its+1,1,j-var%grid%jts+1) = var%data_2d(i,j)
+              this%west_in_buffer(i-var%grid%its+1,1,j-var%grid%jts+1) = var%data_2d(i,j)
             enddo
           enddo
   else
@@ -1563,7 +1558,7 @@ module subroutine put_west(this,var,do_dqdt)
           do j = var%grid%jts, var%grid%jte
             do k = var%grid%kts, var%grid%kte
               do i = var%grid%its, indx_end
-                tmp(i-var%grid%its+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%dqdt_3d(i,k,j)
+                this%west_in_buffer(i-var%grid%its+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%dqdt_3d(i,k,j)
               enddo
             enddo
           enddo
@@ -1572,15 +1567,15 @@ module subroutine put_west(this,var,do_dqdt)
           do j = var%grid%jts, var%grid%jte
             do k = var%grid%kts, var%grid%kte
               do i = var%grid%its, indx_end
-                tmp(i-var%grid%its+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%data_3d(i,k,j)
+                this%west_in_buffer(i-var%grid%its+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%data_3d(i,k,j)
               enddo
             enddo
           enddo
       endif
   endif
 
-  !$acc host_data use_device(tmp)
-  call MPI_Put(tmp, msg_size, &
+  !$acc host_data use_device(this%west_in_buffer)
+  call MPI_Put(this%west_in_buffer, msg_size, &
       var%grid%EW_halo, this%west_neighbor, disp, msg_size, var%grid%EW_win_halo, this%east_in_win)
   !$acc end host_data
 
@@ -1593,31 +1588,48 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
   class(halo_t), intent(in) :: this
   class(variable_t), intent(inout) :: var
   logical, optional, intent(in) :: do_dqdt
-  integer :: n, nx, offs_x, offs_y
+  integer :: n, nx, offs_x, offs_y, i, k, j
   logical :: dqdt
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
   offs_y=var%ystag
-  offs_x=var%xstag
   
   !$acc data present(var, this)
-  !$acc kernels
-  if (var%two_d) then
-      n = ubound(var%data_2d,2)
-      nx = size(var%data_2d,1)
-        var%data_2d(var%grid%its:var%grid%ite-offs_x,n-this%halo_size+1-offs_y:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,1,1:(this%halo_size+offs_y))
-  else
-      n = ubound(var%data_3d,3)
-      nx = size(var%data_3d,1)
-      if (dqdt) then
-          var%dqdt_3d(var%grid%its:var%grid%ite-offs_x,var%grid%kts:var%grid%kte,n-this%halo_size+1-offs_y:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,var%grid%kts:var%grid%kte,1:(this%halo_size+offs_y))
-      else
-          var%data_3d(var%grid%its:var%grid%ite-offs_x,var%grid%kts:var%grid%kte,n-this%halo_size+1-offs_y:n) = this%north_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,var%grid%kts:var%grid%kte,1:(this%halo_size+offs_y))
-      endif
-  endif
-    !$acc end kernels
+if (var%two_d) then
+        n = ubound(var%data_2d,2)
+        nx = size(var%data_2d,1)
+        !$acc parallel loop gang vector collapse(2)
+        do j = n-this%halo_size+1-offs_y, n
+            do i = var%grid%its, var%grid%ite
+                var%data_2d(i,j) = this%north_in_3d(i-var%grid%its+1+this%halo_size,1,j-(n-this%halo_size+1-offs_y)+1)
+            enddo
+        enddo
+else
+        n = ubound(var%data_3d,3)
+        nx = size(var%data_3d,1)
+        if (dqdt) then
+                !$acc parallel loop gang vector collapse(3)
+                do j = n-this%halo_size+1-offs_y, n
+                    do k = var%grid%kts, var%grid%kte
+                        do i = var%grid%its, var%grid%ite
+                            var%dqdt_3d(i,k,j) = this%north_in_3d(i-var%grid%its+1+this%halo_size,k,j-(n-this%halo_size+1-offs_y)+1)
+                        enddo
+                    enddo
+                enddo
+        else
+                !$acc parallel loop gang vector collapse(3)
+                do j = n-this%halo_size+1-offs_y, n
+                    do k = var%grid%kts, var%grid%kte
+                        do i = var%grid%its, var%grid%ite
+                            var%data_3d(i,k,j) = this%north_in_3d(i-var%grid%its+1+this%halo_size,k,j-(n-this%halo_size+1-offs_y)+1)
+                        enddo
+                    enddo
+                enddo
+        endif
+endif
+
     !$acc end data
 end subroutine
 
@@ -1626,32 +1638,46 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
   class(halo_t), intent(in) :: this
   class(variable_t), intent(inout) :: var
   logical, optional, intent(in) :: do_dqdt
-  integer :: start, nx, offs_y, offs_x
+  integer :: start, nx, offs_y, offs_x, i, j, k
   logical :: dqdt
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
   offs_y=var%ystag
-  offs_x=var%xstag
 
   !$acc data present(var, this)
-  !$acc kernels
+if (var%two_d) then
+    start = lbound(var%data_2d,2)
+    !$acc parallel loop gang vector collapse(2)
+    do j = start,start+this%halo_size-1
+    do i = var%grid%its,var%grid%ite
+        var%data_2d(i,j) = this%south_in_3d(i-var%grid%its+1+this%halo_size,1,j-start+1)
+    enddo
+    enddo
+else
+    start = lbound(var%data_3d,3)
+    if (dqdt) then
+        !$acc parallel loop gang vector collapse(3)
+        do j = start,start+this%halo_size-1
+        do k = var%grid%kts,var%grid%kte
+        do i = var%grid%its,var%grid%ite
+            var%dqdt_3d(i,k,j) = this%south_in_3d(i-var%grid%its+1+this%halo_size,k,j-start+1)
+        enddo
+        enddo
+        enddo
+    else
+        !$acc parallel loop gang vector collapse(3)
+        do j = start,start+this%halo_size-1
+        do k = var%grid%kts,var%grid%kte
+        do i = var%grid%its,var%grid%ite
+            var%data_3d(i,k,j) = this%south_in_3d(i-var%grid%its+1+this%halo_size,k,j-start+1)
+        enddo
+        enddo
+        enddo
+    endif
+endif
 
-  if (var%two_d) then
-      start = lbound(var%data_2d,2)
-      nx = size(var%data_2d,1)
-        var%data_2d(var%grid%its:var%grid%ite-offs_x,start:start+this%halo_size-1) = this%south_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,1,1:this%halo_size)
-  else
-      start = lbound(var%data_3d,3)
-      nx = size(var%data_3d,1)
-      if (dqdt) then
-          var%dqdt_3d(var%grid%its:var%grid%ite-offs_x,var%grid%kts:var%grid%kte,start:start+this%halo_size-1) = this%south_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,var%grid%kts:var%grid%kte,1:this%halo_size)
-      else
-          var%data_3d(var%grid%its:var%grid%ite-offs_x,var%grid%kts:var%grid%kte,start:start+this%halo_size-1) = this%south_in_3d(1+this%halo_size:nx-this%halo_size-offs_x,var%grid%kts:var%grid%kte,1:this%halo_size)
-      endif
-  endif
-    !$acc end kernels
     !$acc end data
 end subroutine
 
@@ -1660,31 +1686,45 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
-  integer :: n, ny, offs_x, offs_y
-  logical :: dqdt
+integer :: n, ny, offs_x, offs_y, i, j, k
+logical :: dqdt
 
-  dqdt=.False.
-  if (present(do_dqdt)) dqdt=do_dqdt
-  
-  offs_y=var%ystag
-  offs_x=var%xstag
+dqdt=.False.
+if (present(do_dqdt)) dqdt=do_dqdt
 
-  !$acc data present(var, this)
-  !$acc kernels
-  if (var%two_d) then
-      n = ubound(var%data_2d,1)
-      ny = size(var%data_2d,2)
-        var%data_2d(n-this%halo_size+1-offs_x:n,var%grid%jts:var%grid%jte-offs_y) = this%east_in_3d(1:(this%halo_size+offs_x),1,1+this%halo_size:ny-this%halo_size-offs_y)
-  else
-      n = ubound(var%data_3d,1)
-      ny = size(var%data_3d,3)
-      if (dqdt) then
-          var%dqdt_3d(n-this%halo_size+1-offs_x:n,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte-offs_y) = this%east_in_3d(1:(this%halo_size+offs_x),var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size-offs_y)
-      else
-          var%data_3d(n-this%halo_size+1-offs_x:n,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte-offs_y) = this%east_in_3d(1:(this%halo_size+offs_x),var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size-offs_y)
-      endif
-  endif
-    !$acc end kernels
+offs_x=var%xstag
+
+!$acc data present(var, this)
+if (var%two_d) then
+    n = ubound(var%data_2d,1)
+    !$acc parallel loop gang vector collapse(2)
+    do j = var%grid%jts,var%grid%jte
+    do i = n-this%halo_size+1-offs_x,n
+        var%data_2d(i,j) = this%east_in_3d(i-(n-this%halo_size+1-offs_x)+1,1,j-var%grid%jts+1+this%halo_size)
+    enddo
+    enddo
+else
+    n = ubound(var%data_3d,1)
+    if (dqdt) then
+        !$acc parallel loop gang vector collapse(3)
+        do j = var%grid%jts,var%grid%jte
+        do k = var%grid%kts,var%grid%kte
+        do i = n-this%halo_size+1-offs_x,n
+            var%dqdt_3d(i,k,j) = this%east_in_3d(i-(n-this%halo_size+1-offs_x)+1,k,j-var%grid%jts+1+this%halo_size)
+        enddo
+        enddo
+        enddo
+    else
+        !$acc parallel loop gang vector collapse(3)
+        do j = var%grid%jts,var%grid%jte
+        do k = var%grid%kts,var%grid%kte
+        do i = n-this%halo_size+1-offs_x,n
+            var%data_3d(i,k,j) = this%east_in_3d(i-(n-this%halo_size+1-offs_x)+1,k,j-var%grid%jts+1+this%halo_size)
+        enddo
+        enddo
+        enddo
+    endif
+endif
     !$acc end data
 end subroutine
 
@@ -1693,31 +1733,45 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
-  integer :: start, ny, offs_x, offs_y
-  logical :: dqdt
+integer :: start, ny, offs_x, offs_y, i, j, k
+logical :: dqdt
 
-  dqdt=.False.
-  if (present(do_dqdt)) dqdt=do_dqdt
-  
-  offs_y=var%ystag
-  offs_x=var%xstag
-  
-  !$acc data present(var, this)
-  !$acc kernels
-  if (var%two_d) then
-      start = lbound(var%data_2d,1)
-      ny = size(var%data_2d,2)
-        var%data_2d(start:start+this%halo_size-1,var%grid%jts:var%grid%jte-offs_y) = this%west_in_3d(1:this%halo_size,1,1+this%halo_size:ny-this%halo_size-offs_y)
-  else
-      start = lbound(var%data_3d,1)
-      ny = size(var%data_3d,3)
-      if (dqdt) then
-          var%dqdt_3d(start:start+this%halo_size-1,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte-offs_y) = this%west_in_3d(1:this%halo_size,var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size-offs_y)
-      else
-          var%data_3d(start:start+this%halo_size-1,var%grid%kts:var%grid%kte,var%grid%jts:var%grid%jte-offs_y) = this%west_in_3d(1:this%halo_size,var%grid%kts:var%grid%kte,1+this%halo_size:ny-this%halo_size-offs_y)
-      endif
-  endif
-    !$acc end kernels
+dqdt=.False.
+if (present(do_dqdt)) dqdt=do_dqdt
+
+offs_x=var%xstag
+
+!$acc data present(var, this)
+if (var%two_d) then
+    start = lbound(var%data_2d,1)
+    !$acc parallel loop gang vector collapse(2)
+    do j = var%grid%jts,var%grid%jte
+    do i = start,start+this%halo_size-1
+        var%data_2d(i,j) = this%west_in_3d(i-start+1,1,j-var%grid%jts+1+this%halo_size)
+    enddo
+    enddo
+else
+    start = lbound(var%data_3d,1)
+    if (dqdt) then
+        !$acc parallel loop gang vector collapse(3)
+        do j = var%grid%jts,var%grid%jte
+        do k = var%grid%kts,var%grid%kte
+        do i = start,start+this%halo_size-1
+            var%dqdt_3d(i,k,j) = this%west_in_3d(i-start+1,k,j-var%grid%jts+1+this%halo_size)
+        enddo
+        enddo
+        enddo
+    else
+        !$acc parallel loop gang vector collapse(3)
+        do j = var%grid%jts,var%grid%jte
+        do k = var%grid%kts,var%grid%kte
+        do i = start,start+this%halo_size-1
+            var%data_3d(i,k,j) = this%west_in_3d(i-start+1,k,j-var%grid%jts+1+this%halo_size)
+        enddo
+        enddo
+        enddo
+    endif
+endif
     !$acc end data
 end subroutine
 
@@ -1729,9 +1783,8 @@ module subroutine put_northeast(this,var,do_dqdt)
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
   logical :: dqdt
-  integer :: msg_size, offs_x, offs_y, i, j, k, i_indx_start, j_indx_start
+  integer :: msg_size, offs_x, offs_y
   INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-  real, allocatable :: tmp(:,:,:)
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
@@ -1740,47 +1793,23 @@ module subroutine put_northeast(this,var,do_dqdt)
   offs_y=var%ystag
   disp = 0
   msg_size = 1
-  j_indx_start = var%grid%jte-this%halo_size+1-offs_y
-  i_indx_start = var%grid%ite-this%halo_size+1-offs_x
 
-  allocate(tmp(1:var%grid%halo_size+1, 1:max(1,var%grid%nz), 1:var%grid%halo_size+1))
-  !$acc data present(var) create(tmp)
-
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
   if (var%two_d) then
-    !$acc parallel loop gang vector collapse(2)
-    do j = j_indx_start, var%grid%jte
-        do i = i_indx_start, var%grid%ite
-            tmp(i-i_indx_start+1,1,j-j_indx_start+1) = var%data_2d(i,j)
-        enddo
-    enddo
+        call MPI_Put(var%data_2d(var%grid%ite-this%halo_size+1-offs_x,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
+            var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
   else
       if (dqdt) then
-          !$acc parallel loop gang vector collapse(3)
-          do j = j_indx_start, var%grid%jte
-            do k = var%grid%kts, var%grid%kte
-                do i = i_indx_start, var%grid%ite
-                    tmp(i-i_indx_start+1,k-var%grid%kts+1,j-j_indx_start+1) = var%dqdt_3d(i,k,j)
-                enddo
-            enddo
-          enddo
+          call MPI_Put(var%dqdt_3d(var%grid%ite-this%halo_size+1-offs_x,var%grid%kts,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
+            var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
       else
-          !$acc parallel loop gang vector collapse(3)
-          do j = j_indx_start, var%grid%jte
-            do k = var%grid%kts, var%grid%kte
-                do i = i_indx_start, var%grid%ite
-                    tmp(i-i_indx_start+1,k-var%grid%kts+1,j-j_indx_start+1) = var%data_3d(i,k,j)
-                enddo
-            enddo
-          enddo
+          call MPI_Put(var%data_3d(var%grid%ite-this%halo_size+1-offs_x,var%grid%kts,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
+            var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
       endif
   endif
-
-  !$acc host_data use_device(tmp)
-  call MPI_Put(tmp, msg_size, &
-      var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%west_in_win)
-  !$acc end host_data
-
-  !$acc end data
+    !$acc end host_data
+    !$acc end data
 end subroutine
 
 module subroutine put_northwest(this,var,do_dqdt)    
@@ -1789,9 +1818,8 @@ module subroutine put_northwest(this,var,do_dqdt)
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
   logical :: dqdt
-  integer :: msg_size, offs_x, offs_y, i, j, k, j_indx_start
+  integer :: msg_size, offs_x, offs_y
   INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-  real, allocatable :: tmp(:,:,:)
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
@@ -1800,46 +1828,23 @@ module subroutine put_northwest(this,var,do_dqdt)
   offs_y=var%ystag
   disp = 0
   msg_size = 1
-  j_indx_start = var%grid%jte-this%halo_size+1-offs_y
 
-  allocate(tmp(1:var%grid%halo_size+1, 1:max(1,var%grid%nz), 1:var%grid%halo_size+1))
-  !$acc data present(var) create(tmp)
-
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
   if (var%two_d) then
-    !$acc parallel loop gang vector collapse(2)
-    do j = j_indx_start, var%grid%jte
-        do i = var%grid%its, var%grid%its+this%halo_size-1+offs_x
-            tmp(i-var%grid%its+1,1,j-j_indx_start+1) = var%data_2d(i,j)
-        enddo
-    enddo
+        call MPI_Put(var%data_2d(var%grid%its,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
+            var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
   else
       if (dqdt) then
-          !$acc parallel loop gang vector collapse(3)
-          do j = j_indx_start, var%grid%jte
-            do k = var%grid%kts, var%grid%kte
-                do i = var%grid%its, var%grid%its+this%halo_size-1+offs_x
-                    tmp(i-var%grid%its+1,k-var%grid%kts+1,j-j_indx_start+1) = var%dqdt_3d(i,k,j)
-                enddo
-            enddo
-          enddo
+          call MPI_Put(var%dqdt_3d(var%grid%its,var%grid%kts,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
+            var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
       else
-          !$acc parallel loop gang vector collapse(3)
-          do j = j_indx_start, var%grid%jte
-            do k = var%grid%kts, var%grid%kte
-                do i = var%grid%its, var%grid%its+this%halo_size-1+offs_x
-                    tmp(i-var%grid%its+1,k-var%grid%kts+1,j-j_indx_start+1) = var%data_3d(i,k,j)
-                enddo
-            enddo
-          enddo
+          call MPI_Put(var%data_3d(var%grid%its,var%grid%kts,var%grid%jte-this%halo_size+1-offs_y), msg_size, &
+            var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
       endif
   endif
-
-  !$acc host_data use_device(tmp)
-  call MPI_Put(tmp, msg_size, &
-      var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%south_in_win)
-  !$acc end host_data
-
-  !$acc end data
+    !$acc end host_data
+    !$acc end data
 end subroutine
 
 
@@ -1849,56 +1854,31 @@ module subroutine put_southwest(this,var,do_dqdt)
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
   logical :: dqdt
-  integer :: msg_size, i, j, k, offs_x, offs_y
+  integer :: msg_size
   INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-  real, allocatable :: tmp(:,:,:)
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
-  offs_x=var%xstag
-  offs_y=var%ystag
   disp = 0
   msg_size = 1
 
-  allocate(tmp(1:var%grid%halo_size+1, 1:max(1,var%grid%nz), 1:var%grid%halo_size+1))
-  !$acc data present(var) create(tmp)
-
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
   if (var%two_d) then
-    !$acc parallel loop gang vector collapse(2)
-    do j = var%grid%jts, var%grid%jts+this%halo_size-1+offs_y
-        do i = var%grid%its, var%grid%its+this%halo_size-1+offs_x
-            tmp(i-var%grid%its+1,1,j-var%grid%jts+1) = var%data_2d(i,j)
-        enddo
-    enddo
+        call MPI_Put(var%data_2d(var%grid%its,var%grid%jts), msg_size, &
+            var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%east_in_win)
   else
       if (dqdt) then
-          !$acc parallel loop gang vector collapse(3)
-          do j = var%grid%jts, var%grid%jts+this%halo_size-1+offs_y
-            do k = var%grid%kts, var%grid%kte
-                do i = var%grid%its, var%grid%its+this%halo_size-1+offs_x
-                    tmp(i-var%grid%its+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%dqdt_3d(i,k,j)
-                enddo
-            enddo
-          enddo
+          call MPI_Put(var%dqdt_3d(var%grid%its,var%grid%kts,var%grid%jts), msg_size, &
+            var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%east_in_win)
       else
-          !$acc parallel loop gang vector collapse(3)
-          do j = var%grid%jts, var%grid%jts+this%halo_size-1+offs_y
-            do k = var%grid%kts, var%grid%kte
-                do i = var%grid%its, var%grid%its+this%halo_size-1+offs_x
-                    tmp(i-var%grid%its+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%data_3d(i,k,j)
-                enddo
-            enddo
-          enddo
+          call MPI_Put(var%data_3d(var%grid%its,var%grid%kts,var%grid%jts), msg_size, &
+            var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%east_in_win)
       endif
   endif
-
-  !$acc host_data use_device(tmp)
-  call MPI_Put(tmp, msg_size, &
-      var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_EW_win_halo, this%east_in_win)
-  !$acc end host_data
-
-  !$acc end data
+    !$acc end host_data
+    !$acc end data
 end subroutine
 
 module subroutine put_southeast(this,var,do_dqdt)    
@@ -1907,9 +1887,8 @@ module subroutine put_southeast(this,var,do_dqdt)
   class(variable_t), intent(in) :: var
   logical, optional, intent(in) :: do_dqdt
   logical :: dqdt
-  integer :: msg_size, offs_x, offs_y, i, j, k, i_indx_start
+  integer :: msg_size, offs_x, offs_y
   INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-  real, allocatable :: tmp(:,:,:)
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
@@ -1918,46 +1897,23 @@ module subroutine put_southeast(this,var,do_dqdt)
   offs_y=var%ystag
   disp = 0
   msg_size = 1
-  i_indx_start = var%grid%ite-this%halo_size+1-offs_x
 
-  allocate(tmp(1:var%grid%halo_size+1, 1:max(1,var%grid%nz), 1:var%grid%halo_size+1))
-  !$acc data present(var) create(tmp)
-
+    !$acc data present(var%data_2d, var%data_3d, var%dqdt_3d)
+    !$acc host_data use_device(var%data_2d, var%data_3d, var%dqdt_3d)
   if (var%two_d) then
-    !$acc parallel loop gang vector collapse(2)
-    do j = var%grid%jts, var%grid%jts+this%halo_size-1+offs_y
-        do i = i_indx_start, var%grid%ite
-            tmp(i-i_indx_start+1,1,j-var%grid%jts+1) = var%data_2d(i,j)
-        enddo
-    enddo
+        call MPI_Put(var%data_2d(var%grid%ite-this%halo_size+1-offs_x,var%grid%jts), msg_size, &
+            var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
   else
       if (dqdt) then
-          !$acc parallel loop gang vector collapse(3)
-          do j = var%grid%jts, var%grid%jts+this%halo_size-1+offs_y
-            do k = var%grid%kts, var%grid%kte
-                do i = i_indx_start, var%grid%ite
-                    tmp(i-i_indx_start+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%dqdt_3d(i,k,j)
-                enddo
-            enddo
-          enddo
+          call MPI_Put(var%dqdt_3d(var%grid%ite-this%halo_size+1-offs_x,var%grid%kts,var%grid%jts), msg_size, &
+            var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
       else
-          !$acc parallel loop gang vector collapse(3)
-          do j = var%grid%jts, var%grid%jts+this%halo_size-1+offs_y
-            do k = var%grid%kts, var%grid%kte
-                do i = i_indx_start, var%grid%ite
-                    tmp(i-i_indx_start+1,k-var%grid%kts+1,j-var%grid%jts+1) = var%data_3d(i,k,j)
-                enddo
-            enddo
-          enddo
+          call MPI_Put(var%data_3d(var%grid%ite-this%halo_size+1-offs_x,var%grid%kts,var%grid%jts), msg_size, &
+            var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
       endif
   endif
-
-  !$acc host_data use_device(tmp)
-  call MPI_Put(tmp, msg_size, &
-      var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_NS_win_halo, this%north_in_win)
-  !$acc end host_data
-
-  !$acc end data
+    !$acc end host_data
+    !$acc end data
 end subroutine
 
 
@@ -1966,7 +1922,7 @@ module subroutine retrieve_northeast_halo(this,var,do_dqdt)
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
-  integer :: offs_x, offs_y
+  integer :: offs_x, offs_y, n, nx, i, j, k
   logical :: dqdt
 
   offs_x=var%xstag
@@ -1976,17 +1932,36 @@ module subroutine retrieve_northeast_halo(this,var,do_dqdt)
   if (present(do_dqdt)) dqdt=do_dqdt
   
     !$acc data present(var, this)
-    !$acc kernels
   if (var%two_d) then
-        var%data_2d(var%grid%ite+1-offs_x:var%grid%ime,var%grid%jte+1-offs_y:var%grid%jme) = this%east_in_3d(1:(this%halo_size+offs_x),1,1:(this%halo_size+offs_y))
+        n = ubound(var%data_2d,2)
+        nx = size(var%data_2d,1)
+        !$acc parallel loop gang vector collapse(2)
+        do j = var%grid%jte+1-offs_y, var%grid%jme
+        do i = var%grid%ite+1-offs_x, var%grid%ime
+            var%data_2d(i,j) = this%east_in_3d(i-(var%grid%ite+1-offs_x)+1,1,j-(var%grid%jte+1-offs_y)+1)
+        enddo
+        enddo
   else
       if (dqdt) then
-          var%dqdt_3d(var%grid%ite+1-offs_x:var%grid%ime,this%kts:this%kte,var%grid%jte+1-offs_y:var%grid%jme) = this%east_in_3d(1:(this%halo_size+offs_x),this%kts:this%kte,1:(this%halo_size+offs_y))
+          !$acc parallel loop gang vector collapse(3)
+          do j = var%grid%jte+1-offs_y, var%grid%jme
+          do k = this%kts, this%kte
+          do i = var%grid%ite+1-offs_x, var%grid%ime
+              var%dqdt_3d(i,k,j) = this%east_in_3d(i-(var%grid%ite+1-offs_x)+1,k,j-(var%grid%jte+1-offs_y)+1)
+          enddo
+          enddo
+          enddo
       else
-          var%data_3d(var%grid%ite+1-offs_x:var%grid%ime,this%kts:this%kte,var%grid%jte+1-offs_y:var%grid%jme) = this%east_in_3d(1:(this%halo_size+offs_x),this%kts:this%kte,1:(this%halo_size+offs_y))
-        endif
+          !$acc parallel loop gang vector collapse(3)
+          do j = var%grid%jte+1-offs_y, var%grid%jme
+          do k = this%kts, this%kte
+          do i = var%grid%ite+1-offs_x, var%grid%ime
+              var%data_3d(i,k,j) = this%east_in_3d(i-(var%grid%ite+1-offs_x)+1,k,j-(var%grid%jte+1-offs_y)+1)
+          enddo
+          enddo
+          enddo
+      endif
   endif
-    !$acc end kernels
     !$acc end data
 end subroutine
 
@@ -1995,7 +1970,7 @@ module subroutine retrieve_northwest_halo(this,var,do_dqdt)
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
-  integer :: offs_x, offs_y
+  integer :: offs_x, offs_y, n, nx, i, j, k
   logical :: dqdt
 
   offs_x=var%xstag
@@ -2005,17 +1980,34 @@ module subroutine retrieve_northwest_halo(this,var,do_dqdt)
   if (present(do_dqdt)) dqdt=do_dqdt
   
     !$acc data present(var, this)
-    !$acc kernels
   if (var%two_d) then
-        var%data_2d(var%grid%ims:var%grid%its-1,var%grid%jte+1-offs_y:var%grid%jme) = this%north_in_3d(1:this%halo_size,1,1:(this%halo_size+offs_y))
+        !$acc parallel loop gang vector collapse(2)
+        do j = var%grid%jte+1-offs_y, var%grid%jme
+        do i = var%grid%ims, var%grid%its-1
+            var%data_2d(i,j) = this%north_in_3d(i-var%grid%ims+1,1,j-(var%grid%jte+1-offs_y)+1)
+        enddo
+        enddo
   else
       if (dqdt) then
-          var%dqdt_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jte+1-offs_y:var%grid%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:(this%halo_size+offs_y))
+          !$acc parallel loop gang vector collapse(3)
+          do j = var%grid%jte+1-offs_y, var%grid%jme
+          do k = this%kts, this%kte
+          do i = var%grid%ims, var%grid%its-1
+              var%dqdt_3d(i,k,j) = this%north_in_3d(i-var%grid%ims+1,k,j-(var%grid%jte+1-offs_y)+1)
+          enddo
+          enddo
+          enddo
       else
-          var%data_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jte+1-offs_y:var%grid%jme) = this%north_in_3d(1:this%halo_size,this%kts:this%kte,1:(this%halo_size+offs_y))
+          !$acc parallel loop gang vector collapse(3)
+          do j = var%grid%jte+1-offs_y, var%grid%jme
+          do k = this%kts, this%kte
+          do i = var%grid%ims, var%grid%its-1
+              var%data_3d(i,k,j) = this%north_in_3d(i-var%grid%ims+1,k,j-(var%grid%jte+1-offs_y)+1)
+          enddo
+          enddo
+          enddo
       endif
   endif
-    !$acc end kernels
     !$acc end data
 end subroutine
 
@@ -2024,24 +2016,41 @@ module subroutine retrieve_southwest_halo(this,var,do_dqdt)
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
-
+  integer :: i, j, k
   logical :: dqdt
 
   dqdt=.False.
   if (present(do_dqdt)) dqdt=do_dqdt
   
     !$acc data present(var, this)
-    !$acc kernels
   if (var%two_d) then
-        var%data_2d(var%grid%ims:var%grid%its-1,var%grid%jms:var%grid%jts-1) = this%west_in_3d(1:this%halo_size,1,1:this%halo_size)
+        !$acc parallel loop gang vector collapse(2)
+        do j = var%grid%jms, var%grid%jts-1
+        do i = var%grid%ims, var%grid%its-1
+            var%data_2d(i,j) = this%west_in_3d(i-var%grid%ims+1,1,j-var%grid%jms+1)
+        enddo
+        enddo
   else
       if (dqdt) then
-          var%dqdt_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          !$acc parallel loop gang vector collapse(3)
+          do j = var%grid%jms, var%grid%jts-1
+          do k = this%kts, this%kte
+          do i = var%grid%ims, var%grid%its-1
+              var%dqdt_3d(i,k,j) = this%west_in_3d(i-var%grid%ims+1,k,j-var%grid%jms+1)
+          enddo
+          enddo
+          enddo
       else
-          var%data_3d(var%grid%ims:var%grid%its-1,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%west_in_3d(1:this%halo_size,this%kts:this%kte,1:this%halo_size)
+          !$acc parallel loop gang vector collapse(3)
+          do j = var%grid%jms, var%grid%jts-1
+          do k = this%kts, this%kte
+          do i = var%grid%ims, var%grid%its-1
+              var%data_3d(i,k,j) = this%west_in_3d(i-var%grid%ims+1,k,j-var%grid%jms+1)
+          enddo
+          enddo
+          enddo
       endif
   endif
-    !$acc end kernels
     !$acc end data
 end subroutine
 
@@ -2050,7 +2059,7 @@ module subroutine retrieve_southeast_halo(this,var,do_dqdt)
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
-  integer :: offs_x, offs_y
+  integer :: offs_x, offs_y, i, j, k
   logical :: dqdt
 
   offs_x=var%xstag
@@ -2060,17 +2069,34 @@ module subroutine retrieve_southeast_halo(this,var,do_dqdt)
   if (present(do_dqdt)) dqdt=do_dqdt
 
     !$acc data present(var, this)
-    !$acc kernels
   if (var%two_d) then
-        var%data_2d(var%grid%ite+1-offs_x:var%grid%ime,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:(this%halo_size+offs_x),1,1:this%halo_size)
+        !$acc parallel loop gang vector collapse(2)
+        do j = var%grid%jms, var%grid%jts-1
+        do i = var%grid%ite+1-offs_x, var%grid%ime
+            var%data_2d(i,j) = this%south_in_3d(i-(var%grid%ite+1-offs_x)+1,1,j-var%grid%jms+1)
+        enddo
+        enddo
   else
       if (dqdt) then
-          var%dqdt_3d(var%grid%ite+1-offs_x:var%grid%ime,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:(this%halo_size+offs_x),this%kts:this%kte,1:this%halo_size)
+          !$acc parallel loop gang vector collapse(3)
+          do j = var%grid%jms, var%grid%jts-1
+          do k = this%kts, this%kte
+          do i = var%grid%ite+1-offs_x, var%grid%ime
+              var%dqdt_3d(i,k,j) = this%south_in_3d(i-(var%grid%ite+1-offs_x)+1,k,j-var%grid%jms+1)
+          enddo
+          enddo
+          enddo
       else
-          var%data_3d(var%grid%ite+1-offs_x:var%grid%ime,this%kts:this%kte,var%grid%jms:var%grid%jts-1) = this%south_in_3d(1:(this%halo_size+offs_x),this%kts:this%kte,1:this%halo_size)
+          !$acc parallel loop gang vector collapse(3)
+          do j = var%grid%jms, var%grid%jts-1
+          do k = this%kts, this%kte
+          do i = var%grid%ite+1-offs_x, var%grid%ime
+              var%data_3d(i,k,j) = this%south_in_3d(i-(var%grid%ite+1-offs_x)+1,k,j-var%grid%jms+1)
+          enddo
+          enddo
+          enddo
       endif
   endif
-    !$acc end kernels
     !$acc end data
 
 end subroutine
