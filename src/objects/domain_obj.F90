@@ -2834,8 +2834,8 @@ contains
         if (do_boundary) then
             if (do_west) ims_b(1) = this%ims; ime_b(1) = this%ims+FILTER_WIDTH+this%grid%halo_size; jms_b(1) = this%jms; jme_b(1) = this%jme;
             if (do_east) ims_b(2) = this%ime-FILTER_WIDTH-this%grid%halo_size; ime_b(2) = this%ime; jms_b(2) = this%jms; jme_b(2) = this%jme;
-            if (do_north) ims_b(3) = this%ims; ime_b(3) = this%ime; jms_b(3) = this%jms+FILTER_WIDTH+this%grid%halo_size; jme_b(3) = this%jme;
-            if (do_south) ims_b(4) = this%ims; ime_b(4) = this%ime; jms_b(4) = this%jms; jme_b(4) = this%jms-FILTER_WIDTH-this%grid%halo_size;
+            if (do_north) ims_b(3) = this%ims; ime_b(3) = this%ime; jms_b(3) = this%jme-FILTER_WIDTH-this%grid%halo_size; jme_b(3) = this%jme;
+            if (do_south) ims_b(4) = this%ims; ime_b(4) = this%ime; jms_b(4) = this%jms; jme_b(4) = this%jms+FILTER_WIDTH+this%grid%halo_size;
 
             ! limit vertical extent of west and east boundaries to the extent of the north/south indices
             ! this prevents double-calculating points in the corners
