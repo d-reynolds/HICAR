@@ -43,7 +43,7 @@ module reader_interface
       type(time_delta_t) :: input_dt
       ! list of input files
       character (len=kMAX_FILE_LENGTH), allocatable :: file_list(:)
-      character (len=kMAX_NAME_LENGTH)   :: time_var
+      character (len=kMAX_NAME_LENGTH)   :: time_var, lat_var
 
       ! the netcdf ID for an open file
       integer :: ncfile_id

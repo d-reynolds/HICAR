@@ -17,7 +17,7 @@ submodule(reader_interface) reader_implementation
   use debug_module,       only : check_ncdf
   use timer_interface,    only : timer_t
   use string,             only : as_string
-  use time_io,            only : read_times, find_timestep_in_filelist
+  use time_io,            only : read_times, find_timestep_in_filelist, var_has_time_dim, io_var_reversed
   implicit none
 
 contains
@@ -38,6 +38,8 @@ contains
 
         this%file_list = options%forcing%boundary_files
         this%time_var  = options%forcing%time_var
+        this%lat_var  = options%forcing%latvar
+
         this%model_end_time = options%general%end_time
         this%input_dt   = options%forcing%input_dt
 
@@ -96,9 +98,16 @@ contains
         type(MPI_Comm), intent(in)              :: par_comms
         type(MPI_Info) :: par_comm_info
 
-        real, allocatable :: data3d_t(:,:,:,:), data3d(:,:,:)
+        real, allocatable :: data4d(:,:,:,:), data3d(:,:,:), data2d(:,:), data1d(:)
         type(meta_data_t)  :: var
-        integer :: nx, ny, nz, err, varid, n, ndims, start_3d_t(4), cnt_3d_t(4), start_2d_t(3), cnt_2d_t(3), start_3d(3), cnt_3d(3), start_2d(2), cnt_2d(2)
+        integer :: nx, ny, nz, err, varid, n, ndims, i, k, j
+        integer, dimension(4) :: start_3d_t, cnt_3d_t
+        integer, dimension(3) :: start_2d_t, cnt_2d_t, start_3d, cnt_3d
+        integer, dimension(2) :: start_2d, cnt_2d, start_1d_t, cnt_1d_t
+        integer, dimension(1) :: start_1d, cnt_1d
+        integer :: dim_ids(10), var_id
+        character(len=kMAX_DIM_LENGTH) :: time_dim_name, attr_val
+        logical :: has_time, flip_y, is_reversed
 
         if (allocated(buffer)) deallocate(buffer)
         allocate(buffer(this%n_vars,this%its:this%ite,this%kts:this%kte,this%jts:this%jte))
@@ -114,14 +123,26 @@ contains
         ! setup start/count arrays accordingly
         start_3d_t = (/ this%its,this%jts,this%kts,this%curstep /)
         start_2d_t = (/ this%its,this%jts,this%curstep /)
+        start_1d_t = (/ this%kts,this%curstep /)
+
         start_3d = (/ this%its,this%jts,this%kts /)
         start_2d = (/ this%its,this%jts /)
+        start_1d = (/ this%kts /)
 
         cnt_3d_t = (/ (this%ite-this%its+1),(this%jte-this%jts+1),(this%kte-this%kts+1),1 /)
         cnt_2d_t = (/ (this%ite-this%its+1),(this%jte-this%jts+1),1 /)
+        cnt_1d_t = (/ (this%kte-this%kts+1),1 /)
+
         cnt_3d = (/ (this%ite-this%its+1),(this%jte-this%jts+1),(this%kte-this%kts+1) /)
         cnt_2d = (/ (this%ite-this%its+1),(this%jte-this%jts+1) /)
-            
+        cnt_1d = (/ (this%kte-this%kts+1) /)
+
+        ! determine if we need to flip the y dimension. We will determine this by looking for the
+        ! latitude variable and checking for the attributes stored_direction = "decreasing" or "down" or
+        ! positive = "down"
+
+        flip_y = io_var_reversed(this%file_list(this%curfile), this%lat_var)
+
         ! loop through the list of variables that need to be read in
         do n = 1, size(this%var_meta)
             ! get the next variable in the structure
@@ -130,29 +151,99 @@ contains
             call check_ncdf( nf90_var_par_access(this%ncfile_id, var%file_var_id, nf90_collective))
 
             !get number of dimensions
-            call check_ncdf( nf90_inquire_variable(this%ncfile_id, var%file_var_id, ndims = ndims), " Getting dim length for "//trim(var%name))
+            call check_ncdf( nf90_inquire_variable(this%ncfile_id, var%file_var_id, ndims = ndims, dimids=dim_ids), " Getting dim length for "//trim(var%name))
+
+            !see if one of the dimensions is unlimited (time)
+            has_time = var_has_time_dim(this%file_list(this%curfile), var%name, this%time_var)
 
             if (var%three_d) then
                 nx = var%dim_len(1)
                 ny = var%dim_len(3)
                 nz = var%dim_len(2)
 
-                if (ndims > 3) then
-                    if (allocated(data3d_t)) deallocate(data3d_t)
-                    allocate(data3d_t(nx,ny,nz,1))
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d_t, start=start_3d_t, count=cnt_3d_t), " Getting 3D var with time dim: "//trim(var%name))
-                    buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d_t(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
-                else
+                if (ndims == 4) then
+                    if (allocated(data4d)) deallocate(data4d)
+                    if (has_time) then
+                        allocate(data4d(nx,ny,nz,1))
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data4d, start=start_3d_t, count=cnt_3d_t), " Getting 3D var with time dim: "//trim(var%name))
+                        buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data4d(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
+                    else
+                        write(*,*) "Error: ", trim(var%name), " is spatially 3D, but forcing data is spatially 4D"
+                        stop "Internal variable is spatially 3D, but forcing data is spatially 4D"
+                    endif
+                elseif (ndims==3) then
                     if (allocated(data3d)) deallocate(data3d)
-                    allocate(data3d(nx,ny,nz))
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d, start=start_3d, count=cnt_3d), " Getting 3D var: "//trim(var%name))
-                    buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d(:,:,:), shape=[nx,nz,ny], order=[1,3,2])
+                    if (has_time) then
+                        !if 2D spatial data has been provided for a 3D variable, assume that we are given a 2D plane and should replicate it in the vertical
+                        allocate(data3d(nx,ny,1))
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d, start=start_2d_t, count=cnt_2d_t), " Getting 2D var with time dim for 3D var: "//trim(var%name))
+                        ! Broadcast the 2D data across all vertical levels
+                        do k = this%kts, this%kte
+                            buffer(n,this%its:this%ite,k,this%jts:this%jte) = data3d(:,:,1)
+                        enddo
+                    else
+                        allocate(data3d(nx,ny,nz))
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d, start=start_3d, count=cnt_3d), " Getting 3D var: "//trim(var%name))
+                        buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d(:,:,:), shape=[nx,nz,ny], order=[1,3,2])
+                    endif
+                elseif (ndims==2) then
+                    if (allocated(data2d)) deallocate(data2d)
+                    if (has_time) then
+                        !if 1D spatial data has been provided for a 3D variable, assume that we are given a 1D line and should fill each z level with it
+                        allocate(data2d(nz,1))
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data2d, start=start_1d_t, count=cnt_1d_t), " Getting 1D var with time dim for 3D var: "//trim(var%name))
+                        ! Broadcast the 1D data across all horizontal levels
+
+                        !reverse the order of the 1D data if needed
+                        is_reversed = io_var_reversed(this%file_list(this%curfile), var%name)
+                        if (is_reversed) data2d(:,1) = data2d(size(data2d,1):1:-1,1)
+
+                        do j = this%jts, this%jte
+                            do i = this%its, this%ite
+                                buffer(n,i,this%kts:this%kte,j) = data2d(:,1)
+                            enddo
+                        enddo
+                    else
+                        !if 2D spatial data has been provided for a 3D variable, assume that we are given a 2D plane and should replicate it in the vertical
+                        allocate(data2d(nx,ny))
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data2d, start=start_2d, count=cnt_2d), " Getting 2D var with time dim for 3D var: "//trim(var%name))
+                        ! Broadcast the 2D data across all vertical levels
+                        do k = this%kts, this%kte
+                            buffer(n,this%its:this%ite,k,this%jts:this%jte) = data2d(:,:)
+                        enddo
+                    endif
+                elseif (ndims==1) then
+                    if (allocated(data1d)) deallocate(data1d)
+                    if (.not.(has_time)) then
+                        !if 1D spatial data has been provided for a 3D variable, assume that we are given a 1D line and should fill each z level with it
+                        allocate(data1d(nz))
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data1d, start=start_1d, count=cnt_1d), " Getting 1D var with time dim for 3D var: "//trim(var%name))
+                        ! Broadcast the 1D data across all horizontal levels
+
+                        !reverse the order of the 1D data if needed
+                        is_reversed = io_var_reversed(this%file_list(this%curfile), var%name)
+                        if (is_reversed) data1d = data1d(size(data1d):1:-1)
+
+                        do j = this%jts, this%jte
+                            do i = this%its, this%ite
+                                buffer(n,i,this%kts:this%kte,j) = data1d(this%kts:this%kte)
+                            enddo
+                        enddo
+                    endif
+                endif
+                if (flip_y) then
+                    !invert buffer about the y axis
+                    buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = buffer(n,this%its:this%ite,this%kts:this%kte,this%jte:this%jts:-1)
                 endif
             else if (var%two_d) then
-                if (ndims > 2) then
+                if (ndims == 3) then
                     call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, buffer(n,:,1,:), start=start_2d_t, count=cnt_2d_t), " Getting 2D var with time dim: "//trim(var%name))
-                else
+                elseif (ndims==2) then
                     call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, buffer(n,:,1,:), start=start_2d, count=cnt_2d), " Getting 2D var: "//trim(var%name))
+                endif
+                if (flip_y) then
+                    !invert buffer about the y axis
+                    buffer(n,this%its:this%ite,1,this%jts:this%jte) = buffer(n,this%its:this%ite,1,this%jte:this%jts:-1)
                 endif
             endif
 

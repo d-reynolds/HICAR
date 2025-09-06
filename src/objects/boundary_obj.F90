@@ -7,7 +7,7 @@
 !!------------------------------------------------------------
 submodule(boundary_interface) boundary_implementation
     use array_utilities,        only : interpolate_in_z
-    use io_routines,            only : io_getdims, io_read, io_maxDims, io_variable_is_present, io_write
+    use io_routines,            only : io_getdims, io_read, io_maxDims, io_variable_is_present, io_write, io_var_reversed
     use time_io,                only : read_times, find_timestep_in_filelist
     use string,                 only : str, as_string
     use mod_atm_utilities,      only : rh_to_mr, relative_humidity, compute_3d_p, compute_3d_z, exner_function
@@ -104,7 +104,7 @@ contains
         integer, allocatable :: lat_dims(:), lon_dims(:), qv_dims(:)
         real :: neg_z
         integer :: i, nx, ny, nz, PE_RANK_GLOBAL, x_len, y_len
-
+        logical :: data_flipped
         ! figure out while file and timestep contains the requested start_time
         call set_firstfile_firststep(this, start_time, file_list, time_var)
 
@@ -156,6 +156,14 @@ contains
             write(*,*) 'ERROR: lon dimension on forcing data is not 1D or 2D'
             stop
         endif
+
+        data_flipped = io_var_reversed(this%firstfile, lat_var)
+
+        if (data_flipped) then
+            temp_lat = temp_lat(:,size(temp_lat,2):1:-1)
+            temp_lon = temp_lon(:,size(temp_lon,2):1:-1)
+        endif
+
         call standardize_latlon(temp_lat, temp_lon, options%forcing%forcing_longitude_system)
 
         call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
@@ -199,6 +207,11 @@ contains
             allocate(temp_z_trans(1:nx,1:nz,1:ny))
             
             temp_z_trans(1:nx,1:nz,1:ny) = reshape(temp_z, shape=[nx,nz,ny], order=[1,3,2])
+
+            if (data_flipped) then
+                temp_z_trans = temp_z_trans(:,:,size(temp_z_trans,3):1:-1)
+            endif
+
             this%z = temp_z_trans(this%its:this%ite,1:nz,this%jts:this%jte)
             this%z_is_set = .True.
 

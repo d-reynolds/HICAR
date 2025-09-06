@@ -768,6 +768,10 @@ contains
         options%forcing%boundary_files(1:nfiles) = boundary_files(1:nfiles)
         deallocate(boundary_files)
 
+        ! time var must be set here, without the set_nml_var call, for dimension checking
+        ! in later set_nml_var calls to function properly
+        options%forcing%time_var = time_var
+
         ! NOTE: temperature must be the first of the forcing variables read
         options%forcing%vars_to_read(:) = ""
         options%forcing%dim_list(:) = 0
@@ -812,7 +816,6 @@ contains
         call set_nml_var(options%forcing%lwdown_var, lwdown_var, 'lwdown_var', options%forcing, i)
         call set_nml_var(options%forcing%sst_var, sst_var, 'sst_var', options%forcing, i)
         call set_nml_var(options%forcing%pblhvar, pblhvar, 'pblhvar', options%forcing, i)
-        call set_nml_var(options%forcing%time_var, time_var, 'time_var', options%forcing)
 
         compute_p = .False.
         if ((pvar=="") .and. ((pslvar/="") .or. (psvar/=""))) compute_p = .True.

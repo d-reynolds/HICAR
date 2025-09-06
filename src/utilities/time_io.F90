@@ -3,9 +3,10 @@ module time_io
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
     use string,             only : get_integer, as_string
-    use io_routines,        only : io_read, io_read_attribute
+    use io_routines,        only : io_read, io_read_attribute, io_dimension_is_present, check
     use iso_fortran_env,    only: real64, real64
     use icar_constants,     only: kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, STD_OUT_PE, kOUTPUT_FMT
+    use netcdf
 
     implicit none
 
@@ -464,4 +465,35 @@ contains
 
     end function get_output_time
 
+
+    function var_has_time_dim(filename, varname, time_var) result(has_time)
+        implicit none
+        character(len=*), intent(in) :: filename, varname, time_var
+        logical :: has_time
+
+        integer :: ncid, varid, ndims, dimids(10), i
+        character(len=kMAX_NAME_LENGTH) :: time_dim_name
+
+        call check( nf90_open(trim(filename), nf90_nowrite, ncid), "Opening file "//trim(filename))
+        call check( nf90_inq_varid(ncid, trim(varname), varid), "Getting varid for "//trim(varname))
+
+        call check( nf90_open(filename, IOR(NF90_NOWRITE,NF90_NETCDF4), ncid), " Opening file "//trim(filename))
+        !get the dimension name for the single dimension on the variable this%time_var
+        call check( nf90_inq_varid(ncid, trim(time_var), varid), "Getting varid for "//trim(time_var))
+        call check( nf90_inquire_variable(ncid, varid, ndims=ndims, dimids=dimids), " Getting dim length for "//trim(time_var))
+        if (ndims==1) then
+            call check(nf90_inquire_dimension(ncid, dimids(1), name=time_dim_name), " Getting time dim name")
+        elseif (ndims==0) then
+            ! scalar variable, use name of time variable as dimension name
+            time_dim_name = trim(time_var)
+        else
+            write(*,*) "ERROR: time variable "//trim(time_var)//" has more than one dimension"
+            stop "Error in var_has_time_dim"
+        endif
+
+        call check( nf90_close(ncid), "Closing file "//trim(filename))
+
+        has_time = io_dimension_is_present(trim(filename), varname, trim(time_dim_name))
+
+    end function var_has_time_dim
 end module time_io

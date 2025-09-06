@@ -6,7 +6,8 @@ module namelist_utils
                                   kREAL_NO_VAL, kINT_NO_VAL, kCHAR_NO_VAL
     use mod_wrf_constants, only : piconst
     use options_types,     only : forcing_options_type, domain_options_type
-    use io_routines,       only : check_file_exists, check_variable_present, io_getdims, io_newunit
+    use io_routines,       only : check_file_exists, check_variable_present, io_getdims, io_getdimnames, io_newunit
+    use time_io,           only : var_has_time_dim
     use options_interface, only : options_t
     use time_delta_object,          only : time_delta_t
     use time_object,                only : Time_type
@@ -395,10 +396,11 @@ contains
         character(len=kMAX_STRING_LENGTH) :: group, default, description, units
         real :: min, max
         integer, allocatable :: values(:), var_dims(:), t_var_dims(:)
-        integer :: p, dim_indx, dim_len, type, n, cnt
+        integer :: p, dim_indx, dim_len, type, n, cnt, varid
         character(len=kMAX_STRING_LENGTH) :: dim_name
+        character(len=kMAX_STRING_LENGTH), allocatable :: dim_names(:)
         character(len=3), allocatable :: dimensions(:), t_dimensions(:), dimensions_tmp(:), t_dimensions_tmp(:)
-        logical :: no_check_flag, is_latlon
+        logical :: no_check_flag, is_latlon, has_time, input_var_has_time
 
         if (present(no_check)) then
             no_check_flag = no_check
@@ -408,6 +410,8 @@ contains
 
         call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
 
+        has_time = (trim(dimensions(1)) == 'T' .or. trim(dimensions(1)) == '(T)')
+
         ! see if user wants to use this variable anyways
         if (.not.(var_val =="") .and. .not.(no_check_flag)) then
             ! first check if variable is present in the domain file
@@ -415,39 +419,97 @@ contains
             ! then get the number of dimensions for the variable
             call io_getdims(options%boundary_files(1), var_val, var_dims)
             ! test if the number of dimensions matches the number of dimensions required
+
+            !detect presence of time dimension options%time_var in var_dims
+            input_var_has_time = var_has_time_dim(options%boundary_files(1), var_val, options%time_var)
+
+            ! ensure that time dimension is the first dimension
+            if (input_var_has_time) then
+                !get dimension name of time variable
+                call io_getdimnames(options%boundary_files(1), options%time_var, dim_names)
+                if (size(t_var_dims) == 0) then
+                    dim_name = options%time_var
+                else
+                    !get the first dimension name
+                    dim_name = dim_names(1)
+                endif
+                call io_getdimnames(options%boundary_files(1), var_val, dim_names)
+
+                if (trim(dim_name) /= trim(dim_names(1))) then
+                    if (STD_OUT_PE) write(*,*) "Error: Forcing variable ", trim(name), " has a time dimension, but it is not the first dimension."
+                    if (STD_OUT_PE) write(*,*) "Error: Forcing variables are required to have the time dimension as the first dimension, if present."
+                    if (STD_OUT_PE) write(*,*) "Error: Dimension ordering is assumed to be (T, Z, Y, X) if a given dimension is present."
+                    stop
+                endif
+            endif
+
             if (.not.(size(dimensions) == size(var_dims))) then
 
                 is_latlon =  ( (index(name,'lat') > 0) .or. (index(name,'lon') > 0))
 
-                if ( (size(dimensions)-1) == size(var_dims) .and. (trim(dimensions(1)) == 'T' .or. trim(dimensions(1)) == '(T)')) then
+                if (has_time) then 
                     allocate(dimensions_tmp,source=dimensions)
                     deallocate(dimensions)
                     allocate(dimensions(size(dimensions_tmp)-1))
 
-                    if (STD_OUT_PE) write(*,*) "Forcing variable ", trim(name), " possibly missing the time dimension."
-                    if (STD_OUT_PE) write(*,*) "Proceeding, assuming that the forcing data does not contain a time dimension."
                     dimensions = dimensions_tmp(2:size(dimensions_tmp))
 
                     deallocate(dimensions_tmp)
                 endif
 
-                if (is_latlon .and. (size(var_dims)==1)) then
+                if (is_latlon .and. ( (size(var_dims)==1) .or. (size(var_dims)==2 .and. input_var_has_time) ) ) then
                     if (STD_OUT_PE) write(*,*) "Forcing variable ", trim(name), " is 1D."
-                    allocate(dimensions_tmp,source=dimensions)
-                    deallocate(dimensions)
-                    allocate(dimensions(size(dimensions_tmp)-1))
 
                     if (index(name,'lat') > 0) then
-                        dimensions = dimensions_tmp(1:size(dimensions_tmp)-1)
+                        if (input_var_has_time) then
+                            dimensions = ['T','Y']
+                        else
+                            dimensions = ['Y']
+                        endif
                     else
-                        dimensions = dimensions_tmp(2:size(dimensions_tmp))
+                        if (input_var_has_time) then
+                            dimensions = ['T','X']
+                        else
+                            dimensions = ['X']
+                        endif
                     endif
-                    deallocate(dimensions_tmp)
                 endif
 
-                if ( (size(dimensions)/=size(var_dims)) ) then
-                    if (STD_OUT_PE) write(*,*) "Error: ", trim(name), " has the wrong number of dimensions, should be: ", size(dimensions)
-                    error stop
+                if ( (size(dimensions)/=size(var_dims)) .or. (input_var_has_time .and. (size(dimensions)==size(var_dims)) ) ) then
+                    if (STD_OUT_PE) write(*,*) "ATTENTION: ", trim(name), " does not have the standard number of spatial dimensions: ", size(dimensions)
+                    if (STD_OUT_PE) write(*,*) "ATTENTION: we will assume the shape of the forcing data: ",trim(name)
+
+                    if (size(dimensions) == 3) then
+                        if (size(var_dims) == 3) then
+                            if (input_var_has_time) then
+                                dimensions = ['T','Y','X']
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (T,Y,X)"
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a horizontal map varying in time"
+                            endif
+                        else if (size(var_dims) == 2) then
+                            if (input_var_has_time) then
+                                dimensions = ['T','Z']
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (T,Z)"
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a vertical profile varying in time"
+                            else
+                                dimensions = ['Y','X']
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (Y,X)"
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a horizontal map"
+                            endif
+                        else if (size(var_dims) == 1) then
+                            if (.not.(input_var_has_time)) then
+                                dimensions = ['Z']
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (Z)"
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a vertical profile"
+                            else
+                                if (STD_OUT_PE) write(*,*) "Error: Forcing variable ", trim(name), " has 1 dimension, and it appears to be the time dimension"
+                                error stop
+                            endif
+                        else
+                            if (STD_OUT_PE) write(*,*) "Error: Forcing variable ", trim(name), " has 3 dimensions, but we were expecting 2 or less"
+                            error stop
+                        endif
+                    endif
                 endif
             endif
 
@@ -507,6 +569,11 @@ contains
             options%vars_to_read(i) = var_val
             ! only count spatial dimensions
             cnt = 0
+
+            ! get original dimensions again. We only cleaned them above so that we wouldn't
+            ! try to compare the extent of a dimension that isn't present in the input file
+            call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
+
             do n = 1,size(dimensions)
                 if ((trim(dimensions(n)) /= 'T') .and. (trim(dimensions(n)) /= '(T)')) cnt = cnt + 1
             end do
