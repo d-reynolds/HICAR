@@ -770,7 +770,7 @@ contains
 
         if (find_surrounding%x(1) > -999) return
 
-        write(*,*) '   ERROR: Failed to find point", lon, lat, " in a quadrant near:'
+        write(*,*) '   ERROR: Failed to find point', lon, lat, ' in a quadrant near:'
         write(*,*) lo%lon(pos%x, pos%y), lo%lat(pos%x, pos%y)
         write(*,*) search_point%x
         write(*,*) search_point%y
@@ -807,6 +807,30 @@ contains
         jms = lbound(hi%lat,2)
         jme = ubound(hi%lat,2)
 
+        if (minval(hi%lat) < minval(lo%lat)) then
+            write(*,*) "WARNING : geo_LUT : Minimum latitude of high resolution data is less than that of low resolution data"
+            write(*,*) "  Min latitude of high resolution data: ", minval(hi%lat)
+            write(*,*) "  Min latitude of low resolution data:  ", minval(lo%lat)
+            ! error stop
+        endif
+        if (maxval(hi%lat) > maxval(lo%lat)) then
+            write(*,*) "WARNING : geo_LUT : Maximum latitude of high resolution data is greater than that of low resolution data"
+            write(*,*) "  Max latitude of high resolution data: ", maxval(hi%lat)
+            write(*,*) "  Max latitude of low resolution data:  ", maxval(lo%lat)
+            ! error stop
+        endif
+        if (minval(hi%lon) < minval(lo%lon)) then
+            write(*,*) "WARNING : geo_LUT : Minimum longitude of high resolution data is less than that of low resolution data"
+            write(*,*) "  Min longitude of high resolution data: ", minval(hi%lon)
+            write(*,*) "  Min longitude of low resolution data:  ", minval(lo%lon)
+            ! error stop
+        endif
+        if (maxval(hi%lon) > maxval(lo%lon)) then
+            write(*,*) "WARNING : geo_LUT : Maximum longitude of high resolution data is greater than that of low resolution data"
+            write(*,*) "  Max longitude of high resolution data: ", maxval(hi%lon)
+            write(*,*) "  Max longitude of low resolution data:  ", maxval(lo%lon)
+            ! error stop
+        endif
         allocate(lo%geolut%x(4,ims:ime, jms:jme))
         allocate(lo%geolut%y(4,ims:ime, jms:jme))
         allocate(lo%geolut%w(4,ims:ime, jms:jme))
