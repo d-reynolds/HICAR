@@ -2827,9 +2827,9 @@ contains
         !!  Sensible Heat Exchange Coefficient, 2m
         !!------------------------------------------------------------
         else if (var_idx==kVARS%chs2) then
-            var_meta%name        = "coeff_heat_exchange"
+            var_meta%name        = "coeff_heat_exchange_2m"
             var_meta%dimensions  = two_d_t_dimensions
-            var_meta%attributes  = [attribute_t("non_standard_name", "sensible_heat_exchange_coefficient"), &
+            var_meta%attributes  = [attribute_t("non_standard_name", "sensible_heat_exchange_coefficient_at_2m"), &
                                attribute_t("units",         "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
         

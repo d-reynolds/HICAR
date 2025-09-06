@@ -52,9 +52,9 @@ contains
         this%ide = domain%ide; this%kde = domain%kde; this%jde = domain%jde
 
         if (domain%ims == domain%ids) this%i_s_w = domain%ids
-        if (domain%ime == domain%ide) this%i_e_w = domain%ide !Add extra to accomodate staggered vars
+        if (domain%ime == domain%ide) this%i_e_w = domain%ide
         if (domain%jms == domain%jds) this%j_s_w = domain%jds
-        if (domain%jme == domain%jde) this%j_e_w = domain%jde !Add extra to accomodate staggered vars
+        if (domain%jme == domain%jde) this%j_e_w = domain%jde
 
 
         ! If this run uses nests, then set the variables which we need to output to a child nest
@@ -174,7 +174,6 @@ contains
 
         call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
-        ! +1 added to handle variables on staggered grids
         win_size = n_w_3d*nx_re*nz_w*ny_re
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_3d)
         call C_F_POINTER(tmp_ptr, this%write_buffer_3d, [n_w_3d, nx_re, nz_w, ny_re])
@@ -348,9 +347,6 @@ contains
         integer :: i, n, nx, ny, var_id
                 
         n = 1
-        nx = this%i_e_r - this%i_s_r + 1
-        ny = this%j_e_r - this%j_s_r + 1
-
         ! Do MPI_Win_Wait on read_buffer to make sure that server process has completed data transfer
         call smart_wait(this%read_win, 'Waiting for read_win completion')
 
@@ -366,13 +362,18 @@ contains
                 cycle
             else
                 if (var%two_d) then
+                    nx = size(var%data_2d,1)
+                    ny = size(var%data_2d,2)
                     if (var%dtype == kREAL) then
                         var%data_2d = this%read_buffer(n,1:nx,1,1:ny)
                     ! elseif (var%dtype == kDOUBLE) then
                     !     var%data_2dd = dble(this%read_buffer(n,1:nx,1,1:ny))
                     endif
                 else
-                    var%data_3d = this%read_buffer(n,1:nx,1:var%dim_len(2),1:ny)
+                    nx = size(var%data_3d,1)
+                    ny = size(var%data_3d,3)
+
+                    var%data_3d(:,1:var%dim_len(2),:) = this%read_buffer(n,1:nx,1:var%dim_len(2),1:ny)
                 endif
                 n = n+1
             endif

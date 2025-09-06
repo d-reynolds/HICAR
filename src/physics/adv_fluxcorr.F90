@@ -159,31 +159,6 @@ contains
                         scale_out(i,k,j) = 0.0
                         cycle
                     endif
-                    !This is the original code, which is may be slower than the above
-                    !included code, but is more readable
-                    ! if (u(i,k,j) > 0) then
-                    !     qmax(i,k,j) = max(q(i-1,k,j),qmax(i,k,j))
-                    !     qmin(i,k,j) = min(q(i-1,k,j),qmin(i,k,j))
-                    ! else if (u(i+1,k,j) < 0) then
-                    !     qmax(i,k,j) = max(q(i+1,k,j),qmax(i,k,j))
-                    !     qmin(i,k,j) = min(q(i+1,k,j),qmin(i,k,j))
-                    ! endif
-
-                    ! if (v(i,k,j) > 0) then
-                    !     qmax(i,k,j) = max(q(i,k,j-1),qmax(i,k,j))
-                    !     qmin(i,k,j) = min(q(i,k,j-1),qmin(i,k,j))
-                    ! else if (v(i,k,j+1) < 0) then
-                    !     qmax(i,k,j) = max(q(i,k,j+1),qmax(i,k,j))
-                    !     qmin(i,k,j) = min(q(i,k,j+1),qmin(i,k,j))
-                    ! endif
-                    
-                    ! if (w(i,k,j) < 0 .and. k < kme) then
-                    !     qmax(i,k,j) = max(q(i,k+1,j),qmax(i,k,j))
-                    !     qmin(i,k,j) = min(q(i,k+1,j),qmin(i,k,j))
-                    ! else if (w(i,k,j) > 0 .and. k > kms) then
-                    !     qmax(i,k,j) = max(q(i,k-1,j),qmax(i,k,j))
-                    !     qmin(i,k,j) = min(q(i,k-1,j),qmin(i,k,j))
-                    ! endif
 
                     !Store reused variables to minimize memory accesses
                     dz_t_i   = 1./dz(i,k,j)

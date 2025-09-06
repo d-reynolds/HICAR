@@ -3,10 +3,11 @@ module boundary_interface
     use mpi_f08
     use netcdf
     use options_interface,        only : options_t
+    use options_types,            only : forcing_options_type
     use variable_dict_interface,  only : var_dict_t
     use time_object,              only : Time_type
     use time_delta_object,        only : time_delta_t
-    use data_structures,          only : interpolable_type
+    use data_structures,          only : interpolable_type, dim_arrays_type
     use icar_constants,           only : kMAX_NAME_LENGTH, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH, kVARS
     implicit none
 
@@ -27,6 +28,10 @@ module boundary_interface
         integer :: kte
         integer :: jts
         integer :: jte
+        integer :: ids
+        integer :: ide
+        integer :: jds
+        integer :: jde
 
 
         type(Time_type)                   :: current_time   ! the date/time of the forcing data in memory
@@ -36,9 +41,8 @@ module boundary_interface
         type(var_dict_t)                  :: variables      ! a dictionary with all forcing data
 
         ! boundary data coordinate system
-        real, dimension(:,:),   allocatable :: lat, lon
+        real, dimension(:,:),   allocatable :: lat, lon, ulat, ulon, vlat, vlon
         real, dimension(:,:,:), allocatable :: z            ! 3D z elevation data on the forcing grid
-        real, dimension(:,:,:), allocatable :: interpolated_z ! 3D z interpolated to the model grid (horizontally and vertically)
         
         logical :: z_is_set = .false.
 
@@ -47,6 +51,9 @@ module boundary_interface
         type(interpolable_type) :: geo_u
         type(interpolable_type) :: geo_v
         type(interpolable_type) :: original_geo
+        type(interpolable_type) :: original_geo_u
+        type(interpolable_type) :: original_geo_v
+        type(interpolable_type) :: mass_to_u, mass_to_v
 
     contains
 
@@ -57,6 +64,7 @@ module boundary_interface
         procedure :: init_local_asnest
         procedure :: update_computed_vars
         procedure :: interpolate_original_levels
+        procedure :: setup_z
     end type
 
     interface
@@ -70,33 +78,34 @@ module boundary_interface
         type(options_t), optional, intent(in)    :: parent_options
     end subroutine init_boundary
 
-    module subroutine init_local(this, options, file_list, var_list, dim_list, var_indx, start_time, &
-                                 lat_var, lon_var, z_var, time_var, qv_var, domain_lat, domain_lon)
+    module subroutine init_local(this, options, var_list, dim_list, var_indx, start_time, domain_lat, domain_lon)
         implicit none
         class(boundary_t),               intent(inout)  :: this
-        type(options_t),                 intent(inout)  :: options
-        character(len=kMAX_FILE_LENGTH), intent(in)     :: file_list(:)
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list(:)
-        integer,                         intent(in)     :: dim_list(:), var_indx(:)
+        type(forcing_options_type),      intent(inout)  :: options
+        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
+        type(dim_arrays_type),           intent(in)     :: dim_list (:)
+        integer,                         intent(in)     :: var_indx (:)
         type(Time_type),                 intent(in)     :: start_time
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: lat_var
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: lon_var
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: z_var
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: time_var
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: qv_var
-        real, dimension(:,:), intent(in)                :: domain_lat
-        real, dimension(:,:), intent(in)                :: domain_lon
+        real, dimension(:,:),            intent(in)     :: domain_lat
+        real, dimension(:,:),            intent(in)     :: domain_lon
     end subroutine
 
     module subroutine init_local_asnest(this, var_list, dim_list, var_indx, domain_lat, domain_lon, parent_options)
         class(boundary_t),               intent(inout)  :: this
         character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
-        integer,                         intent(in)     :: dim_list (:), var_indx(:)
+        type(dim_arrays_type),           intent(in)     :: dim_list (:)
+        integer,                         intent(in)     :: var_indx (:)
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
         type(options_t),                 intent(in)     :: parent_options
     end subroutine
     
+    module subroutine setup_z(this, options)
+        implicit none
+        class(boundary_t),   intent(inout)   :: this
+        type(options_t),     intent(in)      :: options
+    end subroutine
+
     module subroutine update_computed_vars(this, options)
         implicit none
         class(boundary_t),   intent(inout)   :: this

@@ -395,12 +395,12 @@ contains
 
         character(len=kMAX_STRING_LENGTH) :: group, default, description, units
         real :: min, max
-        integer, allocatable :: values(:), var_dims(:), t_var_dims(:)
-        integer :: p, dim_indx, dim_len, type, n, cnt, varid
+        integer, allocatable :: values(:), var_dims(:), sanitized_dims(:), ref_var_dims(:)
+        integer :: p, dim_indx, dim_len, type, n, cnt, varid, san_dim_indx
         character(len=kMAX_STRING_LENGTH) :: dim_name
         character(len=kMAX_STRING_LENGTH), allocatable :: dim_names(:)
-        character(len=3), allocatable :: dimensions(:), t_dimensions(:), dimensions_tmp(:), t_dimensions_tmp(:)
-        logical :: no_check_flag, is_latlon, has_time, input_var_has_time
+        character(len=3), allocatable :: dimensions(:), dimensions_original(:), ref_dimensions(:), dimensions_tmp(:), ref_dimensions_tmp(:)
+        logical :: no_check_flag, is_latlon, has_time, input_var_has_time, not_time_mask(10)
 
         if (present(no_check)) then
             no_check_flag = no_check
@@ -410,10 +410,16 @@ contains
 
         call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
 
-        has_time = (trim(dimensions(1)) == 'T' .or. trim(dimensions(1)) == '(T)')
-
         ! see if user wants to use this variable anyways
-        if (.not.(var_val =="") .and. .not.(no_check_flag)) then
+        if (.not.(trim(var_val) == "") .and. .not.(no_check_flag) .and. .not.(trim(var_val) == kCHAR_NO_VAL)) then
+            
+            !initialize array which will hold sanitized dimensions used to setup forcing variables in the model
+            allocate(dimensions_original,source=dimensions)
+            allocate(sanitized_dims(size(dimensions_original)))
+            sanitized_dims = 0
+
+            has_time = (trim(dimensions(1)) == 'T' .or. trim(dimensions(1)) == '(T)')
+
             ! first check if variable is present in the domain file
             call check_variable_present(options%boundary_files(1), var_val)
             ! then get the number of dimensions for the variable
@@ -463,15 +469,15 @@ contains
 
                     if (index(name,'lat') > 0) then
                         if (input_var_has_time) then
-                            dimensions = ['T','Y']
+                            dimensions = [' T ',' Y ']
                         else
-                            dimensions = ['Y']
+                            dimensions = [' Y ']
                         endif
                     else
                         if (input_var_has_time) then
-                            dimensions = ['T','X']
+                            dimensions = [' T ',' X ']
                         else
-                            dimensions = ['X']
+                            dimensions = [' X ']
                         endif
                     endif
                 endif
@@ -483,23 +489,23 @@ contains
                     if (size(dimensions) == 3) then
                         if (size(var_dims) == 3) then
                             if (input_var_has_time) then
-                                dimensions = ['T','Y','X']
+                                dimensions = [' T ',' Y ',' X ']
                                 if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (T,Y,X)"
                                 if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a horizontal map varying in time"
                             endif
                         else if (size(var_dims) == 2) then
                             if (input_var_has_time) then
-                                dimensions = ['T','Z']
+                                dimensions = [' T ',' Z ']
                                 if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (T,Z)"
                                 if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a vertical profile varying in time"
                             else
-                                dimensions = ['Y','X']
+                                dimensions = [' Y ',' X ']
                                 if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (Y,X)"
                                 if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a horizontal map"
                             endif
                         else if (size(var_dims) == 1) then
                             if (.not.(input_var_has_time)) then
-                                dimensions = ['Z']
+                                dimensions = [' Z ']
                                 if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (Z)"
                                 if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a vertical profile"
                             else
@@ -515,19 +521,19 @@ contains
             endif
 
             ! pointless if this is the temperature variable, which is used as the reference
-            if (.not.(name=='tvar')) then
+            if (.not.(name=='qvvar')) then
                 ! now get the dimension lengths of the temperature variable
-                call check_variable_present(options%boundary_files(1), options%tvar)
+                call check_variable_present(options%boundary_files(1), options%qvvar)
                 !! then get the number of dimensions for the variable
-                call io_getdims(options%boundary_files(1), options%tvar, t_var_dims)
-        !
-                call get_nml_var_metadata('tvar',group,description,default,min,max,type,values,units,t_dimensions)
+                call io_getdims(options%boundary_files(1), options%qvvar, ref_var_dims)
+        
+                call get_nml_var_metadata('qvvar',group,description,default,min,max,type,values,units,ref_dimensions)
 
                 ! reverse ordering of dimensions -- needed since fortran netCDF uses reverse ordering relative to python/nco
-                allocate(t_dimensions_tmp(size(t_dimensions)))
-                t_dimensions_tmp = t_dimensions
-                do p=1,size(t_dimensions)
-                    t_dimensions(p) = t_dimensions_tmp(size(t_dimensions_tmp)-p+1)
+                allocate(ref_dimensions_tmp(size(ref_dimensions)))
+                ref_dimensions_tmp = ref_dimensions
+                do p=1,size(ref_dimensions)
+                    ref_dimensions(p) = ref_dimensions_tmp(size(ref_dimensions_tmp)-p+1)
                 end do
 
                 ! reverse ordering of dimensions -- needed since fortran netCDF uses reverse ordering relative to python/nco
@@ -538,57 +544,81 @@ contains
                 end do
 
                 !! now see if any of the shared dimensions (will be x and y) have the same length
-                do p=1,size(t_var_dims)
-                    dim_name = t_dimensions(p)
+                do p=1,size(ref_var_dims)
+
+                    dim_name = ref_dimensions(p)
                     dim_indx = findloc(dimensions,dim_name,dim=1)
                     ! check if the dimension is present in the variable
                     if (dim_indx > 0) then
                         ! check if the dimension length matches the terrain height variable
+                        san_dim_indx = findloc(dimensions_original,dim_name,dim=1)
+                        sanitized_dims(san_dim_indx) = var_dims(dim_indx)
                         dim_len = var_dims(dim_indx)
                         if (name=='ulat' .and. dim_name=='X') dim_len = dim_len - 1
                         if (name=='ulon' .and. dim_name=='X') dim_len = dim_len - 1
                         if (name=='vlat' .and. dim_name=='Y') dim_len = dim_len - 1
                         if (name=='vlon' .and. dim_name=='Y') dim_len = dim_len - 1
-                        if (name=='vvar' .and. dim_name=='Y' .and. dim_len == t_var_dims(p)+1) dim_len = dim_len - 1
-                        if (name=='uvar' .and. dim_name=='X' .and. dim_len == t_var_dims(p)+1) dim_len = dim_len - 1
+                        if (name=='vvar' .and. dim_name=='Y' .and. dim_len == ref_var_dims(p)+1) dim_len = dim_len - 1
+                        if (name=='uvar' .and. dim_name=='X' .and. dim_len == ref_var_dims(p)+1) dim_len = dim_len - 1
+                        if (dim_name=='Z' .and. dim_len == ref_var_dims(p)+1) then
+                            if (STD_OUT_PE) write(*,*) "--------------------------------------------------------------------------------"
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: vertical dimension ",trim(dim_name)," on forcing variable ", trim(name)
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: has dimension length:",var_dims(dim_indx)
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: variable: ",trim(options%qvvar)," has length: ", ref_var_dims(p), "for the same dimension"
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: We are interpreting this as variable ",trim(name), " being on"
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: the k-level interfaces, and will automatically linearly interpolate"
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: it to the mass-points"
+                            if (STD_OUT_PE) write(*,*) "--------------------------------------------------------------------------------"
+                            dim_len = dim_len - 1
+                        endif
 
-                        if (dim_len /= t_var_dims(p)) then
+                        if (dim_len /= ref_var_dims(p)) then
                             if (STD_OUT_PE) write(*,*) "Error: dimension ",trim(dim_name)," on forcing variable ", trim(name)
                             if (STD_OUT_PE) write(*,*) "has dimension length:",var_dims(dim_indx)
-                            if (STD_OUT_PE) write(*,*) "But variable: ",trim(options%tvar)," has length: ", t_var_dims(p), "for the same dimension"
+                            if (STD_OUT_PE) write(*,*) "But variable: ",trim(options%qvvar)," has length: ", ref_var_dims(p), "for the same dimension"
                             ! output special warning if it is a staggered variable
-                            if (STD_OUT_PE .and. .not.(dim_len == var_dims(dim_indx))) write(*,*) "should be ",t_var_dims(p)+1," for staggered vars"
+                            if (STD_OUT_PE .and. .not.(dim_len == var_dims(dim_indx))) write(*,*) "should be ",ref_var_dims(p)+1," for staggered vars"
                             error stop
                         endif
                     endif
                 end do
             endif
+        ! Check if the variable was not set. In this case, we just set it to be blank ("")
+        elseif (trim(var_val) == kCHAR_NO_VAL .or. trim(var_val) == "") then
+            var = ""
+            return
         endif
 
         ! if i is present, then we want to add this variable to the vars-to-read list
         if (present(i)) then
             options%vars_to_read(i) = var_val
             ! only count spatial dimensions
-            cnt = 0
 
             ! get original dimensions again. We only cleaned them above so that we wouldn't
             ! try to compare the extent of a dimension that isn't present in the input file
             call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
 
+            not_time_mask = .False.
             do n = 1,size(dimensions)
-                if ((trim(dimensions(n)) /= 'T') .and. (trim(dimensions(n)) /= '(T)')) cnt = cnt + 1
+                if (trim(dimensions(n)) /= 'T' .and. trim(dimensions(n)) /= '(T)') not_time_mask(n) = .True.
             end do
-            options%dim_list(i) = cnt
 
+            options%dim_list(i)%num_dims = count(not_time_mask(:size(dimensions)))
+
+            if (.not.(allocated(sanitized_dims))) then
+                allocate(sanitized_dims(size(dimensions)))
+                sanitized_dims = 0
+            endif
+
+            if (options%dim_list(i)%num_dims /= size(dimensions)) then
+                options%dim_list(i)%dims = pack(sanitized_dims, not_time_mask(:size(dimensions)))
+            else
+                options%dim_list(i)%dims = var_dims
+            endif
             i = i + 1
         endif
         var = var_val
 
-        ! Check if the variable was not set. This would be an error
-        if (var == kCHAR_NO_VAL .and. default /= kCHAR_NO_VAL) then
-            if (STD_OUT_PE) write(*,*) "Error: '", trim(name), "' is not set to any value (i.e. is still ",(kCHAR_NO_VAL),")"
-            error stop
-        endif
 
     end subroutine set_char_forcing_nml_var
 
@@ -1444,7 +1474,7 @@ contains
                 type = 1
             case ("interactive")
                 description = "Interactive flag, prints out model progress during physics timesteps (T/F)"
-                default = ".False."
+                default = ".True."
                 group = "General"
                 type = 1
             case ("calendar")
@@ -1856,11 +1886,6 @@ contains
                 default = ".False."
                 group = "Forcing"
                 type = 1
-            case ("z_is_on_interface")
-                description = "Forcing Z variable is on interface levels (T/F)"
-                default = ".False."
-                group = "Forcing"
-                type = 1
             case ("time_varying_z")
                 description = "Forcing Z variable is time varying (T/F)"
                 default = ".False."
@@ -1966,6 +1991,20 @@ contains
             case ("pvar")
                 description = "Name of the pressure variable in forcing file"
                 units = "Pa"
+                allocate(dimensions(4))
+                dimensions = ["T", "Z", "Y", "X"]
+                group = "Forcing"
+                type = 1
+            case ("pbvar")
+                description = "Name of the base pressure variable in forcing file"
+                units = "Pa"
+                allocate(dimensions(4))
+                dimensions = ["T", "Z", "Y", "X"]
+                group = "Forcing"
+                type = 1
+            case ("phbvar")
+                description = "Name of the base geopotential variable in forcing file"
+                units = "m^2/s^2"
                 allocate(dimensions(4))
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"

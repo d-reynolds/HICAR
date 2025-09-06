@@ -16,6 +16,7 @@ module reader_interface
   use netcdf
   use icar_constants
   use options_interface,  only : options_t
+  use options_types,      only : dim_arrays_type
   use time_object,        only : Time_type
   use time_delta_object,  only : time_delta_t
   use meta_data_interface, only : meta_data_t
@@ -49,6 +50,7 @@ module reader_interface
       integer :: ncfile_id
       
       integer :: its, ite, kts, kte, jts, jte
+      integer :: ids, ide, jds, jde
 
       integer :: curfile, curstep
   contains
