@@ -328,10 +328,14 @@ module options_types
         logical :: relax_filters       ! should use smoothly varying relaxation filters to nudge forcing at the boundaries
 
         real :: t_offset                ! offset to temperature because WRF outputs potential temperature-300
+        real :: p_multiplier            ! multiplier to apply to pressure forcing data. Useful if pressure is in hPa instead of Pa.
         logical :: limit_rh                ! impose a limit on relative humidity in the forcing data to be <=1
 
         real :: inputinterval           ! time between forcing steps [s]
 
+        integer :: forcing_longitude_system     ! specify center for longitude system
+                                        ! 0 = kPRIME_CENTERED    (-180 - 180)
+                                        ! 1 = kDATELINE_CENTERED (0 - 360)        
 
         ! variable names from init/BC/wind/... files
         character (len=kMAX_NAME_LENGTH) :: latvar="",lonvar="",uvar="",ulat="",ulon="",vvar="",vlat="",vlon="",wvar="", &

@@ -11,7 +11,7 @@ submodule(boundary_interface) boundary_implementation
     use time_io,                only : read_times, find_timestep_in_filelist
     use string,                 only : str, as_string
     use mod_atm_utilities,      only : rh_to_mr, relative_humidity, compute_3d_p, compute_3d_z, exner_function
-    use geo,                    only : standardize_coordinates
+    use geo,                    only : standardize_geo, standardize_latlon
     use vertical_interpolation, only : vLUT, vinterp
     use timer_interface,    only : timer_t
     use debug_module,           only : check_ncdf
@@ -156,6 +156,7 @@ contains
             write(*,*) 'ERROR: lon dimension on forcing data is not 1D or 2D'
             stop
         endif
+        call standardize_latlon(temp_lat, temp_lon, options%forcing%forcing_longitude_system)
 
         call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
 
@@ -420,7 +421,7 @@ contains
         if (allocated(this%geo%lon)) deallocate(this%geo%lon)
         allocate( this%geo%lon, source=this%lon)
 
-        call standardize_coordinates(this%geo, longitude_system)
+        call standardize_geo(this%geo, longitude_system)
 
         this%geo_u   = this%geo
         this%geo_v   = this%geo
@@ -543,6 +544,12 @@ contains
         real :: neg_z
 
         associate(list => this%variables)
+
+        if (options%forcing%p_multiplier /= 1.0) then
+            pvar = list%get_var(kVARS%pressure)
+            pvar%data_3d = pvar%data_3d * options%forcing%p_multiplier
+            call list%add_var(kVARS%pressure, pvar)
+        endif
 
         if (options%forcing%qv_is_relative_humidity) then
             call compute_mixing_ratio_from_rh(list, options)

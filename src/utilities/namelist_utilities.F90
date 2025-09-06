@@ -1744,6 +1744,13 @@ contains
                 default = "0.0"
                 group = "Forcing"
                 type = 1
+            case ("p_multiplier")
+                description = "Multiplier to apply to pressure forcing data. Useful if pressure is in hPa instead of Pa."
+                min = 0
+                max = 100000
+                default = "1.0"
+                group = "Forcing"
+                type = 1
             case ("inputinterval")
                 description = "Interval between forcing data inputs in seconds"
                 min = 1
@@ -1789,6 +1796,13 @@ contains
             case ("time_varying_z")
                 description = "Forcing Z variable is time varying (T/F)"
                 default = ".False."
+                group = "Forcing"
+                type = 1
+            case("forcing_longitude_system")
+                description = "Longitude system, values: (0=Maintain Logitude, 1=Prime Centered, 2=Dateline Centered, 3=Guess Lon)"
+                allocate(values(4))
+                values = (/0, 1, 2, 3/)
+                default = "0"
                 group = "Forcing"
                 type = 1
             case ("hgtvar")

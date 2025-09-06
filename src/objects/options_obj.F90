@@ -609,8 +609,8 @@ contains
         logical, dimension(kMAX_NESTS) :: limit_rh, z_is_geopotential, z_is_on_interface,&
                    time_varying_z, t_is_potential, qv_is_spec_humidity, &
                    qv_is_relative_humidity, relax_filters
-        real, dimension(kMAX_NESTS)    :: t_offset, inputinterval
-
+        real, dimension(kMAX_NESTS)    :: t_offset, p_multiplier, inputinterval
+        integer, dimension(kMAX_NESTS) :: forcing_longitude_system
         character(len=kMAX_FILE_LENGTH) :: forcing_file_list
         character(len=kMAX_FILE_LENGTH), allocatable :: boundary_files(:)
 
@@ -620,8 +620,8 @@ contains
                                         i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
                                         psvar, pslvar, swdown_var, lwdown_var, sst_var, time_var
 
-        namelist /forcing/ forcing_file_list, inputinterval, t_offset, limit_rh, z_is_geopotential, z_is_on_interface, time_varying_z, &
-                            t_is_potential, qv_is_relative_humidity, qv_is_spec_humidity, relax_filters, &
+        namelist /forcing/ forcing_file_list, inputinterval, t_offset, p_multiplier, limit_rh, z_is_geopotential, z_is_on_interface, time_varying_z, &
+                            t_is_potential, forcing_longitude_system, qv_is_relative_humidity, qv_is_spec_humidity, relax_filters, &
                             pvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,qncvar,qnivar,qnrvar,qngvar,qnsvar,&
                             i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
                             hgtvar,shvar,lhvar,pblhvar,   &
@@ -643,12 +643,14 @@ contains
 
         call set_nml_var_default(forcing_file_list, 'forcing_file_list', print_info, gennml)
         call set_nml_var_default(t_offset, 't_offset', print_info, gennml)
+        call set_nml_var_default(p_multiplier, 'p_multiplier', print_info, gennml)
         call set_nml_var_default(inputinterval, 'inputinterval', print_info, gennml)
         call set_nml_var_default(limit_rh, 'limit_rh', print_info, gennml)
         call set_nml_var_default(z_is_geopotential, 'z_is_geopotential', print_info, gennml)
         call set_nml_var_default(z_is_on_interface, 'z_is_on_interface', print_info, gennml)
         call set_nml_var_default(time_varying_z, 'time_varying_z', print_info, gennml)
         call set_nml_var_default(t_is_potential, 't_is_potential', print_info, gennml)
+        call set_nml_var_default(forcing_longitude_system, 'forcing_longitude_system', print_info, gennml)
         call set_nml_var_default(qv_is_relative_humidity, 'qv_is_relative_humidity', print_info, gennml)
         call set_nml_var_default(qv_is_spec_humidity, 'qv_is_spec_humidity', print_info, gennml)
         call set_nml_var_default(relax_filters, 'relax_filters', print_info, gennml)
@@ -707,6 +709,7 @@ contains
         endif
 
         call set_nml_var(options%forcing%t_offset, t_offset(n_indx), 't_offset', t_offset(1))
+        call set_nml_var(options%forcing%p_multiplier, p_multiplier(n_indx), 'p_multiplier', p_multiplier(1))
         call set_nml_var(options%forcing%limit_rh, limit_rh(n_indx), 'limit_rh', limit_rh(1))
         call set_nml_var(options%forcing%z_is_geopotential, z_is_geopotential(n_indx), 'z_is_geopotential', z_is_geopotential(1))
         call set_nml_var(options%forcing%z_is_on_interface, z_is_on_interface(n_indx), 'z_is_on_interface', z_is_on_interface(1))
@@ -716,6 +719,7 @@ contains
         call set_nml_var(options%forcing%qv_is_spec_humidity, qv_is_spec_humidity(n_indx), 'qv_is_spec_humidity', qv_is_spec_humidity(1))
         call set_nml_var(options%forcing%relax_filters, relax_filters(n_indx), 'relax_filters', relax_filters(1))
         call set_nml_var(options%forcing%inputinterval, inputinterval(n_indx), 'inputinterval', inputinterval(1))
+        call set_nml_var(options%forcing%forcing_longitude_system, forcing_longitude_system(n_indx), 'forcing_longitude_system', forcing_longitude_system(1))
 
         call options%forcing%input_dt%set(seconds=options%forcing%inputinterval)
 
@@ -2441,6 +2445,7 @@ contains
         this%forcing%z_is_on_interface = .False.
         this%forcing%time_varying_z = .False.
         this%forcing%t_offset = 0.0
+        this%forcing%p_multiplier = 1.0
         this%forcing%relax_filters = .False.
         this%forcing%compute_z = .False.
 

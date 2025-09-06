@@ -14,7 +14,7 @@ submodule(domain_interface) domain_implementation
     use string,               only : str
     use meta_data_interface,  only : meta_data_t
     use io_routines,          only : io_write, io_read
-    use geo,                  only : geo_lut, geo_interp, geo_interp2d, standardize_coordinates
+    use geo,                  only : geo_lut, geo_interp, geo_interp2d, standardize_geo
     use array_utilities,      only : array_offset_x, array_offset_y, smooth_array, smooth_array_2d, make_2d_x, make_2d_y
     use vertical_interpolation,only : vinterp, vLUT
     use output_metadata,            only : get_varname, get_varmeta, get_varindx
@@ -990,7 +990,7 @@ contains
         ! This also puts the longitudes onto a 0-360 if they are -180-180 (important for Alaska)
         ! Though if working in Europe the -180-180 grid is better ideally the optimal value should be checked.
         ! and good luck if you want to work over the poles...
-        call standardize_coordinates(geo, longitude_system)
+        call standardize_geo(geo, longitude_system)
 
     end subroutine
 

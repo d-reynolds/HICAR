@@ -28,7 +28,7 @@ module geo
     public::geo_LUT      ! Create a geographic Look up table
     public::geo_interp   ! apply geoLUT to interpolate in 2d for a 3d grid
     public::geo_interp2d ! apply geoLUT to interpolate in 2d for a 2d grid
-    public::standardize_coordinates
+    public::standardize_geo, standardize_latlon
 
 contains
     !>------------------------------------------------------------
@@ -1107,13 +1107,14 @@ contains
     !> ----------------------------------------------------------------------------
     !!  Conver longitudes into a common format for geographic interpolation
     !!
-    !!  First convert longitudes that may be -180-180 into 0-360 range first.
+    !!  First convert lat/lon data into a 2d format
+    !!  Then convert longitudes that may be -180-180 into 0-360 range first.
     !!  If data straddle the 0 degree longitude, convert back to -180-180 so interpolation will be smooth
     !!
     !!  @param[inout]   long_data  2D array of longitudes (either -180 - 180 or 0 - 360)
     !!
     !! ----------------------------------------------------------------------------
-    subroutine standardize_coordinates(domain, longitude_system)
+    subroutine standardize_geo(domain, longitude_system)
         implicit none
         type(interpolable_type), intent(inout) :: domain
         integer,                  intent(in), optional :: longitude_system
@@ -1150,30 +1151,45 @@ contains
 
         endif
 
-        if (present(longitude_system)) then
-            if (longitude_system == kMAINTAIN_LON) then
-                ! break
-            elseif (longitude_system == kDATELINE_CENTERED) then
-                where(domain%lon<0) domain%lon = 360+domain%lon
-            elseif (longitude_system == kPRIME_CENTERED) then
-                where(domain%lon>180) domain%lon = domain%lon - 360
-            elseif (longitude_system == kGUESS_LON) then
-                ! try to guess which coordinate system to use
-                ! first convert all domains into -180 to +180 coordinates
-                where(domain%lon>180) domain%lon = domain%lon - 360
-                ! also convert from a -180 to 180 coordinate system into a 0-360 coordinate system if closer to the dateline
-                if ((minval(domain%lon) < -150) .or. (maxval(domain%lon) > 150)) then
-                    where(domain%lon<0) domain%lon = 360+domain%lon
-                endif
-            else
-                write(*,*) "Unknown longitude system of coordinates:", longitude_system
-                write(*,*) " Set options%domain%longitude_system to either:"
-                write(*,*) " Prime meridian centered (0 to 360): ", kPRIME_CENTERED
-                write(*,*) " Dateline meridian centered (-180 to 180): ", kDATELINE_CENTERED
-                error stop
+        if (present(longitude_system)) call standardize_latlon(domain%lat, domain%lon, longitude_system)
+
+    end subroutine standardize_geo
+
+    !! ----------------------------------------------------------------------------
+    !!  Conver longitudes into a common format for geographic interpolation
+    !!
+    !!  First convert longitudes that may be -180-180 into 0-360 range first.
+    !!  If data straddle the 0 degree longitude, convert back to -180-180 so interpolation will be smooth
+    !!
+    !!  @param[inout]   long_data  2D array of longitudes (either -180 - 180 or 0 - 360)
+    !!
+    !! ----------------------------------------------------------------------------
+    subroutine standardize_latlon(lat, lon, longitude_system)
+        implicit none
+        real, dimension(:,:), intent(inout) :: lat, lon
+        integer,                 intent(in) :: longitude_system
+
+        if (longitude_system == kMAINTAIN_LON) then
+            ! break
+        elseif (longitude_system == kDATELINE_CENTERED) then
+            where(lon<0) lon = 360+lon
+        elseif (longitude_system == kPRIME_CENTERED) then
+            where(lon>180) lon = lon - 360
+        elseif (longitude_system == kGUESS_LON) then
+            ! try to guess which coordinate system to use
+            ! first convert all domains into -180 to +180 coordinates
+            where(lon>180) lon = lon - 360
+            ! also convert from a -180 to 180 coordinate system into a 0-360 coordinate system if closer to the dateline
+            if ((minval(lon) < -150) .or. (maxval(lon) > 150)) then
+                where(lon<0) lon = 360+lon
             endif
+        else
+            write(*,*) "Unknown longitude system of coordinates:", longitude_system
+            write(*,*) " Set longitude_system to either:"
+            write(*,*) " Prime meridian centered (0 to 360): ", kPRIME_CENTERED
+            write(*,*) " Dateline meridian centered (-180 to 180): ", kDATELINE_CENTERED
+            error stop
         endif
 
-    end subroutine standardize_coordinates
-
+    end subroutine standardize_latlon
 end module geo
