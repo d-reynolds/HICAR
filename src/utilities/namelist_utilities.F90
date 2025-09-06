@@ -427,7 +427,7 @@ contains
             if (input_var_has_time) then
                 !get dimension name of time variable
                 call io_getdimnames(options%boundary_files(1), options%time_var, dim_names)
-                if (size(t_var_dims) == 0) then
+                if (size(dim_names) == 0) then
                     dim_name = options%time_var
                 else
                     !get the first dimension name
@@ -435,8 +435,9 @@ contains
                 endif
                 call io_getdimnames(options%boundary_files(1), var_val, dim_names)
 
-                if (trim(dim_name) /= trim(dim_names(1))) then
+                if (trim(dim_name) /= trim(dim_names(size(dim_names)))) then
                     if (STD_OUT_PE) write(*,*) "Error: Forcing variable ", trim(name), " has a time dimension, but it is not the first dimension."
+                    if (STD_OUT_PE) write(*,*) "Error: Time dimension name is: ", trim(dim_name), " but the first dimension of ", trim(name), " is: ", trim(dim_names(size(dim_names)))
                     if (STD_OUT_PE) write(*,*) "Error: Forcing variables are required to have the time dimension as the first dimension, if present."
                     if (STD_OUT_PE) write(*,*) "Error: Dimension ordering is assumed to be (T, Z, Y, X) if a given dimension is present."
                     stop
