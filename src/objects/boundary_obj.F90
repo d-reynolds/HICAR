@@ -66,7 +66,7 @@ contains
                                     options%forcing%lonvar,         &
                                     options%forcing%zvar,           &
                                     options%forcing%time_var,       &
-                                    options%forcing%pvar,           &
+                                    options%forcing%qvvar,           &
                                     domain_lat,        &
                                     domain_lon)
         endif
@@ -85,7 +85,7 @@ contains
     !!
     !!------------------------------------------------------------
     module subroutine init_local(this, options, file_list, var_list, dim_list, var_indx, start_time, &
-                                 lat_var, lon_var, z_var, time_var, p_var, domain_lat, domain_lon)
+                                 lat_var, lon_var, z_var, time_var, qv_var, domain_lat, domain_lon)
         class(boundary_t),               intent(inout)  :: this
         type(options_t),                 intent(inout)  :: options
         character(len=kMAX_FILE_LENGTH), intent(in)     :: file_list(:)
@@ -96,12 +96,12 @@ contains
         character(len=kMAX_NAME_LENGTH), intent(in)     :: lon_var
         character(len=kMAX_NAME_LENGTH), intent(in)     :: z_var
         character(len=kMAX_NAME_LENGTH), intent(in)     :: time_var
-        character(len=kMAX_NAME_LENGTH), intent(in)     :: p_var
+        character(len=kMAX_NAME_LENGTH), intent(in)     :: qv_var
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
 
-        real, allocatable :: temp_z(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:), lat_1d(:), lon_1d(:)
-        integer, allocatable :: lat_dims(:), lon_dims(:)
+        real, allocatable :: temp_z(:,:,:), temp_z_1d(:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:), lat_1d(:), lon_1d(:)
+        integer, allocatable :: lat_dims(:), lon_dims(:), qv_dims(:)
         real :: neg_z
         integer :: i, nx, ny, nz, PE_RANK_GLOBAL, x_len, y_len
 
@@ -213,11 +213,26 @@ contains
             endif
 
         else
-            call io_read(this%firstfile, p_var,   temp_z,   this%firststep)
-            nx = size(temp_z,1)
-            ny = size(temp_z,2)
-            nz = size(temp_z,3)
+            !get number of dimensions of qv_var to size the z array
+            call io_getdims(this%firstfile, qv_var, qv_dims)
+            if (STD_OUT_PE) write(*,*) '    Using Z dimension from qv variable in forcing data to construct forcing height coordinate...'
 
+            if (size(qv_dims) == 4 .or. size(qv_dims) == 3) then
+                !qv is 3D, read normally...
+                call io_read(this%firstfile, qv_var,   temp_z,   this%firststep)
+                nx = size(temp_z,1)
+                ny = size(temp_z,2)
+                nz = size(temp_z,3)
+            elseif (size(qv_dims) == 1 .or. size(qv_dims) == 2) then
+                !qv is 1D, read and expand to 3D
+                if (STD_OUT_PE) write(*,*) '    qv variable is 1D or 2D, assuming it is spatially 1D in the vertical...'
+                
+                call io_read(this%firstfile, qv_var,   temp_z_1d,   this%firststep)
+                nz = size(temp_z_1d,1)
+            else
+                write(*,*) 'ERROR: qv dimension on forcing data is not spatially 1D or 3D'
+                stop
+            endif
             if (allocated(this%z)) deallocate(this%z)
             allocate(this%z((this%ite-this%its+1),nz,(this%jte-this%jts+1)))
 
@@ -386,21 +401,35 @@ contains
         this%ite = temp_inds(1); this%jte = temp_inds(2)
 
         ! increase boundary image indices by 5 as buffer to allow for interpolation
-        this%its = max(this%its - 8,1)
-        this%ite = min(this%ite + 8,nx)
-        this%jts = max(this%jts - 8,1)
-        this%jte = min(this%jte + 8,ny)
+        this%its = max(this%its - 2,1)
+        this%ite = min(this%ite + 2,nx)
+        this%jts = max(this%jts - 2,1)
+        this%jte = min(this%jte + 2,ny)
 
-        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  d_ims: ',d_ims,'  d_ime: ',d_ime,'  d_jms: ',d_jms,'  d_jme: ',d_jme
-        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  LLlat: ',LLlat,'  LLlon: ',LLlon,'  URlat: ',URlat,'  URlon: ',URlon
-        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  min_loc: ',minloc(LL_d),'  max_loc: ',minloc(UR_d)
-        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  min_lat: ',minval(domain_lat),'  max_lat: ',maxval(domain_lat)
-        ! if (this%ite < this%its .or. this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  lat_corners: ',lat_corners,'  lon_corners: ',lon_corners
-        if (this%ite < this%its .or. this%jte < this%jts) call io_write('domain_lat.nc',"domain_lat",domain_lat)
-        if (this%ite < this%its .or. this%jte < this%jts) call io_write('domain_lon.nc',"domain_lon",domain_lon)
-        if (this%ite < this%its .or. this%jte < this%jts) call io_write('boundary_lat.nc',"lat",temp_lat)
-        if (this%ite < this%its .or. this%jte < this%jts) call io_write('boundary_lon.nc',"lon",temp_lon)
+        if (minval(temp_lat(this%its:this%ite,this%jts:this%jte)) > LLlat) then
+            write(*,*) 'WARNING: Lower left latitude of domain not contained within forcing data, set_boundary_image method failed'
+            write(*,*) 'minval(domain_lat): ',minval(domain_lat),'  minval(forcing_lat): ',minval(temp_lat)
+            write(*,*) 'maxval(domain_lat): ',maxval(domain_lat),'  maxval(forcing_lat): ',maxval(temp_lat)
+            stop
+        endif
+        if (minval(temp_lon(this%its:this%ite,this%jts:this%jte)) > LLlon) then
+            write(*,*) 'WARNING: Lower left longitude of domain not contained within forcing data, set_boundary_image method failed'
+            write(*,*) 'minval(domain_lon): ',minval(domain_lon),'  minval(forcing_lon): ',minval(temp_lon)
+            write(*,*) 'maxval(domain_lon): ',maxval(domain_lon),'  maxval(forcing_lon): ',maxval(temp_lon)
+            stop
+        endif
+        if (maxval(temp_lat(this%its:this%ite,this%jts:this%jte)) < URlat) then
+            write(*,*) 'WARNING: Upper right latitude of domain not contained within forcing data, set_boundary_image method failed'
+            write(*,*) 'minval(domain_lat): ',minval(domain_lat),'  minval(forcing_lat): ',minval(temp_lat)
+            write(*,*) 'maxval(domain_lat): ',maxval(domain_lat),'  maxval(forcing_lat): ',maxval(temp_lat)
+            stop
+        endif
+        if (maxval(temp_lon(this%its:this%ite,this%jts:this%jte)) < URlon) then
+            write(*,*) 'WARNING: Upper right longitude of domain not contained within forcing data, set_boundary_image method failed'
+            write(*,*) 'minval(domain_lon): ',minval(domain_lon),'  minval(forcing_lon): ',minval(temp_lon)
+            write(*,*) 'maxval(domain_lon): ',maxval(domain_lon),'  maxval(forcing_lon): ',maxval(temp_lon)
+            stop
+        endif
 
     end subroutine set_boundary_image
 
@@ -724,7 +753,6 @@ contains
 
         qvar = list%get_var(kVARS%water_vapor)
         tvar = list%get_var(kVARS%potential_temperature)
-        zvar = list%get_var(kVARS%terrain)
         var = list%get_var(kVARS%pressure, err)
 
         pvar = list%get_var(kVARS%sea_surface_pressure, err)
@@ -742,6 +770,7 @@ contains
 
         else
             pvar = list%get_var(kVARS%surface_pressure, err)
+            zvar = list%get_var(kVARS%terrain)
             if (err == 0) then
                 call compute_3d_z(var%data_3d, pvar%data_2d, this%z, t, qvar%data_3d, zvar%data_2d)
             else

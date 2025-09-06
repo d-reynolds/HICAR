@@ -320,6 +320,8 @@ contains
         n_valid_vars = 0
         do i=1, size(master_var_list)
             if (trim(master_var_list(i)) /= '') then
+                !check if "_computed" is in the variable name, if so skip it
+                if (index(trim(master_var_list(i)), '_computed') > 0) cycle
                 n_valid_vars = n_valid_vars + 1
             endif
         enddo
@@ -333,6 +335,8 @@ contains
         curvar = 1
         do i=1, size(master_var_list)
             if (trim(master_var_list(i)) /= '') then
+                !check if "_computed" is in the variable name, if so skip it
+                if (index(trim(master_var_list(i)), '_computed') > 0) cycle
                 vars_to_read(curvar) = master_var_list(i)
                 var_dimensions(curvar) = master_dim_list(i)
                 ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)

@@ -727,7 +727,6 @@ contains
         
         call require_var(lonvar, "Longitude")
         call require_var(latvar, "Latitude")
-        call require_var(zvar, "Verticle Level Height")
         call require_var(uvar, "U winds")
         call require_var(vvar, "V winds")
         call require_var(tvar, "Temperature")
