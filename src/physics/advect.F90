@@ -102,8 +102,8 @@ contains
         if (horder==1) then
             t_factor_compact = 0.5  * t_factor
             !$acc parallel async(1)
-            ! Using tile(32,4) for better cache locality in 3D loop with moderate k dimension
-            !$acc loop gang vector tile(32,4,1) private(u_val, v_val, abs_u_val, q0, qn1, qn3)
+            ! Using tile(32,2) for better cache locality in 3D loop with moderate k dimension
+            !$acc loop gang vector tile(32,2,1) private(u_val, v_val, abs_u_val, q0, qn1, qn3)
             do j = j_s, j_e
                 do k = kms+1, kme
                     do i = i_s, i_e
@@ -128,7 +128,7 @@ contains
             enddo
 
             ! Using tile(32) for 2D loops - good balance for horizontal dimensions
-            !$acc loop gang vector tile(32,4) private(u_val, abs_u_val, q0, qn1)
+            !$acc loop gang vector tile(32,2) private(u_val, abs_u_val, q0, qn1)
             do j = j_s, j_e
                 do k = kms, kme
                     qn1 = q(i_e,k,j)
@@ -140,7 +140,7 @@ contains
                 enddo
             enddo
 
-            !$acc loop gang vector tile(32,4) private(v_val, abs_u_val, q0, qn3)
+            !$acc loop gang vector tile(32,2) private(v_val, abs_u_val, q0, qn3)
             do k = kms, kme
                 do i = i_s, i_e
                     qn3 = q(i,k,j_e)
@@ -152,7 +152,7 @@ contains
                 enddo
             enddo
 
-            !$acc loop gang vector tile(32,1) private(u_val, v_val, abs_u_val, q0, qn1, qn3)
+            !$acc loop gang vector tile(64,1) private(u_val, v_val, abs_u_val, q0, qn1, qn3)
             do j = j_s, j_e
                 do i = i_s, i_e
                     q0 = q(i,kms,j)
@@ -173,8 +173,8 @@ contains
         else if (horder==3) then
             coef = (1./12) * t_factor
 
-            ! Using tile(32,4) for 3D loop with complex stencil operations
-            !$acc parallel loop gang vector tile(32,4,1) async(1) private(u_val, abs_u_val, q_cache, tmp)
+            ! Using tile(32,2) for 3D loop with complex stencil operations
+            !$acc parallel loop gang vector tile(32,2,1) async(1) private(u_val, abs_u_val, q_cache, tmp)
             do j = j_s,j_e+1
             do k = kms,kme
             do i = i_s,i_e+1
@@ -218,8 +218,8 @@ contains
         else if (horder==5) then
             coef = (1./60)*t_factor
             !$acc parallel async(1)
-            ! Using tile(32,4) for complex 5th order stencil computations
-            !$acc loop gang vector tile(32,4,1)  private(u_val, abs_u_val, q_cache, tmp)
+            ! Using tile(32,2) for complex 5th order stencil computations
+            !$acc loop gang vector tile(32,2,1)  private(u_val, abs_u_val, q_cache, tmp)
             do j = j_s,j_e
             do k = kms,kme
             do i = i_s,i_e+1
@@ -247,7 +247,7 @@ contains
             enddo
             enddo
             
-            !$acc loop gang vector tile(32,4,1)  private(u_val, abs_u_val, q_cache, tmp)
+            !$acc loop gang vector tile(32,2,1)  private(u_val, abs_u_val, q_cache, tmp)
             do j = j_s,j_e+1
             do k = kms,kme
             do i = i_s,i_e
@@ -278,8 +278,8 @@ contains
         if (vorder==1) then
             t_factor_compact = 0.5  * t_factor
             !$acc parallel async(2)
-            ! Using tile(32,4) for vertical flux computation
-            !$acc loop gang vector tile(32,4,1) private(w_val, abs_u_val, q0, qn1)
+            ! Using tile(32,2) for vertical flux computation
+            !$acc loop gang vector tile(32,2,1) private(w_val, abs_u_val, q0, qn1)
             do j = j_s,j_e
                do k = kms+1,kme
                    do i = i_s,i_e
@@ -293,7 +293,7 @@ contains
                    enddo
                enddo
             enddo
-            !$acc loop gang vector tile(32,1) private(w_val, q0)
+            !$acc loop gang vector tile(64,1) private(w_val, q0)
             do j = j_s,j_e
                 do i = i_s,i_e
                     ! flux_z(i,kms,j) = 0
@@ -305,8 +305,8 @@ contains
             !$acc end parallel
         else if (vorder==3) then
             coef = (1./12)*t_factor
-            ! Using tile(32,8) for vertical direction with more k levels
-            !$acc parallel loop gang vector tile(32,4,1) async(2) private(u_val, abs_u_val, tmp)
+            ! Using tile(32,2) for vertical direction with more k levels
+            !$acc parallel loop gang vector tile(32,2,1) async(2) private(u_val, abs_u_val, tmp)
             do j = j_s,j_e
             do k = kms+1,kme+1
             do i = i_s,i_e
@@ -335,8 +335,8 @@ contains
         else if (vorder==5) then
             coef = (1./60)*t_factor
             !$acc parallel async(2)
-            ! Using tile(32,4) for complex 5th order vertical computations
-            !$acc loop gang vector tile(32,4,1) private(u_val, abs_u_val, q_cache, tmp)
+            ! Using tile(32,2) for complex 5th order vertical computations
+            !$acc loop gang vector tile(32,2,1) private(u_val, abs_u_val, q_cache, tmp)
             do j = j_s,j_e
             do k = kms+3,kme-2
             do i = i_s,i_e
@@ -363,7 +363,7 @@ contains
             enddo
             
             coef = (1./12)*t_factor
-            !$acc loop gang vector tile(32,1) private(u_val, abs_u_val, q_cache, tmp, q0, qn1)
+            !$acc loop gang vector tile(64,1) private(u_val, abs_u_val, q_cache, tmp, q0, qn1)
             do j = j_s,j_e
                 do i = i_s,i_e
                     
@@ -455,7 +455,7 @@ contains
         endif
         call sum_time%start()
         
-        !$acc parallel loop gang vector tile(32,4,1) present(qfluxes,qold,flux_x,flux_y,flux_z,denom,dz) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val)
+        !$acc parallel loop gang vector tile(32,2,1) present(qfluxes,qold,flux_x,flux_y,flux_z,denom,dz) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val)
         do j = jts, jte
             do k = kms, kme
             do i = its, ite
@@ -582,7 +582,7 @@ contains
         enddo
 
         !$acc parallel
-        !$acc loop gang vector collapse(3)
+        !$acc loop gang vector tile(32,2,1)
         do j = j_s,j_e+1
             do k = kms,kme
                 do i = i_s,i_e+1
@@ -594,7 +594,7 @@ contains
             enddo
         enddo
 
-        !$acc loop gang vector collapse(3)
+        !$acc loop gang vector tile(32,2,1)
         do j = j_s,j_e+1
             do k = kms,kme-1
                 do i = i_s,i_e+1

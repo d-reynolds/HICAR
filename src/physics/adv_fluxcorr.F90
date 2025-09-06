@@ -50,7 +50,7 @@ contains
 
         !$acc enter data create(usign, vsign, wsign)
         !$acc data present(u, v, w, usign, vsign, wsign)
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector tile(32,2,1)
         do j = jts-1,jte+1
             do k = kms,kme
                 do i = its-1,ite+1
@@ -137,7 +137,7 @@ contains
         !$acc create(scale_in,scale_out)
 
         ! Next compute max and min possible fluxes        
-        !$acc parallel loop gang vector tile(32,4,1) async(1)
+        !$acc parallel loop gang vector tile(32,2,1) async(1)
         do j = jts-1, jte+1 
             do k = kms, kme
                 do i = its-1, ite+1
@@ -232,7 +232,7 @@ contains
             enddo
         enddo
 
-        !$acc parallel loop gang vector tile(32,4,1) async(2) wait(1)
+        !$acc parallel loop gang vector tile(32,2,1) async(2) wait(1)
         do j = jts, jte+1 
             do k = kms, kme
                 do i = its, ite+1
@@ -312,7 +312,7 @@ contains
 
         !Now compute upwind fluxes after second step
 
-        !$acc parallel loop gang vector tile(32,4,1) private(q_cache, tmp) async(1)
+        !$acc parallel loop gang vector tile(32,2,1) private(q_cache, tmp) async(1)
         do j = jts-1, jte+2
             do k = kms, kme+1
                 do i = its-1, ite+2
@@ -347,7 +347,7 @@ contains
         enddo
 
         
-        !$acc parallel loop gang vector tile(32,4,1) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val) async(2) wait(1)
+        !$acc parallel loop gang vector tile(32,2,1) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val) async(2) wait(1)
         do j = jms, jme
             do k = kms, kme
             do i = ims, ime
@@ -379,7 +379,7 @@ contains
 
         !Now compute upwind fluxes after second step
 
-        !$acc parallel loop gang vector tile(32,4,1) private(q_cache, tmp) async(3) wait(2)
+        !$acc parallel loop gang vector tile(32,2,1) private(q_cache, tmp) async(3) wait(2)
         do j = jts-1, jte+2
             do k = kms, kme+1
                 do i = its-1, ite+2
