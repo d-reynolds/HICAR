@@ -2826,8 +2826,8 @@ contains
 
         do_west = (this%ims < this%ids+this%grid%halo_size+FILTER_WIDTH)
         do_east = (this%ime > this%ide-this%grid%halo_size-FILTER_WIDTH)
-        do_north = (this%jms < this%jds+this%grid%halo_size+FILTER_WIDTH)
-        do_south = (this%jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
+        do_south = (this%jms < this%jds+this%grid%halo_size+FILTER_WIDTH)
+        do_north = (this%jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
 
         do_boundary = (do_west .or. do_east .or. do_north .or. do_south)
 
@@ -2839,11 +2839,11 @@ contains
 
             ! limit vertical extent of west and east boundaries to the extent of the north/south indices
             ! this prevents double-calculating points in the corners
-            if (do_west .and. do_south) jms_b(1) = max(jms_b(1),jms_b(4))
-            if (do_east .and. do_south) jms_b(2) = max(jms_b(2),jms_b(4))
+            if (do_west .and. do_south) jms_b(1) = max(jms_b(1),jme_b(4))
+            if (do_east .and. do_south) jms_b(2) = max(jms_b(2),jme_b(4))
 
-            if (do_west .and. do_north) jme_b(1) = min(jme_b(1),jme_b(3))
-            if (do_east .and. do_north) jme_b(2) = min(jme_b(2),jme_b(3))
+            if (do_west .and. do_north) jme_b(1) = min(jme_b(1),jms_b(3))
+            if (do_east .and. do_north) jme_b(2) = min(jme_b(2),jms_b(3))
         endif
 
         !$acc data copyin(ims_b,ime_b,jms_b,jme_b)
