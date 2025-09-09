@@ -21,15 +21,15 @@ import ProjHelpers as ph
 # GLOBAL definitions
 WGS64_crs = pyproj.CRS('EPSG:4326')
 
-def wholeShebang(ds_in,ds_in_rad=0,res=50,terr_filter=10,TPI_thresh=100,valley_thresh=1500,LL_border=0.05,LU_Category='USGS'):
+def wholeShebang(ds_in,ds_in_rad=0,res=50,terr_filter=10,TPI_thresh=100,valley_thresh=1500,LL_border=0.05,LU_Category='USGS',topo_var='topo',lat_var='lat',lon_var='lon'):
     
-    if ('lat' in ds_in_rad):
+    if (lat_var in ds_in_rad):
         print('Adding Radiation Shading variable...')
-        ds_in = addHorayzonParms(ds_in,ds_in_rad)
+        ds_in = addHorayzonParms(ds_in,ds_in_rad,topo_var=topo_var,lat_var=lat_var,lon_var=lon_var)
     #ds_in = addRidgeValleyDists(ds_in,ds_in_rad,res=res,terr_filter=terr_filter,TPI_thresh=TPI_thresh,\
     #                            valley_thresh=valley_thresh,LL_border=LL_border)
-    
-    ds_in = addSlopeAspect(ds_in,res)
+
+    ds_in = addSlopeAspect(ds_in,res,topo_var=topo_var)
     ds_in = addSnowHoldingDepth(ds_in)
 
     if (not('landmask' in ds_in.variables)): 
@@ -42,7 +42,7 @@ def wholeShebang(ds_in,ds_in_rad=0,res=50,terr_filter=10,TPI_thresh=100,valley_t
     
     return ds_in
 
-def addHorayzonParms(ds_in,ds_in_rad):
+def addHorayzonParms(ds_in,ds_in_rad,topo_var='topo',lat_var='lat',lon_var='lon'):
     # Description: Compute gridded topographic parameters (slope angle and aspect,
     #              horizon and sky view factor) for an input DEM Ignore Earth's surface
     #              curvature.
@@ -61,8 +61,8 @@ def addHorayzonParms(ds_in,ds_in_rad):
     azim_num = 90  # number of azimuth sampling directions [-]
     ellps = "WGS84"  # Earth's surface approximation (sphere, GRS80 or WGS84)
 
-    domain = {"lon_min": np.amin(ds_in.lon.values), "lon_max": np.amax(ds_in.lon.values),
-              "lat_min": np.amin(ds_in.lat.values), "lat_max": np.amax(ds_in.lat.values)}
+    domain = {"lon_min": np.amin(ds_in[lon_var].values), "lon_max": np.amax(ds_in[lon_var].values),
+              "lat_min": np.amin(ds_in[lat_var].values), "lat_max": np.amax(ds_in[lat_var].values)}
     file_hori_temp = "./horayzon_temp_out.nc"
 
     # -----------------------------------------------------------------------------
@@ -70,9 +70,9 @@ def addHorayzonParms(ds_in,ds_in_rad):
     # -----------------------------------------------------------------------------
 
     # Load required DEM data (including outer boundary zone)
-    lon = ds_in_rad.lon.values.astype('float64')[0,:]
-    lat = np.flipud(ds_in_rad.lat.values.astype('float64'))[:,0]
-    elevation = np.flipud(ds_in_rad.topo.values.astype('float32'))
+    lon = ds_in_rad[lon_var].values.astype('float64')[0,:]
+    lat = np.flipud(ds_in_rad[lat_var].values.astype('float64'))[:,0]
+    elevation = np.flipud(ds_in_rad[topo_var].values.astype('float32'))
 
     # -> GeoTIFF can also be read with GDAL if available (-> faster)
 
@@ -163,7 +163,7 @@ def addHorayzonParms(ds_in,ds_in_rad):
     rad_ds.hlm.values = np.flip(rad_ds.hlm.values,axis=1)
 
     hlm_ds, __ = ph.regridToDs(rad_ds,ds_in,WGS64_crs,ds_in_xvar='lon',ds_in_yvar='lat',\
-                        ds_in_xdim='x',ds_in_ydim='y',to_ds_xvar='lon',to_ds_yvar='lat',\
+                        ds_in_xdim='x',ds_in_ydim='y',to_ds_xvar=lon_var,to_ds_yvar=lat_var,\
                         to_ds_xdim='x',to_ds_ydim='y',method='bilinear')
     
     ds_in["hlm"]=(("a", "y", "x"), hlm_ds.hlm.values)
@@ -209,10 +209,10 @@ def makeGrid(src_crs,resolution,x_min,x_max,y_min,y_max):
         
     return to_ds
 
-def addSlopeAspect(ds_in,res=50):
+def addSlopeAspect(ds_in,res=50,topo_var='topo'):
     # we easily calculate the sf/dx, df/dy by giving the resolution as below
-    slpx=np.gradient(ds_in.topo.data,res,res)[1]
-    slpy=np.gradient(ds_in.topo.data,res,res)[0]
+    slpx=np.gradient(ds_in[topo_var].data,res,res)[1]
+    slpy=np.gradient(ds_in[topo_var].data,res,res)[0]
 
     # first, we calculate everything in dgree then conert it to radian
     slope=np.hypot(slpy,slpx)
@@ -277,36 +277,36 @@ def get_length_of_degree(latitude):
 # it then extracts the data from large_dom corresponding to a window 15 km larger than the ds dataset
 # it returns the extracted data in a new xarray dataset
 
-def extract_rad_window(ds, large_dom, large_dom_res=50, window_km=15):
+def extract_rad_window(ds, large_dom, large_dom_res=50, window_km=15,lat_var='lat',lon_var='lon'):
 
     # get the coordinates of the ds dataset
-    lat_min = ds.lat.min().values
-    lat_max = ds.lat.max().values
-    lon_min = ds.lon.min().values
-    lon_max = ds.lon.max().values
+    lat_min = ds[lat_var].min().values
+    lat_max = ds[lat_var].max().values
+    lon_min = ds[lon_var].min().values
+    lon_max = ds[lon_var].max().values
 
     # get the coordinates of the swiss_dom dataset
-    lat_min_large = large_dom.lat.min().values
-    lat_max_large = large_dom.lat.max().values
-    lon_min_large = large_dom.lon.min().values
-    lon_max_large = large_dom.lon.max().values
+    lat_min_large = large_dom[lat_var].min().values
+    lat_max_large = large_dom[lat_var].max().values
+    lon_min_large = large_dom[lon_var].min().values
+    lon_max_large = large_dom[lon_var].max().values
 
     mean_lat = (lat_min+lat_max)/2.0
     LoLat, LoLon = get_length_of_degree(mean_lat)
 
     # calculate the indices of the lower left and upper right corners of the ds dataset
-    distances = np.sqrt((large_dom.lat - lat_min)**2 + 
-                        (large_dom.lon - lon_min)**2)
-    
+    distances = np.sqrt((large_dom[lat_var] - lat_min)**2 + 
+                        (large_dom[lon_var] - lon_min)**2)
+
     # Step 3: Find the index of the minimum distance
     closest_index = distances.argmin()
     
     # Step 4: Convert the 1D index to 2D coordinates
     j_min, i_min = np.unravel_index(closest_index, distances.shape)   
-    
-    distances = np.sqrt((large_dom.lat - lat_max)**2 + 
-                        (large_dom.lon - lon_max)**2)
-    
+
+    distances = np.sqrt((large_dom[lat_var] - lat_max)**2 + 
+                        (large_dom[lon_var] - lon_max)**2)
+
     # Step 3: Find the index of the minimum distance
     closest_index = distances.argmin()
     
