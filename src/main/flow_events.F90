@@ -455,96 +455,96 @@ subroutine component_program_end(component, options)
         select type (comp)
             type is (domain_t)
                 if (STD_OUT_PE) write(*,"(A22,I2,A2,A,A16)") "-------------- Domain ",i," (",trim(options(i)%domain%init_conditions_file),") --------------"
-                if (STD_OUT_PE) write(*,'(A31 A10 A3 A10 A3 A10)') " ", "mean", " | ", "min", " | ", "max"
+                if (STD_OUT_PE) write(*,'(A31, A10, A3, A10, A3, A10)') " ", "mean", " | ", "min", " | ", "max"
                 t_val = comp%total_timer%mean(comp%compute_comms)
                 t_val2 = comp%total_timer%min(comp%compute_comms)
                 t_val3 = comp%total_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "total", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "total", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%initialization_timer%mean(comp%compute_comms)
                 t_val2 = comp%initialization_timer%min(comp%compute_comms)
                 t_val3 = comp%initialization_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "init", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "init", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%input_timer%mean(comp%compute_comms)
                 t_val2 = comp%input_timer%min(comp%compute_comms)
                 t_val3 = comp%input_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "input", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "input", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%output_timer%mean(comp%compute_comms)
                 t_val2 = comp%output_timer%min(comp%compute_comms)
                 t_val3 = comp%output_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "output", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "output", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%physics_timer%mean(comp%compute_comms)
                 t_val2 = comp%physics_timer%min(comp%compute_comms)
                 t_val3 = comp%physics_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "physics", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "physics", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%mp_timer%mean(comp%compute_comms)
                 t_val2 = comp%mp_timer%min(comp%compute_comms)
                 t_val3 = comp%mp_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "microphysics", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "microphysics", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%adv_timer%mean(comp%compute_comms)
                 t_val2 = comp%adv_timer%min(comp%compute_comms)
                 t_val3 = comp%adv_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "advection", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%sum_timer%mean(comp%compute_comms)
                 t_val2 = comp%sum_timer%min(comp%compute_comms)
                 t_val3 = comp%sum_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_sum", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "advection_sum", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%flux_timer%mean(comp%compute_comms)
                 t_val2 = comp%flux_timer%min(comp%compute_comms)
                 t_val3 = comp%flux_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_flux", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "advection_flux", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%flux_corr_timer%mean(comp%compute_comms)
                 t_val2 = comp%flux_corr_timer%min(comp%compute_comms)
                 t_val3 = comp%flux_corr_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_flux_corr", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "advection_flux_corr", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%adv_wind_timer%mean(comp%compute_comms)
                 t_val2 = comp%adv_wind_timer%min(comp%compute_comms)
                 t_val3 = comp%adv_wind_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "advection_wind", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "advection_wind", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%rad_timer%mean(comp%compute_comms)
                 t_val2 = comp%rad_timer%min(comp%compute_comms)
                 t_val3 = comp%rad_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "radiation", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "radiation", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%lsm_timer%mean(comp%compute_comms)
                 t_val2 = comp%lsm_timer%min(comp%compute_comms)
                 t_val3 = comp%lsm_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "LSM", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "LSM", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%pbl_timer%mean(comp%compute_comms)
                 t_val2 = comp%pbl_timer%min(comp%compute_comms)
                 t_val3 = comp%pbl_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "PBL", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "PBL", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%forcing_timer%mean(comp%compute_comms)
                 t_val2 = comp%forcing_timer%min(comp%compute_comms)
                 t_val3 = comp%forcing_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "forcing", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "forcing", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%wind_bal_timer%mean(comp%compute_comms)
                 t_val2 = comp%wind_bal_timer%min(comp%compute_comms)
                 t_val3 = comp%wind_bal_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "wind bal", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "wind bal", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%diagnostic_timer%mean(comp%compute_comms)
                 t_val2 = comp%diagnostic_timer%min(comp%compute_comms)
                 t_val3 = comp%diagnostic_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "diagnostic", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "diagnostic", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%send_timer%mean(comp%compute_comms)
                 t_val2 = comp%send_timer%min(comp%compute_comms)
                 t_val3 = comp%send_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "halo-exchange(send)", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "halo-exchange(send)", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%ret_timer%mean(comp%compute_comms)
                 t_val2 = comp%ret_timer%min(comp%compute_comms)
                 t_val3 = comp%ret_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "halo-exchange(retrieve)", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "halo-exchange(retrieve)", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%wait_timer%mean(comp%compute_comms)
                 t_val2 = comp%wait_timer%min(comp%compute_comms)
                 t_val3 = comp%wait_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "halo-exchange(wait)", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "halo-exchange(wait)", ":", t_val, " | ", t_val2, " | ", t_val3
                 t_val = comp%wind_timer%mean(comp%compute_comms)
                 t_val2 = comp%wind_timer%min(comp%compute_comms)
                 t_val3 = comp%wind_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "winds", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "winds", ":", t_val, " | ", t_val2, " | ", t_val3
 #ifdef _OPENACC
                 t_val = comp%cpu_gpu_timer%mean(comp%compute_comms)
                 t_val2 = comp%cpu_gpu_timer%min(comp%compute_comms)
                 t_val3 = comp%cpu_gpu_timer%max(comp%compute_comms)
-                if (STD_OUT_PE) write(*,'(A30 A1 F10.3 A3 F10.3 A3 F10.3)') "CPU-GPU transfers", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "CPU-GPU transfers", ":", t_val, " | ", t_val2, " | ", t_val3
 #endif
                 if (STD_OUT_PE) flush(output_unit)
                 if ( ANY(options%physics%windtype == kITERATIVE_WINDS) .or. ANY(options%physics%windtype == kLINEAR_ITERATIVE_WINDS)) then
