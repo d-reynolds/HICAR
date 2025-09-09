@@ -93,7 +93,6 @@ MODULE MODULE_MP_MORR_TWO_MOMENT
 !  USE module_state_description
 
    IMPLICIT NONE
-   private
    PUBLIC  ::  MP_MORR_TWO_MOMENT, MORR_TWO_MOMENT_INIT
 
    REAL, PARAMETER :: PI = 3.1415926535897932384626434
@@ -103,6 +102,7 @@ MODULE MODULE_MP_MORR_TWO_MOMENT
 
    PRIVATE :: GAMMA, DERF1
    PRIVATE :: PI, SQRTPI
+   PRIVATE :: MORR_TWO_MOMENT_MICRO
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ! SWITCHES FOR MICROPHYSICS SCHEME
@@ -236,18 +236,6 @@ MODULE MODULE_MP_MORR_TWO_MOMENT
      REAL, PRIVATE :: CONS21,CONS22,CONS23,CONS24,CONS25,CONS26,CONS27,CONS28,CONS29,CONS30
      REAL, PRIVATE :: CONS31,CONS32,CONS33,CONS34,CONS35,CONS36,CONS37,CONS38,CONS39,CONS40
      REAL, PRIVATE :: CONS41
-      !$acc declare create(PI, SQRTPI, QSMALL,RHOW, dcs, cons1, cons12, &
-      !$acc   IACT, INUM, NDCNST, ILIQ, INUC, IBASE, ISUB, IGRAUP, IHAIL, &
-      !$acc   AI, AC, AS, AR, AG, BI, BC, BS, BR, BG, RHOSU, RHOI, RHOSN, RHOG, &
-      !$acc   AIMM, BIMM, ECR, MI0, MG0, F1S, F2S, F1R, F2R, EII, ECI, RIN, CPW, &
-      !$acc   CI, DI, CS, DS, CG, DG, C1, K1, MW, OSM, VI, EPSM, RHOA, MAP, MA, RR, &
-      !$acc   BACT, RM1, RM2, NANEW1, NANEW2, SIG1, SIG2, F11, F12, F21, F22, MMULT, &
-      !$acc   LAMMAXI, LAMMINI, LAMMAXR, LAMMINR, LAMMAXS, LAMMINS, LAMMAXG, LAMMING, &
-      !$acc   CONS2, CONS3, CONS4, CONS5, CONS6, CONS7, CONS8, CONS9, CONS10, &
-      !$acc   CONS11, CONS13, CONS14, CONS15, CONS16, CONS17, CONS18, CONS19, CONS20, &
-      !$acc   CONS21, CONS22, CONS23, CONS24, CONS25, CONS26, CONS27, CONS28, CONS29, &
-      !$acc   CONS30, CONS31, CONS32, CONS33, CONS34, CONS35, CONS36, CONS37, CONS38, &
-      !$acc   CONS39, CONS40, CONS41)
 
 
 CONTAINS
@@ -544,18 +532,6 @@ SUBROUTINE MORR_TWO_MOMENT_INIT(hail_opt) ! RAS
         !  call radar_init
 !+---+-----------------------------------------------------------------+
 
-      !$acc update device(QSMALL,RHOW, dcs, cons1, cons12, &
-      !$acc   IACT, INUM, NDCNST, ILIQ, INUC, IBASE, ISUB, IGRAUP, IHAIL, &
-      !$acc   AI, AC, AS, AR, AG, BI, BC, BS, BR, BG, RHOSU, RHOI, RHOSN, RHOG, &
-      !$acc   AIMM, BIMM, ECR, MI0, MG0, F1S, F2S, F1R, F2R, EII, ECI, RIN, CPW, &
-      !$acc   CI, DI, CS, DS, CG, DG, C1, K1, MW, OSM, VI, EPSM, RHOA, MAP, MA, RR, &
-      !$acc   BACT, RM1, RM2, NANEW1, NANEW2, SIG1, SIG2, F11, F12, F21, F22, MMULT, &
-      !$acc   LAMMAXI, LAMMINI, LAMMAXR, LAMMINR, LAMMAXS, LAMMINS, LAMMAXG, LAMMING, &
-      !$acc   CONS2, CONS3, CONS4, CONS5, CONS6, CONS7, CONS8, CONS9, CONS10, &
-      !$acc   CONS11, CONS13, CONS14, CONS15, CONS16, CONS17, CONS18, CONS19, CONS20, &
-      !$acc   CONS21, CONS22, CONS23, CONS24, CONS25, CONS26, CONS27, CONS28, CONS29, &
-      !$acc   CONS30, CONS31, CONS32, CONS33, CONS34, CONS35, CONS36, CONS37, CONS38, &
-      !$acc   CONS39, CONS40, CONS41)
 
 END SUBROUTINE MORR_TWO_MOMENT_INIT
 
@@ -576,7 +552,7 @@ END SUBROUTINE MORR_TWO_MOMENT_INIT
 
 SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
                 TH, QV, QC, QR, QI, QS, QG, NI, NS, NR, NG, &
-                RHO_IN, PII, P, DT_IN, DZ, W,          &
+                RHO, PII, P, DT_IN, DZ, W,          &
                 RAINNC, RAINNCV, SR,                    &
                 SNOWNC,SNOWNCV,GRAUPELNC,GRAUPELNCV,    & ! hm added 7/13/13
                 EFFC, EFFI, EFFS,                       & ! particle radiuses for radiation
@@ -676,7 +652,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 !, effcs, effis
 
    REAL, DIMENSION(ims:ime, kms:kme, jms:jme), INTENT(IN):: &
-                          pii, p, dz, RHO_IN, w !, tke, nctend, nitend,kzh
+                          pii, p, dz, rho, w !, tke, nctend, nitend,kzh
    REAL, INTENT(IN):: dt_in
    INTEGER, INTENT(IN):: ITIMESTEP
 
@@ -693,7 +669,21 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    ! LOCAL VARIABLES
 
    REAL, DIMENSION(its:ite, kts:kte, jts:jte)::                     &
-                      EFFR, EFFG
+                      T, WVAR, EFFR, EFFG
+
+   REAL, DIMENSION(kts:kte) ::                                                                &
+                            QC_TEND1D, QI_TEND1D, QNI_TEND1D, QR_TEND1D,                      &
+                            NI_TEND1D, NS_TEND1D, NR_TEND1D,                                  &
+                            QC1D, QI1D, QR1D,NI1D, NS1D, NR1D, QS1D,                          &
+                            T_TEND1D,QV_TEND1D, T1D, QV1D, P1D, W1D, WVAR1D,         &
+                            EFFC1D, EFFI1D, EFFS1D, EFFR1D,DZ1D,   &
+   ! HM ADD GRAUPEL
+                            QG_TEND1D, NG_TEND1D, QG1D, NG1D, EFFG1D, &
+
+! ADD SEDIMENTATION TENDENCIES (UNITS OF KG/KG/S)
+                            QGSTEN,QRSTEN, QISTEN, QNISTEN, QCSTEN, &
+! ADD CUMULUS TENDENCIES
+                            QRCU1D, QSCU1D, QICU1D
 
 ! add cumulus tendencies
 
@@ -707,12 +697,12 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
   integer :: iinum ! wrf-chem
 
 ! wrf-chem
-   REAL, DIMENSION(kts:kte) :: nc1d, nc_tend1d
-   !REAL, DIMENSION(kts:kte) :: rainprod1d, evapprod1d
+   REAL, DIMENSION(kts:kte) :: nc1d, nc_tend1d,C2PREC,CSED,ISED,SSED,GSED,RSED
+   REAL, DIMENSION(kts:kte) :: rainprod1d, evapprod1d
 ! HM add reflectivity
-   !REAL, DIMENSION(kts:kte) :: dBZ
+   REAL, DIMENSION(kts:kte) :: dBZ
 
-   REAL, dimension(its:ite,jts:jte) :: PRECPRT1D, SNOWRT1D, SNOWPRT1D, GRPLPRT1D ! hm added 7/13/13
+   REAL PRECPRT1D, SNOWRT1D, SNOWPRT1D, GRPLPRT1D ! hm added 7/13/13
 
    INTEGER I,K,J
 
@@ -721,67 +711,337 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    LOGICAL, OPTIONAL, INTENT(IN) :: diagflag
    INTEGER, OPTIONAL, INTENT(IN) :: do_radar_ref
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!START OF DECLARATIONS FROM INLINED FUNCTION!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-! INPUT/OUTPUT PARAMETERS                                 ! DESCRIPTION (UNITS)
-
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QC3DTEN            ! CLOUD WATER MIXING RATIO TENDENCY (KG/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QI3DTEN            ! CLOUD ICE MIXING RATIO TENDENCY (KG/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QNI3DTEN           ! SNOW MIXING RATIO TENDENCY (KG/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QR3DTEN            ! RAIN MIXING RATIO TENDENCY (KG/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  NI3DTEN            ! CLOUD ICE NUMBER CONCENTRATION (1/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  NS3DTEN            ! SNOW NUMBER CONCENTRATION (1/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  NR3DTEN            ! RAIN NUMBER CONCENTRATION (1/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QC3D               ! CLOUD WATER MIXING RATIO (KG/KG)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QI3D               ! CLOUD ICE MIXING RATIO (KG/KG)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QNI3D              ! SNOW MIXING RATIO (KG/KG)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QR3D               ! RAIN MIXING RATIO (KG/KG)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  NI3D               ! CLOUD ICE NUMBER CONCENTRATION (1/KG)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  NS3D               ! SNOW NUMBER CONCENTRATION (1/KG)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  NR3D               ! RAIN NUMBER CONCENTRATION (1/KG)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  T3DTEN             ! TEMPERATURE TENDENCY (K/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QV3DTEN            ! WATER VAPOR MIXING RATIO TENDENCY (KG/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  T3D                ! TEMPERATURE (I,K,J)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QV3D               ! WATER VAPOR MIXING RATIO (KG/KG)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  PRES               ! ATMOSPHERIC PRESSURE (PA)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  DZQ                ! DIFFERENCE IN HEIGHT ACROSS LEVEL (m)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  W3D                ! GRID-SCALE VERTICAL VELOCITY (M/S)
 ! below for wrf-chem
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  nc3d
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  nc3dten
+   flag_qndrop = .false.
+   ! IF ( PRESENT ( f_qndrop ) ) flag_qndrop = f_qndrop
+!!!!!!!!!!!!!!!!!!!!!!
+
+   ! Initialize tendencies (all set to 0) and transfer
+   ! array to local variables
+   DT = DT_IN
+
+   DO I=ITS,ITE
+   DO J=JTS,JTE
+   DO K=KTS,KTE
+       T(I,K,J)        = TH(i,k,j)*PII(i,k,j)
+
+! NOTE: WVAR NOT CURRENTLY USED IN CODE !!!!!!!!!!
+! currently assign wvar to 0.5 m/s (not coupled with PBL scheme)
+
+       WVAR(I,K,J)     = 0.5
+
+! currently mixing of number concentrations also is neglected (not coupled with PBL schemes)
+
+   END DO
+   END DO
+   END DO
+
+   ! default firstprivate to handle all of the module level variables that are defined in init (I hope this works as intented...)
+   !$omp parallel default(shared) &
+   !$omp private(i,j,k) &
+   !$omp private(QC_TEND1D,QI_TEND1D,QNI_TEND1D,QR_TEND1D,NI_TEND1D,NS_TEND1D,NR_TEND1D,T_TEND1D,QV_TEND1D,nc_tend1d) &
+   !$omp private(QC1D,QI1D,QS1D,QR1D,NI1D,NS1D,NR1D,QG1D,NG1D,QG_TEND1D,NG_TEND1D) &
+   !$omp private(T1D,QV1D,P1D,DZ1D,W1D,WVAR1D,qrcu1d,qscu1d,qicu1d,nc1d,iinum) &
+   !$omp private(PRECPRT1D,SNOWPRT1D,GRPLPRT1D) &
+   !$omp private(QGSTEN,QRSTEN, QISTEN, QNISTEN, QCSTEN, EFFC1D, EFFI1D, EFFS1D, EFFR1D) &
+   !$omp shared(QC,QI,QS,QR,NI,NS,NR,QG,NG,T,QV,P,DZ,W,WVAR,qrcuten,qscuten,qicuten) &
+   !$omp shared(TH,EFFC,EFFI,EFFS,EFFR,EFFG,RAINNC,RAINNCV,SNOWNC,SNOWNCV,GRAUPELNC,GRAUPELNCV,SR) &
+   !$omp firstprivate(IHAIL,IGRAUP,ISUB,IBASE,INUC,ILIQ,NDCNST,INUM,IACT,DT) &
+   !$omp firstprivate(its, ite, jts, jte, kts,kte)
+   !$omp do schedule(dynamic)
+   do j=jts,jte      ! j loop (north-south)
+   do i=its,ite      ! i loop (east-west)
+   !
+   ! Transfer 3D arrays into 1D for microphysical calculations
+   !
+
+! hm , initialize 1d tendency arrays to zero
+
+      do k=kts,kte   ! k loop (vertical)
+
+          QC_TEND1D(k)  = 0.
+          QI_TEND1D(k)  = 0.
+          QNI_TEND1D(k) = 0.
+          QR_TEND1D(k)  = 0.
+          NI_TEND1D(k)  = 0.
+          NS_TEND1D(k)  = 0.
+          NR_TEND1D(k)  = 0.
+          T_TEND1D(k)   = 0.
+          QV_TEND1D(k)  = 0.
+          nc_tend1d(k) = 0. ! wrf-chem
+
+          QC1D(k)       = QC(i,k,j)
+          QI1D(k)       = QI(i,k,j)
+          QS1D(k)       = QS(i,k,j)
+          QR1D(k)       = QR(i,k,j)
+
+          NI1D(k)       = NI(i,k,j)
+          NS1D(k)       = NS(i,k,j)
+          NR1D(k)       = NR(i,k,j)
+! HM ADD GRAUPEL
+          QG1D(K)       = QG(I,K,j)
+          NG1D(K)       = NG(I,K,j)
+          QG_TEND1D(K)  = 0.
+          NG_TEND1D(K)  = 0.
+
+          EFFC1D(k)     = EFFC(i,k,j)
+          EFFS1D(k)     = EFFS(i,k,j)
+          EFFI1D(k)     = EFFI(i,k,j)
+          
+          T1D(k)        = T(i,k,j)
+          QV1D(k)       = QV(i,k,j)
+          P1D(k)        = P(i,k,j)
+          DZ1D(k)       = DZ(i,k,j)
+          W1D(k)        = W(i,k,j)
+          WVAR1D(k)     = WVAR(i,k,j)
+! add cumulus tendencies, decouple from mu
+          qrcu1d(k)     = qrcuten(i,k,j) ! /mu(i,j) ! not coupled with mu in ICAR
+          qscu1d(k)     = qscuten(i,k,j) ! /mu(i,j) ! not coupled with mu in ICAR
+          qicu1d(k)     = qicuten(i,k,j) ! /mu(i,j) ! not coupled with mu in ICAR
+      end do  !jdf added this
+! below for wrf-chem
+   ! IF (flag_qndrop .AND. PRESENT( qndrop )) THEN
+   !    iact = 3
+   !    DO k = kts, kte
+   !       nc1d(k)=qndrop(i,k,j)
+   !       iinum=0
+   !    ENDDO
+   ! ELSE
+      DO k = kts, kte
+         nc1d(k)=0. ! temporary placeholder, set to constant in microphysics subroutine
+         iinum=1
+      ENDDO
+   ! ENDIF
+
+!jdf  end do
+
+      call MORR_TWO_MOMENT_MICRO(QC_TEND1D, QI_TEND1D, QNI_TEND1D, QR_TEND1D,            &
+       NI_TEND1D, NS_TEND1D, NR_TEND1D,                                                  &
+       QC1D, QI1D, QS1D, QR1D,NI1D, NS1D, NR1D,                                          &
+       T_TEND1D,QV_TEND1D, T1D, QV1D, P1D, DZ1D, W1D, WVAR1D,                   &
+       PRECPRT1D,SNOWRT1D,                                                               &
+       SNOWPRT1D,GRPLPRT1D,                 & ! hm added 7/13/13
+       EFFC1D,EFFI1D,EFFS1D,EFFR1D,DT,                                                   &
+                                            IMS,IME, JMS,JME, KMS,KME,                   &
+                                            ITS,ITE, JTS,JTE, KTS,KTE,                   & ! HM ADD GRAUPEL
+                                    QG_TEND1D,NG_TEND1D,QG1D,NG1D,EFFG1D, &
+                                    qrcu1d, qscu1d, qicu1d, &
+! ADD SEDIMENTATION TENDENCIES
+                                  QGSTEN,QRSTEN,QISTEN,QNISTEN,QCSTEN, &
+                                  nc1d, nc_tend1d, iinum, C2PREC,CSED,ISED,SSED,GSED,RSED & !wrf-chem
+! #if (WRF_CHEM == 1)
+!                                   ,rainprod1d, evapprod1d & !wrf-chem
+! #endif
+                       )
+
+   !
+   ! Transfer 1D arrays back into 3D arrays
+   !
+      do k=kts,kte
+
+! hm, add tendencies to update global variables
+! HM, TENDENCIES FOR Q AND N NOW ADDED IN M2005MICRO, SO WE
+! ONLY NEED TO TRANSFER 1D VARIABLES BACK TO 3D
+
+          QC(i,k,j)        = QC1D(k)
+          QI(i,k,j)        = QI1D(k)
+          QS(i,k,j)        = QS1D(k)
+          QR(i,k,j)        = QR1D(k)
+          NI(i,k,j)        = NI1D(k)
+          NS(i,k,j)        = NS1D(k)
+          NR(i,k,j)        = NR1D(k)
+	      QG(I,K,j)        = QG1D(K)
+          NG(I,K,j)        = NG1D(K)
+
+          T(i,k,j)         = T1D(k)
+          TH(I,K,J)        = T(i,k,j)/PII(i,k,j) ! CONVERT TEMP BACK TO POTENTIAL TEMP
+          QV(i,k,j)        = QV1D(k)
+
+          EFFC(i,k,j)      = EFFC1D(k)
+          EFFI(i,k,j)      = EFFI1D(k)
+          EFFS(i,k,j)      = EFFS1D(k)
+          EFFR(i,k,j)      = EFFR1D(k)
+	  EFFG(i,k,j)      = EFFG1D(K)
+          ISED3D(i,k,j) = ISED(k)
+          SSED3D(i,k,j) = SSED(k)
+! wrf-chem
+        !   IF (flag_qndrop .AND. PRESENT( qndrop )) THEN
+        !      qndrop(i,k,j) = nc1d(k)
+!jdf         CSED3D(I,K,J) = CSED(K)
+        !   END IF
+        !   IF ( PRESENT( QLSINK ) ) THEN
+        !      if(qc(i,k,j)>1.e-10) then
+        !         QLSINK(I,K,J)  = C2PREC(K)/QC(I,K,J)
+        !      else
+        !         QLSINK(I,K,J)  = 0.0
+        !      endif
+        !   END IF
+        !   IF ( PRESENT( PRECR ) ) PRECR(I,K,J) = RSED(K)
+        !   IF ( PRESENT( PRECI ) ) PRECI(I,K,J) = ISED(K)
+        !   IF ( PRESENT( PRECS ) ) PRECS(I,K,J) = SSED(K)
+        !   IF ( PRESENT( PRECG ) ) PRECG(I,K,J) = GSED(K)
+! EFFECTIVE RADIUS FOR RADIATION CODE (currently not coupled)
+! HM, ADD LIMIT TO PREVENT BLOWING UP OPTICAL PROPERTIES, 8/18/07
+          EFFC(I,K,J)     = MIN(EFFC(I,K,J),50.)*1.E-6
+          EFFC(I,K,J)     = MAX(EFFC(I,K,J),2.5)*1.E-6
+          EFFI(I,K,J)     = MIN(EFFI(I,K,J),125.)*1.E-6
+          EFFI(I,K,J)     = MAX(EFFI(I,K,J),5.)*1.E-6
+          EFFS(I,K,J)     = MIN(EFFS(I,K,J),1000.)*1.E-6
+          EFFS(I,K,J)     = MAX(EFFS(I,K,J),10.)*1.E-6
+!          EFFCS(I,K,J)     = MIN(EFFC(I,K,J),50.)
+!          EFFCS(I,K,J)     = MAX(EFFCS(I,K,J),1.)
+!          EFFIS(I,K,J)     = MIN(EFFI(I,K,J),130.)
+!          EFFIS(I,K,J)     = MAX(EFFIS(I,K,J),13.)
+
+! #if ( WRF_CHEM == 1)
+!            IF ( PRESENT( rainprod ) ) rainprod(i,k,j) = rainprod1d(k)
+!            IF ( PRESENT( evapprod ) ) evapprod(i,k,j) = evapprod1d(k)
+! #endif
+
+      end do
+
+! hm modified so that m2005 precip variables correctly match wrf precip variables
+
+      RAINNC(i,j) = RAINNC(I,J)+PRECPRT1D
+      RAINNCV(i,j) = PRECPRT1D
+! hm, added 7/13/13
+      SNOWNC(i,j) = SNOWNC(I,J)+SNOWPRT1D
+      SNOWNCV(i,j) = SNOWPRT1D
+      GRAUPELNC(i,j) = GRAUPELNC(I,J)+GRPLPRT1D
+      GRAUPELNCV(i,j) = GRPLPRT1D
+      SR(i,j) = SNOWRT1D/(PRECPRT1D+1.E-12)
+
+!+---+-----------------------------------------------------------------+
+        !  IF ( PRESENT (diagflag) ) THEN
+        !  if (diagflag .and. do_radar_ref == 1) then
+        !   call refl10cm_hm (qv1d, qr1d, nr1d, qs1d, ns1d, qg1d, ng1d,   &
+        !               t1d, p1d, dBZ, kts, kte, i, j)
+        !   do k = kts, kte
+        !      refl_10cm(i,k,j) = MAX(-35., dBZ(k))
+        !   enddo
+        !  endif
+        !  ENDIF
+!+---+-----------------------------------------------------------------+
+
+   end do
+   end do
+   !$omp end do
+   !$omp end parallel
+
+END SUBROUTINE MP_MORR_TWO_MOMENT
+
+!CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+!CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+      SUBROUTINE MORR_TWO_MOMENT_MICRO(QC3DTEN,QI3DTEN,QNI3DTEN,QR3DTEN,         &
+       NI3DTEN,NS3DTEN,NR3DTEN,QC3D,QI3D,QNI3D,QR3D,NI3D,NS3D,NR3D,              &
+       T3DTEN,QV3DTEN,T3D,QV3D,PRES,DZQ,W3D,WVAR,PRECRT,SNOWRT,            &
+       SNOWPRT,GRPLPRT,                & ! hm added 7/13/13
+       EFFC,EFFI,EFFS,EFFR,DT,                                                   &
+                                            IMS,IME, JMS,JME, KMS,KME,           &
+                                            ITS,ITE, JTS,JTE, KTS,KTE,           & ! ADD GRAUPEL
+                        QG3DTEN,NG3DTEN,QG3D,NG3D,EFFG,qrcu1d,qscu1d, qicu1d,    &
+                        QGSTEN,QRSTEN,QISTEN,QNISTEN,QCSTEN, &
+                        nc3d,nc3dten,iinum, & ! wrf-chem
+				c2prec,CSED,ISED,SSED,GSED,RSED  &  ! hm added, wrf-chem
+! #if (WRF_CHEM == 1)
+!         ,rainprod, evapprod &
+! #endif
+                        )
+
+!CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+! THIS PROGRAM IS THE MAIN TWO-MOMENT MICROPHYSICS SUBROUTINE DESCRIBED BY
+! MORRISON ET AL. 2005 JAS; MORRISON AND PINTO 2005 JAS.
+! ADDITIONAL CHANGES ARE DESCRIBED IN DETAIL BY MORRISON, THOMPSON, TATARSKII (MWR, SUBMITTED)
+
+! THIS SCHEME IS A BULK DOUBLE-MOMENT SCHEME THAT PREDICTS MIXING
+! RATIOS AND NUMBER CONCENTRATIONS OF FIVE HYDROMETEOR SPECIES:
+! CLOUD DROPLETS, CLOUD (SMALL) ICE, RAIN, SNOW, AND GRAUPEL.
+
+! CODE STRUCTURE: MAIN SUBROUTINE IS 'MORR_TWO_MOMENT'. ALSO INCLUDED IN THIS FILE IS
+! 'FUNCTION POLYSVP', 'FUNCTION DERF1', AND
+! 'FUNCTION GAMMA'.
+
+! NOTE: THIS SUBROUTINE USES 1D ARRAY IN VERTICAL (COLUMN), EVEN THOUGH VARIABLES ARE CALLED '3D'......
+
+!CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+
+! DECLARATIONS
+
+      IMPLICIT NONE
+
+!CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+! THESE VARIABLES BELOW MUST BE LINKED WITH THE MAIN MODEL.
+! DEFINE ARRAY SIZES
+
+! INPUT NUMBER OF GRID CELLS
+
+! INPUT/OUTPUT PARAMETERS                                 ! DESCRIPTION (UNITS)
+      INTEGER, INTENT( IN)  :: IMS,IME, JMS,JME, KMS,KME,          &
+                               ITS,ITE, JTS,JTE, KTS,KTE
+
+      REAL, DIMENSION(KTS:KTE) ::  QC3DTEN            ! CLOUD WATER MIXING RATIO TENDENCY (KG/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  QI3DTEN            ! CLOUD ICE MIXING RATIO TENDENCY (KG/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  QNI3DTEN           ! SNOW MIXING RATIO TENDENCY (KG/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  QR3DTEN            ! RAIN MIXING RATIO TENDENCY (KG/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  NI3DTEN            ! CLOUD ICE NUMBER CONCENTRATION (1/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  NS3DTEN            ! SNOW NUMBER CONCENTRATION (1/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  NR3DTEN            ! RAIN NUMBER CONCENTRATION (1/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  QC3D               ! CLOUD WATER MIXING RATIO (KG/KG)
+      REAL, DIMENSION(KTS:KTE) ::  QI3D               ! CLOUD ICE MIXING RATIO (KG/KG)
+      REAL, DIMENSION(KTS:KTE) ::  QNI3D              ! SNOW MIXING RATIO (KG/KG)
+      REAL, DIMENSION(KTS:KTE) ::  QR3D               ! RAIN MIXING RATIO (KG/KG)
+      REAL, DIMENSION(KTS:KTE) ::  NI3D               ! CLOUD ICE NUMBER CONCENTRATION (1/KG)
+      REAL, DIMENSION(KTS:KTE) ::  NS3D               ! SNOW NUMBER CONCENTRATION (1/KG)
+      REAL, DIMENSION(KTS:KTE) ::  NR3D               ! RAIN NUMBER CONCENTRATION (1/KG)
+      REAL, DIMENSION(KTS:KTE) ::  T3DTEN             ! TEMPERATURE TENDENCY (K/S)
+      REAL, DIMENSION(KTS:KTE) ::  QV3DTEN            ! WATER VAPOR MIXING RATIO TENDENCY (KG/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  T3D                ! TEMPERATURE (K)
+      REAL, DIMENSION(KTS:KTE) ::  QV3D               ! WATER VAPOR MIXING RATIO (KG/KG)
+      REAL, DIMENSION(KTS:KTE) ::  PRES               ! ATMOSPHERIC PRESSURE (PA)
+      REAL, DIMENSION(KTS:KTE) ::  DZQ                ! DIFFERENCE IN HEIGHT ACROSS LEVEL (m)
+      REAL, DIMENSION(KTS:KTE) ::  W3D                ! GRID-SCALE VERTICAL VELOCITY (M/S)
+      REAL, DIMENSION(KTS:KTE) ::  WVAR               ! SUB-GRID VERTICAL VELOCITY (M/S)
+! below for wrf-chem
+      REAL, DIMENSION(KTS:KTE) ::  nc3d
+      REAL, DIMENSION(KTS:KTE) ::  nc3dten
+      integer, intent(in) :: iinum
 
 ! HM ADDED GRAUPEL VARIABLES
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QG3DTEN            ! GRAUPEL MIX RATIO TENDENCY (KG/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  NG3DTEN            ! GRAUPEL NUMB CONC TENDENCY (1/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QG3D            ! GRAUPEL MIX RATIO (KG/KG)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  NG3D            ! GRAUPEL NUMBER CONC (1/KG)
+      REAL, DIMENSION(KTS:KTE) ::  QG3DTEN            ! GRAUPEL MIX RATIO TENDENCY (KG/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  NG3DTEN            ! GRAUPEL NUMB CONC TENDENCY (1/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  QG3D            ! GRAUPEL MIX RATIO (KG/KG)
+      REAL, DIMENSION(KTS:KTE) ::  NG3D            ! GRAUPEL NUMBER CONC (1/KG)
 
 ! HM, ADD 1/16/07, SEDIMENTATION TENDENCIES FOR MIXING RATIO
 
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QGSTEN            ! GRAUPEL SED TEND (KG/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QRSTEN            ! RAIN SED TEND (KG/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QISTEN            ! CLOUD ICE SED TEND (KG/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QNISTEN           ! SNOW SED TEND (KG/KG/S)
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::  QCSTEN            ! CLOUD WAT SED TEND (KG/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  QGSTEN            ! GRAUPEL SED TEND (KG/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  QRSTEN            ! RAIN SED TEND (KG/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  QISTEN            ! CLOUD ICE SED TEND (KG/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  QNISTEN           ! SNOW SED TEND (KG/KG/S)
+      REAL, DIMENSION(KTS:KTE) ::  QCSTEN            ! CLOUD WAT SED TEND (KG/KG/S)
 
 ! hm add cumulus tendencies for precip
-        REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   qrcu1d
-        REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   qscu1d
-        REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   qicu1d
+        REAL, DIMENSION(KTS:KTE) ::   qrcu1d
+        REAL, DIMENSION(KTS:KTE) ::   qscu1d
+        REAL, DIMENSION(KTS:KTE) ::   qicu1d
 
 ! OUTPUT VARIABLES
 
-      !   REAL, DIMENSION(KTS:KTE) ::   EFFC            ! DROPLET EFFECTIVE RADIUS (MICRON)
-      !   REAL, DIMENSION(KTS:KTE) ::   EFFI            ! CLOUD ICE EFFECTIVE RADIUS (MICRON)
-      !   REAL, DIMENSION(KTS:KTE) ::   EFFS            ! SNOW EFFECTIVE RADIUS (MICRON)
-      !   REAL, DIMENSION(KTS:KTE) ::   EFFR            ! RAIN EFFECTIVE RADIUS (MICRON)
-      !   REAL, DIMENSION(KTS:KTE) ::   EFFG            ! GRAUPEL EFFECTIVE RADIUS (MICRON)
-	  REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   C2PREC,CSED,ISED,SSED,GSED,RSED
+        REAL PRECRT                ! TOTAL PRECIP PER TIME STEP (mm)
+        REAL SNOWRT                ! SNOW PER TIME STEP (mm)
+! hm added 7/13/13
+        REAL SNOWPRT      ! TOTAL CLOUD ICE PLUS SNOW PER TIME STEP (mm)
+	REAL GRPLPRT	  ! TOTAL GRAUPEL PER TIME STEP (mm)
+
+        REAL, DIMENSION(KTS:KTE) ::   EFFC            ! DROPLET EFFECTIVE RADIUS (MICRON)
+        REAL, DIMENSION(KTS:KTE) ::   EFFI            ! CLOUD ICE EFFECTIVE RADIUS (MICRON)
+        REAL, DIMENSION(KTS:KTE) ::   EFFS            ! SNOW EFFECTIVE RADIUS (MICRON)
+        REAL, DIMENSION(KTS:KTE) ::   EFFR            ! RAIN EFFECTIVE RADIUS (MICRON)
+        REAL, DIMENSION(KTS:KTE) ::   EFFG            ! GRAUPEL EFFECTIVE RADIUS (MICRON)
 
 ! MODEL INPUT PARAMETERS (FORMERLY IN COMMON BLOCKS)
 
-      !   REAL DT         ! MODEL TIME STEP (SEC)
+        REAL DT         ! MODEL TIME STEP (SEC)
 
 !.....................................................................................................
 ! LOCAL VARIABLES: ALL PARAMETERS BELOW ARE LOCAL TO SCHEME AND DON'T NEED TO COMMUNICATE WITH THE
@@ -789,137 +1049,141 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! SIZE PARAMETER VARIABLES
 
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) :: LAMC          ! SLOPE PARAMETER FOR DROPLETS (M-1)
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) :: LAMI          ! SLOPE PARAMETER FOR CLOUD ICE (M-1)
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) :: LAMS          ! SLOPE PARAMETER FOR SNOW (M-1)
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) :: LAMR          ! SLOPE PARAMETER FOR RAIN (M-1)
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) :: LAMG          ! SLOPE PARAMETER FOR GRAUPEL (M-1)
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) :: CDIST1        ! PSD PARAMETER FOR DROPLETS
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) :: N0I           ! INTERCEPT PARAMETER FOR CLOUD ICE (KG-1 M-1)
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) :: N0S           ! INTERCEPT PARAMETER FOR SNOW (KG-1 M-1)
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) :: N0RR          ! INTERCEPT PARAMETER FOR RAIN (KG-1 M-1)
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) :: N0G           ! INTERCEPT PARAMETER FOR GRAUPEL (KG-1 M-1)
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) :: PGAM          ! SPECTRAL SHAPE PARAMETER FOR DRITS:ITE,KTS:KTE,JTS:JTE
-! MICROPHYSICAL PRITS:ITE,KTS:KTE,JTS:JTE
-     REAL ::  NSUBC     ! LOSS OF NC DURING EVAP
-     REAL ::  NSUBI     ! LOSS OF NI DURING SUB.
-     REAL ::  NSUBS     ! LOSS OF NS DURING SUB.
-     REAL ::  NSUBR     ! LOSS OF NR DURING EVAP
-     REAL ::  PRD       ! DEP CLOUD ICE
-     REAL ::  PRE       ! EVAP OF RAIN
-     REAL ::  PRDS      ! DEP SNOW
-     REAL ::  NNUCCC    ! CHANGE N DUE TO CONTACT FREEZ DROPLETS
-     REAL ::  MNUCCC    ! CHANGE Q DUE TO CONTACT FREEZ DROPLETS
-     REAL ::  PRA       ! ACCRETION DROPLETS BY RAIN
-     REAL ::  PRC       ! AUTOCONVERSION DROPLETS
-     REAL ::  PCC       ! COND/EVAP DROPLETS
-     REAL ::  NNUCCD    ! CHANGE N FREEZING AEROSOL (PRIM ICE NUCLEATION)
-     REAL ::  MNUCCD    ! CHANGE Q FREEZING AEROSOL (PRIM ICE NUCLEATION)
-     REAL ::  MNUCCR    ! CHANGE Q DUE TO CONTACT FREEZ RAIN
-     REAL ::  NNUCCR    ! CHANGE N DUE TO CONTACT FREEZ RAIN
-     REAL ::  NPRA      ! CHANGE IN N DUE TO DROPLET ACC BY RAIN
-     REAL ::  NRAGG     ! SELF-COLLECTION/BREAKUP OF RAIN
-     REAL ::  NSAGG     ! SELF-COLLECTION OF SNOW
-     REAL ::  NPRC      ! CHANGE NC AUTOCONVERSION DROPLETS
-     REAL ::  NPRC1      ! CHANGE NR AUTOCONVERSION DROPLETS
-     REAL ::  PRAI      ! CHANGE Q ACCRETION CLOUD ICE BY SNOW
-     REAL ::  PRCI      ! CHANGE Q AUTOCONVERSIN CLOUD ICE TO SNOW
-     REAL ::  PSACWS    ! CHANGE Q DROPLET ACCRETION BY SNOW
-     REAL ::  NPSACWS   ! CHANGE N DROPLET ACCRETION BY SNOW
-     REAL ::  PSACWI    ! CHANGE Q DROPLET ACCRETION BY CLOUD ICE
-     REAL ::  NPSACWI   ! CHANGE N DROPLET ACCRETION BY CLOUD ICE
-     REAL ::  NPRCI     ! CHANGE N AUTOCONVERSION CLOUD ICE BY SNOW
-     REAL ::  NPRAI     ! CHANGE N ACCRETION CLOUD ICE
-     REAL ::  NMULTS    ! ICE MULT DUE TO RIMING DROPLETS BY SNOW
-     REAL ::  NMULTR    ! ICE MULT DUE TO RIMING RAIN BY SNOW
-     REAL ::  QMULTS    ! CHANGE Q DUE TO ICE MULT DROPLETS/SNOW
-     REAL ::  QMULTR    ! CHANGE Q DUE TO ICE RAIN/SNOW
-     REAL ::  PRACS     ! CHANGE Q RAIN-SNOW COLLECTION
-     REAL ::  NPRACS    ! CHANGE N RAIN-SNOW COLLECTION
-     REAL ::  PCCN      ! CHANGE Q DROPLET ACTIVATION
-     REAL ::  PSMLT     ! CHANGE Q MELTING SNOW TO RAIN
-     REAL ::  EVPMS     ! CHNAGE Q MELTING SNOW EVAPORATING
-     REAL ::  NSMLTS    ! CHANGE N MELTING SNOW
-     REAL ::  NSMLTR    ! CHANGE N MELTING SNOW TO RAIN
+     REAL, DIMENSION(KTS:KTE) :: LAMC          ! SLOPE PARAMETER FOR DROPLETS (M-1)
+     REAL, DIMENSION(KTS:KTE) :: LAMI          ! SLOPE PARAMETER FOR CLOUD ICE (M-1)
+     REAL, DIMENSION(KTS:KTE) :: LAMS          ! SLOPE PARAMETER FOR SNOW (M-1)
+     REAL, DIMENSION(KTS:KTE) :: LAMR          ! SLOPE PARAMETER FOR RAIN (M-1)
+     REAL, DIMENSION(KTS:KTE) :: LAMG          ! SLOPE PARAMETER FOR GRAUPEL (M-1)
+     REAL, DIMENSION(KTS:KTE) :: CDIST1        ! PSD PARAMETER FOR DROPLETS
+     REAL, DIMENSION(KTS:KTE) :: N0I           ! INTERCEPT PARAMETER FOR CLOUD ICE (KG-1 M-1)
+     REAL, DIMENSION(KTS:KTE) :: N0S           ! INTERCEPT PARAMETER FOR SNOW (KG-1 M-1)
+     REAL, DIMENSION(KTS:KTE) :: N0RR          ! INTERCEPT PARAMETER FOR RAIN (KG-1 M-1)
+     REAL, DIMENSION(KTS:KTE) :: N0G           ! INTERCEPT PARAMETER FOR GRAUPEL (KG-1 M-1)
+     REAL, DIMENSION(KTS:KTE) :: PGAM          ! SPECTRAL SHAPE PARAMETER FOR DROPLETS
+
+! MICROPHYSICAL PROCESSES
+
+     REAL, DIMENSION(KTS:KTE) ::  NSUBC     ! LOSS OF NC DURING EVAP
+     REAL, DIMENSION(KTS:KTE) ::  NSUBI     ! LOSS OF NI DURING SUB.
+     REAL, DIMENSION(KTS:KTE) ::  NSUBS     ! LOSS OF NS DURING SUB.
+     REAL, DIMENSION(KTS:KTE) ::  NSUBR     ! LOSS OF NR DURING EVAP
+     REAL, DIMENSION(KTS:KTE) ::  PRD       ! DEP CLOUD ICE
+     REAL, DIMENSION(KTS:KTE) ::  PRE       ! EVAP OF RAIN
+     REAL, DIMENSION(KTS:KTE) ::  PRDS      ! DEP SNOW
+     REAL, DIMENSION(KTS:KTE) ::  NNUCCC    ! CHANGE N DUE TO CONTACT FREEZ DROPLETS
+     REAL, DIMENSION(KTS:KTE) ::  MNUCCC    ! CHANGE Q DUE TO CONTACT FREEZ DROPLETS
+     REAL, DIMENSION(KTS:KTE) ::  PRA       ! ACCRETION DROPLETS BY RAIN
+     REAL, DIMENSION(KTS:KTE) ::  PRC       ! AUTOCONVERSION DROPLETS
+     REAL, DIMENSION(KTS:KTE) ::  PCC       ! COND/EVAP DROPLETS
+     REAL, DIMENSION(KTS:KTE) ::  NNUCCD    ! CHANGE N FREEZING AEROSOL (PRIM ICE NUCLEATION)
+     REAL, DIMENSION(KTS:KTE) ::  MNUCCD    ! CHANGE Q FREEZING AEROSOL (PRIM ICE NUCLEATION)
+     REAL, DIMENSION(KTS:KTE) ::  MNUCCR    ! CHANGE Q DUE TO CONTACT FREEZ RAIN
+     REAL, DIMENSION(KTS:KTE) ::  NNUCCR    ! CHANGE N DUE TO CONTACT FREEZ RAIN
+     REAL, DIMENSION(KTS:KTE) ::  NPRA      ! CHANGE IN N DUE TO DROPLET ACC BY RAIN
+     REAL, DIMENSION(KTS:KTE) ::  NRAGG     ! SELF-COLLECTION/BREAKUP OF RAIN
+     REAL, DIMENSION(KTS:KTE) ::  NSAGG     ! SELF-COLLECTION OF SNOW
+     REAL, DIMENSION(KTS:KTE) ::  NPRC      ! CHANGE NC AUTOCONVERSION DROPLETS
+     REAL, DIMENSION(KTS:KTE) ::  NPRC1      ! CHANGE NR AUTOCONVERSION DROPLETS
+     REAL, DIMENSION(KTS:KTE) ::  PRAI      ! CHANGE Q ACCRETION CLOUD ICE BY SNOW
+     REAL, DIMENSION(KTS:KTE) ::  PRCI      ! CHANGE Q AUTOCONVERSIN CLOUD ICE TO SNOW
+     REAL, DIMENSION(KTS:KTE) ::  PSACWS    ! CHANGE Q DROPLET ACCRETION BY SNOW
+     REAL, DIMENSION(KTS:KTE) ::  NPSACWS   ! CHANGE N DROPLET ACCRETION BY SNOW
+     REAL, DIMENSION(KTS:KTE) ::  PSACWI    ! CHANGE Q DROPLET ACCRETION BY CLOUD ICE
+     REAL, DIMENSION(KTS:KTE) ::  NPSACWI   ! CHANGE N DROPLET ACCRETION BY CLOUD ICE
+     REAL, DIMENSION(KTS:KTE) ::  NPRCI     ! CHANGE N AUTOCONVERSION CLOUD ICE BY SNOW
+     REAL, DIMENSION(KTS:KTE) ::  NPRAI     ! CHANGE N ACCRETION CLOUD ICE
+     REAL, DIMENSION(KTS:KTE) ::  NMULTS    ! ICE MULT DUE TO RIMING DROPLETS BY SNOW
+     REAL, DIMENSION(KTS:KTE) ::  NMULTR    ! ICE MULT DUE TO RIMING RAIN BY SNOW
+     REAL, DIMENSION(KTS:KTE) ::  QMULTS    ! CHANGE Q DUE TO ICE MULT DROPLETS/SNOW
+     REAL, DIMENSION(KTS:KTE) ::  QMULTR    ! CHANGE Q DUE TO ICE RAIN/SNOW
+     REAL, DIMENSION(KTS:KTE) ::  PRACS     ! CHANGE Q RAIN-SNOW COLLECTION
+     REAL, DIMENSION(KTS:KTE) ::  NPRACS    ! CHANGE N RAIN-SNOW COLLECTION
+     REAL, DIMENSION(KTS:KTE) ::  PCCN      ! CHANGE Q DROPLET ACTIVATION
+     REAL, DIMENSION(KTS:KTE) ::  PSMLT     ! CHANGE Q MELTING SNOW TO RAIN
+     REAL, DIMENSION(KTS:KTE) ::  EVPMS     ! CHNAGE Q MELTING SNOW EVAPORATING
+     REAL, DIMENSION(KTS:KTE) ::  NSMLTS    ! CHANGE N MELTING SNOW
+     REAL, DIMENSION(KTS:KTE) ::  NSMLTR    ! CHANGE N MELTING SNOW TO RAIN
 ! HM ADDED 12/13/06
-     REAL ::  PIACR     ! CHANGE QR, ICE-RAIN COLLECTION
-     REAL ::  NIACR     ! CHANGE N, ICE-RAIN COLLECTION
-     REAL ::  PRACI     ! CHANGE QI, ICE-RAIN COLLECTION
-     REAL ::  PIACRS     ! CHANGE QR, ICE RAIN COLLISION, ADDED TO SNOW
-     REAL ::  NIACRS     ! CHANGE N, ICE RAIN COLLISION, ADDED TO SNOW
-     REAL ::  PRACIS     ! CHANGE QI, ICE RAIN COLLISION, ADDED TO SNOW
-     REAL ::  EPRD      ! SUBLIMATION CLOUD ICE
-     REAL ::  EPRDS     ! SUBLIMATION SNOW
-! HM ADDED 12/13/06
-     REAL ::  PRACG    ! CHANGE IN Q COLLECTION RAIN BY GRAUPEL
-     REAL ::  PSACWG    ! CHANGE IN Q COLLECTION DROPLETS BY GRAUPEL
-     REAL ::  PGSACW    ! CONVERSION Q TO GRAUPEL DUE TO COLLECTION DROPLETS BY SNOW
-     REAL ::  PGRACS    ! CONVERSION Q TO GRAUPEL DUE TO COLLECTION RAIN BY SNOW
-     REAL ::  PRDG    ! DEP OF GRAUPEL
-     REAL ::  EPRDG    ! SUB OF GRAUPEL
-     REAL ::  EVPMG    ! CHANGE Q MELTING OF GRAUPEL AND EVAPORATION
-     REAL ::  PGMLT    ! CHANGE Q MELTING OF GRAUPEL
-     REAL ::  NPRACG    ! CHANGE N COLLECTION RAIN BY GRAUPEL
-     REAL ::  NPSACWG    ! CHANGE N COLLECTION DROPLETS BY GRAUPEL
-     REAL ::  NSCNG    ! CHANGE N CONVERSION TO GRAUPEL DUE TO COLLECTION DROPLETS BY SNOW
-     REAL ::  NGRACS    ! CHANGE N CONVERSION TO GRAUPEL DUE TO COLLECTION RAIN BY SNOW
-     REAL ::  NGMLTG    ! CHANGE N MELTING GRAUPEL
-     REAL ::  NGMLTR    ! CHANGE N MELTING GRAUPEL TO RAIN
-     REAL ::  NSUBG    ! CHANGE N SUB/DEP OF GRAUPEL
-     REAL ::  PSACR    ! CONVERSION DUE TO COLL OF SNOW BY RAIN
-     REAL ::  NMULTG    ! ICE MULT DUE TO ACC DROPLETS BY GRAUPEL
-     REAL ::  NMULTRG    ! ICE MULT DUE TO ACC RAIN BY GRAUPEL
-     REAL ::  QMULTG    ! CHANGE Q DUE TO ICE MULT DROPLETS/GRAUPEL
-     REAL ::  QMULTRG    ! CHANGE Q DUE TO ICE MULT RAIN/GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  PIACR     ! CHANGE QR, ICE-RAIN COLLECTION
+     REAL, DIMENSION(KTS:KTE) ::  NIACR     ! CHANGE N, ICE-RAIN COLLECTION
+     REAL, DIMENSION(KTS:KTE) ::  PRACI     ! CHANGE QI, ICE-RAIN COLLECTION
+     REAL, DIMENSION(KTS:KTE) ::  PIACRS     ! CHANGE QR, ICE RAIN COLLISION, ADDED TO SNOW
+     REAL, DIMENSION(KTS:KTE) ::  NIACRS     ! CHANGE N, ICE RAIN COLLISION, ADDED TO SNOW
+     REAL, DIMENSION(KTS:KTE) ::  PRACIS     ! CHANGE QI, ICE RAIN COLLISION, ADDED TO SNOW
+     REAL, DIMENSION(KTS:KTE) ::  EPRD      ! SUBLIMATION CLOUD ICE
+     REAL, DIMENSION(KTS:KTE) ::  EPRDS     ! SUBLIMATION SNOW
+! HM ADDED GRAUPEL PROCESSES
+     REAL, DIMENSION(KTS:KTE) ::  PRACG    ! CHANGE IN Q COLLECTION RAIN BY GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  PSACWG    ! CHANGE IN Q COLLECTION DROPLETS BY GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  PGSACW    ! CONVERSION Q TO GRAUPEL DUE TO COLLECTION DROPLETS BY SNOW
+     REAL, DIMENSION(KTS:KTE) ::  PGRACS    ! CONVERSION Q TO GRAUPEL DUE TO COLLECTION RAIN BY SNOW
+     REAL, DIMENSION(KTS:KTE) ::  PRDG    ! DEP OF GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  EPRDG    ! SUB OF GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  EVPMG    ! CHANGE Q MELTING OF GRAUPEL AND EVAPORATION
+     REAL, DIMENSION(KTS:KTE) ::  PGMLT    ! CHANGE Q MELTING OF GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  NPRACG    ! CHANGE N COLLECTION RAIN BY GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  NPSACWG    ! CHANGE N COLLECTION DROPLETS BY GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  NSCNG    ! CHANGE N CONVERSION TO GRAUPEL DUE TO COLLECTION DROPLETS BY SNOW
+     REAL, DIMENSION(KTS:KTE) ::  NGRACS    ! CHANGE N CONVERSION TO GRAUPEL DUE TO COLLECTION RAIN BY SNOW
+     REAL, DIMENSION(KTS:KTE) ::  NGMLTG    ! CHANGE N MELTING GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  NGMLTR    ! CHANGE N MELTING GRAUPEL TO RAIN
+     REAL, DIMENSION(KTS:KTE) ::  NSUBG    ! CHANGE N SUB/DEP OF GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  PSACR    ! CONVERSION DUE TO COLL OF SNOW BY RAIN
+     REAL, DIMENSION(KTS:KTE) ::  NMULTG    ! ICE MULT DUE TO ACC DROPLETS BY GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  NMULTRG    ! ICE MULT DUE TO ACC RAIN BY GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  QMULTG    ! CHANGE Q DUE TO ICE MULT DROPLETS/GRAUPEL
+     REAL, DIMENSION(KTS:KTE) ::  QMULTRG    ! CHANGE Q DUE TO ICE MULT RAIN/GRAUPEL
+
 ! TIME-VARYING ATMOSPHERIC PARAMETERS
 
-     REAL ::   KAP   ! THERMAL CONDUCTIVITY OF AIR
-     REAL ::   EVS   ! SATURATION VAPOR PRESSURE
-     REAL ::   EIS   ! ICE SATURATION VAPOR PRESSURE
-     REAL ::   QVS   ! SATURATION MIXING RATIO
-     REAL ::   QVI   ! ICE SATURATION MIXING RATIO
-     REAL ::   QVQVS ! SAUTRATION RATIO
-     REAL ::   QVQVSI! ICE SATURAION RATIO
-     REAL ::   DV    ! DIFFUSIVITY OF WATER VAPOR IN AIR
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   XXLS  ! LATENT HEAT OF SUBLIMATION
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   XXLV  ! LATENT HEAT OF VAPORIZATION
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   CPM   ! SPECIFIC HEAT AT CONST PRESSURE FOR MOIST AIR
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   MU    ! VISCOCITY OF AIR
-     REAL ::   SC    ! SCHMIDT NUMBER
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   XLF   ! LATENT HEAT OF FREEZING
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE)  ::   RHO   ! AIR DENSITY
-     REAL ::   AB    ! CORRECTION TO CONDENSATION RATE DUE TO LATENT HEATING
-     REAL ::   ABI    ! CORRECTION TO DEPOSITION RATE DUE TO LATENT HEATING
+     REAL, DIMENSION(KTS:KTE) ::   KAP   ! THERMAL CONDUCTIVITY OF AIR
+     REAL, DIMENSION(KTS:KTE) ::   EVS   ! SATURATION VAPOR PRESSURE
+     REAL, DIMENSION(KTS:KTE) ::   EIS   ! ICE SATURATION VAPOR PRESSURE
+     REAL, DIMENSION(KTS:KTE) ::   QVS   ! SATURATION MIXING RATIO
+     REAL, DIMENSION(KTS:KTE) ::   QVI   ! ICE SATURATION MIXING RATIO
+     REAL, DIMENSION(KTS:KTE) ::   QVQVS ! SAUTRATION RATIO
+     REAL, DIMENSION(KTS:KTE) ::   QVQVSI! ICE SATURAION RATIO
+     REAL, DIMENSION(KTS:KTE) ::   DV    ! DIFFUSIVITY OF WATER VAPOR IN AIR
+     REAL, DIMENSION(KTS:KTE) ::   XXLS  ! LATENT HEAT OF SUBLIMATION
+     REAL, DIMENSION(KTS:KTE) ::   XXLV  ! LATENT HEAT OF VAPORIZATION
+     REAL, DIMENSION(KTS:KTE) ::   CPM   ! SPECIFIC HEAT AT CONST PRESSURE FOR MOIST AIR
+     REAL, DIMENSION(KTS:KTE) ::   MU    ! VISCOCITY OF AIR
+     REAL, DIMENSION(KTS:KTE) ::   SC    ! SCHMIDT NUMBER
+     REAL, DIMENSION(KTS:KTE) ::   XLF   ! LATENT HEAT OF FREEZING
+     REAL, DIMENSION(KTS:KTE) ::   RHO   ! AIR DENSITY
+     REAL, DIMENSION(KTS:KTE) ::   AB    ! CORRECTION TO CONDENSATION RATE DUE TO LATENT HEATING
+     REAL, DIMENSION(KTS:KTE) ::   ABI    ! CORRECTION TO DEPOSITION RATE DUE TO LATENT HEATING
 
 ! TIME-VARYING MICROPHYSICS PARAMETERS
 
-     REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   DAP    ! DIFFUSIVITY OF AEROSOL
+     REAL, DIMENSION(KTS:KTE) ::   DAP    ! DIFFUSIVITY OF AEROSOL
      REAL    NACNT                    ! NUMBER OF CONTACT IN
      REAL    FMULT                    ! TEMP.-DEP. PARAMETER FOR RIME-SPLINTERING
      REAL    COFFI                    ! ICE AUTOCONVERSION PARAMETER
 
 ! FALL SPEED WORKING VARIABLES (DEFINED IN CODE)
 
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::    DUMI,DUMR,DUMFNI,DUMG,DUMFNG
+      REAL, DIMENSION(KTS:KTE) ::    DUMI,DUMR,DUMFNI,DUMG,DUMFNG
       REAL UNI, UMI,UMR
+      REAL, DIMENSION(KTS:KTE) ::    FR, FI, FNI,FG,FNG
       REAL RGVM
+      REAL, DIMENSION(KTS:KTE) ::   FALOUTR,FALOUTI,FALOUTNI
       REAL FALTNDR,FALTNDI,FALTNDNI,RHO2
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   DUMQS,DUMFNS
+      REAL, DIMENSION(KTS:KTE) ::   DUMQS,DUMFNS
       REAL UMS,UNS
+      REAL, DIMENSION(KTS:KTE) ::   FS,FNS, FALOUTS,FALOUTNS,FALOUTG,FALOUTNG
       REAL FALTNDS,FALTNDNS,UNR,FALTNDG,FALTNDNG
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::    DUMC,DUMFNC
+      REAL, DIMENSION(KTS:KTE) ::    DUMC,DUMFNC
       REAL UNC,UMC,UNG,UMG
+      REAL, DIMENSION(KTS:KTE) ::   FC,FALOUTC,FALOUTNC
       REAL FALTNDC,FALTNDNC
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   DUMFNR,FALOUTNR
+      REAL, DIMENSION(KTS:KTE) ::   FNC,DUMFNR,FALOUTNR
       REAL FALTNDNR
-
-      ! the only arrays which need to be stored
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::    FR, FI, FC, FNI,FG,FNG, FS,FNS, FNR, FNC
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   FALOUTS,FALOUTNS,FALOUTG,FALOUTNG, FALOUTR,FALOUTI,FALOUTNI, FALOUTC,FALOUTNC
+      REAL, DIMENSION(KTS:KTE) ::   FNR
 
 ! FALL-SPEED PARAMETER 'A' WITH AIR DENSITY CORRECTION
 
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::    AIN,ARN,ASN,ACN,AGN
+      REAL, DIMENSION(KTS:KTE) ::    AIN,ARN,ASN,ACN,AGN
 
 ! EXTERNAL FUNCTION CALL RETURN VARIABLES
 
@@ -950,14 +1214,13 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! COUNTING/INDEX VARIABLES
 
-     INTEGER N, MAXN ! ,I
-     INTEGER, DIMENSION(ITS:ITE,KMS:KME,JTS:JTE) ::   NSTEP ! NUMBER OF CLOUD DROPLETS IN CELL
-     INTEGER, DIMENSION(ITS:ITE,JTS:JTE) ::   NSTEP_FLAT ! NUMBER OF CLOUD DROPLETS IN CELL
+     INTEGER K,NSTEP,N ! ,I
 
 ! LTRUE IS ONLY USED TO SPEED UP THE CODE !!
-! LTRUE, SWITCH = 0, NO HYDROMETEORS IN CELL,
-!               = 1, HYDROMETEORS IN CELL
-     INTEGER, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE)  ::   LTRUE, LTRUE_COL   ! AIR DENSITY
+! LTRUE, SWITCH = 0, NO HYDROMETEORS IN COLUMN,
+!               = 1, HYDROMETEORS IN COLUMN
+
+      INTEGER LTRUE
 
 ! DROPLET ACTIVATION/FREEZING AEROSOL
 
@@ -994,397 +1257,234 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
         INTEGER IDROP
 
 ! FOR WRF-CHEM
+	REAL, DIMENSION(KTS:KTE)::C2PREC,CSED,ISED,SSED,GSED,RSED
 ! #if (WRF_CHEM == 1)
 !     REAL, DIMENSION(KTS:KTE), INTENT(INOUT) :: rainprod, evapprod
 ! #endif
     REAL, DIMENSION(KTS:KTE)                :: tqimelt ! melting of cloud ice (tendency)
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!END OF DECLARATIONS FROM INLINED FUNCTION!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-! below for wrf-chem
-   flag_qndrop = .false.
-   ! IF ( PRESENT ( f_qndrop ) ) flag_qndrop = f_qndrop
-!!!!!!!!!!!!!!!!!!!!!!
-
-   ! Initialize tendencies (all set to 0) and transfer
-   ! array to local variables
-   DT = DT_IN
-
-   iinum=1
-
-   !$acc data present(TH, QV, QC, QR, QI, QS, QG, NI, NS, NR, NG, &
-   !$acc             RHO_IN, PII, P, DZ, W,              &
-   !$acc             RAINNC, RAINNCV, SR,                    &
-   !$acc             SNOWNC,SNOWNCV,GRAUPELNC,GRAUPELNCV,    & 
-   !$acc             EFFC, EFFI, EFFS,                       &
-   !$acc             qrcuten, qscuten, qicuten,              & 
-   !$acc 		   ISED3D,SSED3D)                          &
-   !$acc      create(EFFR, EFFG, &
-   !$acc             QC3DTEN, QI3DTEN, QNI3DTEN, QR3DTEN, &
-   !$acc             NI3DTEN, NS3DTEN, NR3DTEN, &
-   !$acc             QC3D, QI3D, QR3D, NI3D, NS3D, NR3D, QNI3D, &
-   !$acc             T3DTEN, QV3DTEN, T3D, QV3D, PRES, &
-   !$acc             DZQ, RHO, &
-   !$acc             QG3DTEN, NG3DTEN, QG3D, NG3D, &
-   !$acc             qrcu1d, qscu1d, qicu1d, &
-   !$acc             QGSTEN, QRSTEN, QISTEN, QNISTEN, QCSTEN, LTRUE_COL, NSTEP, NSTEP_FLAT, &
-   !$acc             nc1d, nc_tend1d, C2PREC,CSED,ISED,SSED,GSED,RSED, &
-   !$acc             lamg,acn,abi,arn,ain,agn,ltrue,n0s,qvqvs,qvi,pgam, &
-   !$acc             qvqvsi,dv,eis,cdist1,xlf,xxlv,xxls,nc3d,lams,sc,asn, &
-   !$acc             n0g,cpm,lamr,n0rr,lami,n0i,kap,nc3dten,mu,lamc,ab,qvs,dap,evs, &
-   !$acc             precprt1d,snowrt1d,snowprt1d,grplprt1d, &
-   !$acc             fnc,fc,fi,dumr,fni,fnr,fs,fr,fng,fg,fns,dumg, &
-   !$acc             dumi,dumqs,dumfng,dumfnr,dumfni,dumc,dumfns,dumfnc, &
-   !$acc             faloutns,faloutg,faloutng,falouts,faloutr,faloutnr,faloutni,falouti,faloutc,faloutnc)
-
-   ! default firstprivate to handle all of the module level variables that are defined in init (I hope this works as intented...)
-   ! !$omp parallel default(shared) &
-   ! !$omp private(i,j,k) &
-   ! !$omp private(QC3DTEN,QI3DTEN,QNI3DTEN,QR3DTEN,NI3DTEN,NS3DTEN,NR3DTEN,T3DTEN,QV3DTEN,nc_tend1d) &
-   ! !$omp private(QC3D,QI3D,QNI3D,QR3D,NI3D,NS3D,NR3D,QG3D,NG3D,QG3DTEN,NG3DTEN) &
-   ! !$omp private(T3D,QV3D,PRES,DZQ,qrcu1d,qscu1d,qicu1d,nc1d,iinum) &
-   ! !$omp private(PRECPRT1D,SNOWPRT1D,GRPLPRT1D) &
-   ! !$omp private(QGSTEN,QRSTEN, QISTEN, QNISTEN, QCSTEN) &
-   ! !$omp shared(QC,QI,QS,QR,NI,NS,NR,QG,NG,T,QV,P,DZ,W,qrcuten,qscuten,qicuten) &
-   ! !$omp shared(TH,EFFC,EFFI,EFFS,EFFR,EFFG,RAINNC,RAINNCV,SNOWNC,SNOWNCV,GRAUPELNC,GRAUPELNCV,SR) &
-   ! !$omp firstprivate(IHAIL,IGRAUP,ISUB,IBASE,INUC,ILIQ,NDCNST,INUM,IACT,DT) &
-   ! !$omp firstprivate(its, ite, jts, jte, kts,kte)
-   ! !$omp do schedule(dynamic)
-
-   !$acc parallel loop gang collapse(2)
-   do j=jts,jte      ! j loop (north-south)
-   do i=its,ite      ! i loop (east-west)
-          ! INITIALIZE PRECIP AND SNOW RATES
-          PRECPRT1D(i,j) = 0.
-          SNOWRT1D(i,j) = 0.
-          ! hm added 7/13/13
-          SNOWPRT1D(i,j) = 0.
-          GRPLPRT1D(i,j) = 0.
-    enddo
-    enddo
-
-   !$acc parallel loop gang vector collapse(3)
-   do j=jts,jte      ! j loop (north-south)
-   do k=kts,kte   ! k loop (vertical)
-   do i=its,ite      ! i loop (east-west)
-
-          QC3DTEN(I,K,J)  = 0.
-          QI3DTEN(I,K,J)  = 0.
-          QNI3DTEN(I,K,J) = 0.
-          QR3DTEN(I,K,J)  = 0.
-          NI3DTEN(I,K,J)  = 0.
-          NS3DTEN(I,K,J)  = 0.
-          NR3DTEN(I,K,J)  = 0.
-          T3DTEN(I,K,J)   = 0.
-          QV3DTEN(I,K,J)  = 0.
-          nc_tend1d = 0. ! wrf-chem
-
-          QC3D(I,K,J)       = QC(i,k,j)
-          QI3D(I,K,J)       = QI(i,k,j)
-          QNI3D(I,K,J)       = QS(i,k,j)
-          QR3D(I,K,J)       = QR(i,k,j)
-
-          NI3D(I,K,J)       = NI(i,k,j)
-          NS3D(I,K,J)       = NS(i,k,j)
-          NR3D(I,K,J)       = NR(i,k,j)
-! HM ADD GRAUPEL
-          QG3D(I,K,J)       = QG(I,K,j)
-          NG3D(I,K,J)       = NG(I,K,j)
-          QG3DTEN(I,K,J)  = 0.
-          NG3DTEN(I,K,J)  = 0.
-
-      !     EFFC1D(I,K,J)     = EFFC(i,k,j)
-      !     EFFS1D(I,K,J)     = EFFS(i,k,j)
-      !     EFFI1D(I,K,J)     = EFFI(i,k,j)
-          
-          T3D(I,K,J)        = TH(i,k,j)*PII(i,k,j)
-          QV3D(I,K,J)       = QV(i,k,j)
-          PRES(I,K,J)        = P(i,k,j)
-          DZQ(I,K,J)       = DZ(i,k,j)
-! add cumulus tendencies, decouple from mu
-          qrcu1d(I,K,J)     = qrcuten(i,k,j) ! /mu(i,j) ! not coupled with mu in ICAR
-          qscu1d(I,K,J)     = qscuten(i,k,j) ! /mu(i,j) ! not coupled with mu in ICAR
-          qicu1d(I,K,J)     = qicuten(i,k,j) ! /mu(i,j) ! not coupled with mu in ICAR
-          nc1d=0. ! temporary placeholder, set to constant in microphysics subroutine
-      ENDDO
-      ENDDO
-      ENDDO
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!START OF INLINED FUNCTION!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-!CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
-!CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
-      ! SUBROUTINE MORR_TWO_MOMENT_MICRO(QC3DTEN,QI3DTEN,QNI3DTEN,QR3DTEN,         &
-      !  NI3DTEN,NS3DTEN,NR3DTEN,QC3D,QI3D,QNI3D,QR3D,NI3D,NS3D,NR3D,              &
-      !  T3DTEN,QV3DTEN,T3D,QV3D,PRES,DZQ,W3D,WVAR,PRECRT,SNOWRT,            &
-      !  SNOWPRT,GRPLPRT,                & ! hm added 7/13/13
-      !  EFFC,EFFI,EFFS,EFFR,DT,                                                   &
-      !                                       IMS,IME, JMS,JME, KMS,KME,           &
-      !                                       ITS,ITE, JTS,JTE, KTS,KTE,           & ! ADD GRAUPEL
-      !                   QG3DTEN,NG3DTEN,QG3D,NG3D,EFFG,qrcu1d,qscu1d, qicu1d,    &
-      !                   QGSTEN,QRSTEN,QISTEN,QNISTEN,QCSTEN, &
-      !                   nc3d,nc3dten,iinum, & ! wrf-chem
-	! 			c2prec,CSED,ISED,SSED,GSED,RSED  &  ! hm added, wrf-chem
-! #if (WRF_CHEM == 1)
-!         ,rainprod, evapprod &
-! #endif
-                        ! )
-
-!CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
-! THIS PROGRAM IS THE MAIN TWO-MOMENT MICROPHYSICS SUBROUTINE DESCRIBED BY
-! MORRISON ET AL. 2005 JAS; MORRISON AND PINTO 2005 JAS.
-! ADDITIONAL CHANGES ARE DESCRIBED IN DETAIL BY MORRISON, THOMPSON, TATARSKII (MWR, SUBMITTED)
-
-! THIS SCHEME IS A BULK DOUBLE-MOMENT SCHEME THAT PREDICTS MIXING
-! RATIOS AND NUMBER CONCENTRATIONS OF FIVE HYDROMETEOR SPECIES:
-! CLOUD DROPLETS, CLOUD (SMALL) ICE, RAIN, SNOW, AND GRAUPEL.
-
-! CODE STRUCTURE: MAIN SUBROUTINE IS 'MORR_TWO_MOMENT'. ALSO INCLUDED IN THIS FILE IS
-! 'FUNCTION POLYSVP', 'FUNCTION DERF1', AND
-! 'FUNCTION GAMMA'.
-
-! NOTE: THIS SUBROUTINE USES 1D ARRAY IN VERTICAL (COLUMN), EVEN THOUGH VARIABLES ARE CALLED '3D'......
-
-!CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
-
-! DECLARATIONS
-
-!CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
-! THESE VARIABLES BELOW MUST BE LINKED WITH THE MAIN MODEL.
-! DEFINE ARRAY SIZES
-
-! INPUT NUMBER OF GRID CELLS
-
-
 ! comment lines for wrf-chem since these are intent(in) in that case
 !       REAL, DIMENSION(KTS:KTE) ::  NC3DTEN            ! CLOUD DROPLET NUMBER CONCENTRATION (1/KG/S)
 !       REAL, DIMENSION(KTS:KTE) ::  NC3D               ! CLOUD DROPLET NUMBER CONCENTRATION (1/KG)
 
-
-
-! ATMOSPHERIC PARAMETERS THAT VARY IN TIME AND HEIGHT
-   !$acc parallel loop gang vector collapse(3) async(1)
-   do j=jts,jte      ! j loop (north-south)
-   DO K = KTS,KTE
-   do i=its,ite      ! i loop (east-west)
+!CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 
 ! SET LTRUE INITIALLY TO 0
 
-               LTRUE(I,K,J) = 0
-               NSTEP(I,K,J) = 1
+         LTRUE = 0
+
+! ATMOSPHERIC PARAMETERS THAT VARY IN TIME AND HEIGHT
+         DO K = KTS,KTE
 
 ! NC3DTEN LOCAL ARRAY INITIALIZED
-               NC3DTEN(I,K,J) = 0.
+               NC3DTEN(K) = 0.
 ! INITIALIZE VARIABLES FOR WRF-CHEM OUTPUT TO ZERO
 
-		C2PREC(I,K,J)=0.
-		CSED(I,K,J)=0.
-		ISED(I,K,J)=0.
-		SSED(I,K,J)=0.
-		GSED(I,K,J)=0.
-		RSED(I,K,J)=0.
+		C2PREC(K)=0.
+		CSED(K)=0.
+		ISED(K)=0.
+		SSED(K)=0.
+		GSED(K)=0.
+		RSED(K)=0.
 
 ! #if (WRF_CHEM == 1)
-!          rainprod(I,K,J) = 0.
-!          evapprod(I,K,J) = 0.
-!          tqimelt(I,K,J)  = 0.
-!          PRC      = 0.
-!          PRA      = 0.
+!          rainprod(K) = 0.
+!          evapprod(K) = 0.
+!          tqimelt(K)  = 0.
+!          PRC(K)      = 0.
+!          PRA(K)      = 0.
 ! #endif
 
 ! LATENT HEAT OF VAPORATION
 
-            XXLV(I,K,J) = 3.1484E6-2370.*T3D(I,K,J)
+            XXLV(K) = 3.1484E6-2370.*T3D(K)
 
 ! LATENT HEAT OF SUBLIMATION
 
-            XXLS(I,K,J) = 3.15E6-2370.*T3D(I,K,J)+0.3337E6
+            XXLS(K) = 3.15E6-2370.*T3D(K)+0.3337E6
 
-            CPM(I,K,J) = CP*(1.+0.887*QV3D(I,K,J))
+            CPM(K) = CP*(1.+0.887*QV3D(K))
 
 ! SATURATION VAPOR PRESSURE AND MIXING RATIO
 
 ! hm, add fix for low pressure, 5/12/10
-            EVS = min(0.99*pres(I,K,J),POLYSVP(T3D(I,K,J),0))   ! PA
-            EIS = min(0.99*pres(I,K,J),POLYSVP(T3D(I,K,J),1))   ! PA
+            EVS(K) = min(0.99*pres(k),POLYSVP(T3D(K),0))   ! PA
+            EIS(K) = min(0.99*pres(k),POLYSVP(T3D(K),1))   ! PA
 
 ! MAKE SURE ICE SATURATION DOESN'T EXCEED WATER SAT. NEAR FREEZING
 
-            IF (EIS.GT.EVS) EIS = EVS
+            IF (EIS(K).GT.EVS(K)) EIS(K) = EVS(K)
 
-            QVS = EP_2*EVS/(PRES(I,K,J)-EVS)
-            QVI = EP_2*EIS/(PRES(I,K,J)-EIS)
+            QVS(K) = EP_2*EVS(K)/(PRES(K)-EVS(K))
+            QVI(K) = EP_2*EIS(K)/(PRES(K)-EIS(K))
 
-            QVQVS = QV3D(I,K,J)/QVS
-            QVQVSI = QV3D(I,K,J)/QVI
+            QVQVS(K) = QV3D(K)/QVS(K)
+            QVQVSI(K) = QV3D(K)/QVI(K)
 
 ! AIR DENSITY
 
-            RHO(I,K,J) = PRES(I,K,J)/(R*T3D(I,K,J))
+            RHO(K) = PRES(K)/(R*T3D(K))
 
 ! ADD NUMBER CONCENTRATION DUE TO CUMULUS TENDENCY
 ! ASSUME N0 ASSOCIATED WITH CUMULUS PARAM RAIN IS 10^7 M^-4
 ! ASSUME N0 ASSOCIATED WITH CUMULUS PARAM SNOW IS 2 X 10^7 M^-4
 ! FOR DETRAINED CLOUD ICE, ASSUME MEAN VOLUME DIAM OF 80 MICRON
 
-            IF (QRCU1D(I,K,J).GE.1.E-10) THEN
-            DUM=1.8e5*(QRCU1D(I,K,J)*DT/(PI*RHOW*RHO(I,K,J)**3))**0.25
-            NR3D(I,K,J)=NR3D(I,K,J)+DUM
+            IF (QRCU1D(K).GE.1.E-10) THEN
+            DUM=1.8e5*(QRCU1D(K)*DT/(PI*RHOW*RHO(K)**3))**0.25
+            NR3D(K)=NR3D(K)+DUM
             END IF
-            IF (QSCU1D(I,K,J).GE.1.E-10) THEN
-            DUM=3.e5*(QSCU1D(I,K,J)*DT/(CONS1*RHO(I,K,J)**3))**(1./(DS+1.))
-            NS3D(I,K,J)=NS3D(I,K,J)+DUM
+            IF (QSCU1D(K).GE.1.E-10) THEN
+            DUM=3.e5*(QSCU1D(K)*DT/(CONS1*RHO(K)**3))**(1./(DS+1.))
+            NS3D(K)=NS3D(K)+DUM
             END IF
-            IF (QICU1D(I,K,J).GE.1.E-10) THEN
-            DUM=QICU1D(I,K,J)*DT/(CI*(80.E-6)**DI)
-            NI3D(I,K,J)=NI3D(I,K,J)+DUM
+            IF (QICU1D(K).GE.1.E-10) THEN
+            DUM=QICU1D(K)*DT/(CI*(80.E-6)**DI)
+            NI3D(K)=NI3D(K)+DUM
             END IF
 
 ! AT SUBSATURATION, REMOVE SMALL AMOUNTS OF CLOUD/PRECIP WATER
 ! hm modify 7/0/09 change limit to 1.e-8
 
-             IF (QVQVS.LT.0.9) THEN
-               IF (QR3D(I,K,J).LT.1.E-8) THEN
-                  QV3D(I,K,J)=QV3D(I,K,J)+QR3D(I,K,J)
-                  T3D(I,K,J)=T3D(I,K,J)-QR3D(I,K,J)*XXLV(I,K,J)/CPM(I,K,J)
-                  QR3D(I,K,J)=0.
+             IF (QVQVS(K).LT.0.9) THEN
+               IF (QR3D(K).LT.1.E-8) THEN
+                  QV3D(K)=QV3D(K)+QR3D(K)
+                  T3D(K)=T3D(K)-QR3D(K)*XXLV(K)/CPM(K)
+                  QR3D(K)=0.
                END IF
-               IF (QC3D(I,K,J).LT.1.E-8) THEN
-                  QV3D(I,K,J)=QV3D(I,K,J)+QC3D(I,K,J)
-                  T3D(I,K,J)=T3D(I,K,J)-QC3D(I,K,J)*XXLV(I,K,J)/CPM(I,K,J)
-                  QC3D(I,K,J)=0.
+               IF (QC3D(K).LT.1.E-8) THEN
+                  QV3D(K)=QV3D(K)+QC3D(K)
+                  T3D(K)=T3D(K)-QC3D(K)*XXLV(K)/CPM(K)
+                  QC3D(K)=0.
                END IF
              END IF
 
-             IF (QVQVSI.LT.0.9) THEN
-               IF (QI3D(I,K,J).LT.1.E-8) THEN
-                  QV3D(I,K,J)=QV3D(I,K,J)+QI3D(I,K,J)
-                  T3D(I,K,J)=T3D(I,K,J)-QI3D(I,K,J)*XXLS(I,K,J)/CPM(I,K,J)
-                  QI3D(I,K,J)=0.
+             IF (QVQVSI(K).LT.0.9) THEN
+               IF (QI3D(K).LT.1.E-8) THEN
+                  QV3D(K)=QV3D(K)+QI3D(K)
+                  T3D(K)=T3D(K)-QI3D(K)*XXLS(K)/CPM(K)
+                  QI3D(K)=0.
                END IF
-               IF (QNI3D(I,K,J).LT.1.E-8) THEN
-                  QV3D(I,K,J)=QV3D(I,K,J)+QNI3D(I,K,J)
-                  T3D(I,K,J)=T3D(I,K,J)-QNI3D(I,K,J)*XXLS(I,K,J)/CPM(I,K,J)
-                  QNI3D(I,K,J)=0.
+               IF (QNI3D(K).LT.1.E-8) THEN
+                  QV3D(K)=QV3D(K)+QNI3D(K)
+                  T3D(K)=T3D(K)-QNI3D(K)*XXLS(K)/CPM(K)
+                  QNI3D(K)=0.
                END IF
-               IF (QG3D(I,K,J).LT.1.E-8) THEN
-                  QV3D(I,K,J)=QV3D(I,K,J)+QG3D(I,K,J)
-                  T3D(I,K,J)=T3D(I,K,J)-QG3D(I,K,J)*XXLS(I,K,J)/CPM(I,K,J)
-                  QG3D(I,K,J)=0.
+               IF (QG3D(K).LT.1.E-8) THEN
+                  QV3D(K)=QV3D(K)+QG3D(K)
+                  T3D(K)=T3D(K)-QG3D(K)*XXLS(K)/CPM(K)
+                  QG3D(K)=0.
                END IF
              END IF
 
 ! HEAT OF FUSION
 
-            XLF(I,K,J) = XXLS(I,K,J)-XXLV(I,K,J)
+            XLF(K) = XXLS(K)-XXLV(K)
 
 !..................................................................
 ! IF MIXING RATIO < QSMALL SET MIXING RATIO AND NUMBER CONC TO ZERO
 
-       IF (QC3D(I,K,J).LT.QSMALL) THEN
-         QC3D(I,K,J) = 0.
-         NC3D(I,K,J) = 0.
-         EFFC(I,K,J) = 0.
+       IF (QC3D(K).LT.QSMALL) THEN
+         QC3D(K) = 0.
+         NC3D(K) = 0.
+         EFFC(K) = 0.
        END IF
-       IF (QR3D(I,K,J).LT.QSMALL) THEN
-         QR3D(I,K,J) = 0.
-         NR3D(I,K,J) = 0.
-         EFFR(I,K,J) = 0.
+       IF (QR3D(K).LT.QSMALL) THEN
+         QR3D(K) = 0.
+         NR3D(K) = 0.
+         EFFR(K) = 0.
        END IF
-       IF (QI3D(I,K,J).LT.QSMALL) THEN
-         QI3D(I,K,J) = 0.
-         NI3D(I,K,J) = 0.
-         EFFI(I,K,J) = 0.
+       IF (QI3D(K).LT.QSMALL) THEN
+         QI3D(K) = 0.
+         NI3D(K) = 0.
+         EFFI(K) = 0.
        END IF
-       IF (QNI3D(I,K,J).LT.QSMALL) THEN
-         QNI3D(I,K,J) = 0.
-         NS3D(I,K,J) = 0.
-         EFFS(I,K,J) = 0.
+       IF (QNI3D(K).LT.QSMALL) THEN
+         QNI3D(K) = 0.
+         NS3D(K) = 0.
+         EFFS(K) = 0.
        END IF
-       IF (QG3D(I,K,J).LT.QSMALL) THEN
-         QG3D(I,K,J) = 0.
-         NG3D(I,K,J) = 0.
-         EFFG(I,K,J) = 0.
+       IF (QG3D(K).LT.QSMALL) THEN
+         QG3D(K) = 0.
+         NG3D(K) = 0.
+         EFFG(K) = 0.
        END IF
 
 ! INITIALIZE SEDIMENTATION TENDENCIES FOR MIXING RATIO
 
-      QRSTEN(I,K,J) = 0.
-      QISTEN(I,K,J) = 0.
-      QNISTEN(I,K,J) = 0.
-      QCSTEN(I,K,J) = 0.
-      QGSTEN(I,K,J) = 0.
+      QRSTEN(K) = 0.
+      QISTEN(K) = 0.
+      QNISTEN(K) = 0.
+      QCSTEN(K) = 0.
+      QGSTEN(K) = 0.
 
 !..................................................................
 ! MICROPHYSICS PARAMETERS VARYING IN TIME/HEIGHT
 
 ! fix 053011
-            MU(I,K,J) = 1.496E-6*T3D(I,K,J)**1.5/(T3D(I,K,J)+120.)
+            MU(K) = 1.496E-6*T3D(K)**1.5/(T3D(K)+120.)
 
 ! FALL SPEED WITH DENSITY CORRECTION (HEYMSFIELD AND BENSSEMER 2006)
 
-            DUM = (RHOSU/RHO(I,K,J))**0.54
+            DUM = (RHOSU/RHO(K))**0.54
 
 ! fix 053011
-!            AIN(I,K,J) = DUM*AI
+!            AIN(K) = DUM*AI
 ! AA revision 4/1/11: Ikawa and Saito 1991 air-density correction
-            AIN(I,K,J) = (RHOSU/RHO(I,K,J))**0.35*AI
-            ARN(I,K,J) = DUM*AR
-            ASN(I,K,J) = DUM*AS
-!            ACN(I,K,J) = DUM*AC
+            AIN(K) = (RHOSU/RHO(K))**0.35*AI
+            ARN(K) = DUM*AR
+            ASN(K) = DUM*AS
+!            ACN(K) = DUM*AC
 ! AA revision 4/1/11: temperature-dependent Stokes fall speed
-            ACN(I,K,J) = G*RHOW/(18.*MU(I,K,J))
+            ACN(K) = G*RHOW/(18.*MU(K))
 ! HM ADD GRAUPEL 8/28/06
-            AGN(I,K,J) = DUM*AG
+            AGN(K) = DUM*AG
 
 !hm 4/7/09 bug fix, initialize lami to prevent later division by zero
-            LAMI(I,K,J)=0.
+            LAMI(K)=0.
 
 !..................................
 ! IF THERE IS NO CLOUD/PRECIP WATER, AND IF SUBSATURATED, THEN SKIP MICROPHYSICS
 ! FOR THIS LEVEL
 
-      IF (.not. (QC3D(I,K,J).LT.QSMALL.AND.QI3D(I,K,J).LT.QSMALL.AND.QNI3D(I,K,J).LT.QSMALL &
-            .AND.QR3D(I,K,J).LT.QSMALL.AND.QG3D(I,K,J).LT.QSMALL.AND.( &
-            (T3D(I,K,J).LT.273.15.AND.QVQVSI.LT.0.999).OR. &
-            (T3D(I,K,J).GE.273.15.AND.QVQVS.LT.0.999)))) THEN
+            IF (QC3D(K).LT.QSMALL.AND.QI3D(K).LT.QSMALL.AND.QNI3D(K).LT.QSMALL &
+                 .AND.QR3D(K).LT.QSMALL.AND.QG3D(K).LT.QSMALL) THEN
+                 IF (T3D(K).LT.273.15.AND.QVQVSI(K).LT.0.999) GOTO 200
+                 IF (T3D(K).GE.273.15.AND.QVQVS(K).LT.0.999) GOTO 200
+            END IF
 
 ! THERMAL CONDUCTIVITY FOR AIR
 
 ! fix 053011
-            KAP = 1.414E3*MU(I,K,J)
+            KAP(K) = 1.414E3*MU(K)
 
 ! DIFFUSIVITY OF WATER VAPOR
 
-            DV = 8.794E-5*T3D(I,K,J)**1.81/PRES(I,K,J)
+            DV(K) = 8.794E-5*T3D(K)**1.81/PRES(K)
 
 ! SCHMIT NUMBER
 
 ! fix 053011
-            SC = MU(I,K,J)/(RHO(I,K,J)*DV)
+            SC(K) = MU(K)/(RHO(K)*DV(K))
 
 ! PSYCHOMETIC CORRECTIONS
 
 ! RATE OF CHANGE SAT. MIX. RATIO WITH TEMPERATURE
 
-            DUM = (RV*T3D(I,K,J)**2)
+            DUM = (RV*T3D(K)**2)
 
-            DQSDT = XXLV(I,K,J)*QVS/DUM
-            DQSIDT =  XXLS(I,K,J)*QVI/DUM
+            DQSDT = XXLV(K)*QVS(K)/DUM
+            DQSIDT =  XXLS(K)*QVI(K)/DUM
 
-            ABI = 1.+DQSIDT*XXLS(I,K,J)/CPM(I,K,J)
-            AB = 1.+DQSDT*XXLV(I,K,J)/CPM(I,K,J)
+            ABI(K) = 1.+DQSIDT*XXLS(K)/CPM(K)
+            AB(K) = 1.+DQSDT*XXLV(K)/CPM(K)
 
 !
 !.....................................................................
 !.....................................................................
 ! CASE FOR TEMPERATURE ABOVE FREEZING
 
-            IF (T3D(I,K,J).GE.273.15) THEN
+            IF (T3D(K).GE.273.15) THEN
 
 !......................................................................
 !HM ADD, ALLOW FOR CONSTANT DROPLET NUMBER
@@ -1393,59 +1493,59 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
          IF (iinum.EQ.1) THEN
 ! CONVERT NDCNST FROM CM-3 TO KG-1
-            NC3D(I,K,J)=NDCNST*1.E6/RHO(I,K,J)
+            NC3D(K)=NDCNST*1.E6/RHO(K)
          END IF
 
 ! GET SIZE DISTRIBUTION PARAMETERS
 
 ! MELT VERY SMALL SNOW AND GRAUPEL MIXING RATIOS, ADD TO RAIN
-       IF (QNI3D(I,K,J).LT.1.E-6) THEN
-          QR3D(I,K,J)=QR3D(I,K,J)+QNI3D(I,K,J)
-          NR3D(I,K,J)=NR3D(I,K,J)+NS3D(I,K,J)
-          T3D(I,K,J)=T3D(I,K,J)-QNI3D(I,K,J)*XLF(I,K,J)/CPM(I,K,J)
-          QNI3D(I,K,J) = 0.
-          NS3D(I,K,J) = 0.
+       IF (QNI3D(K).LT.1.E-6) THEN
+          QR3D(K)=QR3D(K)+QNI3D(K)
+          NR3D(K)=NR3D(K)+NS3D(K)
+          T3D(K)=T3D(K)-QNI3D(K)*XLF(K)/CPM(K)
+          QNI3D(K) = 0.
+          NS3D(K) = 0.
        END IF
-       IF (QG3D(I,K,J).LT.1.E-6) THEN
-          QR3D(I,K,J)=QR3D(I,K,J)+QG3D(I,K,J)
-          NR3D(I,K,J)=NR3D(I,K,J)+NG3D(I,K,J)
-          T3D(I,K,J)=T3D(I,K,J)-QG3D(I,K,J)*XLF(I,K,J)/CPM(I,K,J)
-          QG3D(I,K,J) = 0.
-          NG3D(I,K,J) = 0.
+       IF (QG3D(K).LT.1.E-6) THEN
+          QR3D(K)=QR3D(K)+QG3D(K)
+          NR3D(K)=NR3D(K)+NG3D(K)
+          T3D(K)=T3D(K)-QG3D(K)*XLF(K)/CPM(K)
+          QG3D(K) = 0.
+          NG3D(K) = 0.
        END IF
 
-      IF (.not. (QC3D(I,K,J).LT.QSMALL.AND.QNI3D(I,K,J).LT.1.E-8.AND.QR3D(I,K,J).LT.QSMALL.AND.QG3D(I,K,J).LT.1.E-8)) THEN
+       IF (QC3D(K).LT.QSMALL.AND.QNI3D(K).LT.1.E-8.AND.QR3D(K).LT.QSMALL.AND.QG3D(K).LT.1.E-8) GOTO 300
 
 ! MAKE SURE NUMBER CONCENTRATIONS AREN'T NEGATIVE
 
-      NS3D(I,K,J) = MAX(0.,NS3D(I,K,J))
-      NC3D(I,K,J) = MAX(0.,NC3D(I,K,J))
-      NR3D(I,K,J) = MAX(0.,NR3D(I,K,J))
-      NG3D(I,K,J) = MAX(0.,NG3D(I,K,J))
+      NS3D(K) = MAX(0.,NS3D(K))
+      NC3D(K) = MAX(0.,NC3D(K))
+      NR3D(K) = MAX(0.,NR3D(K))
+      NG3D(K) = MAX(0.,NG3D(K))
 
 !......................................................................
 ! RAIN
 
-      IF (QR3D(I,K,J).GE.QSMALL) THEN
-      LAMR(I,K,J) = (PI*RHOW*NR3D(I,K,J)/QR3D(I,K,J))**(1./3.)
-      N0RR(I,K,J) = NR3D(I,K,J)*LAMR(I,K,J)
+      IF (QR3D(K).GE.QSMALL) THEN
+      LAMR(K) = (PI*RHOW*NR3D(K)/QR3D(K))**(1./3.)
+      N0RR(K) = NR3D(K)*LAMR(K)
 
 ! CHECK FOR SLOPE
 
 ! ADJUST VARS
 
-      IF (LAMR(I,K,J).LT.LAMMINR) THEN
+      IF (LAMR(K).LT.LAMMINR) THEN
 
-      LAMR(I,K,J) = LAMMINR
+      LAMR(K) = LAMMINR
 
-      N0RR(I,K,J) = LAMR(I,K,J)**4*QR3D(I,K,J)/(PI*RHOW)
+      N0RR(K) = LAMR(K)**4*QR3D(K)/(PI*RHOW)
 
-      NR3D(I,K,J) = N0RR(I,K,J)/LAMR(I,K,J)
-      ELSE IF (LAMR(I,K,J).GT.LAMMAXR) THEN
-      LAMR(I,K,J) = LAMMAXR
-      N0RR(I,K,J) = LAMR(I,K,J)**4*QR3D(I,K,J)/(PI*RHOW)
+      NR3D(K) = N0RR(K)/LAMR(K)
+      ELSE IF (LAMR(K).GT.LAMMAXR) THEN
+      LAMR(K) = LAMMAXR
+      N0RR(K) = LAMR(K)**4*QR3D(K)/(PI*RHOW)
 
-      NR3D(I,K,J) = N0RR(I,K,J)/LAMR(I,K,J)
+      NR3D(K) = N0RR(K)/LAMR(K)
       END IF
       END IF
 
@@ -1454,35 +1554,35 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! MARTIN ET AL. (1994) FORMULA FOR PGAM
 
-      IF (QC3D(I,K,J).GE.QSMALL) THEN
+      IF (QC3D(K).GE.QSMALL) THEN
 
-         DUM = PRES(I,K,J)/(287.15*T3D(I,K,J))
-         PGAM(I,K,J)=0.0005714*(NC3D(I,K,J)/1.E6*DUM)+0.2714
-         PGAM(I,K,J)=1./(PGAM(I,K,J)**2)-1.
-         PGAM(I,K,J)=MAX(PGAM(I,K,J),2.)
-         PGAM(I,K,J)=MIN(PGAM(I,K,J),10.)
+         DUM = PRES(K)/(287.15*T3D(K))
+         PGAM(K)=0.0005714*(NC3D(K)/1.E6*DUM)+0.2714
+         PGAM(K)=1./(PGAM(K)**2)-1.
+         PGAM(K)=MAX(PGAM(K),2.)
+         PGAM(K)=MIN(PGAM(K),10.)
 
 ! CALCULATE LAMC
 
-      LAMC(I,K,J) = (CONS26*NC3D(I,K,J)*GAMMA(PGAM(I,K,J)+4.)/   &
-                 (QC3D(I,K,J)*GAMMA(PGAM(I,K,J)+1.)))**(1./3.)
+      LAMC(K) = (CONS26*NC3D(K)*GAMMA(PGAM(K)+4.)/   &
+                 (QC3D(K)*GAMMA(PGAM(K)+1.)))**(1./3.)
 
 ! LAMMIN, 60 MICRON DIAMETER
 ! LAMMAX, 1 MICRON
 
-      LAMMIN = (PGAM(I,K,J)+1.)/60.E-6
-      LAMMAX = (PGAM(I,K,J)+1.)/1.E-6
+      LAMMIN = (PGAM(K)+1.)/60.E-6
+      LAMMAX = (PGAM(K)+1.)/1.E-6
 
-      IF (LAMC(I,K,J).LT.LAMMIN) THEN
-      LAMC(I,K,J) = LAMMIN
+      IF (LAMC(K).LT.LAMMIN) THEN
+      LAMC(K) = LAMMIN
 
-      NC3D(I,K,J) = EXP(3.*LOG(LAMC(I,K,J))+LOG(QC3D(I,K,J))+              &
-                LOG(GAMMA(PGAM(I,K,J)+1.))-LOG(GAMMA(PGAM(I,K,J)+4.)))/CONS26
-      ELSE IF (LAMC(I,K,J).GT.LAMMAX) THEN
-      LAMC(I,K,J) = LAMMAX
+      NC3D(K) = EXP(3.*LOG(LAMC(K))+LOG(QC3D(K))+              &
+                LOG(GAMMA(PGAM(K)+1.))-LOG(GAMMA(PGAM(K)+4.)))/CONS26
+      ELSE IF (LAMC(K).GT.LAMMAX) THEN
+      LAMC(K) = LAMMAX
 
-      NC3D(I,K,J) = EXP(3.*LOG(LAMC(I,K,J))+LOG(QC3D(I,K,J))+              &
-                LOG(GAMMA(PGAM(I,K,J)+1.))-LOG(GAMMA(PGAM(I,K,J)+4.)))/CONS26
+      NC3D(K) = EXP(3.*LOG(LAMC(K))+LOG(QC3D(K))+              &
+                LOG(GAMMA(PGAM(K)+1.))-LOG(GAMMA(PGAM(K)+4.)))/CONS26
 
       END IF
 
@@ -1491,78 +1591,78 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 !......................................................................
 ! SNOW
 
-      IF (QNI3D(I,K,J).GE.QSMALL) THEN
-      LAMS(I,K,J) = (CONS1*NS3D(I,K,J)/QNI3D(I,K,J))**(1./DS)
-      N0S(I,K,J) = NS3D(I,K,J)*LAMS(I,K,J)
+      IF (QNI3D(K).GE.QSMALL) THEN
+      LAMS(K) = (CONS1*NS3D(K)/QNI3D(K))**(1./DS)
+      N0S(K) = NS3D(K)*LAMS(K)
 
 ! CHECK FOR SLOPE
 
 ! ADJUST VARS
 
-      IF (LAMS(I,K,J).LT.LAMMINS) THEN
-      LAMS(I,K,J) = LAMMINS
-      N0S(I,K,J) = LAMS(I,K,J)**4*QNI3D(I,K,J)/CONS1
+      IF (LAMS(K).LT.LAMMINS) THEN
+      LAMS(K) = LAMMINS
+      N0S(K) = LAMS(K)**4*QNI3D(K)/CONS1
 
-      NS3D(I,K,J) = N0S(I,K,J)/LAMS(I,K,J)
+      NS3D(K) = N0S(K)/LAMS(K)
 
-      ELSE IF (LAMS(I,K,J).GT.LAMMAXS) THEN
+      ELSE IF (LAMS(K).GT.LAMMAXS) THEN
 
-      LAMS(I,K,J) = LAMMAXS
-      N0S(I,K,J) = LAMS(I,K,J)**4*QNI3D(I,K,J)/CONS1
+      LAMS(K) = LAMMAXS
+      N0S(K) = LAMS(K)**4*QNI3D(K)/CONS1
 
-      NS3D(I,K,J) = N0S(I,K,J)/LAMS(I,K,J)
+      NS3D(K) = N0S(K)/LAMS(K)
       END IF
       END IF
 
 !......................................................................
 ! GRAUPEL
 
-      IF (QG3D(I,K,J).GE.QSMALL) THEN
-      LAMG(I,K,J) = (CONS2*NG3D(I,K,J)/QG3D(I,K,J))**(1./DG)
-      N0G(I,K,J) = NG3D(I,K,J)*LAMG(I,K,J)
+      IF (QG3D(K).GE.QSMALL) THEN
+      LAMG(K) = (CONS2*NG3D(K)/QG3D(K))**(1./DG)
+      N0G(K) = NG3D(K)*LAMG(K)
 
 ! ADJUST VARS
 
-      IF (LAMG(I,K,J).LT.LAMMING) THEN
-      LAMG(I,K,J) = LAMMING
-      N0G(I,K,J) = LAMG(I,K,J)**4*QG3D(I,K,J)/CONS2
+      IF (LAMG(K).LT.LAMMING) THEN
+      LAMG(K) = LAMMING
+      N0G(K) = LAMG(K)**4*QG3D(K)/CONS2
 
-      NG3D(I,K,J) = N0G(I,K,J)/LAMG(I,K,J)
+      NG3D(K) = N0G(K)/LAMG(K)
 
-      ELSE IF (LAMG(I,K,J).GT.LAMMAXG) THEN
+      ELSE IF (LAMG(K).GT.LAMMAXG) THEN
 
-      LAMG(I,K,J) = LAMMAXG
-      N0G(I,K,J) = LAMG(I,K,J)**4*QG3D(I,K,J)/CONS2
+      LAMG(K) = LAMMAXG
+      N0G(K) = LAMG(K)**4*QG3D(K)/CONS2
 
-      NG3D(I,K,J) = N0G(I,K,J)/LAMG(I,K,J)
+      NG3D(K) = N0G(K)/LAMG(K)
       END IF
       END IF
 
 !.....................................................................
 ! ZERO OUT PROCESS RATES
 
-            PRC = 0.
-            NPRC = 0.
-            NPRC1 = 0.
-            PRA = 0.
-            NPRA = 0.
-            NRAGG = 0.
-            NSMLTS = 0.
-            NSMLTR = 0.
-            EVPMS = 0.
-            PCC = 0.
-            PRE = 0.
-            NSUBC = 0.
-            NSUBR = 0.
-            PRACG = 0.
-            NPRACG = 0.
-            PSMLT = 0.
-            PGMLT = 0.
-            EVPMG = 0.
-            PRACS = 0.
-            NPRACS = 0.
-            NGMLTG = 0.
-            NGMLTR = 0.
+            PRC(K) = 0.
+            NPRC(K) = 0.
+            NPRC1(K) = 0.
+            PRA(K) = 0.
+            NPRA(K) = 0.
+            NRAGG(K) = 0.
+            NSMLTS(K) = 0.
+            NSMLTR(K) = 0.
+            EVPMS(K) = 0.
+            PCC(K) = 0.
+            PRE(K) = 0.
+            NSUBC(K) = 0.
+            NSUBR(K) = 0.
+            PRACG(K) = 0.
+            NPRACG(K) = 0.
+            PSMLT(K) = 0.
+            PGMLT(K) = 0.
+            EVPMG(K) = 0.
+            PRACS(K) = 0.
+            NPRACS(K) = 0.
+            NGMLTG(K) = 0.
+            NGMLTR(K) = 0.
 
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 ! CALCULATION OF MICROPHYSICAL PROCESS RATES, T > 273.15 K
@@ -1577,23 +1677,23 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! USE MINIMUM VALUE OF 1.E-6 TO PREVENT FLOATING POINT ERROR
 
-         IF (QC3D(I,K,J).GE.1.E-6) THEN
+         IF (QC3D(K).GE.1.E-6) THEN
 
 ! HM ADD 12/13/06, REPLACE WITH NEWER FORMULA
 ! FROM KHAIROUTDINOV AND KOGAN 2000, MWR
 
-                PRC=1350.*QC3D(I,K,J)**2.47*  &
-           (NC3D(I,K,J)/1.e6*RHO(I,K,J))**(-1.79)
+                PRC(K)=1350.*QC3D(K)**2.47*  &
+           (NC3D(K)/1.e6*RHO(K))**(-1.79)
 
 ! note: nprc1 is change in Nr,
 ! nprc is change in Nc
 
-        NPRC1 = PRC/CONS29
-        NPRC = PRC/(QC3D(I,K,J)/NC3D(I,K,J))
+        NPRC1(K) = PRC(K)/CONS29
+        NPRC(K) = PRC(K)/(QC3D(k)/NC3D(K))
 
 ! hm bug fix 3/20/12
-                NPRC = MIN(NPRC,NC3D(I,K,J)/DT)
-                NPRC1 = MIN(NPRC1,NPRC)
+                NPRC(K) = MIN(NPRC(K),NC3D(K)/DT)
+                NPRC1(K) = MIN(NPRC1(K),NPRC(K))
 
          END IF
 
@@ -1601,17 +1701,17 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! HM ADD 12/13/06, COLLECTION OF SNOW BY RAIN ABOVE FREEZING
 ! FORMULA FROM IKAWA AND SAITO (1991)
 
-         IF (QR3D(I,K,J).GE.1.E-8.AND.QNI3D(I,K,J).GE.1.E-8) THEN
+         IF (QR3D(K).GE.1.E-8.AND.QNI3D(K).GE.1.E-8) THEN
 
-            UMS = ASN(I,K,J)*CONS3/(LAMS(I,K,J)**BS)
-            UMR = ARN(I,K,J)*CONS4/(LAMR(I,K,J)**BR)
-            UNS = ASN(I,K,J)*CONS5/LAMS(I,K,J)**BS
-            UNR = ARN(I,K,J)*CONS6/LAMR(I,K,J)**BR
+            UMS = ASN(K)*CONS3/(LAMS(K)**BS)
+            UMR = ARN(K)*CONS4/(LAMR(K)**BR)
+            UNS = ASN(K)*CONS5/LAMS(K)**BS
+            UNR = ARN(K)*CONS6/LAMR(K)**BR
 
 ! SET REASLISTIC LIMITS ON FALLSPEEDS
 
 ! bug fix, 10/08/09
-            dum=(rhosu/RHO(I,K,J))**0.54
+            dum=(rhosu/rho(k))**0.54
             UMS=MIN(UMS,1.2*dum)
             UNS=MIN(UNS,1.2*dum)
             UMR=MIN(UMR,9.1*dum)
@@ -1620,26 +1720,26 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! hm fix, 2/12/13
 ! for above freezing conditions to get accelerated melting of snow,
 ! we need collection of rain by snow (following Lin et al. 1983)
-!            PRACS = CONS31*(((1.2*UMR-0.95*UMS)**2+              &
-!                  0.08*UMS*UMR)**0.5*RHO(I,K,J)*                     &
-!                 N0RR(I,K,J)*N0S(I,K,J)/LAMS(I,K,J)**3*                    &
-!                  (5./(LAMS(I,K,J)**3*LAMR(I,K,J))+                    &
-!                  2./(LAMS(I,K,J)**2*LAMR(I,K,J)**2)+                  &
-!                  0.5/(LAMS(I,K,J)*LAMR(I,K,J)**3)))
+!            PRACS(K) = CONS31*(((1.2*UMR-0.95*UMS)**2+              &
+!                  0.08*UMS*UMR)**0.5*RHO(K)*                     &
+!                 N0RR(K)*N0S(K)/LAMS(K)**3*                    &
+!                  (5./(LAMS(K)**3*LAMR(K))+                    &
+!                  2./(LAMS(K)**2*LAMR(K)**2)+                  &
+!                  0.5/(LAMS(K)*LAMR(K)**3)))
 
-            PRACS = CONS41*(((1.2*UMR-0.95*UMS)**2+                   &
-                  0.08*UMS*UMR)**0.5*RHO(I,K,J)*                      &
-                  N0RR(I,K,J)*N0S(I,K,J)/LAMR(I,K,J)**3*                              &
-                  (5./(LAMR(I,K,J)**3*LAMS(I,K,J))+                    &
-                  2./(LAMR(I,K,J)**2*LAMS(I,K,J)**2)+                  &
-                  0.5/(LAMR(I,K,J)*LAMS(I,K,J)**3)))
+            PRACS(K) = CONS41*(((1.2*UMR-0.95*UMS)**2+                   &
+                  0.08*UMS*UMR)**0.5*RHO(K)*                      &
+                  N0RR(K)*N0S(K)/LAMR(K)**3*                              &
+                  (5./(LAMR(K)**3*LAMS(K))+                    &
+                  2./(LAMR(K)**2*LAMS(K)**2)+                  &
+                  0.5/(LAMR(k)*LAMS(k)**3)))
 
 ! fix 053011, npracs no longer subtracted from snow
-!            NPRACS = CONS32*RHO(I,K,J)*(1.7*(UNR-UNS)**2+            &
-!                0.3*UNR*UNS)**0.5*N0RR(I,K,J)*N0S(I,K,J)*              &
-!                (1./(LAMR(I,K,J)**3*LAMS(I,K,J))+                      &
-!                 1./(LAMR(I,K,J)**2*LAMS(I,K,J)**2)+                   &
-!                 1./(LAMR(I,K,J)*LAMS(I,K,J)**3))
+!            NPRACS(K) = CONS32*RHO(K)*(1.7*(UNR-UNS)**2+            &
+!                0.3*UNR*UNS)**0.5*N0RR(K)*N0S(K)*              &
+!                (1./(LAMR(K)**3*LAMS(K))+                      &
+!                 1./(LAMR(K)**2*LAMS(K)**2)+                   &
+!                 1./(LAMR(K)*LAMS(K)**3))
 
          END IF
 
@@ -1647,43 +1747,43 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! ASSUME ALL RAIN COLLECTION BY GRAUPEL ABOVE FREEZING IS SHED
 ! ASSUME SHED DROPS ARE 1 MM IN SIZE
 
-         IF (QR3D(I,K,J).GE.1.E-8.AND.QG3D(I,K,J).GE.1.E-8) THEN
+         IF (QR3D(K).GE.1.E-8.AND.QG3D(K).GE.1.E-8) THEN
 
-            UMG = AGN(I,K,J)*CONS7/(LAMG(I,K,J)**BG)
-            UMR = ARN(I,K,J)*CONS4/(LAMR(I,K,J)**BR)
-            UNG = AGN(I,K,J)*CONS8/LAMG(I,K,J)**BG
-            UNR = ARN(I,K,J)*CONS6/LAMR(I,K,J)**BR
+            UMG = AGN(K)*CONS7/(LAMG(K)**BG)
+            UMR = ARN(K)*CONS4/(LAMR(K)**BR)
+            UNG = AGN(K)*CONS8/LAMG(K)**BG
+            UNR = ARN(K)*CONS6/LAMR(K)**BR
 
 ! SET REASLISTIC LIMITS ON FALLSPEEDS
 ! bug fix, 10/08/09
-            dum=(rhosu/RHO(I,K,J))**0.54
+            dum=(rhosu/rho(k))**0.54
             UMG=MIN(UMG,20.*dum)
             UNG=MIN(UNG,20.*dum)
             UMR=MIN(UMR,9.1*dum)
             UNR=MIN(UNR,9.1*dum)
 
 ! PRACG IS MIXING RATIO OF RAIN PER SEC COLLECTED BY GRAUPEL/HAIL
-            PRACG = CONS41*(((1.2*UMR-0.95*UMG)**2+                   &
-                  0.08*UMG*UMR)**0.5*RHO(I,K,J)*                      &
-                  N0RR(I,K,J)*N0G(I,K,J)/LAMR(I,K,J)**3*                              &
-                  (5./(LAMR(I,K,J)**3*LAMG(I,K,J))+                    &
-                  2./(LAMR(I,K,J)**2*LAMG(I,K,J)**2)+				   &
-				  0.5/(LAMR(I,K,J)*LAMG(I,K,J)**3)))
+            PRACG(K) = CONS41*(((1.2*UMR-0.95*UMG)**2+                   &
+                  0.08*UMG*UMR)**0.5*RHO(K)*                      &
+                  N0RR(K)*N0G(K)/LAMR(K)**3*                              &
+                  (5./(LAMR(K)**3*LAMG(K))+                    &
+                  2./(LAMR(K)**2*LAMG(K)**2)+				   &
+				  0.5/(LAMR(k)*LAMG(k)**3)))
 
 ! ASSUME 1 MM DROPS ARE SHED, GET NUMBER SHED PER SEC
 
-            DUM = PRACG/5.2E-7
+            DUM = PRACG(K)/5.2E-7
 
-            NPRACG = CONS32*RHO(I,K,J)*(1.7*(UNR-UNG)**2+            &
-                0.3*UNR*UNG)**0.5*N0RR(I,K,J)*N0G(I,K,J)*              &
-                (1./(LAMR(I,K,J)**3*LAMG(I,K,J))+                      &
-                 1./(LAMR(I,K,J)**2*LAMG(I,K,J)**2)+                   &
-                 1./(LAMR(I,K,J)*LAMG(I,K,J)**3))
+            NPRACG(K) = CONS32*RHO(K)*(1.7*(UNR-UNG)**2+            &
+                0.3*UNR*UNG)**0.5*N0RR(K)*N0G(K)*              &
+                (1./(LAMR(K)**3*LAMG(K))+                      &
+                 1./(LAMR(K)**2*LAMG(K)**2)+                   &
+                 1./(LAMR(K)*LAMG(K)**3))
 
 ! hm 7/15/13, remove limit so that the number of collected drops can smaller than
 ! number of shed drops
-!            NPRACG=MAX(NPRACG-DUM,0.)
-            NPRACG=NPRACG-DUM
+!            NPRACG(K)=MAX(NPRACG(K)-DUM,0.)
+            NPRACG(K)=NPRACG(K)-DUM
 
 	    END IF
 
@@ -1692,14 +1792,14 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! CONTINUOUS COLLECTION EQUATION WITH
 ! GRAVITATIONAL COLLECTION KERNEL, DROPLET FALL SPEED NEGLECTED
 
-         IF (QR3D(I,K,J).GE.1.E-8 .AND. QC3D(I,K,J).GE.1.E-8) THEN
+         IF (QR3D(K).GE.1.E-8 .AND. QC3D(K).GE.1.E-8) THEN
 
 ! 12/13/06 HM ADD, REPLACE WITH NEWER FORMULA FROM
 ! KHAIROUTDINOV AND KOGAN 2000, MWR
 
-           DUM=(QC3D(I,K,J)*QR3D(I,K,J))
-           PRA = 67.*(DUM)**1.15
-           NPRA = PRA/(QC3D(I,K,J)/NC3D(I,K,J))
+           DUM=(QC3D(K)*QR3D(K))
+           PRA(K) = 67.*(DUM)**1.15
+           NPRA(K) = PRA(K)/(QC3D(K)/NC3D(K))
 
          END IF
 !.......................................................................
@@ -1708,38 +1808,38 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! FROM NUMERICAL SIMULATION OF THE STOCHASTIC COLLECTION EQUATION
 ! AS DESCRINED ABOVE FOR AUTOCONVERSION
 
-         IF (QR3D(I,K,J).GE.1.E-8) THEN
+         IF (QR3D(K).GE.1.E-8) THEN
 ! include breakup add 10/09/09
             dum1=300.e-6
-            if (1./lamr(I,K,J).lt.dum1) then
+            if (1./lamr(k).lt.dum1) then
             dum=1.
-            else if (1./lamr(I,K,J).ge.dum1) then
-            dum=2.-exp(2300.*(1./lamr(I,K,J)-dum1))
+            else if (1./lamr(k).ge.dum1) then
+            dum=2.-exp(2300.*(1./lamr(k)-dum1))
             end if
-!            NRAGG = -8.*NR3D(I,K,J)*QR3D(I,K,J)*RHO(I,K,J)
-            NRAGG = -5.78*dum*NR3D(I,K,J)*QR3D(I,K,J)*RHO(I,K,J)
+!            NRAGG(K) = -8.*NR3D(K)*QR3D(K)*RHO(K)
+            NRAGG(K) = -5.78*dum*NR3D(K)*QR3D(K)*RHO(K)
          END IF
 
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 ! CALCULATE EVAP OF RAIN (RUTLEDGE AND HOBBS 1983)
 
-      IF (QR3D(I,K,J).GE.QSMALL) THEN
-        EPSR = 2.*PI*N0RR(I,K,J)*RHO(I,K,J)*DV*                           &
-                   (F1R/(LAMR(I,K,J)*LAMR(I,K,J))+                       &
-                    F2R*(ARN(I,K,J)*RHO(I,K,J)/MU(I,K,J))**0.5*                      &
-                    SC**(1./3.)*CONS9/                   &
-                (LAMR(I,K,J)**CONS34))
+      IF (QR3D(K).GE.QSMALL) THEN
+        EPSR = 2.*PI*N0RR(K)*RHO(K)*DV(K)*                           &
+                   (F1R/(LAMR(K)*LAMR(K))+                       &
+                    F2R*(ARN(K)*RHO(K)/MU(K))**0.5*                      &
+                    SC(K)**(1./3.)*CONS9/                   &
+                (LAMR(K)**CONS34))
       ELSE
       EPSR = 0.
       END IF
 
 ! NO CONDENSATION ONTO RAIN, ONLY EVAP ALLOWED
 
-           IF (QV3D(I,K,J).LT.QVS) THEN
-              PRE = EPSR*(QV3D(I,K,J)-QVS)/AB
-              PRE = MIN(PRE,0.)
+           IF (QV3D(K).LT.QVS(K)) THEN
+              PRE(K) = EPSR*(QV3D(K)-QVS(K))/AB(K)
+              PRE(K) = MIN(PRE(K),0.)
            ELSE
-              PRE = 0.
+              PRE(K) = 0.
            END IF
 
 !.......................................................................
@@ -1748,37 +1848,37 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! SNOW MAY PERSITS ABOVE FREEZING, FORMULA FROM RUTLEDGE AND HOBBS, 1984
 ! IF WATER SUPERSATURATION, SNOW MELTS TO FORM RAIN
 
-          IF (QNI3D(I,K,J).GE.1.E-8) THEN
+          IF (QNI3D(K).GE.1.E-8) THEN
 
 ! fix 053011
 ! HM, MODIFY FOR V3.2, ADD ACCELERATED MELTING DUE TO COLLISION WITH RAIN
-!             DUM = -CPW/XLF(I,K,J)*T3D(I,K,J)*PRACS
-             DUM = -CPW/XLF(I,K,J)*(T3D(I,K,J)-273.15)*PRACS
+!             DUM = -CPW/XLF(K)*T3D(K)*PRACS(K)
+             DUM = -CPW/XLF(K)*(T3D(K)-273.15)*PRACS(K)
 
 ! hm fix 1/20/15
-!             PSMLT=2.*PI*N0S(I,K,J)*KAP*(273.15-T3D(I,K,J))/       &
-!                    XLF(I,K,J)*RHO(I,K,J)*(F1S/(LAMS(I,K,J)*LAMS(I,K,J))+        &
-!                    F2S*(ASN(I,K,J)*RHO(I,K,J)/MU(I,K,J))**0.5*                      &
-!                    SC**(1./3.)*CONS10/                   &
-!                   (LAMS(I,K,J)**CONS35))+DUM
-             PSMLT=2.*PI*N0S(I,K,J)*KAP*(273.15-T3D(I,K,J))/       &
-                    XLF(I,K,J)*(F1S/(LAMS(I,K,J)*LAMS(I,K,J))+        &
-                    F2S*(ASN(I,K,J)*RHO(I,K,J)/MU(I,K,J))**0.5*                      &
-                    SC**(1./3.)*CONS10/                   &
-                   (LAMS(I,K,J)**CONS35))+DUM
+!             PSMLT(K)=2.*PI*N0S(K)*KAP(K)*(273.15-T3D(K))/       &
+!                    XLF(K)*RHO(K)*(F1S/(LAMS(K)*LAMS(K))+        &
+!                    F2S*(ASN(K)*RHO(K)/MU(K))**0.5*                      &
+!                    SC(K)**(1./3.)*CONS10/                   &
+!                   (LAMS(K)**CONS35))+DUM
+             PSMLT(K)=2.*PI*N0S(K)*KAP(K)*(273.15-T3D(K))/       &
+                    XLF(K)*(F1S/(LAMS(K)*LAMS(K))+        &
+                    F2S*(ASN(K)*RHO(K)/MU(K))**0.5*                      &
+                    SC(K)**(1./3.)*CONS10/                   &
+                   (LAMS(K)**CONS35))+DUM
 
 ! IN WATER SUBSATURATION, SNOW MELTS AND EVAPORATES
 
-      IF (QVQVS.LT.1.) THEN
-        EPSS = 2.*PI*N0S(I,K,J)*RHO(I,K,J)*DV*                            &
-                   (F1S/(LAMS(I,K,J)*LAMS(I,K,J))+                       &
-                    F2S*(ASN(I,K,J)*RHO(I,K,J)/MU(I,K,J))**0.5*                      &
-                    SC**(1./3.)*CONS10/                   &
-               (LAMS(I,K,J)**CONS35))
+      IF (QVQVS(K).LT.1.) THEN
+        EPSS = 2.*PI*N0S(K)*RHO(K)*DV(K)*                            &
+                   (F1S/(LAMS(K)*LAMS(K))+                       &
+                    F2S*(ASN(K)*RHO(K)/MU(K))**0.5*                      &
+                    SC(K)**(1./3.)*CONS10/                   &
+               (LAMS(K)**CONS35))
 ! hm fix 8/4/08
-        EVPMS = (QV3D(I,K,J)-QVS)*EPSS/AB
-        EVPMS = MAX(EVPMS,PSMLT)
-        PSMLT = PSMLT-EVPMS
+        EVPMS(K) = (QV3D(K)-QVS(K))*EPSS/AB(K)
+        EVPMS(K) = MAX(EVPMS(K),PSMLT(K))
+        PSMLT(K) = PSMLT(K)-EVPMS(K)
       END IF
       END IF
 
@@ -1788,37 +1888,37 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! GRAUPEL MAY PERSITS ABOVE FREEZING, FORMULA FROM RUTLEDGE AND HOBBS, 1984
 ! IF WATER SUPERSATURATION, GRAUPEL MELTS TO FORM RAIN
 
-          IF (QG3D(I,K,J).GE.1.E-8) THEN
+          IF (QG3D(K).GE.1.E-8) THEN
 
 ! fix 053011
 ! HM, MODIFY FOR V3.2, ADD ACCELERATED MELTING DUE TO COLLISION WITH RAIN
-!             DUM = -CPW/XLF(I,K,J)*T3D(I,K,J)*PRACG
-             DUM = -CPW/XLF(I,K,J)*(T3D(I,K,J)-273.15)*PRACG
+!             DUM = -CPW/XLF(K)*T3D(K)*PRACG(K)
+             DUM = -CPW/XLF(K)*(T3D(K)-273.15)*PRACG(K)
 
 ! hm fix 1/20/15
-!             PGMLT=2.*PI*N0G(I,K,J)*KAP*(273.15-T3D(I,K,J))/ 		 &
-!                    XLF(I,K,J)*RHO(I,K,J)*(F1S/(LAMG(I,K,J)*LAMG(I,K,J))+                &
-!                    F2S*(AGN(I,K,J)*RHO(I,K,J)/MU(I,K,J))**0.5*                      &
-!                    SC**(1./3.)*CONS11/                   &
-!                   (LAMG(I,K,J)**CONS36))+DUM
-             PGMLT=2.*PI*N0G(I,K,J)*KAP*(273.15-T3D(I,K,J))/ 		 &
-                    XLF(I,K,J)*(F1S/(LAMG(I,K,J)*LAMG(I,K,J))+                &
-                    F2S*(AGN(I,K,J)*RHO(I,K,J)/MU(I,K,J))**0.5*                      &
-                    SC**(1./3.)*CONS11/                   &
-                   (LAMG(I,K,J)**CONS36))+DUM
+!             PGMLT(K)=2.*PI*N0G(K)*KAP(K)*(273.15-T3D(K))/ 		 &
+!                    XLF(K)*RHO(K)*(F1S/(LAMG(K)*LAMG(K))+                &
+!                    F2S*(AGN(K)*RHO(K)/MU(K))**0.5*                      &
+!                    SC(K)**(1./3.)*CONS11/                   &
+!                   (LAMG(K)**CONS36))+DUM
+             PGMLT(K)=2.*PI*N0G(K)*KAP(K)*(273.15-T3D(K))/ 		 &
+                    XLF(K)*(F1S/(LAMG(K)*LAMG(K))+                &
+                    F2S*(AGN(K)*RHO(K)/MU(K))**0.5*                      &
+                    SC(K)**(1./3.)*CONS11/                   &
+                   (LAMG(K)**CONS36))+DUM
 
 ! IN WATER SUBSATURATION, GRAUPEL MELTS AND EVAPORATES
 
-      IF (QVQVS.LT.1.) THEN
-        EPSG = 2.*PI*N0G(I,K,J)*RHO(I,K,J)*DV*                                &
-                   (F1S/(LAMG(I,K,J)*LAMG(I,K,J))+                               &
-                    F2S*(AGN(I,K,J)*RHO(I,K,J)/MU(I,K,J))**0.5*                      &
-                    SC**(1./3.)*CONS11/                   &
-               (LAMG(I,K,J)**CONS36))
+      IF (QVQVS(K).LT.1.) THEN
+        EPSG = 2.*PI*N0G(K)*RHO(K)*DV(K)*                                &
+                   (F1S/(LAMG(K)*LAMG(K))+                               &
+                    F2S*(AGN(K)*RHO(K)/MU(K))**0.5*                      &
+                    SC(K)**(1./3.)*CONS11/                   &
+               (LAMG(K)**CONS36))
 ! hm fix 8/4/08
-        EVPMG = (QV3D(I,K,J)-QVS)*EPSG/AB
-        EVPMG = MAX(EVPMG,PGMLT)
-        PGMLT = PGMLT-EVPMG
+        EVPMG(K) = (QV3D(K)-QVS(K))*EPSG/AB(K)
+        EVPMG(K) = MAX(EVPMG(K),PGMLT(K))
+        PGMLT(K) = PGMLT(K)-EVPMG(K)
       END IF
       END IF
 
@@ -1827,8 +1927,8 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! TRANSFER OF MASS FROM SNOW AND GRAUPEL TO RAIN DIRECTLY FROM COLLECTION
 ! ABOVE FREEZING, IT IS ONLY USED FOR ENHANCEMENT OF MELTING AND SHEDDING
 
-      PRACG = 0.
-      PRACS = 0.
+      PRACG(K) = 0.
+      PRACS(K) = 0.
 
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 
@@ -1838,142 +1938,141 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! CONSERVATION OF QC
 
-      DUM = (PRC+PRA)*DT
+      DUM = (PRC(K)+PRA(K))*DT
 
-      IF (DUM.GT.QC3D(I,K,J).AND.QC3D(I,K,J).GE.QSMALL) THEN
+      IF (DUM.GT.QC3D(K).AND.QC3D(K).GE.QSMALL) THEN
 
-        RATIO = QC3D(I,K,J)/DUM
+        RATIO = QC3D(K)/DUM
 
-        PRC = PRC*RATIO
-        PRA = PRA*RATIO
+        PRC(K) = PRC(K)*RATIO
+        PRA(K) = PRA(K)*RATIO
 
         END IF
 
 ! CONSERVATION OF SNOW
 
-        DUM = (-PSMLT-EVPMS+PRACS)*DT
+        DUM = (-PSMLT(K)-EVPMS(K)+PRACS(K))*DT
 
-        IF (DUM.GT.QNI3D(I,K,J).AND.QNI3D(I,K,J).GE.QSMALL) THEN
+        IF (DUM.GT.QNI3D(K).AND.QNI3D(K).GE.QSMALL) THEN
 
 ! NO SOURCE TERMS FOR SNOW AT T > FREEZING
-        RATIO = QNI3D(I,K,J)/DUM
+        RATIO = QNI3D(K)/DUM
 
-        PSMLT = PSMLT*RATIO
-        EVPMS = EVPMS*RATIO
-        PRACS = PRACS*RATIO
+        PSMLT(K) = PSMLT(K)*RATIO
+        EVPMS(K) = EVPMS(K)*RATIO
+        PRACS(K) = PRACS(K)*RATIO
 
         END IF
 
 ! CONSERVATION OF GRAUPEL
 
-        DUM = (-PGMLT-EVPMG+PRACG)*DT
+        DUM = (-PGMLT(K)-EVPMG(K)+PRACG(K))*DT
 
-        IF (DUM.GT.QG3D(I,K,J).AND.QG3D(I,K,J).GE.QSMALL) THEN
+        IF (DUM.GT.QG3D(K).AND.QG3D(K).GE.QSMALL) THEN
 
 ! NO SOURCE TERM FOR GRAUPEL ABOVE FREEZING
-        RATIO = QG3D(I,K,J)/DUM
+        RATIO = QG3D(K)/DUM
 
-        PGMLT = PGMLT*RATIO
-        EVPMG = EVPMG*RATIO
-        PRACG = PRACG*RATIO
+        PGMLT(K) = PGMLT(K)*RATIO
+        EVPMG(K) = EVPMG(K)*RATIO
+        PRACG(K) = PRACG(K)*RATIO
 
         END IF
 
 ! CONSERVATION OF QR
 ! HM 12/13/06, ADDED CONSERVATION OF RAIN SINCE PRE IS NEGATIVE
 
-        DUM = (-PRACS-PRACG-PRE-PRA-PRC+PSMLT+PGMLT)*DT
+        DUM = (-PRACS(K)-PRACG(K)-PRE(K)-PRA(K)-PRC(K)+PSMLT(K)+PGMLT(K))*DT
 
-        IF (DUM.GT.QR3D(I,K,J).AND.QR3D(I,K,J).GE.QSMALL) THEN
+        IF (DUM.GT.QR3D(K).AND.QR3D(K).GE.QSMALL) THEN
 
-        RATIO = (QR3D(I,K,J)/DT+PRACS+PRACG+PRA+PRC-PSMLT-PGMLT)/ &
-                        (-PRE)
-        PRE = PRE*RATIO
+        RATIO = (QR3D(K)/DT+PRACS(K)+PRACG(K)+PRA(K)+PRC(K)-PSMLT(K)-PGMLT(K))/ &
+                        (-PRE(K))
+        PRE(K) = PRE(K)*RATIO
 
         END IF
 
 !....................................
 
-      QV3DTEN(I,K,J) = QV3DTEN(I,K,J)+(-PRE-EVPMS-EVPMG)
+      QV3DTEN(K) = QV3DTEN(K)+(-PRE(K)-EVPMS(K)-EVPMG(K))
 
-      T3DTEN(I,K,J) = T3DTEN(I,K,J)+(PRE*XXLV(I,K,J)+(EVPMS+EVPMG)*XXLS(I,K,J)+&
-                    (PSMLT+PGMLT-PRACS-PRACG)*XLF(I,K,J))/CPM(I,K,J)
+      T3DTEN(K) = T3DTEN(K)+(PRE(K)*XXLV(K)+(EVPMS(K)+EVPMG(K))*XXLS(K)+&
+                    (PSMLT(K)+PGMLT(K)-PRACS(K)-PRACG(K))*XLF(K))/CPM(K)
 
-      QC3DTEN(I,K,J) = QC3DTEN(I,K,J)+(-PRA-PRC)
-      QR3DTEN(I,K,J) = QR3DTEN(I,K,J)+(PRE+PRA+PRC-PSMLT-PGMLT+PRACS+PRACG)
-      QNI3DTEN(I,K,J) = QNI3DTEN(I,K,J)+(PSMLT+EVPMS-PRACS)
-      QG3DTEN(I,K,J) = QG3DTEN(I,K,J)+(PGMLT+EVPMG-PRACG)
+      QC3DTEN(K) = QC3DTEN(K)+(-PRA(K)-PRC(K))
+      QR3DTEN(K) = QR3DTEN(K)+(PRE(K)+PRA(K)+PRC(K)-PSMLT(K)-PGMLT(K)+PRACS(K)+PRACG(K))
+      QNI3DTEN(K) = QNI3DTEN(K)+(PSMLT(K)+EVPMS(K)-PRACS(K))
+      QG3DTEN(K) = QG3DTEN(K)+(PGMLT(K)+EVPMG(K)-PRACG(K))
 ! fix 053011
-!      NS3DTEN(I,K,J) = NS3DTEN(I,K,J)-NPRACS
+!      NS3DTEN(K) = NS3DTEN(K)-NPRACS(K)
 ! HM, bug fix 5/12/08, npracg is subtracted from nr not ng
-!      NG3DTEN(I,K,J) = NG3DTEN(I,K,J)
-      NC3DTEN(I,K,J) = NC3DTEN(I,K,J)+ (-NPRA-NPRC)
-      NR3DTEN(I,K,J) = NR3DTEN(I,K,J)+ (NPRC1+NRAGG-NPRACG)
+!      NG3DTEN(K) = NG3DTEN(K)
+      NC3DTEN(K) = NC3DTEN(K)+ (-NPRA(K)-NPRC(K))
+      NR3DTEN(K) = NR3DTEN(K)+ (NPRC1(K)+NRAGG(K)-NPRACG(K))
 
 ! HM ADD, WRF-CHEM, ADD TENDENCIES FOR C2PREC
 
-	C2PREC(I,K,J) = PRA+PRC
-      IF (PRE.LT.0.) THEN
-         DUM = PRE*DT/QR3D(I,K,J)
+	C2PREC(K) = PRA(K)+PRC(K)
+      IF (PRE(K).LT.0.) THEN
+         DUM = PRE(K)*DT/QR3D(K)
            DUM = MAX(-1.,DUM)
-         NSUBR = DUM*NR3D(I,K,J)/DT
+         NSUBR(K) = DUM*NR3D(K)/DT
       END IF
 
-        IF (EVPMS+PSMLT.LT.0.) THEN
-         DUM = (EVPMS+PSMLT)*DT/QNI3D(I,K,J)
+        IF (EVPMS(K)+PSMLT(K).LT.0.) THEN
+         DUM = (EVPMS(K)+PSMLT(K))*DT/QNI3D(K)
            DUM = MAX(-1.,DUM)
-         NSMLTS = DUM*NS3D(I,K,J)/DT
+         NSMLTS(K) = DUM*NS3D(K)/DT
         END IF
-        IF (PSMLT.LT.0.) THEN
-          DUM = PSMLT*DT/QNI3D(I,K,J)
+        IF (PSMLT(K).LT.0.) THEN
+          DUM = PSMLT(K)*DT/QNI3D(K)
           DUM = MAX(-1.0,DUM)
-          NSMLTR = DUM*NS3D(I,K,J)/DT
+          NSMLTR(K) = DUM*NS3D(K)/DT
         END IF
-        IF (EVPMG+PGMLT.LT.0.) THEN
-         DUM = (EVPMG+PGMLT)*DT/QG3D(I,K,J)
+        IF (EVPMG(K)+PGMLT(K).LT.0.) THEN
+         DUM = (EVPMG(K)+PGMLT(K))*DT/QG3D(K)
            DUM = MAX(-1.,DUM)
-         NGMLTG = DUM*NG3D(I,K,J)/DT
+         NGMLTG(K) = DUM*NG3D(K)/DT
         END IF
-        IF (PGMLT.LT.0.) THEN
-          DUM = PGMLT*DT/QG3D(I,K,J)
+        IF (PGMLT(K).LT.0.) THEN
+          DUM = PGMLT(K)*DT/QG3D(K)
           DUM = MAX(-1.0,DUM)
-          NGMLTR = DUM*NG3D(I,K,J)/DT
+          NGMLTR(K) = DUM*NG3D(K)/DT
         END IF
 
-         NS3DTEN(I,K,J) = NS3DTEN(I,K,J)+(NSMLTS)
-         NG3DTEN(I,K,J) = NG3DTEN(I,K,J)+(NGMLTG)
-         NR3DTEN(I,K,J) = NR3DTEN(I,K,J)+(NSUBR-NSMLTR-NGMLTR)
+         NS3DTEN(K) = NS3DTEN(K)+(NSMLTS(K))
+         NG3DTEN(K) = NG3DTEN(K)+(NGMLTG(K))
+         NR3DTEN(K) = NR3DTEN(K)+(NSUBR(K)-NSMLTR(K)-NGMLTR(K))
 
-      ENDIF !(QC3D(I,K,J).LT.QSMALL.AND.QNI3D(I,K,J).LT.1.E-8.AND.QR3D(I,K,J).LT.QSMALL.AND.QG3D(I,K,J).LT.1.E-8) old CONTINUE 300  
+ 300  CONTINUE
 
-!  
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 ! NOW CALCULATE SATURATION ADJUSTMENT TO CONDENSE EXTRA VAPOR ABOVE
 ! WATER SATURATION
 
-      DUMT = T3D(I,K,J)+DT*T3DTEN(I,K,J)
-      DUMQV = QV3D(I,K,J)+DT*QV3DTEN(I,K,J)
+      DUMT = T3D(K)+DT*T3DTEN(K)
+      DUMQV = QV3D(K)+DT*QV3DTEN(K)
 ! hm, add fix for low pressure, 5/12/10
-      dum=min(0.99*pres(I,K,J),POLYSVP(T3D(I,K,J)+DT*T3DTEN(I,K,J),0))
-      DUMQSS = EP_2*dum/(PRES(I,K,J)-dum)
-      DUMQC = QC3D(I,K,J)+DT*QC3DTEN(I,K,J)
+      dum=min(0.99*pres(k),POLYSVP(DUMT,0))
+      DUMQSS = EP_2*dum/(PRES(K)-dum)
+      DUMQC = QC3D(K)+DT*QC3DTEN(K)
       DUMQC = MAX(DUMQC,0.)
 
 ! SATURATION ADJUSTMENT FOR LIQUID
 
       DUMS = DUMQV-DUMQSS
-      PCC = DUMS/(1.+XXLV(I,K,J)**2*DUMQSS/(CPM(I,K,J)*RV*DUMT**2))/DT
-      IF (PCC*DT+DUMQC.LT.0.) THEN
-           PCC = -DUMQC/DT
+      PCC(K) = DUMS/(1.+XXLV(K)**2*DUMQSS/(CPM(K)*RV*DUMT**2))/DT
+      IF (PCC(K)*DT+DUMQC.LT.0.) THEN
+           PCC(K) = -DUMQC/DT
       END IF
 
-      QV3DTEN(I,K,J) = QV3DTEN(I,K,J)-PCC
-      T3DTEN(I,K,J) = T3DTEN(I,K,J)+PCC*XXLV(I,K,J)/CPM(I,K,J)
-      QC3DTEN(I,K,J) = QC3DTEN(I,K,J)+PCC
+      QV3DTEN(K) = QV3DTEN(K)-PCC(K)
+      T3DTEN(K) = T3DTEN(K)+PCC(K)*XXLV(K)/CPM(K)
+      QC3DTEN(K) = QC3DTEN(K)+PCC(K)
 
 ! #if (WRF_CHEM == 1)
-!          evapprod(I,K,J) = - PRE - EVPMS - EVPMG
-!          rainprod(I,K,J) = PRA + PRC + tqimelt(I,K,J)
+!          evapprod(k) = - PRE(K) - EVPMS(K) - EVPMG(K)
+!          rainprod(k) = PRA(K) + PRC(K) + tqimelt(K)
 ! #endif
 
 !.......................................................................
@@ -1986,15 +2085,15 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! THIS FORMULATION ASSUMES 1:1 RATIO BETWEEN MASS LOSS AND
 ! LOSS OF NUMBER CONCENTRATION
 
-!     IF (PCC.LT.0.) THEN
-!        DUM = PCC*DT/QC3D(I,K,J)
+!     IF (PCC(K).LT.0.) THEN
+!        DUM = PCC(K)*DT/QC3D(K)
 !           DUM = MAX(-1.,DUM)
-!        NSUBC = DUM*NC3D(I,K,J)/DT
+!        NSUBC(K) = DUM*NC3D(K)/DT
 !     END IF
 
 ! UPDATE TENDENCIES
 
-!        NC3DTEN(I,K,J) = NC3DTEN(I,K,J)+NSUBC
+!        NC3DTEN(K) = NC3DTEN(K)+NSUBC(K)
 
 !.....................................................................
 !.....................................................................
@@ -2007,68 +2106,68 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
          IF (iinum.EQ.1) THEN
 ! CONVERT NDCNST FROM CM-3 TO KG-1
-            NC3D(I,K,J)=NDCNST*1.E6/RHO(I,K,J)
+            NC3D(K)=NDCNST*1.E6/RHO(K)
          END IF
 
 ! CALCULATE SIZE DISTRIBUTION PARAMETERS
 ! MAKE SURE NUMBER CONCENTRATIONS AREN'T NEGATIVE
 
-      NI3D(I,K,J) = MAX(0.,NI3D(I,K,J))
-      NS3D(I,K,J) = MAX(0.,NS3D(I,K,J))
-      NC3D(I,K,J) = MAX(0.,NC3D(I,K,J))
-      NR3D(I,K,J) = MAX(0.,NR3D(I,K,J))
-      NG3D(I,K,J) = MAX(0.,NG3D(I,K,J))
+      NI3D(K) = MAX(0.,NI3D(K))
+      NS3D(K) = MAX(0.,NS3D(K))
+      NC3D(K) = MAX(0.,NC3D(K))
+      NR3D(K) = MAX(0.,NR3D(K))
+      NG3D(K) = MAX(0.,NG3D(K))
 
 !......................................................................
 ! CLOUD ICE
 
-      IF (QI3D(I,K,J).GE.QSMALL) THEN
-         LAMI(I,K,J) = (CONS12*                 &
-              NI3D(I,K,J)/QI3D(I,K,J))**(1./DI)
-         N0I(I,K,J) = NI3D(I,K,J)*LAMI(I,K,J)
+      IF (QI3D(K).GE.QSMALL) THEN
+         LAMI(K) = (CONS12*                 &
+              NI3D(K)/QI3D(K))**(1./DI)
+         N0I(K) = NI3D(K)*LAMI(K)
 
 ! CHECK FOR SLOPE
 
 ! ADJUST VARS
 
-      IF (LAMI(I,K,J).LT.LAMMINI) THEN
+      IF (LAMI(K).LT.LAMMINI) THEN
 
-      LAMI(I,K,J) = LAMMINI
+      LAMI(K) = LAMMINI
 
-      N0I(I,K,J) = LAMI(I,K,J)**4*QI3D(I,K,J)/CONS12
+      N0I(K) = LAMI(K)**4*QI3D(K)/CONS12
 
-      NI3D(I,K,J) = N0I(I,K,J)/LAMI(I,K,J)
-      ELSE IF (LAMI(I,K,J).GT.LAMMAXI) THEN
-      LAMI(I,K,J) = LAMMAXI
-      N0I(I,K,J) = LAMI(I,K,J)**4*QI3D(I,K,J)/CONS12
+      NI3D(K) = N0I(K)/LAMI(K)
+      ELSE IF (LAMI(K).GT.LAMMAXI) THEN
+      LAMI(K) = LAMMAXI
+      N0I(K) = LAMI(K)**4*QI3D(K)/CONS12
 
-      NI3D(I,K,J) = N0I(I,K,J)/LAMI(I,K,J)
+      NI3D(K) = N0I(K)/LAMI(K)
       END IF
       END IF
 
 !......................................................................
 ! RAIN
 
-      IF (QR3D(I,K,J).GE.QSMALL) THEN
-      LAMR(I,K,J) = (PI*RHOW*NR3D(I,K,J)/QR3D(I,K,J))**(1./3.)
-      N0RR(I,K,J) = NR3D(I,K,J)*LAMR(I,K,J)
+      IF (QR3D(K).GE.QSMALL) THEN
+      LAMR(K) = (PI*RHOW*NR3D(K)/QR3D(K))**(1./3.)
+      N0RR(K) = NR3D(K)*LAMR(K)
 
 ! CHECK FOR SLOPE
 
 ! ADJUST VARS
 
-      IF (LAMR(I,K,J).LT.LAMMINR) THEN
+      IF (LAMR(K).LT.LAMMINR) THEN
 
-      LAMR(I,K,J) = LAMMINR
+      LAMR(K) = LAMMINR
 
-      N0RR(I,K,J) = LAMR(I,K,J)**4*QR3D(I,K,J)/(PI*RHOW)
+      N0RR(K) = LAMR(K)**4*QR3D(K)/(PI*RHOW)
 
-      NR3D(I,K,J) = N0RR(I,K,J)/LAMR(I,K,J)
-      ELSE IF (LAMR(I,K,J).GT.LAMMAXR) THEN
-      LAMR(I,K,J) = LAMMAXR
-      N0RR(I,K,J) = LAMR(I,K,J)**4*QR3D(I,K,J)/(PI*RHOW)
+      NR3D(K) = N0RR(K)/LAMR(K)
+      ELSE IF (LAMR(K).GT.LAMMAXR) THEN
+      LAMR(K) = LAMMAXR
+      N0RR(K) = LAMR(K)**4*QR3D(K)/(PI*RHOW)
 
-      NR3D(I,K,J) = N0RR(I,K,J)/LAMR(I,K,J)
+      NR3D(K) = N0RR(K)/LAMR(K)
       END IF
       END IF
 
@@ -2077,219 +2176,220 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! MARTIN ET AL. (1994) FORMULA FOR PGAM
 
-      IF (QC3D(I,K,J).GE.QSMALL) THEN
+      IF (QC3D(K).GE.QSMALL) THEN
 
-         DUM = PRES(I,K,J)/(287.15*T3D(I,K,J))
-         PGAM(I,K,J)=0.0005714*(NC3D(I,K,J)/1.E6*DUM)+0.2714
-         PGAM(I,K,J)=1./(PGAM(I,K,J)**2)-1.
-         PGAM(I,K,J)=MAX(PGAM(I,K,J),2.)
-         PGAM(I,K,J)=MIN(PGAM(I,K,J),10.)
+         DUM = PRES(K)/(287.15*T3D(K))
+         PGAM(K)=0.0005714*(NC3D(K)/1.E6*DUM)+0.2714
+         PGAM(K)=1./(PGAM(K)**2)-1.
+         PGAM(K)=MAX(PGAM(K),2.)
+         PGAM(K)=MIN(PGAM(K),10.)
 
 ! CALCULATE LAMC
 
-      LAMC(I,K,J) = (CONS26*NC3D(I,K,J)*GAMMA(PGAM(I,K,J)+4.)/   &
-                 (QC3D(I,K,J)*GAMMA(PGAM(I,K,J)+1.)))**(1./3.)
+      LAMC(K) = (CONS26*NC3D(K)*GAMMA(PGAM(K)+4.)/   &
+                 (QC3D(K)*GAMMA(PGAM(K)+1.)))**(1./3.)
 
 ! LAMMIN, 60 MICRON DIAMETER
 ! LAMMAX, 1 MICRON
 
-      LAMMIN = (PGAM(I,K,J)+1.)/60.E-6
-      LAMMAX = (PGAM(I,K,J)+1.)/1.E-6
+      LAMMIN = (PGAM(K)+1.)/60.E-6
+      LAMMAX = (PGAM(K)+1.)/1.E-6
 
-      IF (LAMC(I,K,J).LT.LAMMIN) THEN
-      LAMC(I,K,J) = LAMMIN
+      IF (LAMC(K).LT.LAMMIN) THEN
+      LAMC(K) = LAMMIN
 
-      NC3D(I,K,J) = EXP(3.*LOG(LAMC(I,K,J))+LOG(QC3D(I,K,J))+              &
-                LOG(GAMMA(PGAM(I,K,J)+1.))-LOG(GAMMA(PGAM(I,K,J)+4.)))/CONS26
-      ELSE IF (LAMC(I,K,J).GT.LAMMAX) THEN
-      LAMC(I,K,J) = LAMMAX
-      NC3D(I,K,J) = EXP(3.*LOG(LAMC(I,K,J))+LOG(QC3D(I,K,J))+              &
-                LOG(GAMMA(PGAM(I,K,J)+1.))-LOG(GAMMA(PGAM(I,K,J)+4.)))/CONS26
+      NC3D(K) = EXP(3.*LOG(LAMC(K))+LOG(QC3D(K))+              &
+                LOG(GAMMA(PGAM(K)+1.))-LOG(GAMMA(PGAM(K)+4.)))/CONS26
+      ELSE IF (LAMC(K).GT.LAMMAX) THEN
+      LAMC(K) = LAMMAX
+      NC3D(K) = EXP(3.*LOG(LAMC(K))+LOG(QC3D(K))+              &
+                LOG(GAMMA(PGAM(K)+1.))-LOG(GAMMA(PGAM(K)+4.)))/CONS26
 
       END IF
 
 ! TO CALCULATE DROPLET FREEZING
 
-        CDIST1(I,K,J) = NC3D(I,K,J)/GAMMA(PGAM(I,K,J)+1.)
+        CDIST1(K) = NC3D(K)/GAMMA(PGAM(K)+1.)
 
       END IF
 
 !......................................................................
 ! SNOW
 
-      IF (QNI3D(I,K,J).GE.QSMALL) THEN
-      LAMS(I,K,J) = (CONS1*NS3D(I,K,J)/QNI3D(I,K,J))**(1./DS)
-      N0S(I,K,J) = NS3D(I,K,J)*LAMS(I,K,J)
+      IF (QNI3D(K).GE.QSMALL) THEN
+      LAMS(K) = (CONS1*NS3D(K)/QNI3D(K))**(1./DS)
+      N0S(K) = NS3D(K)*LAMS(K)
 
 ! CHECK FOR SLOPE
 
 ! ADJUST VARS
 
-      IF (LAMS(I,K,J).LT.LAMMINS) THEN
-      LAMS(I,K,J) = LAMMINS
-      N0S(I,K,J) = LAMS(I,K,J)**4*QNI3D(I,K,J)/CONS1
+      IF (LAMS(K).LT.LAMMINS) THEN
+      LAMS(K) = LAMMINS
+      N0S(K) = LAMS(K)**4*QNI3D(K)/CONS1
 
-      NS3D(I,K,J) = N0S(I,K,J)/LAMS(I,K,J)
+      NS3D(K) = N0S(K)/LAMS(K)
 
-      ELSE IF (LAMS(I,K,J).GT.LAMMAXS) THEN
+      ELSE IF (LAMS(K).GT.LAMMAXS) THEN
 
-      LAMS(I,K,J) = LAMMAXS
-      N0S(I,K,J) = LAMS(I,K,J)**4*QNI3D(I,K,J)/CONS1
+      LAMS(K) = LAMMAXS
+      N0S(K) = LAMS(K)**4*QNI3D(K)/CONS1
 
-      NS3D(I,K,J) = N0S(I,K,J)/LAMS(I,K,J)
+      NS3D(K) = N0S(K)/LAMS(K)
       END IF
       END IF
 
 !......................................................................
 ! GRAUPEL
 
-      IF (QG3D(I,K,J).GE.QSMALL) THEN
-      LAMG(I,K,J) = (CONS2*NG3D(I,K,J)/QG3D(I,K,J))**(1./DG)
-      N0G(I,K,J) = NG3D(I,K,J)*LAMG(I,K,J)
+      IF (QG3D(K).GE.QSMALL) THEN
+      LAMG(K) = (CONS2*NG3D(K)/QG3D(K))**(1./DG)
+      N0G(K) = NG3D(K)*LAMG(K)
 
 ! CHECK FOR SLOPE
 
 ! ADJUST VARS
 
-      IF (LAMG(I,K,J).LT.LAMMING) THEN
-      LAMG(I,K,J) = LAMMING
-      N0G(I,K,J) = LAMG(I,K,J)**4*QG3D(I,K,J)/CONS2
+      IF (LAMG(K).LT.LAMMING) THEN
+      LAMG(K) = LAMMING
+      N0G(K) = LAMG(K)**4*QG3D(K)/CONS2
 
-      NG3D(I,K,J) = N0G(I,K,J)/LAMG(I,K,J)
+      NG3D(K) = N0G(K)/LAMG(K)
 
-      ELSE IF (LAMG(I,K,J).GT.LAMMAXG) THEN
+      ELSE IF (LAMG(K).GT.LAMMAXG) THEN
 
-      LAMG(I,K,J) = LAMMAXG
-      N0G(I,K,J) = LAMG(I,K,J)**4*QG3D(I,K,J)/CONS2
+      LAMG(K) = LAMMAXG
+      N0G(K) = LAMG(K)**4*QG3D(K)/CONS2
 
-      NG3D(I,K,J) = N0G(I,K,J)/LAMG(I,K,J)
+      NG3D(K) = N0G(K)/LAMG(K)
       END IF
       END IF
 
 !.....................................................................
 ! ZERO OUT PROCESS RATES
 
-            MNUCCC = 0.
-            NNUCCC = 0.
-            PRC = 0.
-            NPRC = 0.
-            NPRC1 = 0.
-            NSAGG = 0.
-            PSACWS = 0.
-            NPSACWS = 0.
-            PSACWI = 0.
-            NPSACWI = 0.
-            PRACS = 0.
-            NPRACS = 0.
-            NMULTS = 0.
-            QMULTS = 0.
-            NMULTR = 0.
-            QMULTR = 0.
-            NMULTG = 0.
-            QMULTG = 0.
-            NMULTRG = 0.
-            QMULTRG = 0.
-            MNUCCR = 0.
-            NNUCCR = 0.
-            PRA = 0.
-            NPRA = 0.
-            NRAGG = 0.
-            PRCI = 0.
-            NPRCI = 0.
-            PRAI = 0.
-            NPRAI = 0.
-            NNUCCD = 0.
-            MNUCCD = 0.
-            PCC = 0.
-            PRE = 0.
-            PRD = 0.
-            PRDS = 0.
-            EPRD = 0.
-            EPRDS = 0.
-            NSUBC = 0.
-            NSUBI = 0.
-            NSUBS = 0.
-            NSUBR = 0.
-            PIACR = 0.
-            NIACR = 0.
-            PRACI = 0.
-            PIACRS = 0.
-            NIACRS = 0.
-            PRACIS = 0.
+            MNUCCC(K) = 0.
+            NNUCCC(K) = 0.
+            PRC(K) = 0.
+            NPRC(K) = 0.
+            NPRC1(K) = 0.
+            NSAGG(K) = 0.
+            PSACWS(K) = 0.
+            NPSACWS(K) = 0.
+            PSACWI(K) = 0.
+            NPSACWI(K) = 0.
+            PRACS(K) = 0.
+            NPRACS(K) = 0.
+            NMULTS(K) = 0.
+            QMULTS(K) = 0.
+            NMULTR(K) = 0.
+            QMULTR(K) = 0.
+            NMULTG(K) = 0.
+            QMULTG(K) = 0.
+            NMULTRG(K) = 0.
+            QMULTRG(K) = 0.
+            MNUCCR(K) = 0.
+            NNUCCR(K) = 0.
+            PRA(K) = 0.
+            NPRA(K) = 0.
+            NRAGG(K) = 0.
+            PRCI(K) = 0.
+            NPRCI(K) = 0.
+            PRAI(K) = 0.
+            NPRAI(K) = 0.
+            NNUCCD(K) = 0.
+            MNUCCD(K) = 0.
+            PCC(K) = 0.
+            PRE(K) = 0.
+            PRD(K) = 0.
+            PRDS(K) = 0.
+            EPRD(K) = 0.
+            EPRDS(K) = 0.
+            NSUBC(K) = 0.
+            NSUBI(K) = 0.
+            NSUBS(K) = 0.
+            NSUBR(K) = 0.
+            PIACR(K) = 0.
+            NIACR(K) = 0.
+            PRACI(K) = 0.
+            PIACRS(K) = 0.
+            NIACRS(K) = 0.
+            PRACIS(K) = 0.
 ! HM: ADD GRAUPEL PROCESSES
-            PRACG = 0.
-            PSACR = 0.
-	    PSACWG = 0.
-	    PGSACW = 0.
-            PGRACS = 0.
-	    PRDG = 0.
-	    EPRDG = 0.
-	    NPRACG = 0.
-	    NPSACWG = 0.
-	    NSCNG = 0.
- 	    NGRACS = 0.
-	    NSUBG = 0.
+            PRACG(K) = 0.
+            PSACR(K) = 0.
+	    PSACWG(K) = 0.
+	    PGSACW(K) = 0.
+            PGRACS(K) = 0.
+	    PRDG(K) = 0.
+	    EPRDG(K) = 0.
+	    NPRACG(K) = 0.
+	    NPSACWG(K) = 0.
+	    NSCNG(K) = 0.
+ 	    NGRACS(K) = 0.
+	    NSUBG(K) = 0.
+
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 ! CALCULATION OF MICROPHYSICAL PROCESS RATES
 ! ACCRETION/AUTOCONVERSION/FREEZING/MELTING/COAG.
 !.......................................................................
 ! FREEZING OF CLOUD DROPLETS
 ! ONLY ALLOWED BELOW -4 C
-        IF (QC3D(I,K,J).GE.QSMALL .AND. T3D(I,K,J).LT.269.15) THEN
+        IF (QC3D(K).GE.QSMALL .AND. T3D(K).LT.269.15) THEN
 
 ! NUMBER OF CONTACT NUCLEI (M^-3) FROM MEYERS ET AL., 1992
 ! FACTOR OF 1000 IS TO CONVERT FROM L^-1 TO M^-3
 
 ! MEYERS CURVE
 
-           NACNT = EXP(-2.80+0.262*(273.15-T3D(I,K,J)))*1000.
+           NACNT = EXP(-2.80+0.262*(273.15-T3D(K)))*1000.
 
 ! COOPER CURVE
-!        NACNT =  5.*EXP(0.304*(273.15-T3D(I,K,J)))
+!        NACNT =  5.*EXP(0.304*(273.15-T3D(K)))
 
 ! FLECTHER
-!     NACNT = 0.01*EXP(0.6*(273.15-T3D(I,K,J)))
+!     NACNT = 0.01*EXP(0.6*(273.15-T3D(K)))
 
 ! CONTACT FREEZING
 
 ! MEAN FREE PATH
 
-            DUM = 7.37*T3D(I,K,J)/(288.*10.*PRES(I,K,J))/100.
+            DUM = 7.37*T3D(K)/(288.*10.*PRES(K))/100.
 
 ! EFFECTIVE DIFFUSIVITY OF CONTACT NUCLEI
 ! BASED ON BROWNIAN DIFFUSION
 
-            DAP(I,K,J) = CONS37*T3D(I,K,J)*(1.+DUM/RIN)/MU(I,K,J)
+            DAP(K) = CONS37*T3D(K)*(1.+DUM/RIN)/MU(K)
 
-           MNUCCC = CONS38*DAP(I,K,J)*NACNT*EXP(LOG(CDIST1(I,K,J))+   &
-                   LOG(GAMMA(PGAM(I,K,J)+5.))-4.*LOG(LAMC(I,K,J)))
-           NNUCCC = 2.*PI*DAP(I,K,J)*NACNT*CDIST1(I,K,J)*           &
-                    GAMMA(PGAM(I,K,J)+2.)/                         &
-                    LAMC(I,K,J)
+           MNUCCC(K) = CONS38*DAP(K)*NACNT*EXP(LOG(CDIST1(K))+   &
+                   LOG(GAMMA(PGAM(K)+5.))-4.*LOG(LAMC(K)))
+           NNUCCC(K) = 2.*PI*DAP(K)*NACNT*CDIST1(K)*           &
+                    GAMMA(PGAM(K)+2.)/                         &
+                    LAMC(K)
 
 ! IMMERSION FREEZING (BIGG 1953)
 
-!           MNUCCC = MNUCCC+CONS39*                   &
-!                  EXP(LOG(CDIST1(I,K,J))+LOG(GAMMA(7.+PGAM(I,K,J)))-6.*LOG(LAMC(I,K,J)))*             &
-!                   EXP(AIMM*(273.15-T3D(I,K,J)))
+!           MNUCCC(K) = MNUCCC(K)+CONS39*                   &
+!                  EXP(LOG(CDIST1(K))+LOG(GAMMA(7.+PGAM(K)))-6.*LOG(LAMC(K)))*             &
+!                   EXP(AIMM*(273.15-T3D(K)))
 
-!           NNUCCC = NNUCCC+                                  &
-!            CONS40*EXP(LOG(CDIST1(I,K,J))+LOG(GAMMA(PGAM(I,K,J)+4.))-3.*LOG(LAMC(I,K,J)))              &
-!                *EXP(AIMM*(273.15-T3D(I,K,J)))
+!           NNUCCC(K) = NNUCCC(K)+                                  &
+!            CONS40*EXP(LOG(CDIST1(K))+LOG(GAMMA(PGAM(K)+4.))-3.*LOG(LAMC(K)))              &
+!                *EXP(AIMM*(273.15-T3D(K)))
 
 ! hm 7/15/13 fix for consistency w/ original formula
-           MNUCCC = MNUCCC+CONS39*                   &
-                  EXP(LOG(CDIST1(I,K,J))+LOG(GAMMA(7.+PGAM(I,K,J)))-6.*LOG(LAMC(I,K,J)))*             &
-                   (EXP(AIMM*(273.15-T3D(I,K,J)))-1.)
+           MNUCCC(K) = MNUCCC(K)+CONS39*                   &
+                  EXP(LOG(CDIST1(K))+LOG(GAMMA(7.+PGAM(K)))-6.*LOG(LAMC(K)))*             &
+                   (EXP(AIMM*(273.15-T3D(K)))-1.)
 
-           NNUCCC = NNUCCC+                                  &
-            CONS40*EXP(LOG(CDIST1(I,K,J))+LOG(GAMMA(PGAM(I,K,J)+4.))-3.*LOG(LAMC(I,K,J)))              &
-                *(EXP(AIMM*(273.15-T3D(I,K,J)))-1.)
+           NNUCCC(K) = NNUCCC(K)+                                  &
+            CONS40*EXP(LOG(CDIST1(K))+LOG(GAMMA(PGAM(K)+4.))-3.*LOG(LAMC(K)))              &
+                *(EXP(AIMM*(273.15-T3D(K)))-1.)
 
 ! PUT IN A CATCH HERE TO PREVENT DIVERGENCE BETWEEN NUMBER CONC. AND
 ! MIXING RATIO, SINCE STRICT CONSERVATION NOT CHECKED FOR NUMBER CONC
 
-           NNUCCC = MIN(NNUCCC,NC3D(I,K,J)/DT)
+           NNUCCC(K) = MIN(NNUCCC(K),NC3D(K)/DT)
 
         END IF
 
@@ -2303,23 +2403,23 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! USE MINIMUM VALUE OF 1.E-6 TO PREVENT FLOATING POINT ERROR
 
-         IF (QC3D(I,K,J).GE.1.E-6) THEN
+         IF (QC3D(K).GE.1.E-6) THEN
 
 ! HM ADD 12/13/06, REPLACE WITH NEWER FORMULA
 ! FROM KHAIROUTDINOV AND KOGAN 2000, MWR
 
-                PRC=1350.*QC3D(I,K,J)**2.47*  &
-           (NC3D(I,K,J)/1.e6*RHO(I,K,J))**(-1.79)
+                PRC(K)=1350.*QC3D(K)**2.47*  &
+           (NC3D(K)/1.e6*RHO(K))**(-1.79)
 
 ! note: nprc1 is change in Nr,
 ! nprc is change in Nc
 
-        NPRC1 = PRC/CONS29
-        NPRC = PRC/(QC3D(I,K,J)/NC3D(I,K,J))
+        NPRC1(K) = PRC(K)/CONS29
+        NPRC(K) = PRC(K)/(QC3D(K)/NC3D(K))
 
 ! hm bug fix 3/20/12
-                NPRC = MIN(NPRC,NC3D(I,K,J)/DT)
-                NPRC1 = MIN(NPRC1,NPRC)
+                NPRC(K) = MIN(NPRC(K),NC3D(K)/DT)
+                NPRC1(K) = MIN(NPRC1(K),NPRC(K))
 
          END IF
 
@@ -2329,11 +2429,11 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! SNOW AGGREGATION FROM PASSARELLI, 1978, USED BY REISNER, 1998
 ! THIS IS HARD-WIRED FOR BS = 0.4 FOR NOW
 
-         IF (QNI3D(I,K,J).GE.1.E-8) THEN
-             NSAGG = CONS15*ASN(I,K,J)*RHO(I,K,J)**            &
-            ((2.+BS)/3.)*QNI3D(I,K,J)**((2.+BS)/3.)*                  &
-            (NS3D(I,K,J)*RHO(I,K,J))**((4.-BS)/3.)/                       &
-            (RHO(I,K,J))
+         IF (QNI3D(K).GE.1.E-8) THEN
+             NSAGG(K) = CONS15*ASN(K)*RHO(K)**            &
+            ((2.+BS)/3.)*QNI3D(K)**((2.+BS)/3.)*                  &
+            (NS3D(K)*RHO(K))**((4.-BS)/3.)/                       &
+            (RHO(K))
          END IF
 
 !.......................................................................
@@ -2343,28 +2443,28 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! SNOW
 
-         IF (QNI3D(I,K,J).GE.1.E-8 .AND. QC3D(I,K,J).GE.QSMALL) THEN
+         IF (QNI3D(K).GE.1.E-8 .AND. QC3D(K).GE.QSMALL) THEN
 
-           PSACWS = CONS13*ASN(I,K,J)*QC3D(I,K,J)*RHO(I,K,J)*               &
-                  N0S(I,K,J)/                        &
-                  LAMS(I,K,J)**(BS+3.)
-           NPSACWS = CONS13*ASN(I,K,J)*NC3D(I,K,J)*RHO(I,K,J)*              &
-                  N0S(I,K,J)/                        &
-                  LAMS(I,K,J)**(BS+3.)
+           PSACWS(K) = CONS13*ASN(K)*QC3D(K)*RHO(K)*               &
+                  N0S(K)/                        &
+                  LAMS(K)**(BS+3.)
+           NPSACWS(K) = CONS13*ASN(K)*NC3D(K)*RHO(K)*              &
+                  N0S(K)/                        &
+                  LAMS(K)**(BS+3.)
 
          END IF
 
 !............................................................................
 ! COLLECTION OF CLOUD WATER BY GRAUPEL
 
-         IF (QG3D(I,K,J).GE.1.E-8 .AND. QC3D(I,K,J).GE.QSMALL) THEN
+         IF (QG3D(K).GE.1.E-8 .AND. QC3D(K).GE.QSMALL) THEN
 
-           PSACWG = CONS14*AGN(I,K,J)*QC3D(I,K,J)*RHO(I,K,J)*               &
-                  N0G(I,K,J)/                        &
-                  LAMG(I,K,J)**(BG+3.)
-           NPSACWG = CONS14*AGN(I,K,J)*NC3D(I,K,J)*RHO(I,K,J)*              &
-                  N0G(I,K,J)/                        &
-                  LAMG(I,K,J)**(BG+3.)
+           PSACWG(K) = CONS14*AGN(K)*QC3D(K)*RHO(K)*               &
+                  N0G(K)/                        &
+                  LAMG(K)**(BG+3.)
+           NPSACWG(K) = CONS14*AGN(K)*NC3D(K)*RHO(K)*              &
+                  N0G(K)/                        &
+                  LAMG(K)**(BG+3.)
 	    END IF
 
 !.......................................................................
@@ -2374,19 +2474,19 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! ASSUME THAT RIME COLLECTED ON CLOUD ICE DOES NOT LEAD
 ! TO HALLET-MOSSOP SPLINTERING
 
-         IF (QI3D(I,K,J).GE.1.E-8 .AND. QC3D(I,K,J).GE.QSMALL) THEN
+         IF (QI3D(K).GE.1.E-8 .AND. QC3D(K).GE.QSMALL) THEN
 
 ! PUT IN SIZE DEPENDENT COLLECTION EFFICIENCY BASED ON STOKES LAW
 ! FROM THOMPSON ET AL. 2004, MWR
 
-            IF (1./LAMI(I,K,J).GE.100.E-6) THEN
+            IF (1./LAMI(K).GE.100.E-6) THEN
 
-           PSACWI = CONS16*AIN(I,K,J)*QC3D(I,K,J)*RHO(I,K,J)*               &
-                  N0I(I,K,J)/                        &
-                  LAMI(I,K,J)**(BI+3.)
-           NPSACWI = CONS16*AIN(I,K,J)*NC3D(I,K,J)*RHO(I,K,J)*              &
-                  N0I(I,K,J)/                        &
-                  LAMI(I,K,J)**(BI+3.)
+           PSACWI(K) = CONS16*AIN(K)*QC3D(K)*RHO(K)*               &
+                  N0I(K)/                        &
+                  LAMI(K)**(BI+3.)
+           NPSACWI(K) = CONS16*AIN(K)*NC3D(K)*RHO(K)*              &
+                  N0I(K)/                        &
+                  LAMI(K)**(BI+3.)
            END IF
          END IF
 
@@ -2394,53 +2494,53 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! ACCRETION OF RAIN WATER BY SNOW
 ! FORMULA FROM IKAWA AND SAITO, 1991, USED BY REISNER ET AL, 1998
 
-         IF (QR3D(I,K,J).GE.1.E-8.AND.QNI3D(I,K,J).GE.1.E-8) THEN
+         IF (QR3D(K).GE.1.E-8.AND.QNI3D(K).GE.1.E-8) THEN
 
-            UMS = ASN(I,K,J)*CONS3/(LAMS(I,K,J)**BS)
-            UMR = ARN(I,K,J)*CONS4/(LAMR(I,K,J)**BR)
-            UNS = ASN(I,K,J)*CONS5/LAMS(I,K,J)**BS
-            UNR = ARN(I,K,J)*CONS6/LAMR(I,K,J)**BR
+            UMS = ASN(K)*CONS3/(LAMS(K)**BS)
+            UMR = ARN(K)*CONS4/(LAMR(K)**BR)
+            UNS = ASN(K)*CONS5/LAMS(K)**BS
+            UNR = ARN(K)*CONS6/LAMR(K)**BR
 
 ! SET REASLISTIC LIMITS ON FALLSPEEDS
 
 ! bug fix, 10/08/09
-            dum=(rhosu/RHO(I,K,J))**0.54
+            dum=(rhosu/rho(k))**0.54
             UMS=MIN(UMS,1.2*dum)
             UNS=MIN(UNS,1.2*dum)
             UMR=MIN(UMR,9.1*dum)
             UNR=MIN(UNR,9.1*dum)
 
-            PRACS = CONS41*(((1.2*UMR-0.95*UMS)**2+                   &
-                  0.08*UMS*UMR)**0.5*RHO(I,K,J)*                      &
-                  N0RR(I,K,J)*N0S(I,K,J)/LAMR(I,K,J)**3*                              &
-                  (5./(LAMR(I,K,J)**3*LAMS(I,K,J))+                    &
-                  2./(LAMR(I,K,J)**2*LAMS(I,K,J)**2)+                  &
-                  0.5/(LAMR(I,K,J)*LAMS(I,K,J)**3)))
+            PRACS(K) = CONS41*(((1.2*UMR-0.95*UMS)**2+                   &
+                  0.08*UMS*UMR)**0.5*RHO(K)*                      &
+                  N0RR(K)*N0S(K)/LAMR(K)**3*                              &
+                  (5./(LAMR(K)**3*LAMS(K))+                    &
+                  2./(LAMR(K)**2*LAMS(K)**2)+                  &
+                  0.5/(LAMR(k)*LAMS(k)**3)))
 
-            NPRACS = CONS32*RHO(I,K,J)*(1.7*(UNR-UNS)**2+            &
-                0.3*UNR*UNS)**0.5*N0RR(I,K,J)*N0S(I,K,J)*              &
-                (1./(LAMR(I,K,J)**3*LAMS(I,K,J))+                      &
-                 1./(LAMR(I,K,J)**2*LAMS(I,K,J)**2)+                   &
-                 1./(LAMR(I,K,J)*LAMS(I,K,J)**3))
+            NPRACS(K) = CONS32*RHO(K)*(1.7*(UNR-UNS)**2+            &
+                0.3*UNR*UNS)**0.5*N0RR(K)*N0S(K)*              &
+                (1./(LAMR(K)**3*LAMS(K))+                      &
+                 1./(LAMR(K)**2*LAMS(K)**2)+                   &
+                 1./(LAMR(K)*LAMS(K)**3))
 
 ! MAKE SURE PRACS DOESN'T EXCEED TOTAL RAIN MIXING RATIO
 ! AS THIS MAY OTHERWISE RESULT IN TOO MUCH TRANSFER OF WATER DURING
 ! RIME-SPLINTERING
 
-            PRACS = MIN(PRACS,QR3D(I,K,J)/DT)
+            PRACS(K) = MIN(PRACS(K),QR3D(K)/DT)
 
 ! COLLECTION OF SNOW BY RAIN - NEEDED FOR GRAUPEL CONVERSION CALCULATIONS
 ! ONLY CALCULATE IF SNOW AND RAIN MIXING RATIOS EXCEED 0.1 G/KG
 
 ! HM MODIFY FOR WRFV3.1
 !            IF (IHAIL.EQ.0) THEN
-            IF (QNI3D(I,K,J).GE.0.1E-3.AND.QR3D(I,K,J).GE.0.1E-3) THEN
-            PSACR = CONS31*(((1.2*UMR-0.95*UMS)**2+              &
-                  0.08*UMS*UMR)**0.5*RHO(I,K,J)*                     &
-                 N0RR(I,K,J)*N0S(I,K,J)/LAMS(I,K,J)**3*                               &
-                  (5./(LAMS(I,K,J)**3*LAMR(I,K,J))+                    &
-                  2./(LAMS(I,K,J)**2*LAMR(I,K,J)**2)+                  &
-                  0.5/(LAMS(I,K,J)*LAMR(I,K,J)**3)))
+            IF (QNI3D(K).GE.0.1E-3.AND.QR3D(K).GE.0.1E-3) THEN
+            PSACR(K) = CONS31*(((1.2*UMR-0.95*UMS)**2+              &
+                  0.08*UMS*UMR)**0.5*RHO(K)*                     &
+                 N0RR(K)*N0S(K)/LAMS(K)**3*                               &
+                  (5./(LAMS(K)**3*LAMR(K))+                    &
+                  2./(LAMS(K)**2*LAMR(K)**2)+                  &
+                  0.5/(LAMS(K)*LAMR(K)**3)))
             END IF
 !            END IF
 
@@ -2450,39 +2550,39 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! COLLECTION OF RAINWATER BY GRAUPEL, FROM IKAWA AND SAITO 1990,
 ! USED BY REISNER ET AL 1998
-         IF (QR3D(I,K,J).GE.1.E-8.AND.QG3D(I,K,J).GE.1.E-8) THEN
+         IF (QR3D(K).GE.1.E-8.AND.QG3D(K).GE.1.E-8) THEN
 
-            UMG = AGN(I,K,J)*CONS7/(LAMG(I,K,J)**BG)
-            UMR = ARN(I,K,J)*CONS4/(LAMR(I,K,J)**BR)
-            UNG = AGN(I,K,J)*CONS8/LAMG(I,K,J)**BG
-            UNR = ARN(I,K,J)*CONS6/LAMR(I,K,J)**BR
+            UMG = AGN(K)*CONS7/(LAMG(K)**BG)
+            UMR = ARN(K)*CONS4/(LAMR(K)**BR)
+            UNG = AGN(K)*CONS8/LAMG(K)**BG
+            UNR = ARN(K)*CONS6/LAMR(K)**BR
 
 ! SET REASLISTIC LIMITS ON FALLSPEEDS
 ! bug fix, 10/08/09
-            dum=(rhosu/RHO(I,K,J))**0.54
+            dum=(rhosu/rho(k))**0.54
             UMG=MIN(UMG,20.*dum)
             UNG=MIN(UNG,20.*dum)
             UMR=MIN(UMR,9.1*dum)
             UNR=MIN(UNR,9.1*dum)
 
-            PRACG = CONS41*(((1.2*UMR-0.95*UMG)**2+                   &
-                  0.08*UMG*UMR)**0.5*RHO(I,K,J)*                      &
-                  N0RR(I,K,J)*N0G(I,K,J)/LAMR(I,K,J)**3*                              &
-                  (5./(LAMR(I,K,J)**3*LAMG(I,K,J))+                    &
-                  2./(LAMR(I,K,J)**2*LAMG(I,K,J)**2)+				   &
-				  0.5/(LAMR(I,K,J)*LAMG(I,K,J)**3)))
+            PRACG(K) = CONS41*(((1.2*UMR-0.95*UMG)**2+                   &
+                  0.08*UMG*UMR)**0.5*RHO(K)*                      &
+                  N0RR(K)*N0G(K)/LAMR(K)**3*                              &
+                  (5./(LAMR(K)**3*LAMG(K))+                    &
+                  2./(LAMR(K)**2*LAMG(K)**2)+				   &
+				  0.5/(LAMR(k)*LAMG(k)**3)))
 
-            NPRACG = CONS32*RHO(I,K,J)*(1.7*(UNR-UNG)**2+            &
-                0.3*UNR*UNG)**0.5*N0RR(I,K,J)*N0G(I,K,J)*              &
-                (1./(LAMR(I,K,J)**3*LAMG(I,K,J))+                      &
-                 1./(LAMR(I,K,J)**2*LAMG(I,K,J)**2)+                   &
-                 1./(LAMR(I,K,J)*LAMG(I,K,J)**3))
+            NPRACG(K) = CONS32*RHO(K)*(1.7*(UNR-UNG)**2+            &
+                0.3*UNR*UNG)**0.5*N0RR(K)*N0G(K)*              &
+                (1./(LAMR(K)**3*LAMG(K))+                      &
+                 1./(LAMR(K)**2*LAMG(K)**2)+                   &
+                 1./(LAMR(K)*LAMG(K)**3))
 
 ! MAKE SURE PRACG DOESN'T EXCEED TOTAL RAIN MIXING RATIO
 ! AS THIS MAY OTHERWISE RESULT IN TOO MUCH TRANSFER OF WATER DURING
 ! RIME-SPLINTERING
 
-            PRACG = MIN(PRACG,QR3D(I,K,J)/DT)
+            PRACG(K) = MIN(PRACG(K),QR3D(K)/DT)
 
 	    END IF
 
@@ -2498,18 +2598,18 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! THESE THRESHOLDS CORRESPOND WITH GRAUPEL THRESHOLDS IN RH 1984
 
 !v1.4
-         IF (QNI3D(I,K,J).GE.0.1E-3) THEN
-         IF (QC3D(I,K,J).GE.0.5E-3.OR.QR3D(I,K,J).GE.0.1E-3) THEN
-         IF (PSACWS.GT.0..OR.PRACS.GT.0.) THEN
-            IF (T3D(I,K,J).LT.270.16 .AND. T3D(I,K,J).GT.265.16) THEN
+         IF (QNI3D(K).GE.0.1E-3) THEN
+         IF (QC3D(K).GE.0.5E-3.OR.QR3D(K).GE.0.1E-3) THEN
+         IF (PSACWS(K).GT.0..OR.PRACS(K).GT.0.) THEN
+            IF (T3D(K).LT.270.16 .AND. T3D(K).GT.265.16) THEN
 
-               IF (T3D(I,K,J).GT.270.16) THEN
+               IF (T3D(K).GT.270.16) THEN
                   FMULT = 0.
-               ELSE IF (T3D(I,K,J).LE.270.16.AND.T3D(I,K,J).GT.268.16)  THEN
-                  FMULT = (270.16-T3D(I,K,J))/2.
-               ELSE IF (T3D(I,K,J).GE.265.16.AND.T3D(I,K,J).LE.268.16)   THEN
-                  FMULT = (T3D(I,K,J)-265.16)/3.
-               ELSE IF (T3D(I,K,J).LT.265.16) THEN
+               ELSE IF (T3D(K).LE.270.16.AND.T3D(K).GT.268.16)  THEN
+                  FMULT = (270.16-T3D(K))/2.
+               ELSE IF (T3D(K).GE.265.16.AND.T3D(K).LE.268.16)   THEN
+                  FMULT = (T3D(K)-265.16)/3.
+               ELSE IF (T3D(K).LT.265.16) THEN
                   FMULT = 0.
                END IF
 
@@ -2517,30 +2617,30 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! SPLINTERING FROM DROPLETS ACCRETED ONTO SNOW
 
-               IF (PSACWS.GT.0.) THEN
-                  NMULTS = 35.E4*PSACWS*FMULT*1000.
-                  QMULTS = NMULTS*MMULT
+               IF (PSACWS(K).GT.0.) THEN
+                  NMULTS(K) = 35.E4*PSACWS(K)*FMULT*1000.
+                  QMULTS(K) = NMULTS(K)*MMULT
 
 ! CONSTRAIN SO THAT TRANSFER OF MASS FROM SNOW TO ICE CANNOT BE MORE MASS
 ! THAN WAS RIMED ONTO SNOW
 
-                  QMULTS = MIN(QMULTS,PSACWS)
-                  PSACWS = PSACWS-QMULTS
+                  QMULTS(K) = MIN(QMULTS(K),PSACWS(K))
+                  PSACWS(K) = PSACWS(K)-QMULTS(K)
 
                END IF
 
 ! RIMING AND SPLINTERING FROM ACCRETED RAINDROPS
 
-               IF (PRACS.GT.0.) THEN
-                   NMULTR = 35.E4*PRACS*FMULT*1000.
-                   QMULTR = NMULTR*MMULT
+               IF (PRACS(K).GT.0.) THEN
+                   NMULTR(K) = 35.E4*PRACS(K)*FMULT*1000.
+                   QMULTR(K) = NMULTR(K)*MMULT
 
 ! CONSTRAIN SO THAT TRANSFER OF MASS FROM SNOW TO ICE CANNOT BE MORE MASS
 ! THAN WAS RIMED ONTO SNOW
 
-                   QMULTR = MIN(QMULTR,PRACS)
+                   QMULTR(K) = MIN(QMULTR(K),PRACS(K))
 
-                   PRACS = PRACS-QMULTR
+                   PRACS(K) = PRACS(K)-QMULTR(K)
 
                END IF
 
@@ -2561,18 +2661,18 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 !         IF (IHAIL.EQ.0) THEN
 ! v1.4
-         IF (QG3D(I,K,J).GE.0.1E-3) THEN
-         IF (QC3D(I,K,J).GE.0.5E-3.OR.QR3D(I,K,J).GE.0.1E-3) THEN
-         IF (PSACWG.GT.0..OR.PRACG.GT.0.) THEN
-            IF (T3D(I,K,J).LT.270.16 .AND. T3D(I,K,J).GT.265.16) THEN
+         IF (QG3D(K).GE.0.1E-3) THEN
+         IF (QC3D(K).GE.0.5E-3.OR.QR3D(K).GE.0.1E-3) THEN
+         IF (PSACWG(K).GT.0..OR.PRACG(K).GT.0.) THEN
+            IF (T3D(K).LT.270.16 .AND. T3D(K).GT.265.16) THEN
 
-               IF (T3D(I,K,J).GT.270.16) THEN
+               IF (T3D(K).GT.270.16) THEN
                   FMULT = 0.
-               ELSE IF (T3D(I,K,J).LE.270.16.AND.T3D(I,K,J).GT.268.16)  THEN
-                  FMULT = (270.16-T3D(I,K,J))/2.
-               ELSE IF (T3D(I,K,J).GE.265.16.AND.T3D(I,K,J).LE.268.16)   THEN
-                  FMULT = (T3D(I,K,J)-265.16)/3.
-               ELSE IF (T3D(I,K,J).LT.265.16) THEN
+               ELSE IF (T3D(K).LE.270.16.AND.T3D(K).GT.268.16)  THEN
+                  FMULT = (270.16-T3D(K))/2.
+               ELSE IF (T3D(K).GE.265.16.AND.T3D(K).LE.268.16)   THEN
+                  FMULT = (T3D(K)-265.16)/3.
+               ELSE IF (T3D(K).LT.265.16) THEN
                   FMULT = 0.
                END IF
 
@@ -2580,29 +2680,29 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! SPLINTERING FROM DROPLETS ACCRETED ONTO GRAUPEL
 
-               IF (PSACWG.GT.0.) THEN
-                  NMULTG = 35.E4*PSACWG*FMULT*1000.
-                  QMULTG = NMULTG*MMULT
+               IF (PSACWG(K).GT.0.) THEN
+                  NMULTG(K) = 35.E4*PSACWG(K)*FMULT*1000.
+                  QMULTG(K) = NMULTG(K)*MMULT
 
 ! CONSTRAIN SO THAT TRANSFER OF MASS FROM GRAUPEL TO ICE CANNOT BE MORE MASS
 ! THAN WAS RIMED ONTO GRAUPEL
 
-                  QMULTG = MIN(QMULTG,PSACWG)
-                  PSACWG = PSACWG-QMULTG
+                  QMULTG(K) = MIN(QMULTG(K),PSACWG(K))
+                  PSACWG(K) = PSACWG(K)-QMULTG(K)
 
                END IF
 
 ! RIMING AND SPLINTERING FROM ACCRETED RAINDROPS
 
-               IF (PRACG.GT.0.) THEN
-                   NMULTRG = 35.E4*PRACG*FMULT*1000.
-                   QMULTRG = NMULTRG*MMULT
+               IF (PRACG(K).GT.0.) THEN
+                   NMULTRG(K) = 35.E4*PRACG(K)*FMULT*1000.
+                   QMULTRG(K) = NMULTRG(K)*MMULT
 
 ! CONSTRAIN SO THAT TRANSFER OF MASS FROM GRAUPEL TO ICE CANNOT BE MORE MASS
 ! THAN WAS RIMED ONTO GRAUPEL
 
-                   QMULTRG = MIN(QMULTRG,PRACG)
-                   PRACG = PRACG-QMULTRG
+                   QMULTRG(K) = MIN(QMULTRG(K),PRACG(K))
+                   PRACG(K) = PRACG(K)-QMULTRG(K)
 
                END IF
                END IF
@@ -2615,50 +2715,50 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! CONVERSION OF RIMED CLOUD WATER ONTO SNOW TO GRAUPEL/HAIL
 
 !           IF (IHAIL.EQ.0) THEN
-	   IF (PSACWS.GT.0.) THEN
+	   IF (PSACWS(K).GT.0.) THEN
 ! ONLY ALLOW CONVERSION IF QNI > 0.1 AND QC > 0.5 G/KG FOLLOWING RUTLEDGE AND HOBBS (1984)
-              IF (QNI3D(I,K,J).GE.0.1E-3.AND.QC3D(I,K,J).GE.0.5E-3) THEN
+              IF (QNI3D(K).GE.0.1E-3.AND.QC3D(K).GE.0.5E-3) THEN
 
 ! PORTION OF RIMING CONVERTED TO GRAUPEL (REISNER ET AL. 1998, ORIGINALLY IS1991)
-	     PGSACW = MIN(PSACWS,CONS17*DT*N0S(I,K,J)*QC3D(I,K,J)*QC3D(I,K,J)* &
-                          ASN(I,K,J)*ASN(I,K,J)/ &
-                           (RHO(I,K,J)*LAMS(I,K,J)**(2.*BS+2.)))
+	     PGSACW(K) = MIN(PSACWS(K),CONS17*DT*N0S(K)*QC3D(K)*QC3D(K)* &
+                          ASN(K)*ASN(K)/ &
+                           (RHO(K)*LAMS(K)**(2.*BS+2.)))
 
 ! MIX RAT CONVERTED INTO GRAUPEL AS EMBRYO (REISNER ET AL. 1998, ORIG M1990)
-	     DUM = MAX(RHOSN/(RHOG-RHOSN)*PGSACW,0.)
+	     DUM = MAX(RHOSN/(RHOG-RHOSN)*PGSACW(K),0.)
 
 ! NUMBER CONCENTRAITON OF EMBRYO GRAUPEL FROM RIMING OF SNOW
-	     NSCNG = DUM/MG0*RHO(I,K,J)
+	     NSCNG(K) = DUM/MG0*RHO(K)
 ! LIMIT MAX NUMBER CONVERTED TO SNOW NUMBER
-             NSCNG = MIN(NSCNG,NS3D(I,K,J)/DT)
+             NSCNG(K) = MIN(NSCNG(K),NS3D(K)/DT)
 
 ! PORTION OF RIMING LEFT FOR SNOW
-             PSACWS = PSACWS - PGSACW
+             PSACWS(K) = PSACWS(K) - PGSACW(K)
              END IF
 	   END IF
 
 ! CONVERSION OF RIMED RAINWATER ONTO SNOW CONVERTED TO GRAUPEL
 
-	   IF (PRACS.GT.0.) THEN
+	   IF (PRACS(K).GT.0.) THEN
 ! ONLY ALLOW CONVERSION IF QNI > 0.1 AND QR > 0.1 G/KG FOLLOWING RUTLEDGE AND HOBBS (1984)
-              IF (QNI3D(I,K,J).GE.0.1E-3.AND.QR3D(I,K,J).GE.0.1E-3) THEN
+              IF (QNI3D(K).GE.0.1E-3.AND.QR3D(K).GE.0.1E-3) THEN
 ! PORTION OF COLLECTED RAINWATER CONVERTED TO GRAUPEL (REISNER ET AL. 1998)
-	      DUM = CONS18*(4./LAMS(I,K,J))**3*(4./LAMS(I,K,J))**3 &
-                   /(CONS18*(4./LAMS(I,K,J))**3*(4./LAMS(I,K,J))**3+ &
-                   CONS19*(4./LAMR(I,K,J))**3*(4./LAMR(I,K,J))**3)
+	      DUM = CONS18*(4./LAMS(K))**3*(4./LAMS(K))**3 &
+                   /(CONS18*(4./LAMS(K))**3*(4./LAMS(K))**3+ &
+                   CONS19*(4./LAMR(K))**3*(4./LAMR(K))**3)
               DUM=MIN(DUM,1.)
               DUM=MAX(DUM,0.)
-	      PGRACS = (1.-DUM)*PRACS
-            NGRACS = (1.-DUM)*NPRACS
+	      PGRACS(K) = (1.-DUM)*PRACS(K)
+            NGRACS(K) = (1.-DUM)*NPRACS(K)
 ! LIMIT MAX NUMBER CONVERTED TO MIN OF EITHER RAIN OR SNOW NUMBER CONCENTRATION
-            NGRACS = MIN(NGRACS,NR3D(I,K,J)/DT)
-            NGRACS = MIN(NGRACS,NS3D(I,K,J)/DT)
+            NGRACS(K) = MIN(NGRACS(K),NR3D(K)/DT)
+            NGRACS(K) = MIN(NGRACS(K),NS3D(K)/DT)
 
 ! AMOUNT LEFT FOR SNOW PRODUCTION
-            PRACS = PRACS - PGRACS
-            NPRACS = NPRACS - NGRACS
+            PRACS(K) = PRACS(K) - PGRACS(K)
+            NPRACS(K) = NPRACS(K) - NGRACS(K)
 ! CONVERSION TO GRAUPEL DUE TO COLLECTION OF SNOW BY RAIN
-            PSACR=PSACR*(1.-DUM)
+            PSACR(K)=PSACR(K)*(1.-DUM)
             END IF
 	   END IF
 !           END IF
@@ -2667,22 +2767,22 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! FREEZING OF RAIN DROPS
 ! FREEZING ALLOWED BELOW -4 C
 
-         IF (T3D(I,K,J).LT.269.15.AND.QR3D(I,K,J).GE.QSMALL) THEN
+         IF (T3D(K).LT.269.15.AND.QR3D(K).GE.QSMALL) THEN
 
 ! IMMERSION FREEZING (BIGG 1953)
-!            MNUCCR = CONS20*NR3D(I,K,J)*EXP(AIMM*(273.15-T3D(I,K,J)))/LAMR(I,K,J)**3 &
-!                 /LAMR(I,K,J)**3
+!            MNUCCR(K) = CONS20*NR3D(K)*EXP(AIMM*(273.15-T3D(K)))/LAMR(K)**3 &
+!                 /LAMR(K)**3
 
-!            NNUCCR = PI*NR3D(I,K,J)*BIMM*EXP(AIMM*(273.15-T3D(I,K,J)))/LAMR(I,K,J)**3
+!            NNUCCR(K) = PI*NR3D(K)*BIMM*EXP(AIMM*(273.15-T3D(K)))/LAMR(K)**3
 
 ! hm fix 7/15/13 for consistency w/ original formula
-            MNUCCR = CONS20*NR3D(I,K,J)*(EXP(AIMM*(273.15-T3D(I,K,J)))-1.)/LAMR(I,K,J)**3 &
-                 /LAMR(I,K,J)**3
+            MNUCCR(K) = CONS20*NR3D(K)*(EXP(AIMM*(273.15-T3D(K)))-1.)/LAMR(K)**3 &
+                 /LAMR(K)**3
 
-            NNUCCR = PI*NR3D(I,K,J)*BIMM*(EXP(AIMM*(273.15-T3D(I,K,J)))-1.)/LAMR(I,K,J)**3
+            NNUCCR(K) = PI*NR3D(K)*BIMM*(EXP(AIMM*(273.15-T3D(K)))-1.)/LAMR(K)**3
 
 ! PREVENT DIVERGENCE BETWEEN MIXING RATIO AND NUMBER CONC
-            NNUCCR = MIN(NNUCCR,NR3D(I,K,J)/DT)
+            NNUCCR(K) = MIN(NNUCCR(K),NR3D(K)/DT)
 
          END IF
 
@@ -2691,14 +2791,14 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! CONTINUOUS COLLECTION EQUATION WITH
 ! GRAVITATIONAL COLLECTION KERNEL, DROPLET FALL SPEED NEGLECTED
 
-         IF (QR3D(I,K,J).GE.1.E-8 .AND. QC3D(I,K,J).GE.1.E-8) THEN
+         IF (QR3D(K).GE.1.E-8 .AND. QC3D(K).GE.1.E-8) THEN
 
 ! 12/13/06 HM ADD, REPLACE WITH NEWER FORMULA FROM
 ! KHAIROUTDINOV AND KOGAN 2000, MWR
 
-           DUM=(QC3D(I,K,J)*QR3D(I,K,J))
-           PRA = 67.*(DUM)**1.15
-           NPRA = PRA/(QC3D(I,K,J)/NC3D(I,K,J))
+           DUM=(QC3D(K)*QR3D(K))
+           PRA(K) = 67.*(DUM)**1.15
+           NPRA(K) = PRA(K)/(QC3D(K)/NC3D(K))
 
          END IF
 !.......................................................................
@@ -2707,16 +2807,16 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! FROM NUMERICAL SIMULATION OF THE STOCHASTIC COLLECTION EQUATION
 ! AS DESCRINED ABOVE FOR AUTOCONVERSION
 
-         IF (QR3D(I,K,J).GE.1.E-8) THEN
+         IF (QR3D(K).GE.1.E-8) THEN
 ! include breakup add 10/09/09
             dum1=300.e-6
-            if (1./lamr(I,K,J).lt.dum1) then
+            if (1./lamr(k).lt.dum1) then
             dum=1.
-            else if (1./lamr(I,K,J).ge.dum1) then
-            dum=2.-exp(2300.*(1./lamr(I,K,J)-dum1))
+            else if (1./lamr(k).ge.dum1) then
+            dum=2.-exp(2300.*(1./lamr(k)-dum1))
             end if
-!            NRAGG = -8.*NR3D(I,K,J)*QR3D(I,K,J)*RHO(I,K,J)
-            NRAGG = -5.78*dum*NR3D(I,K,J)*QR3D(I,K,J)*RHO(I,K,J)
+!            NRAGG(K) = -8.*NR3D(K)*QR3D(K)*RHO(K)
+            NRAGG(K) = -5.78*dum*NR3D(K)*QR3D(K)*RHO(K)
          END IF
 
 !.......................................................................
@@ -2725,14 +2825,14 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! HERE IT IS ASSUMED THAT AUTOCONVERSION CAN ONLY OCCUR WHEN THE
 ! ICE IS GROWING, I.E. IN CONDITIONS OF ICE SUPERSATURATION
 
-         IF (QI3D(I,K,J).GE.1.E-8 .AND.QVQVSI.GE.1.) THEN
+         IF (QI3D(K).GE.1.E-8 .AND.QVQVSI(K).GE.1.) THEN
 
-!           COFFI = 2./LAMI(I,K,J)
+!           COFFI = 2./LAMI(K)
 !           IF (COFFI.GE.DCS) THEN
-              NPRCI = CONS21*(QV3D(I,K,J)-QVI)*RHO(I,K,J)                         &
-                *N0I(I,K,J)*EXP(-LAMI(I,K,J)*DCS)*DV/ABI
-              PRCI = CONS22*NPRCI
-              NPRCI = MIN(NPRCI,NI3D(I,K,J)/DT)
+              NPRCI(K) = CONS21*(QV3D(K)-QVI(K))*RHO(K)                         &
+                *N0I(K)*EXP(-LAMI(K)*DCS)*DV(K)/ABI(K)
+              PRCI(K) = CONS22*NPRCI(K)
+              NPRCI(K) = MIN(NPRCI(K),NI3D(K)/DT)
 
 !           END IF
          END IF
@@ -2742,13 +2842,13 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! FOR THIS CALCULATION, IT IS ASSUMED THAT THE VS >> VI
 ! AND DS >> DI FOR CONTINUOUS COLLECTION
 
-         IF (QNI3D(I,K,J).GE.1.E-8 .AND. QI3D(I,K,J).GE.QSMALL) THEN
-            PRAI = CONS23*ASN(I,K,J)*QI3D(I,K,J)*RHO(I,K,J)*N0S(I,K,J)/     &
-                     LAMS(I,K,J)**(BS+3.)
-            NPRAI = CONS23*ASN(I,K,J)*NI3D(I,K,J)*                                       &
-                  RHO(I,K,J)*N0S(I,K,J)/                                 &
-                  LAMS(I,K,J)**(BS+3.)
-            NPRAI=MIN(NPRAI,NI3D(I,K,J)/DT)
+         IF (QNI3D(K).GE.1.E-8 .AND. QI3D(K).GE.QSMALL) THEN
+            PRAI(K) = CONS23*ASN(K)*QI3D(K)*RHO(K)*N0S(K)/     &
+                     LAMS(K)**(BS+3.)
+            NPRAI(K) = CONS23*ASN(K)*NI3D(K)*                                       &
+                  RHO(K)*N0S(K)/                                 &
+                  LAMS(K)**(BS+3.)
+            NPRAI(K)=MIN(NPRAI(K),NI3D(K)/DT)
          END IF
 
 !.......................................................................
@@ -2756,29 +2856,29 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! FOLLOWS REISNER ET AL. 1998
 ! ASSUMED FALLSPEED AND SIZE OF ICE CRYSTAL << THAN FOR RAIN
 
-         IF (QR3D(I,K,J).GE.1.E-8.AND.QI3D(I,K,J).GE.1.E-8.AND.T3D(I,K,J).LE.273.15) THEN
+         IF (QR3D(K).GE.1.E-8.AND.QI3D(K).GE.1.E-8.AND.T3D(K).LE.273.15) THEN
 
 ! ALLOW GRAUPEL FORMATION FROM RAIN-ICE COLLISIONS ONLY IF RAIN MIXING RATIO > 0.1 G/KG,
 ! OTHERWISE ADD TO SNOW
 
-            IF (QR3D(I,K,J).GE.0.1E-3) THEN
-            NIACR=CONS24*NI3D(I,K,J)*N0RR(I,K,J)*ARN(I,K,J) &
-                /LAMR(I,K,J)**(BR+3.)*RHO(I,K,J)
-            PIACR=CONS25*NI3D(I,K,J)*N0RR(I,K,J)*ARN(I,K,J) &
-                /LAMR(I,K,J)**(BR+3.)/LAMR(I,K,J)**3*RHO(I,K,J)
-            PRACI=CONS24*QI3D(I,K,J)*N0RR(I,K,J)*ARN(I,K,J)/ &
-                LAMR(I,K,J)**(BR+3.)*RHO(I,K,J)
-            NIACR=MIN(NIACR,NR3D(I,K,J)/DT)
-            NIACR=MIN(NIACR,NI3D(I,K,J)/DT)
+            IF (QR3D(K).GE.0.1E-3) THEN
+            NIACR(K)=CONS24*NI3D(K)*N0RR(K)*ARN(K) &
+                /LAMR(K)**(BR+3.)*RHO(K)
+            PIACR(K)=CONS25*NI3D(K)*N0RR(K)*ARN(K) &
+                /LAMR(K)**(BR+3.)/LAMR(K)**3*RHO(K)
+            PRACI(K)=CONS24*QI3D(K)*N0RR(K)*ARN(K)/ &
+                LAMR(K)**(BR+3.)*RHO(K)
+            NIACR(K)=MIN(NIACR(K),NR3D(K)/DT)
+            NIACR(K)=MIN(NIACR(K),NI3D(K)/DT)
             ELSE
-            NIACRS=CONS24*NI3D(I,K,J)*N0RR(I,K,J)*ARN(I,K,J) &
-                /LAMR(I,K,J)**(BR+3.)*RHO(I,K,J)
-            PIACRS=CONS25*NI3D(I,K,J)*N0RR(I,K,J)*ARN(I,K,J) &
-                /LAMR(I,K,J)**(BR+3.)/LAMR(I,K,J)**3*RHO(I,K,J)
-            PRACIS=CONS24*QI3D(I,K,J)*N0RR(I,K,J)*ARN(I,K,J)/ &
-                LAMR(I,K,J)**(BR+3.)*RHO(I,K,J)
-            NIACRS=MIN(NIACRS,NR3D(I,K,J)/DT)
-            NIACRS=MIN(NIACRS,NI3D(I,K,J)/DT)
+            NIACRS(K)=CONS24*NI3D(K)*N0RR(K)*ARN(K) &
+                /LAMR(K)**(BR+3.)*RHO(K)
+            PIACRS(K)=CONS25*NI3D(K)*N0RR(K)*ARN(K) &
+                /LAMR(K)**(BR+3.)/LAMR(K)**3*RHO(K)
+            PRACIS(K)=CONS24*QI3D(K)*N0RR(K)*ARN(K)/ &
+                LAMR(K)**(BR+3.)*RHO(K)
+            NIACRS(K)=MIN(NIACRS(K),NR3D(K)/DT)
+            NIACRS(K)=MIN(NIACRS(K),NI3D(K)/DT)
             END IF
          END IF
 
@@ -2789,30 +2889,30 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! add threshold according to Greg Thomspon
 
-         if ((QVQVS.GE.0.999.and.T3D(I,K,J).le.265.15).or. &
-              QVQVSI.ge.1.08) then
+         if ((QVQVS(K).GE.0.999.and.T3D(K).le.265.15).or. &
+              QVQVSI(K).ge.1.08) then
 
 ! hm, modify dec. 5, 2006, replace with cooper curve
-      kc2 = 0.005*exp(0.304*(273.15-T3D(I,K,J)))*1000. ! convert from L-1 to m-3
+      kc2 = 0.005*exp(0.304*(273.15-T3D(K)))*1000. ! convert from L-1 to m-3
 ! limit to 500 L-1
       kc2 = min(kc2,500.e3)
-      kc2=MAX(kc2/RHO(I,K,J),0.)  ! convert to kg-1
+      kc2=MAX(kc2/rho(k),0.)  ! convert to kg-1
 
-          IF (KC2.GT.NI3D(I,K,J)+NS3D(I,K,J)+NG3D(I,K,J)) THEN
-             NNUCCD = (KC2-NI3D(I,K,J)-NS3D(I,K,J)-NG3D(I,K,J))/DT
-             MNUCCD = NNUCCD*MI0
+          IF (KC2.GT.NI3D(K)+NS3D(K)+NG3D(K)) THEN
+             NNUCCD(K) = (KC2-NI3D(K)-NS3D(K)-NG3D(K))/DT
+             MNUCCD(K) = NNUCCD(K)*MI0
           END IF
 
           END IF
 
           ELSE IF (INUC.EQ.1) THEN
 
-          IF (T3D(I,K,J).LT.273.15.AND.QVQVSI.GT.1.) THEN
+          IF (T3D(K).LT.273.15.AND.QVQVSI(K).GT.1.) THEN
 
-             KC2 = 0.16*1000./RHO(I,K,J)  ! CONVERT FROM L-1 TO KG-1
-          IF (KC2.GT.NI3D(I,K,J)+NS3D(I,K,J)+NG3D(I,K,J)) THEN
-             NNUCCD = (KC2-NI3D(I,K,J)-NS3D(I,K,J)-NG3D(I,K,J))/DT
-             MNUCCD = NNUCCD*MI0
+             KC2 = 0.16*1000./RHO(K)  ! CONVERT FROM L-1 TO KG-1
+          IF (KC2.GT.NI3D(K)+NS3D(K)+NG3D(K)) THEN
+             NNUCCD(K) = (KC2-NI3D(K)-NS3D(K)-NG3D(K))/DT
+             MNUCCD(K) = NNUCCD(K)*MI0
           END IF
           END IF
 
@@ -2820,49 +2920,49 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 
-!  101      CONTINUE
+ 101      CONTINUE
 
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 ! CALCULATE EVAP/SUB/DEP TERMS FOR QI,QNI,QR
 
 ! NO VENTILATION FOR CLOUD ICE
 
-        IF (QI3D(I,K,J).GE.QSMALL) THEN
+        IF (QI3D(K).GE.QSMALL) THEN
 
-         EPSI = 2.*PI*N0I(I,K,J)*RHO(I,K,J)*DV/(LAMI(I,K,J)*LAMI(I,K,J))
+         EPSI = 2.*PI*N0I(K)*RHO(K)*DV(K)/(LAMI(K)*LAMI(K))
 
       ELSE
          EPSI = 0.
       END IF
 
-      IF (QNI3D(I,K,J).GE.QSMALL) THEN
-        EPSS = 2.*PI*N0S(I,K,J)*RHO(I,K,J)*DV*                            &
-                   (F1S/(LAMS(I,K,J)*LAMS(I,K,J))+                       &
-                    F2S*(ASN(I,K,J)*RHO(I,K,J)/MU(I,K,J))**0.5*                      &
-                    SC**(1./3.)*CONS10/                   &
-               (LAMS(I,K,J)**CONS35))
+      IF (QNI3D(K).GE.QSMALL) THEN
+        EPSS = 2.*PI*N0S(K)*RHO(K)*DV(K)*                            &
+                   (F1S/(LAMS(K)*LAMS(K))+                       &
+                    F2S*(ASN(K)*RHO(K)/MU(K))**0.5*                      &
+                    SC(K)**(1./3.)*CONS10/                   &
+               (LAMS(K)**CONS35))
       ELSE
       EPSS = 0.
       END IF
 
-      IF (QG3D(I,K,J).GE.QSMALL) THEN
-        EPSG = 2.*PI*N0G(I,K,J)*RHO(I,K,J)*DV*                                &
-                   (F1S/(LAMG(I,K,J)*LAMG(I,K,J))+                               &
-                    F2S*(AGN(I,K,J)*RHO(I,K,J)/MU(I,K,J))**0.5*                      &
-                    SC**(1./3.)*CONS11/                   &
-               (LAMG(I,K,J)**CONS36))
+      IF (QG3D(K).GE.QSMALL) THEN
+        EPSG = 2.*PI*N0G(K)*RHO(K)*DV(K)*                                &
+                   (F1S/(LAMG(K)*LAMG(K))+                               &
+                    F2S*(AGN(K)*RHO(K)/MU(K))**0.5*                      &
+                    SC(K)**(1./3.)*CONS11/                   &
+               (LAMG(K)**CONS36))
 
 
       ELSE
       EPSG = 0.
       END IF
 
-      IF (QR3D(I,K,J).GE.QSMALL) THEN
-        EPSR = 2.*PI*N0RR(I,K,J)*RHO(I,K,J)*DV*                           &
-                   (F1R/(LAMR(I,K,J)*LAMR(I,K,J))+                       &
-                    F2R*(ARN(I,K,J)*RHO(I,K,J)/MU(I,K,J))**0.5*                      &
-                    SC**(1./3.)*CONS9/                   &
-                (LAMR(I,K,J)**CONS34))
+      IF (QR3D(K).GE.QSMALL) THEN
+        EPSR = 2.*PI*N0RR(K)*RHO(K)*DV(K)*                           &
+                   (F1R/(LAMR(K)*LAMR(K))+                       &
+                    F2R*(ARN(K)*RHO(K)/MU(K))**0.5*                      &
+                    SC(K)**(1./3.)*CONS9/                   &
+                (LAMR(K)**CONS34))
       ELSE
       EPSR = 0.
       END IF
@@ -2871,61 +2971,61 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! DUM IS FRACTION OF D*N(D) < DCS
 
 ! LOGIC BELOW FOLLOWS THAT OF HARRINGTON ET AL. 1995 (JAS)
-              IF (QI3D(I,K,J).GE.QSMALL) THEN
-              DUM=(1.-EXP(-LAMI(I,K,J)*DCS)*(1.+LAMI(I,K,J)*DCS))
-              PRD = EPSI*(QV3D(I,K,J)-QVI)/ABI*DUM
+              IF (QI3D(K).GE.QSMALL) THEN
+              DUM=(1.-EXP(-LAMI(K)*DCS)*(1.+LAMI(K)*DCS))
+              PRD(K) = EPSI*(QV3D(K)-QVI(K))/ABI(K)*DUM
               ELSE
               DUM=0.
               END IF
 ! ADD DEPOSITION IN TAIL OF ICE SIZE DIST TO SNOW IF SNOW IS PRESENT
-              IF (QNI3D(I,K,J).GE.QSMALL) THEN
-              PRDS = EPSS*(QV3D(I,K,J)-QVI)/ABI+ &
-                EPSI*(QV3D(I,K,J)-QVI)/ABI*(1.-DUM)
+              IF (QNI3D(K).GE.QSMALL) THEN
+              PRDS(K) = EPSS*(QV3D(K)-QVI(K))/ABI(K)+ &
+                EPSI*(QV3D(K)-QVI(K))/ABI(K)*(1.-DUM)
 ! OTHERWISE ADD TO CLOUD ICE
               ELSE
-              PRD = PRD+EPSI*(QV3D(I,K,J)-QVI)/ABI*(1.-DUM)
+              PRD(K) = PRD(K)+EPSI*(QV3D(K)-QVI(K))/ABI(K)*(1.-DUM)
               END IF
 ! VAPOR DPEOSITION ON GRAUPEL
-              PRDG = EPSG*(QV3D(I,K,J)-QVI)/ABI
+              PRDG(K) = EPSG*(QV3D(K)-QVI(K))/ABI(K)
 
 ! NO CONDENSATION ONTO RAIN, ONLY EVAP
 
-           IF (QV3D(I,K,J).LT.QVS) THEN
-              PRE = EPSR*(QV3D(I,K,J)-QVS)/AB
-              PRE = MIN(PRE,0.)
+           IF (QV3D(K).LT.QVS(K)) THEN
+              PRE(K) = EPSR*(QV3D(K)-QVS(K))/AB(K)
+              PRE(K) = MIN(PRE(K),0.)
            ELSE
-              PRE = 0.
+              PRE(K) = 0.
            END IF
 
 ! MAKE SURE NOT PUSHED INTO ICE SUPERSAT/SUBSAT
 ! FORMULA FROM REISNER 2 SCHEME
 
-           DUM = (QV3D(I,K,J)-QVI)/DT
+           DUM = (QV3D(K)-QVI(K))/DT
 
            FUDGEF = 0.9999
-           SUM_DEP = PRD+PRDS+MNUCCD+PRDG
+           SUM_DEP = PRD(K)+PRDS(K)+MNUCCD(K)+PRDG(K)
 
            IF( (DUM.GT.0. .AND. SUM_DEP.GT.DUM*FUDGEF) .OR.                      &
                (DUM.LT.0. .AND. SUM_DEP.LT.DUM*FUDGEF) ) THEN
-               MNUCCD = FUDGEF*MNUCCD*DUM/SUM_DEP
-               PRD = FUDGEF*PRD*DUM/SUM_DEP
-               PRDS = FUDGEF*PRDS*DUM/SUM_DEP
-	       PRDG = FUDGEF*PRDG*DUM/SUM_DEP
+               MNUCCD(K) = FUDGEF*MNUCCD(K)*DUM/SUM_DEP
+               PRD(K) = FUDGEF*PRD(K)*DUM/SUM_DEP
+               PRDS(K) = FUDGEF*PRDS(K)*DUM/SUM_DEP
+	       PRDG(K) = FUDGEF*PRDG(K)*DUM/SUM_DEP
            ENDIF
 
 ! IF CLOUD ICE/SNOW/GRAUPEL VAP DEPOSITION IS NEG, THEN ASSIGN TO SUBLIMATION PROCESSES
 
-           IF (PRD.LT.0.) THEN
-              EPRD=PRD
-              PRD=0.
+           IF (PRD(K).LT.0.) THEN
+              EPRD(K)=PRD(K)
+              PRD(K)=0.
            END IF
-           IF (PRDS.LT.0.) THEN
-              EPRDS=PRDS
-              PRDS=0.
+           IF (PRDS(K).LT.0.) THEN
+              EPRDS(K)=PRDS(K)
+              PRDS(K)=0.
            END IF
-           IF (PRDG.LT.0.) THEN
-              EPRDG=PRDG
-              PRDG=0.
+           IF (PRDG(K).LT.0.) THEN
+              EPRDG(K)=PRDG(K)
+              PRDG(K)=0.
            END IF
 
 !.......................................................................
@@ -2947,98 +3047,98 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 !****SENSITIVITY - NO ICE
 
       IF (ILIQ.EQ.1) THEN
-      MNUCCC=0.
-      NNUCCC=0.
-      MNUCCR=0.
-      NNUCCR=0.
-      MNUCCD=0.
-      NNUCCD=0.
+      MNUCCC(K)=0.
+      NNUCCC(K)=0.
+      MNUCCR(K)=0.
+      NNUCCR(K)=0.
+      MNUCCD(K)=0.
+      NNUCCD(K)=0.
       END IF
 
 ! ****SENSITIVITY - NO GRAUPEL
       IF (IGRAUP.EQ.1) THEN
-            PRACG = 0.
-            PSACR = 0.
-	    PSACWG = 0.
-	    PRDG = 0.
-	    EPRDG = 0.
-            EVPMG = 0.
-            PGMLT = 0.
-	    NPRACG = 0.
-	    NPSACWG = 0.
-	    NSCNG = 0.
- 	    NGRACS = 0.
-	    NSUBG = 0.
-	    NGMLTG = 0.
-            NGMLTR = 0.
+            PRACG(K) = 0.
+            PSACR(K) = 0.
+	    PSACWG(K) = 0.
+	    PRDG(K) = 0.
+	    EPRDG(K) = 0.
+            EVPMG(K) = 0.
+            PGMLT(K) = 0.
+	    NPRACG(K) = 0.
+	    NPSACWG(K) = 0.
+	    NSCNG(K) = 0.
+ 	    NGRACS(K) = 0.
+	    NSUBG(K) = 0.
+	    NGMLTG(K) = 0.
+            NGMLTR(K) = 0.
 ! fix 053011
-            PIACRS=PIACRS+PIACR
-            PIACR = 0.
+            PIACRS(K)=PIACRS(K)+PIACR(K)
+            PIACR(K) = 0.
 ! fix 070713
-	    PRACIS=PRACIS+PRACI
-	    PRACI = 0.
-	    PSACWS=PSACWS+PGSACW
-	    PGSACW = 0.
-	    PRACS=PRACS+PGRACS
-	    PGRACS = 0.
+	    PRACIS(K)=PRACIS(K)+PRACI(K)
+	    PRACI(K) = 0.
+	    PSACWS(K)=PSACWS(K)+PGSACW(K)
+	    PGSACW(K) = 0.
+	    PRACS(K)=PRACS(K)+PGRACS(K)
+	    PGRACS(K) = 0.
        END IF
 
 ! CONSERVATION OF QC
 
-      DUM = (PRC+PRA+MNUCCC+PSACWS+PSACWI+QMULTS+PSACWG+PGSACW+QMULTG)*DT
+      DUM = (PRC(K)+PRA(K)+MNUCCC(K)+PSACWS(K)+PSACWI(K)+QMULTS(K)+PSACWG(K)+PGSACW(K)+QMULTG(K))*DT
 
-      IF (DUM.GT.QC3D(I,K,J).AND.QC3D(I,K,J).GE.QSMALL) THEN
-        RATIO = QC3D(I,K,J)/DUM
+      IF (DUM.GT.QC3D(K).AND.QC3D(K).GE.QSMALL) THEN
+        RATIO = QC3D(K)/DUM
 
-        PRC = PRC*RATIO
-        PRA = PRA*RATIO
-        MNUCCC = MNUCCC*RATIO
-        PSACWS = PSACWS*RATIO
-        PSACWI = PSACWI*RATIO
-        QMULTS = QMULTS*RATIO
-        QMULTG = QMULTG*RATIO
-        PSACWG = PSACWG*RATIO
-	PGSACW = PGSACW*RATIO
+        PRC(K) = PRC(K)*RATIO
+        PRA(K) = PRA(K)*RATIO
+        MNUCCC(K) = MNUCCC(K)*RATIO
+        PSACWS(K) = PSACWS(K)*RATIO
+        PSACWI(K) = PSACWI(K)*RATIO
+        QMULTS(K) = QMULTS(K)*RATIO
+        QMULTG(K) = QMULTG(K)*RATIO
+        PSACWG(K) = PSACWG(K)*RATIO
+	PGSACW(K) = PGSACW(K)*RATIO
         END IF
 
 ! CONSERVATION OF QI
 
-      DUM = (-PRD-MNUCCC+PRCI+PRAI-QMULTS-QMULTG-QMULTR-QMULTRG &
-                -MNUCCD+PRACI+PRACIS-EPRD-PSACWI)*DT
+      DUM = (-PRD(K)-MNUCCC(K)+PRCI(K)+PRAI(K)-QMULTS(K)-QMULTG(K)-QMULTR(K)-QMULTRG(K) &
+                -MNUCCD(K)+PRACI(K)+PRACIS(K)-EPRD(K)-PSACWI(K))*DT
 
-      IF (DUM.GT.QI3D(I,K,J).AND.QI3D(I,K,J).GE.QSMALL) THEN
+      IF (DUM.GT.QI3D(K).AND.QI3D(K).GE.QSMALL) THEN
 
-        RATIO = (QI3D(I,K,J)/DT+PRD+MNUCCC+QMULTS+QMULTG+QMULTR+QMULTRG+ &
-                     MNUCCD+PSACWI)/ &
-                      (PRCI+PRAI+PRACI+PRACIS-EPRD)
+        RATIO = (QI3D(K)/DT+PRD(K)+MNUCCC(K)+QMULTS(K)+QMULTG(K)+QMULTR(K)+QMULTRG(K)+ &
+                     MNUCCD(K)+PSACWI(K))/ &
+                      (PRCI(K)+PRAI(K)+PRACI(K)+PRACIS(K)-EPRD(K))
 
-        PRCI = PRCI*RATIO
-        PRAI = PRAI*RATIO
-        PRACI = PRACI*RATIO
-        PRACIS = PRACIS*RATIO
-        EPRD = EPRD*RATIO
+        PRCI(K) = PRCI(K)*RATIO
+        PRAI(K) = PRAI(K)*RATIO
+        PRACI(K) = PRACI(K)*RATIO
+        PRACIS(K) = PRACIS(K)*RATIO
+        EPRD(K) = EPRD(K)*RATIO
 
         END IF
 
 ! CONSERVATION OF QR
 
-      DUM=((PRACS-PRE)+(QMULTR+QMULTRG-PRC)+(MNUCCR-PRA)+ &
-             PIACR+PIACRS+PGRACS+PRACG)*DT
+      DUM=((PRACS(K)-PRE(K))+(QMULTR(K)+QMULTRG(K)-PRC(K))+(MNUCCR(K)-PRA(K))+ &
+             PIACR(K)+PIACRS(K)+PGRACS(K)+PRACG(K))*DT
 
-      IF (DUM.GT.QR3D(I,K,J).AND.QR3D(I,K,J).GE.QSMALL) THEN
+      IF (DUM.GT.QR3D(K).AND.QR3D(K).GE.QSMALL) THEN
 
-        RATIO = (QR3D(I,K,J)/DT+PRC+PRA)/ &
-             (-PRE+QMULTR+QMULTRG+PRACS+MNUCCR+PIACR+PIACRS+PGRACS+PRACG)
+        RATIO = (QR3D(K)/DT+PRC(K)+PRA(K))/ &
+             (-PRE(K)+QMULTR(K)+QMULTRG(K)+PRACS(K)+MNUCCR(K)+PIACR(K)+PIACRS(K)+PGRACS(K)+PRACG(K))
 
-        PRE = PRE*RATIO
-        PRACS = PRACS*RATIO
-        QMULTR = QMULTR*RATIO
-        QMULTRG = QMULTRG*RATIO
-        MNUCCR = MNUCCR*RATIO
-        PIACR = PIACR*RATIO
-        PIACRS = PIACRS*RATIO
-        PGRACS = PGRACS*RATIO
-        PRACG = PRACG*RATIO
+        PRE(K) = PRE(K)*RATIO
+        PRACS(K) = PRACS(K)*RATIO
+        QMULTR(K) = QMULTR(K)*RATIO
+        QMULTRG(K) = QMULTRG(K)*RATIO
+        MNUCCR(K) = MNUCCR(K)*RATIO
+        PIACR(K) = PIACR(K)*RATIO
+        PIACRS(K) = PIACRS(K)*RATIO
+        PGRACS(K) = PGRACS(K)*RATIO
+        PRACG(K) = PRACG(K)*RATIO
 
         END IF
 
@@ -3047,28 +3147,28 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
         IF (IGRAUP.EQ.0) THEN
 
-      DUM = (-PRDS-PSACWS-PRAI-PRCI-PRACS-EPRDS+PSACR-PIACRS-PRACIS)*DT
+      DUM = (-PRDS(K)-PSACWS(K)-PRAI(K)-PRCI(K)-PRACS(K)-EPRDS(K)+PSACR(K)-PIACRS(K)-PRACIS(K))*DT
 
-      IF (DUM.GT.QNI3D(I,K,J).AND.QNI3D(I,K,J).GE.QSMALL) THEN
+      IF (DUM.GT.QNI3D(K).AND.QNI3D(K).GE.QSMALL) THEN
 
-        RATIO = (QNI3D(I,K,J)/DT+PRDS+PSACWS+PRAI+PRCI+PRACS+PIACRS+PRACIS)/(-EPRDS+PSACR)
+        RATIO = (QNI3D(K)/DT+PRDS(K)+PSACWS(K)+PRAI(K)+PRCI(K)+PRACS(K)+PIACRS(K)+PRACIS(K))/(-EPRDS(K)+PSACR(K))
 
-       EPRDS = EPRDS*RATIO
-       PSACR = PSACR*RATIO
+       EPRDS(K) = EPRDS(K)*RATIO
+       PSACR(K) = PSACR(K)*RATIO
 
        END IF
 
 ! FOR NO GRAUPEL, NEED TO INCLUDE FREEZING OF RAIN FOR SNOW
        ELSE IF (IGRAUP.EQ.1) THEN
 
-      DUM = (-PRDS-PSACWS-PRAI-PRCI-PRACS-EPRDS+PSACR-PIACRS-PRACIS-MNUCCR)*DT
+      DUM = (-PRDS(K)-PSACWS(K)-PRAI(K)-PRCI(K)-PRACS(K)-EPRDS(K)+PSACR(K)-PIACRS(K)-PRACIS(K)-MNUCCR(K))*DT
 
-      IF (DUM.GT.QNI3D(I,K,J).AND.QNI3D(I,K,J).GE.QSMALL) THEN
+      IF (DUM.GT.QNI3D(K).AND.QNI3D(K).GE.QSMALL) THEN
 
-       RATIO = (QNI3D(I,K,J)/DT+PRDS+PSACWS+PRAI+PRCI+PRACS+PIACRS+PRACIS+MNUCCR)/(-EPRDS+PSACR)
+       RATIO = (QNI3D(K)/DT+PRDS(K)+PSACWS(K)+PRAI(K)+PRCI(K)+PRACS(K)+PIACRS(K)+PRACIS(K)+MNUCCR(K))/(-EPRDS(K)+PSACR(K))
 
-       EPRDS = EPRDS*RATIO
-       PSACR = PSACR*RATIO
+       EPRDS(K) = EPRDS(K)*RATIO
+       PSACR(K) = PSACR(K)*RATIO
 
        END IF
 
@@ -3076,94 +3176,94 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! CONSERVATION OF QG
 
-      DUM = (-PSACWG-PRACG-PGSACW-PGRACS-PRDG-MNUCCR-EPRDG-PIACR-PRACI-PSACR)*DT
+      DUM = (-PSACWG(K)-PRACG(K)-PGSACW(K)-PGRACS(K)-PRDG(K)-MNUCCR(K)-EPRDG(K)-PIACR(K)-PRACI(K)-PSACR(K))*DT
 
-      IF (DUM.GT.QG3D(I,K,J).AND.QG3D(I,K,J).GE.QSMALL) THEN
+      IF (DUM.GT.QG3D(K).AND.QG3D(K).GE.QSMALL) THEN
 
-        RATIO = (QG3D(I,K,J)/DT+PSACWG+PRACG+PGSACW+PGRACS+PRDG+MNUCCR+PSACR+&
-                  PIACR+PRACI)/(-EPRDG)
+        RATIO = (QG3D(K)/DT+PSACWG(K)+PRACG(K)+PGSACW(K)+PGRACS(K)+PRDG(K)+MNUCCR(K)+PSACR(K)+&
+                  PIACR(K)+PRACI(K))/(-EPRDG(K))
 
-       EPRDG = EPRDG*RATIO
+       EPRDG(K) = EPRDG(K)*RATIO
 
       END IF
 
 ! TENDENCIES
 
-      QV3DTEN(I,K,J) = QV3DTEN(I,K,J)+(-PRE-PRD-PRDS-MNUCCD-EPRD-EPRDS-PRDG-EPRDG)
+      QV3DTEN(K) = QV3DTEN(K)+(-PRE(K)-PRD(K)-PRDS(K)-MNUCCD(K)-EPRD(K)-EPRDS(K)-PRDG(K)-EPRDG(K))
 
 ! BUG FIX HM, 3/1/11, INCLUDE PIACR AND PIACRS
-      T3DTEN(I,K,J) = T3DTEN(I,K,J)+(PRE                                 &
-               *XXLV(I,K,J)+(PRD+PRDS+                            &
-                MNUCCD+EPRD+EPRDS+PRDG+EPRDG)*XXLS(I,K,J)+         &
-               (PSACWS+PSACWI+MNUCCC+MNUCCR+                      &
-                QMULTS+QMULTG+QMULTR+QMULTRG+PRACS &
-                +PSACWG+PRACG+PGSACW+PGRACS+PIACR+PIACRS)*XLF(I,K,J))/CPM(I,K,J)
+      T3DTEN(K) = T3DTEN(K)+(PRE(K)                                 &
+               *XXLV(K)+(PRD(K)+PRDS(K)+                            &
+                MNUCCD(K)+EPRD(K)+EPRDS(K)+PRDG(K)+EPRDG(K))*XXLS(K)+         &
+               (PSACWS(K)+PSACWI(K)+MNUCCC(K)+MNUCCR(K)+                      &
+                QMULTS(K)+QMULTG(K)+QMULTR(K)+QMULTRG(K)+PRACS(K) &
+                +PSACWG(K)+PRACG(K)+PGSACW(K)+PGRACS(K)+PIACR(K)+PIACRS(K))*XLF(K))/CPM(K)
 
-      QC3DTEN(I,K,J) = QC3DTEN(I,K,J)+                                      &
-                 (-PRA-PRC-MNUCCC+PCC-                  &
-                  PSACWS-PSACWI-QMULTS-QMULTG-PSACWG-PGSACW)
-      QI3DTEN(I,K,J) = QI3DTEN(I,K,J)+                                      &
-         (PRD+EPRD+PSACWI+MNUCCC-PRCI-                                 &
-                  PRAI+QMULTS+QMULTG+QMULTR+QMULTRG+MNUCCD-PRACI-PRACIS)
-      QR3DTEN(I,K,J) = QR3DTEN(I,K,J)+                                      &
-                 (PRE+PRA+PRC-PRACS-MNUCCR-QMULTR-QMULTRG &
-             -PIACR-PIACRS-PRACG-PGRACS)
+      QC3DTEN(K) = QC3DTEN(K)+                                      &
+                 (-PRA(K)-PRC(K)-MNUCCC(K)+PCC(K)-                  &
+                  PSACWS(K)-PSACWI(K)-QMULTS(K)-QMULTG(K)-PSACWG(K)-PGSACW(K))
+      QI3DTEN(K) = QI3DTEN(K)+                                      &
+         (PRD(K)+EPRD(K)+PSACWI(K)+MNUCCC(K)-PRCI(K)-                                 &
+                  PRAI(K)+QMULTS(K)+QMULTG(K)+QMULTR(K)+QMULTRG(K)+MNUCCD(K)-PRACI(K)-PRACIS(K))
+      QR3DTEN(K) = QR3DTEN(K)+                                      &
+                 (PRE(K)+PRA(K)+PRC(K)-PRACS(K)-MNUCCR(K)-QMULTR(K)-QMULTRG(K) &
+             -PIACR(K)-PIACRS(K)-PRACG(K)-PGRACS(K))
 
       IF (IGRAUP.EQ.0) THEN
 
-      QNI3DTEN(I,K,J) = QNI3DTEN(I,K,J)+                                    &
-           (PRAI+PSACWS+PRDS+PRACS+PRCI+EPRDS-PSACR+PIACRS+PRACIS)
-      NS3DTEN(I,K,J) = NS3DTEN(I,K,J)+(NSAGG+NPRCI-NSCNG-NGRACS+NIACRS)
-      QG3DTEN(I,K,J) = QG3DTEN(I,K,J)+(PRACG+PSACWG+PGSACW+PGRACS+ &
-                    PRDG+EPRDG+MNUCCR+PIACR+PRACI+PSACR)
-      NG3DTEN(I,K,J) = NG3DTEN(I,K,J)+(NSCNG+NGRACS+NNUCCR+NIACR)
+      QNI3DTEN(K) = QNI3DTEN(K)+                                    &
+           (PRAI(K)+PSACWS(K)+PRDS(K)+PRACS(K)+PRCI(K)+EPRDS(K)-PSACR(K)+PIACRS(K)+PRACIS(K))
+      NS3DTEN(K) = NS3DTEN(K)+(NSAGG(K)+NPRCI(K)-NSCNG(K)-NGRACS(K)+NIACRS(K))
+      QG3DTEN(K) = QG3DTEN(K)+(PRACG(K)+PSACWG(K)+PGSACW(K)+PGRACS(K)+ &
+                    PRDG(K)+EPRDG(K)+MNUCCR(K)+PIACR(K)+PRACI(K)+PSACR(K))
+      NG3DTEN(K) = NG3DTEN(K)+(NSCNG(K)+NGRACS(K)+NNUCCR(K)+NIACR(K))
 
 ! FOR NO GRAUPEL, NEED TO INCLUDE FREEZING OF RAIN FOR SNOW
       ELSE IF (IGRAUP.EQ.1) THEN
 
-      QNI3DTEN(I,K,J) = QNI3DTEN(I,K,J)+                                    &
-           (PRAI+PSACWS+PRDS+PRACS+PRCI+EPRDS-PSACR+PIACRS+PRACIS+MNUCCR)
-      NS3DTEN(I,K,J) = NS3DTEN(I,K,J)+(NSAGG+NPRCI-NSCNG-NGRACS+NIACRS+NNUCCR)
+      QNI3DTEN(K) = QNI3DTEN(K)+                                    &
+           (PRAI(K)+PSACWS(K)+PRDS(K)+PRACS(K)+PRCI(K)+EPRDS(K)-PSACR(K)+PIACRS(K)+PRACIS(K)+MNUCCR(K))
+      NS3DTEN(K) = NS3DTEN(K)+(NSAGG(K)+NPRCI(K)-NSCNG(K)-NGRACS(K)+NIACRS(K)+NNUCCR(K))
 
       END IF
 
-      NC3DTEN(I,K,J) = NC3DTEN(I,K,J)+(-NNUCCC-NPSACWS                &
-            -NPRA-NPRC-NPSACWI-NPSACWG)
+      NC3DTEN(K) = NC3DTEN(K)+(-NNUCCC(K)-NPSACWS(K)                &
+            -NPRA(K)-NPRC(K)-NPSACWI(K)-NPSACWG(K))
 
-      NI3DTEN(I,K,J) = NI3DTEN(I,K,J)+                                      &
-       (NNUCCC-NPRCI-NPRAI+NMULTS+NMULTG+NMULTR+NMULTRG+ &
-               NNUCCD-NIACR-NIACRS)
+      NI3DTEN(K) = NI3DTEN(K)+                                      &
+       (NNUCCC(K)-NPRCI(K)-NPRAI(K)+NMULTS(K)+NMULTG(K)+NMULTR(K)+NMULTRG(K)+ &
+               NNUCCD(K)-NIACR(K)-NIACRS(K))
 
-      NR3DTEN(I,K,J) = NR3DTEN(I,K,J)+(NPRC1-NPRACS-NNUCCR      &
-                   +NRAGG-NIACR-NIACRS-NPRACG-NGRACS)
+      NR3DTEN(K) = NR3DTEN(K)+(NPRC1(K)-NPRACS(K)-NNUCCR(K)      &
+                   +NRAGG(K)-NIACR(K)-NIACRS(K)-NPRACG(K)-NGRACS(K))
 
 ! HM ADD, WRF-CHEM, ADD TENDENCIES FOR C2PREC
 
-	C2PREC(I,K,J) = PRA+PRC+PSACWS+QMULTS+QMULTG+PSACWG+ &
-       PGSACW+MNUCCC+PSACWI
+	C2PREC(K) = PRA(K)+PRC(K)+PSACWS(K)+QMULTS(K)+QMULTG(K)+PSACWG(K)+ &
+       PGSACW(K)+MNUCCC(K)+PSACWI(K)
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 ! NOW CALCULATE SATURATION ADJUSTMENT TO CONDENSE EXTRA VAPOR ABOVE
 ! WATER SATURATION
 
-      DUMT = T3D(I,K,J)+DT*T3DTEN(I,K,J)
-      DUMQV = QV3D(I,K,J)+DT*QV3DTEN(I,K,J)
+      DUMT = T3D(K)+DT*T3DTEN(K)
+      DUMQV = QV3D(K)+DT*QV3DTEN(K)
 ! hm, add fix for low pressure, 5/12/10
-      dum=min(0.99*pres(I,K,J),POLYSVP(T3D(I,K,J)+DT*T3DTEN(I,K,J),0))
-      DUMQSS = EP_2*dum/(PRES(I,K,J)-dum)
-      DUMQC = QC3D(I,K,J)+DT*QC3DTEN(I,K,J)
+      dum=min(0.99*pres(k),POLYSVP(DUMT,0))
+      DUMQSS = EP_2*dum/(PRES(K)-dum)
+      DUMQC = QC3D(K)+DT*QC3DTEN(K)
       DUMQC = MAX(DUMQC,0.)
 
 ! SATURATION ADJUSTMENT FOR LIQUID
 
       DUMS = DUMQV-DUMQSS
-      PCC = DUMS/(1.+XXLV(I,K,J)**2*DUMQSS/(CPM(I,K,J)*RV*DUMT**2))/DT
-      IF (PCC*DT+DUMQC.LT.0.) THEN
-           PCC = -DUMQC/DT
+      PCC(K) = DUMS/(1.+XXLV(K)**2*DUMQSS/(CPM(K)*RV*DUMT**2))/DT
+      IF (PCC(K)*DT+DUMQC.LT.0.) THEN
+           PCC(K) = -DUMQC/DT
       END IF
 
-      QV3DTEN(I,K,J) = QV3DTEN(I,K,J)-PCC
-      T3DTEN(I,K,J) = T3DTEN(I,K,J)+PCC*XXLV(I,K,J)/CPM(I,K,J)
-      QC3DTEN(I,K,J) = QC3DTEN(I,K,J)+PCC
+      QV3DTEN(K) = QV3DTEN(K)-PCC(K)
+      T3DTEN(K) = T3DTEN(K)+PCC(K)*XXLV(K)/CPM(K)
+      QC3DTEN(K) = QC3DTEN(K)+PCC(K)
 
 !.......................................................................
 ! ACTIVATION OF CLOUD DROPLETS
@@ -3175,75 +3275,71 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! THIS FORMULATION ASSUMES 1:1 RATIO BETWEEN MASS LOSS AND
 ! LOSS OF NUMBER CONCENTRATION
 
-!     IF (PCC.LT.0.) THEN
-!        DUM = PCC*DT/QC3D(I,K,J)
+!     IF (PCC(K).LT.0.) THEN
+!        DUM = PCC(K)*DT/QC3D(K)
 !           DUM = MAX(-1.,DUM)
-!        NSUBC = DUM*NC3D(I,K,J)/DT
+!        NSUBC(K) = DUM*NC3D(K)/DT
 !     END IF
 
-      IF (EPRD.LT.0.) THEN
-         DUM = EPRD*DT/QI3D(I,K,J)
+      IF (EPRD(K).LT.0.) THEN
+         DUM = EPRD(K)*DT/QI3D(K)
             DUM = MAX(-1.,DUM)
-         NSUBI = DUM*NI3D(I,K,J)/DT
+         NSUBI(K) = DUM*NI3D(K)/DT
       END IF
-      IF (EPRDS.LT.0.) THEN
-         DUM = EPRDS*DT/QNI3D(I,K,J)
+      IF (EPRDS(K).LT.0.) THEN
+         DUM = EPRDS(K)*DT/QNI3D(K)
            DUM = MAX(-1.,DUM)
-         NSUBS = DUM*NS3D(I,K,J)/DT
+         NSUBS(K) = DUM*NS3D(K)/DT
       END IF
-      IF (PRE.LT.0.) THEN
-         DUM = PRE*DT/QR3D(I,K,J)
+      IF (PRE(K).LT.0.) THEN
+         DUM = PRE(K)*DT/QR3D(K)
            DUM = MAX(-1.,DUM)
-         NSUBR = DUM*NR3D(I,K,J)/DT
+         NSUBR(K) = DUM*NR3D(K)/DT
       END IF
-      IF (EPRDG.LT.0.) THEN
-         DUM = EPRDG*DT/QG3D(I,K,J)
+      IF (EPRDG(K).LT.0.) THEN
+         DUM = EPRDG(K)*DT/QG3D(K)
            DUM = MAX(-1.,DUM)
-         NSUBG = DUM*NG3D(I,K,J)/DT
+         NSUBG(K) = DUM*NG3D(K)/DT
       END IF
 
-!        nsubr=0.
-!        nsubs=0.
-!        nsubg=0.
+!        nsubr(k)=0.
+!        nsubs(k)=0.
+!        nsubg(k)=0.
 
 ! UPDATE TENDENCIES
 
-!        NC3DTEN(I,K,J) = NC3DTEN(I,K,J)+NSUBC
-         NI3DTEN(I,K,J) = NI3DTEN(I,K,J)+NSUBI
-         NS3DTEN(I,K,J) = NS3DTEN(I,K,J)+NSUBS
-         NG3DTEN(I,K,J) = NG3DTEN(I,K,J)+NSUBG
-         NR3DTEN(I,K,J) = NR3DTEN(I,K,J)+NSUBR
+!        NC3DTEN(K) = NC3DTEN(K)+NSUBC(K)
+         NI3DTEN(K) = NI3DTEN(K)+NSUBI(K)
+         NS3DTEN(K) = NS3DTEN(K)+NSUBS(K)
+         NG3DTEN(K) = NG3DTEN(K)+NSUBG(K)
+         NR3DTEN(K) = NR3DTEN(K)+NSUBR(K)
 
 ! #if (WRF_CHEM == 1)
-!          evapprod(I,K,J) = - PRE - EPRDS - EPRDG
-!          rainprod(I,K,J) = PRA + PRC + PSACWS + PSACWG + PGSACW &
-!                        + PRAI + PRCI + PRACI + PRACIS + &
-!                        + PRDS + PRDG
+!          evapprod(k) = - PRE(K) - EPRDS(K) - EPRDG(K)
+!          rainprod(k) = PRA(K) + PRC(K) + PSACWS(K) + PSACWG(K) + PGSACW(K) &
+!                        + PRAI(K) + PRCI(K) + PRACI(K) + PRACIS(K) + &
+!                        + PRDS(K) + PRDG(K)
 ! #endif
 
          END IF !!!!!! TEMPERATURE
 
 ! SWITCH LTRUE TO 1, SINCE HYDROMETEORS ARE PRESENT
-         LTRUE(I,K,J) = 1
+         LTRUE = 1
 
-      ENDIF !(QC3D(I,K,J).LT.QSMALL.AND.QI3D(I,K,J).LT.QSMALL.AND.QNI3D(I,K,J).LT.QSMALL &
-            !      .AND.QR3D(I,K,J).LT.QSMALL.AND.QG3D(I,K,J).LT.QSMALL.AND.( &
-            !      (T3D(I,K,J).LT.273.15.AND.QVQVSI.LT.0.999).OR. &
-            !      (T3D(I,K,J).GE.273.15.AND.QVQVS.LT.0.999))) -- old CONTINUE 200
+ 200     CONTINUE
+
         END DO
-      END DO
-      END DO
 
-      !calculate LTRUE_COL(I,K,J), where LTRUE_COL=1 if LTRUE=1 anywhere in the column
-      !$acc parallel loop gang vector collapse(3) wait(1) async(2)
-      do j=jts,jte
-         do k = kts, kte
-            do i=its,ite
-               LTRUE_COL(i,k,j)=maxval(LTRUE(i,:,j))
-            end do
-         end do
-      end do
+! INITIALIZE PRECIP AND SNOW RATES
+      PRECRT = 0.
+      SNOWRT = 0.
+! hm added 7/13/13
+      SNOWPRT = 0.
+      GRPLPRT = 0.
+
 ! IF THERE ARE NO HYDROMETEORS, THEN SKIP TO END OF SUBROUTINE
+
+        IF (LTRUE.EQ.0) GOTO 400
 
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 !.......................................................................
@@ -3253,82 +3349,81 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! STABILITY, I.E. COURANT# < 1
 
 !.......................................................................
-   !$acc parallel loop gang vector collapse(3) async(3) wait(2)
-   do j=jts,jte      ! j loop (north-south)
-      do k = kts, kte
-         do i=its,ite      ! i loop (east-west)
 
-       IF (LTRUE_COL(I,K,J).EQ.0) CYCLE
-        DUMI(I,K,J) = QI3D(I,K,J)+QI3DTEN(I,K,J)*DT
-        DUMQS(I,K,J) = QNI3D(I,K,J)+QNI3DTEN(I,K,J)*DT
-        DUMR(I,K,J) = QR3D(I,K,J)+QR3DTEN(I,K,J)*DT
-        DUMFNI(I,K,J) = NI3D(I,K,J)+NI3DTEN(I,K,J)*DT
-        DUMFNS(I,K,J) = NS3D(I,K,J)+NS3DTEN(I,K,J)*DT
-        DUMFNR(I,K,J) = NR3D(I,K,J)+NR3DTEN(I,K,J)*DT
-        DUMC(I,K,J) = QC3D(I,K,J)+QC3DTEN(I,K,J)*DT
-        DUMFNC(I,K,J) = NC3D(I,K,J)+NC3DTEN(I,K,J)*DT
-	DUMG(I,K,J) = QG3D(I,K,J)+QG3DTEN(I,K,J)*DT
-	DUMFNG(I,K,J) = NG3D(I,K,J)+NG3DTEN(I,K,J)*DT
+      NSTEP = 1
+
+      DO K = KTE,KTS,-1
+
+        DUMI(K) = QI3D(K)+QI3DTEN(K)*DT
+        DUMQS(K) = QNI3D(K)+QNI3DTEN(K)*DT
+        DUMR(K) = QR3D(K)+QR3DTEN(K)*DT
+        DUMFNI(K) = NI3D(K)+NI3DTEN(K)*DT
+        DUMFNS(K) = NS3D(K)+NS3DTEN(K)*DT
+        DUMFNR(K) = NR3D(K)+NR3DTEN(K)*DT
+        DUMC(K) = QC3D(K)+QC3DTEN(K)*DT
+        DUMFNC(K) = NC3D(K)+NC3DTEN(K)*DT
+	DUMG(K) = QG3D(K)+QG3DTEN(K)*DT
+	DUMFNG(K) = NG3D(K)+NG3DTEN(K)*DT
 
 ! SWITCH FOR CONSTANT DROPLET NUMBER
         IF (iinum.EQ.1) THEN
-        DUMFNC(I,K,J) = NC3D(I,K,J)
+        DUMFNC(K) = NC3D(K)
         END IF
 
 ! GET DUMMY LAMDA FOR SEDIMENTATION CALCULATIONS
 
 ! MAKE SURE NUMBER CONCENTRATIONS ARE POSITIVE
-      DUMFNI(I,K,J) = MAX(0.,DUMFNI(I,K,J))
-      DUMFNS(I,K,J) = MAX(0.,DUMFNS(I,K,J))
-      DUMFNC(I,K,J) = MAX(0.,DUMFNC(I,K,J))
-      DUMFNR(I,K,J) = MAX(0.,DUMFNR(I,K,J))
-      DUMFNG(I,K,J) = MAX(0.,DUMFNG(I,K,J))
+      DUMFNI(K) = MAX(0.,DUMFNI(K))
+      DUMFNS(K) = MAX(0.,DUMFNS(K))
+      DUMFNC(K) = MAX(0.,DUMFNC(K))
+      DUMFNR(K) = MAX(0.,DUMFNR(K))
+      DUMFNG(K) = MAX(0.,DUMFNG(K))
 
 !......................................................................
 ! CLOUD ICE
 
-      IF (DUMI(I,K,J).GE.QSMALL) THEN
-        DLAMI = (CONS12*DUMFNI(I,K,J)/DUMI(I,K,J))**(1./DI)
+      IF (DUMI(K).GE.QSMALL) THEN
+        DLAMI = (CONS12*DUMFNI(K)/DUMI(K))**(1./DI)
         DLAMI=MAX(DLAMI,LAMMINI)
         DLAMI=MIN(DLAMI,LAMMAXI)
       END IF
 !......................................................................
 ! RAIN
 
-      IF (DUMR(I,K,J).GE.QSMALL) THEN
-        DLAMR = (PI*RHOW*DUMFNR(I,K,J)/DUMR(I,K,J))**(1./3.)
+      IF (DUMR(K).GE.QSMALL) THEN
+        DLAMR = (PI*RHOW*DUMFNR(K)/DUMR(K))**(1./3.)
         DLAMR=MAX(DLAMR,LAMMINR)
         DLAMR=MIN(DLAMR,LAMMAXR)
       END IF
 !......................................................................
 ! CLOUD DROPLETS
 
-      IF (DUMC(I,K,J).GE.QSMALL) THEN
-         DUM = PRES(I,K,J)/(287.15*T3D(I,K,J))
-         PGAM(I,K,J)=0.0005714*(NC3D(I,K,J)/1.E6*DUM)+0.2714
-         PGAM(I,K,J)=1./(PGAM(I,K,J)**2)-1.
-         PGAM(I,K,J)=MAX(PGAM(I,K,J),2.)
-         PGAM(I,K,J)=MIN(PGAM(I,K,J),10.)
+      IF (DUMC(K).GE.QSMALL) THEN
+         DUM = PRES(K)/(287.15*T3D(K))
+         PGAM(K)=0.0005714*(NC3D(K)/1.E6*DUM)+0.2714
+         PGAM(K)=1./(PGAM(K)**2)-1.
+         PGAM(K)=MAX(PGAM(K),2.)
+         PGAM(K)=MIN(PGAM(K),10.)
 
-        DLAMC = (CONS26*DUMFNC(I,K,J)*GAMMA(PGAM(I,K,J)+4.)/(DUMC(I,K,J)*GAMMA(PGAM(I,K,J)+1.)))**(1./3.)
-        LAMMIN = (PGAM(I,K,J)+1.)/60.E-6
-        LAMMAX = (PGAM(I,K,J)+1.)/1.E-6
+        DLAMC = (CONS26*DUMFNC(K)*GAMMA(PGAM(K)+4.)/(DUMC(K)*GAMMA(PGAM(K)+1.)))**(1./3.)
+        LAMMIN = (PGAM(K)+1.)/60.E-6
+        LAMMAX = (PGAM(K)+1.)/1.E-6
         DLAMC=MAX(DLAMC,LAMMIN)
         DLAMC=MIN(DLAMC,LAMMAX)
       END IF
 !......................................................................
 ! SNOW
 
-      IF (DUMQS(I,K,J).GE.QSMALL) THEN
-        DLAMS = (CONS1*DUMFNS(I,K,J)/ DUMQS(I,K,J))**(1./DS)
+      IF (DUMQS(K).GE.QSMALL) THEN
+        DLAMS = (CONS1*DUMFNS(K)/ DUMQS(K))**(1./DS)
         DLAMS=MAX(DLAMS,LAMMINS)
         DLAMS=MIN(DLAMS,LAMMAXS)
       END IF
 !......................................................................
 ! GRAUPEL
 
-      IF (DUMG(I,K,J).GE.QSMALL) THEN
-        DLAMG = (CONS2*DUMFNG(I,K,J)/ DUMG(I,K,J))**(1./DG)
+      IF (DUMG(K).GE.QSMALL) THEN
+        DLAMG = (CONS2*DUMFNG(K)/ DUMG(K))**(1./DG)
         DLAMG=MAX(DLAMG,LAMMING)
         DLAMG=MIN(DLAMG,LAMMAXG)
       END IF
@@ -3338,41 +3433,41 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! CLOUD WATER
 
-      IF (DUMC(I,K,J).GE.QSMALL) THEN
-      UNC =  ACN(I,K,J)*GAMMA(1.+BC+PGAM(I,K,J))/ (DLAMC**BC*GAMMA(PGAM(I,K,J)+1.))
-      UMC = ACN(I,K,J)*GAMMA(4.+BC+PGAM(I,K,J))/  (DLAMC**BC*GAMMA(PGAM(I,K,J)+4.))
+      IF (DUMC(K).GE.QSMALL) THEN
+      UNC =  ACN(K)*GAMMA(1.+BC+PGAM(K))/ (DLAMC**BC*GAMMA(PGAM(K)+1.))
+      UMC = ACN(K)*GAMMA(4.+BC+PGAM(K))/  (DLAMC**BC*GAMMA(PGAM(K)+4.))
       ELSE
       UMC = 0.
       UNC = 0.
       END IF
 
-      IF (DUMI(I,K,J).GE.QSMALL) THEN
-      UNI =  AIN(I,K,J)*CONS27/DLAMI**BI
-      UMI = AIN(I,K,J)*CONS28/(DLAMI**BI)
+      IF (DUMI(K).GE.QSMALL) THEN
+      UNI =  AIN(K)*CONS27/DLAMI**BI
+      UMI = AIN(K)*CONS28/(DLAMI**BI)
       ELSE
       UMI = 0.
       UNI = 0.
       END IF
 
-      IF (DUMR(I,K,J).GE.QSMALL) THEN
-      UNR = ARN(I,K,J)*CONS6/DLAMR**BR
-      UMR = ARN(I,K,J)*CONS4/(DLAMR**BR)
+      IF (DUMR(K).GE.QSMALL) THEN
+      UNR = ARN(K)*CONS6/DLAMR**BR
+      UMR = ARN(K)*CONS4/(DLAMR**BR)
       ELSE
       UMR = 0.
       UNR = 0.
       END IF
 
-      IF (DUMQS(I,K,J).GE.QSMALL) THEN
-      UMS = ASN(I,K,J)*CONS3/(DLAMS**BS)
-      UNS = ASN(I,K,J)*CONS5/DLAMS**BS
+      IF (DUMQS(K).GE.QSMALL) THEN
+      UMS = ASN(K)*CONS3/(DLAMS**BS)
+      UNS = ASN(K)*CONS5/DLAMS**BS
       ELSE
       UMS = 0.
       UNS = 0.
       END IF
 
-      IF (DUMG(I,K,J).GE.QSMALL) THEN
-      UMG = AGN(I,K,J)*CONS7/(DLAMG**BG)
-      UNG = AGN(I,K,J)*CONS8/DLAMG**BG
+      IF (DUMG(K).GE.QSMALL) THEN
+      UMG = AGN(K)*CONS7/(DLAMG**BG)
+      UNG = AGN(K)*CONS8/DLAMG**BG
       ELSE
       UMG = 0.
       UNG = 0.
@@ -3381,518 +3476,433 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! SET REALISTIC LIMITS ON FALLSPEED
 
 ! bug fix, 10/08/09
-        dum=(rhosu/RHO(I,K,J))**0.54
+        dum=(rhosu/rho(k))**0.54
         UMS=MIN(UMS,1.2*dum)
         UNS=MIN(UNS,1.2*dum)
 ! fix 053011
 ! fix for correction by AA 4/6/11
-        UMI=MIN(UMI,1.2*(rhosu/RHO(I,K,J))**0.35)
-        UNI=MIN(UNI,1.2*(rhosu/RHO(I,K,J))**0.35)
+        UMI=MIN(UMI,1.2*(rhosu/rho(k))**0.35)
+        UNI=MIN(UNI,1.2*(rhosu/rho(k))**0.35)
         UMR=MIN(UMR,9.1*dum)
         UNR=MIN(UNR,9.1*dum)
         UMG=MIN(UMG,20.*dum)
         UNG=MIN(UNG,20.*dum)
 
-      FR(I,K,J) = UMR
-      FI(I,K,J) = UMI
-      FNI(I,K,J) = UNI
-      FS(I,K,J) = UMS
-      FNS(I,K,J) = UNS
-      FNR(I,K,J) = UNR
-      FC(I,K,J) = UMC
-      FNC(I,K,J) = UNC
-      FG(I,K,J) = UMG
-      FNG(I,K,J) = UNG
+      FR(K) = UMR
+      FI(K) = UMI
+      FNI(K) = UNI
+      FS(K) = UMS
+      FNS(K) = UNS
+      FNR(K) = UNR
+      FC(K) = UMC
+      FNC(K) = UNC
+      FG(K) = UMG
+      FNG(K) = UNG
 
-      ENDDO
-      ENDDO
-      ENDDO
 ! V3.3 MODIFY FALLSPEED BELOW LEVEL OF PRECIP
 
-   !$acc parallel loop gang collapse(2) async(4) wait(3)
-   do j=jts,jte      ! j loop (north-south)
-   do i=its,ite      ! i loop (east-west)
-
-       IF (LTRUE_COL(I,KTS,J).EQ.0) CYCLE
-      !$acc loop seq
-      DO K = KTE-1,KTS,-1
-
-	! IF (K.LE.KTE-1) THEN
-        IF (FR(I,K,J).LT.1.E-10) THEN
-	FR(I,K,J)=FR(I,K+1,J)
+	IF (K.LE.KTE-1) THEN
+        IF (FR(K).LT.1.E-10) THEN
+	FR(K)=FR(K+1)
 	END IF
-        IF (FI(I,K,J).LT.1.E-10) THEN
-	FI(I,K,J)=FI(I,K+1,J)
+        IF (FI(K).LT.1.E-10) THEN
+	FI(K)=FI(K+1)
 	END IF
-        IF (FNI(I,K,J).LT.1.E-10) THEN
-	FNI(I,K,J)=FNI(I,K+1,J)
+        IF (FNI(K).LT.1.E-10) THEN
+	FNI(K)=FNI(K+1)
 	END IF
-        IF (FS(I,K,J).LT.1.E-10) THEN
-	FS(I,K,J)=FS(I,K+1,J)
+        IF (FS(K).LT.1.E-10) THEN
+	FS(K)=FS(K+1)
 	END IF
-        IF (FNS(I,K,J).LT.1.E-10) THEN
-	FNS(I,K,J)=FNS(I,K+1,J)
+        IF (FNS(K).LT.1.E-10) THEN
+	FNS(K)=FNS(K+1)
 	END IF
-        IF (FNR(I,K,J).LT.1.E-10) THEN
-	FNR(I,K,J)=FNR(I,K+1,J)
+        IF (FNR(K).LT.1.E-10) THEN
+	FNR(K)=FNR(K+1)
 	END IF
-        IF (FC(I,K,J).LT.1.E-10) THEN
-	FC(I,K,J)=FC(I,K+1,J)
+        IF (FC(K).LT.1.E-10) THEN
+	FC(K)=FC(K+1)
 	END IF
-        IF (FNC(I,K,J).LT.1.E-10) THEN
-	FNC(I,K,J)=FNC(I,K+1,J)
+        IF (FNC(K).LT.1.E-10) THEN
+	FNC(K)=FNC(K+1)
 	END IF
-        IF (FG(I,K,J).LT.1.E-10) THEN
-	FG(I,K,J)=FG(I,K+1,J)
+        IF (FG(K).LT.1.E-10) THEN
+	FG(K)=FG(K+1)
 	END IF
-        IF (FNG(I,K,J).LT.1.E-10) THEN
-	FNG(I,K,J)=FNG(I,K+1,J)
+        IF (FNG(K).LT.1.E-10) THEN
+	FNG(K)=FNG(K+1)
 	END IF
-	! END IF ! K LE KTE-1
-
-      END DO
-
-      END DO
-      END DO
+	END IF ! K LE KTE-1
 
 ! CALCULATE NUMBER OF SPLIT TIME STEPS
-   !$acc parallel loop gang vector collapse(3) async(5) wait(4)
-   do j=jts,jte      ! j loop (north-south)
-   DO K = KTS,KTE
-      do i=its,ite      ! i loop (east-west)
 
-       IF (LTRUE_COL(I,K,J).EQ.0) CYCLE
-
-      RGVM = MAX(FR(I,K,J),FI(I,K,J),FS(I,K,J),FC(I,K,J),FNI(I,K,J),FNR(I,K,J),FNS(I,K,J),FNC(I,K,J),FG(I,K,J),FNG(I,K,J))
+      RGVM = MAX(FR(K),FI(K),FS(K),FC(K),FNI(K),FNR(K),FNS(K),FNC(K),FG(K),FNG(K))
 ! VVT CHANGED IFIX -> INT (GENERIC FUNCTION)
-      NSTEP(I,K,J) = MAX(INT(RGVM*DT/DZQ(I,K,J)+1.),1)
+      NSTEP = MAX(INT(RGVM*DT/DZQ(K)+1.),NSTEP)
 
-! MULTIPLY VARIABLES BY RHO(I,K,J)
-      DUM1 = RHO(I,K,J)
-      DUMR(I,K,J) = DUMR(I,K,J)*DUM1
-      DUMI(I,K,J) = DUMI(I,K,J)*DUM1
-      DUMFNI(I,K,J) = DUMFNI(I,K,J)*DUM1
-      DUMQS(I,K,J) = DUMQS(I,K,J)*DUM1
-      DUMFNS(I,K,J) = DUMFNS(I,K,J)*DUM1
-      DUMFNR(I,K,J) = DUMFNR(I,K,J)*DUM1
-      DUMC(I,K,J) = DUMC(I,K,J)*DUM1
-      DUMFNC(I,K,J) = DUMFNC(I,K,J)*DUM1
-      DUMG(I,K,J) = DUMG(I,K,J)*DUM1
-      DUMFNG(I,K,J) = DUMFNG(I,K,J)*DUM1
+! MULTIPLY VARIABLES BY RHO
+      DUMR(k) = DUMR(k)*RHO(K)
+      DUMI(k) = DUMI(k)*RHO(K)
+      DUMFNI(k) = DUMFNI(K)*RHO(K)
+      DUMQS(k) = DUMQS(K)*RHO(K)
+      DUMFNS(k) = DUMFNS(K)*RHO(K)
+      DUMFNR(k) = DUMFNR(K)*RHO(K)
+      DUMC(k) = DUMC(K)*RHO(K)
+      DUMFNC(k) = DUMFNC(K)*RHO(K)
+      DUMG(k) = DUMG(K)*RHO(K)
+      DUMFNG(k) = DUMFNG(K)*RHO(K)
 
       END DO
-      END DO
-      END DO
 
-      !$acc parallel loop gang vector collapse(2) wait(5)
-      do j = jts,jte
-      do i = its,ite
-            NSTEP_FLAT(i,j) = MAXVAL(NSTEP(i,:,j))
-      enddo
-      enddo
+      DO N = 1,NSTEP
 
-      MAXN = 0
-      !$acc parallel loop gang vector collapse(3) copy(MAXN)
-      do j = jts,jte
-      do k = kts,kte
-      do i = its,ite
-            NSTEP(i,k,j) = NSTEP_FLAT(i,j)
-            MAXN = max(MAXN, NSTEP(i,k,j))
-      enddo
-      enddo
-      enddo
-
-
-  DO N = 1,MAXN
-
-   !$acc parallel loop gang(STATIC: 1) vector collapse(3)
-   do j=jts,jte      ! j loop (north-south)
-   DO K = KTS,KTE
-   do i=its,ite      ! i loop (east-west)
-
-      IF (LTRUE_COL(I,K,J).EQ.0 .or. N > NSTEP(I,K,J)) cycle
-
-      ! if (LTRUE(I,K,J).EQ.0) CYCLE  !NO HYDROMETEORS CALCULATED FOR THIS CELL
-      FALOUTR(I,K,J) = FR(I,K,J)*DUMR(I,K,J)
-      FALOUTI(I,K,J) = FI(I,K,J)*DUMI(I,K,J)
-      FALOUTNI(I,K,J) = FNI(I,K,J)*DUMFNI(I,K,J)
-      FALOUTS(I,K,J) = FS(I,K,J)*DUMQS(I,K,J)
-      FALOUTNS(I,K,J) = FNS(I,K,J)*DUMFNS(I,K,J)
-      FALOUTNR(I,K,J) = FNR(I,K,J)*DUMFNR(I,K,J)
-      FALOUTC(I,K,J) = FC(I,K,J)*DUMC(I,K,J)
-      FALOUTNC(I,K,J) = FNC(I,K,J)*DUMFNC(I,K,J)
-      FALOUTG(I,K,J) = FG(I,K,J)*DUMG(I,K,J)
-      FALOUTNG(I,K,J) = FNG(I,K,J)*DUMFNG(I,K,J)
-      END DO
-      END DO
+      DO K = KTS,KTE
+      FALOUTR(K) = FR(K)*DUMR(K)
+      FALOUTI(K) = FI(K)*DUMI(K)
+      FALOUTNI(K) = FNI(K)*DUMFNI(K)
+      FALOUTS(K) = FS(K)*DUMQS(K)
+      FALOUTNS(K) = FNS(K)*DUMFNS(K)
+      FALOUTNR(K) = FNR(K)*DUMFNR(K)
+      FALOUTC(K) = FC(K)*DUMC(K)
+      FALOUTNC(K) = FNC(K)*DUMFNC(K)
+      FALOUTG(K) = FG(K)*DUMG(K)
+      FALOUTNG(K) = FNG(K)*DUMFNG(K)
       END DO
 
-      !$acc parallel loop gang(STATIC: 1) vector collapse(2)
-      do j=jts,jte      ! j loop (north-south)
-      do i=its,ite      ! i loop (east-west)
+! TOP OF MODEL
 
-            IF (LTRUE_COL(I,KTE,J).EQ.0 .or. N > NSTEP(I,KTE,J)) cycle
+      K = KTE
+      FALTNDR = FALOUTR(K)/DZQ(k)
+      FALTNDI = FALOUTI(K)/DZQ(k)
+      FALTNDNI = FALOUTNI(K)/DZQ(k)
+      FALTNDS = FALOUTS(K)/DZQ(k)
+      FALTNDNS = FALOUTNS(K)/DZQ(k)
+      FALTNDNR = FALOUTNR(K)/DZQ(k)
+      FALTNDC = FALOUTC(K)/DZQ(k)
+      FALTNDNC = FALOUTNC(K)/DZQ(k)
+      FALTNDG = FALOUTG(K)/DZQ(k)
+      FALTNDNG = FALOUTNG(K)/DZQ(k)
+! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
 
-            DUM1 = 1/DZQ(I,KTE,J)
-            FALTNDR = FALOUTR(I,KTE,J)*DUM1
-            FALTNDI = FALOUTI(I,KTE,J)*DUM1
-            FALTNDNI = FALOUTNI(I,KTE,J)*DUM1
-            FALTNDS = FALOUTS(I,KTE,J)*DUM1
-            FALTNDNS = FALOUTNS(I,KTE,J)*DUM1
-            FALTNDNR = FALOUTNR(I,KTE,J)*DUM1
-            FALTNDC = FALOUTC(I,KTE,J)*DUM1
-            FALTNDNC = FALOUTNC(I,KTE,J)*DUM1
-            FALTNDG = FALOUTG(I,KTE,J)*DUM1
-            FALTNDNG = FALOUTNG(I,KTE,J)*DUM1
-      ! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
+      QRSTEN(K) = QRSTEN(K)-FALTNDR/NSTEP/RHO(k)
+      QISTEN(K) = QISTEN(K)-FALTNDI/NSTEP/RHO(k)
+      NI3DTEN(K) = NI3DTEN(K)-FALTNDNI/NSTEP/RHO(k)
+      QNISTEN(K) = QNISTEN(K)-FALTNDS/NSTEP/RHO(k)
+      NS3DTEN(K) = NS3DTEN(K)-FALTNDNS/NSTEP/RHO(k)
+      NR3DTEN(K) = NR3DTEN(K)-FALTNDNR/NSTEP/RHO(k)
+      QCSTEN(K) = QCSTEN(K)-FALTNDC/NSTEP/RHO(k)
+      NC3DTEN(K) = NC3DTEN(K)-FALTNDNC/NSTEP/RHO(k)
+      QGSTEN(K) = QGSTEN(K)-FALTNDG/NSTEP/RHO(k)
+      NG3DTEN(K) = NG3DTEN(K)-FALTNDNG/NSTEP/RHO(k)
 
-            DUM2 = 1/NSTEP(I,KTE,J)/RHO(I,KTE,J)
-            QRSTEN(I,KTE,J) = QRSTEN(I,KTE,J)-FALTNDR*DUM2
-            QISTEN(I,KTE,J) = QISTEN(I,KTE,J)-FALTNDI*DUM2
-            NI3DTEN(I,KTE,J) = NI3DTEN(I,KTE,J)-FALTNDNI*DUM2
-            QNISTEN(I,KTE,J) = QNISTEN(I,KTE,J)-FALTNDS*DUM2
-            NS3DTEN(I,KTE,J) = NS3DTEN(I,KTE,J)-FALTNDNS*DUM2
-            NR3DTEN(I,KTE,J) = NR3DTEN(I,KTE,J)-FALTNDNR*DUM2
-            QCSTEN(I,KTE,J) = QCSTEN(I,KTE,J)-FALTNDC*DUM2
-            NC3DTEN(I,KTE,J) = NC3DTEN(I,KTE,J)-FALTNDNC*DUM2
-            QGSTEN(I,KTE,J) = QGSTEN(I,KTE,J)-FALTNDG*DUM2
-            NG3DTEN(I,KTE,J) = NG3DTEN(I,KTE,J)-FALTNDNG*DUM2
+      DUMR(K) = DUMR(K)-FALTNDR*DT/NSTEP
+      DUMI(K) = DUMI(K)-FALTNDI*DT/NSTEP
+      DUMFNI(K) = DUMFNI(K)-FALTNDNI*DT/NSTEP
+      DUMQS(K) = DUMQS(K)-FALTNDS*DT/NSTEP
+      DUMFNS(K) = DUMFNS(K)-FALTNDNS*DT/NSTEP
+      DUMFNR(K) = DUMFNR(K)-FALTNDNR*DT/NSTEP
+      DUMC(K) = DUMC(K)-FALTNDC*DT/NSTEP
+      DUMFNC(K) = DUMFNC(K)-FALTNDNC*DT/NSTEP
+      DUMG(K) = DUMG(K)-FALTNDG*DT/NSTEP
+      DUMFNG(K) = DUMFNG(K)-FALTNDNG*DT/NSTEP
 
-            DUMT = DT/NSTEP(I,KTE,J)
-            DUMR(I,KTE,J) = DUMR(I,KTE,J)+FALTNDR*DUMT
-            DUMI(I,KTE,J) = DUMI(I,KTE,J)+FALTNDI*DUMT
-            DUMFNI(I,KTE,J) = DUMFNI(I,KTE,J)+FALTNDNI*DUMT
-            DUMQS(I,KTE,J) = DUMQS(I,KTE,J)+FALTNDS*DUMT
-            DUMFNS(I,KTE,J) = DUMFNS(I,KTE,J)+FALTNDNS*DUMT
-            DUMFNR(I,KTE,J) = DUMFNR(I,KTE,J)+FALTNDNR*DUMT
-            DUMC(I,KTE,J) = DUMC(I,KTE,J)+FALTNDC*DUMT
-            DUMFNC(I,KTE,J) = DUMFNC(I,KTE,J)+FALTNDNC*DUMT
-            DUMG(I,KTE,J) = DUMG(I,KTE,J)+FALTNDG*DUMT
-            DUMFNG(I,KTE,J) = DUMFNG(I,KTE,J)+FALTNDNG*DUMT
-
-      ENDDO
-      enddo
-
-      !$acc parallel loop gang(STATIC: 1) vector collapse(3)
-      do j=jts,jte      ! j loop (north-south)
       DO K = KTE-1,KTS,-1
-      do i=its,ite      ! i loop (east-west)
+      FALTNDR = (FALOUTR(K+1)-FALOUTR(K))/DZQ(K)
+      FALTNDI = (FALOUTI(K+1)-FALOUTI(K))/DZQ(K)
+      FALTNDNI = (FALOUTNI(K+1)-FALOUTNI(K))/DZQ(K)
+      FALTNDS = (FALOUTS(K+1)-FALOUTS(K))/DZQ(K)
+      FALTNDNS = (FALOUTNS(K+1)-FALOUTNS(K))/DZQ(K)
+      FALTNDNR = (FALOUTNR(K+1)-FALOUTNR(K))/DZQ(K)
+      FALTNDC = (FALOUTC(K+1)-FALOUTC(K))/DZQ(K)
+      FALTNDNC = (FALOUTNC(K+1)-FALOUTNC(K))/DZQ(K)
+      FALTNDG = (FALOUTG(K+1)-FALOUTG(K))/DZQ(K)
+      FALTNDNG = (FALOUTNG(K+1)-FALOUTNG(K))/DZQ(K)
 
-            IF (LTRUE_COL(I,K,J).EQ.0 .or. N > NSTEP(I,K,J)) cycle
+! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
 
-            DUM1 = 1/DZQ(I,K,J)
+      QRSTEN(K) = QRSTEN(K)+FALTNDR/NSTEP/RHO(k)
+      QISTEN(K) = QISTEN(K)+FALTNDI/NSTEP/RHO(k)
+      NI3DTEN(K) = NI3DTEN(K)+FALTNDNI/NSTEP/RHO(k)
+      QNISTEN(K) = QNISTEN(K)+FALTNDS/NSTEP/RHO(k)
+      NS3DTEN(K) = NS3DTEN(K)+FALTNDNS/NSTEP/RHO(k)
+      NR3DTEN(K) = NR3DTEN(K)+FALTNDNR/NSTEP/RHO(k)
+      QCSTEN(K) = QCSTEN(K)+FALTNDC/NSTEP/RHO(k)
+      NC3DTEN(K) = NC3DTEN(K)+FALTNDNC/NSTEP/RHO(k)
+      QGSTEN(K) = QGSTEN(K)+FALTNDG/NSTEP/RHO(k)
+      NG3DTEN(K) = NG3DTEN(K)+FALTNDNG/NSTEP/RHO(k)
 
-            FALTNDR = (FALOUTR(I,K+1,J)-FALOUTR(I,K,J))*DUM1
-            FALTNDI = (FALOUTI(I,K+1,J)-FALOUTI(I,K,J))*DUM1
-            FALTNDNI = (FALOUTNI(I,K+1,J)-FALOUTNI(I,K,J))*DUM1
-            FALTNDS = (FALOUTS(I,K+1,J)-FALOUTS(I,K,J))*DUM1
-            FALTNDNS = (FALOUTNS(I,K+1,J)-FALOUTNS(I,K,J))*DUM1
-            FALTNDNR = (FALOUTNR(I,K+1,J)-FALOUTNR(I,K,J))*DUM1
-            FALTNDC = (FALOUTC(I,K+1,J)-FALOUTC(I,K,J))*DUM1
-            FALTNDNC = (FALOUTNC(I,K+1,J)-FALOUTNC(I,K,J))*DUM1
-            FALTNDG = (FALOUTG(I,K+1,J)-FALOUTG(I,K,J))*DUM1
-            FALTNDNG = (FALOUTNG(I,K+1,J)-FALOUTNG(I,K,J))*DUM1
+      DUMR(K) = DUMR(K)+FALTNDR*DT/NSTEP
+      DUMI(K) = DUMI(K)+FALTNDI*DT/NSTEP
+      DUMFNI(K) = DUMFNI(K)+FALTNDNI*DT/NSTEP
+      DUMQS(K) = DUMQS(K)+FALTNDS*DT/NSTEP
+      DUMFNS(K) = DUMFNS(K)+FALTNDNS*DT/NSTEP
+      DUMFNR(K) = DUMFNR(K)+FALTNDNR*DT/NSTEP
+      DUMC(K) = DUMC(K)+FALTNDC*DT/NSTEP
+      DUMFNC(K) = DUMFNC(K)+FALTNDNC*DT/NSTEP
+      DUMG(K) = DUMG(K)+FALTNDG*DT/NSTEP
+      DUMFNG(K) = DUMFNG(K)+FALTNDNG*DT/NSTEP
 
-      ! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
-            DUM2 = 1/NSTEP(I,K,J)/RHO(I,K,J)
-
-            QRSTEN(I,K,J) = QRSTEN(I,K,J)+FALTNDR*DUM2
-            QISTEN(I,K,J) = QISTEN(I,K,J)+FALTNDI*DUM2
-            NI3DTEN(I,K,J) = NI3DTEN(I,K,J)+FALTNDNI*DUM2
-            QNISTEN(I,K,J) = QNISTEN(I,K,J)+FALTNDS*DUM2
-            NS3DTEN(I,K,J) = NS3DTEN(I,K,J)+FALTNDNS*DUM2
-            NR3DTEN(I,K,J) = NR3DTEN(I,K,J)+FALTNDNR*DUM2
-            QCSTEN(I,K,J) = QCSTEN(I,K,J)+FALTNDC*DUM2
-            NC3DTEN(I,K,J) = NC3DTEN(I,K,J)+FALTNDNC*DUM2
-            QGSTEN(I,K,J) = QGSTEN(I,K,J)+FALTNDG*DUM2
-            NG3DTEN(I,K,J) = NG3DTEN(I,K,J)+FALTNDNG*DUM2
-
-            DUMT = DT/NSTEP(I,K,J)
-            DUMR(I,K,J) = DUMR(I,K,J)+FALTNDR*DUMT
-            DUMI(I,K,J) = DUMI(I,K,J)+FALTNDI*DUMT
-            DUMFNI(I,K,J) = DUMFNI(I,K,J)+FALTNDNI*DUMT
-            DUMQS(I,K,J) = DUMQS(I,K,J)+FALTNDS*DUMT
-            DUMFNS(I,K,J) = DUMFNS(I,K,J)+FALTNDNS*DUMT
-            DUMFNR(I,K,J) = DUMFNR(I,K,J)+FALTNDNR*DUMT
-            DUMC(I,K,J) = DUMC(I,K,J)+FALTNDC*DUMT
-            DUMFNC(I,K,J) = DUMFNC(I,K,J)+FALTNDNC*DUMT
-            DUMG(I,K,J) = DUMG(I,K,J)+FALTNDG*DUMT
-            DUMFNG(I,K,J) = DUMFNG(I,K,J)+FALTNDNG*DUMT
-
-      ! FOR WRF-CHEM, NEED PRECIP RATES (UNITS OF KG/M^2/S)
-            CSED(I,K,J)=CSED(I,K,J)+FALOUTC(I,K,J)/NSTEP(I,K,J)
-            ISED(I,K,J)=ISED(I,K,J)+FALOUTI(I,K,J)/NSTEP(I,K,J)
-            SSED(I,K,J)=SSED(I,K,J)+FALOUTS(I,K,J)/NSTEP(I,K,J)
-            GSED(I,K,J)=GSED(I,K,J)+FALOUTG(I,K,J)/NSTEP(I,K,J)
-            RSED(I,K,J)=RSED(I,K,J)+FALOUTR(I,K,J)/NSTEP(I,K,J)
-      END DO
-      END DO
+! FOR WRF-CHEM, NEED PRECIP RATES (UNITS OF KG/M^2/S)
+	  CSED(K)=CSED(K)+FALOUTC(K)/NSTEP
+	  ISED(K)=ISED(K)+FALOUTI(K)/NSTEP
+	  SSED(K)=SSED(K)+FALOUTS(K)/NSTEP
+	  GSED(K)=GSED(K)+FALOUTG(K)/NSTEP
+	  RSED(K)=RSED(K)+FALOUTR(K)/NSTEP
       END DO
 
 ! GET PRECIPITATION AND SNOWFALL ACCUMULATION DURING THE TIME STEP
 ! FACTOR OF 1000 CONVERTS FROM M TO MM, BUT DIVISION BY DENSITY
 ! OF LIQUID WATER CANCELS THIS FACTOR OF 1000
-      
-      !$acc parallel loop gang(STATIC: 1) vector collapse(2)
-      do j=jts,jte      ! j loop (north-south)
-      do i=its,ite      ! i loop (east-west)
-        IF (LTRUE_COL(I,KTS,J).EQ.0 .or. N > NSTEP(I,KTS,J)) cycle
 
-        PRECPRT1D(I,J) = PRECPRT1D(I,J)+(FALOUTR(I,KTS,J)+FALOUTC(I,KTS,J)+FALOUTS(I,KTS,J)+FALOUTI(I,KTS,J)+FALOUTG(I,KTS,J))  &
-                     *DT/NSTEP_FLAT(I,J)
-        SNOWRT1D(I,J) = SNOWRT1D(I,J)+(FALOUTS(I,KTS,J)+FALOUTI(I,KTS,J)+FALOUTG(I,KTS,J))*DT/NSTEP_FLAT(I,J)
+        PRECRT = PRECRT+(FALOUTR(KTS)+FALOUTC(KTS)+FALOUTS(KTS)+FALOUTI(KTS)+FALOUTG(KTS))  &
+                     *DT/NSTEP
+        SNOWRT = SNOWRT+(FALOUTS(KTS)+FALOUTI(KTS)+FALOUTG(KTS))*DT/NSTEP
 ! hm added 7/13/13
-        SNOWPRT1D(I,J) = SNOWPRT1D(I,J)+(FALOUTI(I,KTS,J)+FALOUTS(I,KTS,J))*DT/NSTEP_FLAT(I,J)
-        GRPLPRT1D(I,J) = GRPLPRT1D(I,J)+(FALOUTG(I,KTS,J))*DT/NSTEP_FLAT(I,J)
-      END DO
-      END DO
+        SNOWPRT = SNOWPRT+(FALOUTI(KTS)+FALOUTS(KTS))*DT/NSTEP
+        GRPLPRT = GRPLPRT+(FALOUTG(KTS))*DT/NSTEP
 
       END DO
 
-   !$acc parallel loop gang vector collapse(3) 
-   do j=jts,jte      ! j loop (north-south)
-   do k=kts,kte
-   do i=its,ite      ! i loop (east-west)
-        if (LTRUE(I,K,J).EQ.0) CYCLE !NO HYDROMETEORS CALCULATED FOR THIS CELL
+        DO K=KTS,KTE
 
 ! ADD ON SEDIMENTATION TENDENCIES FOR MIXING RATIO TO REST OF TENDENCIES
 
-        QR3DTEN(I,K,J)=QR3DTEN(I,K,J)+QRSTEN(I,K,J)
-        QI3DTEN(I,K,J)=QI3DTEN(I,K,J)+QISTEN(I,K,J)
-        QC3DTEN(I,K,J)=QC3DTEN(I,K,J)+QCSTEN(I,K,J)
-        QG3DTEN(I,K,J)=QG3DTEN(I,K,J)+QGSTEN(I,K,J)
-        QNI3DTEN(I,K,J)=QNI3DTEN(I,K,J)+QNISTEN(I,K,J)
+        QR3DTEN(K)=QR3DTEN(K)+QRSTEN(K)
+        QI3DTEN(K)=QI3DTEN(K)+QISTEN(K)
+        QC3DTEN(K)=QC3DTEN(K)+QCSTEN(K)
+        QG3DTEN(K)=QG3DTEN(K)+QGSTEN(K)
+        QNI3DTEN(K)=QNI3DTEN(K)+QNISTEN(K)
 
 ! PUT ALL CLOUD ICE IN SNOW CATEGORY IF MEAN DIAMETER EXCEEDS 2 * dcs
 
 !hm 4/7/09 bug fix
-!        IF (QI3D(I,K,J).GE.QSMALL.AND.T3D(I,K,J).LT.273.15) THEN
-        IF (QI3D(I,K,J).GE.QSMALL.AND.T3D(I,K,J).LT.273.15.AND.LAMI(I,K,J).GE.1.E-10) THEN
-        IF (1./LAMI(I,K,J).GE.2.*DCS) THEN
-           QNI3DTEN(I,K,J) = QNI3DTEN(I,K,J)+QI3D(I,K,J)/DT+ QI3DTEN(I,K,J)
-           NS3DTEN(I,K,J) = NS3DTEN(I,K,J)+NI3D(I,K,J)/DT+   NI3DTEN(I,K,J)
-           QI3DTEN(I,K,J) = -QI3D(I,K,J)/DT
-           NI3DTEN(I,K,J) = -NI3D(I,K,J)/DT
+!        IF (QI3D(K).GE.QSMALL.AND.T3D(K).LT.273.15) THEN
+        IF (QI3D(K).GE.QSMALL.AND.T3D(K).LT.273.15.AND.LAMI(K).GE.1.E-10) THEN
+        IF (1./LAMI(K).GE.2.*DCS) THEN
+           QNI3DTEN(K) = QNI3DTEN(K)+QI3D(K)/DT+ QI3DTEN(K)
+           NS3DTEN(K) = NS3DTEN(K)+NI3D(K)/DT+   NI3DTEN(K)
+           QI3DTEN(K) = -QI3D(K)/DT
+           NI3DTEN(K) = -NI3D(K)/DT
         END IF
         END IF
 
 ! hm add tendencies here, then call sizeparameter
 ! to ensure consisitency between mixing ratio and number concentration
 
-          QC3D(I,K,J)        = QC3D(I,K,J)+QC3DTEN(I,K,J)*DT
-          QI3D(I,K,J)        = QI3D(I,K,J)+QI3DTEN(I,K,J)*DT
-          QNI3D(I,K,J)        = QNI3D(I,K,J)+QNI3DTEN(I,K,J)*DT
-          QR3D(I,K,J)        = QR3D(I,K,J)+QR3DTEN(I,K,J)*DT
-          NC3D(I,K,J)        = NC3D(I,K,J)+NC3DTEN(I,K,J)*DT
-          NI3D(I,K,J)        = NI3D(I,K,J)+NI3DTEN(I,K,J)*DT
-          NS3D(I,K,J)        = NS3D(I,K,J)+NS3DTEN(I,K,J)*DT
-          NR3D(I,K,J)        = NR3D(I,K,J)+NR3DTEN(I,K,J)*DT
+          QC3D(k)        = QC3D(k)+QC3DTEN(k)*DT
+          QI3D(k)        = QI3D(k)+QI3DTEN(k)*DT
+          QNI3D(k)        = QNI3D(k)+QNI3DTEN(k)*DT
+          QR3D(k)        = QR3D(k)+QR3DTEN(k)*DT
+          NC3D(k)        = NC3D(k)+NC3DTEN(k)*DT
+          NI3D(k)        = NI3D(k)+NI3DTEN(k)*DT
+          NS3D(k)        = NS3D(k)+NS3DTEN(k)*DT
+          NR3D(k)        = NR3D(k)+NR3DTEN(k)*DT
 
           IF (IGRAUP.EQ.0) THEN
-          QG3D(I,K,J)        = QG3D(I,K,J)+QG3DTEN(I,K,J)*DT
-          NG3D(I,K,J)        = NG3D(I,K,J)+NG3DTEN(I,K,J)*DT
+          QG3D(k)        = QG3D(k)+QG3DTEN(k)*DT
+          NG3D(k)        = NG3D(k)+NG3DTEN(k)*DT
           END IF
 
 ! ADD TEMPERATURE AND WATER VAPOR TENDENCIES FROM MICROPHYSICS
-          T3D(I,K,J)         = T3D(I,K,J)+T3DTEN(I,K,J)*DT
-          QV3D(I,K,J)        = QV3D(I,K,J)+QV3DTEN(I,K,J)*DT
+          T3D(K)         = T3D(K)+T3DTEN(k)*DT
+          QV3D(K)        = QV3D(K)+QV3DTEN(k)*DT
 
 ! SATURATION VAPOR PRESSURE AND MIXING RATIO
 
 ! hm, add fix for low pressure, 5/12/10
-            EVS = min(0.99*pres(I,K,J),POLYSVP(T3D(I,K,J),0))   ! PA
-            EIS = min(0.99*pres(I,K,J),POLYSVP(T3D(I,K,J),1))   ! PA
+            EVS(K) = min(0.99*pres(k),POLYSVP(T3D(K),0))   ! PA
+            EIS(K) = min(0.99*pres(k),POLYSVP(T3D(K),1))   ! PA
 
 ! MAKE SURE ICE SATURATION DOESN'T EXCEED WATER SAT. NEAR FREEZING
 
-            IF (EIS.GT.EVS) EIS = EVS
+            IF (EIS(K).GT.EVS(K)) EIS(K) = EVS(K)
 
-            QVS = EP_2*EVS/(PRES(I,K,J)-EVS)
-            QVI = EP_2*EIS/(PRES(I,K,J)-EIS)
+            QVS(K) = EP_2*EVS(K)/(PRES(K)-EVS(K))
+            QVI(K) = EP_2*EIS(K)/(PRES(K)-EIS(K))
 
-            QVQVS = QV3D(I,K,J)/QVS
-            QVQVSI = QV3D(I,K,J)/QVI
+            QVQVS(K) = QV3D(K)/QVS(K)
+            QVQVSI(K) = QV3D(K)/QVI(K)
 
 ! AT SUBSATURATION, REMOVE SMALL AMOUNTS OF CLOUD/PRECIP WATER
 ! hm 7/9/09 change limit to 1.e-8
 
-             IF (QVQVS.LT.0.9) THEN
-               IF (QR3D(I,K,J).LT.1.E-8) THEN
-                  QV3D(I,K,J)=QV3D(I,K,J)+QR3D(I,K,J)
-                  T3D(I,K,J)=T3D(I,K,J)-QR3D(I,K,J)*XXLV(I,K,J)/CPM(I,K,J)
-                  QR3D(I,K,J)=0.
+             IF (QVQVS(K).LT.0.9) THEN
+               IF (QR3D(K).LT.1.E-8) THEN
+                  QV3D(K)=QV3D(K)+QR3D(K)
+                  T3D(K)=T3D(K)-QR3D(K)*XXLV(K)/CPM(K)
+                  QR3D(K)=0.
                END IF
-               IF (QC3D(I,K,J).LT.1.E-8) THEN
-                  QV3D(I,K,J)=QV3D(I,K,J)+QC3D(I,K,J)
-                  T3D(I,K,J)=T3D(I,K,J)-QC3D(I,K,J)*XXLV(I,K,J)/CPM(I,K,J)
-                  QC3D(I,K,J)=0.
+               IF (QC3D(K).LT.1.E-8) THEN
+                  QV3D(K)=QV3D(K)+QC3D(K)
+                  T3D(K)=T3D(K)-QC3D(K)*XXLV(K)/CPM(K)
+                  QC3D(K)=0.
                END IF
              END IF
 
-             IF (QVQVSI.LT.0.9) THEN
-               IF (QI3D(I,K,J).LT.1.E-8) THEN
-                  QV3D(I,K,J)=QV3D(I,K,J)+QI3D(I,K,J)
-                  T3D(I,K,J)=T3D(I,K,J)-QI3D(I,K,J)*XXLS(I,K,J)/CPM(I,K,J)
-                  QI3D(I,K,J)=0.
+             IF (QVQVSI(K).LT.0.9) THEN
+               IF (QI3D(K).LT.1.E-8) THEN
+                  QV3D(K)=QV3D(K)+QI3D(K)
+                  T3D(K)=T3D(K)-QI3D(K)*XXLS(K)/CPM(K)
+                  QI3D(K)=0.
                END IF
-               IF (QNI3D(I,K,J).LT.1.E-8) THEN
-                  QV3D(I,K,J)=QV3D(I,K,J)+QNI3D(I,K,J)
-                  T3D(I,K,J)=T3D(I,K,J)-QNI3D(I,K,J)*XXLS(I,K,J)/CPM(I,K,J)
-                  QNI3D(I,K,J)=0.
+               IF (QNI3D(K).LT.1.E-8) THEN
+                  QV3D(K)=QV3D(K)+QNI3D(K)
+                  T3D(K)=T3D(K)-QNI3D(K)*XXLS(K)/CPM(K)
+                  QNI3D(K)=0.
                END IF
-               IF (QG3D(I,K,J).LT.1.E-8) THEN
-                  QV3D(I,K,J)=QV3D(I,K,J)+QG3D(I,K,J)
-                  T3D(I,K,J)=T3D(I,K,J)-QG3D(I,K,J)*XXLS(I,K,J)/CPM(I,K,J)
-                  QG3D(I,K,J)=0.
+               IF (QG3D(K).LT.1.E-8) THEN
+                  QV3D(K)=QV3D(K)+QG3D(K)
+                  T3D(K)=T3D(K)-QG3D(K)*XXLS(K)/CPM(K)
+                  QG3D(K)=0.
                END IF
              END IF
 
 !..................................................................
 ! IF MIXING RATIO < QSMALL SET MIXING RATIO AND NUMBER CONC TO ZERO
 
-       IF (QC3D(I,K,J).LT.QSMALL) THEN
-         QC3D(I,K,J) = 0.
-         NC3D(I,K,J) = 0.
-         EFFC(I,K,J) = 0.
+       IF (QC3D(K).LT.QSMALL) THEN
+         QC3D(K) = 0.
+         NC3D(K) = 0.
+         EFFC(K) = 0.
        END IF
-       IF (QR3D(I,K,J).LT.QSMALL) THEN
-         QR3D(I,K,J) = 0.
-         NR3D(I,K,J) = 0.
-         EFFR(I,K,J) = 0.
+       IF (QR3D(K).LT.QSMALL) THEN
+         QR3D(K) = 0.
+         NR3D(K) = 0.
+         EFFR(K) = 0.
        END IF
-       IF (QI3D(I,K,J).LT.QSMALL) THEN
-         QI3D(I,K,J) = 0.
-         NI3D(I,K,J) = 0.
-         EFFI(I,K,J) = 0.
+       IF (QI3D(K).LT.QSMALL) THEN
+         QI3D(K) = 0.
+         NI3D(K) = 0.
+         EFFI(K) = 0.
        END IF
-       IF (QNI3D(I,K,J).LT.QSMALL) THEN
-         QNI3D(I,K,J) = 0.
-         NS3D(I,K,J) = 0.
-         EFFS(I,K,J) = 0.
+       IF (QNI3D(K).LT.QSMALL) THEN
+         QNI3D(K) = 0.
+         NS3D(K) = 0.
+         EFFS(K) = 0.
        END IF
-       IF (QG3D(I,K,J).LT.QSMALL) THEN
-         QG3D(I,K,J) = 0.
-         NG3D(I,K,J) = 0.
-         EFFG(I,K,J) = 0.
+       IF (QG3D(K).LT.QSMALL) THEN
+         QG3D(K) = 0.
+         NG3D(K) = 0.
+         EFFG(K) = 0.
        END IF
 
 !..................................
 ! IF THERE IS NO CLOUD/PRECIP WATER, THEN SKIP CALCULATIONS
 
-      IF (.not.(QC3D(I,K,J).LT.QSMALL.AND.QI3D(I,K,J).LT.QSMALL.AND.QNI3D(I,K,J).LT.QSMALL &
-           .AND.QR3D(I,K,J).LT.QSMALL.AND.QG3D(I,K,J).LT.QSMALL)) THEN
+            IF (QC3D(K).LT.QSMALL.AND.QI3D(K).LT.QSMALL.AND.QNI3D(K).LT.QSMALL &
+                 .AND.QR3D(K).LT.QSMALL.AND.QG3D(K).LT.QSMALL) GOTO 500
 
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 ! CALCULATE INSTANTANEOUS PROCESSES
 
 ! ADD MELTING OF CLOUD ICE TO FORM RAIN
 
-        IF (QI3D(I,K,J).GE.QSMALL.AND.T3D(I,K,J).GE.273.15) THEN
-           QR3D(I,K,J) = QR3D(I,K,J)+QI3D(I,K,J)
-           T3D(I,K,J) = T3D(I,K,J)-QI3D(I,K,J)*XLF(I,K,J)/CPM(I,K,J)
+        IF (QI3D(K).GE.QSMALL.AND.T3D(K).GE.273.15) THEN
+           QR3D(K) = QR3D(K)+QI3D(K)
+           T3D(K) = T3D(K)-QI3D(K)*XLF(K)/CPM(K)
 ! #if (WRF_CHEM == 1)
-!            tqimelt(I,K,J)=QI3D(I,K,J)/DT
+!            tqimelt(K)=QI3D(K)/DT
 ! #endif
-           QI3D(I,K,J) = 0.
-           NR3D(I,K,J) = NR3D(I,K,J)+NI3D(I,K,J)
-           NI3D(I,K,J) = 0.
+           QI3D(K) = 0.
+           NR3D(K) = NR3D(K)+NI3D(K)
+           NI3D(K) = 0.
         END IF
 
 ! ****SENSITIVITY - NO ICE
-      IF (ILIQ.EQ.0) THEN
+        IF (ILIQ.EQ.1) GOTO 778
 
 ! HOMOGENEOUS FREEZING OF CLOUD WATER
 
-        IF (T3D(I,K,J).LE.233.15.AND.QC3D(I,K,J).GE.QSMALL) THEN
-           QI3D(I,K,J)=QI3D(I,K,J)+QC3D(I,K,J)
-           T3D(I,K,J)=T3D(I,K,J)+QC3D(I,K,J)*XLF(I,K,J)/CPM(I,K,J)
-           QC3D(I,K,J)=0.
-           NI3D(I,K,J)=NI3D(I,K,J)+NC3D(I,K,J)
-           NC3D(I,K,J)=0.
+        IF (T3D(K).LE.233.15.AND.QC3D(K).GE.QSMALL) THEN
+           QI3D(K)=QI3D(K)+QC3D(K)
+           T3D(K)=T3D(K)+QC3D(K)*XLF(K)/CPM(K)
+           QC3D(K)=0.
+           NI3D(K)=NI3D(K)+NC3D(K)
+           NC3D(K)=0.
         END IF
 
 ! HOMOGENEOUS FREEZING OF RAIN
 
         IF (IGRAUP.EQ.0) THEN
 
-        IF (T3D(I,K,J).LE.233.15.AND.QR3D(I,K,J).GE.QSMALL) THEN
-           QG3D(I,K,J) = QG3D(I,K,J)+QR3D(I,K,J)
-           T3D(I,K,J) = T3D(I,K,J)+QR3D(I,K,J)*XLF(I,K,J)/CPM(I,K,J)
-           QR3D(I,K,J) = 0.
-           NG3D(I,K,J) = NG3D(I,K,J)+ NR3D(I,K,J)
-           NR3D(I,K,J) = 0.
+        IF (T3D(K).LE.233.15.AND.QR3D(K).GE.QSMALL) THEN
+           QG3D(K) = QG3D(K)+QR3D(K)
+           T3D(K) = T3D(K)+QR3D(K)*XLF(K)/CPM(K)
+           QR3D(K) = 0.
+           NG3D(K) = NG3D(K)+ NR3D(K)
+           NR3D(K) = 0.
         END IF
 
         ELSE IF (IGRAUP.EQ.1) THEN
 
-        IF (T3D(I,K,J).LE.233.15.AND.QR3D(I,K,J).GE.QSMALL) THEN
-           QNI3D(I,K,J) = QNI3D(I,K,J)+QR3D(I,K,J)
-           T3D(I,K,J) = T3D(I,K,J)+QR3D(I,K,J)*XLF(I,K,J)/CPM(I,K,J)
-           QR3D(I,K,J) = 0.
-           NS3D(I,K,J) = NS3D(I,K,J)+NR3D(I,K,J)
-           NR3D(I,K,J) = 0.
+        IF (T3D(K).LE.233.15.AND.QR3D(K).GE.QSMALL) THEN
+           QNI3D(K) = QNI3D(K)+QR3D(K)
+           T3D(K) = T3D(K)+QR3D(K)*XLF(K)/CPM(K)
+           QR3D(K) = 0.
+           NS3D(K) = NS3D(K)+NR3D(K)
+           NR3D(K) = 0.
         END IF
 
         END IF
 
-      ENDIF !(ILIQ.EQ.1) old CONTINUE 778
+ 778    CONTINUE
 
 ! MAKE SURE NUMBER CONCENTRATIONS AREN'T NEGATIVE
 
-      NI3D(I,K,J) = MAX(0.,NI3D(I,K,J))
-      NS3D(I,K,J) = MAX(0.,NS3D(I,K,J))
-      NC3D(I,K,J) = MAX(0.,NC3D(I,K,J))
-      NR3D(I,K,J) = MAX(0.,NR3D(I,K,J))
-      NG3D(I,K,J) = MAX(0.,NG3D(I,K,J))
+      NI3D(K) = MAX(0.,NI3D(K))
+      NS3D(K) = MAX(0.,NS3D(K))
+      NC3D(K) = MAX(0.,NC3D(K))
+      NR3D(K) = MAX(0.,NR3D(K))
+      NG3D(K) = MAX(0.,NG3D(K))
 
 !......................................................................
 ! CLOUD ICE
 
-      IF (QI3D(I,K,J).GE.QSMALL) THEN
-         LAMI(I,K,J) = (CONS12*                 &
-              NI3D(I,K,J)/QI3D(I,K,J))**(1./DI)
+      IF (QI3D(K).GE.QSMALL) THEN
+         LAMI(K) = (CONS12*                 &
+              NI3D(K)/QI3D(K))**(1./DI)
 
 ! CHECK FOR SLOPE
 
 ! ADJUST VARS
 
-      IF (LAMI(I,K,J).LT.LAMMINI) THEN
+      IF (LAMI(K).LT.LAMMINI) THEN
 
-      LAMI(I,K,J) = LAMMINI
+      LAMI(K) = LAMMINI
 
-      N0I(I,K,J) = LAMI(I,K,J)**4*QI3D(I,K,J)/CONS12
+      N0I(K) = LAMI(K)**4*QI3D(K)/CONS12
 
-      NI3D(I,K,J) = N0I(I,K,J)/LAMI(I,K,J)
-      ELSE IF (LAMI(I,K,J).GT.LAMMAXI) THEN
-      LAMI(I,K,J) = LAMMAXI
-      N0I(I,K,J) = LAMI(I,K,J)**4*QI3D(I,K,J)/CONS12
+      NI3D(K) = N0I(K)/LAMI(K)
+      ELSE IF (LAMI(K).GT.LAMMAXI) THEN
+      LAMI(K) = LAMMAXI
+      N0I(K) = LAMI(K)**4*QI3D(K)/CONS12
 
-      NI3D(I,K,J) = N0I(I,K,J)/LAMI(I,K,J)
+      NI3D(K) = N0I(K)/LAMI(K)
       END IF
       END IF
 
 !......................................................................
 ! RAIN
 
-      IF (QR3D(I,K,J).GE.QSMALL) THEN
-      LAMR(I,K,J) = (PI*RHOW*NR3D(I,K,J)/QR3D(I,K,J))**(1./3.)
+      IF (QR3D(K).GE.QSMALL) THEN
+      LAMR(K) = (PI*RHOW*NR3D(K)/QR3D(K))**(1./3.)
 
 ! CHECK FOR SLOPE
 
 ! ADJUST VARS
 
-      IF (LAMR(I,K,J).LT.LAMMINR) THEN
+      IF (LAMR(K).LT.LAMMINR) THEN
 
-      LAMR(I,K,J) = LAMMINR
+      LAMR(K) = LAMMINR
 
-      N0RR(I,K,J) = LAMR(I,K,J)**4*QR3D(I,K,J)/(PI*RHOW)
+      N0RR(K) = LAMR(K)**4*QR3D(K)/(PI*RHOW)
 
-      NR3D(I,K,J) = N0RR(I,K,J)/LAMR(I,K,J)
-      ELSE IF (LAMR(I,K,J).GT.LAMMAXR) THEN
-      LAMR(I,K,J) = LAMMAXR
-      N0RR(I,K,J) = LAMR(I,K,J)**4*QR3D(I,K,J)/(PI*RHOW)
+      NR3D(K) = N0RR(K)/LAMR(K)
+      ELSE IF (LAMR(K).GT.LAMMAXR) THEN
+      LAMR(K) = LAMMAXR
+      N0RR(K) = LAMR(K)**4*QR3D(K)/(PI*RHOW)
 
-      NR3D(I,K,J) = N0RR(I,K,J)/LAMR(I,K,J)
+      NR3D(K) = N0RR(K)/LAMR(K)
       END IF
 
       END IF
@@ -3902,34 +3912,34 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
 ! MARTIN ET AL. (1994) FORMULA FOR PGAM
 
-      IF (QC3D(I,K,J).GE.QSMALL) THEN
+      IF (QC3D(K).GE.QSMALL) THEN
 
-         DUM = PRES(I,K,J)/(287.15*T3D(I,K,J))
-         PGAM(I,K,J)=0.0005714*(NC3D(I,K,J)/1.E6*DUM)+0.2714
-         PGAM(I,K,J)=1./(PGAM(I,K,J)**2)-1.
-         PGAM(I,K,J)=MAX(PGAM(I,K,J),2.)
-         PGAM(I,K,J)=MIN(PGAM(I,K,J),10.)
+         DUM = PRES(K)/(287.15*T3D(K))
+         PGAM(K)=0.0005714*(NC3D(K)/1.E6*DUM)+0.2714
+         PGAM(K)=1./(PGAM(K)**2)-1.
+         PGAM(K)=MAX(PGAM(K),2.)
+         PGAM(K)=MIN(PGAM(K),10.)
 
 ! CALCULATE LAMC
 
-      LAMC(I,K,J) = (CONS26*NC3D(I,K,J)*GAMMA(PGAM(I,K,J)+4.)/   &
-                 (QC3D(I,K,J)*GAMMA(PGAM(I,K,J)+1.)))**(1./3.)
+      LAMC(K) = (CONS26*NC3D(K)*GAMMA(PGAM(K)+4.)/   &
+                 (QC3D(K)*GAMMA(PGAM(K)+1.)))**(1./3.)
 
 ! LAMMIN, 60 MICRON DIAMETER
 ! LAMMAX, 1 MICRON
 
-      LAMMIN = (PGAM(I,K,J)+1.)/60.E-6
-      LAMMAX = (PGAM(I,K,J)+1.)/1.E-6
+      LAMMIN = (PGAM(K)+1.)/60.E-6
+      LAMMAX = (PGAM(K)+1.)/1.E-6
 
-      IF (LAMC(I,K,J).LT.LAMMIN) THEN
-      LAMC(I,K,J) = LAMMIN
-      NC3D(I,K,J) = EXP(3.*LOG(LAMC(I,K,J))+LOG(QC3D(I,K,J))+              &
-                LOG(GAMMA(PGAM(I,K,J)+1.))-LOG(GAMMA(PGAM(I,K,J)+4.)))/CONS26
+      IF (LAMC(K).LT.LAMMIN) THEN
+      LAMC(K) = LAMMIN
+      NC3D(K) = EXP(3.*LOG(LAMC(K))+LOG(QC3D(K))+              &
+                LOG(GAMMA(PGAM(K)+1.))-LOG(GAMMA(PGAM(K)+4.)))/CONS26
 
-      ELSE IF (LAMC(I,K,J).GT.LAMMAX) THEN
-      LAMC(I,K,J) = LAMMAX
-      NC3D(I,K,J) = EXP(3.*LOG(LAMC(I,K,J))+LOG(QC3D(I,K,J))+              &
-                LOG(GAMMA(PGAM(I,K,J)+1.))-LOG(GAMMA(PGAM(I,K,J)+4.)))/CONS26
+      ELSE IF (LAMC(K).GT.LAMMAX) THEN
+      LAMC(K) = LAMMAX
+      NC3D(K) = EXP(3.*LOG(LAMC(K))+LOG(QC3D(K))+              &
+                LOG(GAMMA(PGAM(K)+1.))-LOG(GAMMA(PGAM(K)+4.)))/CONS26
 
       END IF
 
@@ -3938,24 +3948,24 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 !......................................................................
 ! SNOW
 
-      IF (QNI3D(I,K,J).GE.QSMALL) THEN
-      LAMS(I,K,J) = (CONS1*NS3D(I,K,J)/QNI3D(I,K,J))**(1./DS)
+      IF (QNI3D(K).GE.QSMALL) THEN
+      LAMS(K) = (CONS1*NS3D(K)/QNI3D(K))**(1./DS)
 
 ! CHECK FOR SLOPE
 
 ! ADJUST VARS
 
-      IF (LAMS(I,K,J).LT.LAMMINS) THEN
-      LAMS(I,K,J) = LAMMINS
-      N0S(I,K,J) = LAMS(I,K,J)**4*QNI3D(I,K,J)/CONS1
+      IF (LAMS(K).LT.LAMMINS) THEN
+      LAMS(K) = LAMMINS
+      N0S(K) = LAMS(K)**4*QNI3D(K)/CONS1
 
-      NS3D(I,K,J) = N0S(I,K,J)/LAMS(I,K,J)
+      NS3D(K) = N0S(K)/LAMS(K)
 
-      ELSE IF (LAMS(I,K,J).GT.LAMMAXS) THEN
+      ELSE IF (LAMS(K).GT.LAMMAXS) THEN
 
-      LAMS(I,K,J) = LAMMAXS
-      N0S(I,K,J) = LAMS(I,K,J)**4*QNI3D(I,K,J)/CONS1
-      NS3D(I,K,J) = N0S(I,K,J)/LAMS(I,K,J)
+      LAMS(K) = LAMMAXS
+      N0S(K) = LAMS(K)**4*QNI3D(K)/CONS1
+      NS3D(K) = N0S(K)/LAMS(K)
       END IF
 
       END IF
@@ -3963,187 +3973,90 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 !......................................................................
 ! GRAUPEL
 
-      IF (QG3D(I,K,J).GE.QSMALL) THEN
-      LAMG(I,K,J) = (CONS2*NG3D(I,K,J)/QG3D(I,K,J))**(1./DG)
+      IF (QG3D(K).GE.QSMALL) THEN
+      LAMG(K) = (CONS2*NG3D(K)/QG3D(K))**(1./DG)
 
 ! CHECK FOR SLOPE
 
 ! ADJUST VARS
 
-      IF (LAMG(I,K,J).LT.LAMMING) THEN
-      LAMG(I,K,J) = LAMMING
-      N0G(I,K,J) = LAMG(I,K,J)**4*QG3D(I,K,J)/CONS2
+      IF (LAMG(K).LT.LAMMING) THEN
+      LAMG(K) = LAMMING
+      N0G(K) = LAMG(K)**4*QG3D(K)/CONS2
 
-      NG3D(I,K,J) = N0G(I,K,J)/LAMG(I,K,J)
+      NG3D(K) = N0G(K)/LAMG(K)
 
-      ELSE IF (LAMG(I,K,J).GT.LAMMAXG) THEN
+      ELSE IF (LAMG(K).GT.LAMMAXG) THEN
 
-      LAMG(I,K,J) = LAMMAXG
-      N0G(I,K,J) = LAMG(I,K,J)**4*QG3D(I,K,J)/CONS2
+      LAMG(K) = LAMMAXG
+      N0G(K) = LAMG(K)**4*QG3D(K)/CONS2
 
-      NG3D(I,K,J) = N0G(I,K,J)/LAMG(I,K,J)
+      NG3D(K) = N0G(K)/LAMG(K)
       END IF
 
       END IF
 
-      ENDIF !(QC3D(I,K,J).LT.QSMALL.AND.QI3D(I,K,J).LT.QSMALL.AND.QNI3D(I,K,J).LT.QSMALL &
-            !.AND.QR3D(I,K,J).LT.QSMALL.AND.QG3D(I,K,J).LT.QSMALL) old CONTINUE 500
+ 500  CONTINUE
+
 ! CALCULATE EFFECTIVE RADIUS
 
-      IF (QI3D(I,K,J).GE.QSMALL) THEN
-         EFFI(I,K,J) = 3./LAMI(I,K,J)/2.*1.E6
+      IF (QI3D(K).GE.QSMALL) THEN
+         EFFI(K) = 3./LAMI(K)/2.*1.E6
       ELSE
-         EFFI(I,K,J) = 25.
+         EFFI(K) = 25.
       END IF
 
-      IF (QNI3D(I,K,J).GE.QSMALL) THEN
-         EFFS(I,K,J) = 3./LAMS(I,K,J)/2.*1.E6
+      IF (QNI3D(K).GE.QSMALL) THEN
+         EFFS(K) = 3./LAMS(K)/2.*1.E6
       ELSE
-         EFFS(I,K,J) = 25.
+         EFFS(K) = 25.
       END IF
 
-      IF (QR3D(I,K,J).GE.QSMALL) THEN
-         EFFR(I,K,J) = 3./LAMR(I,K,J)/2.*1.E6
+      IF (QR3D(K).GE.QSMALL) THEN
+         EFFR(K) = 3./LAMR(K)/2.*1.E6
       ELSE
-         EFFR(I,K,J) = 25.
+         EFFR(K) = 25.
       END IF
 
-      IF (QC3D(I,K,J).GE.QSMALL) THEN
-            EFFC(I,K,J) = GAMMA(PGAM(I,K,J)+4.)/                        &
-             GAMMA(PGAM(I,K,J)+3.)/LAMC(I,K,J)/2.*1.E6
+      IF (QC3D(K).GE.QSMALL) THEN
+      EFFC(K) = GAMMA(PGAM(K)+4.)/                        &
+             GAMMA(PGAM(K)+3.)/LAMC(K)/2.*1.E6
       ELSE
-      EFFC(I,K,J) = 25.
+      EFFC(K) = 25.
       END IF
 
-      IF (QG3D(I,K,J).GE.QSMALL) THEN
-         EFFG(I,K,J) = 3./LAMG(I,K,J)/2.*1.E6
+      IF (QG3D(K).GE.QSMALL) THEN
+         EFFG(K) = 3./LAMG(K)/2.*1.E6
       ELSE
-         EFFG(I,K,J) = 25.
+         EFFG(K) = 25.
       END IF
 
 ! HM ADD 1/10/06, ADD UPPER BOUND ON ICE NUMBER, THIS IS NEEDED
 ! TO PREVENT VERY LARGE ICE NUMBER DUE TO HOMOGENEOUS FREEZING
 ! OF DROPLETS, ESPECIALLY WHEN INUM = 1, SET MAX AT 10 CM-3
-!          NI3D(I,K,J) = MIN(NI3D(I,K,J),10.E6/RHO(I,K,J))
+!          NI3D(K) = MIN(NI3D(K),10.E6/RHO(K))
 ! HM, 12/28/12, LOWER MAXIMUM ICE CONCENTRATION TO ADDRESS PROBLEM
 ! OF EXCESSIVE AND PERSISTENT ANVIL
 ! NOTE: THIS MAY CHANGE/REDUCE SENSITIVITY TO AEROSOL/CCN CONCENTRATION
-          NI3D(I,K,J) = MIN(NI3D(I,K,J),0.3E6/RHO(I,K,J))
+          NI3D(K) = MIN(NI3D(K),0.3E6/RHO(K))
 
 ! ADD BOUND ON DROPLET NUMBER - CANNOT EXCEED AEROSOL CONCENTRATION
           IF (iinum.EQ.0.AND.IACT.EQ.2) THEN
-          NC3D(I,K,J) = MIN(NC3D(I,K,J),(NANEW1+NANEW2)/RHO(I,K,J))
+          NC3D(K) = MIN(NC3D(K),(NANEW1+NANEW2)/RHO(K))
           END IF
 ! SWITCH FOR CONSTANT DROPLET NUMBER
           IF (iinum.EQ.1) THEN
 ! CHANGE NDCNST FROM CM-3 TO KG-1
-             NC3D(I,K,J) = NDCNST*1.E6/RHO(I,K,J)
+             NC3D(K) = NDCNST*1.E6/RHO(K)
           END IF
 
       END DO !!! K LOOP
-      END DO
-      END DO
+
+ 400         CONTINUE
 
 ! ALL DONE !!!!!!!!!!!
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!END OF INLINED FUNCTION!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-   !$acc parallel loop gang vector collapse(3)
-   do j=jts,jte      ! j loop (north-south)
-   do k=kts,kte
-   do i=its,ite      ! i loop (east-west)
-
-! hm, add tendencies to update global variables
-! HM, TENDENCIES FOR Q AND N NOW ADDED IN M2005MICRO, SO WE
-! ONLY NEED TO TRANSFER 1D VARIABLES BACK TO 3D
-
-          QC(i,k,j)        = QC3D(I,K,J)
-          QI(i,k,j)        = QI3D(I,K,J)
-          QS(i,k,j)        = QNI3D(I,K,J)
-          QR(i,k,j)        = QR3D(I,K,J)
-          NI(i,k,j)        = NI3D(I,K,J)
-          NS(i,k,j)        = NS3D(I,K,J)
-          NR(i,k,j)        = NR3D(I,K,J)
-	      QG(I,K,j)        = QG3D(I,K,J)
-          NG(I,K,j)        = NG3D(I,K,J)
-
-          TH(I,K,J)        = T3D(I,K,J)/PII(i,k,j) ! CONVERT TEMP BACK TO POTENTIAL TEMP
-          QV(i,k,j)        = QV3D(I,K,J)
-
-          ISED3D(i,k,j) = ISED(I,K,J)
-          SSED3D(i,k,j) = SSED(I,K,J)
-! wrf-chem
-        !   IF (flag_qndrop .AND. PRESENT( qndrop )) THEN
-        !      qndrop(i,k,j) = nc1d(I,K,J)
-!jdf         CSED3D(I,K,J) = CSED(I,K,J)
-        !   END IF
-        !   IF ( PRESENT( QLSINK ) ) THEN
-        !      if(qc(i,k,j)>1.e-10) then
-        !         QLSINK(I,K,J)  = C2PREC(I,K,J)/QC(I,K,J)
-        !      else
-        !         QLSINK(I,K,J)  = 0.0
-        !      endif
-        !   END IF
-        !   IF ( PRESENT( PRECR ) ) PRECR(I,K,J) = RSED(I,K,J)
-        !   IF ( PRESENT( PRECI ) ) PRECI(I,K,J) = ISED(I,K,J)
-        !   IF ( PRESENT( PRECS ) ) PRECS(I,K,J) = SSED(I,K,J)
-        !   IF ( PRESENT( PRECG ) ) PRECG(I,K,J) = GSED(I,K,J)
-! EFFECTIVE RADIUS FOR RADIATION CODE (currently not coupled)
-! HM, ADD LIMIT TO PREVENT BLOWING UP OPTICAL PROPERTIES, 8/18/07
-          EFFC(I,K,J)     = MIN(EFFC(I,K,J),50.)*1.E-6
-          EFFC(I,K,J)     = MAX(EFFC(I,K,J),2.5)*1.E-6
-          EFFI(I,K,J)     = MIN(EFFI(I,K,J),125.)*1.E-6
-          EFFI(I,K,J)     = MAX(EFFI(I,K,J),5.)*1.E-6
-          EFFS(I,K,J)     = MIN(EFFS(I,K,J),1000.)*1.E-6
-          EFFS(I,K,J)     = MAX(EFFS(I,K,J),10.)*1.E-6
-!          EFFCS(I,K,J)     = MIN(EFFC(I,K,J),50.)
-!          EFFCS(I,K,J)     = MAX(EFFCS(I,K,J),1.)
-!          EFFIS(I,K,J)     = MIN(EFFI(I,K,J),130.)
-!          EFFIS(I,K,J)     = MAX(EFFIS(I,K,J),13.)
-
-! #if ( WRF_CHEM == 1)
-!            IF ( PRESENT( rainprod ) ) rainprod(i,k,j) = rainprod1d(I,K,J)
-!            IF ( PRESENT( evapprod ) ) evapprod(i,k,j) = evapprod1d(I,K,J)
-! #endif
-
-      end do
-
-! hm modified so that m2005 precip variables correctly match wrf precip variables
-!+---+-----------------------------------------------------------------+
-        !  IF ( PRESENT (diagflag) ) THEN
-        !  if (diagflag .and. do_radar_ref == 1) then
-        !   call refl10cm_hm (QV3D, QR3D, NR3D, QNI3D, NS3D, QG3D, NG3D,   &
-        !               t1d, PRES, dBZ, kts, kte, i, j)
-        !   do k = kts, kte
-        !      refl_10cm(i,k,j) = MAX(-35., dBZ(I,K,J))
-        !   enddo
-        !  endif
-        !  ENDIF
-!+---+-----------------------------------------------------------------+
-
-   end do
-   end do
-
-   !$acc parallel loop gang vector collapse(2)
-   do j=jts,jte      ! j loop (north-south)
-   do i=its,ite      ! i loop (east-west)
-      RAINNC(i,j) = RAINNC(I,J)+PRECPRT1D(i,j)
-      RAINNCV(i,j) = PRECPRT1D(i,j)
-! hm, added 7/13/13
-      SNOWNC(i,j) = SNOWNC(I,J)+SNOWPRT1D(i,j)
-      SNOWNCV(i,j) = SNOWPRT1D(i,j)
-      GRAUPELNC(i,j) = GRAUPELNC(I,J)+GRPLPRT1D(i,j)
-      GRAUPELNCV(i,j) = GRPLPRT1D(i,j)
-      SR(i,j) = SNOWRT1D(i,j)/(PRECPRT1D(i,j)+1.E-12)
-   enddo
-   enddo
-   ! !$omp end do
-   ! !$omp end parallel
-   !$acc end data
-
-END SUBROUTINE MP_MORR_TWO_MOMENT
+      RETURN
+      END SUBROUTINE MORR_TWO_MOMENT_MICRO
 
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 
@@ -4158,12 +4071,12 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 !  TYPE REFERS TO SATURATION WITH RESPECT TO LIQUID (0) OR ICE (1)
 
 ! REPLACE GOFF-GRATCH WITH FASTER FORMULATION FROM FLATAU ET AL. 1992, TABLE 4 (RIGHT-HAND COLUMN)
-      !$acc routine seq
+
       IMPLICIT NONE
 
       REAL DUM
-      REAL, INTENT(IN) :: T
-      INTEGER, INTENT(IN) :: TYPE
+      REAL T
+      INTEGER TYPE
 ! ice
       real a0i,a1i,a2i,a3i,a4i,a5i,a6i,a7i,a8i
       data a0i,a1i,a2i,a3i,a4i,a5i,a6i,a7i,a8i /&
@@ -4310,10 +4223,9 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
       implicit none
       INTEGER I,N
       LOGICAL PARITY
-      REAL, INTENT(IN) :: X
       REAL                                                          &
           CONV,EPS,FACT,HALF,ONE,RES,SUM,TWELVE,                    &
-          TWO,XBIG,XDEN,XINF,XMININ,XNUM,Y,Y1,YSQ,Z,ZERO
+          TWO,X,XBIG,XDEN,XINF,XMININ,XNUM,Y,Y1,YSQ,Z,ZERO
       REAL, DIMENSION(7) :: C
       REAL, DIMENSION(8) :: P
       REAL, DIMENSION(8) :: Q
@@ -4454,7 +4366,7 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 
       REAL FUNCTION DERF1(X)
       IMPLICIT NONE
-      REAL, INTENT(IN) :: X
+      REAL X
       REAL, DIMENSION(0 : 64) :: A, B
       REAL W,T,Y
       INTEGER K,I
@@ -4567,15 +4479,15 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 
 !+---+-----------------------------------------------------------------+
 
-!       subroutine refl10cm_hm (QV3D, QR3D, NR3D, QNI3D, NS3D, QG3D, NG3D, &
-!                       t1d, PRES, dBZ, kts, kte, ii, jj)
+!       subroutine refl10cm_hm (qv1d, qr1d, nr1d, qs1d, ns1d, qg1d, ng1d, &
+!                       t1d, p1d, dBZ, kts, kte, ii, jj)
 !
 !       IMPLICIT NONE
 !
 ! !..Sub arguments
 !       INTEGER, INTENT(IN):: kts, kte, ii, jj
 !       REAL, DIMENSION(kts:kte), INTENT(IN)::                            &
-!                       QV3D, QR3D, NR3D, QNI3D, NS3D, QG3D, NG3D, t1d, PRES
+!                       qv1d, qr1d, nr1d, qs1d, ns1d, qg1d, ng1d, t1d, p1d
 !       REAL, DIMENSION(kts:kte), INTENT(INOUT):: dBZ
 !
 ! !..Local variables
@@ -4597,55 +4509,55 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 ! !+---+
 !
 !       do k = kts, kte
-!          dBZ(I,K,J) = -35.0
+!          dBZ(k) = -35.0
 !       enddo
 !
 ! !+---+-----------------------------------------------------------------+
 ! !..Put column of data into local arrays.
 ! !+---+-----------------------------------------------------------------+
 !       do k = kts, kte
-!          temp(I,K,J) = T3D(I,K,J)
-!          qv(I,K,J) = MAX(1.E-10, QV3D(I,K,J))
-!          pres(I,K,J) = PRES(I,K,J)
-!          RHO = 0.622*pres(I,K,J)/(R*temp(I,K,J)*(qv(I,K,J)+0.622))
+!          temp(k) = t1d(k)
+!          qv(k) = MAX(1.E-10, qv1d(k))
+!          pres(k) = p1d(k)
+!          rho(k) = 0.622*pres(k)/(R*temp(k)*(qv(k)+0.622))
 !
-!          if (QR3D(I,K,J) .gt. 1.E-9) then
-!             rr(I,K,J) = QR3D(I,K,J)*RHO
-!             nr(I,K,J) = NR3D(I,K,J)*RHO
-!             lamr = (xam_r*xcrg(3)*xorg2*nr(I,K,J)/rr(I,K,J))**xobmr
-!             ilamr(I,K,J) = 1./lamr
-!             N0_r(I,K,J) = nr(I,K,J)*xorg2*lamr**xcre(2)
-!             L_qr(I,K,J) = .true.
+!          if (qr1d(k) .gt. 1.E-9) then
+!             rr(k) = qr1d(k)*rho(k)
+!             nr(k) = nr1d(k)*rho(k)
+!             lamr = (xam_r*xcrg(3)*xorg2*nr(k)/rr(k))**xobmr
+!             ilamr(k) = 1./lamr
+!             N0_r(k) = nr(k)*xorg2*lamr**xcre(2)
+!             L_qr(k) = .true.
 !          else
-!             rr(I,K,J) = 1.E-12
-!             nr(I,K,J) = 1.E-12
-!             L_qr(I,K,J) = .false.
+!             rr(k) = 1.E-12
+!             nr(k) = 1.E-12
+!             L_qr(k) = .false.
 !          endif
 !
-!          if (QNI3D(I,K,J) .gt. 1.E-9) then
-!             rs(I,K,J) = QNI3D(I,K,J)*RHO
-!             ns(I,K,J) = NS3D(I,K,J)*RHO
-!             lams = (xam_s*xcsg(3)*xosg2*ns(I,K,J)/rs(I,K,J))**xobms
-!             ilams(I,K,J) = 1./lams
-!             N0_s(I,K,J) = ns(I,K,J)*xosg2*lams**xcse(2)
-!             L_qs(I,K,J) = .true.
+!          if (qs1d(k) .gt. 1.E-9) then
+!             rs(k) = qs1d(k)*rho(k)
+!             ns(k) = ns1d(k)*rho(k)
+!             lams = (xam_s*xcsg(3)*xosg2*ns(k)/rs(k))**xobms
+!             ilams(k) = 1./lams
+!             N0_s(k) = ns(k)*xosg2*lams**xcse(2)
+!             L_qs(k) = .true.
 !          else
-!             rs(I,K,J) = 1.E-12
-!             ns(I,K,J) = 1.E-12
-!             L_qs(I,K,J) = .false.
+!             rs(k) = 1.E-12
+!             ns(k) = 1.E-12
+!             L_qs(k) = .false.
 !          endif
 !
-!          if (QG3D(I,K,J) .gt. 1.E-9) then
-!             rg(I,K,J) = QG3D(I,K,J)*RHO
-!             ng(I,K,J) = NG3D(I,K,J)*RHO
-!             lamg = (xam_g*xcgg(3)*xogg2*ng(I,K,J)/rg(I,K,J))**xobmg
-!             ilamg(I,K,J) = 1./lamg
-!             N0_g(I,K,J) = ng(I,K,J)*xogg2*lamg**xcge(2)
-!             L_qg(I,K,J) = .true.
+!          if (qg1d(k) .gt. 1.E-9) then
+!             rg(k) = qg1d(k)*rho(k)
+!             ng(k) = ng1d(k)*rho(k)
+!             lamg = (xam_g*xcgg(3)*xogg2*ng(k)/rg(k))**xobmg
+!             ilamg(k) = 1./lamg
+!             N0_g(k) = ng(k)*xogg2*lamg**xcge(2)
+!             L_qg(k) = .true.
 !          else
-!             rg(I,K,J) = 1.E-12
-!             ng(I,K,J) = 1.E-12
-!             L_qg(I,K,J) = .false.
+!             rg(k) = 1.E-12
+!             ng(k) = 1.E-12
+!             L_qg(k) = .false.
 !          endif
 !       enddo
 !
@@ -4655,8 +4567,8 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 !       melti = .false.
 !       k_0 = kts
 !       do k = kte-1, kts, -1
-!          if ( (temp(I,K,J).gt.273.15) .and. L_qr(I,K,J)                         &
-!                                   .and. (L_qs(I,K+1,J).or.L_qg(I,K+1,J)) ) then
+!          if ( (temp(k).gt.273.15) .and. L_qr(k)                         &
+!                                   .and. (L_qs(k+1).or.L_qg(k+1)) ) then
 !             k_0 = MAX(k+1, k_0)
 !             melti=.true.
 !             goto 195
@@ -4671,16 +4583,16 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 ! !+---+-----------------------------------------------------------------+
 !
 !       do k = kts, kte
-!          ze_rain(I,K,J) = 1.e-22
-!          ze_snow(I,K,J) = 1.e-22
-!          ze_graupel(I,K,J) = 1.e-22
-!          if (L_qr(I,K,J)) ze_rain(I,K,J) = N0_r(I,K,J)*xcrg(4)*ilamr(I,K,J)**xcre(4)
-!          if (L_qs(I,K,J)) ze_snow(I,K,J) = (0.176/0.93) * (6.0/PI)*(6.0/PI)     &
+!          ze_rain(k) = 1.e-22
+!          ze_snow(k) = 1.e-22
+!          ze_graupel(k) = 1.e-22
+!          if (L_qr(k)) ze_rain(k) = N0_r(k)*xcrg(4)*ilamr(k)**xcre(4)
+!          if (L_qs(k)) ze_snow(k) = (0.176/0.93) * (6.0/PI)*(6.0/PI)     &
 !                                  * (xam_s/900.0)*(xam_s/900.0)          &
-!                                  * N0_s(I,K,J)*xcsg(4)*ilams(I,K,J)**xcse(4)
-!          if (L_qg(I,K,J)) ze_graupel(I,K,J) = (0.176/0.93) * (6.0/PI)*(6.0/PI)  &
+!                                  * N0_s(k)*xcsg(4)*ilams(k)**xcse(4)
+!          if (L_qg(k)) ze_graupel(k) = (0.176/0.93) * (6.0/PI)*(6.0/PI)  &
 !                                     * (xam_g/900.0)*(xam_g/900.0)       &
-!                                     * N0_g(I,K,J)*xcgg(4)*ilamg(I,K,J)**xcge(4)
+!                                     * N0_g(k)*xcgg(4)*ilamg(k)**xcge(4)
 !       enddo
 !
 ! !+---+-----------------------------------------------------------------+
@@ -4695,10 +4607,10 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 !        do k = k_0-1, kts, -1
 !
 ! !..Reflectivity contributed by melting snow
-!           if (L_qs(I,K,J) .and. L_qs(k_0) ) then
-!            fmelt_s = MAX(0.005d0, MIN(1.0d0-rs(I,K,J)/rs(k_0), 0.99d0))
+!           if (L_qs(k) .and. L_qs(k_0) ) then
+!            fmelt_s = MAX(0.005d0, MIN(1.0d0-rs(k)/rs(k_0), 0.99d0))
 !            eta = 0.d0
-!            lams = 1./ilams(I,K,J)
+!            lams = 1./ilams(k)
 !            do n = 1, nrbins
 !               x = xam_s * xxDs(n)**xbm_s
 !               call rayleigh_soak_wetgraupel (x,DBLE(xocms),DBLE(xobms), &
@@ -4706,19 +4618,19 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 !                     CBACK, mixingrulestring_s, matrixstring_s,          &
 !                     inclusionstring_s, hoststring_s,                    &
 !                     hostmatrixstring_s, hostinclusionstring_s)
-!               f_d = N0_s(I,K,J)*xxDs(n)**xmu_s * DEXP(-lams*xxDs(n))
+!               f_d = N0_s(k)*xxDs(n)**xmu_s * DEXP(-lams*xxDs(n))
 !               eta = eta + f_d * CBACK * simpson(n) * xdts(n)
 !            enddo
-!            ze_snow(I,K,J) = SNGL(lamda4 / (pi5 * K_w) * eta)
+!            ze_snow(k) = SNGL(lamda4 / (pi5 * K_w) * eta)
 !           endif
 !
 !
 ! !..Reflectivity contributed by melting graupel
 !
-!           if (L_qg(I,K,J) .and. L_qg(k_0) ) then
-!            fmelt_g = MAX(0.005d0, MIN(1.0d0-rg(I,K,J)/rg(k_0), 0.99d0))
+!           if (L_qg(k) .and. L_qg(k_0) ) then
+!            fmelt_g = MAX(0.005d0, MIN(1.0d0-rg(k)/rg(k_0), 0.99d0))
 !            eta = 0.d0
-!            lamg = 1./ilamg(I,K,J)
+!            lamg = 1./ilamg(k)
 !            do n = 1, nrbins
 !               x = xam_g * xxDg(n)**xbm_g
 !               call rayleigh_soak_wetgraupel (x,DBLE(xocmg),DBLE(xobmg), &
@@ -4726,17 +4638,17 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 !                     CBACK, mixingrulestring_g, matrixstring_g,          &
 !                     inclusionstring_g, hoststring_g,                    &
 !                     hostmatrixstring_g, hostinclusionstring_g)
-!               f_d = N0_g(I,K,J)*xxDg(n)**xmu_g * DEXP(-lamg*xxDg(n))
+!               f_d = N0_g(k)*xxDg(n)**xmu_g * DEXP(-lamg*xxDg(n))
 !               eta = eta + f_d * CBACK * simpson(n) * xdtg(n)
 !            enddo
-!            ze_graupel(I,K,J) = SNGL(lamda4 / (pi5 * K_w) * eta)
+!            ze_graupel(k) = SNGL(lamda4 / (pi5 * K_w) * eta)
 !           endif
 !
 !        enddo
 !       endif
 !
 !       do k = kte, kts, -1
-!          dBZ(I,K,J) = 10.*log10((ze_rain(I,K,J)+ze_snow(I,K,J)+ze_graupel(I,K,J))*1.d18)
+!          dBZ(k) = 10.*log10((ze_rain(k)+ze_snow(k)+ze_graupel(k))*1.d18)
 !       enddo
 !
 !
