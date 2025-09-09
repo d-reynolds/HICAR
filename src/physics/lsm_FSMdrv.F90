@@ -134,7 +134,7 @@ contains
         if (options%restart%restart) then
             last_output = options%restart%restart_time
         else if (context_change) then
-            last_output = domain%next_output - domain%output_dt
+            call last_output%set(domain%next_output%mjd() - domain%output_dt%days())
         else
             last_output = options%general%start_time
         endif
@@ -253,10 +253,10 @@ contains
         call FSM_SETUP()
 
         if (SNTRAN+SNSLID > 0) then
-            call Qs_u_var%initialize(domain%grid2d)
-            call Qs_v_var%initialize(domain%grid2d)
-            call SD_0_var%initialize(domain%grid2d)
-            call Sice_0_var%initialize(domain%grid2d)
+            call Qs_u_var%initialize(kVARS%density,domain%grid2d)
+            call Qs_v_var%initialize(kVARS%density,domain%grid2d)
+            call SD_0_var%initialize(kVARS%density,domain%grid2d)
+            call Sice_0_var%initialize(kVARS%density,domain%grid2d)
         endif
 
         !!        
