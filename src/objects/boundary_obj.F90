@@ -319,10 +319,7 @@ contains
         !The lat/lon bounds of the domain object are used to find the appropriate indexes of the forcing data
         !These bounds are then extended by 1 in each direction to accomodate bilinear interpolation
 
-        !  read in latitude and longitude coordinate data
-        call io_read(parent_options%domain%init_conditions_file, parent_options%domain%lat_hi, parent_nest_lat)
-        call io_read(parent_options%domain%init_conditions_file, parent_options%domain%lon_hi, parent_nest_lon)
-        
+        !  read in latitude and longitude coordinate data        
         call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%lat_hi, parent_options%domain%lon_hi, parent_nest_lat, parent_nest_lon)
 
         if (minval(domain_lat) < minval(parent_nest_lat) .or. maxval(domain_lat) > maxval(parent_nest_lat)) then

@@ -834,6 +834,11 @@ contains
                 ! Get length of z dim
                 call check_ncdf( nf90_inquire_variable(ncid, var_id, dimids = dimid_3d), " Getting dim IDs for "//trim(name))
                 call check_ncdf( nf90_inquire_dimension(ncid, dimid_3d(3), len = nz), " Getting z dim len for "//trim(name))
+
+                !clip nz to be the extent needed, or the full extent of the variable in the file. This clip is a dummy check in case
+                ! the user changed the nz value for the domain and didn't delete the old restart file. Speaking from experience.
+                nz = min(nz, (this%k_e_w-this%k_s_w+1) )
+
                 
                 if (allocated(data3d)) deallocate(data3d)
                 allocate(data3d(nx,ny,nz,1))
