@@ -546,6 +546,7 @@ contains
     !!----------------------------------------------------------
     elemental function sat_mr(temperature,pressure)
     ! Calculate the saturated mixing ratio at a temperature (K), pressure (Pa)
+        !$acc routine seq
         implicit none
         real,intent(in) :: temperature,pressure
         real :: e_s,a,b

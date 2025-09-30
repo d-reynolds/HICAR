@@ -136,7 +136,8 @@ contains
             th2d = 0.0
 
             gz1oz0 = log((domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(:,kts,:) - domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d) / domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)
-            
+            !$acc enter data copyin(windspd,rmol,zol,qgh,qsfc,cpm,flhc,flqc,regime,mavail,th2d,gz1oz0)
+
             if (context_change) return
 
             call sfclayrevinit(ims,ime,jms,jme,                    &
@@ -159,7 +160,7 @@ contains
             windspd = sqrt(domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d(ims:ime,kms,jms:jme)**2 + domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d(ims:ime,kms,jms:jme)**2)
             where(windspd==0) windspd=1e-5            
 
-            call sfclayrev(u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d   & !-- u3d         3d u-velocity interpolated to theta points (m/s)
+            call SFCLAYREV(u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d   & !-- u3d         3d u-velocity interpolated to theta points (m/s)
                ,v3d=domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d              & !-- v3d         3d v-velocity interpolated to theta points (m/s)
                ,t3d=domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d         &
                ,qv3d=domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d        &
@@ -170,7 +171,7 @@ contains
                ,rovcp=rcp                              & ! rovcp = Rd/cp
                ,r=R_d                                  &  ! J/(kg K) specific gas constant for dry air
                ,xlv=XLV                                & !-- xlv         latent heat of vaporization (j/kg)
-               ,psfc=domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d   &
+               ,psfcpa=domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d   &
                ,chs=domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d                 &
                ,chs2=domain%vars_2d(domain%var_indx(kVARS%chs2)%v)%data_2d               &
                ,cqs2=domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d               &
@@ -229,12 +230,13 @@ contains
             endif
     end subroutine sfc
 
-!    subroutine sfc_finalize(options)
-!        implicit none
-!        type(options_t), intent(in) :: options
-!
-!        if (options%physics%surfacelayer==kSFC_MM5REV) then
-!        endif
-!
-!    end subroutine sfc_finalize
+   subroutine sfc_finalize(options)
+       implicit none
+       type(options_t), intent(in) :: options
+
+       if (options%physics%surfacelayer==kSFC_MM5REV) then
+            !$acc exit data delete(windspd,rmol,zol,qgh,qsfc,cpm,flhc,flqc,regime,mavail,th2d,gz1oz0)
+       endif
+
+   end subroutine sfc_finalize
 end module surface_layer

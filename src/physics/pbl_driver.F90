@@ -31,6 +31,7 @@ module planetary_boundary_layer
     !use pbl_diagnostic, only : diagnostic_pbl, finalize_diagnostic_pbl, init_diagnostic_pbl
     !use module_bl_ysu, only : ysuinit, ysu
     use module_bl_ysu, only : ysuinit, ysu
+    use module_bl_ysu_gpu, only : ysuinit_gpu, ysu_gpu
     use mod_wrf_constants, only : EOMEG, XLV, r_v, R_d, KARMAN, gravity, EP_1, EP_2, cp, rcp, rovg
     use icar_constants !, only : karman,stefan_boltzmann
     use ieee_arithmetic ! for debugging
@@ -153,6 +154,7 @@ contains
             if (allocated(RTHRATEN)) deallocate(RTHRATEN)
             allocate(RTHRATEN(ims:ime, kms:kme, jms:jme)) !initialize radiative heating tendencies and set to 0 in case user turns on ysu radiative heating w/o radiations scheme
             RTHRATEN = 0.0
+            !$acc enter data copyin(windspd,regime,RTHRATEN)
             ! initialize tendencies (this is done in ysu init but only for tiles, not mem (ie its vs ims))
             ! BK: check if this actually matters ???
             if(.not.context_change)then
@@ -171,7 +173,7 @@ contains
             endif
 
 
-            call ysuinit(rublten=domain%tend%u                  &
+            call ysuinit_gpu(rublten=domain%tend%u                  &
                         ,rvblten=domain%tend%v                  &
                         ,rthblten=domain%tend%th_pbl            &
                         ,rqvblten=domain%tend%qv_pbl            &
@@ -221,22 +223,42 @@ contains
         if (options%physics%boundarylayer==kPBL_YSU) then
 
             ! Reset tendencies before the next pbl call. (not sure if necessary)
-            domain%tend%qv_pbl    = 0
-            domain%tend%th_pbl    = 0
-            domain%tend%qc_pbl    = 0
-            domain%tend%qi_pbl    = 0
-            domain%tend%u         = 0
-            domain%tend%v         = 0
+            !$acc data present(domain,windspd,RTHRATEN,regime)
+            !$acc parallel
+            !$acc loop gang vector collapse(3)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                domain%tend%u(i,k,j)       = 0
+                domain%tend%v(i,k,j)       = 0
+                domain%tend%th_pbl(i,k,j)  = 0
+                domain%tend%qv_pbl(i,k,j)  = 0
+                domain%tend%qc_pbl(i,k,j)  = 0
+                domain%tend%qi_pbl(i,k,j)  = 0
+            enddo
+            enddo
+            enddo
 
-            ! windspd=sqrt(  domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d(ims:ime, 1, jms:jme)**2 +     &
-            !             domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d(ims:ime, 1, jms:jme)**2   )
-            windspd = sqrt(domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d**2 + domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d**2) ! as it is done in lsm_driver.
-            where(windspd==0) windspd=1e-5
+            !$acc loop gang vector collapse(2)
+            do j = jms,jme
+            do i = ims,ime
+                windspd(i,j) = sqrt(domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d(i,j)**2 + domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d(i,j)**2) ! as it is done in lsm_driver.
+                if (windspd(i,j)==0) windspd(i,j)=1e-5
+            enddo
+            enddo
+            ! if (options%physics%radiation==kRA_RRTMG) then
+                !$acc loop gang vector collapse(3)
+                do j = jms,jme
+                do k = kms,kme
+                do i = ims,ime
+                    RTHRATEN(i,k,j) = domain%tend%th_lwrad(i,k,j) + domain%tend%th_swrad(i,k,j)
+                enddo
+                enddo
+                enddo
+            ! endif
+            !$acc end parallel
 
-            if (options%physics%radiation==kRA_RRTMG) then
-                RTHRATEN = domain%tend%th_lwrad + domain%tend%th_swrad
-            endif
-            call ysu(u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d                           & !-- u3d         3d u-velocity interpolated to theta points (m/s)
+            call ysu_gpu(u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d                           & !-- u3d         3d u-velocity interpolated to theta points (m/s)
                     ,v3d=domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d                           & !-- v3d         3d v-velocity interpolated to theta points (m/s)
                     ,th3d=domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d           &
                     ,t3d=domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d                      &
@@ -246,6 +268,7 @@ contains
                     ,p3d=domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d                         & !-- p3d         3d pressure (pa)
                     ,p3di=domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d              & !-- p3di        3d pressure (pa) at interface level
                     ,pi3d=domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d                           & !-- pi3d        3d exner function (dimensionless)
+                    ,rho=domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d                           & !-- rho        3d density (kg/m^3)
                     ,rublten=domain%tend%u                               & ! i/o
                     ,rvblten=domain%tend%v                  & ! i/o
                     ,rthblten=domain%tend%th_pbl            & ! i/o
@@ -272,6 +295,7 @@ contains
                     ,qfx=domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d           & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
                     !,UOCE=uoce,VOCE=voce                                  & !ocean currents -- not currently used
                     !,CTOPO=ctopo,CTOPO2=ctopo2                            & !optional, only applied to momentum tendencies, not currently used
+                    ! ,tke_pbl=domain%vars_2d(domain%var_indx(kVARS%tke_pbl)%v)%data_2d               &
                     ,YSU_TOPDOWN_PBLMIX=options%pbl%ysu_topdown_pblmix                &
                     ,wspd=windspd                           & ! i/o -- wspd        wind speed at lowest model level (m/s)
                     ,br=domain%vars_2d(domain%var_indx(kVARS%br)%v)%data_2d                   & !-- br          bulk richardson number in surface layer
@@ -283,7 +307,7 @@ contains
                     ,RTHRATEN=RTHRATEN                                    &
 !                    ,WSTAR=wstar,DELTA=delta                              &  !Output variables of YSU which we currently dont use
                     ,exch_h=domain%vars_3d(domain%var_indx(kVARS%coeff_heat_exchange_3d)%v)%data_3d  & ! i/o -- exch_h ! exchange coefficient for heat, K m/s , but 3d??
-                    ,exch_m=domain%vars_3d(domain%var_indx(kVARS%coeff_momentum_exchange_3d)%v)%data_3d  & ! i/o -- exch_h ! exchange coefficient for heat, K m/s , but 3d??
+                    ! ,exch_m=domain%vars_3d(domain%var_indx(kVARS%coeff_momentum_exchange_3d)%v)%data_3d  & ! i/o -- exch_h ! exchange coefficient for heat, K m/s , but 3d??
                     ,u10=domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d               &
                     ,v10=domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d               &
                     ,ids=ids, ide=ide, jds=jds, jde=jde     &
@@ -293,6 +317,8 @@ contains
                     ,kts=kts, kte=kte-1                     &
                 !optional
                     ,regime=regime                          )!  i/o -- regime	flag indicating pbl regime (stable, unstable, etc.) - not used?
+                !$acc end data
+
 
                     ! if(STD_OUT_PE .and. options%general%debug) write(*,*) "  pbl height/lev is:", maxval(domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
 
@@ -350,10 +376,30 @@ contains
             ! domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d   =  domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d  +  tend_v_vgrid  * dt_in
 
             ! add mass grid tendencies
-            domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d            =  domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d            + domain%tend%qv_pbl  * dt
-            domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d       =  domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d       + domain%tend%qc_pbl  * dt
-            domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d  =  domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d  + domain%tend%th_pbl  * dt
-            domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d         =  domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d         + domain%tend%qi_pbl  * dt
+
+            associate(qv => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
+                        qc => domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d, &
+                        th => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d, &
+                        qi => domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d, &
+                        qv_tend => domain%tend%qv_pbl, &
+                        qc_tend => domain%tend%qc_pbl, &
+                        th_tend => domain%tend%th_pbl, &
+                        qi_tend => domain%tend%qi_pbl)
+
+            !$acc parallel loop gang vector collapse(3) present(qv,qc,th,qi,qv_tend,qc_tend,th_tend,qi_tend) copyin(dt)
+            do j = jts, jte
+                do k = kts, kte
+                    do i = its, ite
+                            qv(i,k,j) = qv(i,k,j) + qv_tend(i,k,j) * dt
+                            qc(i,k,j) = qc(i,k,j) + qc_tend(i,k,j) * dt
+                            th(i,k,j) = th(i,k,j) + th_tend(i,k,j) * dt
+                            qi(i,k,j) = qi(i,k,j) + qi_tend(i,k,j) * dt
+                    end do
+                end do
+            end do
+            end associate
+
+        
         endif
     end subroutine pbl_apply_tend
 
@@ -367,6 +413,9 @@ contains
         !else if (options%physics%boundarylayer==kPBL_DIAGNOSTIC) then
         !    call finalize_diagnostic_pbl()
         !endif
+
+
+        !$acc exit data delete(windspd,regime,RTHRATEN)
 
     end subroutine pbl_finalize
 end module planetary_boundary_layer

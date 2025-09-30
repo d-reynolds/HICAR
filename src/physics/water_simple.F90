@@ -25,19 +25,24 @@ contains
         integer, dimension(its:ite,jts:jte),  optional, intent(in)    :: vegtype
         integer, intent(in)                     :: its, ite, kts, kte, jts, jte
 
-        integer :: i, j
+        integer :: i, j, options_water, options_water_cat, options_lake_cat
 
+        options_water = options%physics%watersurface
+        options_water_cat = options%lsm%water_category
+        options_lake_cat  = options%lsm%lake_category
 
+        !$acc data present_or_copy(sst,psfc,wind,qv,temperature,sensible_heat,latent_heat,landmask,qv_surf,evap_flux,tskin,coef_heat_exch,vegtype,its,ite,jts,jte)
+        !$acc parallel loop gang vector collapse(2)
         do j=jts,jte
             do i=its,ite
                 if(                                                                         &
-                    ( (options%physics%watersurface==kWATER_SIMPLE) .AND.                   &   ! If lakemodel is not selected, use this
+                    ( (options_water==kWATER_SIMPLE) .AND.                   &   ! If lakemodel is not selected, use this
                       (landmask(i,j)==kLC_WATER)                                            & !(n.b. in case noah (mp or lsm) is not used, landmask may not be set correctly!)
                     )                                                                       &
                     .OR.                                                                    &
-                    ( (options%physics%watersurface==kWATER_LAKE) .AND.                     &    ! if lake model is selected, and
-                      (vegtype(i,j).eq.options%lsm%water_category) .AND.            &    !   gridcell is water,
-                      (vegtype(i,j).ne.options%lsm%lake_category)                   &    !   but not lake (i.e ocean)
+                    ( (options_water==kWATER_LAKE) .AND.                     &    ! if lake model is selected, and
+                      (vegtype(i,j).eq.options_water_cat) .AND.            &    !   gridcell is water,
+                      (vegtype(i,j).ne.options_lake_cat)                   &    !   but not lake (i.e ocean)
                     )                                                                         &
                 )then
                     qv_surf(i,j) = 0.98 * sat_mr(sst(i,j),psfc(i,j)) ! multiply by 0.98 to account for salinity
@@ -50,6 +55,7 @@ contains
                 endif
             end do
         end do
+        !$acc end data
 
     end subroutine water_simple
 
