@@ -184,12 +184,31 @@ contains
         real, dimension(ims:ime,kms:kme,jms:jme) :: rho_i
         
         !$acc data present(w, div, dz, jaco_w, rho) create(rho_i)
-        !$acc kernels
-        rho_i(:,kms:kme-1,:) = ( rho(:,kms:kme-1,:)*dz(:,kms+1:kme,:) + rho(:,kms+1:kme,:)*dz(:,kms:kme-1,:) ) / (dz(:,kms:kme-1,:)+dz(:,kms+1:kme,:))
-        rho_i(:,kme,:) = rho(:,kme,:)
-        w = 0
-        !$acc end kernels
-
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme-1
+            do i = ims, ime
+                rho_i(i,k,j) = ( rho(i,k,j)*dz(i,k+1,j) + rho(i,k+1,j)*dz(i,k,j) ) / (dz(i,k,j)+dz(i,k+1,j))
+            enddo
+            enddo
+        enddo
+        
+        !$acc parallel loop gang vector collapse(2)
+        do j = jms, jme
+            do i = ims, ime
+            rho_i(i,kme,j) = rho(i,kme,j)
+            w(i,kms,j) = 0
+            enddo
+        enddo
+        
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms+1, kme
+            do i = ims, ime
+                w(i,k,j) = 0
+            enddo
+            enddo
+        enddo
         !$acc parallel loop gang collapse(2)
         do j = j_s,j_e
         do i = i_s,i_e
@@ -229,7 +248,7 @@ contains
         logical,intent(in)    :: advect_density
         logical, optional, intent(in) :: horz_only
         
-        real, dimension(ims:ime,kms:kme,jms:jme) :: diff_U, diff_V, w_met
+        real, dimension(ims:ime,kms:kme,jms:jme) :: w_met
         real, dimension(ims:ime+1,kms:kme,jms:jme) :: u_met
         real, dimension(ims:ime,kms:kme,jms:jme+1) :: v_met
         real, dimension(ims:ime,kms:kme-1,jms:jme) :: rho_i
@@ -238,53 +257,135 @@ contains
         horz = .False.
         if (present(horz_only)) horz=horz_only
 
-        !$acc data present(div, u, v, w, dz, jaco, jaco_u, jaco_v, jaco_w, rho, dx) create(rho_i, u_met, v_met, w_met, diff_U, diff_V)
+        !$acc data present(div, u, v, w, dz, jaco, jaco_u, jaco_v, jaco_w, rho, dx) create(rho_i, u_met, v_met, w_met)
 
         !Multiplication of U/V by metric terms, converting jacobian to staggered-grid where possible, otherwise making assumption of
         !Constant jacobian at edges
         
-        !$acc kernels
 
         if (advect_density) then
-            u_met(ims+1:ime,:,:) = u(ims+1:ime,:,:) * jaco_u(ims+1:ime,:,:) * (rho(ims:ime-1,:,:) + rho(ims+1:ime,:,:))/2
-            u_met(ims,:,:) = u(ims,:,:) * jaco_u(ims,:,:) * (1.5*rho(ims,:,:) - 0.5*rho(ims+1,:,:))
-            u_met(ime+1,:,:) = u(ime+1,:,:) * jaco_u(ime+1,:,:) * (1.5*rho(ime,:,:) - 0.5*rho(ime-1,:,:))
+            !$acc parallel
+            !$acc loop gang vector collapse(3)
+            do j = jms, jme
+                do k = kms, kme
+                do i = ims+1, ime
+                    u_met(i,k,j) = u(i,k,j) * jaco_u(i,k,j) * (rho(i-1,k,j) + rho(i,k,j))/2
+                enddo
+                enddo
+            enddo
+            !$acc loop gang vector collapse(3)
+            do j = jms+1, jme
+                do k = kms, kme
+                do i = ims, ime
+                    v_met(i,k,j) = v(i,k,j) * jaco_v(i,k,j) * (rho(i,k,j-1) + rho(i,k,j))/2
+                enddo
+                enddo
+            enddo
+            !Handle edges assuming constant density gradient
+            !$acc loop gang vector collapse(2)
+            do j = jms, jme
+            do k = kms, kme
+                u_met(ims,k,j) = u(ims,k,j) * jaco_u(ims,k,j) * (1.5*rho(ims,k,j) - 0.5*rho(ims+1,k,j))
+                u_met(ime+1,k,j) = u(ime+1,k,j) * jaco_u(ime+1,k,j) * (1.5*rho(ime,k,j) - 0.5*rho(ime-1,k,j))
+            enddo
+            enddo
+            !$acc loop gang vector collapse(2)
+            do k = kms, kme
+            do i = ims, ime
+                v_met(i,k,jms) = v(i,k,jms) * jaco_v(i,k,jms) * (1.5*rho(i,k,jms) - 0.5*rho(i,k,jms+1))
+                v_met(i,k,jme+1) = v(i,k,jme+1) * jaco_v(i,k,jme+1) * (1.5*rho(i,k,jme) - 0.5*rho(i,k,jme-1))
+            enddo
+            enddo
 
-            v_met(:,:,jms+1:jme) = v(:,:,jms+1:jme) * jaco_v(:,:,jms+1:jme) * (rho(:,:,jms:jme-1) + rho(:,:,jms+1:jme))/2
-            v_met(:,:,jms) = v(:,:,jms) * jaco_v(:,:,jms) * (1.5*rho(:,:,jms) - 0.5*rho(:,:,jms+1))
-            v_met(:,:,jme+1) = v(:,:,jme+1) * jaco_v(:,:,jme+1) * (1.5*rho(:,:,jme) - 0.5*rho(:,:,jme-1))
-
-            rho_i(:,kms:kme-1,:) = ( rho(:,kms:kme-1,:)*dz(:,kms+1:kme,:) + rho(:,kms+1:kme,:)*dz(:,kms:kme-1,:) ) / (dz(:,kms:kme-1,:)+dz(:,kms+1:kme,:))
+            !$acc loop gang vector collapse(3)
+            do j = jms, jme
+                do k = kms, kme-1
+                do i = ims, ime
+                    !Interpolate density to w grid
+                    rho_i(i,k,j) = ( rho(i,k,j)*dz(i,k+1,j) + rho(i,k+1,j)*dz(i,k,j) ) / (dz(i,k,j)+dz(i,k+1,j))
+                enddo
+                enddo
+            enddo
+            !$acc end parallel
         else
-            u_met = u * jaco_u
-            v_met = v * jaco_v
+            !$acc parallel 
+            !$acc loop gang vector collapse(3)
+            do j = jms, jme
+                do k = kms, kme
+                do i = ims, ime+1
+                    u_met(i,k,j) = u(i,k,j) * jaco_u(i,k,j)
+                enddo
+                enddo
+            enddo
+            !$acc loop gang vector collapse(3)
+            do j = jms, jme+1
+                do k = kms, kme
+                do i = ims, ime
+                    v_met(i,k,j) = v(i,k,j) * jaco_v(i,k,j)
+                enddo
+                enddo
+            enddo
+            !$acc end parallel
         end if
 
-        diff_U = u_met(ims+1:ime+1, :, jms:jme) - u_met(ims:ime, :, jms:jme)
-        diff_V = v_met(ims:ime, :, jms+1:jme+1) - v_met(ims:ime, :, jms:jme)
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+            do i = ims, ime
+                div(i,k,j) = (u_met(i+1, k, j) - u_met(i, k, j) + &
+                              v_met(i, k, j+1) - v_met(i, k, j)) / dx
 
-        div = (diff_U+diff_V) /(dx)
+            enddo
+            enddo
+        enddo
 
         if (.NOT.(horz)) then
             if (advect_density) then
-                w_met(:,kme,:) = w(:,kme,:) * jaco_w(:,kme,:) * rho(:,kme,:)
-                w_met(:,kms:kme-1,:) = w(:,kms:kme-1,:) * jaco_w(:,kms:kme-1,:) * rho_i
+                !$acc parallel
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme-1
+                    do i = ims, ime
+                        !Interpolate density to w grid
+                        w_met(i,k,j) = w(i,k,j) * jaco_w(i,k,j) * rho_i(i,k,j)
+                    enddo
+                    enddo
+                enddo
+                !$acc loop gang vector collapse(2)
+                do j = jms,jme
+                do i = ims,ime
+                    w_met(i,kme,j) = w(i,kme,j) * jaco_w(i,kme,j) * rho(i,kme,j)
+                enddo
+                enddo
+                !$acc end parallel
             else
-                w_met = w*jaco_w
+                !$acc parallel loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme
+                        do i = ims, ime
+                            w_met(i,k,j) = w(i,k,j) * jaco_w(i,k,j)
+                        enddo
+                    enddo
+                enddo
             end if
 
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms,jme
             do k = kms,kme
+            do i = ims,ime
                 if (k == kms) then
-                    div(ims:ime, k, jms:jme) = div(ims:ime, k, jms:jme) + w_met(ims:ime, k, jms:jme)/(dz(ims:ime, k, jms:jme))
+                    div(i, k, j) = div(i, k, j) + w_met(i, k, j)/(dz(i, k, j))
                 else
-                    div(ims:ime, k, jms:jme) = div(ims:ime, k, jms:jme) + &
-                                   (w_met(ims:ime,k,jms:jme)-w_met(ims:ime,k-1,jms:jme))/(dz(ims:ime,k,jms:jme))
+                    div(i, k, j) = div(i, k, j) + &
+                                   (w_met(i,k,j)-w_met(i,k-1,j))/(dz(i,k,j))
                 endif
-            enddo
+                div(i, k, j) = div(i, k, j) / jaco(i,k,j)
 
-            div = div / jaco
+            enddo
+            enddo
+            enddo
         endif
-        !$acc end kernels
+
         !$acc end data
     end subroutine calc_divergence
     
