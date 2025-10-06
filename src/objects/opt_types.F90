@@ -235,7 +235,7 @@ module options_types
     ! store Radiation options
     ! ------------------------------------------------
     type rad_options_type
-       real    :: update_interval_rrtmg                ! how ofen to update the radiation in seconds.
+       real    :: update_interval_rad                  ! how ofen to update the radiation in seconds.
                                                        ! RRTMG scheme is expensive. Default is 1800s (30 minutes)
        integer :: icloud                               ! How RRTMG interact with clouds
        integer :: cldovrlp                             ! how RRTMG considers cloud overlapping (1 = random, 2 = maximum-random, 3 = maximum, 4 = exponential, 5 = exponential-random)

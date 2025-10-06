@@ -45,7 +45,7 @@
 !!----------------------------------------------------------
 module module_ra_simple
     use time_object,        only : Time_type
-    use mod_atm_utilities,  only : relative_humidity, calc_solar_elevation
+    use mod_atm_utilities,  only : relative_humidity
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
     use mod_wrf_constants,  only : piconst, DEGRAD, STBOLT
@@ -59,21 +59,17 @@ module module_ra_simple
 
 contains
 
-    function shortwave(day_frac, cloud_cover, solar_elevation, ims,ime, its,ite)
+    function shortwave(day_frac, cloud_cover, cosine_zenith_angle, ims,ime, its,ite)
         ! compute shortwave down at the surface based on solar elevation, fractional day of the year, and cloud fraction
         ! based on Reiff et al. (1984)
         implicit none
         real             :: shortwave       (ims:ime)
         real, intent(in) :: day_frac        (ims:ime)
         real, intent(in) :: cloud_cover     (ims:ime)
-        real, intent(in) :: solar_elevation (ims:ime)
+        real, intent(in) :: cosine_zenith_angle (ims:ime)
         integer, intent(in) :: ims,ime, its,ite
 
-        real :: sin_solar_elev(its:ite)
-
-        sin_solar_elev = sin(solar_elevation(its:ite))
-
-        shortwave(its:ite) = So * (1 + 0.035 * cos(day_frac(its:ite) * 2*piconst)) * sin_solar_elev * (0.48 + 0.29 * sin_solar_elev)
+        shortwave(its:ite) = So * (1 + 0.035 * cos(day_frac(its:ite) * 2*piconst)) * cosine_zenith_angle(its:ite) * (0.48 + 0.29 * cosine_zenith_angle(its:ite))
 
         ! note it is cloud_cover**3.4 in Reiff, but this makes almost no difference and integer powers are fast so could use **3
         shortwave(its:ite) = shortwave(its:ite) * (1 - (0.75 * (cloud_cover(its:ite)**3.4)) )
@@ -124,7 +120,7 @@ contains
     end function
 
     
-    subroutine ra_simple(theta, pii, qv, qc, qs, qr, p, swdown, lwdown, cloud_cover, lat, lon, date, options, dt, &
+    subroutine ra_simple(theta, pii, qv, qc, qs, qr, p, swdown, lwdown, cloud_cover, lat, lon, cosine_zenith_angle, date, options, dt, &
                 ims, ime, jms, jme, kms, kme, &
                 its, ite, jts, jte, kts, kte, &
                 F_runlw)
@@ -141,6 +137,7 @@ contains
         real, intent(out)  :: cloud_cover(ims:ime, jms:jme)
         real, intent(in)   :: lat        (ims:ime, jms:jme)
         real, intent(in)   :: lon        (ims:ime, jms:jme)
+        real, intent(in)   :: cosine_zenith_angle (ims:ime, jms:jme)
         type(Time_type),    intent(in) :: date
         type(options_t), intent(in) :: options
         real,               intent(in) :: dt
@@ -151,19 +148,18 @@ contains
         logical :: runlw
         real :: coolingrate
         integer :: i, j, k
-        real, allocatable, dimension(:) :: rh, T_air, solar_elevation, hydrometeors, day_frac
+        real, allocatable, dimension(:) :: rh, T_air, hydrometeors, day_frac
 
 
         runlw = .True.
         if (present(F_runlw)) runlw = F_runlw
 
-        !$omp parallel private(j,k,rh,T_air,solar_elevation,hydrometeors,day_frac,coolingrate) &
+        !$omp parallel private(j,k,rh,T_air,hydrometeors,day_frac,coolingrate) &
         !$omp shared(theta,pii,qv,p,qc,qs,qr,date,lon,cloud_cover,swdown,lwdown)                      &
         !$omp firstprivate(runlw, ims, ime, jms, jme, kms, kme, its, ite, jts, jte, kts, kte)
 
         allocate(rh             (ims:ime))
         allocate(T_air          (ims:ime))
-        allocate(solar_elevation(ims:ime))
         allocate(hydrometeors   (ims:ime))
         allocate(day_frac       (ims:ime))
 
@@ -189,14 +185,13 @@ contains
             end do
             where(hydrometeors<0) hydrometeors = 0
 
-            solar_elevation  = calc_solar_elevation(date, options%rad%tzone, lon, lat, j, ims,ime, jms,jme, its,ite)
 
             do i = its, ite
                 day_frac(i) = date%year_fraction(lon=lon(i,j))
             end do
     
             cloud_cover(:,j) = cloudfrac(rh, hydrometeors, ims,ime, its,ite)
-            swdown(:,j)      = shortwave(day_frac, cloud_cover(:,j), solar_elevation, ims,ime, its,ite)
+            swdown(:,j)      = shortwave(day_frac, cloud_cover(:,j), cosine_zenith_angle, ims,ime, its,ite)
             if (runlw) then
                 lwdown(:,j)      = longwave(T_air, cloud_cover(:,j), ims,ime, its,ite)
 
@@ -206,7 +201,7 @@ contains
         end do
         !$omp end do
 
-        deallocate(rh,T_air, solar_elevation, hydrometeors, day_frac)
+        deallocate(rh,T_air, hydrometeors, day_frac)
         !$omp end parallel
 
     end subroutine ra_simple

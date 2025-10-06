@@ -516,7 +516,8 @@ module icar_constants
     integer, parameter :: kRA_BASIC      = 1
     integer, parameter :: kRA_SIMPLE     = 2
     integer, parameter :: kRA_RRTMG      = 3
-
+    integer, parameter :: kRA_RRTMGP    = 4
+    
     integer, parameter :: kADV_STD       = 1
     integer, parameter :: kADV_MPDATA    = 2
 

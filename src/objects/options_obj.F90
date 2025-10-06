@@ -1992,13 +1992,13 @@ contains
         integer :: name_unit, rc
         logical :: print_info, gennml
 
-        real    :: update_interval_rrtmg(kMAX_NESTS)             ! minimum number of seconds between RRTMG updates
+        real    :: update_interval_rad(kMAX_NESTS)             ! minimum number of seconds between RRTMG updates
         integer :: icloud(kMAX_NESTS)                            ! how RRTMG interacts with clouds
         integer :: cldovrlp(kMAX_NESTS)                          ! how RRTMG considers cloud overlapping
         logical :: read_ghg(kMAX_NESTS)
         real    :: tzone(kMAX_NESTS) !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
         ! define the namelist
-        namelist /rad_parameters/ update_interval_rrtmg, icloud, read_ghg, cldovrlp, tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
+        namelist /rad_parameters/ update_interval_rad, icloud, read_ghg, cldovrlp, tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
         CHARACTER(LEN=200) :: error_msg
 
         print_info = .False.
@@ -2007,7 +2007,7 @@ contains
         gennml = .False.
         if (present(gen_nml)) gennml = gen_nml
 
-        call set_nml_var_default(update_interval_rrtmg, 'update_interval_rrtmg', print_info, gennml)
+        call set_nml_var_default(update_interval_rad, 'update_interval_rad', print_info, gennml)
         call set_nml_var_default(icloud, 'icloud', print_info, gennml)
         call set_nml_var_default(cldovrlp, 'cldovrlp', print_info, gennml)
         call set_nml_var_default(read_ghg, 'read_ghg', print_info, gennml)
@@ -2035,7 +2035,7 @@ contains
             ! endif
         endif
 
-        call set_nml_var(rad_options%update_interval_rrtmg, update_interval_rrtmg(n_indx), 'update_interval_rrtmg', update_interval_rrtmg(1))
+        call set_nml_var(rad_options%update_interval_rad, update_interval_rad(n_indx), 'update_interval_rad', update_interval_rad(1))
         call set_nml_var(rad_options%icloud, icloud(n_indx), 'icloud', icloud(1))
         call set_nml_var(rad_options%cldovrlp, cldovrlp(n_indx), 'cldovrlp', cldovrlp(1))
         call set_nml_var(rad_options%read_ghg, read_ghg(n_indx), 'read_ghg', read_ghg(1))

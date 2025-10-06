@@ -734,7 +734,7 @@ contains
 ! A FUNCTION OF TEMPERATURE AND PRESSURE
 !
     REAL FUNCTION RSLF(P,T)
-
+    !$acc routine seq
     IMPLICIT NONE
     REAL, INTENT(IN):: P, T
     REAL:: ESL,X
@@ -768,7 +768,7 @@ contains
 ! FUNCTION OF TEMPERATURE AND PRESSURE
 !
     REAL FUNCTION RSIF(P,T)
-
+    !$acc routine seq
     IMPLICIT NONE
     REAL, INTENT(IN):: P, T
     REAL:: ESI,X
@@ -797,30 +797,29 @@ contains
 
 !+---+-----------------------------------------------------------------+
 
-    SUBROUTINE cal_cldfra3(CLDFRA, qv, qc, qi, qs, dz,                &
-        &                 p, t, XLAND, gridkm,                             &
-        &                 modify_qvapor, max_relh,                         &
-        &                 kts,kte)
-   !
+    SUBROUTINE cal_cldfra3(CLDFRA, qv, qc, qi, qs, dz, p, t, XLAND, gridkm, max_relh, kts, kte, modify_qvapor, use_multilayer)
+        !$acc routine vector
         IMPLICIT NONE
    !
         INTEGER, INTENT(IN):: kts, kte
-        LOGICAL, INTENT(IN):: modify_qvapor
+        LOGICAL, INTENT(IN):: modify_qvapor, use_multilayer
         REAL, DIMENSION(kts:kte), INTENT(INOUT):: qv, qc, qi, cldfra
         REAL, DIMENSION(kts:kte), INTENT(IN):: p, t, dz, qs
         REAL, INTENT(IN):: gridkm, XLAND, max_relh
 
    !..Local vars.
         REAL:: RH_00L, RH_00O, RH_00
-        REAL:: entrmnt=0.5
+        REAL:: entrmnt
         INTEGER:: k
         REAL:: TC, qvsi, qvsw, RHUM, delz
         REAL, DIMENSION(kts:kte):: qvs, rh, rhoa
 
    !+---+
 
+        entrmnt = 0.5
    !..Initialize cloud fraction, compute RH, and rho-air.
 
+        !$acc loop vector
         DO k = kts,kte
             CLDFRA(K) = 0.0
             qvsw = rslf(P(k), t(k))
@@ -840,12 +839,13 @@ contains
         ENDDO
 
 
-   !..First cut scale-aware. Higher resolution should require closer to
-   !.. saturated grid box for higher cloud fraction.  Simple functions
-   !.. chosen based on Mocko and Cotton (1995) starting point and desire
-   !.. to get near 100% RH as grid spacing moves toward 1.0km, but higher
-   !.. RH over ocean required as compared to over land.
-
+!    !..First cut scale-aware. Higher resolution should require closer to
+!    !.. saturated grid box for higher cloud fraction.  Simple functions
+!    !.. chosen based on Mocko and Cotton (1995) starting point and desire
+!    !.. to get near 100% RH as grid spacing moves toward 1.0km, but higher
+!    !.. RH over ocean required as compared to over land.
+        
+        !$acc loop vector
         DO k = kts,kte
 
             delz = MAX(100., dz(k))
@@ -854,7 +854,7 @@ contains
             RHUM = rh(k)
 
             if (qc(k).gt.1.E-6 .or. qi(k).ge.1.E-7                         &
-        &                    .or. (qs(k).gt.1.E-6 .and. t(k).lt.273.)) then
+        &                    .or. (qs(k).gt.1.E-5 .and. t(k).lt.273.)) then
                CLDFRA(K) = 1.0
                qvs(k) = qv(k)
             else if (((qc(k)+qi(k)).gt.1.E-10) .and.                        &
@@ -900,19 +900,22 @@ contains
             endif
         ENDDO
 
-        call find_cloudLayers(qvs, cldfra, T, P, Dz, entrmnt,             &
-        &                      qc, qi, qs, kts,kte)
+        if (use_multilayer) then
+            call find_cloudLayers(qvs, cldfra, T, P, Dz, entrmnt,             &
+                                qc, qi, qs, kts,kte)
 
-   !..Do a final total column adjustment since we may have added more than 1mm
-   !.. LWP/IWP for multiple cloud decks.
+    !    !..Do a final total column adjustment since we may have added more than 1mm
+    !    !.. LWP/IWP for multiple cloud decks.
 
-        call adjust_cloudFinal(cldfra, qc, qi, rhoa, dz, kts,kte)
-        if (modify_qvapor) then
-            DO k = kts,kte
-                if (cldfra(k).gt.0.20 .and. cldfra(k).lt.1.0) then
-                  qv(k) = qvs(k)
-                endif
-            ENDDO
+            call adjust_cloudFinal(cldfra, qc, qi, rhoa, dz, kts,kte)
+            if (modify_qvapor) then
+                !$acc loop vector
+                DO k = kts,kte
+                    if (cldfra(k).gt.0.20 .and. cldfra(k).lt.1.0) then
+                    qv(k) = qvs(k)
+                    endif
+                ENDDO
+            endif
         endif
 
     END SUBROUTINE cal_cldfra3
@@ -924,7 +927,7 @@ contains
 
     SUBROUTINE find_cloudLayers(qvs1d, cfr1d, T1d, P1d, Dz1d, entrmnt,&
             &                            qc1d, qi1d, qs1d, kts,kte)
-       !
+        !$acc routine vector
         IMPLICIT NONE
        !
         INTEGER, INTENT(IN):: kts, kte
@@ -941,6 +944,7 @@ contains
        !+---+
 
         k_m12C = 0
+        !$acc loop vector
         DO k = kte, kts, -1
             theta(k) = T1d(k)*((100000.0/P1d(k))**(287.05/1004.))
             if (T1d(k)-273.16 .gt. -12.0 .and. P1d(k).gt.10100.0) k_m12C = MAX(k_m12C, k)
@@ -966,16 +970,17 @@ contains
        !.. tropopause height, as would any other diagnostic, so ensure resulting
        !.. k_tropo level is above 700hPa.
 
+        !$acc loop vector
         DO k = kte-3, kts, -1
             theta1 = theta(k)
             theta2 = theta(k+2)
             delz = dz1d(k) + dz1d(k+1) + dz1d(k+2)
             if ( ((((theta2-theta1)/delz) .lt. 10./1500. ) .AND.       &
             &                 (P1d(k).gt.8500.)) .or. (P1d(k).gt.70000.) ) then
-                goto 86
+                exit
             endif
         ENDDO
-    86  continue
+
         k_tropo = MAX(kts+2, MIN(k+2, kte-1))
 
         !if (k_tropo.gt.kte-2) then
@@ -986,6 +991,7 @@ contains
         !endif
 
        !..Eliminate possible fractional clouds above supposed tropopause.
+        !$acc loop vector
         DO k = k_tropo+1, kte
             if (cfr1d(k).gt.0.0 .and. cfr1d(k).lt.1.0) then
                 cfr1d(k) = 0.
@@ -997,10 +1003,12 @@ contains
        !.. likely to get clouds in more realistic capping inversion layer.
 
         kbot = kts+2
+        !$acc loop vector
         DO k = kbot, k_m12C
             if ( (theta(k)-theta(k-1)) .gt. 0.025E-3*Dz1d(k)) EXIT
         ENDDO
         kbot = MAX(kts+1, k-2)
+        !$acc loop vector
         DO k = kts, kbot
             if (cfr1d(k).gt.0.0 .and. cfr1d(k).lt.1.0) cfr1d(k) = 0.
         ENDDO
@@ -1021,13 +1029,14 @@ contains
                 k_cldt = MAX(k_cldt, k)
             endif
             if (in_cloud) then
+                !$acc loop vector
                 DO k2 = k_cldt-1, k_m12C, -1
                     if (cfr1d(k2).lt.0.01 .or. k2.eq.k_m12C) then
                         k_cldb = k2+1
-                        goto 87
+                        exit
                     endif
                 ENDDO
-        87      continue
+
                 in_cloud = .false.
             endif
             if ((k_cldt - k_cldb + 1) .ge. 2) then
@@ -1053,13 +1062,14 @@ contains
                 k_cldt = MAX(k_cldt, k)
             endif
             if (in_cloud) then
+                !$acc loop vector
                 DO k2 = k_cldt-1, kbot, -1
                     if (cfr1d(k2).lt.0.01 .or. k2.eq.kbot) then
                         k_cldb = k2+1
-                        goto 88
+                        exit
                     endif
                 ENDDO
-        88      continue
+
                 in_cloud = .false.
             endif
             if ((k_cldt - k_cldb + 1) .ge. 2) then
@@ -1167,7 +1177,7 @@ contains
     !.. the supposed amounts due to the cloud fraction scheme.
 
     SUBROUTINE adjust_cloudFinal(cfr, qc, qi, Rho,dz, kts,kte)
-
+        !$acc routine vector
         IMPLICIT NONE
                 !
         INTEGER, INTENT(IN):: kts,kte
@@ -1178,6 +1188,7 @@ contains
 
         lwp = 0.
         iwp = 0.
+        !$acc loop vector
         do k = kts, kte
             if (cfr(k).gt.0.0) then
                 lwp = lwp + qc(k)*Rho(k)*dz(k)
@@ -1187,6 +1198,7 @@ contains
 
         if (lwp .gt. 1.0) then
             xfac = 1.0/lwp
+            !$acc loop vector
             do k = kts, kte
                 if (cfr(k).gt.0.0 .and. cfr(k).lt.1.0) then
                     qc(k) = qc(k)*xfac
@@ -1196,6 +1208,7 @@ contains
 
         if (iwp .gt. 1.0) then
             xfac = 1.0/iwp
+                !$acc loop vector
                 do k = kts, kte
                     if (cfr(k).gt.0.0 .and. cfr(k).lt.1.0) then
                         qi(k) = qi(k)*xfac
@@ -1221,50 +1234,22 @@ contains
     end subroutine calc_Richardson_nr
 
 
-
-    !! MJ corrected, as calc_solar_elevation has largley understimated the zenith angle in Switzerland
-    !! MJ added: this is Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
-    !! MJ: note that this works everywhere and may be checked by https://gml.noaa.gov/grad/solcalc/index.html
-    !! MJ: the only parameter needs to be given is https://gml.noaa.gov/grad/solcalc/index.html UTC Offset here referred to tzone=1 for centeral Erupe. HACK: this should be given by use in the namelist file
-    !! MJ: Julian_day is a large value, we need to use the real64 format when applying TJ scheme in HICAR.
-    function calc_solar_elevation(date, tzone, lon, lat, j, ims,ime, jms,jme, its,ite, solar_azimuth)
+    subroutine calc_solar_date(date_seconds, julian_day, sun_declin_deg_out, eq_of_time_minutes_out)
         implicit none
-        real                       :: calc_solar_elevation(ims:ime)
-        type(Time_type),intent(in) :: date
-        real,           intent(in) :: tzone
-        real, dimension(ims:ime, jms:jme), intent(in) :: lon, lat
-        integer,        intent(in) :: j
-        integer,        intent(in) :: ims, ime, jms, jme
-        integer,        intent(in) :: its, ite
-        real, optional, intent(inout):: solar_azimuth(ims:ime)
-        
-        integer :: i
-        real, dimension(ims:ime) :: declination
-        real(real64) :: julian_day, julian_century!, tzone
+        real(real64),   intent(in)  :: date_seconds, julian_day
+        real(real64),   intent(out) :: sun_declin_deg_out, eq_of_time_minutes_out
+
+        real(real64) :: julian_century
         real(real64) :: geom_mean_long_sun_deg, geom_mean_anom_sun_deg, eccent_earth_orbit
         real(real64) :: sun_eq_of_ctr, sun_true_long_deg, sun_app_long_deg
-        real(real64) :: mean_obliq_ecliptic_deg, obliq_corr_deg, var_y, true_solar_time_min
-        real :: hour_angle_deg, solar_zenith_angle_deg, solar_elev_angle_deg
-        real :: lat_hr, lon_hr
-        real :: approx_atm_refrac_deg, solar_elev_corr_atm_ref_deg, solar_azimuth_angle
+        real(real64) :: mean_obliq_ecliptic_deg, obliq_corr_deg, var_y
 
         !These variables may only be updated some of the time
-        real, save :: sun_declin_deg, eq_of_time_minutes, timeofday
+        real, save :: sun_declin_deg, eq_of_time_minutes
         real(real64), save :: last_sun_declin = -3600.0   !Date since last calculating the sun declination in seconds
-        real(real64), save :: last_date = -3600.0 !Date of last calculation of time-of-day in seconds
-    
-        !!
-        calc_solar_elevation = 0
-        if(present(solar_azimuth)) solar_azimuth = 0
-
-        if (.not.(date%seconds()==last_date)) then
-            timeofday        = (real(date%hour)+real(date%minute)/60.+real(date%second)/3600.)/24.
-            last_date = date%seconds()
-        endif
 
         !If it has been more than an hour since the last calculation, recalculate the solar orbital position
-        if ((date%seconds()-last_sun_declin)>=3600) then
-            julian_day       = date%date_to_jd(date%year,date%month,date%day,date%hour,date%minute,date%second)-tzone/24.
+        if ((date_seconds-last_sun_declin)>=3600) then
             julian_century   = (julian_day - 2451545) / 36525.
             !!
             geom_mean_long_sun_deg = mod(280.46646 + julian_century * (36000.76983 + julian_century * 0.0003032),360.)
@@ -1281,16 +1266,47 @@ contains
             var_y = tan(DEGRAD *(obliq_corr_deg / 2)) * tan(DEGRAD *(obliq_corr_deg / 2))
             eq_of_time_minutes = 4 * RADDEG*(var_y  * sin(2 * DEGRAD *(geom_mean_long_sun_deg)) - 2 * eccent_earth_orbit * sin(DEGRAD *(geom_mean_anom_sun_deg)) + 4 * eccent_earth_orbit * var_y * sin(DEGRAD *(geom_mean_anom_sun_deg)) * cos(2  * DEGRAD *(geom_mean_long_sun_deg)) - 0.5 * var_y * var_y * sin(4 * DEGRAD *(geom_mean_long_sun_deg)) - 1.25 * eccent_earth_orbit * eccent_earth_orbit * sin(2 * DEGRAD *(geom_mean_anom_sun_deg)))
 
-            last_sun_declin = date%seconds()
+            last_sun_declin = date_seconds
             !!
         endif
 
+        sun_declin_deg_out = sun_declin_deg
+        eq_of_time_minutes_out = eq_of_time_minutes
+
+    end subroutine calc_solar_date
+
+    !! MJ corrected, as calc_solar_elevation has largley understimated the zenith angle in Switzerland
+    !! MJ added: this is Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
+    !! MJ: note that this works everywhere and may be checked by https://gml.noaa.gov/grad/solcalc/index.html
+    !! MJ: the only parameter needs to be given is https://gml.noaa.gov/grad/solcalc/index.html UTC Offset here referred to tzone=1 for centeral Erupe. HACK: this should be given by use in the namelist file
+    !! MJ: Julian_day is a large value, we need to use the real64 format when applying TJ scheme in HICAR.
+    subroutine calc_solar_elevation(solar_elevation, hour_frac, sun_declin_deg, eq_of_time_minutes, tzone, lon, lat, j, ims,ime, jms,jme, its,ite, solar_azimuth)
+        !$acc routine vector
+        implicit none
+        real,        intent(inout) :: solar_elevation(ims:ime)
+        real,           intent(in) :: hour_frac
+        real(real64),   intent(in) :: sun_declin_deg, eq_of_time_minutes
+        real,           intent(in) :: tzone
+        real, dimension(ims:ime, jms:jme), intent(in) :: lon, lat
+        integer,        intent(in) :: j
+        integer,        intent(in) :: ims, ime, jms, jme
+        integer,        intent(in) :: its, ite
+        real, optional, intent(inout):: solar_azimuth(ims:ime)
+        
+        integer :: i
+        real(real64) :: true_solar_time_min
+        real :: hour_angle_deg, solar_zenith_angle_deg, solar_elev_angle_deg
+        real :: lat_hr, lon_hr
+        real :: approx_atm_refrac_deg, solar_elev_corr_atm_ref_deg, solar_azimuth_angle    
         !!       
+        !$acc loop vector
         do i = its, ite           
             !!
+            solar_elevation(i)=0.0
+            if(present(solar_azimuth)) solar_azimuth(i)=0.0
             lon_hr=lon(i,j)
             lat_hr=RADDEG*asin(sin(lat(i,j)*DEGRAD))                
-            true_solar_time_min = mod(timeofday * 1440 + eq_of_time_minutes + 4 * lon_hr - 60. * tzone,1440.);
+            true_solar_time_min = mod(hour_frac * 1440 + eq_of_time_minutes + 4 * lon_hr - 60. * tzone,1440.);
             !!
             if (true_solar_time_min /4 < 0) then
                 hour_angle_deg=true_solar_time_min /4 + 180
@@ -1320,14 +1336,13 @@ contains
                 solar_azimuth_angle = mod(floor((540 - RADDEG*(acos(((sin(DEGRAD*(lat_hr)) * cos(DEGRAD*(solar_zenith_angle_deg))) - sin(DEGRAD*(sun_declin_deg))) / (cos(DEGRAD*(lat_hr)) * sin(DEGRAD*(solar_zenith_angle_deg))))))*100000)/100000,360);      
             endif                       
             
-            calc_solar_elevation(i)=solar_elev_corr_atm_ref_deg*DEGRAD
+            solar_elevation(i)=solar_elev_corr_atm_ref_deg*DEGRAD
             if(present(solar_azimuth)) solar_azimuth(i)=solar_azimuth_angle*DEGRAD
+            if (solar_elevation(i)<0.0) solar_elevation(i)=0.0
+            if (solar_elevation(i)>90.0) solar_elevation(i)=90.0
         end do
 
-        where(calc_solar_elevation<0.0) calc_solar_elevation=0.0
-        where(calc_solar_elevation>90.0) calc_solar_elevation=90.0
-
-    end function calc_solar_elevation
+    end subroutine calc_solar_elevation
 
 
     !! MJ added: based on https://solarsena.com/solar-azimuth-angle-calculator-solar-panels/

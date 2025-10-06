@@ -44,6 +44,7 @@ module time_object
         procedure, public  :: seconds     => get_seconds
         procedure, public  :: day_of_year => calc_day_of_year
         procedure, public  :: year_fraction=>calc_year_fraction
+        procedure, public  :: TOD_hours
         procedure, public  :: date_to_mjd => date_to_mjd
         procedure, public  :: date_to_jd => date_to_jd
         ! procedure, public  :: as_string   => as_string
@@ -214,10 +215,9 @@ interface
     !!  
     !!  MJ added
     !!------------------------------------------------------------
-    module function date_to_jd(this, year, month, day, hour, minute, second)
+    module function date_to_jd(this)
         implicit none
         class(Time_type), intent(in) :: this
-        integer, intent(in) :: year, month, day, hour, minute, second
         real(real64) :: date_to_jd
 
     end function date_to_jd
@@ -268,6 +268,16 @@ interface
 
     end function calc_year_fraction
 
+    !>------------------------------------------------------------
+    !!  Return the time of day in hours as a floating point
+    !!
+    !!------------------------------------------------------------
+    module function TOD_hours(this)
+        implicit none
+        real                        :: TOD_hours
+        class(Time_type)            :: this
+
+    end function TOD_hours
 
 
     !>------------------------------------------------------------

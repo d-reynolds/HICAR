@@ -2305,10 +2305,11 @@ contains
                                                        "0 = no RAD,"//achar(10)//BLNK_CHR_N// &
                                                        "1 = Surface fluxes from forcing data"//achar(10)//BLNK_CHR_N// &
                                                        "2 = cloud fraction based radiation + radiative cooling"//achar(10)//BLNK_CHR_N// &
-                                                       "3 = RRTMG"
+                                                       "3 = RRTMG"//achar(10)//BLNK_CHR_N// &
+                                                       "4 = RRTMGP"
 
-                allocate(values(4))
-                values = [0, 1, 2, 3]
+                allocate(values(5))
+                values = [0, 1, 2, 3, 4]
                 default = "0"
                 group = "Physics"
             case ("conv")
@@ -3300,7 +3301,7 @@ contains
             ! Radiation parameters namelist variables
             ! --------------------------------------
             ! --------------------------------------
-            case ("update_interval_rrtmg")
+            case ("update_interval_rad")
                 description = "Time interval for updating the radiation. If = 0, update every time step."
                 min = 0
                 max = 86400

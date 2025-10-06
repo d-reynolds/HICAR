@@ -37,7 +37,7 @@ module land_surface
     use module_sf_noahmpdrv, only : noahmplsm, noahmp_init
     use module_water_simple, only : water_simple
     use module_water_lake,   only : lake, lakeini, nlevsoil, nlevsnow, nlevlake
-    use mod_atm_utilities,   only : sat_mr, calc_Richardson_nr, calc_solar_elevation
+    use mod_atm_utilities,   only : sat_mr, calc_Richardson_nr
     use icar_constants,      only : kVARS, kLSM_NOAH, kLSM_NOAHMP, kSM_FSM, kMAX_NESTS
     use options_interface,   only : options_t
     use domain_interface,    only : domain_t
@@ -1354,16 +1354,6 @@ contains
 !                    call calc_declin(domain%sim_time%day_of_year(),real(domain%sim_time%hour),real(domain%sim_time%minute),real(domain%sim_time%second),domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d(I,J),domain%vars_2d(domain%var_indx(kVARS%longitude)%v)%data_2d(I,J),domain%cos_zenith%data_2d(I,J))
 !                  enddo
 !                enddo
-
-                allocate(solar_elevation(ims:ime))
-
-                do j = jms,jme
-
-                    solar_elevation  = calc_solar_elevation(date=domain%sim_time, tzone=options%rad%tzone, &
-                        lon=domain%vars_2d(domain%var_indx(kVARS%longitude)%v)%data_2d, lat=domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d, j=j, &
-                        ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite)
-                    domain%vars_2d(domain%var_indx(kVARS%cosine_zenith_angle)%v)%data_2d(ims:ime,j)=sin(solar_elevation(ims:ime))
-                enddo
 
                 if (options%physics%snowmodel==kSM_FSM) then
                     SR = 0.0 ! This, in combination with setting OPT_SNF to 4 in the LSM_init, will turn off snowfall partitioning in NoahMP
