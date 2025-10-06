@@ -347,12 +347,12 @@ contains
                   u_mass                => this%vars_3d(this%var_indx(kVARS%u_mass)%v)%data_3d,                 &
                   v_mass                => this%vars_3d(this%var_indx(kVARS%v_mass)%v)%data_3d,                 &
                   potential_temperature => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d )
-        !$acc data present(exner, pressure, pressure_i, dz_i, dz_mass, psfc, density, temperature, temperature_i, qv, u, v, u_mass, v_mass, potential_temperature) create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3)
+        !$acc data present(exner, pressure, future_pressure, pressure_i, dz_i, dz_mass, psfc, density, temperature, temperature_i, qv, u, v, u_mass, v_mass, potential_temperature) create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3)
 
         !Calculation of density
 
         if (forcing_update_only) then
-            !$acc parallel loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jms,jme
             do k = kms,kme
             do i = ims,ime
@@ -363,16 +363,78 @@ contains
             enddo
             enddo
         else
-            !$acc parallel loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jms,jme
             do k = kms,kme
             do i = ims,ime
-                exner(i,k,j) = exner_function(pressure(i,k,j))
+                exner(i,k,j) =  exner_function(pressure(i,k,j))
                 temperature(i,k,j) = potential_temperature(i,k,j) * exner(i,k,j)
                 density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,j))) ! kg/m^3
             enddo
             enddo
             enddo
+
+            if (this%var_indx(kVARS%u_mass)%v > 0) then
+                !$acc parallel loop gang vector collapse(3) async(2)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                            u_mass(i,k,j) = (u(i+1,k,j) + u(i,k,j)) * 0.5
+                            v_mass(i,k,j) = (v(i,k,j+1) + v(i,k,j)) * 0.5
+                        enddo
+                    enddo
+                enddo
+            endif
+
+            ! temporary constant
+            if (this%var_indx(kVARS%roughness_z0)%v > 0) then
+                associate(z            => this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d, &
+                          roughness_z0 => this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+                          terrain      => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d)
+
+                !$acc parallel loop gang vector collapse(2) async(3) present(z,roughness_z0,terrain)
+                do j = jms,jme
+                    do i = ims,ime
+                        ! use log-law of the wall to convert from first model level to surface
+                        surf_temp_1(i,j) = karman / log((z(i,kms,j) - terrain(i,j)) / roughness_z0(i,j))
+                        ! use log-law of the wall to convert from surface to 10m height
+                        surf_temp_2(i,j) = log(10.0 / roughness_z0(i,j)) / karman
+                    enddo
+                enddo
+
+                end associate
+            endif
+
+            if (this%var_indx(kVARS%u_10m)%v > 0) then
+                associate(v_10m => this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d, &
+                          u_10m => this%vars_2d(this%var_indx(kVARS%u_10m)%v)%data_2d)
+
+                !$acc parallel loop gang vector collapse(2) wait(2,3) async(4) present(u_10m, v_10m)
+                do j = jms,jme
+                    do i = ims,ime
+                        surf_temp_3(i,j)                         = u_mass      (i,kms,j) * surf_temp_1(i,j)
+                        u_10m(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
+                        surf_temp_3(i,j)                         = v_mass      (i,kms,j) * surf_temp_1(i,j)
+                        v_10m(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
+                    enddo
+                enddo
+
+                end associate
+            endif
+
+            if (this%var_indx(kVARS%ustar)%v > 0) then
+                associate(ustar => this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d)
+
+                !$acc parallel loop gang vector collapse(2) wait(2,3) async(5) present(ustar)
+                do j = jts,jte
+                    do i = its,ite
+                        ! now calculate master ustar based on U and V combined in quadrature
+                        ustar(i,j) = sqrt(u_mass(i,kms,j)**2 + v_mass(i,kms,j)**2) * surf_temp_1(i,j)
+                    enddo
+                enddo
+
+                end associate
+            endif
         endif
 
 
@@ -380,7 +442,7 @@ contains
         ! these then affect density, leading to discontinuities in density, and thus winds. So, here we set the density for points on the "frame"
         ! to be the same as the density in the first cell within the physics region of the domain
         if (ims==ids) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jms,jme
                 do k = kms,kme
                     do i = ims,its-1
@@ -395,7 +457,7 @@ contains
             enddo
         endif
         if (ime==ide) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jms,jme
                 do k = kms,kme
                     do i = ite+1,ime
@@ -410,7 +472,7 @@ contains
             enddo
         endif
         if (jms==jds) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jms,jts-1
                 do k = kms,kme
                     do i = ims,ime
@@ -425,7 +487,7 @@ contains
             enddo
         endif
         if (jme==jde) then 
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jte+1,jme
                 do k = kms,kme
                     do i = ims,ime
@@ -441,7 +503,7 @@ contains
         endif
 
         if (ims==ids .and. jms==jds) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jms,jts-1
                 do k = kms,kme
                     do i = ims,its-1
@@ -457,7 +519,7 @@ contains
         endif
 
         if (ims==ids .and. jme==jde) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jte+1,jme
                 do k = kms,kme
                     do i = ims,its-1
@@ -473,7 +535,7 @@ contains
         endif
 
         if (ime==ide .and. jms==jds) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jms,jts-1
                 do k = kms,kme
                     do i = ite+1,ime
@@ -489,7 +551,7 @@ contains
         endif
 
         if (ime==ide .and. jme==jde) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jte+1,jme
                 do k = kms,kme
                     do i = ite+1,ime
@@ -505,7 +567,7 @@ contains
         endif
 
         if (.not.(forcing_update_only)) then
-            !$acc parallel loop gang vector collapse(2) wait(1) async(2)
+            !$acc parallel loop gang vector collapse(2) wait(6) async(7)
             do j = jms,jme
                 do i = ims,ime
                     temperature_i(i,kms,j) = temperature(i,kms,j) + (temperature(i,kms,j) - temperature(i,kms+1,j)) * 0.5
@@ -513,7 +575,7 @@ contains
                 enddo
             enddo
 
-            !$acc parallel loop gang vector collapse(3)  wait(2) async(3)
+            !$acc parallel loop gang vector collapse(3)  wait(7) async(8)
             do j = jms,jme
                 do k = kms+1,kme
                     do i = ims,ime
@@ -523,7 +585,7 @@ contains
                 enddo
             enddo
 
-            !$acc parallel loop gang vector collapse(2)  wait(3) async(4)
+            !$acc parallel loop gang vector collapse(2)  wait(8) async(9)
             do j = jms,jme
                 do i = ims,ime
                     temperature_i(i,kme+1,j) = temperature(i,kme,j) + (temperature(i,kme,j) - temperature(i,kme-1,j)) * 0.5
@@ -531,26 +593,16 @@ contains
                 enddo
             enddo
 
-            if (this%var_indx(kVARS%u_mass)%v > 0) then
-                !$acc parallel loop gang vector collapse(3) async(5)
-                do j = jms,jme
-                    do k = kms,kme
-                        do i = ims,ime
-                            u_mass(i,k,j) = (u(i+1,k,j) + u(i,k,j)) * 0.5
-                            v_mass(i,k,j) = (v(i,k,j+1) + v(i,k,j)) * 0.5
-                        enddo
-                    enddo
-                enddo
-            endif
-
             if (this%var_indx(kVARS%surface_pressure)%v > 0) then
-                !$acc parallel loop gang vector collapse(2) async(6)
+                !$acc parallel loop gang vector collapse(2) async(10)
                 do j = jms,jme
                     do i = ims,ime
                         psfc(i,j) = pressure_i(i, kms, j)
                     enddo
                 enddo
             endif
+
+            !$acc wait
 
             if (this%var_indx(kVARS%ivt)%v > 0) then
                 call compute_ivt(this%vars_2d(this%var_indx(kVARS%ivt)%v)%data_2d, qv, u_mass, v_mass, pressure_i(:,kms:kme,:))
@@ -571,60 +623,7 @@ contains
                 if (this%var_indx(kVARS%graupel_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%graupel_mass)%v)%data_3d(i,k,j)
                 call compute_iq(this%vars_2d(this%var_indx(kVARS%iwi)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
             endif
-            
-            ! temporary constant
-            if (this%var_indx(kVARS%roughness_z0)%v > 0) then
-                associate(z            => this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d, &
-                          roughness_z0 => this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d, &
-                          terrain      => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d)
-
-                !$acc parallel loop gang vector collapse(2) async(7) present(z,roughness_z0,terrain)
-                do j = jms,jme
-                    do i = ims,ime
-                        ! use log-law of the wall to convert from first model level to surface
-                        surf_temp_1(i,j) = karman / log((z(i,kms,j) - terrain(i,j)) / roughness_z0(i,j))
-                        ! use log-law of the wall to convert from surface to 10m height
-                        surf_temp_2(i,j) = log(10.0 / roughness_z0(i,j)) / karman
-                    enddo
-                enddo
-
-                end associate
-            endif
-
-            if (this%var_indx(kVARS%u_10m)%v > 0) then
-                associate(v_10m => this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d, &
-                          u_10m => this%vars_2d(this%var_indx(kVARS%u_10m)%v)%data_2d)
-
-                !$acc parallel loop gang vector collapse(2) wait(5,7) async(8) present(u_10m, v_10m)
-                do j = jms,jme
-                    do i = ims,ime
-                        surf_temp_3(i,j)                         = u_mass      (i,kms,j) * surf_temp_1(i,j)
-                        u_10m(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
-                        surf_temp_3(i,j)                         = v_mass      (i,kms,j) * surf_temp_1(i,j)
-                        v_10m(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
-                    enddo
-                enddo
-
-                end associate
-            endif
-
-            if (this%var_indx(kVARS%ustar)%v > 0) then
-                associate(ustar => this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d)
-
-                !$acc parallel loop gang vector collapse(2) wait(5,7) async(8) present(ustar)
-                do j = jts,jte
-                    do i = its,ite
-                        ! now calculate master ustar based on U and V combined in quadrature
-                        ustar(i,j) = sqrt(u_mass(i,kms,j)**2 + v_mass(i,kms,j)**2) * surf_temp_1(i,j)
-                    enddo
-                enddo
-
-                end associate
-            endif
-
         endif
-
-        !$acc wait(1,2,3,4,5,6,7,8)
 
         !$acc end data
         end associate
@@ -2131,6 +2130,7 @@ contains
         if (this%var_indx(kVARS%temperature_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d=init_surf_temp
         if (this%var_indx(kVARS%humidity_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%humidity_2m)%v)%data_2d=0.001
         if (this%var_indx(kVARS%surface_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%surface_pressure)%v)%data_2d=102000
+        if (this%var_indx(kVARS%land_emissivity)%v > 0) this%vars_2d(this%var_indx(kVARS%land_emissivity)%v)%data_2d=0.95
         if (this%var_indx(kVARS%longwave_up)%v > 0) this%vars_2d(this%var_indx(kVARS%longwave_up)%v)%data_2d=0
         if (this%var_indx(kVARS%ground_heat_flux)%v > 0) this%vars_2d(this%var_indx(kVARS%ground_heat_flux)%v)%data_2d=0
         if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d=init_surf_temp

@@ -177,8 +177,7 @@ contains
   !                                                                        voce
 !
    real,     dimension( ims:ime, jms:jme )                                   , &
-             intent(in   )   ::                                         xland, &
-                                                                          hfx, &
+             intent(in   )   ::                                           hfx, &
                                                                           qfx, &
                                                                            br, &
                                                                          psfc
@@ -201,6 +200,10 @@ contains
 !
    integer,  dimension( ims:ime, jms:jme )                                   , &
              intent(out  )   ::                                        kpbl2d
+
+   integer,  dimension( ims:ime, jms:jme )                                   , &
+             intent(in  )   ::                                        xland
+
    logical,  intent(in)      ::                                       flag_qi
 !
 !optional
@@ -354,7 +357,7 @@ contains
 #if defined(mpas)
 !$acc kzhout,kzmout,kzqout, &
 #endif
-!$acc delta,wstar,xkzml,xkzhl,zfacent,entfac,ust3,wstar3,wstar3_2, &
+!$acc delta,wstar,xkzml,xkzhl,zfacent,entfac,ust3,wstar3,wstar3_2,uoce,voce, &
 !$acc hgamu,hgamv,wm2, we,bfxpbl,hfxpbl,qfxpbl,ufxpbl,vfxpbl,dthvx, tke_pbl) &
 !$acc present(u3d,v3d,t3d,qv3d,qc3d,qi3d,p3d,p3di,pi3d,                               &
 !$acc         rublten,rvblten,rthblten,                                   &
@@ -367,7 +370,7 @@ contains
 !$acc         exch_h,                                                     &
 !$acc         u10,v10,                                                     &
 !$acc         rthraten, rho,                                            &
-!$acc         regime) present_or_copyin(xland,dt,uoce,voce)
+!$acc         regime, xland)
 
 #if defined(mpas)
 !$acc parallel loop gang vector collapse(3)
@@ -690,7 +693,7 @@ do j = jts,jte
    enddo
    enddo
 
-!$acc parallel loop gang vector collapse(2) wait(10)
+!$acc parallel loop gang vector collapse(2) wait(10) async(51)
 do j = jts,jte
    do i = its,ite
 !!!     tvcon = (1.+ep1*qv3d(i,k,j))
@@ -710,7 +713,7 @@ do j = jts,jte
    enddo
 enddo
 
-!$acc parallel loop gang vector collapse(2)
+!$acc parallel loop gang vector collapse(2) wait(51) async(52)
   do j = jts,jte
    do i = its,ite
 !$acc loop seq
@@ -720,7 +723,7 @@ enddo
    enddo
    enddo
 
-!$acc parallel async(11) 
+!$acc parallel async(11) wait(52)
 !$acc loop gang vector collapse(3) private(tvcon)
 do j = jts,jte
    do k = kts,kte

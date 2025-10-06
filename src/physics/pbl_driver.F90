@@ -137,7 +137,10 @@ contains
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    YSU PBL"
 
             ! allocate local vars YSU:
-            if (allocated(windspd)) deallocate(windspd)
+            if (allocated(windspd)) then
+                !$acc exit data delete(windspd)
+                deallocate(windspd)
+            endif
             allocate(windspd(ims:ime, jms:jme))
             ! allocate(hpbl(ims:ime, jms:jme))  ! this should go to domain object for convective modules!!
             !allocate(u10d(ims:ime, jms:jme))
@@ -147,14 +150,22 @@ contains
             ! CHS = 0.01
             !allocate(xland_real(ims:ime,jms:jme))
             !xland_real=real(domain%land_mask)
-            if (allocated(regime)) deallocate(regime)
+            if (allocated(regime)) then
+                !$acc exit data delete(regime)
+                deallocate(regime)
+            endif
             allocate(regime(ims:ime,jms:jme))
             !allocate(tend_u_ugrid(ims:ime+1, kms:kme, jms:jme)) ! to add the calculated u/v tendencies to the u/v grid
             !allocate(tend_v_vgrid(ims:ime, kms:kme, jms:jme+1))
-            if (allocated(RTHRATEN)) deallocate(RTHRATEN)
+            if (allocated(RTHRATEN)) then
+                !$acc exit data delete(RTHRATEN)
+                deallocate(RTHRATEN)
+            endif
             allocate(RTHRATEN(ims:ime, kms:kme, jms:jme)) !initialize radiative heating tendencies and set to 0 in case user turns on ysu radiative heating w/o radiations scheme
             RTHRATEN = 0.0
+            
             !$acc enter data copyin(windspd,regime,RTHRATEN)
+            
             ! initialize tendencies (this is done in ysu init but only for tiles, not mem (ie its vs ims))
             ! BK: check if this actually matters ???
             if(.not.context_change)then
@@ -223,18 +234,24 @@ contains
         if (options%physics%boundarylayer==kPBL_YSU) then
 
             ! Reset tendencies before the next pbl call. (not sure if necessary)
-            !$acc data present(domain,windspd,RTHRATEN,regime)
-            !$acc parallel
+
+            associate(tend_u => domain%tend%u, tend_v => domain%tend%v, tend_th_pbl => domain%tend%th_pbl, &
+                      tend_qv_pbl => domain%tend%qv_pbl, tend_qc_pbl => domain%tend%qc_pbl, tend_qi_pbl => domain%tend%qi_pbl, &
+                      tend_th_lwrad => domain%tend%th_lwrad, tend_th_swrad => domain%tend%th_swrad, &
+                      u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
+                      v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d)
+            !$acc parallel present(tend_u, tend_v, tend_th_pbl, tend_qv_pbl, tend_qc_pbl, tend_qi_pbl, &
+            !$acc &               tend_th_lwrad, tend_th_swrad, u_10m, v_10m, windspd,RTHRATEN,regime) copyin(kVARS)
             !$acc loop gang vector collapse(3)
             do j = jms,jme
             do k = kms,kme
             do i = ims,ime
-                domain%tend%u(i,k,j)       = 0
-                domain%tend%v(i,k,j)       = 0
-                domain%tend%th_pbl(i,k,j)  = 0
-                domain%tend%qv_pbl(i,k,j)  = 0
-                domain%tend%qc_pbl(i,k,j)  = 0
-                domain%tend%qi_pbl(i,k,j)  = 0
+                tend_u(i,k,j)       = 0
+                tend_v(i,k,j)       = 0
+                tend_th_pbl(i,k,j)  = 0
+                tend_qv_pbl(i,k,j)  = 0
+                tend_qc_pbl(i,k,j)  = 0
+                tend_qi_pbl(i,k,j)  = 0
             enddo
             enddo
             enddo
@@ -242,7 +259,7 @@ contains
             !$acc loop gang vector collapse(2)
             do j = jms,jme
             do i = ims,ime
-                windspd(i,j) = sqrt(domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d(i,j)**2 + domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d(i,j)**2) ! as it is done in lsm_driver.
+                windspd(i,j) = sqrt(u_10m(i,j)**2 + v_10m(i,j)**2) ! as it is done in lsm_driver.
                 if (windspd(i,j)==0) windspd(i,j)=1e-5
             enddo
             enddo
@@ -251,12 +268,14 @@ contains
                 do j = jms,jme
                 do k = kms,kme
                 do i = ims,ime
-                    RTHRATEN(i,k,j) = domain%tend%th_lwrad(i,k,j) + domain%tend%th_swrad(i,k,j)
+                    RTHRATEN(i,k,j) = tend_th_lwrad(i,k,j) + tend_th_swrad(i,k,j)
                 enddo
                 enddo
                 enddo
             ! endif
             !$acc end parallel
+
+            end associate
 
             call ysu_gpu(u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d                           & !-- u3d         3d u-velocity interpolated to theta points (m/s)
                     ,v3d=domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d                           & !-- v3d         3d v-velocity interpolated to theta points (m/s)
@@ -290,7 +309,7 @@ contains
                     ,hpbl=domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d               & ! i/o -- hpbl	pbl height (m) - intent(inout)
                     ,psim=domain%vars_2d(domain%var_indx(kVARS%psim)%v)%data_2d               & !-- psim        similarity stability function for momentum - intent(in)
                     ,psih=domain%vars_2d(domain%var_indx(kVARS%psih)%v)%data_2d               & !-- psih        similarity stability function for heat- intent(in)
-                    ,xland=real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di)                               &
+                    ,xland=domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di                               &
                     ,hfx=domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d                     & !  HFX  - net upward heat flux at the surface (W/m^2)
                     ,qfx=domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d           & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
                     !,UOCE=uoce,VOCE=voce                                  & !ocean currents -- not currently used
@@ -317,7 +336,6 @@ contains
                     ,kts=kts, kte=kte-1                     &
                 !optional
                     ,regime=regime                          )!  i/o -- regime	flag indicating pbl regime (stable, unstable, etc.) - not used?
-                !$acc end data
 
 
                     ! if(STD_OUT_PE .and. options%general%debug) write(*,*) "  pbl height/lev is:", maxval(domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
@@ -386,7 +404,7 @@ contains
                         th_tend => domain%tend%th_pbl, &
                         qi_tend => domain%tend%qi_pbl)
 
-            !$acc parallel loop gang vector collapse(3) present(qv,qc,th,qi,qv_tend,qc_tend,th_tend,qi_tend) copyin(dt)
+            !$acc parallel loop gang vector collapse(3) present(qv,qc,th,qi,qv_tend,qc_tend,th_tend,qi_tend)
             do j = jts, jte
                 do k = kts, kte
                     do i = its, ite

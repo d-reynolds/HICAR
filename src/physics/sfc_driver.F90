@@ -98,18 +98,54 @@ contains
         if (options%physics%surfacelayer==kSFC_MM5REV) then
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Revised MM5"
             
-            if (allocated(windspd)) deallocate(windspd)
-            if (allocated(rmol)) deallocate(rmol)
-            if (allocated(zol)) deallocate(zol)
-            if (allocated(qgh)) deallocate(qgh)
-            if (allocated(qsfc)) deallocate(qsfc)
-            if (allocated(cpm)) deallocate(cpm)
-            if (allocated(flhc)) deallocate(flhc)
-            if (allocated(flqc)) deallocate(flqc)
-            if (allocated(regime)) deallocate(regime)
-            if (allocated(mavail)) deallocate(mavail)
-            if (allocated(th2d)) deallocate(th2d)
-            if (allocated(gz1oz0)) deallocate(gz1oz0)
+            if (allocated(windspd)) then
+                !$acc exit data delete(windspd)
+                deallocate(windspd)
+            endif
+            if (allocated(rmol)) then
+                !$acc exit data delete(rmol)
+                deallocate(rmol)
+            endif
+            if (allocated(zol)) then
+                !$acc exit data delete(zol)
+                deallocate(zol)
+            endif
+            if (allocated(qgh)) then
+                !$acc exit data delete(qgh)
+                deallocate(qgh)
+            endif
+            if (allocated(qsfc)) then
+                !$acc exit data delete(qsfc)
+                deallocate(qsfc)
+            endif
+            if (allocated(cpm)) then
+                !$acc exit data delete(cpm)
+                deallocate(cpm)
+            endif
+            if (allocated(flhc)) then
+                !$acc exit data delete(flhc)
+                deallocate(flhc)
+            endif
+            if (allocated(flqc)) then
+                !$acc exit data delete(flqc)
+                deallocate(flqc)
+            endif
+            if (allocated(regime)) then
+                !$acc exit data delete(regime)
+                deallocate(regime)
+            endif
+            if (allocated(mavail)) then
+                !$acc exit data delete(mavail)
+                deallocate(mavail)
+            endif
+            if (allocated(th2d)) then
+                !$acc exit data delete(th2d)
+                deallocate(th2d)
+            endif
+            if (allocated(gz1oz0)) then
+                !$acc exit data delete(gz1oz0)
+                deallocate(gz1oz0)
+            endif
             
             allocate(windspd(ims:ime, jms:jme))
             allocate(rmol(ims:ime, jms:jme))
@@ -194,7 +230,7 @@ contains
                ,ust=domain%vars_2d(domain%var_indx(kVARS%ustar)%v)%data_2d                       & ! i/o -- ust		u* in similarity theory (m/s)
                ,zol=zol                                & ! i/o -- zol		z/l height over monin-obukhov length - intent(inout) - but appears to not be used really?
                ,pblh=domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d               & ! i/o -- hpbl	pbl height (m) - intent(inout)
-               ,xland=real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di)           &
+               ,xland=domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di           &
                ,hfx=domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d       & !  HFX  - net upward heat flux at the surface (W/m^2)
                ,qfx=domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d                 & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
                ,lh=domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d          & !  LH  - net upward latent flux at the surface (W/m^2/s)

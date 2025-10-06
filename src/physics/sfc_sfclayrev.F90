@@ -139,8 +139,11 @@ CONTAINS
       REAL,     DIMENSION( ims:ime, jms:jme )                    , &
                 INTENT(IN   )               ::             MAVAIL, &
                                                              PBLH, &
-                                                            XLAND, &
                                                               TSK
+
+      INTEGER,     DIMENSION( ims:ime, jms:jme )                 , &
+                INTENT(IN   )               ::             XLAND
+
       REAL,     DIMENSION( ims:ime, jms:jme )                    , &
                 INTENT(OUT  )               ::                U10, &
                                                               V10, &
@@ -385,10 +388,10 @@ CONTAINS
     !$acc     HFX,QFX,LH,TSK,FLHC,FLQC,QGH,QSFC,RMOL, &
     !$acc     U10,V10,TH2,T2,Q2,                            &
     !$acc     GZ1OZ0,WSPD,BR,                     &
-    !$acc     ustm,ck,cka,cd,cda) present_or_copy(xland)    &
+    !$acc     ustm,ck,cka,cd,cda, xland)          &
     !$acc create(water_depth,THX,QX, &
     !$acc        DENOMQ,DENOMQ2,DENOMT2, &
-    !$acc        RHOX) copyin(scm_force_flux, isftcflx,iz0tlnd)
+    !$acc        RHOX)
 
 
     !$acc parallel loop gang vector collapse(2)
@@ -1149,7 +1152,7 @@ CONTAINS
    REAL,    INTENT(IN)      ::   shalwater_depth 
    INTEGER, INTENT(IN)      ::   bathymetry_flag 
    REAL,    DIMENSION( ims:ime, jms:jme ), INTENT(INOUT)    ::  water_depth
-   REAL,    DIMENSION( ims:ime, jms:jme ), INTENT(IN   )    ::  xland 
+   INTEGER,    DIMENSION( ims:ime, jms:jme ), INTENT(IN   )    ::  xland 
    INTEGER         ::     LakeModel
    REAL,    DIMENSION( ims:ime, jms:jme ), INTENT(IN   )    ::  lake_depth
    REAL,    DIMENSION( ims:ime, jms:jme )                   ::  lakemask  
