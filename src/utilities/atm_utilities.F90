@@ -836,7 +836,7 @@ contains
 
             rh(k) = MAX(0.01, qv(k)/qvs(k))
             rhoa(k) = p(k)/(287.0*t(k))
-        ENDDO
+!         ENDDO
 
 
 !    !..First cut scale-aware. Higher resolution should require closer to
@@ -845,8 +845,8 @@ contains
 !    !.. to get near 100% RH as grid spacing moves toward 1.0km, but higher
 !    !.. RH over ocean required as compared to over land.
         
-        !$acc loop vector
-        DO k = kts,kte
+!         !$acc loop vector
+!         DO k = kts,kte
 
             delz = MAX(100., dz(k))
             RH_00L = 0.77 + MIN(0.22,SQRT(1./(50.0+gridkm*gridkm*delz*0.01)))

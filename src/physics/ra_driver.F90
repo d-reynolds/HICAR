@@ -619,31 +619,20 @@ contains
                                 domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d(i,j) = 0
                             enddo
                         enddo
-                        !$acc parallel loop gang vector collapse(2) present(domain,qi, qc, qs, cldfra, p_1d, t_1d, qv_1d, qc_1d, qi_1d, qs_1d, Dz_1d, cf_1d)
+                        !$acc parallel loop gang(static: 1) vector collapse(2) present(domain,qi, qc, qs, cldfra, p_1d, t_1d, qv_1d, qc_1d, qi_1d, qs_1d, Dz_1d, cf_1d)
                         DO j = jts,jte
                             DO i = its,ite
-                                !$acc loop
-                                DO k = kts,kte
-                                    p_1d(k) = domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d(i,k,j)
-                                    t_1d(k) = domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d(i,k,j)
-                                    qv_1d(k) = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i,k,j)
-                                    qc_1d(k) = qc(i,k,j)
-                                    qi_1d(k) = qi(i,k,j)
-                                    qs_1d(k) = qs(i,k,j)
-                                    Dz_1d(k) = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,k,j)
-                                    cf_1d(k) = cldfra(i,k,j)
-                                ENDDO
-                                CALL cal_cldfra3(cf_1d, qv_1d, qc_1d, qi_1d, qs_1d, Dz_1d, &
-                                              p_1d, t_1d, real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(i,j)), &
+                                CALL cal_cldfra3(cldfra(i,:,j), domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i,:,j), &
+                                              qc(i,:,j), qi(i,:,j), qs(i,:,j), &
+                                              domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,:,j), &
+                                              domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d(i,:,j), &
+                                              domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d(i,:,j), &
+                                              real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(i,j)), &
                                               gridkm, 1.5, kms, kme,        &
                                               modify_qvapor=.false., use_multilayer=.False.)
                                 !$acc loop
                                 DO k = kts,kte
-                                    ! qc, qi and qs may be locally recalculated in cal_cldfra3 if use_multilayer is set to .True.
-                                    qc(i,k,j) = qc_1d(k)
-                                    qi(i,k,j) = qi_1d(k)
-                                    cldfra(i,k,j) = cf_1d(k)
-                                    domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d(i,j) = max(domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d(i,j), cf_1d(k))
+                                    domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d(i,j) = max(domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d(i,j), cldfra(i,k,j))
                                 ENDDO
                             ENDDO
                         ENDDO
@@ -848,12 +837,13 @@ contains
                                 q(col_indx,k)   = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i,k,j)*(amd/amw)
                                 ! o3(col_indx,k)   = domain%vars_3d(domain%var_indx(kVARS%ozone)%v)%data_3d(i,k,j)
 
-                                cld_frc = MAX(EPSILON(1.0_wp),cldfra(i,k,j))
 
                                 zwp(col_indx,k) = 0._wp
                                 swp(col_indx,k) = 1000.0*qs(i,k,j) * air_mass_lay
 
-                                if (cld_frc > 0.0_wp) then
+                                if (cldfra(i,k,j) > 0.0_wp) then
+                                    cld_frc = MAX(EPSILON(1.0_wp),cldfra(i,k,j))
+                                    
                                     lwp(col_indx,k) = 1000.0*qc(i,k,j) * air_mass_lay / cld_frc
                                     iwp(col_indx,k) = 1000.0*qi(i,k,j) * air_mass_lay / cld_frc
                                     rel(col_indx,k) = max(relmin, min(relmax,domain%vars_3d(domain%var_indx(kVARS%re_cloud)%v)%data_3d(i,k,j)))
@@ -875,8 +865,6 @@ contains
                             enddo
                         enddo
                     enddo
-
-                    !!!!!!!!cldfra
 
                     !$acc update host(p_lay)
 

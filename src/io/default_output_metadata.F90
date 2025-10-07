@@ -1063,7 +1063,7 @@ contains
         !!  Cloud cover fraction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%cloud_fraction) then
-            var_meta%name        = "clt"
+            var_meta%name        = "cldfrac"
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "cloud_area_fraction"),                 &
                                attribute_t("units",         "1"),                                   &
