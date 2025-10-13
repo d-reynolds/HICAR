@@ -461,7 +461,9 @@ contains
 ! Initial code: Guo-Yue Niu, Oct. 2007
 ! --------------------------------------------------------------------------------------------------
 
-  implicit none
+  !$acc routine seq
+  IMPLICIT NONE
+
 ! --------------------------------------------------------------------------------------------------
 ! input
   type (noahmp_parameters), INTENT(IN) :: parameters
@@ -1036,7 +1038,9 @@ END IF
 ! --------------------------------------------------------------------------------------------------
 ! re-process atmospheric forcing
 ! ----------------------------------------------------------------------
+  !$acc routine seq
   IMPLICIT NONE
+
 ! --------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -1223,7 +1227,8 @@ END IF
 ! --------------------------------------------------------------------------------------------------
 ! vegetation phenology considering vegeation canopy being buries by snow and evolution in time
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
   type (noahmp_parameters), intent(in) :: parameters
@@ -1337,7 +1342,8 @@ ENDIF   ! CROPTYPE == 0
 ! Michael Barlage: Oct 2013 - split CANWATER to calculate precip movement for
 !                             tracking of advected heat
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ------------------------ input/output variables --------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -1564,7 +1570,8 @@ ENDIF   ! CROPTYPE == 0
 ! --------------------------------------------------------------------------------------------------
 ! check surface energy balance and water balance
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
   type (noahmp_parameters), intent(in) :: parameters
@@ -1779,7 +1786,8 @@ ENDIF   ! CROPTYPE == 0
 !             /    |   |   |   |   |   |   |   |   / fraction, but with gaps. The 'tile'
 !            -------------------------------------- approach overlaps too much shadows.
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
   type (noahmp_parameters), intent(in) :: parameters
@@ -2369,7 +2377,8 @@ ENDIF   ! CROPTYPE == 0
                          DF      ,HCPCT   ,SNICEV  ,SNLIQV  ,EPORE   , & !out
                          FACT    )                                       !out
 ! -------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
   type (noahmp_parameters), intent(in) :: parameters
@@ -2478,7 +2487,8 @@ ENDIF   ! CROPTYPE == 0
 ! --------------------------------------------------------------------------------------------------
 ! Snow bulk density,volumetric capacity, and thermal conductivity
 !---------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 !---------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -2540,7 +2550,8 @@ ENDIF   ! CROPTYPE == 0
 ! Code history:
 ! June 2001 changes: frozen soil condition.
 ! --------------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   type (noahmp_parameters), intent(in) :: parameters
     INTEGER, INTENT(IN)    :: ISOIL  ! soil layer
     REAL, INTENT(IN)       :: SMC    ! total soil water
@@ -2653,7 +2664,8 @@ ENDIF   ! CROPTYPE == 0
                         SAV     ,SAG     ,FSR     ,FSA     ,FSRV    , &
                         FSRG    ,ALBSND  ,ALBSNI  ,BGAP    ,WGAP    )   !out
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -2785,7 +2797,8 @@ ENDIF   ! CROPTYPE == 0
 ! radiation) reflected, transmitted, and absorbed by vegetation.
 ! also sunlit fraction of the canopy.
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -2963,6 +2976,7 @@ ENDIF   ! CROPTYPE == 0
                      FSRG) !inout
 
 ! --------------------------------------------------------------------------------------------------
+!$acc routine seq
   IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
@@ -3080,7 +3094,8 @@ ENDIF   ! CROPTYPE == 0
 
   SUBROUTINE SNOW_AGE (parameters,DT,TG,SNEQVO,SNEQV,TAUSS,FAGE)
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ------------------------ code history ------------------------------------------------------------
 ! from BATS
 ! ------------------------ input/output variables --------------------------------------------------
@@ -3132,7 +3147,8 @@ ENDIF   ! CROPTYPE == 0
 
   SUBROUTINE SNOWALB_BATS (parameters,NBAND,FSNO,COSZ,FAGE,ALBSND,ALBSNI)
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
 
@@ -3187,7 +3203,8 @@ ENDIF   ! CROPTYPE == 0
 
   SUBROUTINE SNOWALB_CLASS (parameters,NBAND,QSNOW,DT,ALB,ALBOLD,ALBSND,ALBSNI,ILOC,JLOC)
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
 
@@ -3243,7 +3260,8 @@ ENDIF   ! CROPTYPE == 0
                         TG      ,ILOC    ,JLOC    ,                   & !in
                         ALBGRD  ,ALBGRI  )                              !out
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 !input
 
@@ -3315,7 +3333,8 @@ ENDIF   ! CROPTYPE == 0
 ! and transmitted through vegetation for unit incoming direct or diffuse
 ! flux given an underlying surface with known albedo.
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
 
@@ -3582,7 +3601,8 @@ ENDIF   ! CROPTYPE == 0
 ! -SAV + IRC[TV] + SHC[TV] + EVC[TV] + TR[TV] = 0
 ! -SAG + IRG[TG] + SHG[TG] + EVG[TG] + GH[TG] = 0
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -4204,7 +4224,8 @@ ENDIF   ! CROPTYPE == 0
 ! bare soil:
 ! -SAB + IRB[TG] + SHB[TG] + EVB[TG] + GHB[TG] = 0
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -4545,7 +4566,8 @@ ENDIF   ! CROPTYPE == 0
 ! compute under-canopy aerodynamic resistance RAG and leaf boundary layer
 ! resistance RB
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -4644,7 +4666,8 @@ ENDIF   ! CROPTYPE == 0
 ! -------------------------------------------------------------------------------------------------
 ! computing surface drag coefficient CM for momentum and CH for heat
 ! -------------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! -------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -4812,7 +4835,8 @@ ENDIF   ! CROPTYPE == 0
 ! CALCULATE SURFACE LAYER EXCHANGE COEFFICIENTS VIA ITERATIVE PROCESS.
 ! SEE CHEN ET AL (1997, BLM)
 ! -------------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   type (noahmp_parameters), intent(in) :: parameters
     INTEGER, INTENT(IN) :: ILOC
     INTEGER, INTENT(IN) :: JLOC
@@ -5020,7 +5044,8 @@ ENDIF   ! CROPTYPE == 0
 !  Joakim Refslund, 2011. Modified from NoahMP v3.6, which was modified from YSU SFCLAY.
 !  Modifications for Rev SFCLAY done by Dylan Reynolds, 2023.
 !-------------------------------------------------------------------                                                      
-   IMPLICIT NONE                                                                                                          
+!$acc routine seq
+IMPLICIT NONE                                                                                                          
 !-------------------------------------------------------------------                                                      
 ! parameters                                                                                                              
    REAL,   PARAMETER     :: XKA=2.4E-5                                                                                    
@@ -5415,7 +5440,8 @@ ENDIF   ! CROPTYPE == 0
 !---------------------------------------------------------------------------------------------------
 ! use polynomials to calculate saturation vapor pressure and derivative with
 ! respect to temperature: over water when t > 0 c and over ice when t <= 0 c
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 !---------------------------------------------------------------------------------------------------
 ! in
 
@@ -5469,7 +5495,8 @@ ENDIF   ! CROPTYPE == 0
                       O2      ,CO2     ,IGS     ,BTRAN   ,RB      , & !in
                       RS      ,PSN     )                              !out
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -5612,7 +5639,8 @@ ENDIF   ! CROPTYPE == 0
 ! --------------------------------------------------------------------------------------------------
 !niu    USE module_Noahlsm_utility
 ! --------------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -5683,7 +5711,8 @@ ENDIF   ! CROPTYPE == 0
 
         SUBROUTINE CALHUM(parameters,SFCTMP, SFCPRS, Q2SAT, DQSDT2)
 
-        IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 
   type (noahmp_parameters), intent(in) :: parameters
         REAL, INTENT(IN)       :: SFCTMP, SFCPRS
@@ -5722,7 +5751,8 @@ ENDIF   ! CROPTYPE == 0
 ! during melting season may exceed melting point (TFRZ) but later in PHASECHANGE
 ! subroutine the snow temperatures are reset to TFRZ for melting snow.
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 !input
 
@@ -5845,7 +5875,8 @@ ENDIF   ! CROPTYPE == 0
 ! thermal diffusion equation.  also to compute ( prepare ) the matrix
 ! coefficients for the tri-diagonal matrix of the implicit time scheme.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -5942,7 +5973,8 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! CALCULATE/UPDATE THE SOIL TEMPERATURE FIELD.
 ! ----------------------------------------------------------------------
-    implicit none
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -6012,7 +6044,8 @@ ENDIF   ! CROPTYPE == 0
 ! # 0  , . . . , 0 ,   0   ,   0   ,  A(M) ,  B(M) # # P(M) #   # D(M) #
 ! ###                                            ### ###  ###   ###  ###
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 
     INTEGER, INTENT(IN)   :: NTOP
     INTEGER, INTENT(IN)   :: NSOIL,NSNOW
@@ -6062,7 +6095,8 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! melting/freezing of snow water and soil water
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! inputs
 
@@ -6300,7 +6334,8 @@ ENDIF   ! CROPTYPE == 0
 ! OUTPUT:
 !   FREE..........SUPERCOOLED LIQUID WATER CONTENT [m3/m3]
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   type (noahmp_parameters), intent(in) :: parameters
     INTEGER,INTENT(IN)   :: ISOIL
     REAL, INTENT(IN)     :: SH2O,SMC,TKELV
@@ -6436,7 +6471,8 @@ ENDIF   ! CROPTYPE == 0
 ! Code history:
 ! Initial code: Guo-Yue Niu, Oct. 2007
 ! ----------------------------------------------------------------------
-  implicit none
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -6690,7 +6726,8 @@ ENDIF   ! CROPTYPE == 0
 ! ------------------------ code history ------------------------------
 ! canopy hydrology
 ! --------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ------------------------ input/output variables --------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -6818,7 +6855,8 @@ ENDIF   ! CROPTYPE == 0
                         SH2O   ,SICE   ,STC    ,ZSNSO  ,DZSNSO , & !inout
                         QSNBOT ,SNOFLOW,PONDING1       ,PONDING2)  !out
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -6952,7 +6990,8 @@ ENDIF   ! CROPTYPE == 0
 ! snow depth and density to account for the new snowfall.
 ! new values of snow depth & density returned.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -7019,7 +7058,8 @@ ENDIF   ! CROPTYPE == 0
                       DZSNSO ,SICE   ,SNOWH  ,SNEQV  ,         & !inout
                       PONDING1       ,PONDING2)                  !out
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -7205,7 +7245,8 @@ ENDIF   ! CROPTYPE == 0
   SUBROUTINE DIVIDE (parameters,NSNOW  ,NSOIL  ,                         & !in
                      ISNOW  ,STC    ,SNICE  ,SNLIQ  ,DZSNSO  )  !inout
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -7332,7 +7373,8 @@ ENDIF   ! CROPTYPE == 0
 
   SUBROUTINE COMBO(parameters,DZ,  WLIQ,  WICE, T, DZ2, WLIQ2, WICE2, T2)
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 
 ! ----------------------------------------------------------------------s
@@ -7388,7 +7430,8 @@ ENDIF   ! CROPTYPE == 0
                       SNLIQ  ,ZSOIL  ,IMELT  ,FICEOLD,ILOC   , JLOC , & !in
                       ISNOW  ,DZSNSO ,ZSNSO )                    !inout
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -7499,7 +7542,8 @@ ENDIF   ! CROPTYPE == 0
 ! Renew the mass of ice lens (SNICE) and liquid (SNLIQ) of the
 ! surface snow layer resulting from sublimation (frost) / evaporation (dew)
 ! ----------------------------------------------------------------------
-   IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -7649,7 +7693,8 @@ ENDIF   ! CROPTYPE == 0
 ! calculate surface runoff and soil moisture.
 ! ----------------------------------------------------------------------
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -7913,7 +7958,8 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! calculate equilibrium water table depth (Niu et al., 2005)
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -7971,7 +8017,8 @@ ENDIF   ! CROPTYPE == 0
 ! --------------------------------------------------------------------------------
 ! compute inflitration rate at soil surface and surface runoff
 ! --------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------
 ! inputs
   type (noahmp_parameters), intent(in) :: parameters
@@ -8075,7 +8122,8 @@ ENDIF   ! CROPTYPE == 0
 ! water diffusion equation.  also to compute ( prepare ) the matrix
 ! coefficients for the tri-diagonal matrix of the implicit time scheme.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 !input
 
@@ -8207,7 +8255,8 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! calculate/update soil moisture content values
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 !input
 
@@ -8329,7 +8378,8 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! calculate soil water diffusivity and soil hydraulic conductivity.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -8368,7 +8418,8 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! calculate soil water diffusivity and soil hydraulic conductivity.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -8422,7 +8473,8 @@ ENDIF   ! CROPTYPE == 0
   ! Author: Prasanth Valayamkunnath (NCAR) <prasanth@ucar.edu>
   ! Date  : 08/06/2020
   !-----------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   ! ----------------------------------------------------------------------------------------------
     ! inputs
     type (noahmp_parameters), intent(in)   :: parameters
@@ -8537,7 +8589,8 @@ ENDIF   ! CROPTYPE == 0
   ! Author: Prasanth Valayamkunnath (NCAR) <prasanth@ucar.edu>
   ! Date  : 08/06/2020
   !---------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   ! --------------------------------------------------------------------------------------------
     ! inputs
     type (noahmp_parameters), intent(in)    :: parameters
@@ -8613,7 +8666,8 @@ ENDIF   ! CROPTYPE == 0
   ! Author: Prasanth Valayamkunnath (NCAR) <prasanth@ucar.edu>
   ! Date  : 08/06/2020
   !---------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   ! --------------------------------------------------------------------------------------------
     ! inputs
     type (noahmp_parameters), intent(in)    :: parameters
@@ -8658,7 +8712,8 @@ ENDIF   ! CROPTYPE == 0
   ! Author: Prasanth Valayamkunnath (NCAR) <prasanth@ucar.edu>
   ! Date  : 08/06/2020
   !---------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   ! --------------------------------------------------------------------------------------------
     ! inputs
     type (noahmp_parameters), intent(in)    :: parameters
@@ -8702,7 +8757,8 @@ ENDIF   ! CROPTYPE == 0
   ! Author: Prasanth Valayamkunnath (NCAR) <prasanth@ucar.edu>
   ! Date  : 08/06/2020
   !---------------------------------------------------------------------------------------------
-   IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   ! --------------------------------------------------------------------------------------------
    type (noahmp_parameters), intent(in) :: parameters
    INTEGER,                  INTENT(IN) :: NSOIL  !number of soil layers
@@ -8759,7 +8815,8 @@ ENDIF   ! CROPTYPE == 0
                          SH2O   ,ZWT    ,WA     ,WT     ,         & !inout
                          QIN    ,QDIS   )                           !out
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -8948,7 +9005,8 @@ ENDIF   ! CROPTYPE == 0
 !Diagnoses water table depth and computes recharge when the water table is within the resolved soil layers,
 !according to the Miguez-Macho&Fan scheme
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -9092,7 +9150,8 @@ END  SUBROUTINE SHALLOWWATERTABLE
                      GPP    ,NPP    ,NEE    ,AUTORS ,HETERS ,TOTSC  , & !out
                      TOTLB  ,XLAI   ,XSAI   )                   !out
 ! ------------------------------------------------------------------------------------------
-      IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ------------------------------------------------------------------------------------------
 ! inputs (carbon)
 
@@ -9208,7 +9267,8 @@ END  SUBROUTINE SHALLOWWATERTABLE
 ! -----------------------------------------------------------------------------------------
 ! The original code is from RE Dickinson et al.(1998), modifed by Guo-Yue Niu, 2004
 ! -----------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! -----------------------------------------------------------------------------------------
 
 ! input
@@ -9480,7 +9540,8 @@ END  SUBROUTINE SHALLOWWATERTABLE
 ! Initial crop version added by Barlage v3.8
 
 ! ------------------------------------------------------------------------------------------
-      IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ------------------------------------------------------------------------------------------
 ! inputs (carbon)
 
@@ -9599,7 +9660,8 @@ END  SUBROUTINE SHALLOWWATERTABLE
 ! modified by Xing Liu, 2014.
 !
 ! -----------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! -----------------------------------------------------------------------------------------
 
 ! input
@@ -10173,7 +10235,8 @@ END SUBROUTINE PSN_CROP
 !*----------------------------------------------------------------------*
 
 SUBROUTINE EMERG(DT, TSOIL, DD, TBEM, EMA, EMB, STATE_GECROS)
-      IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
       REAL, INTENT(IN) :: DT, TSOIL, DD, TBEM, EMA, EMB
       REAL, DIMENSION(1:60), INTENT(INOUT) :: STATE_GECROS
       REAL :: EMTH, TINT
@@ -10206,7 +10269,8 @@ END SUBROUTINE EMERG
                              iopt_inf  ,iopt_rad  ,iopt_alb  ,iopt_snf  ,iopt_tbot, iopt_stc, &
 			     iopt_rsf , iopt_soil, iopt_pedo, iopt_crop, iopt_irr, iopt_irrm)
 
-  implicit none
+!$acc routine seq
+IMPLICIT NONE
 
   INTEGER,  INTENT(IN) :: idveg     !dynamic vegetation (1 -> off ; 2 -> on) with opt_crs = 1
   INTEGER,  INTENT(IN) :: iopt_crs  !canopy stomatal resistance (1-> Ball-Berry; 2->Jarvis)
