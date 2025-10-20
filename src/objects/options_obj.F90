@@ -408,7 +408,7 @@ contains
         ! check if the last entry in dz_levels is zero, which would indicate that nz is larger than the number
         ! of entries in dz_levels, or that the user passed bad data
         if (this%domain%nz > 1) then
-            if (this%domain%dz_levels(this%domain%nz) == 0) then
+            if ( (this%domain%dz_levels(this%domain%nz) == 0) .and. (this%domain%auto_level == 0) ) then
                 if (STD_OUT_PE) write(*,*) "  nz is larger than the number of entries in dz_levels, or the last entry in dz_levels is zero."
                 stop
             endif

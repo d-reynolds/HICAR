@@ -1011,10 +1011,11 @@ contains
 
             allocate(dz(nz))
 
-            ! Implementation of ICON-like automatic level-generation, that is either cubic or quadratic (COSMO style) !!!!STILL EXPERIMENTAL!!!!
+            ! Implementation of ICON-like automatic level-generation, that is either cubic or quadratic or exponential !!!!STILL EXPERIMENTAL!!!!
             ! If auto_sleve is set to 0, then dz is not modified and the rest of the sleve setup is done normally.
             ! If auto_sleve is set to 1, then dz is modified to be a cubic polynomial (Used in ICON if itype_laydistr==2).
             ! If auto_sleve is set to 2, then dz is modified to be a quadratic polynomial (COSMO style, used in ICON if itype_laydistr==3).
+            ! If auto_sleve is set to 3, then dz is modified to be an exponential stretching (eta-style as in WRF).
             ! Lowest layer thickness is set to min_lay_thickn, model top height is set to top_height, and stretch_fac is used to control the distribution of dz.
             ! After automatic level generation, the new dz is used to calculate the SLEVE levels as usual.
             if (auto_sleve .ge. 1) then
@@ -1078,7 +1079,7 @@ contains
                 if (STD_OUT_PE) then
                     write(*,*) '    Using automatic sleve level generation with auto_sleve = ', auto_sleve
                     write(*,*) '    Vertical grid setup BEFORE SLEVE transformation:'
-                    write(*,*) '    Lowest 10 model layer heights dz(1:11) = ', dz(1:11), ' m above ground.'
+                    write(*,*) '    Lowest 10 model layer heights dz(1:10) = ', dz(1:10), ' m above ground.'
                     write(*,*) '    Model top (sum(dz))  = ', sum(dz), ' m.a.s.l.'
                     write(*,*) '    Stretch factor = ', stretch_fac, &
                             ',   min layer thickness = ', minval(dz), ' m'
