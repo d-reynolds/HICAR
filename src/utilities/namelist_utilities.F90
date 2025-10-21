@@ -1370,15 +1370,15 @@ contains
                 default = "20.0"
                 group = "Domain"
             case("model_top_height")
-                description = "Model top height in meters, only used when auto_sleve=1 or 2."
+                description = "Model top height in meters, only used when auto_sleve = 1, 2 or 3."
                 min = 0.1
                 max = 1e6
                 default = "10000.0"
                 group = "Domain"
             case("stretch_fac")
-                description = "Factor that controls distribution of the vertical levels, only used when auto_sleve=1 or 2." //achar(10)//BLNK_CHR_N// &
-                    "Values: 0 -> linearly spaced levels, 1 -> parabolic or quadratic distribution depending on auto_sleve." //achar(10)//BLNK_CHR_N// &
-                    "Higher stretching is experimental but possible."
+                description = "Factor that controls distribution of the vertical levels, only used when auto_sleve = 1, 2 or 3." //achar(10)//BLNK_CHR_N// &
+                    "Values: 0 -> linearly spaced levels, 1 -> parabolic, quadratic or exponential distribution depending on auto_sleve." //achar(10)//BLNK_CHR_N// &
+                    "Higher stretching is possible."
                 min = 0.0
                 max = 10.0
                 default = "0.7"

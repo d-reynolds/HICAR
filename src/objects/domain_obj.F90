@@ -1016,6 +1016,7 @@ contains
             ! If auto_sleve is set to 1, then dz is modified to be a cubic polynomial (Used in ICON if itype_laydistr==2).
             ! If auto_sleve is set to 2, then dz is modified to be a quadratic polynomial (COSMO style, used in ICON if itype_laydistr==3).
             ! If auto_sleve is set to 3, then dz is modified to be an exponential stretching (eta-style as in WRF).
+            ! If auto_sleve is set to 4, then dz is modified to be an arccosine-based distribution (another COSMO-like option as seen in src_artifdata; can be set in ICON using itype_laydistr == 1).
             ! Lowest layer thickness is set to min_lay_thickn, model top height is set to top_height, and stretch_fac is used to control the distribution of dz.
             ! After automatic level generation, the new dz is used to calculate the SLEVE levels as usual.
             if (auto_sleve .ge. 1) then
@@ -1025,27 +1026,27 @@ contains
 
                 select case (auto_sleve)
                 case (1)
-                    ! case 1: ICON-style cubic half-level polynomial (bottom-up)
-                    x1 = (2*stretch_fac - 1) * min_lay_thckn
+                    ! case 1: ICON-style third-order polynomial half-levels that allows choice of min_lay_thckn; stretch_fac needs to be between 0.5 and 1.0!!!
+                    !         There's quite a lot that can go wrong, if stretch_fac, min_lay_thckn, top_height, nz are not chosen well!
+                    x1 = (2._wp*stretch_fac - 1._wp) * min_lay_thckn
                     b  = ( top_height &
-                        - (x1/6)*nz**3 &
-                        - (min_lay_thckn - x1/6)*nz &
-                        ) / ( nz**2 - nz**3/3 - 2*nz/3 )
-                    a  = (x1 - 2*b) / 6
+                        - (x1/6._wp)*nz**3 &
+                        - (min_lay_thckn - x1/6._wp)*nz &
+                         ) / (nz**2-1._wp/3._wp*nz**3-2._wp/3._wp*nz)
+                    a  = (x1 - 2._wp*b) / 6._wp
                     c  = min_lay_thckn - (a + b)
                     do jk = 1, nlevp1
-                        jkr       = real(jk - 1)       ! 0 at bottom, nz at top
-                        vct_a(jk) = a*jkr**3 + b*jkr**2 + c
+                        jkr       = real(nlevp1-jk,wp)       ! reverse index as function approaches top height at 0, and 0 at nz
+                        vct_a(jk) = a*jkr**3 + b*jkr**2 + c*jkr ! jk=1 is model bottom, jk=nz+1 is model top half-level
                     end do
 
                 case (2)
-                    ! case 2: quadratic half-level polynomial
-                    b_lin = real(nz) * min_lay_thckn / top_height
-                    a_lin = 1.0 - b_lin
+                    ! case 2: second-order polynomial half-levels (COSMO style, s. COSMO-TR No.21 p.33, Baldauf(2013)); stretch_fac needs to be between 0.0 and 1.0!!!
                     do jk = 1, nlevp1
-                        x         = real(jk - 1) / real(nz)
-                        vct_a(jk) = top_height * (a_lin*x**2 + b_lin*x)
+                        x1 = real( nz - jk, wp) / real( nz, wp) ! diverting from the original here (using nz instead of nz+1 in nominator) to ensure vector_a(0) = 0 as in auto_sleve case 1
+                        vct_a(jk) = top_height * x1 * ( stretch_fac * x1 + 1.0_wp-stretch_fac )
                     end do
+
 
                 case (3)
                     ! case 3: eta-style exponential half-level stretching
@@ -1064,11 +1065,49 @@ contains
 !                            vct_a(jk) = vct_a(jk) + dz1_offset
 !                        end do
 !                    endif
+                case (4)
+                    ! case 4: arccosine-based half-level distribution (another COSMO-like option as seen in src_artifdata; can be set in ICON using itype_laydistr == 1)
+                    !         Best suited for compressing levels at mid-height.
+                    !         stretch_fac -> 0 gives stronger compression, first at mid height, then lower and lower heights.
+                    !         stretch_fac = 1.1 to 1.2 gives almost a linear distribution of levels.
+                    !         stretch_fac -> higher values (e.g. 3) gives more compression towards the top.
+                    z_exp = LOG(min_lay_thckn/top_height)/LOG(2._wp/pi*ACOS(REAL(nz-1,wp)**stretch_fac/&
+                        &     REAL(nz,wp)**stretch_fac))
+
+                    ! Set up distribution of coordinate surfaces according to the analytical formula
+                    ! vct = h_top*(2/pi*arccos(jk-1/nz))**z_exp (taken from the COSMO model, src_artifdata)
+                    ! z_exp has been calculated above in order to return min_lay_thckn as thickness
+                    ! of the lowest model layer
+                    DO jk = 1, nlevp1
+                        vct_a(jk)      = top_height*(2._wp/pi*ACOS(REAL(jk-1,wp)**stretch_fac/ &
+                        &              REAL(nz,wp)**stretch_fac))**z_exp
+                    ENDDO
+
 
                 case default
                     write(*,*) 'ERROR: auto_sleve must be 0,1,2 or 3. Not', auto_sleve
                     stop
                 end select
+
+                ! check that generated levels are valid: vector_a(1) = 0, afterwards monotonically increasing, and last level ~= top_height
+                if ( abs(vct_a(1)) > 1.0e-6_wp) then
+                    write(*,*) 'WARNING in automatic sleve level generation: lowest half-level is suspicious: ', vct_a(1)
+                    write(*,*) 'Check your auto_sleve, stretch_fac, height_lowest_level, model_top_height and nz settings.'
+                    write(*,*) 'When using auto_sleve = 1 consider plotting the half-level distribution first to ensure validity, as this setting is quite sensitive to changes in said parameters.'
+                else if ( abs(vct_a(nlevp1) - top_height) > 0.01_wp*top_height) then
+                    write(*,*) 'WARNING in automatic sleve level generation: highest half-level deviates too far from model_top_height setting (', top_height,'). It is ', vct_a(nlevp1)
+                    write(*,*) 'Check your auto_sleve, stretch_fac, height_lowest_level, model_top_height and nz settings.'
+                    write(*,*) 'When using auto_sleve = 1 consider plotting the half-level distribution first to ensure validity, as this setting is quite sensitive to changes in said parameters.'
+                else
+                    do jk = 2, nlevp1
+                        if ( vct_a(jk) <= vct_a(jk-1) ) then
+                            write(*,*) 'ERROR in automatic sleve level generation: half-levels are NOT monotonically increasing at level ', jk, ' : ', vct_a(jk-1), ' >= ', vct_a(jk)
+                            write(*,*) 'Check your auto_sleve, stretch_fac, height_lowest_level, model_top_height and nz settings.'
+                            write(*,*) 'When using auto_sleve = 1 consider plotting the half-level distribution first to ensure validity, as this setting is quite sensitive to changes in said parameters.'
+                            stop
+                        end if
+                    end do
+                end if    
 
                 ! compute layer thicknesses
                 do jk = 1, nz
@@ -1100,7 +1139,7 @@ contains
 
             smooth_height = sum(dz(1:max_level))!+dz(max_level)*0.5
 
-            ! Terminology from Schär et al 2002, Leuenberger 2009: (can be simpliied later on, but for clarity)
+            ! Terminology from Schär et al 2002, Leuenberger 2009: (can be simplified later on, but for clarity)
             s1 = smooth_height / options%domain%decay_rate_L_topo
             s2 = smooth_height / options%domain%decay_rate_S_topo
             n  =  options%domain%sleve_n 
