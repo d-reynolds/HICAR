@@ -1038,9 +1038,9 @@ contains
                          ) / (nz**2-1.0/3.0*nz**3-2.0/3.0*nz)
                     a  = (x1 - 2.0*b) / 6.0
                     c  = min_lay_thckn - (a + b)
-                    do jk = 1, nlevp1
+                    do jk = 0, nz
                         !jkr       = real(nlevp1-jk)       ! reverse index as function approaches top height at 0, and 0 at nz
-                        vct_a(jk) = a*jk**3 + b*jk**2 + c*jk ! jk=1 is model bottom, jk=nz+1 is model top half-level
+                        vct_a(jk+1) = a*jk**3 + b*jk**2 + c*jk ! jk=1 is model bottom, jk=nz+1 is model top half-level
                     end do
 
                 case (2)
@@ -1124,7 +1124,7 @@ contains
                     write(*,*) '    Lowest 10 model layer heights dz(1:10) = ', dz(1:10), ' m above ground.'
                     write(*,*) '    Model top (sum(dz))  = ', sum(dz), ' m.a.s.l.'
                     write(*,*) '    Stretch factor = ', stretch_fac, &
-                            ',   min layer thickness = ', minval(dz), ' m'
+                               ',   min layer thickness = ', minval(dz), ' m'
                 endif
 
                 deallocate(vct_a)
