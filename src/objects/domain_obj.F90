@@ -1039,8 +1039,8 @@ contains
                     a  = (x1 - 2.0*b) / 6.0
                     c  = min_lay_thckn - (a + b)
                     do jk = 1, nlevp1
-                        jkr       = real(nlevp1-jk)       ! reverse index as function approaches top height at 0, and 0 at nz
-                        vct_a(jkr) = a*jkr**3 + b*jkr**2 + c*jkr ! jk=1 is model bottom, jk=nz+1 is model top half-level
+                        !jkr       = real(nlevp1-jk)       ! reverse index as function approaches top height at 0, and 0 at nz
+                        vct_a(jk) = a*jk**3 + b*jk**2 + c*jk ! jk=1 is model bottom, jk=nz+1 is model top half-level
                     end do
 
                 case (2)
