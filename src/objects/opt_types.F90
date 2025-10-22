@@ -383,7 +383,7 @@ module options_types
         real    :: decay_rate_S_topo    !
         real    :: sleve_n              ! Additional parameter introduced by Leuenberger 2009.
 
-        integer :: auto_sleve           ! Option for auto-generating levels for sleve, as in ICON, introduced by MS
+        integer :: auto_sleve           ! Option for auto-generating levels for sleve, adapted from ICON, introduced by MS
         real    :: height_lowest_level  ! Height of the lowest model level above ground [m] (used for auto_sleve)
         real    :: model_top_height     ! Height of the model top above ground [m] (used for auto_sleve)
         real    :: stretch_fac          ! Stretch factor for the vertical grid, used in auto_sleve  

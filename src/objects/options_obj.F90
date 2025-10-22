@@ -268,6 +268,21 @@ contains
             call check_file_exists(trim(this%restart%restart_folder), message='Restart folder does not exist.')
         endif
 
+        ! Check that auto_sleve options are consistent
+        if (this%domain%auto_sleve > 0) then
+            if (this%domain%auto_sleve == 1 .and. (this%domain%stretch_fac <= 0.5 .or. this%domain%stretch_fac > 1.0)) then
+                write(*,*) "  WARNING WARNING WARNING"
+                write(*,*) "  WARNING When using auto_sleve = 1, stretch_fac should be 0.5 < stretch_fac < 1.0 but is currently ", this%domain%stretch_fac
+                write(*,*) "  WARNING WARNING WARNING"
+                stop
+            else if (this%domain%auto_sleve == 2 .and. (this%domain%stretch_fac > 1.0)) then
+                write(*,*) "  WARNING WARNING WARNING"
+                write(*,*) "  WARNING When using auto_sleve = 2, stretch_fac should be 0.0001 < stretch_fac < 1.0 but is currently ", this%domain%stretch_fac
+                write(*,*) "  WARNING WARNING WARNING"
+                stop
+            endif
+        endif
+
         !clean output var list
         do i=1, size(this%output%vars_for_output)
             if ((this%output%vars_for_output(i)+this%vars_for_restart(i) > 0) .and. (this%vars_to_allocate(i) <= 0)) then
@@ -310,7 +325,7 @@ contains
         if (this%physics%snowmodel==kSM_FSM) then
             kSNOW_GRID_Z = this%sm%fsm_nsnow_max
             kSNOWSOIL_GRID_Z = kSNOW_GRID_Z+kSOIL_GRID_Z
-    endif
+        endif
 
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
         if ((this%physics%landsurface>0).and.(this%physics%boundarylayer==0)) then
@@ -408,7 +423,7 @@ contains
         ! check if the last entry in dz_levels is zero, which would indicate that nz is larger than the number
         ! of entries in dz_levels, or that the user passed bad data
         if (this%domain%nz > 1) then
-            if ( (this%domain%dz_levels(this%domain%nz) == 0) .and. (this%domain%auto_level == 0) ) then
+            if ( (this%domain%dz_levels(this%domain%nz) == 0) .and. (this%domain%auto_sleve == 0) ) then
                 if (STD_OUT_PE) write(*,*) "  nz is larger than the number of entries in dz_levels, or the last entry in dz_levels is zero."
                 stop
             endif
