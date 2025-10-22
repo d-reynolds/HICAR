@@ -1438,7 +1438,7 @@ contains
                     "Plotting the distributions is recommended, geogebra plots can be found at https://www.geogebra.org/u/maxsesselmann."
                 min = 0.0001
                 max = 10.0
-                default = "0.6"
+                default = "0.7"
                 group = "Domain"
             case ("use_agl_height")
                 description = "Use height above ground level, instead of above sea level, "//achar(10)//BLNK_CHR_N// &
