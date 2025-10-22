@@ -1039,15 +1039,15 @@ contains
                     a  = (x1 - 2.0*b) / 6.0
                     c  = min_lay_thckn - (a + b)
                     do jk = 0, nz
-                        !jkr       = real(nlevp1-jk)       ! reverse index as function approaches top height at 0, and 0 at nz
                         vct_a(jk+1) = a*jk**3 + b*jk**2 + c*jk ! jk=1 is model bottom, jk=nz+1 is model top half-level
                     end do
 
                 case (2)
                     ! case 2: second-order polynomial half-levels (COSMO style, s. COSMO-TR No.21 p.33, Baldauf(2013)); stretch_fac needs to be between 0.0 and 1.0!!!
                     do jk = 1, nlevp1
+                        jkr       = real(nlevp1-jk+1)       ! reverse index as function approaches top height at 0, and 0 at nz
                         x1 = real(nz - jk) / real(nz) ! diverting from the original here (using nz instead of nz+1 in nominator) to ensure vector_a(0) = 0 as in auto_sleve case 1
-                        vct_a(jk) = top_height * x1 * ( stretch_fac * x1 + 1.0-stretch_fac )
+                        vct_a(jkr) = top_height * x1 * ( stretch_fac * x1 + 1.0-stretch_fac )
                     end do
 
 
