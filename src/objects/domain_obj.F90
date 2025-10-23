@@ -1047,7 +1047,7 @@ contains
                     do jk = 0, nz
                         jkr = nlevp1-jk      ! reverse index as function approaches top height at 0, and 0 at nz
                         x1 = real(nz - jk) / real(nz) ! diverting from the original here (using nz instead of nz+1 in nominator) to ensure vector_a(0) = 0 as in auto_sleve case 1
-                        vct_a(jkr) = top_height * x1 * ( stretch_fac * x1 + 1.0-stretch_fac )
+                        vct_a(nint(jkr)) = top_height * x1 * ( stretch_fac * x1 + 1.0-stretch_fac )
                     end do
 
 
@@ -1081,8 +1081,9 @@ contains
                     ! vct = h_top*(2/pi*arccos(jk-1/nz))**z_exp (taken from the COSMO model, src_artifdata)
                     ! z_exp has been calculated above in order to return min_lay_thckn as thickness
                     ! of the lowest model layer
-                    DO jk = 1, nlevp1
-                        vct_a(jk)      = top_height*(2.0/pi*ACOS(REAL(jk-1)**stretch_fac/ &
+                    DO jk = 0, nz
+                        jkr = nlevp1 - jk      ! reverse index as function approaches top height at 0, and 0 at nz
+                        vct_a(nint(jkr))      = top_height*(2.0/pi*ACOS(REAL(jk)**stretch_fac/ &
                         &              REAL(nz)**stretch_fac))**z_exp
                     ENDDO
 
