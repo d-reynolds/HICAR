@@ -967,6 +967,13 @@ contains
         integer :: i, max_level
         real :: s, n, s1, s2, gamma, gamma_min
         real :: b1_i, b1_mass, db1_i, db1_mass, b2_i, b2_mass, db2_i, db2_mass
+
+        real, allocatable :: vct_a(:), dz(:)
+        real :: x1, a, b, c, jkr, x, a_lin, b_lin, alpha, exp_alpha, x_lin, raw_dz1, dz1_offset
+        integer :: nlevp1, jk
+
+        real, parameter :: pi = acos(-1.0)
+        real :: z_exp
         
         associate(ims => this%ims,      ime => this%ime,                        &
             jms => this%jms,      jme => this%jme,                        &
@@ -976,7 +983,11 @@ contains
             z_v                   => this%geo_v%z,                        &
             z_interface           => this%vars_3d(this%var_indx(kVARS%z_interface)%v)%data_3d,            &
             nz                    => options%domain%nz,               &
-            dz                    => options%domain%dz_levels,        &
+            dz_lev                => options%domain%dz_levels,        &
+            auto_sleve            => options%domain%auto_sleve,      &
+            min_lay_thckn         => options%domain%height_lowest_level,        &
+            top_height            => options%domain%model_top_height,                &
+            stretch_fac           => options%domain%stretch_fac,              &
             dz_mass               => this%vars_3d(this%var_indx(kVARS%dz)%v)%data_3d,                &
             dz_interface          => this%vars_3d(this%var_indx(kVARS%dz_interface)%v)%data_3d,           &
             terrain               => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d,                &
@@ -1001,9 +1012,138 @@ contains
             ! Still not 100% convinced this works well in cases other than flat_z_height = 0 (w sleve). So for now best to keep at 0 when using sleve?
             max_level = nz !find_flat_model_level(options, nz, dz)
 
+            allocate(dz(nz))
+
+            ! Implementation of ICON-like automatic level-generation, that is either cubic or quadratic or exponential !!!!STILL EXPERIMENTAL!!!!
+            ! If auto_sleve is set to 0, then dz is not modified and the rest of the sleve setup is done normally.
+            ! If auto_sleve is set to 1, then dz is modified to be a cubic polynomial (Used in ICON if itype_laydistr==2).
+            ! If auto_sleve is set to 2, then dz is modified to be a quadratic polynomial (COSMO style, used in ICON if itype_laydistr==3).
+            ! If auto_sleve is set to 3, then dz is modified to be an exponential stretching (eta-style as in WRF).
+            ! If auto_sleve is set to 4, then dz is modified to be an arccosine-based distribution (another COSMO-like option as seen in src_artifdata; can be set in ICON using itype_laydistr == 1).
+            ! Lowest layer thickness is set to min_lay_thickn, model top height is set to top_height, and stretch_fac is used to control the distribution of dz.
+            ! After automatic level generation, the new dz is used to calculate the SLEVE levels as usual.
+            if (auto_sleve .ge. 1) then
+
+                nlevp1 = nz + 1
+                allocate(vct_a(nlevp1))
+
+                select case (auto_sleve)
+                case (1)
+                    ! case 1: ICON-style third-order polynomial half-levels that allows choice of min_lay_thckn; stretch_fac needs to be between 0.5 and 1.0!!!
+                    !         There's quite a lot that can go wrong, if stretch_fac, min_lay_thckn, top_height, nz are not chosen well!
+                    x1 = (2.0*stretch_fac - 1.0) * min_lay_thckn
+                    b  = ( top_height &
+                        - (x1/6.0)*nz**3 &
+                        - (min_lay_thckn - x1/6.0)*nz &
+                         ) / (nz**2-1.0/3.0*nz**3-2.0/3.0*nz)
+                    a  = (x1 - 2.0*b) / 6.0
+                    c  = min_lay_thckn - (a + b)
+                    do jk = 0, nz
+                        vct_a(jk+1) = a*jk**3 + b*jk**2 + c*jk ! jk=1 is model bottom, jk=nz+1 is model top half-level
+                    end do
+
+                case (2)
+                    ! case 2: second-order polynomial half-levels (COSMO style, s. COSMO-TR No.21 p.33, Baldauf(2013)); stretch_fac needs to be between 0.0 and 1.0!!!
+                    do jk = 0, nz
+                        jkr = nlevp1-jk      ! reverse index as function approaches top height at 0, and 0 at nz
+                        x1 = real(nz - jk) / real(nz) ! diverting from the original here (using nz instead of nz+1 in nominator) to ensure vector_a(0) = 0 as in auto_sleve case 1
+                        vct_a(nint(jkr)) = top_height * x1 * ( stretch_fac * x1 + 1.0-stretch_fac )
+                    end do
+
+
+                case (3)
+                    ! case 3: eta-style exponential half-level stretching
+                    alpha     = stretch_fac
+                    exp_alpha = exp(alpha)
+                    ! compute raw exponential half-levels
+                    do jk = 1, nlevp1
+                        x_lin     = real(jk - 1) / real(nz)
+                        vct_a(jk) = top_height * (exp(alpha*x_lin) - 1.0) / (exp_alpha - 1.0)
+                    end do
+!                    ! enforce exact minimum layer thickness by offsetting half-levels
+!                    raw_dz1 = vct_a(2) - vct_a(1)
+!                    dz1_offset  = min_lay_thckn - raw_dz1
+!                    if (dz1_offset .ne. 0.0) then
+!                        do jk = 2, nlevp1
+!                            vct_a(jk) = vct_a(jk) + dz1_offset
+!                        end do
+!                    endif
+                case (4)
+                    ! case 4: arccosine-based half-level distribution (another COSMO-like option as seen in src_artifdata; can be set in ICON using itype_laydistr == 1)
+                    !         Best suited for compressing levels at mid-height.
+                    !         stretch_fac -> 0 gives stronger compression, first at mid height, then lower and lower heights.
+                    !         stretch_fac = 1.1 to 1.2 gives almost a linear distribution of levels.
+                    !         stretch_fac -> higher values (e.g. 3) gives more compression towards the top.
+                    z_exp = LOG(min_lay_thckn/top_height)/LOG(2.0/pi*ACOS(REAL(nz-1)**stretch_fac/&
+                        &     REAL(nz)**stretch_fac))
+
+                    ! Set up distribution of coordinate surfaces according to the analytical formula
+                    ! vct = h_top*(2/pi*arccos(jk-1/nz))**z_exp (taken from the COSMO model, src_artifdata)
+                    ! z_exp has been calculated above in order to return min_lay_thckn as thickness
+                    ! of the lowest model layer
+                    DO jk = 0, nz
+                        jkr = nlevp1 - jk      ! reverse index as function approaches top height at 0, and 0 at nz
+                        vct_a(nint(jkr))      = top_height*(2.0/pi*ACOS(REAL(jk)**stretch_fac/ &
+                        &              REAL(nz)**stretch_fac))**z_exp
+                    ENDDO
+
+
+                case default
+                    write(*,*) 'ERROR: auto_sleve must be 0,1,2 or 3. Not', auto_sleve
+                    stop
+                end select
+
+                ! check that generated levels are valid: vector_a(1) = 0, afterwards monotonically increasing, and last level ~= top_height
+                if ( abs(vct_a(1)) > 1.0e-6) then
+                    write(*,*) 'WARNING in automatic sleve level generation: lowest half-level is suspicious: ', vct_a(1)
+                    write(*,*) 'Check your auto_sleve, stretch_fac, height_lowest_level, model_top_height and nz settings.'
+                    write(*,*) 'When using auto_sleve = 1 consider plotting the half-level distribution first to ensure validity (https://www.geogebra.org/u/maxsesselmann), as this setting is quite sensitive to changes in said parameters.'
+                else if ( abs(vct_a(nlevp1) - top_height) > 0.01*top_height) then
+                    write(*,*) 'WARNING in automatic sleve level generation: highest half-level deviates too far from model_top_height setting (', top_height,'). It is ', vct_a(nlevp1)
+                    write(*,*) 'Check your auto_sleve, stretch_fac, height_lowest_level, model_top_height and nz settings.'
+                    write(*,*) 'When using auto_sleve = 1 consider plotting the half-level distribution first to ensure validity (https://www.geogebra.org/u/maxsesselmann), as this setting is quite sensitive to changes in said parameters.'
+                else
+                    do jk = 2, nlevp1
+                        if ( vct_a(jk) <= vct_a(jk-1) ) then
+                            write(*,*) 'ERROR in automatic sleve level generation: half-levels are NOT monotonically increasing at level ', jk, ' : ', vct_a(jk-1), ' >= ', vct_a(jk)
+                            write(*,*) 'Check your auto_sleve, stretch_fac, height_lowest_level, model_top_height and nz settings.'
+                            write(*,*) 'When using auto_sleve = 1 consider plotting the half-level distribution first to ensure validity (https://www.geogebra.org/u/maxsesselmann), as this setting is quite sensitive to changes in said parameters.'
+                            stop
+                        end if
+                    end do
+                end if    
+
+                ! compute layer thicknesses
+                do jk = 1, nz
+                    dz(jk) = vct_a(jk+1) - vct_a(jk)
+                end do
+
+                ! Diagnostics
+                if (STD_OUT_PE) then
+                    write(*,*) '    Using automatic sleve level generation with auto_sleve = ', auto_sleve
+                    write(*,*) '    Vertical grid setup BEFORE SLEVE transformation:'
+                    write(*,*) '    Lowest 10 model layer heights dz(1:10) = ', dz(1:10), ' m above ground.'
+                    write(*,*) '    Model top (sum(dz))  = ', sum(dz), ' m.a.s.l.'
+                    write(*,*) '    Stretch factor = ', stretch_fac, &
+                               ',   min layer thickness = ', minval(dz), ' m'
+                endif
+
+                deallocate(vct_a)
+
+            else if (auto_sleve == 0) then
+                ! no auto-sleve: preserve original dz_lev
+                dz(1:nz) = dz_lev(1:nz)
+
+            else
+                write(*,*) 'ERROR: auto_sleve must be 0,1,2 or 3. Not', auto_sleve
+                stop
+            endif
+
+
+
             smooth_height = sum(dz(1:max_level))!+dz(max_level)*0.5
 
-            ! Terminology from Schär et al 2002, Leuenberger 2009: (can be simpliied later on, but for clarity)
+            ! Terminology from Schär et al 2002, Leuenberger 2009: (can be simplified later on, but for clarity)
             s1 = smooth_height / options%domain%decay_rate_L_topo
             s2 = smooth_height / options%domain%decay_rate_S_topo
             n  =  options%domain%sleve_n 
@@ -1051,7 +1191,8 @@ contains
                 write(*,*) "    Using a sleve_n of ", options%domain%sleve_n
                 write(*,*) "    Smooth height is ", smooth_height, "m.a.s.l     (model top ", sum(dz(1:nz)), "m.a.s.l.)"
                 write(*,*) "    invertibility parameter gamma is: ", gamma_min
-                if(gamma_min <= 0) write(*,*) " CAUTION: coordinate transformation is not invertible (gamma <= 0 ) !!! reduce decay rate(s), and/or increase flat_z_height!"
+                if(gamma_min > 0 .and. gamma_min < 0.15) write(*,*) " CAUTION: coordinate transformation is close to being non-invertible (gamma < 0.15) ! Model might crash with Segmentation Violation. Reduce decay rate(s), and/or increase flat_z_height! When using sleve_auto, also reduce height_lowest_level and/or modify stretch_fac!"
+                if(gamma_min <= 0) write(*,*) " CAUTION: coordinate transformation is not invertible (gamma <= 0 ) !!! Reduce decay rate(s), and/or increase flat_z_height! When using sleve_auto, also reduce height_lowest_level and/or stretch_fac!"
                 ! if(options%general%debug)  write(*,*) "   (for (debugging) reference: 'gamma(n=1)'= ", gamma,")"
                 write(*,*) ""
                 flush(output_unit)
@@ -1210,6 +1351,8 @@ contains
             z_interface  = global_z_interface(ims:ime,:,jms:jme)
             z            = neighbor_z(ims:ime,:,jms:jme)
             jacobian     = neighbor_jacobian(ims:ime,:,jms:jme)
+
+            deallocate(dz)
 
         end associate
         ! call array_offset_x(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
