@@ -1408,10 +1408,11 @@ contains
                 group = "Domain"
             case("auto_sleve")
                 description = "Integer that determines whether to create levels automatically when using sleve=.True. (As used in ICON & WRF):" //achar(10)//BLNK_CHR_N// &
-                    "Values: 0=No, 1=Third-order polynomial level distribution (ICON like), 2=Second-order polynomial level distribution (COSMO like)" //achar(10)//BLNK_CHR_N// &
-                    "        3=Eta style exponential level distribution (WRF like), 4=Arccosine level distribution (COSMO like)." //achar(10)//BLNK_CHR_N// &
-                    "        auto_sleve=3 might be most robust solution, while options 1 and 4 allow for forced lowest level height." //achar(10)//BLNK_CHR_N// &
-                    "        Plotting the distributions beforehand is recommended, geogebra plots can be found at https://www.geogebra.org/u/maxsesselmann."
+                    "Values: 0=No, 1=Third-order polynomial level distribution (ICON like), 2=Second-order polynomial level" //achar(10)//BLNK_CHR_N// &
+                    "        distribution (COSMO like) 3=Eta style exponential level distribution (WRF like), 4=Arccosine level" //achar(10)//BLNK_CHR_N// &
+                    "        distribution (COSMO like). auto_sleve=3 might be most robust solution, while options 1 and 4 allow" //achar(10)//BLNK_CHR_N// &
+                    "        for forced lowest level height. Plotting the distributions beforehand is recommended," //achar(10)//BLNK_CHR_N// & 
+                    "        geogebra plots can be found at https://www.geogebra.org/u/maxsesselmann."
                 min = 0
                 max = 4
                 default = "0"
@@ -1430,12 +1431,17 @@ contains
                 group = "Domain"
             case("stretch_fac")
                 description = "Factor that controls distribution of the vertical levels, only used when auto_sleve = 1, 2, 3 or 4." //achar(10)//BLNK_CHR_N// &
-                    "For auto_sleve=1: stretch_fac needs to be between 0.5 and 1.0. stretch_fac -> 0.5 more linear, stretch_fac -> 1.0 more level compression at the surface." //achar(10)//BLNK_CHR_N// &
-                    "For auto_sleve=2: stretch_fac needs to be between 0.0 and 1.0. stretch_fac -> 0.0 more linear, stretch_fac -> 1.0 more level compression at the surface." //achar(10)//BLNK_CHR_N// &
-                    "For auto_sleve=3: stretch_fac needs to be > 0. stretch_fac -> 0.0 more linear, stretch_fac -> higher values: more level compression at the surface." //achar(10)//BLNK_CHR_N// &
-                    "For auto_sleve=4: stretch_fac needs to be > 0. stretch_fac -> 0.0 more compression at the surface, stretch_fac -> higher values: more level compression at the model top." //achar(10)//BLNK_CHR_N// &
+                    "For auto_sleve=1: stretch_fac needs to be between 0.5 and 1.0. stretch_fac -> 0.5 more linear," //achar(10)//BLNK_CHR_N// &
+                    " stretch_fac -> 1.0 more level compression at the surface." //achar(10)//BLNK_CHR_N// &
+                    "For auto_sleve=2: stretch_fac needs to be between 0.0 and 1.0. stretch_fac -> 0.0 more linear," //achar(10)//BLNK_CHR_N// &
+                    " stretch_fac -> 1.0 more level compression at the surface." //achar(10)//BLNK_CHR_N// &
+                    "For auto_sleve=3: stretch_fac needs to be > 0. stretch_fac -> 0.0 more linear," //achar(10)//BLNK_CHR_N// &
+                    " stretch_fac -> higher values: more level compression at the surface." //achar(10)//BLNK_CHR_N// &
+                    "For auto_sleve=4: stretch_fac needs to be > 0. stretch_fac -> 0.0 more compression at the surface," //achar(10)//BLNK_CHR_N// &
+                    " stretch_fac -> higher values: more level compression at the model top." //achar(10)//BLNK_CHR_N// &
                     "auto_sleve=3 might be most robust solution, while options 1 and 4 allow for forced lowest level height." //achar(10)//BLNK_CHR_N// &
-                    "Plotting the distributions is recommended, geogebra plots can be found at https://www.geogebra.org/u/maxsesselmann."
+                    "Plotting the distributions is recommended, " //achar(10)//BLNK_CHR_N// &
+                    " geogebra plots can be found at https://www.geogebra.org/u/maxsesselmann."
                 min = 0.0001
                 max = 10.0
                 default = "0.7"
