@@ -14,6 +14,10 @@ module adv_fluxcorr
 
     public :: WRF_flux_corr, init_fluxcorr, set_sign_arrays, clear_flux_sign_arrays
     integer, allocatable, dimension(:,:,:)   :: usign, vsign, wsign
+    real,    allocatable, dimension(:,:,:)   :: scale_in, scale_out, qmax, qmin
+    real,    allocatable, dimension(:,:,:)   :: flux_x_up
+    real,    allocatable, dimension(:,:,:)   :: flux_y_up
+    real,    allocatable, dimension(:,:,:)   :: flux_z_up
 
 contains
 
@@ -34,10 +38,24 @@ contains
         if (allocated(usign)) deallocate(usign)
         if (allocated(vsign)) deallocate(vsign)
         if (allocated(wsign)) deallocate(wsign)
-        
+        if (allocated(scale_in)) deallocate(scale_in)
+        if (allocated(scale_out)) deallocate(scale_out)
+        if (allocated(qmax)) deallocate(qmax)
+        if (allocated(qmin)) deallocate(qmin)
+        if (allocated(flux_x_up)) deallocate(flux_x_up)
+        if (allocated(flux_y_up)) deallocate(flux_y_up)
+        if (allocated(flux_z_up)) deallocate(flux_z_up)
+
         allocate(usign(its-1:ite+1,kms:kme,jts-1:jte+1))
         allocate(vsign(its-1:ite+1,kms:kme,jts-1:jte+1))
         allocate(wsign(its-1:ite+1,kms:kme,jts-1:jte+1))
+        allocate(scale_in(its-1:ite+1,kms:kme,jts-1:jte+1))
+        allocate(scale_out(its-1:ite+1,kms:kme,jts-1:jte+1))
+        allocate(qmax(its-1:ite+1,kms:kme,jts-1:jte+1))
+        allocate(qmin(its-1:ite+1,kms:kme,jts-1:jte+1))
+        allocate(flux_x_up(its-1:ite+2,kms:kme,jts-1:jte+2))
+        allocate(flux_y_up(its-1:ite+2,kms:kme,jts-1:jte+2))
+        allocate(flux_z_up(its-1:ite+2,kms:kme+1,jts-1:jte+2))
     end subroutine init_fluxcorr
 
     subroutine set_sign_arrays(u,v,w)
@@ -48,8 +66,8 @@ contains
 
         integer :: i, j, k
 
-        !$acc enter data create(usign, vsign, wsign)
-        !$acc data present(u, v, w, usign, vsign, wsign)
+        !$acc enter data create(usign, vsign, wsign, scale_in, scale_out, qmax, qmin, flux_x_up, flux_y_up, flux_z_up)
+        ! !$acc data present(u, v, w, usign, vsign, wsign)
         !$acc parallel loop gang vector tile(32,2,1)
         do j = jts-1,jte+1
             do k = kms,kme
@@ -91,14 +109,14 @@ contains
             end do
         end do
 
-        !$acc end data
+        ! !$acc end data
 
     end subroutine set_sign_arrays
 
     subroutine clear_flux_sign_arrays()
         implicit none
 
-        !$acc exit data delete(usign, vsign, wsign)
+        !$acc exit data delete(usign, vsign, wsign, scale_in, scale_out, qmax, qmin, flux_x_up, flux_y_up, flux_z_up)
 
     end subroutine clear_flux_sign_arrays
 
@@ -114,12 +132,8 @@ contains
         real, dimension(its-1:ite+2,kms:kme+1,jts-1:jte+2),intent(inout)          :: flux_z
         
         
-        real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+1)   :: scale_in, scale_out
-        real, dimension(its-1:ite+2,kms:kme,  jts-1:jte+2)   :: flux_x_up
-        real, dimension(its-1:ite+2,kms:kme,  jts-1:jte+2)   :: flux_y_up
-        real, dimension(its-1:ite+2,kms:kme+1,jts-1:jte+2)   :: flux_z_up
 
-        real :: dz_t_i, fx, fx1, fy, fy1, fz, fz1, qmax, qmin, q_i, q_j, q_k, q0, temp, flux_in, flux_out, scale_in_cur, scale_out_cur
+        real :: dz_t_i, fx, fx1, fy, fy1, fz, fz1, q_i, q_j, q_k, q0, temp, flux_in, flux_out, scale_in_cur, scale_out_cur
         integer :: i, j ,k
         real :: scale
         real :: flux_x_up_0, flux_y_up_0, flux_z_up_0, flux_x_up_1, flux_y_up_1, flux_z_up_1
@@ -130,11 +144,9 @@ contains
 
         ! Get upwind fluxes
 
-        !$acc enter data create(flux_x_up,flux_y_up,flux_z_up)
         call upwind_flux3(q,u,v,w,flux_x_up,flux_z_up,flux_y_up,dz,denom)
 
-        !$acc data present(q,flux_x,flux_y,flux_z,flux_x_up,flux_y_up,flux_z_up,dz,denom,usign,vsign,wsign) &
-        !$acc create(scale_in,scale_out)
+        !$acc data present(scale_in, scale_out, qmax, qmin, flux_x_up, flux_y_up, flux_z_up) async(1)
 
         ! Next compute max and min possible fluxes        
         !$acc parallel loop gang vector tile(32,2,1) async(1)
@@ -150,11 +162,19 @@ contains
                     q_j = q(i,k,j+vsign0)
                     q_k = q(i,k+wsign0,j)
 
-                    qmax = max(q0, q_i, q_j, q_k)
-                    qmin = min(q0, q_i, q_j, q_k)
+                    qmax(i,k,j) = max(q0, q_i, q_j, q_k)
+                    qmin(i,k,j) = min(q0, q_i, q_j, q_k)
+                enddo
+            enddo
+        enddo
+        !$acc wait(10)
 
+        !$acc parallel loop gang vector tile(32,2,1) async(1)
+        do j = jts, jte+1 
+            do k = kms, kme
+                do i = its, ite+1
                     ! If the min and max for this point are 0, there is no flux limiter to calculate...
-                    if ((abs(qmax)+abs(qmin)) == 0) then
+                    if ((abs(qmax(i,k,j))+abs(qmin(i,k,j))) == 0) then
                         scale_in(i,k,j) = 0.0
                         scale_out(i,k,j) = 0.0
                         cycle
@@ -185,7 +205,7 @@ contains
                     endif
 
                     !Compute concentration if upwind only was used
-                    temp  = q0 - ((flux_x_up_1 - flux_x_up_0) + &
+                    temp  = q(i,k,j) - ((flux_x_up_1 - flux_x_up_0) + &
                                         (flux_y_up_1 - flux_y_up_0) + &
                                         (flux_z_up_1 - flux_z_up_0) * &
                                             dz_t_i)*denom(i,k,j)
@@ -201,8 +221,8 @@ contains
                                 (max(0.0,fz1) + max(0.0,-fz)) * &
                                     dz_t_i)*denom(i,k,j)
     
-                    scale_in(i,k,j) = (qmax-temp)/(flux_in  + 0.000000001)
-                    scale_out(i,k,j) = (temp-qmin)/(flux_out+ 0.000000001)
+                    scale_in(i,k,j) = (qmax(i,k,j)-temp)/(flux_in  + 0.000000001)
+                    scale_out(i,k,j) = (temp-qmin(i,k,j))/(flux_out+ 0.000000001)
                 enddo
             enddo
         enddo
@@ -240,7 +260,7 @@ contains
             enddo
         enddo
 
-        !$acc parallel loop gang vector collapse(2) async(3) wait(2)
+        !$acc parallel loop gang vector collapse(2) async(3) wait(1)
         do j = jts, jte+1 
             do i = its, ite+1
                 flux_z(i,kme+1,j) = flux_z(i,kme+1,j) - flux_z_up(i,kme+1,j)
@@ -249,11 +269,9 @@ contains
                 flux_z(i,kme+1,j) = scale*flux_z(i,kme+1,j) + flux_z_up(i,kme+1,j)
             enddo
         enddo
-        !$acc end parallel
         !$acc end data
-        !$acc wait(3)
-
-        !$acc exit data delete(flux_x_up,flux_y_up,flux_z_up)
+        ! !$acc end data
+        !$acc wait(2,3)
 
     end subroutine WRF_flux_corr
 
@@ -281,13 +299,13 @@ contains
 
         !Update intermediate concentration
 
-        !$acc data present(q,u,v,w,flux_x,flux_y,flux_z,dz,denom) &
-        !$acc create(dumb_q)
+        ! !$acc data present(q,u,v,w,flux_x,flux_y,flux_z,dz,denom) &
+        !$acc data create(dumb_q) async(10)
 
 
         !Now compute upwind fluxes after second step
 
-        !$acc parallel loop gang vector tile(32,2,1) private(q_cache, tmp) async(1)
+        !$acc parallel loop gang vector tile(32,2,1) private(q_cache, tmp) async(10)
         do j = jts-1, jte+2
             do k = kms, kme+1
                 do i = its-1, ite+2
@@ -322,7 +340,7 @@ contains
         enddo
 
         
-        !$acc parallel loop gang vector tile(32,2,1) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val) async(2) wait(1)
+        !$acc parallel loop gang vector tile(32,2,1) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val) async(10)
         do j = jms, jme
             do k = kms, kme
             do i = ims, ime
@@ -354,7 +372,7 @@ contains
 
         !Now compute upwind fluxes after second step
 
-        !$acc parallel loop gang vector tile(32,2,1) private(q_cache, tmp) async(3) wait(2)
+        !$acc parallel loop gang vector tile(32,2,1) private(q_cache, tmp) async(10)
         do j = jts-1, jte+2
             do k = kms, kme+1
                 do i = its-1, ite+2
@@ -389,6 +407,6 @@ contains
         enddo
 
         !$acc end data
-        !$acc wait(3)
+        ! !$acc wait(10)
     end subroutine upwind_flux3
 end module adv_fluxcorr

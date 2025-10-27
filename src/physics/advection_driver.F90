@@ -77,7 +77,7 @@ contains
         type(variable_t) :: var_to_advect
         integer :: n
 
-        real, allocatable :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
+        real, allocatable :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:), temp(:,:,:)
 
         if (options%physics%advection==kADV_STD) then
 
@@ -93,6 +93,11 @@ contains
                                       domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                                       domain%dx,options,dt, U_m, V_m, W_m, denom)
             if (options%adv%flux_corr==kFLUXCOR_MONO) call set_sign_arrays(U_m,V_m,W_m)
+            if (options%time%RK3) then
+                ! Allocate temporary array for RK3
+                allocate(temp(ims:ime,kms:kme,jms:jme))
+                !$acc enter data create(temp)
+            endif
             call adv_wind_time%stop()
 
         else if(options%physics%advection==kADV_MPDATA) then
@@ -104,8 +109,8 @@ contains
             if (options%time%RK3) then
                 if (options%physics%advection==kADV_STD) then
     
-                    call RK3_adv(domain%vars_3d(domain%adv_vars(n)%v)%data_3d, options, U_m, V_m, W_m, denom, &
-                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, flux_time, flux_corr_time, sum_time, adv_wind_time)
+                    call RK3_adv(domain%vars_3d(domain%adv_vars(n)%v)%data_3d, temp, options, U_m, V_m, W_m, denom, &
+                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, flux_time, flux_corr_time, sum_time, adv_wind_time, n)
                     
                 else if(options%physics%advection==kADV_MPDATA) then
                     ! Not yet implemented (is it compatable w/ RK3?)
@@ -122,24 +127,23 @@ contains
 
         call adv_std_clean_wind_arrays(U_m, V_m, W_m, denom)
         if (options%adv%flux_corr==kFLUXCOR_MONO) call clear_flux_sign_arrays()
-
+        if (options%time%RK3) then
+            !$acc exit data delete(temp)
+            deallocate(temp)
+        endif
     end subroutine advect
 
-    subroutine RK3_adv(var, options, U_m, V_m, W_m, denom, dz, flux_time, flux_corr_time, sum_time, adv_wind_time)
+    subroutine RK3_adv(var, temp, options, U_m, V_m, W_m, denom, dz, flux_time, flux_corr_time, sum_time, adv_wind_time, q_id)
         implicit none
-        real, allocatable, intent(inout) :: var(:,:,:)
+        real, allocatable, intent(inout) :: var(:,:,:), temp(:,:,:)
         type(options_t), intent(in) :: options
         real, allocatable, intent(in) :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:), dz(:,:,:)
         type(timer_t), intent(inout) :: flux_time, flux_corr_time, sum_time, adv_wind_time
+        integer, intent(in) :: q_id
 
-        real , allocatable :: temp(:,:,:)
         integer :: j, k, i
 
-        allocate(temp(ims:ime,kms:kme,jms:jme))
-
-        !$acc data present(var) create(temp)
-
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) present(var, temp) async(q_id)
         do j = jms,jme
         do k = kms,kme
         do i = ims,ime
@@ -150,13 +154,11 @@ contains
 
         !Initial advection-tendency calculations
 
-        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_corr_time, sum_time,t_factor_in=0.333)
-        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_corr_time, sum_time,t_factor_in=0.5)
+        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_corr_time, sum_time,t_factor_in=0.333,q_id_in=q_id)
+        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_corr_time, sum_time,t_factor_in=0.5,q_id_in=q_id)
         !final advection call with tendency-fluxes
-        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_corr_time, sum_time,flux_corr_in=options%adv%flux_corr)
+        call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_corr_time, sum_time,flux_corr_in=options%adv%flux_corr,q_id_in=q_id)
         
-        !$acc end data
-
     end subroutine RK3_adv
 
 end module advection

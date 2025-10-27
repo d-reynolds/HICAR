@@ -1122,20 +1122,20 @@ contains
             if((options%physics%watersurface==kWATER_SIMPLE) .or.      &
                 (options%physics%watersurface==kWATER_LAKE) ) then
                     call water_simple(options,                              &
-                                      domain%vars_2d(domain%var_indx(kVARS%sst)%v)%data_2d(its:ite,jts:jte),                   &
-                                      domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d(its:ite,jts:jte),      &
-                                      windspd(its:ite,jts:jte),                              &
-                                      domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(its:ite,kms,jts:jte),       &
-                                      domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d(its:ite,kms,jts:jte),       &
-                                      domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d(its:ite,jts:jte),         &
-                                      domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d(its:ite,jts:jte),           &
-                                      domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(its:ite,jts:jte),                     &
-                                      QSFC(its:ite,jts:jte),                                 &
-                                      domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d(its:ite,jts:jte),                   &
-                                      domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d(its:ite,jts:jte),      &
-                                      domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d(its:ite,jts:jte),   &
-                                      domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di(its:ite,jts:jte),                      &
-                                      its, ite, kts, kte, jts, jte)
+                                      domain%vars_2d(domain%var_indx(kVARS%sst)%v)%data_2d,                   &
+                                      domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d,      &
+                                      windspd,                              &
+                                      domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,       &
+                                      domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d,       &
+                                      domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d,         &
+                                      domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d,           &
+                                      land_mask,                     &
+                                      QSFC,                                 &
+                                      domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d,                   &
+                                      domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,      &
+                                      domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d,   &
+                                      domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di,                      &
+                                      ims, ime, kms, kme, jms, jme)
                                 !   ,domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d               & ! terrain height [m] if ht(i,j)>=lake_min_elev -> lake (in case no lake category is provided, but lake model is selected, we need to not run the simple water as well - left comment in for future reference)
             endif
 

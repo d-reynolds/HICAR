@@ -213,7 +213,7 @@ contains
         ! endif
         
         ! If we are just changing nest contexts, we don't need to reinitialize the radiation modules
-        if (context_change) return
+        ! if (context_change) return
 
         if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing Radiation"
 
@@ -250,40 +250,50 @@ contains
                 domain%tend%th_swrad = 0
                 domain%tend%th_lwrad = 0
         else if (options%physics%radiation == kRA_RRTMGP) then
-            ! Omit the checks starting with the second iteration
-            call rte_config_checks(logical(.false., wl))
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    RRTMGP"    
+            ! if (.not.(k_dist_sw%is_loaded())) then
 
-            call stop_on_err(gas_concs%init(gas_names))
+                if (k_dist_sw%is_loaded() .or. k_dist_lw%is_loaded()) then
+                    call gas_concs%reset()
+                    call k_dist_sw%finalize()
+                    call k_dist_lw%finalize()
+                    call cloud_optics_sw%finalize()
+                    call cloud_optics_lw%finalize()
+                endif
+                call rte_config_checks(logical(.false., wl))
 
-            DO i = 1, ngas
-                CALL stop_on_err(gas_concs%set_vmr(gas_names(i), 0._wp))
-            ENDDO
+                call stop_on_err(gas_concs%init(gas_names))
 
-            ! Set perscribed atmospheric composition. Water vapor will be set dynamically at each call. 
-            ! This can be changed in the future to read from a file or from different climate change scenarios
-            call stop_on_err(gas_concs%set_vmr("co2", 410.e-6_wp))
-            call stop_on_err(gas_concs%set_vmr("ch4", 1650.e-9_wp))
-            call stop_on_err(gas_concs%set_vmr("n2o", 306.e-9_wp))
-            call stop_on_err(gas_concs%set_vmr("n2",  0.7808_wp))
-            call stop_on_err(gas_concs%set_vmr("o2",  0.2095_wp))
-            call stop_on_err(gas_concs%set_vmr("co",  0._wp))
+                DO i = 1, ngas
+                    CALL stop_on_err(gas_concs%set_vmr(gas_names(i), 0._wp))
+                ENDDO
 
-            ! ----------------------------------------------------------------------------
-            ! load data into classes
-            call load_and_init(k_dist_sw, k_dist_sw_file, gas_concs)
-            call load_and_init(k_dist_lw, k_dist_lw_file, gas_concs)
+                ! Set perscribed atmospheric composition. Water vapor will be set dynamically at each call. 
+                ! This can be changed in the future to read from a file or from different climate change scenarios
+                call stop_on_err(gas_concs%set_vmr("co2", 410.e-6_wp))
+                call stop_on_err(gas_concs%set_vmr("ch4", 1650.e-9_wp))
+                call stop_on_err(gas_concs%set_vmr("n2o", 306.e-9_wp))
+                call stop_on_err(gas_concs%set_vmr("n2",  0.7808_wp))
+                call stop_on_err(gas_concs%set_vmr("o2",  0.2095_wp))
+                call stop_on_err(gas_concs%set_vmr("co",  0._wp))
 
-            !
-            call load_cld_lutcoeff(cloud_optics_lw, cloud_optics_lw_file)
-            call load_cld_lutcoeff(cloud_optics_sw, cloud_optics_sw_file)
-            call stop_on_err(cloud_optics_lw%set_ice_roughness(2))
-            call stop_on_err(cloud_optics_sw%set_ice_roughness(2))
+                ! ----------------------------------------------------------------------------
+                ! load data into classes
+                call load_and_init(k_dist_sw, k_dist_sw_file, gas_concs)
+                call load_and_init(k_dist_lw, k_dist_lw_file, gas_concs)
 
-            if (do_aerosols) then
-                ! Load aerosol optics coefficients from lookup tables
-                call load_aero_lutcoeff (aerosol_optics_lw, aerosol_optics_lw_file)
-                call load_aero_lutcoeff (aerosol_optics_sw, aerosol_optics_sw_file)
-            end if
+                !
+                call load_cld_lutcoeff(cloud_optics_lw, cloud_optics_lw_file)
+                call load_cld_lutcoeff(cloud_optics_sw, cloud_optics_sw_file)
+                call stop_on_err(cloud_optics_lw%set_ice_roughness(2))
+                call stop_on_err(cloud_optics_sw%set_ice_roughness(2))
+
+                if (do_aerosols) then
+                    ! Load aerosol optics coefficients from lookup tables
+                    call load_aero_lutcoeff (aerosol_optics_lw, aerosol_optics_lw_file)
+                    call load_aero_lutcoeff (aerosol_optics_sw, aerosol_optics_sw_file)
+                end if
+            ! endif
         endif
 
     end subroutine radiation_init
@@ -459,7 +469,7 @@ contains
                       lon => domain%vars_2d(domain%var_indx(kVARS%longitude)%v)%data_2d, &
                       cosine_zenith_angle => domain%vars_2d(domain%var_indx(kVARS%cosine_zenith_angle)%v)%data_2d)
 
-            !$acc parallel loop gang present(lat, lon, solar_elevation_store, solar_azimuth_store)
+            !$acc parallel loop gang async(1)
             do j = jms,jme
                !! MJ used corr version, as other does not work in Erupe
                 call calc_solar_elevation(solar_elevation=solar_elevation_store(:,j), hour_frac=hour_frac, sun_declin_deg=sun_declin_deg, eq_of_time_minutes=eq_of_time_minutes, tzone=tzone, &
@@ -467,27 +477,28 @@ contains
                     ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite, solar_azimuth=solar_azimuth_store(:,j))
             enddo
 
-            !$acc parallel loop gang vector collapse(2) present(cosine_zenith_angle)
-            do j = jms,jme
-                do i = ims,ime
-                    cosine_zenith_angle(i,j)=sin(solar_elevation_store(i,j))
-                enddo
-            enddo
-
             if (options%physics%radiation_downScaling == 1) then
                 associate(slope => domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d, &
                           aspect => domain%vars_2d(domain%var_indx(kVARS%aspect_angle)%v)%data_2d)
-                !$acc parallel loop gang vector collapse(2) present(cos_project_angle, slope, solar_elevation_store, solar_azimuth_store, aspect)
+                !$acc parallel loop gang vector collapse(2) async(1)
                 do j = jms,jme
                     do i = ims,ime
+                        cosine_zenith_angle(i,j)=sin(solar_elevation_store(i,j))
+
                         cos_project_angle(i,j)= cos(slope(i,j))*sin(solar_elevation_store(i,j)) + &
                                                 sin(slope(i,j))*cos(solar_elevation_store(i,j))   &
                                                 *cos(solar_azimuth_store(i,j)-aspect(i,j))
                     enddo
                 enddo
                 end associate
+            else
+                !$acc parallel loop gang vector collapse(2) async(1)
+                do j = jms,jme
+                    do i = ims,ime
+                        cosine_zenith_angle(i,j)=sin(solar_elevation_store(i,j))
+                    enddo
+                enddo
             endif
-
             end associate
         endif
 
@@ -569,7 +580,7 @@ contains
 
             !Calculate solar constant
             call radconst(domain%sim_time%day_of_year(), declin, solar_constant)
-           
+            !$acc wait(1)
             if (options%physics%radiation==kRA_SIMPLE) then
                 call ra_simple(theta = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,         &
                                pii= domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,                            &
@@ -619,19 +630,31 @@ contains
                                 domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d(i,j) = 0
                             enddo
                         enddo
-                        !$acc parallel loop gang(static: 1) vector collapse(2) present(domain,qi, qc, qs, cldfra, p_1d, t_1d, qv_1d, qc_1d, qi_1d, qs_1d, Dz_1d, cf_1d)
+                        !$acc parallel loop gang(static: 1) vector collapse(2) present(domain,qi, qc, qs, cldfra, p_1d, t_1d, qv_1d, qc_1d, qi_1d, qs_1d, Dz_1d, cf_1d) async(1)
                         DO j = jts,jte
                             DO i = its,ite
-                                CALL cal_cldfra3(cldfra(i,:,j), domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i,:,j), &
-                                              qc(i,:,j), qi(i,:,j), qs(i,:,j), &
-                                              domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,:,j), &
-                                              domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d(i,:,j), &
-                                              domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d(i,:,j), &
+                                !$acc loop
+                                DO k = kms,kme
+                                    cf_1d(k) = cldfra(i,k,j)
+                                    qv_1d(k) = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i,k,j)
+                                    qc_1d(k) = qc(i,k,j)
+                                    qi_1d(k) = qi(i,k,j)
+                                    qs_1d(k) = qs(i,k,j)
+                                    p_1d(k) = domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d(i,k,j)
+                                    t_1d(k) = domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d(i,k,j)
+                                    Dz_1d(k) = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,k,j)
+                                ENDDO
+                                CALL cal_cldfra3(cf_1d, qv_1d, &
+                                              qc_1d, qi_1d, qs_1d, &
+                                              Dz_1d, &
+                                              p_1d, &
+                                              t_1d, &
                                               real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(i,j)), &
                                               gridkm, 1.5, kms, kme,        &
                                               modify_qvapor=.false., use_multilayer=.False.)
                                 !$acc loop
                                 DO k = kts,kte
+                                    cldfra(i,k,j) = cf_1d(k)
                                     domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d(i,j) = max(domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d(i,j), cldfra(i,k,j))
                                 ENDDO
                             ENDDO
@@ -824,7 +847,7 @@ contains
                             rel(ncol, nlay), rei(ncol, nlay), lwp(ncol, nlay), zwp(ncol,nlay), iwp(ncol, nlay), swp(ncol, nlay), res(ncol, nlay))
                     !$acc data create(p_lay, t_lay, p_lev, t_lev, q, rel, rei, lwp, zwp, iwp, swp, res)
 
-                    !$acc parallel loop gang vector collapse(2) private(col_indx) present(domain, p_lay, t_lay, q, rel, rei, lwp, zwp, iwp, swp, res, p_lev, t_lev, qi)
+                    !$acc parallel loop gang vector collapse(2) private(col_indx) present(domain, p_lay, t_lay, q, rel, rei, lwp, zwp, iwp, swp, res, p_lev, t_lev, qi) wait(1)
                     do j = jts, jte
                         do i = its, ite
                             col_indx = (i-its+1) + (j - jts)*(ite - its + 1)
@@ -1138,10 +1161,8 @@ contains
                       shortwave_diffuse => domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
                       shortwave_direct_above => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct_above)%v)%data_2d, &
                       hlm => domain%vars_3d(domain%var_indx(kVARS%hlm)%v)%data_3d)
-
-            !$acc parallel loop gang vector collapse(2) present(shortwave, shortwave_direct, shortwave_diffuse, shortwave_direct_above, hlm) &
-            !$acc                                       present(solar_elevation_store, solar_azimuth_store, shortwave_cached, cos_project_angle) &
-            !$acc                                       copyin(kVARS)
+            
+            !$acc parallel loop gang vector collapse(2) copyin(kVARS) wait(1)
             do j = jts,jte
                 do i = its,ite
                     shortwave_direct(i,j) = max( shortwave_cached(i,j) - shortwave_diffuse(i,j),0.0)
@@ -1191,7 +1212,7 @@ contains
                       tend_th_lwrad => domain%tend%th_lwrad, &
                       tend_swrad    => domain%vars_3d(domain%var_indx(kVARS%tend_swrad)%v)%data_3d)
 
-            !$acc parallel loop gang vector collapse(3) present(pot_temp, tend_th_swrad, tend_th_lwrad, tend_swrad)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jts,jte
                 do k = kts,kte
                     do i = its,ite
@@ -1202,6 +1223,7 @@ contains
             enddo
 
             end associate
+            !$acc wait(1)
         endif
 
     end subroutine rad_apply_dtheta

@@ -288,8 +288,8 @@ contains
                     ,p3di=domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d              & !-- p3di        3d pressure (pa) at interface level
                     ,pi3d=domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d                           & !-- pi3d        3d exner function (dimensionless)
                     ,rho=domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d                           & !-- rho        3d density (kg/m^3)
-                    ,rublten=domain%tend%u                               & ! i/o
-                    ,rvblten=domain%tend%v                  & ! i/o
+                    ! ,rublten=domain%tend%u                               & ! i/o
+                    ! ,rvblten=domain%tend%v                  & ! i/o
                     ,rthblten=domain%tend%th_pbl            & ! i/o
                     ,rqvblten=domain%tend%qv_pbl            & ! i/o
                     ,rqcblten=domain%tend%qc_pbl            & ! i/o
@@ -301,6 +301,7 @@ contains
                     ,rd=R_d                                 &  ! J/(kg K) specific gas constant for dry air
                     ,rovg=rovg                              &
                     ,dz8w=domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d       & !-- dz8w        dz between full levels (m)
+                    ,z8w=domain%vars_3d(domain%var_indx(kVARS%z_interface)%v)%data_3d               & !-- z8w         height of full levels (m)
                     ,xlv=XLV                    & !-- xlv         latent heat of vaporization (j/kg)
                     ,rv=r_v                                  &  ! J/(kg K) specific gas constant for wet/moist air
                     ,psfc=domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d   &

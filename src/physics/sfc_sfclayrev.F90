@@ -1200,6 +1200,8 @@ CONTAINS
    END SUBROUTINE shalwater_init
 
       function zolri(ri,z,z0)
+      !$acc routine seq
+
       real, intent(in) :: ri
       real, intent(in)    :: z, z0
       real    :: x1, x2, fx1, fx2, zolri
@@ -1242,6 +1244,7 @@ CONTAINS
 ! -----------------------------------------------------------------------
 !
       function zolri2(zol2,ri2,z,z0)
+      !$acc routine seq
       real, intent(inout) :: zol2
       real, intent(in)    :: ri2, z, z0
       real  :: zol3, zol20, psix2, psih2, zolri2
@@ -1267,6 +1270,7 @@ CONTAINS
 ! ... integrated similarity functions ...
 !
       function psim_stable_full(zolf)
+      !$acc routine seq
       real   :: psim_stable_full
       real, intent(in)    :: zolf
 
@@ -1283,6 +1287,7 @@ CONTAINS
       end function
       
       function psim_unstable_full(zolf)
+      !$acc routine seq
       real   :: x, psimk, ym, psimc, psim_unstable_full
       real, intent(in)    :: zolf
 
@@ -1298,6 +1303,7 @@ CONTAINS
       end function
 
       function psih_unstable_full(zolf)
+      !$acc routine seq
       real   :: y, psihk, yh, psihc, psih_unstable_full
       real, intent(in)    :: zolf
 
@@ -1314,6 +1320,7 @@ CONTAINS
 
 ! look-up table functions
       function psim_stable(zolf)
+      !$acc routine seq
       integer :: nzol
       real    :: rzol, psim_stable
       real, intent(in)    :: zolf
@@ -1329,6 +1336,7 @@ CONTAINS
       end function
 
       function psih_stable(zolf)
+      !$acc routine seq
       integer :: nzol
       real    :: rzol, psih_stable
       real, intent(in)    :: zolf
@@ -1344,6 +1352,7 @@ CONTAINS
       end function
       
       function psim_unstable(zolf)
+      !$acc routine seq
       integer :: nzol
       real    :: rzol, psim_unstable
       real, intent(in)    :: zolf
@@ -1359,6 +1368,7 @@ CONTAINS
       end function
 
       function psih_unstable(zolf)
+      !$acc routine seq
       integer :: nzol
       real    :: rzol, psih_unstable
       real, intent(in)    :: zolf

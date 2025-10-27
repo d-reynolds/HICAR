@@ -16,14 +16,15 @@ contains
 
     subroutine water_simple(options, sst, psfc, wind, qv, temperature,  &
                             sensible_heat, latent_heat, landmask, &
-                            qv_surf, evap_flux, tskin, coef_heat_exch, vegtype, its, ite, kts, kte, jts, jte)
+                            qv_surf, evap_flux, tskin, coef_heat_exch, vegtype, ims, ime, kms, kme, jms, jme)
         implicit none
         type(options_t),intent(in)    :: options        
-        real,    dimension(its:ite,jts:jte),  intent(inout) :: sensible_heat, latent_heat, qv_surf, evap_flux, tskin
-        real,    dimension(its:ite,jts:jte),  intent(in)    :: sst, psfc, wind, qv, temperature, coef_heat_exch
-        integer, dimension(its:ite,jts:jte),  intent(in)    :: landmask
-        integer, dimension(its:ite,jts:jte),  optional, intent(in)    :: vegtype
-        integer, intent(in)                     :: its, ite, kts, kte, jts, jte
+        real,    dimension(ims:ime,jms:jme),  intent(inout) :: sensible_heat, latent_heat, qv_surf, evap_flux, tskin
+        real,    dimension(ims:ime,jms:jme),  intent(in)    :: sst, psfc, wind, coef_heat_exch
+        real,    dimension(ims:ime,jms:jme),  intent(in)    :: landmask
+        real,    dimension(ims:ime,kms:kme,jms:jme),  intent(in)    :: qv, temperature
+        integer, dimension(ims:ime,jms:jme),  optional, intent(in)    :: vegtype
+        integer, intent(in)                     :: ims, ime, kms, kme, jms, jme
 
         integer :: i, j, options_water, options_water_cat, options_lake_cat
 
@@ -31,10 +32,10 @@ contains
         options_water_cat = options%lsm%water_category
         options_lake_cat  = options%lsm%lake_category
 
-        !$acc data present_or_copy(sst,psfc,wind,qv,temperature,sensible_heat,latent_heat,landmask,qv_surf,evap_flux,tskin,coef_heat_exch,vegtype,its,ite,jts,jte)
+        !$acc data present(sst,psfc,wind,qv,temperature,sensible_heat,latent_heat,landmask,qv_surf,evap_flux,tskin,coef_heat_exch,vegtype) copyin(ims,ime,jms,jme)
         !$acc parallel loop gang vector collapse(2)
-        do j=jts,jte
-            do i=its,ite
+        do j=jms,jme
+            do i=ims,ime
                 if(                                                                         &
                     ( (options_water==kWATER_SIMPLE) .AND.                   &   ! If lakemodel is not selected, use this
                       (landmask(i,j)==kLC_WATER)                                            & !(n.b. in case noah (mp or lsm) is not used, landmask may not be set correctly!)
@@ -47,8 +48,8 @@ contains
                 )then
                     qv_surf(i,j) = 0.98 * sat_mr(sst(i,j),psfc(i,j)) ! multiply by 0.98 to account for salinity
 
-                    sensible_heat(i,j) = coef_heat_exch(i,j) * wind(i,j) * (sst(i,j)-temperature(i,j))
-                    evap_flux(i,j)     = coef_heat_exch(i,j) * wind(i,j) * (qv_surf(i,j)-qv(i,j))
+                    sensible_heat(i,j) = coef_heat_exch(i,j) * wind(i,j) * (sst(i,j)-temperature(i,1,j))
+                    evap_flux(i,j)     = coef_heat_exch(i,j) * wind(i,j) * (qv_surf(i,j)-qv(i,1,j))
                     latent_heat(i,j)   = evap_flux(i,j) * XLV
                     tskin(i,j)   = sst(i,j)
 

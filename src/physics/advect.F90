@@ -97,7 +97,7 @@ contains
         ! GPU optimization variables
         real :: q_cache(7), u_val, v_val, w_val, abs_u_val
                       
-        !$acc data present(q,U_m,V_m,W_m,flux_x,flux_y,flux_z)
+        ! !$acc data present(q,U_m,V_m,W_m,flux_x,flux_y,flux_z)
 
         if (horder==1) then
             t_factor_compact = 0.5  * t_factor
@@ -415,11 +415,11 @@ contains
         endif
 
         !$acc wait(1,2)
-        !$acc end data
+        ! !$acc end data
     end subroutine flux3
 
 
-    subroutine adv_std_advect3d(qfluxes,qold,U_m,V_m,W_m,denom,dz, flux_time, flux_corr_time, sum_time, t_factor_in,flux_corr_in)
+    subroutine adv_std_advect3d(qfluxes,qold,U_m,V_m,W_m,denom,dz, flux_time, flux_corr_time, sum_time, t_factor_in,flux_corr_in,q_id_in)
         ! !DIR$ INLINEALWAYS adv_std_advect3d
         implicit none
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(inout)   :: qfluxes
@@ -430,13 +430,15 @@ contains
         real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: W_m
         type(timer_t), intent(inout) :: flux_time, flux_corr_time, sum_time
         real, optional,                              intent(in)      :: t_factor_in
-        integer, optional,                           intent(in)      :: flux_corr_in
+        integer, optional,                           intent(in)      :: flux_corr_in, q_id_in
 
         ! interal parameters
         real    :: t_factor, flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val
-        integer :: i, k, j, flux_corr
+        integer :: i, k, j, flux_corr, q_id
 
         
+        q_id = 1
+        if (present(q_id_in)) q_id = q_id_in
         !Initialize t_factor, which is used during RK time stepping to scale the time step
         t_factor = 1.0
         if (present(t_factor_in)) t_factor = t_factor_in
@@ -448,6 +450,7 @@ contains
         call flux3(qfluxes,U_m, V_m, W_m, flux_x,flux_z,flux_y,t_factor)
         call flux_time%stop()
 
+        !$acc wait(q_id)
         if (flux_corr > 0) then
             call flux_corr_time%start()
             call WRF_flux_corr(qold,U_m, V_m, W_m, flux_x,flux_z,flux_y,dz,denom)
@@ -455,7 +458,7 @@ contains
         endif
         call sum_time%start()
         
-        !$acc parallel loop gang vector tile(32,2,1) present(qfluxes,qold,flux_x,flux_y,flux_z,denom,dz) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val)
+        !$acc parallel loop gang vector async(q_id) tile(32,2,1) private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val)
         do j = jts, jte
             do k = kms, kme
             do i = its, ite
@@ -479,6 +482,7 @@ contains
             enddo
         enddo
         
+        !$acc wait(q_id)
         call sum_time%stop()
 
     end subroutine adv_std_advect3d
@@ -572,7 +576,7 @@ contains
 
         !Compute the denomenator for all of the flux summation terms here once
 
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) async(1)
         do j = jms,jme
             do k = kms,kme
                 do i = ims,ime
@@ -581,20 +585,26 @@ contains
             enddo
         enddo
 
-        !$acc parallel
-        !$acc loop gang vector tile(32,2,1)
+        !$acc parallel loop gang vector tile(32,2,1) async(2)
         do j = j_s,j_e+1
             do k = kms,kme
                 do i = i_s,i_e+1
                     U_m(i,k,j) = u(i,k,j) * dt * (rho(i,k,j)+rho(i-1,k,j))*0.5 * &
                         jaco_u(i,k,j) / dx
+                enddo
+            enddo
+        enddo
+        !$acc parallel loop gang vector tile(32,2,1) async(3)
+        do j = j_s,j_e+1
+            do k = kms,kme
+                do i = i_s,i_e+1
                     V_m(i,k,j) = v(i,k,j) * dt * (rho(i,k,j)+rho(i,k,j-1))*0.5 * &
                         jaco_v(i,k,j) / dx
                 enddo
             enddo
         enddo
 
-        !$acc loop gang vector tile(32,2,1)
+        !$acc parallel loop gang vector tile(32,2,1) async(4)
         do j = j_s,j_e+1
             do k = kms,kme-1
                 do i = i_s,i_e+1
@@ -606,15 +616,15 @@ contains
             enddo
         enddo
         
-        !$acc loop gang vector collapse(2)
+        !$acc parallel loop gang vector collapse(2) async(5)
         do j = j_s,j_e+1
             do i = i_s,i_e+1
                 W_m(i,kme,j) = w(i,kme,j) * dt * jaco_w(i,kme,j) * rho(i,kme,j)
             enddo
         enddo
-        !$acc end parallel
         !$acc end data
 
+        !$acc wait(1,2,3,4,5)
     end subroutine adv_std_compute_wind
 
     subroutine adv_std_clean_wind_arrays(U_m,V_m,W_m,denom)

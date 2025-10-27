@@ -193,8 +193,16 @@ contains
 
         if (options%physics%surfacelayer==kSFC_MM5REV) then
         
-            windspd = sqrt(domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d(ims:ime,kms,jms:jme)**2 + domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d(ims:ime,kms,jms:jme)**2)
-            where(windspd==0) windspd=1e-5            
+            associate(u_mass => domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d, &
+                      v_mass => domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d)
+            !$acc parallel loop gang vector collapse(2) present(u_mass, v_mass,windspd)
+            do j = jms, jme
+                do i = ims, ime
+                    windspd(i,j) = sqrt(u_mass(i,kms,j)**2 + v_mass(i,kms,j)**2)
+                    if (windspd(i,j) < 1e-5) windspd(i,j) = 1e-5
+                end do
+            end do
+            end associate
 
             call SFCLAYREV(u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d   & !-- u3d         3d u-velocity interpolated to theta points (m/s)
                ,v3d=domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d              & !-- v3d         3d v-velocity interpolated to theta points (m/s)
