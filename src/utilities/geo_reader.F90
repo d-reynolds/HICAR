@@ -109,13 +109,17 @@ contains
     !! @retval  real    weights
     !!
     !!------------------------------------------------------------
-    function tri_weights(yi,y,xi,x)
+    function tri_weights(yi,y,xi,x,extrap)
         implicit none
         real,intent(in)::yi,y(4),xi,x(4)
         real::x0,y0
         real, dimension(4) ::tri_weights
+        logical,optional,intent(in) :: extrap
 
+        logical :: point_is_extrap = .False.
         real :: w1,w2,w3,denom
+
+        if (present(extrap)) point_is_extrap = extrap
 
         x0 = sum(x)/4
         y0 = sum(y)/4
@@ -144,7 +148,7 @@ contains
 
         w3 = 1 - w1 - w2
 
-        if (minval([w1,w2,w3]) < -1e-2) then
+        if (minval([w1,w2,w3]) < -1e-2 .and. .not.(point_is_extrap) ) then
             write(*,*) "ERROR: Point not located in bounding triangle"
             write(*,*) xi, yi
             write(*,*) "Triangle vertices"
@@ -156,7 +160,7 @@ contains
         endif
         w1=max(0.,w1); w2=max(0.,w2); w3=max(0.,w3);
 
-        if (abs((w1+w2+w3)-1)>1e-2) then
+        if (abs((w1+w2+w3)-1)>1e-2 .and. .not.(point_is_extrap) ) then
             write(*,*) "Error, w1+w2+w3 != 1"
             write(*,*) w1,w2,w3
             write(*,*) "Point"
@@ -678,12 +682,13 @@ contains
     !!  Given a closest position, return the 4 points surrounding the lat/lon position in lo%lat/lon
     !!
     !!------------------------------------------------------------
-    type(fourpos) function find_surrounding(lo,lat,lon,pos,nx,ny)
+    type(fourpos) function find_surrounding(lo,lat,lon,pos,nx,ny,extrap)
         implicit none
         type(interpolable_type),intent(in)::lo
         real,intent(in)::lat,lon
         type(position),intent(in)::pos
         integer,intent(in) :: nx,ny
+        logical,optional,intent(out) :: extrap
         integer :: i, j
         integer :: xdeltas(4), ydeltas(4), dx, dy
         integer :: lowerx, upperx, lowery, uppery
@@ -703,6 +708,8 @@ contains
         upperx = ubound(lo%lat,1)
         lowery = lbound(lo%lat,2)
         uppery = ubound(lo%lat,2)
+
+        if (present(extrap)) extrap=.False.
 
         do i = 1, 4
             dx = xdeltas(i)
@@ -762,7 +769,13 @@ contains
                     endif
 
                 endif
-
+            else
+                !get point outside of set
+                if (current_err < best_err) then
+                    best_err = current_err
+                    find_surrounding = search_point
+                    if (present(extrap)) extrap=.True.
+                endif
             endif
         enddo
 
@@ -794,6 +807,7 @@ contains
         integer :: nx, ny, i, j, k, lo_nx, lo_ny
         integer :: ims,ime,jms,jme
         real, dimension(4) :: lat, lon
+        logical :: is_extrap
 
         nx    = size(hi%lat,1)
         ny    = size(hi%lat,2)
@@ -840,7 +854,7 @@ contains
                     lo%geolut%w(:,i,j) = 0.25
                 else
                     ! Found a good point, now find the other 3 of the surrounding 4 points
-                    xy = find_surrounding(lo, hi%lat(i,j), hi%lon(i,j), curpos, lo_nx, lo_ny)
+                    xy = find_surrounding(lo, hi%lat(i,j), hi%lon(i,j), curpos, lo_nx, lo_ny, extrap=is_extrap)
                     lo%geolut%x(:,i,j) = xy%x
                     lo%geolut%y(:,i,j) = xy%y
                     ! load those latitutes and longitudes into 1D arrays to calculate weights
@@ -849,7 +863,7 @@ contains
                         lon(k) = lo%lon(xy%x(k), xy%y(k))
                     enddo
                     ! and calculate the weights to apply to each gridcell
-                    lo%geolut%w(:,i,j) = tri_weights(hi%lat(i,j), lat, hi%lon(i,j), lon)
+                    lo%geolut%w(:,i,j) = tri_weights(hi%lat(i,j), lat, hi%lon(i,j), lon, extrap=is_extrap)
                     ! lo%geolut%w(:,i,j) = idw_weights(hi%lat(i,j), lat, hi%lon(i,j), lon)
                     ! lo%geolut%w(:,i,j) = bilin_weights(hi%lat(i,j), lat, hi%lon(i,j), lon)
 

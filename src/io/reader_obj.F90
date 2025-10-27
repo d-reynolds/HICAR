@@ -17,8 +17,9 @@ submodule(reader_interface) reader_implementation
   use debug_module,           only : check_ncdf
   use variable_interface,     only : variable_t
   use timer_interface,    only : timer_t
-
+  use array_utilities,        only : interpolate_in_z
   use time_io,                only : read_times, find_timestep_in_filelist
+  use io_routines,            only : io_read
   implicit none
 
 contains
@@ -30,10 +31,11 @@ contains
         type(options_t), intent(in) :: options
 
         
-        integer, allocatable                         :: var_dimensions(:)
+        type(dim_arrays_type), allocatable           :: var_dimensions(:)
         character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
         type(variable_t) :: new_variable
-        integer :: i, dims(3)
+        integer :: i, nx, ny, nz
+        real, dimension(:,:,:), allocatable :: tmp_read_var
         
 
         this%file_list = options%forcing%boundary_files
@@ -52,7 +54,12 @@ contains
         this%its = its; this%ite = ite
         this%kts = kts; this%kte = kte
         this%jts = jts; this%jte = jte
-        dims = (/ (this%ite-this%its+1),(this%kte-this%kts+1),(this%jte-this%jts+1) /)
+
+        !get global input file dimensions
+        call io_read(this%file_list(this%curfile), options%forcing%tvar,   tmp_read_var,   this%curstep)
+
+        this%ids = 1; this%ide = ubound(tmp_read_var, 1)
+        this%jds = 1; this%jde = ubound(tmp_read_var, 2)
 
         ! the parameters option type can't contain allocatable arrays because it is a coarray
         ! so we need to allocate the vars_to_read and var_dimensions outside of the options type
@@ -61,11 +68,18 @@ contains
         this%n_vars = size(vars_to_read)
 
         do i=1, this%n_vars
-            if (var_dimensions(i)==2) then
-                call new_variable%initialize( [dims(1),dims(3)] )
+            nx = (this%ite-this%its+1)
+            nz = (this%kte-this%kts+1)
+            ny = (this%jte-this%jts+1)
+
+            if (var_dimensions(i)%dims(1) == this%ide+1) nx = nx+1
+            if (var_dimensions(i)%dims(2) == this%jde+1) ny = ny+1
+
+            if (var_dimensions(i)%num_dims==2) then
+                call new_variable%initialize( [nx, ny] )
                 call this%variables%add_var(vars_to_read(i), new_variable)
-            elseif (var_dimensions(i)==3) then
-                call new_variable%initialize( dims )
+            else if (var_dimensions(i)%num_dims==3) then
+                call new_variable%initialize( [nx, nz, ny] )
                 call this%variables%add_var(vars_to_read(i), new_variable)
             endif
         end do
@@ -87,7 +101,7 @@ contains
         integer :: nx, ny, nz, err, varid, n, ndims, start_3d_t(4), cnt_3d_t(4), start_2d_t(3), cnt_2d_t(3), start_3d(3), cnt_3d(3), start_2d(2), cnt_2d(2)
 
         if (allocated(buffer)) deallocate(buffer)
-        allocate(buffer(this%n_vars,this%its:this%ite,this%kts:this%kte,this%jts:this%jte))
+        allocate(buffer(this%n_vars,this%its:this%ite+1,this%kts:this%kte,this%jts:this%jte+1))
 
         !See if we must open the file
         if (this%ncfile_id < 0) then
@@ -101,11 +115,6 @@ contains
         start_2d_t = (/ this%its,this%jts,this%curstep /)
         start_3d = (/ this%its,this%jts,this%kts /)
         start_2d = (/ this%its,this%jts /)
-
-        cnt_3d_t = (/ (this%ite-this%its+1),(this%jte-this%jts+1),(this%kte-this%kts+1),1 /)
-        cnt_2d_t = (/ (this%ite-this%its+1),(this%jte-this%jts+1),1 /)
-        cnt_3d = (/ (this%ite-this%its+1),(this%jte-this%jts+1),(this%kte-this%kts+1) /)
-        cnt_2d = (/ (this%ite-this%its+1),(this%jte-this%jts+1) /)
 
         associate(list => this%variables)
             
@@ -126,20 +135,47 @@ contains
                 ny = size(var%data_3d, 3)
                 nz = size(var%data_3d, 2)
 
+                cnt_3d_t = (/ nx, ny, nz,1 /)
+                cnt_3d = (/ nx, ny, nz /)
+
                 if (ndims > 3) then
                     if (allocated(data3d_t)) deallocate(data3d_t)
                     allocate(data3d_t(nx,ny,nz,1))
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, data3d_t, start=start_3d_t, count=cnt_3d_t), " Getting 3D var "//trim(name))
-                    buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d_t(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, data3d_t, start=start_3d_t, count=cnt_3d_t), " Getting 3D var with time "//trim(name))
+
+                    !check if variable is staggered in vertical
+                    ! if so, we need to interpolate it to the mass levels
+                    if (nz == (this%kte-this%kts+2)) then
+                        data3d = data3d_t(:,:,:,1)
+                        call interpolate_in_z(data3d,zdim=3)
+                        data3d_t(:,:,:,1) = data3d
+                        nz = nz-1
+                    endif
+
+                    buffer(n,this%its:this%its+nx-1,this%kts:this%kts+nz-1,this%jts:this%jts+ny-1) = reshape(data3d_t(:,:,1:nz,1), shape=[nx,nz,ny], order=[1,3,2])
                 else
                     if (allocated(data3d)) deallocate(data3d)
                     allocate(data3d(nx,ny,nz))
                     call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, data3d, start=start_3d, count=cnt_3d), " Getting 3D var "//trim(name))
-                    buffer(n,this%its:this%ite,this%kts:this%kte,this%jts:this%jte) = reshape(data3d(:,:,:), shape=[nx,nz,ny], order=[1,3,2])
+
+                    !check if variable is staggered in vertical
+                    ! if so, we need to interpolate it to the mass levels
+                    if (nz == (this%kte-this%kts+2)) then
+                        call interpolate_in_z(data3d,zdim=3)
+                        nz = nz-1
+                    endif
+
+                    buffer(n,this%its:this%its+nx-1,this%kts:this%kts+nz-1,this%jts:this%jts+ny-1) = reshape(data3d(:,:,:), shape=[nx,nz,ny], order=[1,3,2])
                 endif
             else if (var%two_d) then
+                nx = size(var%data_2d, 1)
+                ny = size(var%data_2d, 2)
+
+                cnt_2d_t = (/ nx, ny, 1 /)
+                cnt_2d = (/ nx, ny /)
+
                 if (ndims > 2) then
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, buffer(n,:,1,:), start=start_2d_t, count=cnt_2d_t), " Getting 2D "//trim(name))
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, buffer(n,:,1,:), start=start_2d_t, count=cnt_2d_t), " Getting 2D with time "//trim(name))
                 else
                     call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, buffer(n,:,1,:), start=start_2d, count=cnt_2d), " Getting 2D "//trim(name))
                 endif
@@ -297,9 +333,9 @@ contains
     subroutine setup_variable_lists(master_var_list, master_dim_list, vars_to_read, var_dimensions)
         implicit none
         character(len=kMAX_NAME_LENGTH), intent(in)                 :: master_var_list(:)
-        integer,                         intent(in)                 :: master_dim_list(:)
+        type(dim_arrays_type),           intent(in)                 :: master_dim_list(:)
         character(len=kMAX_NAME_LENGTH), intent(inout), allocatable :: vars_to_read(:)
-        integer,                         intent(inout), allocatable :: var_dimensions(:)
+        type(dim_arrays_type),           intent(inout), allocatable :: var_dimensions(:)
 
         integer :: n_valid_vars
         integer :: i, curvar, err
@@ -321,7 +357,8 @@ contains
         do i=1, size(master_var_list)
             if (trim(master_var_list(i)) /= '') then
                 vars_to_read(curvar) = master_var_list(i)
-                var_dimensions(curvar) = master_dim_list(i)
+                var_dimensions(curvar)%num_dims = master_dim_list(i)%num_dims
+                var_dimensions(curvar)%dims = master_dim_list(i)%dims
                 ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)
                 curvar = curvar + 1
             endif

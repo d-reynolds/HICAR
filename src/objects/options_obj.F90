@@ -359,14 +359,6 @@ contains
             if (STD_OUT_PE) write(*,*) "  WARNING If z is geopotential, set z_is_geopotential=True in the namelist."
             if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
         endif
-        if ((this%forcing%z_is_geopotential .eqv. .True.).and. &
-            (this%forcing%z_is_on_interface .eqv. .False.)) then
-            if (STD_OUT_PE) write(*,*) "  "
-            if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
-            if (STD_OUT_PE) write(*,*) "  WARNING geopotential height is no longer assumed to be on model interface levels."
-            if (STD_OUT_PE) write(*,*) "  WARNING To interpolate geopotential, set z_is_on_interface=True in the namelist. "
-            if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
-        endif
         
         !! MJ added
         if ((this%physics%radiation_downScaling==1).and.(this%physics%radiation==0)) then
@@ -735,7 +727,7 @@ contains
 
         integer :: name_unit, rc, i, j, nfiles
         logical :: compute_p, print_info, read_namelist, gennml
-        logical, dimension(kMAX_NESTS) :: limit_rh, z_is_geopotential, z_is_on_interface,&
+        logical, dimension(kMAX_NESTS) :: limit_rh, z_is_geopotential,&
                    time_varying_z, t_is_potential, qv_is_spec_humidity, &
                    qv_is_relative_humidity, relax_filters
         real, dimension(kMAX_NESTS)    :: t_offset, inputinterval
@@ -744,14 +736,14 @@ contains
         character(len=kMAX_FILE_LENGTH), allocatable :: boundary_files(:)
 
         character(len=kMAX_NAME_LENGTH) :: latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar,zvar,  &
-                                        pvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,            &
+                                        pvar,pbvar,phbvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,            &
                                         qncvar,qnivar,qnrvar,qngvar,qnsvar,hgtvar,shvar,lhvar,pblhvar,  &
                                         i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
                                         psvar, pslvar, swdown_var, lwdown_var, sst_var, time_var
 
-        namelist /forcing/ forcing_file_list, inputinterval, t_offset, limit_rh, z_is_geopotential, z_is_on_interface, time_varying_z, &
+        namelist /forcing/ forcing_file_list, inputinterval, t_offset, limit_rh, z_is_geopotential, time_varying_z, &
                             t_is_potential, qv_is_relative_humidity, qv_is_spec_humidity, relax_filters, &
-                            pvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,qncvar,qnivar,qnrvar,qngvar,qnsvar,&
+                            pvar,pbvar,phbvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,qncvar,qnivar,qnrvar,qngvar,qnsvar,&
                             i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
                             hgtvar,shvar,lhvar,pblhvar,   &
                             latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar,zvar, &
@@ -775,7 +767,6 @@ contains
         call set_nml_var_default(inputinterval, 'inputinterval', print_info, gennml)
         call set_nml_var_default(limit_rh, 'limit_rh', print_info, gennml)
         call set_nml_var_default(z_is_geopotential, 'z_is_geopotential', print_info, gennml)
-        call set_nml_var_default(z_is_on_interface, 'z_is_on_interface', print_info, gennml)
         call set_nml_var_default(time_varying_z, 'time_varying_z', print_info, gennml)
         call set_nml_var_default(t_is_potential, 't_is_potential', print_info, gennml)
         call set_nml_var_default(qv_is_relative_humidity, 'qv_is_relative_humidity', print_info, gennml)
@@ -795,6 +786,8 @@ contains
         call set_nml_var_default(pslvar, 'pslvar', print_info, gennml)
         call set_nml_var_default(psvar, 'psvar', print_info, gennml)
         call set_nml_var_default(pvar, 'pvar', print_info, gennml)
+        call set_nml_var_default(pbvar, 'pbvar', print_info, gennml)
+        call set_nml_var_default(phbvar, 'phbvar', print_info, gennml)
         call set_nml_var_default(tvar, 'tvar', print_info, gennml)
         call set_nml_var_default(qvvar, 'qvvar', print_info, gennml)
         call set_nml_var_default(qcvar, 'qcvar', print_info, gennml)
@@ -838,7 +831,6 @@ contains
         call set_nml_var(options%forcing%t_offset, t_offset(n_indx), 't_offset', t_offset(1))
         call set_nml_var(options%forcing%limit_rh, limit_rh(n_indx), 'limit_rh', limit_rh(1))
         call set_nml_var(options%forcing%z_is_geopotential, z_is_geopotential(n_indx), 'z_is_geopotential', z_is_geopotential(1))
-        call set_nml_var(options%forcing%z_is_on_interface, z_is_on_interface(n_indx), 'z_is_on_interface', z_is_on_interface(1))
         call set_nml_var(options%forcing%time_varying_z, time_varying_z(n_indx), 'time_varying_z', time_varying_z(1))
         call set_nml_var(options%forcing%t_is_potential, t_is_potential(n_indx), 't_is_potential', t_is_potential(1))
         call set_nml_var(options%forcing%qv_is_relative_humidity, qv_is_relative_humidity(n_indx), 'qv_is_relative_humidity', qv_is_relative_humidity(1))
@@ -896,9 +888,11 @@ contains
 
         ! NOTE: temperature must be the first of the forcing variables read
         options%forcing%vars_to_read(:) = ""
-        options%forcing%dim_list(:) = 0
+        options%forcing%dim_list(:)%num_dims = 0
         i = 1
         call set_nml_var(options%forcing%tvar, tvar, 'tvar', options%forcing, i)
+        call set_nml_var(options%forcing%pbvar, pbvar, 'pbvar', options%forcing, i)
+        call set_nml_var(options%forcing%phbvar, phbvar, 'phbvar', options%forcing, i)
         call set_nml_var(options%forcing%latvar, latvar, 'latvar', options%forcing)
         call set_nml_var(options%forcing%lonvar, lonvar, 'lonvar', options%forcing)
         call set_nml_var(options%forcing%hgtvar, hgtvar, 'hgtvar', options%forcing, i)
@@ -961,7 +955,7 @@ contains
         ! if (options%forcing%time_varying_z) then
         if (options%forcing%compute_z) then
             zvar = "height_computed"
-            options%forcing%zvar        = zvar; options%forcing%vars_to_read(i) = zvar;      options%forcing%dim_list(i) = -3;    i = i + 1
+            options%forcing%zvar        = zvar; options%forcing%vars_to_read(i) = zvar;    i = i + 1
         else
             call set_nml_var(options%forcing%zvar, zvar, 'zvar', options%forcing, i)
         endif
@@ -969,7 +963,7 @@ contains
 
         if (compute_p) then
             pvar = "air_pressure_computed"
-            options%forcing%pvar        = pvar  ; options%forcing%vars_to_read(i) = pvar;       options%forcing%dim_list(i) = -3;   i = i + 1
+            options%forcing%pvar        = pvar  ; options%forcing%vars_to_read(i) = pvar;   i = i + 1
         else
             call set_nml_var(options%forcing%pvar, pvar, 'pvar', options%forcing, i)
         endif
@@ -2577,7 +2571,6 @@ contains
         this%forcing%qv_is_spec_humidity = .false.  
         this%forcing%t_is_potential = .True.
         this%forcing%z_is_geopotential = .False.
-        this%forcing%z_is_on_interface = .False.
         this%forcing%time_varying_z = .False.
         this%forcing%t_offset = 0.0
         this%forcing%relax_filters = .False.
@@ -2586,7 +2579,7 @@ contains
         ! Now set the forcing variable names -- these are the same as the domain variable names
         ! NOTE: temperature must be the first of the forcing variables read
         this%forcing%vars_to_read(:) = ""
-        this%forcing%dim_list(:) = 0
+        this%forcing%dim_list(:)%num_dims = 0
         i = 1
         call set_nml_var(this%forcing%zvar, get_varname( kVARS%z ), 'zvar', this%forcing, i, no_check=.True.)
         call set_nml_var(this%forcing%uvar, get_varname( kVARS%u ), 'uvar', this%forcing, i, no_check=.True.)

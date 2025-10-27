@@ -16,6 +16,7 @@ module reader_interface
   use netcdf
   use icar_constants
   use options_interface,  only : options_t
+  use options_types,      only : dim_arrays_type
   use variable_dict_interface,  only : var_dict_t
   use boundary_interface, only : boundary_t
   use time_object,        only : Time_type
@@ -50,6 +51,7 @@ module reader_interface
       integer :: ncfile_id
       
       integer :: its, ite, kts, kte, jts, jte
+      integer :: ids, ide, jds, jde
 
       integer :: curfile, curstep
   contains

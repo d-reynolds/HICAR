@@ -2543,28 +2543,22 @@ contains
         type(options_t), intent(in)     :: options
 
         type(interpolable_type) :: forc_u_from_mass, forc_v_from_mass
-        type(variable_t) :: temporary_data
         integer :: nx, ny, nz, i, j, k, ims, ime, jms, jme
         real, allocatable, dimension(:,:) :: AGL_cap, AGL_u_cap, AGL_v_cap, AGL_n, AGL_u_n, AGL_v_n
 
         ! this%geo and forcing%geo have to be of class interpolable
         ! which means they must contain lat, lon, z, geolut, and vLUT components
 
+        call geo_LUT(this%geo,    forcing%geo)
         call geo_LUT(this%geo_agl,forcing%geo_agl)
-        call geo_LUT(this%geo,forcing%geo)
         call geo_LUT(this%geo_u,  forcing%geo_u)
         call geo_LUT(this%geo_v,  forcing%geo_v)
 
         if (allocated(forcing%z)) then  ! In case of external 2D forcing data, skip the VLUTs.
 
-            ! See if we did not set forcing z at initialization of boundary object. This can happen
-            ! if we are a nest, and the parent domain's global z field was not yet set at the time of
-            ! initialization.
-            if (.not.forcing%z_is_set) then
-                temporary_data = forcing%variables%get_var(options%forcing%zvar)
-                forcing%z = temporary_data%data_3d
-            endif
-
+            ! This function will do any necessary interpolation of z if it is on interface, or
+            ! convert from geopotential height to height
+            call forcing%setup_z(options)
             forc_u_from_mass%lat = forcing%geo%lat
             forc_u_from_mass%lon = forcing%geo%lon
             forc_v_from_mass%lat = forcing%geo%lat
@@ -2579,12 +2573,14 @@ contains
             ime = ubound(this%geo_u%z,1)
             jms = lbound(this%geo_u%z,3)
             jme = ubound(this%geo_u%z,3)
-            allocate(forcing%geo_u%z(ims:ime, forcing%kts:forcing%kte, jms:jme))            
+            if (allocated(forcing%geo_u%z)) deallocate(forcing%geo_u%z)
+            allocate(forcing%geo_u%z(ims:ime, forcing%kts:forcing%kte, jms:jme))
 
             ims = lbound(this%geo_v%z,1)
             ime = ubound(this%geo_v%z,1)
             jms = lbound(this%geo_v%z,3)
-            jme = ubound(this%geo_v%z,3)            
+            jme = ubound(this%geo_v%z,3)
+            if (allocated(forcing%geo_v%z)) deallocate(forcing%geo_v%z)
             allocate(forcing%geo_v%z(ims:ime, forcing%kts:forcing%kte, jms:jme))
             
 
