@@ -140,7 +140,7 @@ contains
         
         ! Associate various variables from the domain data structure for easier access
 
-        !$acc data copyin(kVARS) create(divergence)
+        !$acc data create(divergence)
         associate(dx => domain%dx, &
                     rho => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                     dz => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
@@ -154,7 +154,7 @@ contains
         
         end associate
         !$acc end data
-
+        !$acc wait (10)
         !------------------------------------------------------------
         ! Now do the same for the convective wind field if needed
         !------------------------------------------------------------
@@ -184,7 +184,7 @@ contains
         real, dimension(ims:ime,kms:kme,jms:jme) :: rho_i
         
         !$acc data present(w, div, dz, jaco_w, rho) create(rho_i)
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) async(1)
         do j = jms, jme
             do k = kms, kme-1
             do i = ims, ime
@@ -193,23 +193,14 @@ contains
             enddo
         enddo
         
-        !$acc parallel loop gang vector collapse(2)
+        !$acc parallel loop gang vector collapse(2) async(1)
         do j = jms, jme
             do i = ims, ime
             rho_i(i,kme,j) = rho(i,kme,j)
-            w(i,kms,j) = 0
             enddo
         enddo
         
-        !$acc parallel loop gang vector collapse(3)
-        do j = jms, jme
-            do k = kms+1, kme
-            do i = ims, ime
-                w(i,k,j) = 0
-            enddo
-            enddo
-        enddo
-        !$acc parallel loop gang collapse(2)
+        !$acc parallel loop gang collapse(2) wait(1) async(10)
         do j = j_s,j_e
         do i = i_s,i_e
         !$acc loop seq
@@ -264,7 +255,7 @@ contains
         
 
         if (advect_density) then
-            !$acc parallel
+            !$acc parallel async(0)
             !$acc loop gang vector collapse(3)
             do j = jms, jme
                 do k = kms, kme
@@ -308,7 +299,7 @@ contains
             enddo
             !$acc end parallel
         else
-            !$acc parallel 
+            !$acc parallel async(0)
             !$acc loop gang vector collapse(3)
             do j = jms, jme
                 do k = kms, kme
@@ -328,7 +319,7 @@ contains
             !$acc end parallel
         end if
 
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) async(1) wait(0)
         do j = jms, jme
             do k = kms, kme
             do i = ims, ime
@@ -369,7 +360,7 @@ contains
                 enddo
             end if
 
-            !$acc parallel loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jms,jme
             do k = kms,kme
             do i = ims,ime
@@ -387,6 +378,7 @@ contains
         endif
 
         !$acc end data
+        !$acc wait(2)
     end subroutine calc_divergence
     
 
@@ -679,16 +671,16 @@ contains
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
 
                 ! -- Do this all a second time to minimize discretization artifacts
-                call calc_idealized_wgrid(domain)
+                ! call calc_idealized_wgrid(domain)
 
-                call calc_divergence(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
-                        domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,domain%dx, &
-                        domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options%adv%advect_density,horz_only=.False.)
+                ! call calc_divergence(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                !         domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,domain%dx, &
+                !         domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options%adv%advect_density,horz_only=.False.)
 
-                call calc_iter_winds_old(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
-                !Exchange u and v, since the outer points are not updated in above function
-                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
-                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
+                ! call calc_iter_winds_old(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
+                ! !Exchange u and v, since the outer points are not updated in above function
+                ! call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
+                ! call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
 
                 !$acc end data
             endif

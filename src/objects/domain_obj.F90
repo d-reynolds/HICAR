@@ -347,7 +347,7 @@ contains
                   u_mass                => this%vars_3d(this%var_indx(kVARS%u_mass)%v)%data_3d,                 &
                   v_mass                => this%vars_3d(this%var_indx(kVARS%v_mass)%v)%data_3d,                 &
                   potential_temperature => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d )
-        !$acc data present(exner, pressure, future_pressure, pressure_i, dz_i, dz_mass, psfc, density, temperature, temperature_i, qv, u, v, u_mass, v_mass, potential_temperature) create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3)
+        ! !$acc data present(exner, pressure, future_pressure, pressure_i, dz_i, dz_mass, psfc, density, temperature, temperature_i, qv, u, v, u_mass, v_mass, potential_temperature) create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3)
 
         !Calculation of density
 
@@ -625,7 +625,7 @@ contains
             endif
         endif
 
-        !$acc end data
+        ! !$acc end data
         end associate
 
     end subroutine diagnostic_update
@@ -2818,8 +2818,6 @@ contains
         !calculate dt in units of hours
         dt_h = dt/3600.0
 
-        ims_b = 0; ime_b = 0; jms_b = 0; jme_b = 0
-
         do_west = (this%ims < this%ids+this%grid%halo_size+FILTER_WIDTH)
         do_east = (this%ime > this%ide-this%grid%halo_size-FILTER_WIDTH)
         do_south = (this%jms < this%jds+this%grid%halo_size+FILTER_WIDTH)
@@ -2827,11 +2825,16 @@ contains
 
         do_boundary = (do_west .or. do_east .or. do_north .or. do_south)
 
+        !$acc data create(ims_b,ime_b,jms_b,jme_b)
+        associate( ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, halo_size => this%grid%halo_size )
+        !$acc parallel present(ims, ime, jms, jme, halo_size)
+        ims_b = 0; ime_b = 0; jms_b = 0; jme_b = 0
+
         if (do_boundary) then
-            if (do_west) ims_b(1) = this%ims; ime_b(1) = this%ims+FILTER_WIDTH+this%grid%halo_size; jms_b(1) = this%jms; jme_b(1) = this%jme;
-            if (do_east) ims_b(2) = this%ime-FILTER_WIDTH-this%grid%halo_size; ime_b(2) = this%ime; jms_b(2) = this%jms; jme_b(2) = this%jme;
-            if (do_north) ims_b(3) = this%ims; ime_b(3) = this%ime; jms_b(3) = this%jme-FILTER_WIDTH-this%grid%halo_size; jme_b(3) = this%jme;
-            if (do_south) ims_b(4) = this%ims; ime_b(4) = this%ime; jms_b(4) = this%jms; jme_b(4) = this%jms+FILTER_WIDTH+this%grid%halo_size;
+            if (do_west) ims_b(1) = ims; ime_b(1) = ims+FILTER_WIDTH+halo_size; jms_b(1) = jms; jme_b(1) = jme;
+            if (do_east) ims_b(2) = ime-FILTER_WIDTH-halo_size; ime_b(2) = ime; jms_b(2) = jms; jme_b(2) = jme;
+            if (do_north) ims_b(3) = ims; ime_b(3) = ime; jms_b(3) = jme-FILTER_WIDTH-halo_size; jme_b(3) = jme;
+            if (do_south) ims_b(4) = ims; ime_b(4) = ime; jms_b(4) = jms; jme_b(4) = jms+FILTER_WIDTH+halo_size;
 
             ! limit vertical extent of west and east boundaries to the extent of the north/south indices
             ! this prevents double-calculating points in the corners
@@ -2841,8 +2844,8 @@ contains
             if (do_west .and. do_north) jme_b(1) = min(jme_b(1),jms_b(3))
             if (do_east .and. do_north) jme_b(2) = min(jme_b(2),jms_b(3))
         endif
-
-        !$acc data copyin(ims_b,ime_b,jms_b,jme_b)
+        !$acc end parallel
+        end associate
 
         do n = 1,size(this%forcing_hi)
 

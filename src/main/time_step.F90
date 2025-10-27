@@ -370,7 +370,14 @@ contains
                 call domain%halo_3d_send()
                 call domain%halo_2d_send()
                 call domain%send_timer%stop()
-    
+#ifdef _OPENACC
+                call domain%ret_timer%start()
+                call domain%halo_3d_retrieve()
+                call domain%halo_2d_retrieve()
+                !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call domain%ret_timer%stop()
+#endif
+
                 call domain%rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
                 if (options%general%debug) call domain_check(domain, "rad(domain")
@@ -387,12 +394,14 @@ contains
                 call pbl(domain, options, real(dt%seconds()))!, halo=1)
                 call domain%pbl_timer%stop()
 
+#ifndef _OPENACC
                 call domain%ret_timer%start()
                 call domain%halo_3d_retrieve()
                 call domain%halo_2d_retrieve()
-                call integrate_physics_tendencies(domain, options, real(dt%seconds()))
                 !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
                 call domain%ret_timer%stop()
+#endif
+                call integrate_physics_tendencies(domain, options, real(dt%seconds()))
 
                 if (options%general%debug) call domain_check(domain, "pbl")
                 call convect(domain, options, real(dt%seconds()))!, halo=1)
