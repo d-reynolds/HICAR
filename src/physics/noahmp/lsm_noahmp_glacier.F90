@@ -53,6 +53,8 @@ MODULE NOAHMP_GLACIER_GLOBALS
 
   INTEGER :: OPT_GLA != 1    !(suggested 1)
 
+  !$acc declare create(OPT_ALB, OPT_SNF, OPT_TBOT, OPT_STC, OPT_GLA)
+
 ! adjustable parameters for snow processes
 
   REAL, PARAMETER :: Z0SNO  = 0.002  !snow surface roughness length (m) (0.002)
@@ -122,6 +124,7 @@ contains
 ! Initial code: Guo-Yue Niu, Oct. 2007
 ! Modified to glacier: Michael Barlage, June 2012
 ! --------------------------------------------------------------------------------------------------
+!$acc routine seq
   implicit none
 ! --------------------------------------------------------------------------------------------------
 ! input
@@ -212,7 +215,7 @@ contains
   REAL                                           :: QMELT  !internal pack melt
   REAL                                           :: SWDOWN !downward solar [w/m2]
   REAL                                           :: BEG_WB !beginning water for error check
-  REAL                                           :: ZBOT = -8.0
+  REAL, PARAMETER                                :: ZBOT = -8.0
 
   CHARACTER*256 message
 
@@ -243,9 +246,9 @@ contains
                          TG     ,STC    ,SNOWH  ,SNEQV  ,SNEQVO ,SH2O   , & !inout
                          SMC    ,SNICE  ,SNLIQ  ,ALBOLD ,CM     ,CH     , & !inout
                          TAUSS  ,QSFC   ,                                 & !inout
-                         IMELT  ,SNICEV ,SNLIQV ,EPORE  ,QMELT  ,PONDING, & !out
-		         SAG    ,FSA    ,FSR    ,FIRA   ,FSH    ,FGEV   , & !out
-		         TRAD   ,T2M    ,SSOIL  ,LATHEA ,Q2E    ,EMISSI, CH2B )   !out
+                          IMELT  ,SNICEV ,SNLIQV ,EPORE  ,QMELT  ,PONDING, & !out
+             SAG    ,FSA    ,FSR    ,FIRA   ,FSH    ,FGEV   , & !out
+             TRAD   ,T2M    ,SSOIL  ,LATHEA ,Q2E    ,EMISSI, CH2B )   !out
 
     SICE = MAX(0.0, SMC - SH2O)
     SNEQVO  = SNEQV
@@ -272,7 +275,7 @@ contains
      END IF
 
      IF(MAXVAL(SICE) < 0.0001) THEN
-       WRITE(message,*) "GLACIER HAS MELTED AT:",ILOC,JLOC," ARE YOU SURE THIS SHOULD BE A GLACIER POINT?"
+       WRITE(*,*) "GLACIER HAS MELTED AT:",ILOC,JLOC," ARE YOU SURE THIS SHOULD BE A GLACIER POINT?"
 !       CALL wrf_debug(10,TRIM(message))
      END IF
 
@@ -302,7 +305,8 @@ contains
 ! --------------------------------------------------------------------------------------------------
 ! re-process atmospheric forcing
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! --------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -365,7 +369,8 @@ contains
 !  USE NOAHMP_VEG_PARAMETERS
 !  USE NOAHMP_RAD_PARAMETERS
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! --------------------------------------------------------------------------------------------------
 ! inputs
   INTEGER                           , INTENT(IN)    :: NSNOW  !maximum no. of snow layers
@@ -540,7 +545,8 @@ contains
                                  FACT    )                                       !out
 ! -------------------------------------------------------------------------------------------------
 ! -------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! --------------------------------------------------------------------------------------------------
 ! inputs
   INTEGER                        , INTENT(IN)  :: NSOIL   !number of soil layers
@@ -612,7 +618,8 @@ contains
 ! --------------------------------------------------------------------------------------------------
 ! Snow bulk density,volumetric capacity, and thermal conductivity
 !---------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 !---------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -668,7 +675,8 @@ contains
                                 ALBOLD  ,TAUSS   ,                            & !inout
                                 SAG     ,FSR     ,FSA)                          !out
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! --------------------------------------------------------------------------------------------------
 ! input
   REAL, INTENT(IN)                     :: DT     !time step [s]
@@ -755,7 +763,8 @@ contains
 ! ==================================================================================================
   SUBROUTINE SNOW_AGE_GLACIER (DT,TG,SNEQVO,SNEQV,TAUSS,FAGE)
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! ------------------------ code history ------------------------------------------------------------
 ! from BATS
 ! ------------------------ input/output variables --------------------------------------------------
@@ -809,7 +818,8 @@ contains
 ! --------------------------------------------------------------------------------------------------
   SUBROUTINE SNOWALB_BATS_GLACIER (NBAND,COSZ,FAGE,ALBSND,ALBSNI)
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! --------------------------------------------------------------------------------------------------
 ! input
 
@@ -858,7 +868,8 @@ contains
 ! --------------------------------------------------------------------------------------------------
   SUBROUTINE SNOWALB_CLASS_GLACIER (NBAND,QSNOW,DT,ALB,ALBOLD,ALBSND,ALBSNI)
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! --------------------------------------------------------------------------------------------------
 ! input
 
@@ -918,7 +929,8 @@ contains
 ! ----------------------------------------------------------------------
 !  USE MODULE_MODEL_CONSTANTS
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! ----------------------------------------------------------------------
 ! input
   INTEGER, INTENT(IN)                         :: NSNOW  !maximum no. of snow layers
@@ -1122,7 +1134,8 @@ contains
 !---------------------------------------------------------------------------------------------------
 ! use polynomials to calculate saturation vapor pressure and derivative with
 ! respect to temperature: over water when t > 0 c and over ice when t <= 0 c
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 !---------------------------------------------------------------------------------------------------
 ! in
 
@@ -1177,7 +1190,8 @@ contains
 ! -------------------------------------------------------------------------------------------------
 ! computing surface drag coefficient CM for momentum and CH for heat
 ! -------------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+    !$acc routine seq
+implicit none
 ! -------------------------------------------------------------------------------------------------
 ! inputs
     INTEGER,              INTENT(IN) :: ITER   !iteration index
@@ -1339,7 +1353,8 @@ contains
 ! during melting season may exceed melting point (TFRZ) but later in PHASECHANGE
 ! subroutine the snow temperatures are reset to TFRZ for melting snow.
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! --------------------------------------------------------------------------------------------------
 !input
 
@@ -1404,7 +1419,8 @@ contains
 ! thermal diffusion equation.  also to compute ( prepare ) the matrix
 ! coefficients for the tri-diagonal matrix of the implicit time scheme.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+    !$acc routine seq
+implicit none
 ! ----------------------------------------------------------------------
 ! input
 
@@ -1497,7 +1513,8 @@ contains
 ! ----------------------------------------------------------------------
 ! CALCULATE/UPDATE THE SOIL TEMPERATURE FIELD.
 ! ----------------------------------------------------------------------
-    implicit none
+    !$acc routine seq
+implicit none
 ! ----------------------------------------------------------------------
 ! input
 
@@ -1564,7 +1581,8 @@ contains
 ! # 0  , . . . , 0 ,   0   ,   0   ,  A(M) ,  B(M) # # P(M) #   # D(M) #
 ! ###                                            ### ###  ###   ###  ###
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+    !$acc routine seq
+implicit none
 
     INTEGER, INTENT(IN)   :: NTOP
     INTEGER, INTENT(IN)   :: NSOIL,NSNOW
@@ -1613,6 +1631,7 @@ contains
 ! ----------------------------------------------------------------------
 ! melting/freezing of snow water and soil water
 ! ----------------------------------------------------------------------
+!$acc routine seq  
   IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! inputs
@@ -2007,6 +2026,7 @@ END IF   ! OPT_GLA == 1
 ! Code history:
 ! Initial code: Guo-Yue Niu, Oct. 2007
 ! ----------------------------------------------------------------------
+!$acc routine seq
   implicit none
 ! ----------------------------------------------------------------------
 ! input
@@ -2179,7 +2199,8 @@ END IF   ! OPT_GLA == 1
 				FSH    ,                                 & !inout
                                 QSNBOT ,SNOFLOW,PONDING1       ,PONDING2)  !out
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! ----------------------------------------------------------------------
 ! input
   INTEGER,                         INTENT(IN)    :: NSNOW  !maximum no. of snow layers
@@ -2307,7 +2328,8 @@ END IF   ! OPT_GLA == 1
 ! snow depth and density to account for the new snowfall.
 ! new values of snow depth & density returned.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+    !$acc routine seq
+implicit none
 ! ----------------------------------------------------------------------
 ! input
 
@@ -2369,7 +2391,8 @@ END IF   ! OPT_GLA == 1
                               ISNOW  ,DZSNSO )                          !inout
 ! ----------------------------------------------------------------------
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! ----------------------------------------------------------------------
 ! input
    INTEGER,                         INTENT(IN)    :: NSOIL  !no. of soil layers [ =4]
@@ -2468,7 +2491,8 @@ END IF   ! OPT_GLA == 1
                               DZSNSO ,SICE   ,SNOWH  ,SNEQV  ,         & !inout
                               PONDING1       ,PONDING2)                  !inout
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+    !$acc routine seq
+implicit none
 ! ----------------------------------------------------------------------
 ! input
 
@@ -2637,7 +2661,8 @@ END IF   ! OPT_GLA == 1
 ! ----------------------------------------------------------------------
   SUBROUTINE COMBO_GLACIER(DZ,  WLIQ,  WICE, T, DZ2, WLIQ2, WICE2, T2)
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+    !$acc routine seq
+implicit none
 ! ----------------------------------------------------------------------
 
 ! ----------------------------------------------------------------------s
@@ -2689,7 +2714,8 @@ END IF   ! OPT_GLA == 1
   SUBROUTINE DIVIDE_GLACIER (NSNOW  ,NSOIL  ,                         & !in
                              ISNOW  ,STC    ,SNICE  ,SNLIQ  ,DZSNSO  )  !inout
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+    !$acc routine seq
+implicit none
 ! ----------------------------------------------------------------------
 ! input
 
@@ -2821,7 +2847,8 @@ END IF   ! OPT_GLA == 1
 ! Renew the mass of ice lens (SNICE) and liquid (SNLIQ) of the
 ! surface snow layer resulting from sublimation (frost) / evaporation (dew)
 ! ----------------------------------------------------------------------
-   IMPLICIT NONE
+   !$acc routine seq
+implicit none
 ! ----------------------------------------------------------------------
 ! input
 
@@ -2977,7 +3004,8 @@ END IF   ! OPT_GLA == 1
 ! --------------------------------------------------------------------------------------------------
 ! check surface energy balance and water balance
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+  !$acc routine seq
+implicit none
 ! --------------------------------------------------------------------------------------------------
 ! inputs
   INTEGER                        , INTENT(IN) :: ILOC   !grid index
@@ -3010,20 +3038,20 @@ END IF   ! OPT_GLA == 1
      WRITE(*,*) "SAG    =",SAG
      WRITE(*,*) "FSA    =",FSA
      WRITE(*,*) "FSR    =",FSR
-     WRITE(message,*) 'ERRSW =',ERRSW
+     WRITE(*,*) 'ERRSW =',ERRSW
      WRITE(*,*) "FATAL: Radiation budget problem in Noah-MP Glacier"
-     STOP
+     STOP "FATAL: Radiation budget problem in Noah-MP Glacier"
 !     call wrf_message(trim(message))
 !     call wrf_error_fatal("Radiation budget problem in NOAHMP GLACIER")
    END IF
 
    ERRENG = SAG-(FIRA+FSH+FGEV+SSOIL)
    IF(ERRENG > 0.01) THEN
-      write(message,*) 'ERRENG =',ERRENG
+      write(*,*) 'ERRENG =',ERRENG
 !      call wrf_message(trim(message))
-      WRITE(message,'(i6,1x,i6,1x,5F10.4)')ILOC,JLOC,SAG,FIRA,FSH,FGEV,SSOIL
+      WRITE(*,*)ILOC,JLOC,SAG,FIRA,FSH,FGEV,SSOIL
       WRITE(*,*) "FATAL: Energy budget problem in Noah-MP Glacier"
-      STOP
+      STOP "FATAL: Energy budget problem in Noah-MP Glacier"
 !      call wrf_message(trim(message))
 !      call wrf_error_fatal("Energy budget problem in NOAHMP GLACIER")
    END IF
@@ -3053,7 +3081,7 @@ END IF   ! OPT_GLA == 1
 ! ==================================================================================================
 
   SUBROUTINE NOAHMP_OPTIONS_GLACIER(iopt_alb  ,iopt_snf  ,iopt_tbot, iopt_stc, iopt_gla )
-
+  !$acc routine seq
   IMPLICIT NONE
 
   INTEGER,  INTENT(IN) :: iopt_alb  !snow surface albedo (1->BATS; 2->CLASS)

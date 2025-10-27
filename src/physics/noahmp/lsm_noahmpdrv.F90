@@ -63,6 +63,10 @@ CONTAINS
 !    USE MODULE_SF_NOAHMPLSM
     USE MODULE_SF_NOAHMPLSM, only: noahmp_options, NOAHMP_SFLX, noahmp_parameters
     USE module_sf_noahmp_glacier
+#ifdef _OPENACC
+  use openacc
+#endif
+
     USE NOAHMP_TABLES, ONLY: ISICE_TABLE, CO2_TABLE, O2_TABLE, DEFAULT_CROP_TABLE, ISCROP_TABLE, ISURBAN_TABLE, NATURAL_TABLE, &
                              LCZ_1_TABLE,LCZ_2_TABLE,LCZ_3_TABLE,LCZ_4_TABLE,LCZ_5_TABLE,LCZ_6_TABLE,LCZ_7_TABLE,LCZ_8_TABLE,  &
                              LCZ_9_TABLE,LCZ_10_TABLE,LCZ_11_TABLE
@@ -128,7 +132,7 @@ CONTAINS
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  SWDDIF    ! solar down at surface [W m-2]
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  SWDDIR    ! solar down at surface [W m-2]
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  GLW       ! longwave down at surface [W m-2]
-    REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN   ) ::  P8W3D     ! 3D pressure, valid at interface [Pa]
+    REAL,    DIMENSION( ims:ime, kms:kme+1, jms:jme ), INTENT(IN   ) ::  P8W3D     ! 3D pressure, valid at interface [Pa]
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  PRECIP_IN ! total input precipitation [mm]
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  SR        ! frozen precipitation ratio [-]
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  PBLH      ! PBL height 
@@ -338,7 +342,7 @@ CONTAINS
     REAL                                :: LAT          ! latitude [rad]
     REAL                                :: Z_ML         ! model height [m]
     INTEGER                             :: VEGTYP       ! vegetation type
-    INTEGER,    DIMENSION(NSOIL)        :: SOILTYP      ! soil type
+    INTEGER,    DIMENSION(1:NSOIL)      :: SOILTYP      ! soil type
     INTEGER                             :: CROPTYPE     ! crop type
     REAL                                :: FVEG         ! vegetation fraction [-]
     REAL                                :: FVGMAX       ! annual max vegetation fraction []
@@ -526,11 +530,53 @@ CONTAINS
 
 ! ----------------------------------------------------------------------
 
-    CALL NOAHMP_OPTIONS(IDVEG  ,IOPT_CRS  ,IOPT_BTR  ,IOPT_RUN  ,IOPT_SFC  ,IOPT_FRZ , &
-                     IOPT_INF  ,IOPT_RAD  ,IOPT_ALB  ,IOPT_SNF  ,IOPT_TBOT, IOPT_STC , &
-		     IOPT_RSF  ,IOPT_SOIL ,IOPT_PEDO ,IOPT_CROP ,IOPT_IRR  ,IOPT_IRRM)
-
-    IPRINT    =  .false.                     ! debug printout
+   !$acc data present(COSZIN,XLAT,XLONG, & ! IN : Time/Space-related
+   !$acc                DZ8W,       DT,       DZS,    NSOIL,       DX,            & ! IN : Model configuration
+	!$acc         IVGTYP,   ISLTYP,    VEGFRA,   VEGMAX,      TMN,            & ! IN : Vegetation/Soil characteristics
+	!$acc 	 XLAND,     XICE,XICE_THRES,  CROPCAT,                      & ! IN : Vegetation/Soil characteristics
+	!$acc        PLANTING,  HARVEST,SEASON_GDD,                               &
+   !$acc               IDVEG, IOPT_CRS,  IOPT_BTR, IOPT_RUN, IOPT_SFC, IOPT_FRZ,  & ! IN : User options
+   !$acc            IOPT_INF, IOPT_RAD,  IOPT_ALB, IOPT_SNF,IOPT_TBOT, IOPT_STC,  & ! IN : User options
+   !$acc            IOPT_GLA, IOPT_RSF, IOPT_SOIL,IOPT_PEDO,IOPT_CROP, IOPT_IRR,  & ! IN : User options
+   !$acc           IOPT_IRRM,                                                     & ! IN : User options
+   !$acc            IZ0TLND, SF_URBAN_PHYSICS,                                    & ! IN : User options
+	!$acc       SOILCOMP,  SOILCL1,  SOILCL2,   SOILCL3,  SOILCL4,            & ! IN : User options
+   !$acc                 T3D,     QV3D,     U_PHY,    V_PHY,   SWDOWN,     SWDDIR,&
+   !$acc              SWDDIF,      GLW,                                           & ! IN : Forcing
+	!$acc 	 P8W3D,PRECIP_IN,        SR,                                & ! IN : Forcing
+   !$acc             IRFRACT,  SIFRACT,   MIFRACT,  FIFRACT,                      & ! IN : Noah MP only
+   !$acc                 TSK,      HFX,      QFX,        LH,   GRDFLX,    SMSTAV, & ! IN/OUT LSM eqv
+   !$acc              SMSTOT,SFCRUNOFF, UDRUNOFF,    ALBEDO,    SNOWC,     SMOIS, & ! IN/OUT LSM eqv
+	!$acc 	  SH2O,     TSLB,     SNOW,     SNOWH,   CANWAT,    ACSNOM, & ! IN/OUT LSM eqv
+	!$acc 	ACSNOW,    EMISS,     QSFC,                                 & ! IN/OUT LSM eqv
+ 	!$acc 	    Z0,      ZNT, PBLH,                                     & ! IN/OUT LSM eqv
+   !$acc             IRNUMSI,  IRNUMMI,  IRNUMFI,   IRWATSI,  IRWATMI,   IRWATFI, & ! IN/OUT Noah MP only
+   !$acc             IRELOSS,  IRSIVOL,  IRMIVOL,   IRFIVOL,  IRRSPLH,  LLANDUSE, & ! IN/OUT Noah MP only
+   !$acc             ISNOWXY,     TVXY,     TGXY,  CANICEXY, CANLIQXY,     EAHXY, & ! IN/OUT Noah MP only
+	!$acc          TAHXY,     CMXY,     CHXY,    FWETXY, SNEQVOXY,  ALBOLDXY, & ! IN/OUT Noah MP only
+   !$acc             QSNOWXY, QRAINXY,  WSLAKEXY, ZWTXY,  WAXY,  WTXY,    TSNOXY, & ! IN/OUT Noah MP only
+	!$acc        ZSNSOXY,  SNICEXY,  SNLIQXY,  LFMASSXY, RTMASSXY,  STMASSXY, & ! IN/OUT Noah MP only
+	!$acc         WOODXY, STBLCPXY, FASTCPXY,    XLAIXY,   XSAIXY,   TAUSSXY, & ! IN/OUT Noah MP only
+	!$acc        SMOISEQ, SMCWTDXY,DEEPRECHXY,   RECHXY,  GRAINXY,    GDDXY,PGSXY,  & ! IN/OUT Noah MP only
+   !$acc             GECROS_STATE,                                                & ! IN/OUT gecros model
+	!$acc         T2MVXY,   T2MBXY,    Q2MVXY,   Q2MBXY,                      & ! OUT Noah MP only
+	!$acc         TRADXY,    NEEXY,    GPPXY,     NPPXY,   FVEGXY,   RUNSFXY, & ! OUT Noah MP only
+	!$acc        RUNSBXY,   ECANXY,   EDIRXY,   ETRANXY,    FSAXY,    FIRAXY, & ! OUT Noah MP only
+	!$acc         APARXY,    PSNXY,    SAVXY,     SAGXY,  RSSUNXY,   RSSHAXY, & ! OUT Noah MP only
+	!$acc 	BGAPXY,   WGAPXY,    TGVXY,     TGBXY,    CHVXY,     CHBXY, & ! OUT Noah MP only
+	!$acc 	 SHGXY,    SHCXY,    SHBXY,     EVGXY,    EVBXY,     GHVXY, & ! OUT Noah MP only
+	!$acc 	 GHBXY,    IRGXY,    IRCXY,     IRBXY,     TRXY,     EVCXY, & ! OUT Noah MP only
+   !$acc            CHLEAFXY,   CHUCXY,   CHV2XY,    CHB2XY, RS,                  & ! OUT Noah MP only
+   ! !$acc                BEXP_3D,SMCDRY_3D,SMCWLT_3D,SMCREF_3D,SMCMAX_3D,          & ! placeholders to activate 3D soil
+	! !$acc 	 DKSAT_3D,DWSAT_3D,PSISAT_3D,QUARTZ_3D,                     &
+	! !$acc 	 REFDK_2D,REFKDT_2D,                                        &
+   ! !$acc               IRR_FRAC_2D,IRR_HAR_2D,IRR_LAI_2D,IRR_MAD_2D,FILOSS_2D,      &
+   ! !$acc               SPRIR_RATE_2D,MICIR_RATE_2D,FIRTFAC_2D,IR_RAIN_2D,           &
+   !$acc             MP_RAINC, MP_RAINNC, MP_SHCV, MP_SNOW, MP_GRAUP, MP_HAIL) &
+   !$acc    copyin(ITIMESTEP,   JULIAN,   &
+   !$acc           ims, ime, kms, kme, jms,jme, &
+   !$acc           its,ite,kts,kte,jts,jte, & ! IN : Time/Space-related
+   !$acc           ids,ide,kds,kde,jds,jde)
 
     YEARLEN = 365                            ! find length of year for phenology (also S Hemisphere)
     if (mod(YR,4) == 0) then
@@ -548,9 +594,18 @@ CONTAINS
        ZSOIL(K) = -DZS(K) + ZSOIL(K-1)
     END DO
 
-    JLOOP : DO J=jts,jte
+    IPRINT    =  .false.                     ! debug printout
 
-       IF(ITIMESTEP == 1)THEN
+   !$acc parallel
+    CALL NOAHMP_OPTIONS(IDVEG  ,IOPT_CRS  ,IOPT_BTR  ,IOPT_RUN  ,IOPT_SFC  ,IOPT_FRZ , &
+                     IOPT_INF  ,IOPT_RAD  ,IOPT_ALB  ,IOPT_SNF  ,IOPT_TBOT, IOPT_STC , &
+		     IOPT_RSF  ,IOPT_SOIL ,IOPT_PEDO ,IOPT_CROP ,IOPT_IRR  ,IOPT_IRRM)
+   !$acc end parallel
+    
+
+    IF(ITIMESTEP == 1)THEN
+      !$acc parallel loop gang vector collapse(2)
+      DO J=jts,jte
           DO I=its,ite
             !  IF((XLAND(I,J)-1.5) >= 0.) THEN    ! Open water case
             IF(   ((XLAND(I,J)-1.5) >= 0.) .OR.             & ! skip if XLAND = 2
@@ -573,19 +628,24 @@ CONTAINS
                 ENDIF
              ENDIF
           ENDDO
-       ENDIF                                                               ! end of initialization over ocean
-
+      ENDDO
+   ENDIF                                                               ! end of initialization over ocean
 
 !-----------------------------------------------------------------------
-   ILOOP : DO I = its, ite
-
+   ! !$acc parallel loop gang vector collapse(2) &
+   ! !$acc           firstprivate(ZSOIL, YEARLEN) private(parameters, SOILTYP, SMCEQ, SMC, SMH2O, STC, ZSNSO, SNICE, SNLIQ, &
+   ! !$acc           ALBSND, ALBSNI, gecros1d, FICEOLD, SAND, CLAY, ORGM) if(acc_get_device_type() == acc_device_nvidia)  ! local variables)
+   DO J=jts,jte
+   DO I = its, ite
     IF (XICE(I,J) >= XICE_THRES) THEN
        ICE = 1                            ! Sea-ice point
 
-       SH2O  (i,1:NSOIL,j) = 1.0
+       DO K = 1, NSOIL
+          SH2O(I,K,J)       = 1.0
+       ENDDO
        XLAIXY(i,j)         = 0.01
 
-       CYCLE ILOOP ! Skip any processing at sea-ice points
+       CYCLE ! Skip any processing at sea-ice points
 
     ELSE
 
@@ -593,7 +653,7 @@ CONTAINS
       IF(   ((XLAND(I,J)-1.5) >= 0.) .OR.             & ! skip if XLAND = 2
             ((XLAND(I,J)-0.5) < 0.)                   & ! skip if XLAND = 0
       ) THEN
-         CYCLE ILOOP                                  ! Open water case
+         CYCLE                                  ! Open water case
       ENDIF
 
 !     2D to 1D
@@ -604,15 +664,15 @@ CONTAINS
        LAT    = XLAT  (I,J)                           ! latitude [rad]
        Z_ML   = 0.5*DZ8W(I,1,J)                       ! DZ8W: thickness of full levels; ZLVL forcing height [m]
        VEGTYP = IVGTYP(I,J)                           ! vegetation type
-       if(iopt_soil == 1) then
-         SOILTYP= ISLTYP(I,J)                         ! soil type same in all layers
+       if(iopt_soil == 1 .or. iopt_soil == 3) then
+            DO K = 1, NSOIL
+               SOILTYP(K) = ISLTYP(I,J)                         ! soil type same in all layers
+            END DO
        elseif(iopt_soil == 2) then
          SOILTYP(1) = nint(SOILCL1(I,J))              ! soil type in layer1
          SOILTYP(2) = nint(SOILCL2(I,J))              ! soil type in layer2
          SOILTYP(3) = nint(SOILCL3(I,J))              ! soil type in layer3
          SOILTYP(4) = nint(SOILCL4(I,J))              ! soil type in layer4
-       elseif(iopt_soil == 3) then
-         SOILTYP= ISLTYP(I,J)                         ! to initialize with default
        end if
        FVEG   = VEGFRA(I,J)/100.                      ! vegetation fraction [0-1]
        FVGMAX = VEGMAX (I,J)/100.                     ! Vegetation fraction annual max [0-1]
@@ -666,10 +726,6 @@ CONTAINS
 ! IN/OUT fields
 
        ISNOW                 = ISNOWXY (I,J)                ! snow layers []
-       SMC  (      1:NSOIL)  = SMOIS   (I,      1:NSOIL,J)  ! soil total moisture [m3/m3]
-       SMH2O(      1:NSOIL)  = SH2O    (I,      1:NSOIL,J)  ! soil liquid moisture [m3/m3]
-       STC  (-NSNOW+1:    0) = TSNOXY  (I,-NSNOW+1:    0,J) ! snow temperatures [K]
-       STC  (      1:NSOIL)  = TSLB    (I,      1:NSOIL,J)  ! soil temperatures [K]
        SWE                   = SNOW    (I,J)                ! snow water equivalent [mm]
        SNDPTH                = SNOWH   (I,J)                ! snow depth [m]
        QSFC1D                = QSFC    (I,J)
@@ -693,9 +749,23 @@ CONTAINS
        ZWT                   = ZWTXY   (I,J)                ! depth to water table [m]
        WA                    = WAXY    (I,J)                ! water storage in aquifer [mm]
        WT                    = WTXY    (I,J)                ! water in aquifer&saturated soil [mm]
-       ZSNSO(-NSNOW+1:NSOIL) = ZSNSOXY (I,-NSNOW+1:NSOIL,J) ! depth to layer interface
-       SNICE(-NSNOW+1:    0) = SNICEXY (I,-NSNOW+1:    0,J) ! snow layer ice content
-       SNLIQ(-NSNOW+1:    0) = SNLIQXY (I,-NSNOW+1:    0,J) ! snow layer water content
+       
+       do k = -NSNOW+1, NSOIL
+          ZSNSO (k) = ZSNSOXY (I,k,J)               ! depth to layer interface
+       end do
+
+       do k = -NSNOW+1, 0
+         SNICE(k) = SNICEXY (I,k,J) ! snow layer ice content
+         SNLIQ(k) = SNLIQXY (I,k,J) ! snow layer water content
+         STC  (k) = TSNOXY  (I,k,J) ! snow temperatures [K]
+       end do       
+
+      do k = 1, NSOIL
+         SMCEQ(k) = SMOISEQ (I,k,J)
+         SMC(k)  = SMOIS   (I,k,J) ! soil total moisture [m3/m3]
+         SMH2O(k)  = SH2O    (I,k,J) ! soil liquid moisture [m3/m3]
+         STC(k)  = TSLB    (I,k,J) ! soil temperatures [K]
+      end do
        LFMASS                = LFMASSXY(I,J)                ! leaf mass
        RTMASS                = RTMASSXY(I,J)                ! root mass
        STMASS                = STMASSXY(I,J)                ! stem mass
@@ -705,7 +775,6 @@ CONTAINS
        PLAI                  = XLAIXY  (I,J)                ! leaf area index [-] (no snow effects)
        PSAI                  = XSAIXY  (I,J)                ! stem area index [-] (no snow effects)
        TAUSS                 = TAUSSXY (I,J)                ! non-dimensional snow age
-       SMCEQ(       1:NSOIL) = SMOISEQ (I,       1:NSOIL,J)
        SMCWTD                = SMCWTDXY(I,J)
        RECH                  = 0.
        DEEPRECH              = 0.
@@ -730,7 +799,9 @@ CONTAINS
 
        if(iopt_crop == 2) then   ! gecros crop model
 
-         gecros1d(1:60)      = gecros_state(I,1:60,J)       ! Gecros variables 2D -> local
+         do k = 1,60
+            gecros1d(k)      = gecros_state(I,k,J)       ! Gecros variables 2D -> local
+         end do
 
          if(croptype == 1) then
            gecros_dd   =  2.5
@@ -808,11 +879,13 @@ CONTAINS
 
        if(iopt_soil == 3 .and. .not. parameters%urban_flag) then
 
-	sand = 0.01 * soilcomp(i,1:4,j)
-	clay = 0.01 * soilcomp(i,5:8,j)
-        orgm = 0.0
+         DO K = 1, NSOIL
+            sand(K) = 0.01 * soilcomp(i,K,j)
+            clay(K) = 0.01 * soilcomp(i,K+4,j)
+            orgm(K) = 0.0
+         ENDDO
 
-        if(iopt_pedo == 1) call pedotransfer_sr2006(nsoil,sand,clay,orgm,parameters)
+         if(iopt_pedo == 1) call pedotransfer_sr2006(nsoil,sand,clay,orgm,parameters)
 
        end if
 
@@ -822,12 +895,12 @@ CONTAINS
 
        if(iopt_crop == 1 .and. croptype > 0) then
          parameters%PLTDAY = PLANTING(I,J)
-	 parameters%HSDAY  = HARVEST (I,J)
-	 parameters%GDDS1  = SEASON_GDD(I,J) / 1770.0 * parameters%GDDS1
-	 parameters%GDDS2  = SEASON_GDD(I,J) / 1770.0 * parameters%GDDS2
-	 parameters%GDDS3  = SEASON_GDD(I,J) / 1770.0 * parameters%GDDS3
-	 parameters%GDDS4  = SEASON_GDD(I,J) / 1770.0 * parameters%GDDS4
-	 parameters%GDDS5  = SEASON_GDD(I,J) / 1770.0 * parameters%GDDS5
+         parameters%HSDAY  = HARVEST (I,J)
+         parameters%GDDS1  = SEASON_GDD(I,J) / 1770.0 * parameters%GDDS1
+         parameters%GDDS2  = SEASON_GDD(I,J) / 1770.0 * parameters%GDDS2
+         parameters%GDDS3  = SEASON_GDD(I,J) / 1770.0 * parameters%GDDS3
+         parameters%GDDS4  = SEASON_GDD(I,J) / 1770.0 * parameters%GDDS4
+         parameters%GDDS5  = SEASON_GDD(I,J) / 1770.0 * parameters%GDDS5
        end if
 
        if(iopt_irr == 2) then ! based on planting and harvesting dates.
@@ -860,8 +933,12 @@ CONTAINS
 ! Initialized local
 
        FICEOLD = 0.0
-       FICEOLD(ISNOW+1:0) = SNICEXY(I,ISNOW+1:0,J) &  ! snow ice fraction
-           /(SNICEXY(I,ISNOW+1:0,J)+SNLIQXY(I,ISNOW+1:0,J))
+       !$acc loop
+       do k = ISNOW+1,0
+         FICEOLD(k) = SNICEXY(I,k,J) &  ! snow ice fraction
+           /(SNICEXY(I,k,J)+SNLIQXY(I,k,J))
+       end do
+
        CO2PP  = CO2_TABLE * P_ML                      ! partial pressure co2 [Pa]
        O2PP   = O2_TABLE  * P_ML                      ! partial pressure  o2 [Pa]
        FOLN   = 1.0                                   ! for now, set to nitrogen saturation
@@ -1170,8 +1247,10 @@ CONTAINS
 
           ENDIF                                                         ! endif of land-sea test
 
-      ENDDO ILOOP                                                       ! of I loop
-   ENDDO JLOOP                                                          ! of J loop
+      ENDDO                                                       ! of I loop
+   ENDDO                                                          ! of J loop
+   ! 
+   !$acc end data
 
 !------------------------------------------------------
   END SUBROUTINE noahmplsm
@@ -1181,6 +1260,8 @@ SUBROUTINE TRANSFER_MP_PARAMETERS(VEGTYPE,SOILTYPE,SLOPETYPE,SOILCOLOR,CROPTYPE,
 
   USE NOAHMP_TABLES
   USE MODULE_SF_NOAHMPLSM
+
+  !$acc routine seq
 
   implicit none
 
@@ -1741,6 +1822,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
           ! If no SNOWH do the following
         !  CALL wrf_message( 'SNOW HEIGHT NOT FOUND - VALUE DEFINED IN LSMINIT' )
           !if (STD_OUT_PE) WRITE(*,*) 'SNOW HEIGHT NOT FOUND - VALUE DEFINED IN LSMINIT'
+          !$acc parallel loop gang vector default(present)
           DO J = jts,jtf
              DO I = its,itf
                 SNOWH(I,J)=SNOW(I,J)*0.005               ! SNOW in mm and SNOWH in m
@@ -1751,11 +1833,12 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
 
        ! Check if snow/snowh are consistent and cap SWE at 5000mm;
        !  the Noah-MP code does it internally but if we don't do it here, problems ensue
+      !$acc parallel loop gang vector default(present)
        DO J = jts,jtf
           DO I = its,itf
              IF ( SNOW(i,j) > 0. .AND. SNOWH(i,j) == 0. .OR. SNOWH(i,j) > 0. .AND. SNOW(i,j) == 0.) THEN
                IF (STD_OUT_PE) THEN
-                 WRITE(err_message,*)"problem with initial snow fields: snow/snowh>0 while snowh/snow=0 at i,j" &
+                 WRITE(*,*)"problem with initial snow fields: snow/snowh>0 while snowh/snow=0 at i,j" &
                                      ,i,j,snow(i,j),snowh(i,j)
                ENDIF
 !               CALL wrf_message(err_message)
@@ -1768,12 +1851,13 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
        ENDDO
 
        errflag = 0
+      !$acc parallel loop gang vector default(present)
        DO j = jts,jtf
           DO i = its,itf
              IF ( ISLTYP( i,j ) .LT. 1 ) THEN
                 errflag = 1
                 IF (STD_OUT_PE) THEN
-                  WRITE(err_message,*)"module_sf_noahlsm.F: lsminit: out of range ISLTYP ",i,j,ISLTYP( i,j )
+                  WRITE(*,*)"module_sf_noahlsm.F: lsminit: out of range ISLTYP ",i,j,ISLTYP( i,j )
                 ENDIF
     !            CALL wrf_message(err_message)
              ENDIF
@@ -1799,7 +1883,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
 ! <--GAC
 
 ! initialize soil liquid water content SH2O
-
+      !$acc parallel loop gang vector default(present)
        DO J = jts , jtf
           DO I = its , itf
 	    IF(IVGTYP(I,J)==ISICE_TABLE .AND. XICE(I,J) <= 0.0) THEN
@@ -1841,7 +1925,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
        ENDDO
 !  ENDIF
 
-
+      !$acc parallel loop gang vector default(present)
        DO J = jts,jtf
           DO I = its,itf
              tvxy       (I,J) = TSK(I,J)
@@ -1860,7 +1944,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
 	       if(snow(i,j) > 0.0 .and. tsk(i,j) > 273.15) t2mvxy(I,J) = 273.15
              t2mbxy     (I,J) = TSK(I,J)
 	       if(snow(i,j) > 0.0 .and. tsk(i,j) > 273.15) t2mbxy(I,J) = 273.15
-             chstarxy     (I,J) = 0.1
+            !  chstarxy     (I,J) = 0.1
 !jref:end
 
              cmxy       (I,J) = 0.0
@@ -1999,19 +2083,16 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
           enddo
        enddo
 
+       !$acc data copyin(DZS) create(ZSOIL)
+       !$acc parallel
 
        ! Given the soil layer thicknesses (in DZS), initialize the soil layer
        ! depths from the surface.
        ZSOIL(1)         = -DZS(1)          ! negative
+       !$acc loop
        DO NS=2, NSOIL
           ZSOIL(NS)       = ZSOIL(NS-1) - DZS(NS)
        END DO
-
-       ! Initialize snow/soil layer arrays ZSNSOXY, TSNOXY, SNICEXY, SNLIQXY,
-       ! and ISNOWXY
-       CALL snow_init ( ims , ime , jms , jme , its , itf , jts , jtf , 3 , &
-            &           NSOIL , zsoil , snow , tgxy , snowh ,     &
-            &           zsnsoxy , tsnoxy , snicexy , snliqxy , isnowxy )
 
        !initialize arrays for groundwater dynamics iopt_run=5
 
@@ -2048,7 +2129,14 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
              !CALL wrf_error_fatal ('Not enough fields to use groundwater option in Noah-MP')
           END IF
        endif
+      !$acc end parallel
 
+       ! Initialize snow/soil layer arrays ZSNSOXY, TSNOXY, SNICEXY, SNLIQXY,
+       ! and ISNOWXY
+       CALL snow_init ( ims , ime , jms , jme , its , itf , jts , jtf , 3 , &
+            &           NSOIL , zsoil , snow , tgxy , snowh ,     &
+            &           zsnsoxy , tsnoxy , snicexy , snliqxy , isnowxy )
+      !$acc end data
     ENDIF
 
   END SUBROUTINE NOAHMP_INIT
@@ -2094,12 +2182,15 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
     REAL,   DIMENSION(-NSNOW+1:NSOIL) :: DZSNSO
 
 !------------------------------------------------------------------------------------------
-
+   !$acc parallel loop gang vector default(present) private(DZSNO,DZSNSO)
     DO J = jts , jtf
        DO I = its , itf
           IF ( SNODEP(I,J) < 0.025 ) THEN
              ISNOWXY(I,J) = 0
-             DZSNO(-NSNOW+1:0) = 0.
+            !$acc loop seq
+             DO IZ = -NSNOW+1 , 0
+                DZSNO(IZ) = 0.
+             END DO
           ELSE
              IF ( ( SNODEP(I,J) >= 0.025 ) .AND. ( SNODEP(I,J) <= 0.05 ) ) THEN
                 ISNOWXY(I,J)    = -1
@@ -2129,9 +2220,13 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
              END IF
           END IF
 
-          TSNOXY (I,-NSNOW+1:0,J) = 0.
-          SNICEXY(I,-NSNOW+1:0,J) = 0.
-          SNLIQXY(I,-NSNOW+1:0,J) = 0.
+         !$acc loop seq
+         DO IZ = -NSNOW+1 , 0
+            TSNOXY (I,IZ,J) = 0.
+            SNICEXY(I,IZ,J) = 0.
+            SNLIQXY(I,IZ,J) = 0.
+         END DO
+          !$acc loop seq
           DO IZ = ISNOWXY(I,J)+1 , 0
              TSNOXY(I,IZ,J)  = TGXY(I,J)  ! [k]
              SNLIQXY(I,IZ,J) = 0.00
@@ -2139,18 +2234,21 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
           END DO
 
           ! Assign local variable DZSNSO, the soil/snow layer thicknesses, for snow layers
+          !$acc loop seq
           DO IZ = ISNOWXY(I,J)+1 , 0
              DZSNSO(IZ) = -DZSNO(IZ)
           END DO
 
           ! Assign local variable DZSNSO, the soil/snow layer thicknesses, for soil layers
           DZSNSO(1) = ZSOIL(1)
+          !$acc loop seq
           DO IZ = 2 , NSOIL
              DZSNSO(IZ) = (ZSOIL(IZ) - ZSOIL(IZ-1))
           END DO
 
           ! Assign ZSNSOXY, the layer depths, for soil and snow layers
           ZSNSOXY(I,ISNOWXY(I,J)+1,J) = DZSNSO(ISNOWXY(I,J)+1)
+          !$acc loop seq
           DO IZ = ISNOWXY(I,J)+2 , NSOIL
              ZSNSOXY(I,IZ,J) = ZSNSOXY(I,IZ-1,J) + DZSNSO(IZ)
           ENDDO
@@ -2514,6 +2612,7 @@ SUBROUTINE PEDOTRANSFER_SR2006(nsoil,sand,clay,orgm,parameters)
 
 SUBROUTINE gecros_init(xlat,hti,rdi,clvi,crti,nlvi,laii,nrti,slnbi,state_gecros)
 implicit none
+!$acc routine seq
 REAL, INTENT(IN)     :: HTI
 REAL, INTENT(IN)     :: RDI
 REAL, INTENT(IN)     :: CLVI
@@ -2589,6 +2688,7 @@ END SUBROUTINE gecros_init
 
 SUBROUTINE gecros_reinit(STATE_GECROS)
 implicit none
+!$acc routine seq
 REAL, DIMENSION(1:60), INTENT(INOUT) :: STATE_GECROS
 
   !Re-inititalization of Gecros variables after harvest
@@ -2656,6 +2756,7 @@ END SUBROUTINE gecros_reinit
 
 function checkIfHarvest(STATE_GECROS, DT, harvestDS1, harvestDS2, harvestDS1ExtraDays, harvestDS2ExtraDays)
 implicit none
+!$acc routine seq
 real :: DT, harvestDS1, harvestDS2
 real :: daysSinceDS1, daysSinceDS2
 real :: harvestDS1ExtraDays, harvestDS2ExtraDays
