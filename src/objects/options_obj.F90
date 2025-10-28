@@ -1331,7 +1331,7 @@ contains
             endif
             dz_levels(:,n_indx) = dz_levels(:,1)
         endif
-        if (domain_options%nz==MAXLEVELS) then
+        if ((domain_options%nz==MAXLEVELS) .and. (auto_sleve(n_indx) == 0)) then
             do this_level=1,MAXLEVELS-1
                 if (dz_levels(this_level+1,n_indx)<=0) then
                     domain_options%nz=this_level

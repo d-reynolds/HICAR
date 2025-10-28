@@ -961,7 +961,7 @@ contains
     subroutine setup_sleve(this, options)
         implicit none
         class(domain_t), intent(inout)  :: this
-        type(options_t), intent(in)     :: options
+        type(options_t), intent(inout)     :: options
 
         real, allocatable :: temp(:,:,:), gamma_n(:), neighbor_jacobian(:,:,:), neighbor_z(:,:,:)
         integer :: i, max_level
@@ -972,8 +972,10 @@ contains
         real :: x1, a, b, c, jkr, x, a_lin, b_lin, alpha, exp_alpha, x_lin, raw_dz1, dz1_offset
         integer :: nlevp1, jk
 
-        real, parameter :: pi = acos(-1.0)
+        real, parameter :: pi_const = acos(-1.0)
         real :: z_exp
+
+        logical :: auto_sleve_warnings
         
         associate(ims => this%ims,      ime => this%ime,                        &
             jms => this%jms,      jme => this%jme,                        &
@@ -1014,7 +1016,7 @@ contains
 
             allocate(dz(nz))
 
-            ! Implementation of ICON-like automatic level-generation, that is either cubic or quadratic or exponential !!!!STILL EXPERIMENTAL!!!!
+            ! Implementation of ICON-like automatic level-generation, that is either cubic or quadratic or exponential
             ! If auto_sleve is set to 0, then dz is not modified and the rest of the sleve setup is done normally.
             ! If auto_sleve is set to 1, then dz is modified to be a cubic polynomial (Used in ICON if itype_laydistr==2).
             ! If auto_sleve is set to 2, then dz is modified to be a quadratic polynomial (COSMO style, used in ICON if itype_laydistr==3).
@@ -1074,7 +1076,7 @@ contains
                     !         stretch_fac -> 0 gives stronger compression, first at mid height, then lower and lower heights.
                     !         stretch_fac = 1.1 to 1.2 gives almost a linear distribution of levels.
                     !         stretch_fac -> higher values (e.g. 3) gives more compression towards the top.
-                    z_exp = LOG(min_lay_thckn/top_height)/LOG(2.0/pi*ACOS(REAL(nz-1)**stretch_fac/&
+                    z_exp = LOG(min_lay_thckn/top_height)/LOG(2.0/pi_const*ACOS(REAL(nz-1)**stretch_fac/&
                         &     REAL(nz)**stretch_fac))
 
                     ! Set up distribution of coordinate surfaces according to the analytical formula
@@ -1083,40 +1085,46 @@ contains
                     ! of the lowest model layer
                     DO jk = 0, nz
                         jkr = nlevp1 - jk      ! reverse index as function approaches top height at 0, and 0 at nz
-                        vct_a(nint(jkr))      = top_height*(2.0/pi*ACOS(REAL(jk)**stretch_fac/ &
+                        vct_a(nint(jkr))      = top_height*(2.0/pi_const*ACOS(REAL(jk)**stretch_fac/ &
                         &              REAL(nz)**stretch_fac))**z_exp
                     ENDDO
 
 
                 case default
-                    write(*,*) 'ERROR: auto_sleve must be 0,1,2 or 3. Not', auto_sleve
+                    write(*,*) 'ERROR: auto_sleve must be 0,1,2,3 or 4. Not', auto_sleve
                     stop
                 end select
 
                 ! check that generated levels are valid: vector_a(1) = 0, afterwards monotonically increasing, and last level ~= top_height
-                if ( abs(vct_a(1)) > 1.0e-6) then
+                auto_sleve_warnings = .false.
+                if ( abs(vct_a(1)) > 1.0e-6 ) then
+                    auto_sleve_warnings = .true.
                     write(*,*) 'WARNING in automatic sleve level generation: lowest half-level is suspicious: ', vct_a(1)
-                    write(*,*) 'Check your auto_sleve, stretch_fac, height_lowest_level, model_top_height and nz settings.'
-                    write(*,*) 'When using auto_sleve = 1 consider plotting the half-level distribution first to ensure validity (https://www.geogebra.org/u/maxsesselmann), as this setting is quite sensitive to changes in said parameters.'
-                else if ( abs(vct_a(nlevp1) - top_height) > 0.01*top_height) then
+                else if ( abs(vct_a(nlevp1) - top_height) > 0.01*top_height ) then
+                    auto_sleve_warnings = .true.
                     write(*,*) 'WARNING in automatic sleve level generation: highest half-level deviates too far from model_top_height setting (', top_height,'). It is ', vct_a(nlevp1)
-                    write(*,*) 'Check your auto_sleve, stretch_fac, height_lowest_level, model_top_height and nz settings.'
-                    write(*,*) 'When using auto_sleve = 1 consider plotting the half-level distribution first to ensure validity (https://www.geogebra.org/u/maxsesselmann), as this setting is quite sensitive to changes in said parameters.'
                 else
                     do jk = 2, nlevp1
                         if ( vct_a(jk) <= vct_a(jk-1) ) then
+                            auto_sleve_warnings = .true.
                             write(*,*) 'ERROR in automatic sleve level generation: half-levels are NOT monotonically increasing at level ', jk, ' : ', vct_a(jk-1), ' >= ', vct_a(jk)
-                            write(*,*) 'Check your auto_sleve, stretch_fac, height_lowest_level, model_top_height and nz settings.'
-                            write(*,*) 'When using auto_sleve = 1 consider plotting the half-level distribution first to ensure validity (https://www.geogebra.org/u/maxsesselmann), as this setting is quite sensitive to changes in said parameters.'
                             stop
                         end if
                     end do
-                end if    
+                end if
+
+                if ( auto_sleve_warnings .eqv. .true. ) then
+                    write(*,*) 'Check your auto_sleve, stretch_fac, height_lowest_level, model_top_height and nz settings.'
+                    write(*,*) 'When using auto_sleve = 1 consider plotting the half-level distribution first to ensure validity (https://www.geogebra.org/u/maxsesselmann), as this setting is quite sensitive to changes in said parameters.'
+                end if
 
                 ! compute layer thicknesses
                 do jk = 1, nz
                     dz(jk) = vct_a(jk+1) - vct_a(jk)
                 end do
+
+                ! save dz to options component so it can be used elsewhere (relevant if dz=0.0 in namelist)
+                options%domain%dz_levels = dz(1:nz)
 
                 ! Diagnostics
                 if (STD_OUT_PE) then
@@ -1191,7 +1199,6 @@ contains
                 write(*,*) "    Using a sleve_n of ", options%domain%sleve_n
                 write(*,*) "    Smooth height is ", smooth_height, "m.a.s.l     (model top ", sum(dz(1:nz)), "m.a.s.l.)"
                 write(*,*) "    invertibility parameter gamma is: ", gamma_min
-                if(gamma_min > 0 .and. gamma_min < 0.15) write(*,*) " CAUTION: coordinate transformation is close to being non-invertible (gamma < 0.15) ! Model might crash with Segmentation Violation. Reduce decay rate(s), and/or increase flat_z_height! When using sleve_auto, also reduce height_lowest_level and/or modify stretch_fac!"
                 if(gamma_min <= 0) write(*,*) " CAUTION: coordinate transformation is not invertible (gamma <= 0 ) !!! Reduce decay rate(s), and/or increase flat_z_height! When using sleve_auto, also reduce height_lowest_level and/or stretch_fac!"
                 ! if(options%general%debug)  write(*,*) "   (for (debugging) reference: 'gamma(n=1)'= ", gamma,")"
                 write(*,*) ""
@@ -1501,7 +1508,7 @@ contains
     subroutine initialize_core_variables(this, options)
         implicit none
         class(domain_t), intent(inout)  :: this
-        type(options_t), intent(in)     :: options
+        type(options_t), intent(inout)     :: options
 
         real, allocatable :: temp(:,:,:)
         integer :: i, j
@@ -1514,10 +1521,6 @@ contains
         allocate( this%geo_u%z(this%u_grid%ims:this%u_grid%ime, this%u_grid%nz, this%u_grid%jms:this%u_grid%jme))
         allocate( this%geo_v%z(this%v_grid%ims:this%v_grid%ime, this%v_grid%nz, this%v_grid%jms:this%v_grid%jme))
 
-        do i=this%grid%kms, this%grid%kme
-            this%vars_3d(this%var_indx(kVARS%advection_dz)%v)%data_3d(:,i,:) = options%domain%dz_levels(i)
-        enddo
-
         ! Setup the vertical grid structure, either as a SLEVE coordinate, or a more 'simple' vertical structure:
         if (options%domain%sleve) then
             call setup_sleve(this, options)
@@ -1525,6 +1528,10 @@ contains
             ! This will set up either a Gal-Chen terrainfollowing coordinate, or no terrain following.
             call setup_simple_z(this, options)
         endif
+
+        do i=this%grid%kms, this%grid%kme
+            this%vars_3d(this%var_indx(kVARS%advection_dz)%v)%data_3d(:,i,:) = options%domain%dz_levels(i)
+        enddo
         
         call setup_geo(this%geo,   this%vars_2d(this%var_indx(kVARS%latitude)%v)%data_2d,   this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d, options%domain%longitude_system,  this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d)
         call setup_geo(this%geo_agl,   this%vars_2d(this%var_indx(kVARS%latitude)%v)%data_2d,   this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d, options%domain%longitude_system,  this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d)
