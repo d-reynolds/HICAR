@@ -1457,8 +1457,8 @@ contains
                 group = "Domain"
             case("stretch_fac")
                 description = "Factor that controls distribution of the vertical levels, only used when auto_sleve = 1, 2, 3 or 4."//achar(10)//BLNK_CHR_N// &
-                    "For auto_sleve=1: stretch_fac needs to be between 0.5 and 1.0. stretch_fac -> 0.5 more linear,"//achar(10)//BLNK_CHR_N// &
-                    " stretch_fac -> 1.0 more level compression at the surface."//achar(10)//BLNK_CHR_N// &
+                    "For auto_sleve=1: stretch_fac needs to be between 0.5 and 1.0. stretch_fac -> 0.5 more level compression at the surface,"//achar(10)//BLNK_CHR_N// &
+                    " stretch_fac -> 1.0 more linear."//achar(10)//BLNK_CHR_N// &
                     "For auto_sleve=2: stretch_fac needs to be between 0.0 and 1.0. stretch_fac -> 0.0 more linear,"//achar(10)//BLNK_CHR_N// &
                     " stretch_fac -> 1.0 more level compression at the surface."//achar(10)//BLNK_CHR_N// &
                     "For auto_sleve=3: stretch_fac needs to be > 0. stretch_fac -> 0.0 more linear,"//achar(10)//BLNK_CHR_N// &
