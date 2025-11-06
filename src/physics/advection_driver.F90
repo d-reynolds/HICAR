@@ -9,7 +9,7 @@ module advection
     use icar_constants
     use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, adv_std_clean_wind_arrays
     use adv_mpdata,                 only : mpdata_init, mpdata_advect3d, mpdata_compute_wind
-    use adv_fluxcorr,               only : init_fluxcorr, set_sign_arrays, clear_flux_sign_arrays
+    use adv_fluxcorr,               only : init_fluxcorr, set_sign_arrays, clear_flux_sign_arrays, compute_upwind_fluxes_async
     ! use debug_module,               only : domain_fix
     use options_interface,          only: options_t
     use domain_interface,           only: domain_t
@@ -150,7 +150,12 @@ contains
         !$acc end kernels
 
         !Initial advection-tendency calculations
+        if (options%adv%flux_corr==kFLUXCOR_MONO) then
+            !$acc wait(q_id) !temp is needed right away
+            call compute_upwind_fluxes_async(temp,U_m, V_m, W_m, dz, denom, (q_id+100))
+        endif
 
+        ! wait on q_id will be handeled inside adv_std_advect3d
         call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_corr_time, sum_time,t_factor_in=0.333,q_id_in=q_id)
         call adv_std_advect3d(var, temp, U_m, V_m, W_m, denom, dz,flux_time, flux_corr_time, sum_time,t_factor_in=0.5,q_id_in=q_id)
         !final advection call with tendency-fluxes
