@@ -3505,7 +3505,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
   DO N = 1,MAXN
 
-   !$acc parallel loop gang(STATIC: 1) vector collapse(3)
+   !$acc parallel loop gang vector collapse(3)
    do j=jts,jte      ! j loop (north-south)
    DO K = KTS,KTE
    do i=its,ite      ! i loop (east-west)
@@ -3527,7 +3527,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
       END DO
       END DO
 
-      !$acc parallel loop gang(STATIC: 1) vector collapse(2)
+      !$acc parallel loop gang vector collapse(2)
       do j=jts,jte      ! j loop (north-south)
       do i=its,ite      ! i loop (east-west)
 
@@ -3573,7 +3573,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
       ENDDO
       enddo
 
-      !$acc parallel loop gang(STATIC: 1) vector collapse(3)
+      !$acc parallel loop gang vector collapse(3)
       do j=jts,jte      ! j loop (north-south)
       DO K = KTE-1,KTS,-1
       do i=its,ite      ! i loop (east-west)
@@ -3633,7 +3633,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 ! FACTOR OF 1000 CONVERTS FROM M TO MM, BUT DIVISION BY DENSITY
 ! OF LIQUID WATER CANCELS THIS FACTOR OF 1000
       
-      !$acc parallel loop gang(STATIC: 1) vector collapse(2)
+      !$acc parallel loop gang vector collapse(2)
       do j=jts,jte      ! j loop (north-south)
       do i=its,ite      ! i loop (east-west)
         IF (LTRUE_COL(I,KTS,J).EQ.0 .or. N > NSTEP(I,KTS,J)) cycle
@@ -3649,7 +3649,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 
       END DO
 
-   !$acc parallel loop gang vector collapse(3) 
+   !$acc parallel loop gang vector collapse(3) async(6) wait(5)
    do j=jts,jte      ! j loop (north-south)
    do k=kts,kte
    do i=its,ite      ! i loop (east-west)
@@ -4050,7 +4050,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!END OF INLINED FUNCTION!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-   !$acc parallel loop gang vector collapse(3)
+   !$acc parallel loop gang vector collapse(3) async(7) wait(6)
    do j=jts,jte      ! j loop (north-south)
    do k=kts,kte
    do i=its,ite      ! i loop (east-west)
@@ -4126,7 +4126,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    end do
    end do
 
-   !$acc parallel loop gang vector collapse(2)
+   !$acc parallel loop gang vector collapse(2) wait(7)
    do j=jts,jte      ! j loop (north-south)
    do i=its,ite      ! i loop (east-west)
       RAINNC(i,j) = RAINNC(I,J)+PRECPRT1D(i,j)

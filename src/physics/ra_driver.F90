@@ -116,6 +116,8 @@ module radiation
                                     :: aerosol_optics_lw, aerosol_optics_sw
     logical :: do_aerosols = .False.
     integer, parameter :: ngas = 8
+    integer :: nblocks = 1
+
     character(len=3), dimension(ngas), parameter :: &
                 gas_names = ['h2o', 'o3', 'co2', 'n2o', 'co ', 'ch4', 'o2 ', 'n2 ']
     type(ty_gas_concs)           :: gas_concs
@@ -253,8 +255,11 @@ contains
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    RRTMGP"    
             ! if (.not.(k_dist_sw%is_loaded())) then
 
+                !determine number of blocks to use for RRTMGP. This is done to reduce
+                ! the GPU memory requirements. A good base is 200x200 horizontal points per block
+                nblocks = MAX(1, ((ite - its + 1)*(jte - jts + 1)) / 40000)
+    
                 if (k_dist_sw%is_loaded() .or. k_dist_lw%is_loaded()) then
-                    call gas_concs%reset()
                     call k_dist_sw%finalize()
                     call k_dist_lw%finalize()
                     call cloud_optics_sw%finalize()
@@ -262,20 +267,7 @@ contains
                 endif
                 call rte_config_checks(logical(.false., wl))
 
-                call stop_on_err(gas_concs%init(gas_names))
-
-                DO i = 1, ngas
-                    CALL stop_on_err(gas_concs%set_vmr(gas_names(i), 0._wp))
-                ENDDO
-
-                ! Set perscribed atmospheric composition. Water vapor will be set dynamically at each call. 
-                ! This can be changed in the future to read from a file or from different climate change scenarios
-                call stop_on_err(gas_concs%set_vmr("co2", 410.e-6_wp))
-                call stop_on_err(gas_concs%set_vmr("ch4", 1650.e-9_wp))
-                call stop_on_err(gas_concs%set_vmr("n2o", 306.e-9_wp))
-                call stop_on_err(gas_concs%set_vmr("n2 ",  0.7808_wp))
-                call stop_on_err(gas_concs%set_vmr("o2 ",  0.2095_wp))
-                call stop_on_err(gas_concs%set_vmr("co ",  0._wp))
+                call set_atmo_gas_conc(domain)
 
                 ! ----------------------------------------------------------------------------
                 ! load data into classes
@@ -434,7 +426,7 @@ contains
         real(wp), dimension(:,:),   allocatable :: emis_sfc, sfc_alb_dir, sfc_alb_dif ! First dimension is band
 
         character(len=8) :: char_input
-        integer :: ncol, nlay, nblocks, block, jb_s, jb_e
+        integer :: ncol, nlay, block, jb_s, jb_e
         real(real64) :: sun_declin_deg, eq_of_time_minutes
         !
         ! Timing variables
@@ -897,10 +889,21 @@ contains
                 else if (options%physics%radiation==kRA_RRTMGP) then
 
                     !cut RRTMGP up into blocks to reduce memory usage
-                    nblocks = 4
                     do block = 1, nblocks
-                    jb_s = jts + (block - 1)*(jte - jts + 1)/nblocks
-                    jb_e = MIN(jts + block*(jte - jts + 1)/nblocks, jte)
+                    if (block == 1 .and. nblocks==1) then
+                        jb_s = jts
+                        jb_e = jte
+                    elseif (block == 1) then
+                        jb_s = jts
+                        jb_e = MIN(jts + block*(jte - jts + 1)/nblocks, jte)
+                    elseif (block == nblocks) then
+                        jb_s = jb_e + 1
+                        jb_e = jte
+                    else
+                        ngpt = jb_e - jb_s + 1
+                        jb_s = jb_e + 1
+                        jb_e = MIN(jb_s + ngpt - 1, jte)
+                    end if
                     ! ----------------------------------------------------------------------------
                     ! 
                     ! ------------------------------ BEGIN INIT  ---------------------------------
@@ -965,6 +968,7 @@ contains
 
                     !$acc update host(p_lay)
 
+                    call set_atmo_gas_conc(domain, block)
                     CALL stop_on_err(gas_concs%set_vmr('h2o',   q))
 
                     ! ----------------------------------------------------------------------------
@@ -1305,6 +1309,35 @@ contains
 
     end subroutine rad_apply_dtheta
 
+    subroutine set_atmo_gas_conc(domain, block_num)
+        implicit none
+§
+        type(domain_t), intent(in) :: domain
+        integer, optional, intent(in) :: block_num
+
+        integer :: i, j, k, col_indx, b_num, jb_s, jb_e
+
+        b_num = 1
+        if (present(block_num)) b_num = block_num
+
+        call gas_concs%reset()
+
+        call stop_on_err(gas_concs%init(gas_names))
+
+        DO i = 1, ngas
+            CALL stop_on_err(gas_concs%set_vmr(gas_names(i), 0._wp))
+        ENDDO
+
+        ! Set perscribed atmospheric composition. Water vapor will be set dynamically at each call. 
+        ! This can be changed in the future to read from a file or from different climate change scenarios
+        call stop_on_err(gas_concs%set_vmr("co2", 410.e-6_wp))
+        call stop_on_err(gas_concs%set_vmr("ch4", 1650.e-9_wp))
+        call stop_on_err(gas_concs%set_vmr("n2o", 306.e-9_wp))
+        call stop_on_err(gas_concs%set_vmr("n2 ",  0.7808_wp))
+        call stop_on_err(gas_concs%set_vmr("o2 ",  0.2095_wp))
+        call stop_on_err(gas_concs%set_vmr("co ",  0._wp))
+
+    end subroutine set_atmo_gas_conc
     
 ! DR 2023: Taken from WRF mod_radiation_driver
 !---------------------------------------------------------------------

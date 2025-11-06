@@ -907,7 +907,7 @@ do j = jts,jte
      else
        brint = (brcr(i,j)-brdn(i,j))/(brup(i,j)-brdn(i,j))
      endif
-     hpbl(i,j) = za(i,k-1,j)+brint*(za(i,k,j)-za(i,k-1,j))
+     hpbl(i,j) = za(i,max(1,k-1),j)+brint*(za(i,k,j)-za(i,max(1,k-1),j))
      if(hpbl(i,j).lt.zq(i,2,j)) kpbl(i,j) = 1
      if(kpbl(i,j).le.1) pblflg(i,j) = .false.
      fm = psim(i,j)
@@ -1049,7 +1049,7 @@ do j = jts,jte
        else
          brint = (brcr(i,j)-brdn(i,j))/(brup(i,j)-brdn(i,j))
        endif
-       hpbl(i,j) = za(i,k-1,j)+brint*(za(i,k,j)-za(i,k-1,j))
+       hpbl(i,j) = za(i,max(1,k-1),j)+brint*(za(i,k,j)-za(i,max(1,k-1),j))
        if(hpbl(i,j).lt.zq(i,2,j)) kpbl(i,j) = 1
        if(kpbl(i,j).le.1) pblflg(i,j) = .false.
      endif
@@ -1097,7 +1097,7 @@ do j = jts,jte
        else
          brint = (brcr(i,j)-brdn(i,j))/(brup(i,j)-brdn(i,j))
        endif
-       hpbl(i,j) = za(i,k-1,j)+brint*(za(i,k,j)-za(i,k-1,j))
+       hpbl(i,j) = za(i,max(1,k-1),j)+brint*(za(i,k,j)-za(i,max(1,k-1),j))
        if(hpbl(i,j).lt.zq(i,2,j)) kpbl(i,j) = 1
        if(kpbl(i,j).le.1) pblflg(i,j) = .false.
      endif
