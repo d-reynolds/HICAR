@@ -102,6 +102,8 @@ contains
 
         else if(options%physics%advection==kADV_MPDATA) then
             call mpdata_compute_wind(domain,options,dt)
+        else
+            return
         endif
 
         do n = 1, size(domain%adv_vars)
@@ -127,7 +129,7 @@ contains
 
         call adv_std_clean_wind_arrays(U_m, V_m, W_m, denom)
         if (options%adv%flux_corr==kFLUXCOR_MONO) call clear_flux_sign_arrays()
-        if (options%time%RK3) then
+        if (options%physics%advection==kADV_STD .and. options%time%RK3) then
             !$acc exit data delete(temp)
             deallocate(temp)
         endif
@@ -143,14 +145,9 @@ contains
 
         integer :: j, k, i
 
-        !$acc parallel loop gang vector collapse(3) present(var, temp) async(q_id)
-        do j = jms,jme
-        do k = kms,kme
-        do i = ims,ime
-            temp(i,k,j) = var(i,k,j)
-        enddo
-        enddo
-        enddo
+        !$acc kernels present(var, temp) async(q_id)
+        temp(:,:,:) = var(:,:,:)
+        !$acc end kernels
 
         !Initial advection-tendency calculations
 

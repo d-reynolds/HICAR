@@ -1,5 +1,6 @@
 submodule(variable_interface) variable_implementation
     use output_metadata, only : get_varmeta
+    use openacc, only : acc_is_present
     implicit none
 
 contains
@@ -29,7 +30,10 @@ contains
         this%four_d  = grid%is4d
         this%dim_len    = grid%get_dims()
         this%grid       = grid
-        if (allocated(this%global_dim_len)) deallocate(this%global_dim_len)
+        if (allocated(this%global_dim_len)) then
+            !$acc exit data finalize delete(this%global_dim_len)  ! ensure previous data is removed from device
+            deallocate(this%global_dim_len)
+        endif
         if (this%one_d) then
             allocate(this%global_dim_len(1))
             this%global_dim_len(1) = grid%kde
@@ -49,23 +53,37 @@ contains
             this%global_dim_len(3) = grid%jde
             this%global_dim_len(4) = grid%n_4d
         endif
+        !$acc enter data copyin(this%global_dim_len)
 
         if (present(forcing_var)) this%forcing_var = forcing_var
 
         if (grid%is1d) then
-            if (allocated(this%data_1d)) deallocate(this%data_1d)
+            if (allocated(this%data_1d)) then
+                !$acc exit data finalize delete(this%data_1d)  ! ensure previous data is removed from device
+                deallocate(this%data_1d)
+            endif
             allocate(this%data_1d(grid%kms:grid%kme), stat=err)
             if (err /= 0) stop "variable:grid:1d: Allocation request failed"
 
             this%data_1d = 0
+            !$acc enter data copyin(this%data_1d)
 
         endif
 
         if (grid%is2d) then
 
-            if (allocated(this%data_2d)) deallocate(this%data_2d)
-            if (allocated(this%data_2di)) deallocate(this%data_2di)
-            if (allocated(this%dqdt_2d)) deallocate(this%dqdt_2d)
+            if (allocated(this%data_2d)) then
+                !$acc exit data finalize delete(this%data_2d)  ! ensure previous data is removed from device
+                deallocate(this%data_2d)
+            endif
+            if (allocated(this%data_2di)) then
+                !$acc exit data finalize delete(this%data_2di)  ! ensure previous data is removed from device
+                deallocate(this%data_2di)
+            endif
+            if (allocated(this%dqdt_2d)) then
+                !$acc exit data finalize delete(this%dqdt_2d)  ! ensure previous data is removed from device
+                deallocate(this%dqdt_2d)
+            endif
 
             if (this%dtype == kREAL) then
                 allocate(this%data_2d(grid%ims:grid%ime,    &
@@ -73,6 +91,7 @@ contains
                 if (err /= 0) stop "variable:grid:2d: Allocation request failed"
 
                 this%data_2d = 0
+                !$acc enter data copyin(this%data_2d)
             ! elseif (this%dtype == kDOUBLE) then
             !     allocate(this%data_2dd(grid%ims:grid%ime,    &
             !                            grid%jms:grid%jme), stat=err)
@@ -85,6 +104,7 @@ contains
                 if (err /= 0) stop "variable:grid:2d: Allocation request failed"
 
                 this%data_2di = 0
+                !$acc enter data copyin(this%data_2di)
         
             endif
 
@@ -94,19 +114,27 @@ contains
                 if (err /= 0) stop "variable:grid:dqdt_2d: Allocation request failed"
 
                 this%dqdt_2d = 0
+                !$acc enter data copyin(this%dqdt_2d)
             endif
 
         endif
 
         if (grid%is3d) then
-            if (allocated(this%data_3d)) deallocate(this%data_3d)
-            if (allocated(this%dqdt_3d)) deallocate(this%dqdt_3d)
+            if (allocated(this%data_3d)) then
+                !$acc exit data finalize delete(this%data_3d)  ! ensure previous data is removed from device
+                deallocate(this%data_3d)
+            endif
+            if (allocated(this%dqdt_3d)) then
+                !$acc exit data finalize delete(this%dqdt_3d)  ! ensure previous data is removed from device
+                deallocate(this%dqdt_3d)
+            endif
             allocate(this%data_3d(grid%ims:grid%ime,    &
                                   grid%kms:grid%kme,    &
                                   grid%jms:grid%jme), stat=err)
             if (err /= 0) stop "variable:grid:3d: Allocation request failed"
 
             this%data_3d = 0
+            !$acc enter data copyin(this%data_3d)
         
             ! note w is special cased because it does not have a forcing variable, so it is not necessarily allocated automatically
             if (this%forcing_var .or. this%id==kVARS%w) then
@@ -116,6 +144,7 @@ contains
                 if (err /= 0) stop "variable:grid:dqdt_3d: Allocation request failed"
 
                 this%dqdt_3d = 0
+                !$acc enter data copyin(this%dqdt_3d)
             endif
         endif
         if (grid%is4d) then
@@ -160,33 +189,49 @@ contains
         if (present(forcing_var)) this%forcing_var = forcing_var
 
         if (this%two_d) then
-            if (allocated(this%data_2d)) deallocate(this%data_2d)
+            if (allocated(this%data_2d)) then
+                deallocate(this%data_2d)
+                !$acc exit data finalize delete(this%data_2d)  ! ensure previous data is removed from device
+            endif
             allocate(this%data_2d(dims(1), dims(2)), stat=err)
             if (err /= 0) stop "variable:dims:2d: Allocation request denied"
             this%data_2d = 0
+            !$acc enter data copyin(this%data_2d)
 
             if (this%forcing_var) then
-                if (allocated(this%dqdt_2d)) deallocate(this%dqdt_2d)
+                if (allocated(this%dqdt_2d)) then
+                    deallocate(this%dqdt_2d)
+                    !$acc exit data finalize delete(this%dqdt_2d)  ! ensure previous data is removed from device
+                endif
                 allocate(this%dqdt_2d(dims(1), dims(2)), stat=err)
                 if (err /= 0) stop "variable:dims:dqdt_2d: Allocation request denied"
 
                 this%dqdt_2d = 0
+                !$acc enter data copyin(this%dqdt_2d)
             endif
         endif
 
         if (this%three_d) then
-            if (allocated(this%data_3d)) deallocate(this%data_3d)
+            if (allocated(this%data_3d)) then
+                !$acc exit data finalize delete(this%data_3d)  ! ensure previous data is removed from device
+                deallocate(this%data_3d)
+            endif
             allocate(this%data_3d(dims(1), dims(2), dims(3)), stat=err)
             if (err /= 0) stop "variable:dims:3d: Allocation request denied"
 
             this%data_3d = 0
+            !$acc enter data copyin(this%data_3d)
 
             if (this%forcing_var) then
-                if (allocated(this%dqdt_3d)) deallocate(this%dqdt_3d)
+                if (allocated(this%dqdt_3d)) then
+                    !$acc exit data finalize delete(this%dqdt_3d)  ! ensure previous data is removed from device
+                    deallocate(this%dqdt_3d)
+                endif
                 allocate(this%dqdt_3d(dims(1), dims(2), dims(3)), stat=err)
                 if (err /= 0) stop "variable:dims:dqdt_3d: Allocation request denied"
 
                 this%dqdt_3d = 0
+                !$acc enter data copyin(this%dqdt_3d)
             endif
         endif
 
@@ -206,44 +251,74 @@ contains
         endif
         
         if (allocated(src%data_3d)) then
-            if (allocated(dest%data_3d)) deallocate(dest%data_3d)
+            if (allocated(dest%data_3d)) then
+                !$acc exit data finalize delete(dest%data_3d)
+                deallocate(dest%data_3d)
+            endif
             allocate(dest%data_3d, source=src%data_3d)
+            !$acc update device(dest%data_3d) if_present
         else if (allocated(dest%data_3d)) then
+            !$acc exit data finalize delete(dest%data_3d)
             deallocate(dest%data_3d)
         endif
         
         if (allocated(src%data_2d)) then
-            if (allocated(dest%data_2d)) deallocate(dest%data_2d)
+            if (allocated(dest%data_2d)) then
+                !$acc exit data finalize delete(dest%data_2d)  ! ensure previous data is removed from device
+                deallocate(dest%data_2d)
+            endif
             allocate(dest%data_2d, source=src%data_2d)
+            !$acc update device(dest%data_2d) if_present
         else if (allocated(dest%data_2d)) then
+            !$acc exit data finalize delete(dest%data_2d)
             deallocate(dest%data_2d)
         endif
         
         if (allocated(src%data_1d)) then
-            if (allocated(dest%data_1d)) deallocate(dest%data_1d)
+            if (allocated(dest%data_1d)) then
+                !$acc exit data finalize delete(dest%data_1d)  ! ensure previous data is removed from device
+                deallocate(dest%data_1d)
+            endif
             allocate(dest%data_1d, source=src%data_1d)
+            !$acc update device(dest%data_1d) if_present
         else if (allocated(dest%data_1d)) then
+            !$acc exit data finalize delete(dest%data_1d)
             deallocate(dest%data_1d)
         endif
         
         if (allocated(src%data_2di)) then
-            if (allocated(dest%data_2di)) deallocate(dest%data_2di)
+            if (allocated(dest%data_2di)) then
+                !$acc exit data finalize delete(dest%data_2di)  ! ensure previous data is removed from device
+                deallocate(dest%data_2di)
+            endif
             allocate(dest%data_2di, source=src%data_2di)
+            !$acc update device(dest%data_2di) if_present
         else if (allocated(dest%data_2di)) then
+            !$acc exit data finalize delete(dest%data_2di)
             deallocate(dest%data_2di)
         endif
         
         if (allocated(src%dqdt_3d)) then
-            if (allocated(dest%dqdt_3d)) deallocate(dest%dqdt_3d)
+            if (allocated(dest%dqdt_3d)) then
+                !$acc exit data finalize delete(dest%dqdt_3d)  ! ensure previous data is removed from device
+                deallocate(dest%dqdt_3d)
+            endif
             allocate(dest%dqdt_3d, source=src%dqdt_3d)
+            !$acc update device(dest%dqdt_3d) if_present
         else if (allocated(dest%dqdt_3d)) then
+            !$acc exit data finalize delete(dest%dqdt_3d)
             deallocate(dest%dqdt_3d)
         endif
         
         if (allocated(src%dqdt_2d)) then
-            if (allocated(dest%dqdt_2d)) deallocate(dest%dqdt_2d)
+            if (allocated(dest%dqdt_2d)) then
+                !$acc exit data finalize delete(dest%dqdt_2d)  ! ensure previous data is removed from device
+                deallocate(dest%dqdt_2d)
+            endif
             allocate(dest%dqdt_2d, source=src%dqdt_2d)
+            !$acc update device(dest%dqdt_2d) if_present
         else if (allocated(dest%dqdt_2d)) then
+            !$acc exit data finalize delete(dest%dqdt_2d)
             deallocate(dest%dqdt_2d)
         endif
         
@@ -262,23 +337,38 @@ contains
         
         ! Copy allocatable arrays
         if (allocated(src%dim_len)) then
-            if (allocated(dest%dim_len)) deallocate(dest%dim_len)
+            if (allocated(dest%dim_len)) then
+                !$acc exit data finalize delete(dest%dim_len)  ! ensure previous data is removed from device
+                deallocate(dest%dim_len)
+            endif
             allocate(dest%dim_len, source=src%dim_len)
+            !$acc update device(dest%dim_len) if_present
         else if (allocated(dest%dim_len)) then
+            !$acc exit data finalize delete(dest%dim_len)
             deallocate(dest%dim_len)
         endif
         
         if (allocated(src%global_dim_len)) then
-            if (allocated(dest%global_dim_len)) deallocate(dest%global_dim_len)
+            if (allocated(dest%global_dim_len)) then
+                !$acc exit data finalize delete(dest%global_dim_len)  ! ensure previous data is removed from device
+                deallocate(dest%global_dim_len)
+            endif
             allocate(dest%global_dim_len, source=src%global_dim_len)
+            !$acc update device(dest%global_dim_len) if_present
         else if (allocated(dest%global_dim_len)) then
+            !$acc exit data finalize delete(dest%global_dim_len)
             deallocate(dest%global_dim_len)
         endif
                 
         if (allocated(src%dim_ids)) then
-            if (allocated(dest%dim_ids)) deallocate(dest%dim_ids)
+            if (allocated(dest%dim_ids)) then
+                !$acc exit data finalize delete(dest%dim_ids)  ! ensure previous data is removed from device
+                deallocate(dest%dim_ids)
+            endif
             allocate(dest%dim_ids, source=src%dim_ids)
+            !$acc update device(dest%dim_ids) if_present
         else if (allocated(dest%dim_ids)) then
+            !$acc exit data finalize delete(dest%dim_ids)
             deallocate(dest%dim_ids)
         endif
         
@@ -313,5 +403,55 @@ contains
         this%force_boundaries = force_boundaries
 
     end subroutine set_from_metadata
+
+    elemental module subroutine finalize_variable(this)
+        implicit none
+        type(variable_t), intent(inout) :: this
+        
+        ! Clean up GPU memory before deallocating arrays
+        if (allocated(this%data_3d)) then
+            !$acc exit data finalize delete(this%data_3d)
+            deallocate(this%data_3d)
+        endif
+        if (allocated(this%data_2d)) then
+            !$acc exit data finalize delete(this%data_2d)
+            deallocate(this%data_2d)
+        endif
+        if (allocated(this%data_1d)) then
+            !$acc exit data finalize delete(this%data_1d)
+            deallocate(this%data_1d)
+        endif
+        if (allocated(this%data_4d)) then
+            !$acc exit data finalize delete(this%data_4d)
+            deallocate(this%data_4d)
+        endif
+        if (allocated(this%dqdt_3d)) then
+            !$acc exit data finalize delete(this%dqdt_3d)
+            deallocate(this%dqdt_3d)
+        endif
+        if (allocated(this%dqdt_2d)) then
+            !$acc exit data finalize delete(this%dqdt_2d)
+            deallocate(this%dqdt_2d)
+        endif
+        if (allocated(this%data_2di)) then
+            !$acc exit data finalize delete(this%data_2di)
+            deallocate(this%data_2di)
+        endif
+        if (allocated(this%global_dim_len)) then
+            !$acc exit data finalize delete(this%global_dim_len)
+            deallocate(this%global_dim_len)
+        endif
+        if (allocated(this%dim_len)) then
+            !$acc exit data finalize delete(this%dim_len)
+            deallocate(this%dim_len)
+        endif
+        if (allocated(this%dim_ids)) then
+            !$acc exit data finalize delete(this%dim_ids)
+            deallocate(this%dim_ids)
+        endif
+
+        ! Arrays will be automatically deallocated by Fortran
+        
+    end subroutine finalize_variable
 
 end submodule

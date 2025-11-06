@@ -38,7 +38,7 @@ contains
         endif
 
         allocate(this%var_list(kMIN_VAR_DICT_SIZE))
-
+        !$acc enter data create(this%var_list)
         this%max_vars = kMIN_VAR_DICT_SIZE
         this%n_vars = 0
         this%current_variable = 1
@@ -120,9 +120,9 @@ contains
         logical,             intent(in), optional :: save_state
         integer,             intent(out),optional :: err
 
-        type(variable_t) :: var
         logical :: save_data
-        integer :: ims,ime, jms,jme, kms,kme, indx, error
+        integer :: ims,ime, jms,jme, kms,kme, indx, i
+        logical :: found
 
         save_data = .False.
         if (present(save_state)) save_data=save_state
@@ -140,18 +140,33 @@ contains
             stop "Ran out of space in var_dict"
         endif
 
-        ! check if an entry with varname is already in dictionary
-        var = this%get_var(in_id,err=error, indx=indx)
+        found = .False.
+        do i = 1, this%n_vars
+            ! if this key matches the supplied key, return the variable
+            if (this%var_list(i)%id == in_id) then
+                found = .True.
+                indx = i
+                exit
+            endif
+        end do
 
         ! if we get an error, then we need to add a new entry
-        if (error == 0) then
+        if (found) then
             ! if (STD_OUT_PE) write(*,*) "WARNING: Overwriting existing variable in var_dict: ", trim(var_data%name)
             if (this%var_list(indx)%var%two_d) then
                 this%var_list(indx)%var%data_2d(:,:)  = var_data%data_2d(:,:)
-                if (allocated(this%var_list(indx)%var%dqdt_2d)) this%var_list(indx)%var%dqdt_2d(:,:)  = var_data%dqdt_2d(:,:)
+                !$acc update device(this%var_list(indx)%var%data_2d)
+                if (allocated(this%var_list(indx)%var%dqdt_2d)) then
+                    this%var_list(indx)%var%dqdt_2d(:,:)  = var_data%dqdt_2d(:,:)
+                    !$acc update device(this%var_list(indx)%var%dqdt_2d)
+                endif
             else if (this%var_list(indx)%var%three_d) then
                 this%var_list(indx)%var%data_3d(:,:,:)  = var_data%data_3d(:,:,:)
-                if (allocated(this%var_list(indx)%var%dqdt_3d)) this%var_list(indx)%var%dqdt_3d(:,:,:)  = var_data%dqdt_3d(:,:,:)
+                !$acc update device(this%var_list(indx)%var%data_3d)
+                if (allocated(this%var_list(indx)%var%dqdt_3d)) then
+                    this%var_list(indx)%var%dqdt_3d(:,:,:)  = var_data%dqdt_3d(:,:,:)
+                    !$acc update device(this%var_list(indx)%var%dqdt_3d)
+                endif
             endif
         else
             ! if (STD_OUT_PE) write(*,*) "WARNING: Adding var to var dict: ", trim(var_data%name)
@@ -162,33 +177,45 @@ contains
 
             ! warning, this copies all information directly from the var_data into the dict, including the POINTER to the data
             this%var_list(indx)%var  = var_data
-            ! this%var_list(indx)%var%name = varname
-
-            ! If we want to assume that the data arrays may be deallocated outside of the dict, we can do this...
-            if (save_data) then
-
-                if (var_data%two_d) then
-                    ims = lbound(var_data%data_2d,1)
-                    ime = ubound(var_data%data_2d,1)
-                    jms = lbound(var_data%data_2d,2)
-                    jme = ubound(var_data%data_2d,2)
-
-                    deallocate( this%var_list(indx)%var%data_2d)
-                    allocate(this%var_list(indx)%var%data_2d(ims:ime, jms:jme))
-                    this%var_list(indx)%var%data_2d(:,:)  = var_data%data_2d(:,:)
-                else
-                    ims = lbound(var_data%data_3d,1)
-                    ime = ubound(var_data%data_3d,1)
-                    jms = lbound(var_data%data_3d,2)
-                    jme = ubound(var_data%data_3d,2)
-                    kms = lbound(var_data%data_3d,3)
-                    kme = ubound(var_data%data_3d,3)
-
-                    deallocate( this%var_list(indx)%var%data_3d)
-                    allocate(this%var_list(indx)%var%data_3d(ims:ime, jms:jme, kms:kme))
-                    this%var_list(indx)%var%data_3d(:,:,:)  = var_data%data_3d(:,:,:)
+            if (this%var_list(indx)%var%two_d) then
+                !$acc enter data copyin(this%var_list(indx)%var%data_2d)
+                if (allocated(this%var_list(indx)%var%dqdt_2d)) then
+                    !$acc enter data copyin(this%var_list(indx)%var%dqdt_2d)
+                endif
+            else if (this%var_list(indx)%var%three_d) then
+                !$acc enter data copyin(this%var_list(indx)%var%data_3d)
+                if (allocated(this%var_list(indx)%var%dqdt_3d)) then
+                    !$acc enter data copyin(this%var_list(indx)%var%dqdt_3d)
                 endif
             endif
+
+            ! this%var_list(indx)%var%name = varname
+
+            ! ! If we want to assume that the data arrays may be deallocated outside of the dict, we can do this...
+            ! if (save_data) then
+
+            !     if (var_data%two_d) then
+            !         ims = lbound(var_data%data_2d,1)
+            !         ime = ubound(var_data%data_2d,1)
+            !         jms = lbound(var_data%data_2d,2)
+            !         jme = ubound(var_data%data_2d,2)
+
+            !         deallocate( this%var_list(indx)%var%data_2d)
+            !         allocate(this%var_list(indx)%var%data_2d(ims:ime, jms:jme))
+            !         this%var_list(indx)%var%data_2d(:,:)  = var_data%data_2d(:,:)
+            !     else
+            !         ims = lbound(var_data%data_3d,1)
+            !         ime = ubound(var_data%data_3d,1)
+            !         jms = lbound(var_data%data_3d,2)
+            !         jme = ubound(var_data%data_3d,2)
+            !         kms = lbound(var_data%data_3d,3)
+            !         kme = ubound(var_data%data_3d,3)
+
+            !         deallocate( this%var_list(indx)%var%data_3d)
+            !         allocate(this%var_list(indx)%var%data_3d(ims:ime, jms:jme, kms:kme))
+            !         this%var_list(indx)%var%data_3d(:,:,:)  = var_data%data_3d(:,:,:)
+            !     endif
+            ! endif
         endif
 
 

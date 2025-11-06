@@ -106,6 +106,9 @@ module domain_interface
     procedure :: update_delta_fields
     procedure :: apply_forcing
 
+    procedure :: update_device
+    procedure :: update_host
+
   end type
 
   integer, parameter :: space_dimension=3
@@ -199,6 +202,16 @@ module domain_interface
         class(domain_t),    intent(inout) :: this
         type(options_t), intent(in)       :: options
         real, intent(in)                  :: dt
+    end subroutine
+
+    module subroutine update_device(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
+    end subroutine
+
+    module subroutine update_host(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
     end subroutine
 
   end interface

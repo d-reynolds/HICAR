@@ -273,9 +273,9 @@ contains
                 call stop_on_err(gas_concs%set_vmr("co2", 410.e-6_wp))
                 call stop_on_err(gas_concs%set_vmr("ch4", 1650.e-9_wp))
                 call stop_on_err(gas_concs%set_vmr("n2o", 306.e-9_wp))
-                call stop_on_err(gas_concs%set_vmr("n2",  0.7808_wp))
-                call stop_on_err(gas_concs%set_vmr("o2",  0.2095_wp))
-                call stop_on_err(gas_concs%set_vmr("co",  0._wp))
+                call stop_on_err(gas_concs%set_vmr("n2 ",  0.7808_wp))
+                call stop_on_err(gas_concs%set_vmr("o2 ",  0.2095_wp))
+                call stop_on_err(gas_concs%set_vmr("co ",  0._wp))
 
                 ! ----------------------------------------------------------------------------
                 ! load data into classes
@@ -395,7 +395,7 @@ contains
         real :: gridkm, ra_dt, declin, hour_frac, air_mass_lay, cld_frc
         real :: relmax, relmin, reimax, reimin
         real(real64) :: date_seconds, julian_day
-        integer :: i, k, j, col_indx
+        integer :: i, k, j, col_indx,sim_month
 
         logical :: f_qr, f_qc, f_qi, F_QI2, F_QI3, f_qs, f_qg, f_qv, f_qndrop
         integer :: mp_options, F_REC, F_REI, F_RES
@@ -434,7 +434,7 @@ contains
         real(wp), dimension(:,:),   allocatable :: emis_sfc, sfc_alb_dir, sfc_alb_dif ! First dimension is band
 
         character(len=8) :: char_input
-        integer :: ncol, nlay
+        integer :: ncol, nlay, nblocks, block, jb_s, jb_e
         real(real64) :: sun_declin_deg, eq_of_time_minutes
         !
         ! Timing variables
@@ -460,6 +460,7 @@ contains
             ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval)) then
             tzone = options%rad%tzone
             date_seconds = domain%sim_time%seconds()
+            sim_month = domain%sim_time%month
             julian_day = domain%sim_time%date_to_jd()
             hour_frac = domain%sim_time%TOD_hours()
 
@@ -505,6 +506,34 @@ contains
         !If we are not over the update interval, don't run any of this, since it contains allocations, etc...
         if ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval) then
 
+            associate(albedo_dom => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d, &
+                      shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
+                      shortwave_diffuse => domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
+                      shortwave_direct => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d, &
+                      longwave => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d, &
+                      out_longwave_rad => domain%vars_2d(domain%var_indx(kVARS%out_longwave_rad)%v)%data_2d, &
+                      cloud_fraction => domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d, &
+                      land_mask => domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
+                      dz_interface => domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d, &
+                      temperature => domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d, &
+                      pressure => domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d, &
+                      potential_temperature => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d, &
+                      temperature_i => domain%vars_3d(domain%var_indx(kVARS%temperature_interface)%v)%data_3d, &
+                      pressure_i => domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d, &
+                      exner => domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d, &
+                      water_vapor => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
+                      density => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
+                      re_cloud => domain%vars_3d(domain%var_indx(kVARS%re_cloud)%v)%data_3d, &
+                      re_ice => domain%vars_3d(domain%var_indx(kVARS%re_ice)%v)%data_3d, &
+                      re_snow => domain%vars_3d(domain%var_indx(kVARS%re_snow)%v)%data_3d, &
+                      land_emissivity => domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d, &
+                      cosine_zenith_angle => domain%vars_2d(domain%var_indx(kVARS%cosine_zenith_angle)%v)%data_2d, &
+                      qv_dom => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
+                      qc_dom => domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d, &
+                      qi_dom => domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d, &
+                      i2_dom => domain%vars_3d(domain%var_indx(kVARS%ice2_mass)%v)%data_3d, &
+                      i3_dom => domain%vars_3d(domain%var_indx(kVARS%ice3_mass)%v)%data_3d, &
+                      qs_dom => domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d)
             ra_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
             last_model_time(domain%nest_indx) = domain%sim_time%seconds()
 
@@ -563,18 +592,57 @@ contains
             cldfra=0
             !$acc end kernels
 
-            !$acc parallel loop gang vector collapse(3) present(domain, qi, qs, qc)
-            do j = jms,jme
-                do k = kms,kme
-                    do i = ims,ime
-                    if (F_QI) qi(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d(i,k,j)
-                    if (F_QI2) qi(i,k,j) = qi(i,k,j) + domain%vars_3d(domain%var_indx(kVARS%ice2_mass)%v)%data_3d(i,k,j)
-                    if (F_QI3) qi(i,k,j) = qi(i,k,j) + domain%vars_3d(domain%var_indx(kVARS%ice3_mass)%v)%data_3d(i,k,j)
-                    if (F_QC) qc(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d(i,k,j)
-                    if (F_QS) qs(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d(i,k,j)
+            if (F_QI) then
+                !$acc parallel loop gang vector collapse(3) present(qi_dom, qi)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                        qi(i,k,j) = qi_dom(i,k,j)
+                        enddo
                     enddo
                 enddo
-            enddo
+            endif
+            if (F_QC) then
+                !$acc parallel loop gang vector collapse(3) present(qc_dom, qc)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                        qc(i,k,j) = qc_dom(i,k,j)
+                        enddo
+                    enddo
+                enddo
+            endif
+            if (F_QS) then
+                !$acc parallel loop gang vector collapse(3) present(qs_dom, qs)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                        qs(i,k,j) = qs_dom(i,k,j)
+                        enddo
+                    enddo
+                enddo
+            endif
+            if (F_QI2) then
+                !$acc parallel loop gang vector collapse(3) present(i2_dom, qi)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                        qi(i,k,j) = qi(i,k,j) + i2_dom(i,k,j)
+                        enddo
+                    enddo
+                enddo
+            endif
+            if (F_QI3) then
+                !$acc parallel loop gang vector collapse(3) present(i3_dom, qi)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                        qi(i,k,j) = qi(i,k,j) + i3_dom(i,k,j)
+                        enddo
+                    enddo
+                enddo
+            endif
+
 
             mp_options=0
 
@@ -603,17 +671,17 @@ contains
             else if (options%physics%radiation==kRA_RRTMG .or. options%physics%radiation==kRA_RRTMGP) then
 
                 if (options%lsm%monthly_albedo) then
-                    !$acc parallel loop gang vector collapse(2) present(domain, albedo)
+                    !$acc parallel loop gang vector collapse(2) present(albedo_dom, albedo)
                     do j = jms,jme
                         do i = ims,ime
-                            ALBEDO(i,j) = domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(i, domain%sim_time%month, j)
+                            ALBEDO(i,j) = albedo_dom(i, sim_month, j)
                         enddo
                     enddo
                 else
-                    !$acc parallel loop gang vector collapse(2) present(domain, albedo)
+                    !$acc parallel loop gang vector collapse(2) present(albedo_dom, albedo)
                     do j = jms,jme
                         do i = ims,ime
-                            ALBEDO(i,j) = domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(i, 1, j)
+                            ALBEDO(i,j) = albedo_dom(i, 1, j)
                         enddo
                     enddo
                 endif
@@ -624,38 +692,39 @@ contains
                 If (options%rad%icloud == 3) THEN
                     IF ( F_QC .AND. F_QI ) THEN
                         gridkm = domain%dx/1000
-                        !$acc parallel loop gang vector collapse(2) present(domain)
+                        !$acc parallel loop gang vector collapse(2) present(cloud_fraction)
                         do j = jts,jte
                             do i = its,ite
-                                domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d(i,j) = 0
+                                cloud_fraction(i,j) = 0
                             enddo
                         enddo
-                        !$acc parallel loop gang(static: 1) vector collapse(2) present(domain,qi, qc, qs, cldfra, p_1d, t_1d, qv_1d, qc_1d, qi_1d, qs_1d, Dz_1d, cf_1d) async(1)
+                        !$acc parallel loop gang(static: 1) vector collapse(2) present(qv_dom, pressure, temperature, &
+                        !$acc                    dz_interface, land_mask, cloud_fraction, qi, qc, qs, cldfra, p_1d, t_1d, qv_1d, qc_1d, qi_1d, qs_1d, Dz_1d, cf_1d) async(1)
                         DO j = jts,jte
                             DO i = its,ite
                                 !$acc loop
                                 DO k = kms,kme
                                     cf_1d(k) = cldfra(i,k,j)
-                                    qv_1d(k) = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i,k,j)
+                                    qv_1d(k) = qv_dom(i,k,j)
                                     qc_1d(k) = qc(i,k,j)
                                     qi_1d(k) = qi(i,k,j)
                                     qs_1d(k) = qs(i,k,j)
-                                    p_1d(k) = domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d(i,k,j)
-                                    t_1d(k) = domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d(i,k,j)
-                                    Dz_1d(k) = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,k,j)
+                                    p_1d(k) = pressure(i,k,j)
+                                    t_1d(k) = temperature(i,k,j)
+                                    Dz_1d(k) = dz_interface(i,k,j)
                                 ENDDO
                                 CALL cal_cldfra3(cf_1d, qv_1d, &
                                               qc_1d, qi_1d, qs_1d, &
                                               Dz_1d, &
                                               p_1d, &
                                               t_1d, &
-                                              real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(i,j)), &
+                                              real(land_mask(i,j)), &
                                               gridkm, 1.5, kms, kme,        &
                                               modify_qvapor=.false., use_multilayer=.False.)
                                 !$acc loop
                                 DO k = kts,kte
                                     cldfra(i,k,j) = cf_1d(k)
-                                    domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d(i,j) = max(domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d(i,j), cldfra(i,k,j))
+                                    cloud_fraction(i,j) = max(cloud_fraction(i,j), cldfra(i,k,j))
                                 ENDDO
                             ENDDO
                         ENDDO
@@ -827,13 +896,18 @@ contains
 
                 else if (options%physics%radiation==kRA_RRTMGP) then
 
+                    !cut RRTMGP up into blocks to reduce memory usage
+                    nblocks = 4
+                    do block = 1, nblocks
+                    jb_s = jts + (block - 1)*(jte - jts + 1)/nblocks
+                    jb_e = MIN(jts + block*(jte - jts + 1)/nblocks, jte)
                     ! ----------------------------------------------------------------------------
                     ! 
                     ! ------------------------------ BEGIN INIT  ---------------------------------
                     !
                     ! ----------------------------------------------------------------------------
 
-                    ncol = (ite - its + 1)*(jte - jts + 1)
+                    ncol = (ite - its + 1)*(jb_e - jb_s + 1)
                     nlay = (kte - kts + 1)
 
                     reimin = MAX(cloud_optics_lw%get_min_radius_ice(), cloud_optics_sw%get_min_radius_ice()) 
@@ -847,17 +921,17 @@ contains
                             rel(ncol, nlay), rei(ncol, nlay), lwp(ncol, nlay), zwp(ncol,nlay), iwp(ncol, nlay), swp(ncol, nlay), res(ncol, nlay))
                     !$acc data create(p_lay, t_lay, p_lev, t_lev, q, rel, rei, lwp, zwp, iwp, swp, res)
 
-                    !$acc parallel loop gang vector collapse(2) private(col_indx) present(domain, p_lay, t_lay, q, rel, rei, lwp, zwp, iwp, swp, res, p_lev, t_lev, qi) wait(1)
-                    do j = jts, jte
+                    !$acc parallel loop gang vector collapse(2) private(col_indx) present(density, dz_interface, pressure, temperature, &
+                    !$acc            qv_dom, re_cloud, re_ice, re_snow, pressure_i, temperature_i, p_lay, t_lay, q, rel, rei, lwp, zwp, iwp, swp, res, p_lev, t_lev, qi) wait(1)
+                    do j = jb_s, jb_e
                         do i = its, ite
-                            col_indx = (i-its+1) + (j - jts)*(ite - its + 1)
+                            col_indx = (i-its+1) + (j - jb_s)*(ite - its + 1)
                             !$acc loop
                             do k = kts, kte
-                                air_mass_lay = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d(i,k,j) * &
-                                                             domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,k,j)
-                                p_lay(col_indx,k) = domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d(i,k,j)
-                                t_lay(col_indx,k) = domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d(i,k,j)
-                                q(col_indx,k)   = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i,k,j)*(amd/amw)
+                                air_mass_lay = density(i,k,j) * dz_interface(i,k,j)
+                                p_lay(col_indx,k) = pressure(i,k,j)
+                                t_lay(col_indx,k) = temperature(i,k,j)
+                                q(col_indx,k)   = qv_dom(i,k,j)*(amd/amw)
                                 ! o3(col_indx,k)   = domain%vars_3d(domain%var_indx(kVARS%ozone)%v)%data_3d(i,k,j)
 
 
@@ -869,9 +943,9 @@ contains
                                     
                                     lwp(col_indx,k) = 1000.0*qc(i,k,j) * air_mass_lay / cld_frc
                                     iwp(col_indx,k) = 1000.0*qi(i,k,j) * air_mass_lay / cld_frc
-                                    rel(col_indx,k) = max(relmin, min(relmax,domain%vars_3d(domain%var_indx(kVARS%re_cloud)%v)%data_3d(i,k,j)))
-                                    rei(col_indx,k) = max(reimin, min(reimax,domain%vars_3d(domain%var_indx(kVARS%re_ice)%v)%data_3d(i,k,j)))
-                                    res(col_indx,k) = max(reimin, min(reimax,domain%vars_3d(domain%var_indx(kVARS%re_snow)%v)%data_3d(i,k,j)))
+                                    rel(col_indx,k) = max(relmin, min(relmax, re_cloud(i,k,j)))
+                                    rei(col_indx,k) = max(reimin, min(reimax, re_ice(i,k,j)))
+                                    res(col_indx,k) = max(reimin, min(reimax, re_snow(i,k,j)))
                                 else
                                     lwp(col_indx,k) = 0.0_wp
                                     iwp(col_indx,k) = 0.0_wp
@@ -883,8 +957,8 @@ contains
 
                             !$acc loop
                             do k = kts, kte+1
-                                p_lev(col_indx,k) = domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d(i,k,j)
-                                t_lev(col_indx,k) = domain%vars_3d(domain%var_indx(kVARS%temperature_interface)%v)%data_3d(i,k,j)
+                                p_lev(col_indx,k) = pressure_i(i,k,j)
+                                t_lev(col_indx,k) = temperature_i(i,k,j)
                             enddo
                         enddo
                     enddo
@@ -929,24 +1003,23 @@ contains
 
                     !$acc data create(t_sfc, emis_sfc, flx_up, flx_dn) &
                     !$ACC   CREATE(lw_sources, atmos_lw, clouds_lw, snow_lw) &
-                    !$ACC   CREATE(lw_sources%lay_source) &
-                    !$ACC   CREATE(lw_sources%sfc_source) &
-                    !$ACC   CREATE(lw_sources%sfc_source_Jac, atmos_lw%tau) &
-                    !$acc   create(clouds_lw%tau, snow_lw%tau)
+                    !$ACC   CREATE(lw_sources%lay_source, lw_sources%lev_source) &
+                    !$ACC   CREATE(lw_sources%sfc_source, lw_sources%sfc_source_Jac) &
+                    !$acc   create(atmos_lw%tau, clouds_lw%tau, snow_lw%tau)
                     ! !$acc data create(aerosols_lw, aerosols_lw%tau)
 
 
                     ! lw_sources is threadprivate
                     ! Surface temperature
 
-                    !$acc parallel loop gang vector collapse(2) present(t_sfc, emis_sfc, t_lay, domain)
-                    do j = jts, jte
+                    !$acc parallel loop gang vector collapse(2) present(t_sfc, emis_sfc, t_lay, land_emissivity)
+                    do j = jb_s, jb_e
                         do i = its, ite
-                            col_indx = (i-its+1) + (j - jts)*(ite - its + 1)
+                            col_indx = (i-its+1) + (j - jb_s)*(ite - its + 1)
                             t_sfc(col_indx) = t_lay(col_indx,1)
                             !$acc loop
                             do k = 1, nbnd
-                                emis_sfc(k,col_indx) = domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d(i,j)
+                                emis_sfc(k,col_indx) = land_emissivity(i,j)
                             enddo
                         enddo
                     enddo
@@ -982,11 +1055,11 @@ contains
                                             emis_sfc,   &
                                             fluxes_lw))
 
-                    !$acc parallel loop gang vector collapse(2) present(domain, flx_up, flx_dn) copyin(kVARS) 
-                    do j = jts,jte 
+                    !$acc parallel loop gang vector collapse(2) present(out_longwave_rad, longwave, flx_up, flx_dn) copyin(kVARS) 
+                    do j = jb_s,jb_e 
                         do i = its,ite
-                            domain%vars_2d(domain%var_indx(kVARS%out_longwave_rad)%v)%data_2d(i,j) = flx_up((i - its + 1) + (j - jts)*(ite-its + 1), 1)
-                            domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d(i,j) = flx_dn((i - its + 1) + (j - jts)*(ite-its + 1), 1)
+                            out_longwave_rad(i,j) = flx_up((i - its + 1) + (j - jb_s)*(ite-its + 1), 1)
+                            longwave(i,j) = flx_dn((i - its + 1) + (j - jb_s)*(ite-its + 1), 1)
                         enddo
                     enddo
                     ! Debug prints
@@ -1021,17 +1094,17 @@ contains
 
 
                     !$acc data create(atmos_sw, toa_flux, sfc_alb_dir, sfc_alb_dif, mu0, flx_up, flx_dn, flx_dnsw_dir, clouds_sw, snow_sw) &
+                    !$acc   create(atmos_sw%tau, atmos_sw%ssa, atmos_sw%g) &
                     !$acc   create(clouds_sw%tau, clouds_sw%ssa, clouds_sw%g) &
                     !$acc   create(snow_sw%tau, snow_sw%ssa, snow_sw%g)
                     ! !$acc data create(aerosols_sw, aerosols_sw%tau, aerosols_sw%ssa, aerosols_sw%g)
-                    ! Ocean-ish values for no particular reason
 
-                    !$acc parallel loop gang vector collapse(2) private(col_indx) present(domain, ALBEDO, sfc_alb_dir, sfc_alb_dif, mu0)
-                    do j = jts, jte
+                    !$acc parallel loop gang vector collapse(2) private(col_indx) present(cosine_zenith_angle, ALBEDO, sfc_alb_dir, sfc_alb_dif, mu0)
+                    do j = jb_s, jb_e
                         do i = its, ite
-                            col_indx = (i-its+1) + (j - jts)*(ite - its + 1)
+                            col_indx = (i-its+1) + (j - jb_s)*(ite - its + 1)
 
-                            mu0(col_indx) = domain%vars_2d(domain%var_indx(kVARS%cosine_zenith_angle)%v)%data_2d(i,j)
+                            mu0(col_indx) = cosine_zenith_angle(i,j)
 
                             !$acc loop
                             do k = 1, nbnd
@@ -1075,13 +1148,12 @@ contains
                                             sfc_alb_dir, sfc_alb_dif, &
                                             fluxes_sw))
                     
-                    !$acc parallel loop gang vector collapse(2) present(domain, flx_up, flx_dn, flx_dnsw_dir) copyin(kVARS) 
-                    do j = jts,jte
+                    !$acc parallel loop gang vector collapse(2) present(shortwave, shortwave_direct, shortwave_diffuse, flx_up, flx_dn, flx_dnsw_dir) copyin(kVARS) 
+                    do j = jb_s,jb_e
                         do i = its,ite
-                            domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d(i,j) = flx_dn((i - its + 1) + (j - jts)*(ite-its + 1), 1)
-                            domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d(i,j) = flx_dnsw_dir((i - its + 1) + (j - jts)*(ite-its + 1), 1)
-                            domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d(i,j) = domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d(i,j) - &
-                                                                                                      domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d(i,j)
+                            shortwave(i,j) = flx_dn((i - its + 1) + (j - jb_s)*(ite-its + 1), 1)
+                            shortwave_direct(i,j) = flx_dnsw_dir((i - its + 1) + (j - jb_s)*(ite-its + 1), 1)
+                            shortwave_diffuse(i,j) = shortwave(i,j) - shortwave_direct(i,j)
                         enddo
                     enddo
                     !$acc end data
@@ -1089,6 +1161,11 @@ contains
                     call atmos_sw%finalize()
                     call clouds_sw%finalize()
                     call snow_sw%finalize()
+
+                    deallocate(p_lay, t_lay, p_lev, t_lev, q, rel, rei, lwp, zwp, iwp, swp, res)
+                    deallocate(toa_flux, sfc_alb_dir, sfc_alb_dif, mu0, flx_up, flx_dn, flx_dnsw_dir, t_sfc, emis_sfc)
+
+                    enddo
                 endif 
 
                 ! If the user has provided sky view fraction, then apply this to the diffuse SW now, 
@@ -1098,8 +1175,7 @@ contains
                           tend_th_swrad => domain%tend%th_swrad)
 
                 if (domain%var_indx(kVARS%svf)%v > 0) then
-                    associate(shortwave_diffuse => domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
-                              svf => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d)
+                    associate(svf => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d)
                     !$acc parallel loop gang vector collapse(2) present(shortwave_diffuse, svf)
                     do j = jts,jte
                         do i = its,ite
@@ -1122,11 +1198,12 @@ contains
             ! cache shortwave from RRTMG_SWRAD for downscaling.
             ! needed if we are to call the terrain shading routine more frequently than RRTMG_SWRAD
             if (options%physics%radiation_downScaling==1) then
-                !$acc kernels present(domain, shortwave_cached) copyin(kVARS)
-                shortwave_cached = domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d
+                !$acc kernels present(shortwave, shortwave_cached) copyin(kVARS)
+                shortwave_cached = shortwave
                 !$acc end kernels
             endif
             !$acc end data
+            end associate
         end if
         
         
@@ -1162,7 +1239,7 @@ contains
                       shortwave_direct_above => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct_above)%v)%data_2d, &
                       hlm => domain%vars_3d(domain%var_indx(kVARS%hlm)%v)%data_3d)
             
-            !$acc parallel loop gang vector collapse(2) copyin(kVARS) wait(1)
+            !$acc parallel loop gang vector collapse(2) present(shortwave_cached, shortwave_diffuse, shortwave_direct, shortwave, shortwave_direct_above, solar_elevation_store, solar_azimuth_store, cos_project_angle) copyin(kVARS) wait(1)
             do j = jts,jte
                 do i = its,ite
                     shortwave_direct(i,j) = max( shortwave_cached(i,j) - shortwave_diffuse(i,j),0.0)
@@ -1212,7 +1289,7 @@ contains
                       tend_th_lwrad => domain%tend%th_lwrad, &
                       tend_swrad    => domain%vars_3d(domain%var_indx(kVARS%tend_swrad)%v)%data_3d)
 
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) present(pot_temp, tend_th_lwrad, tend_th_swrad, tend_swrad) async(1)
             do j = jts,jte
                 do k = kts,kte
                     do i = its,ite

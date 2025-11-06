@@ -58,9 +58,59 @@ contains
 
         call init_batch_exch(this)
         
-        !$acc enter data copyin(this)
-
+        !$acc enter data copyin(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
+        !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
+        !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, &
+        !$acc                   this%vars_2d, this%vars_3d, this%var_indx, this%forcing_var_indx, this%forcing_hi, &
+        !$acc                   this%adv_vars, this%exch_vars, this%tend, this%halo)
+        
+        !update all relevant data_2d/data_3d fields of vars_2d/vars_3d to device
+        call this%update_device()
     end subroutine init_domain
+
+    module subroutine update_device(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        integer :: i
+
+        do i = 1, size(this%vars_2d)
+            if (allocated(this%vars_2d(i)%data_2d)) then
+                !$acc update device(this%vars_2d(i)%data_2d)
+            endif
+            if (allocated(this%vars_2d(i)%data_2di)) then
+                !$acc update device(this%vars_2d(i)%data_2di)
+            endif
+        end do
+        do i = 1, size(this%vars_3d)
+            if (allocated(this%vars_3d(i)%data_3d)) then
+                !$acc update device(this%vars_3d(i)%data_3d)
+            endif
+        end do
+
+    end subroutine update_device
+
+    module subroutine update_host(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        integer :: i
+
+        do i = 1, size(this%vars_2d)
+            if (allocated(this%vars_2d(i)%data_2d)) then
+                !$acc update host(this%vars_2d(i)%data_2d)
+            endif
+            if (allocated(this%vars_2d(i)%data_2di)) then
+                !$acc update host(this%vars_2d(i)%data_2di)
+            endif
+        end do
+
+        do i = 1, size(this%vars_3d)
+            if (allocated(this%vars_3d(i)%data_3d)) then
+                !$acc update host(this%vars_3d(i)%data_3d)
+            endif
+        end do
+
+    end subroutine update_host
+
 
     subroutine init_batch_exch(this)
         implicit none
@@ -163,7 +213,63 @@ contains
     module subroutine release(this)
         class(domain_t), intent(inout) :: this
 
-        !$acc exit data delete(this)
+        integer :: i
+        
+        !$acc exit data finalize delete(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
+        !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
+        !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, &
+        !$acc                   this%vars_2d, this%vars_3d, this%var_indx, this%forcing_var_indx, this%forcing_hi, &
+        !$acc                   this%adv_vars, this%exch_vars, this%tend, this%halo)
+        
+        do i = 1, size(this%vars_2d)
+            if (allocated(this%vars_2d(i)%data_2d)) then
+                !$acc exit data finalize delete(this%vars_2d(i)%data_2d)
+                deallocate(this%vars_2d(i)%data_2d)
+            endif
+            if (allocated(this%vars_2d(i)%dqdt_2d)) then
+                !$acc exit data finalize delete(this%vars_2d(i)%dqdt_2d)
+                deallocate(this%vars_2d(i)%dqdt_2d)
+            endif
+            if (allocated(this%vars_2d(i)%data_2di)) then
+                !$acc exit data finalize delete(this%vars_2d(i)%data_2di)
+                deallocate(this%vars_2d(i)%data_2di)
+            endif
+        end do
+        do i = 1, size(this%vars_3d)
+            if (allocated(this%vars_3d(i)%data_3d)) then
+                !$acc exit data finalize delete(this%vars_3d(i)%data_3d)
+                deallocate(this%vars_3d(i)%data_3d)
+            endif
+            if (allocated(this%vars_3d(i)%dqdt_3d)) then
+                !$acc exit data finalize delete(this%vars_3d(i)%dqdt_3d)
+                deallocate(this%vars_3d(i)%dqdt_3d)
+            endif
+        end do
+        do i = 1, size(this%vars_4d)
+            if (allocated(this%vars_4d(i)%data_4d)) then
+                deallocate(this%vars_4d(i)%data_4d)
+            endif
+        end do
+
+        do i = 1, size(this%forcing_hi)
+            if (allocated(this%forcing_hi(i)%data_2d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%data_2d)
+                deallocate(this%forcing_hi(i)%data_2d)
+            endif
+            if (allocated(this%forcing_hi(i)%dqdt_2d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%dqdt_2d)
+                deallocate(this%forcing_hi(i)%dqdt_2d)
+            endif
+            if (allocated(this%forcing_hi(i)%data_3d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%data_3d)
+                deallocate(this%forcing_hi(i)%data_3d)
+            endif
+            if (allocated(this%forcing_hi(i)%dqdt_3d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%dqdt_3d)
+                deallocate(this%forcing_hi(i)%dqdt_3d)
+            endif
+        end do
+
         call this%halo%finalize()
 
     end subroutine
@@ -642,7 +748,6 @@ contains
 
         integer :: ims, ime, jms, jme, kms, kme
         type(meta_data_t) :: var_meta
-        type(variable_t)  :: tmp_var, forcing_var_hi
         type(grid_t)     :: grid
         integer :: n_one_d, n_two_d, n_three_d, n_four_d, n_forcing_var
         logical :: is_forcing_var
@@ -773,57 +878,100 @@ contains
                     endif
                 endif
 
-                call tmp_var%initialize(i, grid, forcing_var=is_forcing_var)
 
                 ! test if forcing var is empty
                 if (is_forcing_var) then
 
                     n_forcing_var = n_forcing_var + 1
-                    call forcing_var_hi%initialize(i, grid, forcing_var=is_forcing_var)
                     this%forcing_var_indx(i)%id = i
                     this%forcing_var_indx(i)%v = n_forcing_var
 
-                    this%forcing_hi(this%forcing_var_indx(i)%v) = forcing_var_hi
+                    call this%forcing_hi(this%forcing_var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
                 endif
 
                 this%var_indx(i)%id = i
-                if (tmp_var%one_d) then
+                if (var_meta%one_d) then
                     n_one_d = n_one_d + 1
                     this%var_indx(i)%v = n_one_d
-                    this%vars_1d(this%var_indx(i)%v) = tmp_var
-                else if (tmp_var%two_d) then
+                    call this%vars_1d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                else if (var_meta%two_d) then
                     n_two_d = n_two_d + 1
                     this%var_indx(i)%v = n_two_d
-                    this%vars_2d(this%var_indx(i)%v) = tmp_var
-                else if (tmp_var%three_d) then
+                    call this%vars_2d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                else if (var_meta%three_d) then
                     n_three_d = n_three_d + 1
                     this%var_indx(i)%v = n_three_d
-                    this%vars_3d(this%var_indx(i)%v) = tmp_var
-                else if (tmp_var%four_d) then
+                    call this%vars_3d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                else if (var_meta%four_d) then
                     n_four_d = n_four_d + 1
                     this%var_indx(i)%v = n_four_d
-                    this%vars_4d(this%var_indx(i)%v) = tmp_var
+                    call this%vars_4d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
                 endif
             endif
         enddo
 
 
-        if (0<opt%vars_to_allocate( kVARS%tend_qv_adv) )                allocate(this%tend%qv_adv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qv_pbl) )                allocate(this%tend%qv_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qv) )                    allocate(this%tend%qv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_th) )                    allocate(this%tend%th(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_th_pbl) )                allocate(this%tend%th_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qc_pbl) )                allocate(this%tend%qc_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qi_pbl) )                allocate(this%tend%qi_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qc) )                    allocate(this%tend%qc(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qi) )                    allocate(this%tend%qi(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qs) )                    allocate(this%tend%qs(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qr) )                    allocate(this%tend%qr(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_u) )                     allocate(this%tend%u(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_v) )                     allocate(this%tend%v(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+        if (0<opt%vars_to_allocate( kVARS%tend_qv_adv) )   then
+            allocate(this%tend%qv_adv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
+            !$acc enter data copyin(this%tend%qv_adv)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qv_pbl) )   then
+            allocate(this%tend%qv_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
+            !$acc enter data copyin(this%tend%qv_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qv) )       then
+            allocate(this%tend%qv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qv)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_th) )       then
+            allocate(this%tend%th(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%th)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_th_pbl) )   then
+            allocate(this%tend%th_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%th_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qc_pbl) )   then
+            allocate(this%tend%qc_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qc_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qi_pbl) )   then
+            allocate(this%tend%qi_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qi_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qc) )       then
+            allocate(this%tend%qc(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qc)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qi) )       then
+            allocate(this%tend%qi(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qi)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qs) )       then
+            allocate(this%tend%qs(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qs)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qr) )       then
+            allocate(this%tend%qr(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qr)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_u) )        then
+            allocate(this%tend%u(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+            !$acc enter data copyin(this%tend%u)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_v) )        then
+            allocate(this%tend%v(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+            !$acc enter data copyin(this%tend%v)
+        endif
 
-        if (0<opt%vars_to_allocate( kVARS%tend_th_lwrad) )              allocate(this%tend%th_lwrad(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_th_swrad) )              allocate(this%tend%th_swrad(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+        if (0<opt%vars_to_allocate( kVARS%tend_th_lwrad) ) then
+            allocate(this%tend%th_lwrad(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+            !$acc enter data copyin(this%tend%th_lwrad)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_th_swrad) ) then
+            allocate(this%tend%th_swrad(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+            !$acc enter data copyin(this%tend%th_swrad)
+        endif
 
     end subroutine
 
@@ -2750,43 +2898,57 @@ contains
 
 
         ! Now iterate through the dictionary as long as there are more elements present
-        !$acc data present(this)
+
         do n = 1,size(this%forcing_hi)
+            associate(forcing_hi => this%forcing_hi(n))
             !Update delta fields on the high-resolution forcing varaibles...
             if (this%forcing_hi(n)%two_d) then
-                !$acc kernels
-                this%forcing_hi(n)%dqdt_2d = (this%forcing_hi(n)%dqdt_2d - this%forcing_hi(n)%data_2d) / dt_seconds
+                !$acc kernels present(forcing_hi%dqdt_2d, forcing_hi%data_2d)
+                forcing_hi%dqdt_2d = (forcing_hi%dqdt_2d - forcing_hi%data_2d) / dt_seconds
                 !$acc end kernels
             else if (this%forcing_hi(n)%three_d) then
-                !$acc kernels
-                this%forcing_hi(n)%dqdt_3d = (this%forcing_hi(n)%dqdt_3d - this%forcing_hi(n)%data_3d) / dt_seconds
+                !$acc kernels present(forcing_hi%dqdt_3d, forcing_hi%data_3d)
+                forcing_hi%dqdt_3d = (forcing_hi%dqdt_3d - forcing_hi%data_3d) / dt_seconds
                 !$acc end kernels
             endif
 
             ! now update delta fields for domain variables
-            var_indx = this%forcing_hi(n)%id
-
-            if (.not.(this%forcing_hi(n)%force_boundaries)) then
-                if (this%forcing_hi(n)%two_d) then
-                    !$acc parallel loop gang vector collapse(2)
-                    do j = this%vars_2d(this%var_indx(var_indx)%v)%grid%jms, this%vars_2d(this%var_indx(var_indx)%v)%grid%jme
-                        do i = this%vars_2d(this%var_indx(var_indx)%v)%grid%ims, this%vars_2d(this%var_indx(var_indx)%v)%grid%ime
-                            this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d(i,j) = (this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d(i,j) - this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j)) / dt_seconds
+            var_indx = forcing_hi%id
+            if (.not.(forcing_hi%force_boundaries)) then
+                if (forcing_hi%two_d) then
+                    associate(var_2d => this%vars_2d(this%var_indx(var_indx)%v), &
+                              ims => this%vars_2d(this%var_indx(var_indx)%v)%grid%ims, &
+                              ime => this%vars_2d(this%var_indx(var_indx)%v)%grid%ime, &
+                              jms => this%vars_2d(this%var_indx(var_indx)%v)%grid%jms, &
+                              jme => this%vars_2d(this%var_indx(var_indx)%v)%grid%jme)
+                    !$acc parallel loop gang vector collapse(2) present(var_2d%dqdt_2d, var_2d%data_2d, ims, ime, jms, jme)
+                    do j = jms, jme
+                        do i = ims, ime
+                            var_2d%dqdt_2d(i,j) = (var_2d%dqdt_2d(i,j) - var_2d%data_2d(i,j)) / dt_seconds
                         enddo
                     enddo
+                    end associate
                 else if (this%forcing_hi(n)%three_d) then
-                    !$acc parallel loop gang vector collapse(3)
-                    do j = this%vars_3d(this%var_indx(var_indx)%v)%grid%jms, this%vars_3d(this%var_indx(var_indx)%v)%grid%jme
-                        do k = this%kms, this%kme
-                            do i = this%vars_3d(this%var_indx(var_indx)%v)%grid%ims, this%vars_3d(this%var_indx(var_indx)%v)%grid%ime
-                                this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d(i,k,j) = (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d(i,k,j) - this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j)) / dt_seconds
+                    associate(var_3d => this%vars_3d(this%var_indx(var_indx)%v), &
+                              ims => this%vars_3d(this%var_indx(var_indx)%v)%grid%ims, &
+                              ime => this%vars_3d(this%var_indx(var_indx)%v)%grid%ime, &
+                              kms => this%kms, &
+                              kme => this%kme, &
+                              jms => this%vars_3d(this%var_indx(var_indx)%v)%grid%jms, &
+                              jme => this%vars_3d(this%var_indx(var_indx)%v)%grid%jme)
+                    !$acc parallel loop gang vector collapse(3) present(var_3d%dqdt_3d, var_3d%data_3d, ims, ime, kms, kme, jms, jme)
+                    do j = jms, jme
+                        do k = kms, kme
+                            do i = ims, ime
+                                var_3d%dqdt_3d(i,k,j) = (var_3d%dqdt_3d(i,k,j) - var_3d%data_3d(i,k,j)) / dt_seconds
                             enddo
                         enddo
                     enddo
+                    end associate
                 endif
             endif
+            end associate
         enddo
-        !$acc end data
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
         ! this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d = (this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d - this%vars_3d(this%var_indx(kVARS%w)%v)%data_3d) / dt%seconds()
@@ -2862,7 +3024,7 @@ contains
 
                 ! apply forcing throughout the domain for 2D diagnosed variables (e.g. SST, SW)
                 if (.not.(forcing%force_boundaries)) then
-                    !$acc parallel loop gang vector collapse(2) present(var, forcing)
+                    !$acc parallel loop gang vector collapse(2) present(var%data_2d, var%dqdt_2d, forcing%data_2d, forcing%dqdt_2d)
                     do j = jms,jme
                         do i = ims,ime
                             var%data_2d(i,j) = var%data_2d(i,j) + (var%dqdt_2d(i,j) * dt)
@@ -2870,7 +3032,7 @@ contains
                         enddo
                     enddo
                 else if (do_boundary) then
-                    !$acc parallel present(var,forcing,relax_filter,ims_b,ime_b,jms_b,jme_b) 
+                    !$acc parallel present(var%data_2d, var%dqdt_2d, forcing%data_2d, forcing%dqdt_2d, relax_filter, ims_b, ime_b, jms_b, jme_b)
                     do p = 1,4
                         if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
@@ -2910,7 +3072,7 @@ contains
                 ! only apply forcing data on the boundaries for advected scalars (e.g. temperature, humidity)
                 ! applying forcing to the edges has already been handeled when updating dqdt using the relaxation filter
                 if (.not.(forcing%force_boundaries)) then
-                    !$acc parallel loop gang vector collapse(3) present(var, forcing)
+                    !$acc parallel loop gang vector collapse(3) present(var%data_3d, var%dqdt_3d, forcing%data_3d, forcing%dqdt_3d)
                     do j = jms,jme
                         do k = kms, kme
                             do i = ims,ime
@@ -2925,7 +3087,7 @@ contains
                         enddo
                     enddo
                 else if (do_boundary) then
-                    !$acc parallel present(var,forcing,relax_filter,ims_b,ime_b,jms_b,jme_b)
+                    !$acc parallel present(var%data_3d, var%dqdt_3d, forcing%data_3d, forcing%dqdt_3d,relax_filter,ims_b,ime_b,jms_b,jme_b)
                     do p = 1,4
                         if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
@@ -2988,18 +3150,17 @@ contains
         type(variable_t) :: input_data
 
         ! number of layers has to be used when subsetting for update_pressure (for now)
-        integer :: nz, i, var_indx, pressure_indx, pot_temp_indx
+        integer :: nz, p, var_indx, pressure_indx, pot_temp_indx, i, j, k
         logical :: var_is_u, var_is_v, var_is_pressure, var_is_potential_temp, agl_interp, force_boundaries
 
         update_only = .False.
         if (present(update)) update_only = update
 
         ! Now iterate through the dictionary as long as there are more elements present
-        !$acc data present(this)
-        do i = 1,size(this%forcing_hi)
+        do p = 1,size(this%forcing_hi)
 
-            ! var_indx = get_varindx(trim(this%forcing_hi(i)%name))
-            var_indx = this%forcing_hi(i)%id
+            ! var_indx = get_varindx(trim(this%forcing_hi(p)%name))
+            var_indx = this%forcing_hi(p)%id
 
             var_to_interpolate = get_varmeta(var_indx, force_boundaries=force_boundaries)
 
@@ -3007,21 +3168,23 @@ contains
             input_data = forcing%variables%get_var(var_indx)
             ! interpolate
             if (input_data%two_d) then
-                associate(var     => this%vars_2d(this%var_indx(var_indx)%v) )
+                associate(var     => this%vars_2d(this%var_indx(var_indx)%v), forcing_hi => this%forcing_hi(p) )
                 if (update_only) then
-                    call geo_interp2d(this%forcing_hi(i)%dqdt_2d, input_data%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(forcing_hi%dqdt_2d, input_data%data_2d, forcing%geo%geolut)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    !$acc update device(this%forcing_hi(i)%dqdt_2d)
-                    !$acc kernels present(this%forcing_hi(i), var)
-                    if (.not.(force_boundaries)) var%dqdt_2d = this%forcing_hi(i)%dqdt_2d
+                    !$acc update device(forcing_hi%dqdt_2d)
+                     if (.not.(force_boundaries)) then
+                    !$acc kernels present(forcing_hi%dqdt_2d, var%dqdt_2d)
+                    var%dqdt_2d = forcing_hi%dqdt_2d
                     !$acc end kernels
+                    endif
                 else
-                    call geo_interp2d(this%forcing_hi(i)%data_2d, input_data%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(forcing_hi%data_2d, input_data%data_2d, forcing%geo%geolut)
                     !If this is an initialization step, copy high res directly over to domain
 
-                    !$acc update device(this%forcing_hi(i)%data_2d)
-                    !$acc kernels present(this%forcing_hi(i), var)
-                    var%data_2d = this%forcing_hi(i)%data_2d
+                    !$acc update device(forcing_hi%data_2d)
+                    !$acc kernels present(forcing_hi%data_2d, var%data_2d)
+                    var%data_2d = forcing_hi%data_2d
                     !$acc end kernels
                 endif
                 end associate
@@ -3034,29 +3197,32 @@ contains
                 !for interpolation. If the user has not selected AGL interpolation in the namelist, this will result in standard z-interpolation
                 agl_interp = .not.(var_is_pressure .or. var_is_potential_temp)
 
-                associate(var     => this%vars_3d(this%var_indx(var_indx)%v) )
+                associate(var     => this%vars_3d(this%var_indx(var_indx)%v), &
+                          forcing_hi => this%forcing_hi(p) )
 
                 ! if just updating, use the dqdt variable otherwise use the 3D variable
                 if (update_only) then
-                    call interpolate_variable(this%forcing_hi(i)%dqdt_3d, input_data, forcing, this, &
+                    call interpolate_variable(forcing_hi%dqdt_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    !$acc update device(this%forcing_hi(i)%dqdt_3d)
-                    !$acc kernels present(this%forcing_hi(i), var)
-                    if (.not.(force_boundaries).and..not.var_is_u.and..not.var_is_v) var%dqdt_3d = this%forcing_hi(i)%dqdt_3d
-                    !$acc end kernels
+                    !$acc update device(forcing_hi%dqdt_3d)
+                    if (.not.(force_boundaries).and..not.var_is_u.and..not.var_is_v) then
+                        !$acc kernels present(forcing_hi%dqdt_3d, var%dqdt_3d)
+                        var%dqdt_3d = forcing_hi%dqdt_3d
+                        !$acc end kernels
+                    endif
                 else
-                    call interpolate_variable(this%forcing_hi(i)%data_3d, input_data, forcing, this, &
+                    call interpolate_variable(forcing_hi%data_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     !If this is an initialization step, copy high res directly over to domain
-                    !$acc update device(this%forcing_hi(i)%data_3d)
-                    !$acc kernels present(this%forcing_hi(i), var)
-                    var%data_3d = this%forcing_hi(i)%data_3d
+                    !$acc update device(forcing_hi%data_3d)
+                    !$acc kernels present(forcing_hi%data_3d, var%data_3d)
+                    var%data_3d = forcing_hi%data_3d
                     !$acc end kernels
                 endif
                 end associate
-                if (var_is_pressure) pressure_indx = i
-                if (var_is_potential_temp) pot_temp_indx = i
+                if (var_is_pressure) pressure_indx = p
+                if (var_is_potential_temp) pot_temp_indx = p
             endif
             call forcing%variables%add_var(var_indx, input_data)
         enddo
@@ -3064,25 +3230,41 @@ contains
         !Adjust potential temperature (first) and pressure (second) to account for points below forcing grid
         !Only domain-wide-forced variables are updated with the domain dqdt_3d
         
-        associate(pressure     => this%vars_3d(this%var_indx(kVARS%pressure)%v), &
-                   pot_temp     => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v))
+        associate( forcing_pressure => this%forcing_hi(pressure_indx), &
+                   forcing_pot_temp => this%forcing_hi(pot_temp_indx), &
+                   pressure     => this%vars_3d(this%var_indx(kVARS%pressure)%v), &
+                   pot_temp     => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v), &
+                   ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, kms => this%kms, kme => this%kme )
         if (update_only) then
-            call adjust_pressure_temp(this%forcing_hi(pressure_indx)%dqdt_3d,this%forcing_hi(pot_temp_indx)%dqdt_3d, forcing%geo%z, this%geo%z)
-            !$acc update device(this%forcing_hi(pressure_indx)%dqdt_3d,this%forcing_hi(pot_temp_indx)%dqdt_3d)
-            !$acc kernels present(this%forcing_hi(pressure_indx), this%forcing_hi(pot_temp_indx), pressure, pot_temp)
-            pressure%dqdt_3d = this%forcing_hi(pressure_indx)%dqdt_3d
-            pot_temp%dqdt_3d = this%forcing_hi(pot_temp_indx)%dqdt_3d
-            !$acc end kernels
+            call adjust_pressure_temp(forcing_pressure%dqdt_3d,forcing_pot_temp%dqdt_3d, forcing%geo%z, this%geo%z)
+            !$acc update device(forcing_pressure%dqdt_3d,forcing_pot_temp%dqdt_3d)
+            !$acc parallel loop gang vector collapse(3) &
+            !$acc present(forcing_pressure%dqdt_3d, forcing_pot_temp%dqdt_3d, pressure%dqdt_3d, pot_temp%dqdt_3d, &
+            !$acc          jms, jme, kms, kme, ims, ime)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                pressure%dqdt_3d(i,k,j) = forcing_pressure%dqdt_3d(i,k,j)
+                pot_temp%dqdt_3d(i,k,j) = forcing_pot_temp%dqdt_3d(i,k,j)
+            enddo
+            enddo
+            enddo
         else
-            call adjust_pressure_temp(this%forcing_hi(pressure_indx)%data_3d,this%forcing_hi(pot_temp_indx)%data_3d, forcing%geo%z, this%geo%z)
-            !$acc update device(this%forcing_hi(pressure_indx)%data_3d,this%forcing_hi(pot_temp_indx)%data_3d)
-            !$acc kernels present(this%forcing_hi(pressure_indx), this%forcing_hi(pot_temp_indx), pressure, pot_temp)
-            pressure%data_3d = this%forcing_hi(pressure_indx)%data_3d
-            pot_temp%data_3d = this%forcing_hi(pot_temp_indx)%data_3d
-            !$acc end kernels
+            call adjust_pressure_temp(forcing_pressure%data_3d,forcing_pot_temp%data_3d, forcing%geo%z, this%geo%z)
+            !$acc update device(forcing_pressure%data_3d,forcing_pot_temp%data_3d)
+            !$acc parallel loop gang vector collapse(3) &
+            !$acc present(forcing_pressure%data_3d, forcing_pot_temp%data_3d, pressure%data_3d, pot_temp%data_3d, &
+            !$acc          jms, jme, kms, kme, ims, ime)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                pressure%data_3d(i,k,j) = forcing_pressure%data_3d(i,k,j)
+                pot_temp%data_3d(i,k,j) = forcing_pot_temp%data_3d(i,k,j)
+            enddo
+            enddo
+            enddo
         endif
         end associate
-        !$acc end data
 
         !Ensure that input data for hydrometeors after interpolation have been forced to 0-minimum
         !call this%enforce_limits(update_in=update_only)

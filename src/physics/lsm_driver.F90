@@ -638,7 +638,7 @@ contains
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in)    :: options
         logical, optional, intent(in) :: context_chng
-        integer :: i, j, k
+        integer :: i, j, k, dev_num
         logical :: context_change, restart, monthly_albedo, monthly_vegfrac
         real,allocatable,dimension(:,:) :: chstarxy
 
@@ -648,10 +648,27 @@ contains
         ! see if we should switch OpenACC context
         devtype = acc_get_device_type()
         if (cpu_accel .and. .not.(devtype == acc_device_host)) then
-            !$acc update host(domain%vars_2d, domain%vars_3d)
+            call domain%update_host()
+            dev_num = acc_get_device_num(acc_device_nvidia)
             call acc_set_device_type(acc_device_host)
         end if
 #endif
+
+        associate(temperature_2m => domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d, &
+                  humidity_2m    => domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d,  &
+                  temperature    => domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d,    &
+                  water_vapor    => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,   &
+                  albedo_dom     => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d, &
+                  veg_frac      => domain%vars_3d(domain%var_indx(kVARS%vegetation_fraction)%v)%data_3d, &
+                  canopy_water  => domain%vars_2d(domain%var_indx(kVARS%canopy_water)%v)%data_2d, &
+                  cqs2_dom      => domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d, &
+                  soil_temperature => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+                  soil_water_content => domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d, &
+                  land_mask_dom     => domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
+                  roughness_z0     => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+                  veg_type    => domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di)
+
+
         if (present(context_chng)) then
             context_change = context_chng
         else
@@ -708,14 +725,14 @@ contains
         if (allocated(windspd)) deallocate(windspd)
         if (allocated(land_mask)) deallocate(land_mask)
 
-        allocate(Z0(ims:ime,jms:jme), source=domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)
+        allocate(Z0(ims:ime,jms:jme), source=roughness_z0)
         allocate(QZ0(ims:ime,jms:jme), source=0.0)
-        allocate(QSFC(ims:ime,jms:jme), source=domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(:,kms,:))
+        allocate(QSFC(ims:ime,jms:jme), source=water_vapor(:,kms,:))
         allocate(Ri(ims:ime,jms:jme), source=0.0)
         allocate(z_atm(ims:ime,jms:jme), source=50.0)
         allocate(current_precipitation(ims:ime,jms:jme), source=0.0)
         allocate(windspd(ims:ime,jms:jme), source=1.0)
-        allocate(land_mask(ims:ime,jms:jme), source=real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di))
+        allocate(land_mask(ims:ime,jms:jme), source=real(land_mask_dom))
         !$acc enter data copyin(Z0, QZ0, QSFC, Ri, current_precipitation, windspd, land_mask)
 
         if (options%physics%landsurface > kLSM_BASIC) then
@@ -741,11 +758,11 @@ contains
         endif
 
         ! initial guesses
-        !$acc parallel loop gang vector collapse(2) present(domain)
+        !$acc parallel loop gang vector collapse(2) present(temperature_2m, humidity_2m, temperature, water_vapor)
         do j = jms, jme
             do i = ims, ime
-                domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d(i,j) = domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d(i,kms,j)
-                domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d(i,j) = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i,kms,j)
+                temperature_2m(i,j) = temperature(i,kms,j)
+                humidity_2m(i,j) = water_vapor(i,kms,j)
             end do
         end do
         
@@ -771,7 +788,7 @@ contains
             monthly_vegfrac = options%lsm%monthly_vegfrac
             cur_vegmonth = domain%sim_time%month
 
-            !$acc parallel loop gang vector collapse(2) present(domain, ALBEDO, VEGFRAC)
+            !$acc parallel loop gang vector collapse(2) present(albedo_dom, veg_frac, cqs2_dom, canopy_water, soil_temperature, soil_water_content, ALBEDO, VEGFRAC)
             do j = jms, jme
                 do i = ims, ime
                     if (monthly_albedo) then
@@ -779,26 +796,26 @@ contains
                             print*, "ERROR, monthly albedo requires monthly vegfrac"
                             stop
                         endif
-                        ALBEDO(i,j) = domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(i, cur_vegmonth, j)
+                        ALBEDO(i,j) = albedo_dom(i, cur_vegmonth, j)
                     else
-                        ALBEDO(i,j) = domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(i, 1, j)
+                        ALBEDO(i,j) = albedo_dom(i, 1, j)
                     endif
                     if (monthly_vegfrac) then
-                        VEGFRAC(i,j) = domain%vars_3d(domain%var_indx(kVARS%vegetation_fraction)%v)%data_3d(i, cur_vegmonth, j)
+                        VEGFRAC(i,j) = veg_frac(i, cur_vegmonth, j)
                     else
-                        VEGFRAC(i,j) = domain%vars_3d(domain%var_indx(kVARS%vegetation_fraction)%v)%data_3d(i, 1, j)
+                        VEGFRAC(i,j) = veg_frac(i, 1, j)
                     endif
 
                     ! save the canopy water in a temporary variable in case this is a restart run because lsm_init resets it to 0
-                    domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d(i,j) = domain%vars_2d(domain%var_indx(kVARS%canopy_water)%v)%data_2d(i,j)
+                    cqs2_dom(i,j) = canopy_water(i,j)
                     ! prevents init from failing when processing water points that may have "soil_t"=0
                     !$acc loop
-                    do k=1,ubound(domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d,2)
-                        if (domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d(i,k,j) < 200) then
-                            domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d(i,k,j) = 200.0
+                    do k=1,ubound(soil_temperature,2)
+                        if (soil_temperature(i,k,j) < 200) then
+                            soil_temperature(i,k,j) = 200.0
                         end if
-                        if (domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d(i,k,j) < 0.0001) then
-                            domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d(i,k,j) = 0.0001
+                        if (soil_water_content(i,k,j) < 0.0001) then
+                            soil_water_content(i,k,j) = 0.0001
                         end if
                     end do
                 end do
@@ -976,13 +993,13 @@ contains
         endif
 
         if (options%physics%landsurface == kLSM_NOAH .or. options%physics%landsurface==kLSM_NOAHMP) then
-            !$acc parallel loop gang vector collapse(2) present(domain, land_mask)
+            !$acc parallel loop gang vector collapse(2) present(canopy_water, cqs2_dom, veg_type, land_mask)
             do j = jms, jme
                 do i = ims, ime
-                    domain%vars_2d(domain%var_indx(kVARS%canopy_water)%v)%data_2d(i,j) = domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d(i,j)
-                    domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d(i,j)=0.01
+                    canopy_water(i,j) = cqs2_dom(i,j)
+                    cqs2_dom(i,j)=0.01
 
-                    if (domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di(i,j) == ISWATER .or. domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di(i,j) == ISLAKE) then
+                    if (veg_type(i,j) == ISWATER .or. veg_type(i,j) == ISLAKE) then
                         land_mask(i,j) = kLC_WATER
                     end if
                 end do
@@ -1116,12 +1133,15 @@ contains
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
             endif
         endif
+        end associate
+
 #ifdef _OPENACC
         ! see if we should switch OpenACC context
         devtype = acc_get_device_type()
-        if (cpu_accel .and. devtype == acc_device_host) then
+        if (devtype == acc_device_host) then
             call acc_set_device_type(acc_device_nvidia)
-            !$acc update device(domain%vars_2d, domain%vars_3d)
+            call acc_set_device_num(dev_num, acc_device_nvidia)
+            call domain%update_device()
         end if
 #endif
     end subroutine lsm_init
@@ -1133,7 +1153,7 @@ contains
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in)    :: options
         real, intent(in) :: dt
-        integer :: i,j, k, month
+        integer :: i,j, k, month, dev_num
         logical :: monthly_albedo, monthly_vegfrac
 
         if (options%physics%landsurface == 0) return
@@ -1144,152 +1164,202 @@ contains
             landuse_name = options%lsm%LU_Categories            !test whether this works or if we need something separate
             julian_day = domain%sim_time%day_of_year()
 
+            associate( &
+                cosine_zenith_angle => domain%vars_2d(domain%var_indx(kVARS%cosine_zenith_angle)%v)%data_2d, &
+                latitude => domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d, &
+                longitude => domain%vars_2d(domain%var_indx(kVARS%longitude)%v)%data_2d, &
+                dz_interface => domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d, &
+                veg_type => domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di, &
+                soil_type => domain%vars_2d(domain%var_indx(kVARS%soil_type)%v)%data_2di, &
+                vegetation_fraction_max => domain%vars_2d(domain%var_indx(kVARS%vegetation_fraction_max)%v)%data_2d, &
+                veg_frac      => domain%vars_3d(domain%var_indx(kVARS%vegetation_fraction)%v)%data_3d, &
+                soil_deep_temperature => domain%vars_2d(domain%var_indx(kVARS%soil_deep_temperature)%v)%data_2d, &
+                xice => domain%vars_2d(domain%var_indx(kVARS%xice)%v)%data_2d, &
+                crop_category => domain%vars_2d(domain%var_indx(kVARS%crop_category)%v)%data_2di, &
+                date_planting => domain%vars_2d(domain%var_indx(kVARS%date_planting)%v)%data_2d, &
+                date_harvest => domain%vars_2d(domain%var_indx(kVARS%date_harvest)%v)%data_2d, &
+                growing_season_gdd => domain%vars_2d(domain%var_indx(kVARS%growing_season_gdd)%v)%data_2d, &
+                soil_sand_and_clay => domain%vars_3d(domain%var_indx(kVARS%soil_sand_and_clay)%v)%data_3d, &
+                soil_texture_1 => domain%vars_2d(domain%var_indx(kVARS%soil_texture_1)%v)%data_2d, &
+                soil_texture_2 => domain%vars_2d(domain%var_indx(kVARS%soil_texture_2)%v)%data_2d, &
+                soil_texture_3 => domain%vars_2d(domain%var_indx(kVARS%soil_texture_3)%v)%data_2d, &
+                soil_texture_4 => domain%vars_2d(domain%var_indx(kVARS%soil_texture_4)%v)%data_2d, &
+                temperature => domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d, &
+                water_vapor => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
+                u_mass => domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d, &
+                v_mass => domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d, &
+                u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
+                v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d, &
+                shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
+                shortwave_direct => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d, &
+                shortwave_diffuse => domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
+                longwave => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d, &
+                longwave_up => domain%vars_2d(domain%var_indx(kVARS%longwave_up)%v)%data_2d, &
+                precipitation => domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
+                snowfall => domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d, &
+                lsm_last_precip => domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
+                lsm_last_snow => domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d, &
+                pressure_interface => domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d, &
+                irr_frac_total => domain%vars_2d(domain%var_indx(kVARS%irr_frac_total)%v)%data_2d, &
+                irr_frac_sprinkler => domain%vars_2d(domain%var_indx(kVARS%irr_frac_sprinkler)%v)%data_2d, &
+                irr_frac_micro => domain%vars_2d(domain%var_indx(kVARS%irr_frac_micro)%v)%data_2d, &
+                irr_frac_flood => domain%vars_2d(domain%var_indx(kVARS%irr_frac_flood)%v)%data_2d, &
+                skin_temperature => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                temperature_2m => domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d, &
+                surface_pressure => domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d, &
+                sensible_heat => domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+                qfx => domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d, &
+                latent_heat => domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
+                ground_heat_flux => domain%vars_2d(domain%var_indx(kVARS%ground_heat_flux)%v)%data_2d, &
+                soil_totalmoisture => domain%vars_2d(domain%var_indx(kVARS%soil_totalmoisture)%v)%data_2d, &
+                albedo_dom => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d, &
+                soil_water_content => domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d, &
+                soil_water_content_liq => domain%vars_3d(domain%var_indx(kVARS%soil_water_content_liq)%v)%data_3d, &
+                soil_temperature => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+                snow_height => domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+                snow_water_equivalent => domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+                canopy_water => domain%vars_2d(domain%var_indx(kVARS%canopy_water)%v)%data_2d, &
+                land_emissivity => domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d, &
+                roughness_z0 => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+                hpbl => domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d, &
+                irr_eventno_sprinkler => domain%vars_2d(domain%var_indx(kVARS%irr_eventno_sprinkler)%v)%data_2di, &
+                irr_eventno_micro => domain%vars_2d(domain%var_indx(kVARS%irr_eventno_micro)%v)%data_2di, &
+                irr_eventno_flood => domain%vars_2d(domain%var_indx(kVARS%irr_eventno_flood)%v)%data_2di, &
+                irr_alloc_sprinkler => domain%vars_2d(domain%var_indx(kVARS%irr_alloc_sprinkler)%v)%data_2d, &
+                irr_alloc_micro => domain%vars_2d(domain%var_indx(kVARS%irr_alloc_micro)%v)%data_2d, &
+                irr_alloc_flood => domain%vars_2d(domain%var_indx(kVARS%irr_alloc_flood)%v)%data_2d, &
+                irr_evap_loss_sprinkler => domain%vars_2d(domain%var_indx(kVARS%irr_evap_loss_sprinkler)%v)%data_2d, &
+                irr_amt_sprinkler => domain%vars_2d(domain%var_indx(kVARS%irr_amt_sprinkler)%v)%data_2d, &
+                irr_amt_micro => domain%vars_2d(domain%var_indx(kVARS%irr_amt_micro)%v)%data_2d, &
+                irr_amt_flood => domain%vars_2d(domain%var_indx(kVARS%irr_amt_flood)%v)%data_2d, &
+                evap_heat_sprinkler => domain%vars_2d(domain%var_indx(kVARS%evap_heat_sprinkler)%v)%data_2d, &
+                snow_nlayers => domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+                veg_leaf_temperature => domain%vars_2d(domain%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d, &
+                ground_surf_temperature => domain%vars_2d(domain%var_indx(kVARS%ground_surf_temperature)%v)%data_2d, &
+                canopy_water_ice => domain%vars_2d(domain%var_indx(kVARS%canopy_water_ice)%v)%data_2d, &
+                canopy_water_liquid => domain%vars_2d(domain%var_indx(kVARS%canopy_water_liquid)%v)%data_2d, &
+                canopy_vapor_pressure => domain%vars_2d(domain%var_indx(kVARS%canopy_vapor_pressure)%v)%data_2d, &
+                canopy_temperature => domain%vars_2d(domain%var_indx(kVARS%canopy_temperature)%v)%data_2d, &
+                coeff_momentum_drag => domain%vars_2d(domain%var_indx(kVARS%coeff_momentum_drag)%v)%data_2d, &
+                chs => domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d, &
+                canopy_fwet => domain%vars_2d(domain%var_indx(kVARS%canopy_fwet)%v)%data_2d, &
+                snow_water_eq_prev => domain%vars_2d(domain%var_indx(kVARS%snow_water_eq_prev)%v)%data_2d, &
+                snow_albedo_prev => domain%vars_2d(domain%var_indx(kVARS%snow_albedo_prev)%v)%data_2d, &
+                snowfall_ground => domain%vars_2d(domain%var_indx(kVARS%snowfall_ground)%v)%data_2d, &
+                rainfall_ground => domain%vars_2d(domain%var_indx(kVARS%rainfall_ground)%v)%data_2d, &
+                storage_lake => domain%vars_2d(domain%var_indx(kVARS%storage_lake)%v)%data_2d, &
+                water_table_depth => domain%vars_2d(domain%var_indx(kVARS%water_table_depth)%v)%data_2d, &
+                water_aquifer => domain%vars_2d(domain%var_indx(kVARS%water_aquifer)%v)%data_2d, &
+                storage_gw => domain%vars_2d(domain%var_indx(kVARS%storage_gw)%v)%data_2d, &
+                snow_temperature => domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+                snow_layer_depth => domain%vars_3d(domain%var_indx(kVARS%snow_layer_depth)%v)%data_3d, &
+                snow_layer_ice => domain%vars_3d(domain%var_indx(kVARS%snow_layer_ice)%v)%data_3d, &
+                snow_layer_liquid_water => domain%vars_3d(domain%var_indx(kVARS%snow_layer_liquid_water)%v)%data_3d, &
+                mass_leaf => domain%vars_2d(domain%var_indx(kVARS%mass_leaf)%v)%data_2d, &
+                mass_root => domain%vars_2d(domain%var_indx(kVARS%mass_root)%v)%data_2d, &
+                mass_stem => domain%vars_2d(domain%var_indx(kVARS%mass_stem)%v)%data_2d, &
+                mass_wood => domain%vars_2d(domain%var_indx(kVARS%mass_wood)%v)%data_2d, &
+                soil_carbon_stable => domain%vars_2d(domain%var_indx(kVARS%soil_carbon_stable)%v)%data_2d, &
+                soil_carbon_fast => domain%vars_2d(domain%var_indx(kVARS%soil_carbon_fast)%v)%data_2d, &
+                lai => domain%vars_2d(domain%var_indx(kVARS%lai)%v)%data_2d, &
+                sai => domain%vars_2d(domain%var_indx(kVARS%sai)%v)%data_2d, &
+                snow_age_factor => domain%vars_2d(domain%var_indx(kVARS%snow_age_factor)%v)%data_2d, &
+                eq_soil_moisture => domain%vars_3d(domain%var_indx(kVARS%eq_soil_moisture)%v)%data_3d, &
+                smc_watertable_deep => domain%vars_2d(domain%var_indx(kVARS%smc_watertable_deep)%v)%data_2d, &
+                recharge_deep => domain%vars_2d(domain%var_indx(kVARS%recharge_deep)%v)%data_2d, &
+                recharge => domain%vars_2d(domain%var_indx(kVARS%recharge)%v)%data_2d, &
+                mass_ag_grain => domain%vars_2d(domain%var_indx(kVARS%mass_ag_grain)%v)%data_2d, &
+                growing_degree_days => domain%vars_2d(domain%var_indx(kVARS%growing_degree_days)%v)%data_2d, &
+                plant_growth_stage => domain%vars_2d(domain%var_indx(kVARS%plant_growth_stage)%v)%data_2di, &
+                gecros_state => domain%vars_3d(domain%var_indx(kVARS%gecros_state)%v)%data_3d, &
+                temperature_2m_veg => domain%vars_2d(domain%var_indx(kVARS%temperature_2m_veg)%v)%data_2d, &
+                temperature_2m_bare => domain%vars_2d(domain%var_indx(kVARS%temperature_2m_bare)%v)%data_2d, &
+                mixing_ratio_2m_veg => domain%vars_2d(domain%var_indx(kVARS%mixing_ratio_2m_veg)%v)%data_2d, &
+                mixing_ratio_2m_bare => domain%vars_2d(domain%var_indx(kVARS%mixing_ratio_2m_bare)%v)%data_2d, &
+                surface_rad_temperature => domain%vars_2d(domain%var_indx(kVARS%surface_rad_temperature)%v)%data_2d, &
+                net_ecosystem_exchange => domain%vars_2d(domain%var_indx(kVARS%net_ecosystem_exchange)%v)%data_2d, &
+                gross_primary_prod => domain%vars_2d(domain%var_indx(kVARS%gross_primary_prod)%v)%data_2d, &
+                net_primary_prod => domain%vars_2d(domain%var_indx(kVARS%net_primary_prod)%v)%data_2d, &
+                vegetation_fraction_out => domain%vars_2d(domain%var_indx(kVARS%vegetation_fraction_out)%v)%data_2d, &
+                runoff_surface => domain%vars_2d(domain%var_indx(kVARS%runoff_surface)%v)%data_2d, &
+                runoff_subsurface => domain%vars_2d(domain%var_indx(kVARS%runoff_subsurface)%v)%data_2d, &
+                evap_canopy => domain%vars_2d(domain%var_indx(kVARS%evap_canopy)%v)%data_2d, &
+                evap_soil_surface => domain%vars_2d(domain%var_indx(kVARS%evap_soil_surface)%v)%data_2d, &
+                transpiration_rate => domain%vars_2d(domain%var_indx(kVARS%transpiration_rate)%v)%data_2d, &
+                rad_absorbed_total => domain%vars_2d(domain%var_indx(kVARS%rad_absorbed_total)%v)%data_2d, &
+                rad_net_longwave => domain%vars_2d(domain%var_indx(kVARS%rad_net_longwave)%v)%data_2d, &
+                apar => domain%vars_2d(domain%var_indx(kVARS%apar)%v)%data_2d, &
+                photosynthesis_total => domain%vars_2d(domain%var_indx(kVARS%photosynthesis_total)%v)%data_2d, &
+                rad_absorbed_veg => domain%vars_2d(domain%var_indx(kVARS%rad_absorbed_veg)%v)%data_2d, &
+                rad_absorbed_bare => domain%vars_2d(domain%var_indx(kVARS%rad_absorbed_bare)%v)%data_2d, &
+                stomatal_resist_sun => domain%vars_2d(domain%var_indx(kVARS%stomatal_resist_sun)%v)%data_2d, &
+                stomatal_resist_shade => domain%vars_2d(domain%var_indx(kVARS%stomatal_resist_shade)%v)%data_2d, &
+                frac_between_gap => domain%vars_2d(domain%var_indx(kVARS%frac_between_gap)%v)%data_2d, &
+                frac_within_gap => domain%vars_2d(domain%var_indx(kVARS%frac_within_gap)%v)%data_2d, &
+                ground_temperature_canopy => domain%vars_2d(domain%var_indx(kVARS%ground_temperature_canopy)%v)%data_2d, &
+                ground_temperature_bare => domain%vars_2d(domain%var_indx(kVARS%ground_temperature_bare)%v)%data_2d, &
+                ch_veg => domain%vars_2d(domain%var_indx(kVARS%ch_veg)%v)%data_2d, &
+                ch_bare => domain%vars_2d(domain%var_indx(kVARS%ch_bare)%v)%data_2d, &
+                sensible_heat_veg => domain%vars_2d(domain%var_indx(kVARS%sensible_heat_veg)%v)%data_2d, &
+                sensible_heat_canopy => domain%vars_2d(domain%var_indx(kVARS%sensible_heat_canopy)%v)%data_2d, &
+                sensible_heat_bare => domain%vars_2d(domain%var_indx(kVARS%sensible_heat_bare)%v)%data_2d, &
+                evap_heat_veg => domain%vars_2d(domain%var_indx(kVARS%evap_heat_veg)%v)%data_2d, &
+                evap_heat_bare => domain%vars_2d(domain%var_indx(kVARS%evap_heat_bare)%v)%data_2d, &
+                ground_heat_veg => domain%vars_2d(domain%var_indx(kVARS%ground_heat_veg)%v)%data_2d, &
+                ground_heat_bare => domain%vars_2d(domain%var_indx(kVARS%ground_heat_bare)%v)%data_2d, &
+                net_longwave_veg => domain%vars_2d(domain%var_indx(kVARS%net_longwave_veg)%v)%data_2d, &
+                net_longwave_canopy => domain%vars_2d(domain%var_indx(kVARS%net_longwave_canopy)%v)%data_2d, &
+                net_longwave_bare => domain%vars_2d(domain%var_indx(kVARS%net_longwave_bare)%v)%data_2d, &
+                transpiration_heat => domain%vars_2d(domain%var_indx(kVARS%transpiration_heat)%v)%data_2d, &
+                evap_heat_canopy => domain%vars_2d(domain%var_indx(kVARS%evap_heat_canopy)%v)%data_2d, &
+                ch_leaf => domain%vars_2d(domain%var_indx(kVARS%ch_leaf)%v)%data_2d, &
+                ch_under_canopy => domain%vars_2d(domain%var_indx(kVARS%ch_under_canopy)%v)%data_2d, &
+                ch_veg_2m => domain%vars_2d(domain%var_indx(kVARS%ch_veg_2m)%v)%data_2d, &
+                ch_bare_2m => domain%vars_2d(domain%var_indx(kVARS%ch_bare_2m)%v)%data_2d, &
+                stomatal_resist_total => domain%vars_2d(domain%var_indx(kVARS%stomatal_resist_total)%v)%data_2d &
+            )
+
 #ifdef _OPENACC
         ! see if we should switch OpenACC context
         devtype = acc_get_device_type()
         if (cpu_accel .and. .not.(devtype == acc_device_host)) then
-            !$acc update host(domain%vars_2d(domain%var_indx(kVARS%cosine_zenith_angle)%v)%data_2d,       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d,                  &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%longitude)%v)%data_2d,                 &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d,              & ! domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d,              & !
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di,                          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%soil_type)%v)%data_2di,                         &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%vegetation_fraction_max)%v)%data_2d,   &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%soil_deep_temperature)%v)%data_2d,     &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%xice)%v)%data_2d,                              &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%crop_category)%v)%data_2di,                     &  !only used if iopt_crop>0; not currently set up
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%date_planting)%v)%data_2d,             &  !only used if iopt_crop>0; not currently set up
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%date_harvest)%v)%data_2d,              &  !only used if iopt_crop>0; not currently set up
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%growing_season_gdd)%v)%data_2d,        &  !only used if iopt_crop>0; not currently set up
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%soil_sand_and_clay)%v)%data_3d,        &  ! only used if iopt_soil = 3
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%soil_texture_1)%v)%data_2d,            &  ! only used if iopt_soil = 2
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%soil_texture_2)%v)%data_2d,            &  ! only used if iopt_soil = 2
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%soil_texture_3)%v)%data_2d,            &  ! only used if iopt_soil = 2
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%soil_texture_4)%v)%data_2d,            &  ! only used if iopt_soil = 2
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d,               &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,               &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d,                    &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d,                    &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d,                 &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d,          &  ! only used in urban modules, which are currently disabled
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d,         &  ! only used in urban modules, which are currently disabled
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d,                  &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d,       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_frac_total)%v)%data_2d,            &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_frac_sprinkler)%v)%data_2d,        &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_frac_micro)%v)%data_2d,            &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_frac_flood)%v)%data_2d,            &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,          &  ! TSK
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d,             &  !  HFX
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d,                       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d,               &  ! LH
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ground_heat_flux)%v)%data_2d,          &  ! GRDFLX
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%soil_totalmoisture)%v)%data_2d,        &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d,        &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d,        &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%soil_water_content_liq)%v)%data_3d,    &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%canopy_water)%v)%data_2d,              &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d,           &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d,              &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d,                      &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_eventno_sprinkler)%v)%data_2di,             &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_eventno_micro)%v)%data_2di,                 &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_eventno_flood)%v)%data_2di,                 &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_alloc_sprinkler)%v)%data_2d,       &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_alloc_micro)%v)%data_2d,           &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_alloc_flood)%v)%data_2d,           &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_evap_loss_sprinkler)%v)%data_2d,   &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_amt_sprinkler)%v)%data_2d,         &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_amt_micro)%v)%data_2d,             &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%irr_amt_flood)%v)%data_2d,             &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%evap_heat_sprinkler)%v)%data_2d,       &  ! only used if iopt_irr > 0
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di,             &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d,      &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ground_surf_temperature)%v)%data_2d,   &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%canopy_water_ice)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%canopy_water_liquid)%v)%data_2d,       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%canopy_vapor_pressure)%v)%data_2d,     &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%canopy_temperature)%v)%data_2d,        &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%coeff_momentum_drag)%v)%data_2d,       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d,                       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%canopy_fwet)%v)%data_2d,               &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%snow_water_eq_prev)%v)%data_2d,        &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%snow_albedo_prev)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%snowfall_ground)%v)%data_2d,           &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%rainfall_ground)%v)%data_2d,           &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%storage_lake)%v)%data_2d,              &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%water_table_depth)%v)%data_2d,         &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%water_aquifer)%v)%data_2d,             &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%storage_gw)%v)%data_2d,                &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d,        &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%snow_layer_depth)%v)%data_3d, &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%snow_layer_ice)%v)%data_3d,   &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%snow_layer_liquid_water)%v)%data_3d,&
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%mass_leaf)%v)%data_2d,                 &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%mass_root)%v)%data_2d,                 &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%mass_stem)%v)%data_2d,                 &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%mass_wood)%v)%data_2d,                 &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%soil_carbon_stable)%v)%data_2d,        &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%soil_carbon_fast)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%lai)%v)%data_2d,                       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%sai)%v)%data_2d,                       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%snow_age_factor)%v)%data_2d,           &
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%eq_soil_moisture)%v)%data_3d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%smc_watertable_deep)%v)%data_2d,       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%recharge_deep)%v)%data_2d,             &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%recharge)%v)%data_2d,                  &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%mass_ag_grain)%v)%data_2d,             &  ! currently left as zeroes; not used if iopt_crop = 0?
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%growing_degree_days)%v)%data_2d,       &  ! currently left as zeroes; not used if iopt_crop = 0?
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%plant_growth_stage)%v)%data_2di,                &  ! currently left as zeroes; not used if iopt_crop = 0?
-            !$acc                    domain%vars_3d(domain%var_indx(kVARS%gecros_state)%v)%data_3d,              &  ! not set up; only used if iopt_crop = 2
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%temperature_2m_veg)%v)%data_2d,        &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%temperature_2m_bare)%v)%data_2d,       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%mixing_ratio_2m_veg)%v)%data_2d,       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%mixing_ratio_2m_bare)%v)%data_2d,      &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%surface_rad_temperature)%v)%data_2d,   &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%net_ecosystem_exchange)%v)%data_2d,    &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%gross_primary_prod)%v)%data_2d,        &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%net_primary_prod)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%vegetation_fraction_out)%v)%data_2d,   &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%runoff_surface)%v)%data_2d,            &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%runoff_subsurface)%v)%data_2d,         &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%evap_canopy)%v)%data_2d,               &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%evap_soil_surface)%v)%data_2d,         &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%transpiration_rate)%v)%data_2d,        &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%rad_absorbed_total)%v)%data_2d,        &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%rad_net_longwave)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%apar)%v)%data_2d,                      &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%photosynthesis_total)%v)%data_2d,      &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%rad_absorbed_veg)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%rad_absorbed_bare)%v)%data_2d,         &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%stomatal_resist_sun)%v)%data_2d,       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%stomatal_resist_shade)%v)%data_2d,     &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%frac_between_gap)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%frac_within_gap)%v)%data_2d,           &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ground_temperature_canopy)%v)%data_2d, &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ground_temperature_bare)%v)%data_2d,   &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ch_veg)%v)%data_2d,                    &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ch_bare)%v)%data_2d,                   &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%sensible_heat_veg)%v)%data_2d,         &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%sensible_heat_canopy)%v)%data_2d,      &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%sensible_heat_bare)%v)%data_2d,        &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%evap_heat_veg)%v)%data_2d,             &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%evap_heat_bare)%v)%data_2d,            &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ground_heat_veg)%v)%data_2d,           &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ground_heat_bare)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%net_longwave_veg)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%net_longwave_canopy)%v)%data_2d,       &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%net_longwave_bare)%v)%data_2d,         &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%transpiration_heat)%v)%data_2d,        &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%evap_heat_canopy)%v)%data_2d,          &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ch_leaf)%v)%data_2d,                   &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ch_under_canopy)%v)%data_2d,           &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ch_veg_2m)%v)%data_2d,                 &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%ch_bare_2m)%v)%data_2d,                &
-            !$acc                    domain%vars_2d(domain%var_indx(kVARS%stomatal_resist_total)%v)%data_2d)
+            call domain%update_host()
+            !$acc update host(cosine_zenith_angle, latitude, longitude, dz_interface, veg_type, soil_type, &
+            !$acc              vegetation_fraction_max, soil_deep_temperature, xice, crop_category, &
+            !$acc              date_planting, date_harvest, growing_season_gdd, soil_sand_and_clay, &
+            !$acc              soil_texture_1, soil_texture_2, soil_texture_3, soil_texture_4, &
+            !$acc              temperature, water_vapor, u_mass, v_mass, shortwave, shortwave_direct, &
+            !$acc              shortwave_diffuse, longwave, pressure_interface, irr_frac_total, &
+            !$acc              irr_frac_sprinkler, irr_frac_micro, irr_frac_flood, skin_temperature, &
+            !$acc              sensible_heat, qfx, latent_heat, ground_heat_flux, soil_totalmoisture, &
+            !$acc              albedo_dom, soil_water_content, soil_water_content_liq, soil_temperature, &
+            !$acc              snow_height, snow_water_equivalent, canopy_water, land_emissivity, &
+            !$acc              roughness_z0, hpbl, irr_eventno_sprinkler, irr_eventno_micro, &
+            !$acc              irr_eventno_flood, irr_alloc_sprinkler, irr_alloc_micro, irr_alloc_flood, &
+            !$acc              irr_evap_loss_sprinkler, irr_amt_sprinkler, irr_amt_micro, irr_amt_flood, &
+            !$acc              evap_heat_sprinkler, snow_nlayers, veg_leaf_temperature, &
+            !$acc              ground_surf_temperature, canopy_water_ice, canopy_water_liquid, &
+            !$acc              canopy_vapor_pressure, canopy_temperature, coeff_momentum_drag, chs, &
+            !$acc              canopy_fwet, snow_water_eq_prev, snow_albedo_prev, snowfall_ground, &
+            !$acc              rainfall_ground, storage_lake, water_table_depth, water_aquifer, storage_gw, &
+            !$acc              snow_temperature, snow_layer_depth, snow_layer_ice, snow_layer_liquid_water, &
+            !$acc              mass_leaf, mass_root, mass_stem, mass_wood, soil_carbon_stable, &
+            !$acc              soil_carbon_fast, lai, sai, snow_age_factor, eq_soil_moisture, &
+            !$acc              smc_watertable_deep, recharge_deep, recharge, mass_ag_grain, &
+            !$acc              growing_degree_days, plant_growth_stage, gecros_state, temperature_2m_veg, &
+            !$acc              temperature_2m_bare, mixing_ratio_2m_veg, mixing_ratio_2m_bare, &
+            !$acc              surface_rad_temperature, net_ecosystem_exchange, gross_primary_prod, &
+            !$acc              net_primary_prod, vegetation_fraction_out, runoff_surface, runoff_subsurface, &
+            !$acc              evap_canopy, evap_soil_surface, transpiration_rate, rad_absorbed_total, &
+            !$acc              rad_net_longwave, apar, photosynthesis_total, rad_absorbed_veg, &
+            !$acc              rad_absorbed_bare, stomatal_resist_sun, stomatal_resist_shade, &
+            !$acc              frac_between_gap, frac_within_gap, ground_temperature_canopy, &
+            !$acc              ground_temperature_bare, ch_veg, ch_bare, sensible_heat_veg, &
+            !$acc              sensible_heat_canopy, sensible_heat_bare, evap_heat_veg, evap_heat_bare, &
+            !$acc              ground_heat_veg, ground_heat_bare, net_longwave_veg, net_longwave_canopy, &
+            !$acc              net_longwave_bare, transpiration_heat, evap_heat_canopy, ch_leaf, &
+            !$acc              ch_under_canopy, ch_veg_2m, ch_bare_2m, stomatal_resist_total)
+            dev_num = acc_get_device_num(acc_device_nvidia)
             call acc_set_device_type(acc_device_host)
         else
             !$acc update device(lsm_dt, landuse_name)
@@ -1300,7 +1370,7 @@ contains
 
             ! exchange coefficients
             !$acc kernels
-            windspd = sqrt(domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d**2 + domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d**2)
+            windspd = sqrt(u_10m**2 + v_10m**2)
             where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
             !$acc end kernels
 
@@ -1316,12 +1386,12 @@ contains
                 domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d = domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d
             endif
             !$acc kernels
-            current_precipitation = (domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d - domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
+            current_precipitation = (precipitation - lsm_last_precip) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
             !$acc end kernels
 
             if (options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
                 !$acc kernels
-                current_snow = (domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d-domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d)!+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
+                current_snow = (snowfall-lsm_last_snow) !+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
                 current_rain = max(current_precipitation-current_snow,0.) !! MJ: rainfall in kg m-2
                 !$acc end kernels
             endif
@@ -1336,21 +1406,23 @@ contains
                 do j=jms,jme
                     do i=ims,ime
                         if (land_mask(i,j) == kLC_LAND) then
-                            QGH(i,j) = sat_mr(domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d(i,j),domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d(i,j))
+                            QGH(i,j) = sat_mr(temperature_2m(i,j),surface_pressure(i,j))
                         endif
                     enddo
                 enddo
 
-                !$acc parallel loop gang vector collapse(2) present(domain, ALBEDO, VEGFRAC)
+                !$acc parallel loop gang vector collapse(2) present(albedo_dom, veg_frac, ALBEDO, VEGFRAC)
                 do j = jms, jme
                     do i = ims, ime
                         if (monthly_albedo) then
-                            ALBEDO(i,j) = domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(i, cur_vegmonth, j)
+                            ALBEDO(i,j) = albedo_dom(i, cur_vegmonth, j)
                         else
-                            ALBEDO(i,j) = domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(i, 1, j)
+                            ALBEDO(i,j) = albedo_dom(i, 1, j)
                         endif
                         if (monthly_vegfrac) then
-                            VEGFRAC(i,j) = domain%vars_3d(domain%var_indx(kVARS%vegetation_fraction)%v)%data_3d(i, cur_vegmonth, j)
+                            VEGFRAC(i,j) = veg_frac(i, cur_vegmonth, j)
+                        else
+                            VEGFRAC(i,j) = veg_frac(i, 1, j)
                         endif
                     end do
                 end do
@@ -1368,13 +1440,13 @@ contains
                         nmp_snow = 0.0
                         nmp_snow_t = 273.15
                     else
-                        !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_snow_t, domain, current_snow, current_precipitation)
+                        !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_snow_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
                         do j = jms, jme
                             do i = ims, ime
                                 SR(i,j) = current_snow(i,j)/(current_precipitation(i,j)+epsilon)
-                                nmp_snowh(i,j) = domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(i,j)
-                                nmp_snow(i,j) = domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(i,j)
-                                nmp_snow_t(i,1:3,j) = domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,1:3,j)
+                                nmp_snowh(i,j) = snow_height(i,j)
+                                nmp_snow(i,j) = snow_water_equivalent(i,j)
+                                nmp_snow_t(i,1:3,j) = snow_temperature(i,1:3,j)
                             end do
                         end do
                     endif
@@ -1716,22 +1788,26 @@ contains
                                 ims,ime,  jms,jme,  kms,kme,              &
                                 its,ite,  jts,jte,  kts,kte)
 
-                    !$acc parallel loop gang vector collapse(2) present(VEGFRAC, domain)
+                    !$acc parallel loop gang vector collapse(2) present(veg_frac, vegetation_fraction_out)
                     do j = jts, jte
                         do i = its, ite
-                            VEGFRAC(i,j) = domain%vars_2d(domain%var_indx(kVARS%vegetation_fraction_out)%v)%data_2d(i, j)*100.0
+                            if (monthly_vegfrac) then
+                                veg_frac(i, cur_vegmonth, j) = vegetation_fraction_out(i, j)*100.0
+                            else
+                                veg_frac(i, 1, j) = vegetation_fraction_out(i, j)*100.0
+                            endif
                         end do
                     end do
 
                     if ( .not.(options%physics%snowmodel==kSM_FSM)) then
-                        !$acc parallel loop gang vector collapse(2) copyin(nmp_snow, nmp_snowh, nmp_snow_t, kVARS) present(domain%vars_2d, domain%vars_3d, domain%var_indx)
+                        !$acc parallel loop gang vector collapse(2) copyin(nmp_snow, nmp_snowh, nmp_snow_t, kVARS) present(snow_height, snow_water_equivalent, snow_temperature)
                         do j = jts, jte
                             do i = its, ite
-                                domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(i,j) = nmp_snowh(i,j)
-                                domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(i,j) = nmp_snow(i,j)
+                                snow_height(i,j) = nmp_snowh(i,j)
+                                snow_water_equivalent(i,j) = nmp_snow(i,j)
                                 !$acc loop
                                 do k = 1, 3
-                                    domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,k,j) = nmp_snow_t(i,k,j)
+                                    snow_temperature(i,k,j) = nmp_snow_t(i,k,j)
                                 end do
                             end do
                         end do
@@ -1741,19 +1817,19 @@ contains
 
                 month = domain%sim_time%month
                 monthly_albedo = options%lsm%monthly_albedo
-                !$acc parallel present(domain%vars_3d, domain%var_indx) copyin(ALBEDO)
+                !$acc parallel present(albedo_dom, ALBEDO)
                 if (monthly_albedo) then
                     !$acc loop gang vector collapse(2) 
                     do j = jts, jte
                         do i = its, ite
-                            domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(i, month, j) = ALBEDO(i,j)
+                            albedo_dom(i, month, j) = ALBEDO(i,j)
                         end do
                     end do
                 else
                     !$acc loop gang vector collapse(2)
                     do j = jts, jte
                         do i = its, ite
-                            domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(i, 1, j) = ALBEDO(i,j)
+                            albedo_dom(i, 1, j) = ALBEDO(i,j)
                         end do
                     end do
                 endif
@@ -1779,18 +1855,18 @@ contains
             !!
             if (options%physics%landsurface > kLSM_BASIC) then
             
-                !$acc parallel loop gang vector collapse(2) present(domain%vars_3d, domain%vars_2d, domain%var_indx) copyin(kVARS, DZS)
+                !$acc parallel loop gang vector collapse(2) present(lsm_last_precip, precipitation, lsm_last_snow, snowfall, longwave_up, land_emissivity, skin_temperature, soil_totalmoisture, soil_water_content) copyin(kVARS, DZS)
                 do j = jts, jte
                     do i = its, ite
-                        domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d(i,j) = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d(i,j)
-                        domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d(i,j) = domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d(i,j)
+                        lsm_last_precip(i,j) = precipitation(i,j)
+                        lsm_last_snow(i,j) = snowfall(i,j)
                         
-                        domain%vars_2d(domain%var_indx(kVARS%longwave_up)%v)%data_2d(i,j) = STBOLT * domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d(i,j) * domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d(i,j)**4
+                        longwave_up(i,j) = STBOLT * land_emissivity(i,j) * skin_temperature(i,j)**4
                         ! accumulate soil moisture over the entire column
-                        domain%vars_2d(domain%var_indx(kVARS%soil_totalmoisture)%v)%data_2d(i,j) = 0.0
+                        soil_totalmoisture(i,j) = 0.0
 
                         do k = 1,num_soil_layers
-                            domain%vars_2d(domain%var_indx(kVARS%soil_totalmoisture)%v)%data_2d(i,j) = domain%vars_2d(domain%var_indx(kVARS%soil_totalmoisture)%v)%data_2d(i,j) + domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d(i,k,j) * DZS(k) * 1000
+                            soil_totalmoisture(i,j) = soil_totalmoisture(i,j) + soil_water_content(i,k,j) * DZS(k) * 1000
                         enddo
                     enddo
                 enddo
@@ -1821,6 +1897,10 @@ contains
         devtype = acc_get_device_type()
         if (cpu_accel .and. devtype == acc_device_host) then
             call acc_set_device_type(acc_device_nvidia)
+            call acc_set_device_num(dev_num, acc_device_nvidia)
+            ! The manual update device block is more efficient than calling the update_device() routine
+            ! call domain%update_device()
+
             !$acc update device(domain%vars_2d(domain%var_indx(kVARS%cosine_zenith_angle)%v)%data_2d,       &
             !$acc                    domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d,                  &
             !$acc                    domain%vars_2d(domain%var_indx(kVARS%longitude)%v)%data_2d,                 &
@@ -1961,6 +2041,7 @@ contains
         end if
 #endif
             !!
+            end associate
         endif
         
 

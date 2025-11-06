@@ -135,9 +135,7 @@ contains
             call DMGlobalToLocal(da,b,INSERT_VALUES,localX,ierr)
 
             call DMDAVecGetArrayReadF90(da,localX,lambda, ierr)
-            !$acc data present(domain) copyin(lambda)
             call calc_updated_winds(domain, lambda, adv_den)
-            !$acc end data
             call DMDAVecRestoreArrayReadF90(da,localX,lambda, ierr)
 
           else
@@ -171,9 +169,19 @@ contains
         allocate(rho_u(i_start:i_end,k_s:k_e,j_s:j_e))
         allocate(rho_v(i_s:i_e,k_s:k_e,j_start:j_end))
 
+
+        associate(density => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
+                    u       => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+                    v       => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+                    w       => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                    jaco_u_domain => domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, &
+                    jaco_v_domain => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
+                    jaco_domain   => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
+                    dzdx_u => domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, &
+                    dzdy_v => domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d)
         ! Create GPU data for local arrays
         !$acc enter data create(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v)
-        !$acc data present(domain, lambda, u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, alpha, dz_if)
+        !$acc data present(density, u, v, jaco_u_domain, jaco_v_domain, jaco_domain, dzdx_u, dzdy_v, lambda, u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, alpha, dz_if) copyin(lambda)
 
         !$acc kernels
         rho = 1.0
@@ -183,10 +191,10 @@ contains
 
         if (adv_den) then
             !$acc parallel loop gang vector collapse(3)
-            do j = domain%jms, domain%jme
+            do j = jms, jme
                 do k = k_s, k_e
-                    do i = domain%ims, domain%ime
-                        rho(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d(i,k,j)
+                    do i = ims, ime
+                        rho(i,k,j) = density(i,k,j)
                     end do
                 end do
             end do
@@ -194,7 +202,7 @@ contains
         
         ! Calculate rho_u and rho_v with GPU kernels
         !$acc parallel
-        if (i_s==domain%grid%ids .and. i_e==domain%grid%ide) then
+        if (i_s==ids .and. i_e==ide) then
             !$acc loop gang vector collapse(3)
             do j = j_s, j_e
                 do k = k_s, k_e
@@ -210,7 +218,7 @@ contains
                     rho_u(i_start,k,j) = rho(i_start,k,j)
                 end do
             end do
-        else if (i_s==domain%grid%ids) then
+        else if (i_s==ids) then
             !$acc loop gang vector collapse(3)
             do j = j_s, j_e
                 do k = k_s, k_e
@@ -225,7 +233,7 @@ contains
                     rho_u(i_start,k,j) = rho(i_start,k,j)
                 end do
             end do
-        else if (i_e==domain%grid%ide) then
+        else if (i_e==ide) then
             !$acc loop gang vector collapse(3)
             do j = j_s, j_e
                 do k = k_s, k_e
@@ -253,7 +261,7 @@ contains
         !$acc end parallel
         
         !$acc parallel
-        if (j_s==domain%grid%jds .and. j_e==domain%grid%jde) then
+        if (j_s==jds .and. j_e==jde) then
             !$acc loop gang vector collapse(3)
             do j = j_start+1, j_end-1
                 do k = k_s, k_e
@@ -269,7 +277,7 @@ contains
                     rho_v(i,k,j_end) = rho(i,k,j_end-1)
                 end do
             end do
-        else if (j_s==domain%grid%jds) then
+        else if (j_s==jds) then
             !$acc loop gang vector collapse(3)
             do j = j_start+1, j_end
                 do k = k_s, k_e
@@ -284,7 +292,7 @@ contains
                     rho_v(i,k,j_start) = rho(i,k,j_start)
                 end do
             end do
-        else if (j_e==domain%grid%jde) then
+        else if (j_e==jde) then
             !$acc loop gang vector collapse(3)
             do j = j_start, j_end-1
                 do k = k_s, k_e
@@ -367,10 +375,8 @@ contains
         do j = j_s, j_e
             do k = k_s, k_e
                 do i = i_start, i_end
-                    domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i,k,j) + &
-                                                        0.5*((lambda(i,k,j) - &
-                                                        lambda(i-1,k,j))/dx - &
-        domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i,k,j)*(u_dlambdz(i,k,j))/domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i,k,j))/(rho_u(i,k,j))
+                    u(i,k,j) = u(i,k,j) + 0.5*((lambda(i,k,j) - lambda(i-1,k,j))/dx - &
+                                        dzdx_u(i,k,j)*(u_dlambdz(i,k,j))/jaco_u_domain(i,k,j))/(rho_u(i,k,j))
                 end do
             end do
         end do
@@ -379,10 +385,7 @@ contains
         do j = j_start, j_end
             do k = k_s, k_e
                 do i = i_s, i_e
-                    domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i,k,j) + &
-                                                        0.5*((lambda(i,k,j) - &
-                                                        lambda(i,k,j-1))/dx - &
-        domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i,k,j)*(v_dlambdz(i,k,j))/domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i,k,j))/(rho_v(i,k,j))
+                    v(i,k,j) = v(i,k,j) + 0.5*((lambda(i,k,j) - lambda(i,k,j-1))/dx - dzdy_v(i,k,j)*(v_dlambdz(i,k,j))/jaco_v_domain(i,k,j))/(rho_v(i,k,j))
                 end do
             end do
         end do
@@ -391,15 +394,14 @@ contains
         do j = j_s, j_e
             do k = k_s, k_e
                 do i = i_s, i_e
-                    domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i,k,j) + &
-                        0.5*(alpha(i,k,j)**2)*dlambdz(i,k,j)/domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i,k,j)
+                    w(i,k,j) = w(i,k,j) + 0.5*(alpha(i,k,j)**2)*dlambdz(i,k,j)/jaco_domain(i,k,j)
                 end do
             end do
         end do
 
         !$acc end data
         !$acc exit data delete(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v)
-
+        end associate
     end subroutine calc_updated_winds
 
     subroutine ComputeRHS(ksp,vec_b,ierr)
@@ -1101,33 +1103,41 @@ contains
         k_e = domain%kte  
         j_s = domain%jts
         j_e = domain%jte
+        ims = domain%ims
+        ime = domain%ime
+        jms = domain%jms
+        jme = domain%jme
+        ids = domain%grid%ids
+        ide = domain%grid%ide
+        jds = domain%grid%jds
+        jde = domain%grid%jde
 
         !i_s+hs, unless we are on global boundary, then i_s
-        if (domain%grid%ims==domain%grid%ids) i_s = domain%grid%ids
-        
+        if (ims==ids) i_s = ids
+
         !i_e, unless we are on global boundary, then i_e+1
-        if (domain%grid%ime==domain%grid%ide) i_e = domain%grid%ide
-        
+        if (ime==ide) i_e = ide
+
         !j_s+hs, unless we are on global boundary, then j_s
-        if (domain%grid%jms==domain%grid%jds) j_s = domain%grid%jds
+        if (jms==jds) j_s = jds
         
         !j_e, unless we are on global boundary, then j_e+1
-        if (domain%grid%jme==domain%grid%jde) j_e = domain%grid%jde
+        if (jme==jde) j_e = jde
 
         i_s_bnd = i_s
         i_e_bnd = i_e
         j_s_bnd = j_s
         j_e_bnd = j_e
-        if (i_s==domain%grid%ids) then
+        if (i_s==ids) then
             i_s_bnd = i_s + 1
         endif
-        if (i_e==domain%grid%ide) then
+        if (i_e==ide) then
             i_e_bnd = i_e - 1
         endif
-        if (j_s==domain%grid%jds) then
+        if (j_s==jds) then
             j_s_bnd = j_s + 1
         endif
-        if (j_e==domain%grid%jde) then
+        if (j_e==jde) then
             j_e_bnd = j_e - 1
         endif
 
@@ -1153,16 +1163,20 @@ contains
             dx = domain%dx
             
             ! Create GPU data for persistent arrays
+            associate(advection_dz_var => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+                      neighbor_terrain_var => domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d, &
+                      dzdx_domain => domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, &
+                      dzdy_domain => domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d, &
+                      jaco_domain => domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
             !$acc enter data create(dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma, dz_if, alpha, div)
-            
-            !$acc data present(domain, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, dz_if, sigma)
-            
+
+            !$acc data present(advection_dz_var, neighbor_terrain_var, dzdx_domain, dzdy_domain, jaco_domain, domain%vars_2d, domain%var_indx, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, dz_if, sigma)
+
             !$acc parallel loop gang vector collapse(3)
             do j = j_s, j_e
                 do k = k_s+1, k_e
                     do i = i_s, i_e
-                        dz_if(i,k,j) = (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j) + &
-                                       domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k-1,j))/2
+                        dz_if(i,k,j) = (advection_dz_var(i,k,j) + advection_dz_var(i,k-1,j))/2
                     end do
                 end do
             end do            
@@ -1170,12 +1184,12 @@ contains
             !$acc parallel loop gang vector collapse(2)
             do j = j_s, j_e
                 do i = i_s, i_e
-                    dz_if(i,k_s,j) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k_s,j)
-                    dz_if(i,k_e+1,j) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k_e,j)
+                    dz_if(i,k_s,j) = advection_dz_var(i,k_s,j)
+                    dz_if(i,k_e+1,j) = advection_dz_var(i,k_e,j)
 
 
-                    dzdx_surf(i,j) = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i,k_s,j)
-                    dzdy_surf(i,j) = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i,k_s,j)
+                    dzdx_surf(i,j) = dzdx_domain(i,k_s,j)
+                    dzdy_surf(i,j) = dzdy_domain(i,k_s,j)
                 enddo
             end do
             
@@ -1183,9 +1197,9 @@ contains
             do j = j_s, j_e
                 do k = k_s, k_e
                     do i = i_s, i_e
-                        dzdx(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(i,k,j)
-                        dzdy(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d(i,k,j)
-                        jaco(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(i,k,j)
+                        dzdx(i,k,j) = dzdx_domain(i,k,j)
+                        dzdy(i,k,j) = dzdy_domain(i,k,j)
+                        jaco(i,k,j) = jaco_domain(i,k,j)
                         sigma(i,k,j) = dz_if(i,k,j)/dz_if(i,k+1,j)
                     end do
                 end do
@@ -1195,20 +1209,19 @@ contains
             !$acc parallel loop gang vector collapse(2)
             do j = j_s, j_e
                 do i = i_s_bnd, i_e_bnd
-                    dzdx_surf(i,j) = (domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i+1,j) - &
-                                     domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i-1,j))/(2*dx)
+                    dzdx_surf(i,j) = (neighbor_terrain_var(i+1,j) - neighbor_terrain_var(i-1,j))/(2*dx)
                 end do
             end do
             !$acc parallel loop gang vector collapse(2)
             do j = j_s_bnd, j_e_bnd
                 do i = i_s, i_e
-                    dzdy_surf(i,j) = (domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i,j+1) - &
-                                     domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i,j-1))/(2*dx)
+                    dzdy_surf(i,j) = (neighbor_terrain_var(i,j+1) - neighbor_terrain_var(i,j-1))/(2*dx)
                 end do
             end do
             !$acc update host(dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, dz_if, sigma)
 
             !$acc end data
+            end associate
 
             !Calculate how global grid is decomposed for DMDA
             !subtract halo size from boundaries of each cell to get x/y extent
