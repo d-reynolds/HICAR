@@ -611,9 +611,9 @@ contains
             endif
 
             if (options%dim_list(i)%num_dims /= size(dimensions)) then
-                options%dim_list(i)%dims = pack(sanitized_dims, not_time_mask(:size(dimensions)))
+                options%dim_list(i)%dims(1:options%dim_list(i)%num_dims) = pack(sanitized_dims, not_time_mask(:size(dimensions)))
             else
-                options%dim_list(i)%dims = var_dims
+                options%dim_list(i)%dims(1:options%dim_list(i)%num_dims) = var_dims
             endif
             i = i + 1
         endif

@@ -4,7 +4,7 @@ submodule(output_interface) output_implementation
   use iso_fortran_env,          only : output_unit
   use time_io,                  only : get_output_time, find_timestep_in_filelist
   use string,                   only : str, split_str, as_string
-  use io_routines,              only : io_newunit, check_file_exists
+  use io_routines,              only : io_newunit, check_file_exists, can_file_parallel
 
   implicit none
 
@@ -454,14 +454,26 @@ contains
         integer,                         intent(in)    :: var_indx_list(:)
         type(MPI_Info) :: par_comm_info
         integer :: err
+        logical :: is_file_parallel
         
         ! open file
         call MPI_Comm_get_info(par_comms, par_comm_info)
-        err = nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), this%active_nc_id, &
-                comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL)
+
+        is_file_parallel = .True.!can_file_parallel(filename)
+
+        if (is_file_parallel) then
+            err = nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), this%active_nc_id, &
+                    comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL)
+        else
+            err = nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), this%active_nc_id)
+        endif
         if (err /= NF90_NOERR) then
-            call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id, &
+            if (is_file_parallel) then
+                call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id, &
                     comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL), "Opening:"//trim(filename))
+            else
+                call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id), "Opening:"//trim(filename))
+            endif
         else
             ! in case we need to add a new variable when setting up variables
             call check_ncdf(nf90_redef(this%active_nc_id), "Setting redefine mode for: "//trim(filename))
@@ -628,6 +640,7 @@ contains
         type(Time_type) :: output_time
         real, allocatable :: var_3d(:,:,:)
         integer :: i, k_s, k_e
+        logical :: is_file_parallel
         
         integer :: start_three_D_t(4), start_three_D_t_b(4), start_three_D_t_b2(4)
         integer :: start_two_D_t(3), start_two_D_t_b(3), start_two_D_t_b2(3)
@@ -637,6 +650,8 @@ contains
         integer :: v_i_s_b, v_i_e_b, v_j_s_b, v_j_e_b
         integer :: v_i_s_b2, v_i_e_b2, v_j_s_b2, v_j_e_b2
     
+        is_file_parallel = .True.!can_file_parallel(this%output_fn)
+
         do i=1,size(var_indx_list)
             associate(var => this%var_meta(var_indx_list(i)))                
                 k_s = this%kts
@@ -699,7 +714,7 @@ contains
 
                 v_j_s_b2 = max(v_j_s_b2,1)
                 v_j_e_b2 = max(v_j_e_b2,1)
-                call check_ncdf( nf90_var_par_access(this%active_nc_id, var%file_var_id, nf90_collective))
+                if (is_file_parallel) call check_ncdf( nf90_var_par_access(this%active_nc_id, var%file_var_id, nf90_collective))
 
                 if (var%three_d) then
                     var_3d = reshape(this%variables(var_indx_list(i))%data_3d, &
@@ -788,7 +803,7 @@ contains
             end associate
         end do
         
-        call check_ncdf( nf90_var_par_access(this%active_nc_id, this%time%file_var_id, nf90_collective))
+        if (is_file_parallel) call check_ncdf( nf90_var_par_access(this%active_nc_id, this%time%file_var_id, nf90_collective))
 
         output_time = get_output_time(time, units=this%time_units, round_seconds=.False.)
         call check_ncdf( nf90_put_var(this%active_nc_id, this%time%file_var_id, dble(output_time%mjd()+5d-6), [current_step] ),   &

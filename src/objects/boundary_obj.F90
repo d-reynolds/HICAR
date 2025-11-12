@@ -674,16 +674,16 @@ contains
         input_z = this%variables%get_var(kVARS%z)
 
         if (.not.(input_z%computed)) then
-            if (options%forcing%z_is_geopotential) then
-                ! see if the user has provided a base geopotential height field
-                phbase = this%variables%get_var(kVARS%geopotential_base,err)
-                if (err == 0) input_z%data_3d = input_z%data_3d + phbase%data_3d
+            ! if (options%forcing%z_is_geopotential) then
+            !     ! see if the user has provided a base geopotential height field
+            !     phbase = this%variables%get_var(kVARS%geopotential_base,err)
+            !     if (err == 0) input_z%data_3d = input_z%data_3d + phbase%data_3d
 
-                input_z%data_3d = input_z%data_3d / gravity
-                !neg_z = minval(input_z%data_3d)
-                ! if (neg_z < 0.0) input_z%data_3d = input_z%data_3d - neg_z
-                call this%variables%add_var(kVARS%z, input_z)
-            endif
+            !     input_z%data_3d = input_z%data_3d / gravity
+            !     !neg_z = minval(input_z%data_3d)
+            !     ! if (neg_z < 0.0) input_z%data_3d = input_z%data_3d - neg_z
+            !     call this%variables%add_var(kVARS%z, input_z)
+            ! endif
 
             if (allocated(this%z)) deallocate(this%z)
             allocate(this%z,source=input_z%data_3d)
@@ -776,7 +776,7 @@ contains
         type(options_t),     intent(in)      :: options
 
         integer           :: err
-        type(variable_t)  :: var, pvar, tvar, pbvar
+        type(variable_t)  :: var, pvar, tvar, pbvar, input_z
 
         integer :: nx,ny,nz, var_id
         real, allocatable :: temp_z(:,:,:)
@@ -845,13 +845,27 @@ contains
         !limit sea surface temperature to be >= 273.15 (i.e. cannot freeze)
         call limit_2d_var(list, kVARS%sst, min_val=273.15)
 
-        end associate
+        input_z = this%variables%get_var(kVARS%z)
+
+        if (.not.(input_z%computed)) then
+            if (options%forcing%z_is_geopotential) then
+                ! see if the user has provided a base geopotential height field
+                pbvar = this%variables%get_var(kVARS%geopotential_base,err)
+                if (err == 0) input_z%data_3d = input_z%data_3d + pbvar%data_3d
+
+                input_z%data_3d = input_z%data_3d / gravity
+                !neg_z = minval(input_z%data_3d)
+                ! if (neg_z < 0.0) input_z%data_3d = input_z%data_3d - neg_z
+                call this%variables%add_var(kVARS%z, input_z)
+            endif
+        endif
 
         ! if the vertical levels of the forcing data change over time, they need to be interpolated to the original levels here.
         if (options%forcing%time_varying_z) then
             call this%interpolate_original_levels(options)
         endif
 
+        end associate
 
     end subroutine update_computed_vars
 
@@ -1082,7 +1096,7 @@ contains
             if (trim(master_var_list(i)) /= '') then
                 vars_to_read(curvar) = master_var_list(i)
                 var_dimensions(curvar)%num_dims = master_dim_list(i)%num_dims
-                var_dimensions(curvar)%dims = master_dim_list(i)%dims
+                var_dimensions(curvar)%dims(1:master_dim_list(i)%num_dims) = master_dim_list(i)%dims(1:master_dim_list(i)%num_dims)
                 ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)
                 curvar = curvar + 1
             endif

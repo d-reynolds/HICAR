@@ -19,7 +19,7 @@ submodule(reader_interface) reader_implementation
   use string,             only : as_string
   use time_io,            only : read_times, find_timestep_in_filelist, var_has_time_dim
   use array_utilities,    only : interpolate_in_z
-  use io_routines,        only : io_read, io_getdims, io_var_reversed
+  use io_routines,        only : io_read, io_getdims, io_var_reversed, can_file_parallel
   implicit none
 
 contains
@@ -118,29 +118,49 @@ contains
         integer, dimension(3) :: start_2d_t, cnt_2d_t, start_3d, cnt_3d
         integer, dimension(2) :: start_2d, cnt_2d, start_1d_t, cnt_1d_t
         integer, dimension(1) :: start_1d, cnt_1d
-        integer :: var_id
+        integer :: var_id, y_s, mid_y_local, mid_y_global
         integer, allocatable :: dims(:)
         character(len=kMAX_DIM_LENGTH) :: time_dim_name, attr_val
-        logical :: has_time, flip_y, is_reversed
+        logical :: has_time, flip_y, is_reversed, is_file_parallel
 
         if (allocated(buffer)) deallocate(buffer)
         allocate(buffer(this%n_vars,this%its:this%ite+1,this%kts:this%kte,this%jts:this%jte+1))
 
         !See if we must open the file
+
+        is_file_parallel = .False.!can_file_parallel(this%file_list(this%curfile))
         if (this%ncfile_id < 0) then
-            call MPI_Comm_get_info(par_comms, par_comm_info)
-            call check_ncdf( nf90_open(this%file_list(this%curfile), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id, &
-                    comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL), " Opening file "//trim(this%file_list(this%curfile)))
+            if (.not.(is_file_parallel)) then
+                call check_ncdf( nf90_open(this%file_list(this%curfile), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id), " Opening file "//trim(this%file_list(this%curfile)))
+            else
+                par_comm_info = MPI_INFO_NULL
+                call MPI_Comm_get_info(par_comms, par_comm_info)
+                call check_ncdf( nf90_open(this%file_list(this%curfile), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id, &
+                        comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL), " Opening file "//trim(this%file_list(this%curfile)))
+            endif
         endif
         
+        flip_y = io_var_reversed(this%file_list(this%curfile), this%lat_var)
 
+        !if flip_y, then the y index for starting needs to be flipped about the midpoint of the y dimension
+        if (flip_y) then
+            !first get midpoint of this y read 
+            ny = this%jte - this%jts + 1
+            mid_y_local = ny/2 + this%jts - 1
+            y_s = this%jde - mid_y_local - ny/2
+            ! mid_y_global = (this%jde - this%jds+1)/2
+            ! if (mid_y_local <= mid_y_global) y_s = mid_y_global + (mid_y_global-mid_y_local) - ny/2
+            ! if (mid_y_local > mid_y_global) y_s = mid_y_global - (mid_y_local-mid_y_global) - ny/2
+        else
+            y_s = this%jts
+        endif
         ! setup start/count arrays accordingly
-        start_3d_t = (/ this%its,this%jts,this%kts,this%curstep /)
-        start_2d_t = (/ this%its,this%jts,this%curstep /)
+        start_3d_t = (/ this%its,y_s,this%kts,this%curstep /)
+        start_2d_t = (/ this%its,y_s,this%curstep /)
         start_1d_t = (/ this%kts,this%curstep /)
 
-        start_3d = (/ this%its,this%jts,this%kts /)
-        start_2d = (/ this%its,this%jts /)
+        start_3d = (/ this%its,y_s,this%kts /)
+        start_2d = (/ this%its,y_s /)
         start_1d = (/ this%kts /)
 
         cnt_3d_t = (/ (this%ite-this%its+1),(this%jte-this%jts+1),(this%kte-this%kts+1),1 /)
@@ -155,14 +175,13 @@ contains
         ! latitude variable and checking for the attributes stored_direction = "decreasing" or "down" or
         ! positive = "down"
 
-        flip_y = io_var_reversed(this%file_list(this%curfile), this%lat_var)
 
         ! loop through the list of variables that need to be read in
         do n = 1, size(this%var_meta)
             ! get the next variable in the structure
             var = this%var_meta(n)
             if (var%file_var_id < 0) call check_ncdf( nf90_inq_varid(this%ncfile_id, var%name, var%file_var_id), " Getting var ID for "//trim(var%name))
-            call check_ncdf( nf90_var_par_access(this%ncfile_id, var%file_var_id, nf90_collective))
+            if (is_file_parallel) call check_ncdf( nf90_var_par_access(this%ncfile_id, var%file_var_id, nf90_collective))
 
             !get number of dimensions
             call check_ncdf( nf90_inquire_variable(this%ncfile_id, var%file_var_id, ndims = ndims), " Getting dim length for "//trim(var%name))
@@ -257,7 +276,7 @@ contains
                         if (data_nz == nz+1) then
                             if (allocated(data1d)) deallocate(data1d)
                             allocate(data1d(nz))
-                            data1d = (data2d(2:,1)+data2d(:-1,1))/2.0
+                            data1d = (data2d(2:nz+1,1)+data2d(1:nz,1))/2.0
                             deallocate(data2d)
                             allocate(data2d(nz,1))
                             data2d(:,1) = data1d
@@ -304,7 +323,7 @@ contains
                         if (data_nz == nz+1) then
                             if (allocated(data2d)) deallocate(data2d)
                             allocate(data2d(nz,1))
-                            data2d(:,1) = (data1d(2:)+data1d(:-1))/2.0
+                            data2d(:,1) = (data1d(2:nz+1)+data1d(1:nz))/2.0
                             deallocate(data1d)
                             allocate(data1d(nz))
                             data1d = data2d(:,1)
@@ -324,8 +343,12 @@ contains
                 endif
 
                 if (flip_y) then
-                    !invert buffer about the y axis
-                    buffer(n,this%its:this%its+nx-1,this%kts:this%kte,this%jts:this%jts+ny-1) = buffer(n,this%its:this%its+nx-1,this%kts:this%kte,(this%jts+ny-1):this%jts:-1)
+                    !invert buffer about the y axis using a temporary array to avoid overlap
+                    if (allocated(data3d)) deallocate(data3d)
+                    allocate(data3d(nx,nz,ny))
+                    data3d = buffer(n,this%its:this%its+nx-1,this%kts:this%kte,this%jts:this%jts+ny-1)
+                    buffer(n,this%its:this%its+nx-1,this%kts:this%kte,this%jts:this%jts+ny-1) = data3d(:,:,ny:1:-1)
+                    deallocate(data3d)
                 endif
             else if (var%two_d) then
                 nx = var%dim_len(1)
@@ -340,8 +363,12 @@ contains
                     call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, buffer(n,this%its:this%its+nx-1,1,this%jts:this%jts+ny-1), start=start_2d, count=cnt_2d), " Getting 2D var: "//trim(var%name))
                 endif
                 if (flip_y) then
-                    !invert buffer about the y axis
-                    buffer(n,this%its:this%its+nx-1,1,this%jts:this%jts+ny-1) = buffer(n,this%its:this%its+nx-1,1,(this%jts+ny-1):this%jts:-1)
+                    !invert buffer about the y axis using a temporary array to avoid overlap
+                    if (allocated(data2d)) deallocate(data2d)
+                    allocate(data2d(nx,ny))
+                    data2d = buffer(n,this%its:this%its+nx-1,1,this%jts:this%jts+ny-1)
+                    buffer(n,this%its:this%its+nx-1,1,this%jts:this%jts+ny-1) = data2d(:,ny:1:-1)
+                    deallocate(data2d)
                 endif
             endif
 
@@ -528,7 +555,7 @@ contains
                 if (index(trim(master_var_list(i)), '_computed') > 0) cycle
                 vars_to_read(curvar) = master_var_list(i)
                 var_dimensions(curvar)%num_dims = master_dim_list(i)%num_dims
-                var_dimensions(curvar)%dims = master_dim_list(i)%dims
+                var_dimensions(curvar)%dims(1:master_dim_list(i)%num_dims) = master_dim_list(i)%dims(1:master_dim_list(i)%num_dims)
                 ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)
                 curvar = curvar + 1
             endif
