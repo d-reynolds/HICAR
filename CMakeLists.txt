@@ -98,17 +98,6 @@ endif()
 set(GIT_VERSION $(shell git describe --long --dirty --all --always | sed -e's/heads\///'))
 add_definitions(-DVERSION=\"$(GIT_VERSION)\")
 
-#########################################################
-
-
-list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
-add_library(hicar_lib STATIC ${SOURCE_FILES})
-add_executable(HICAR ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
-
-set_property(TARGET hicar_lib PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
-set_property(TARGET HICAR PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
-
-############################################
 ############## Auto-detect  ################
 message(STATUS "")
 message(STATUS "Trying to auto-detect the environment...")
@@ -193,6 +182,136 @@ string( TOLOWER "${COMPILER}" COMPILER )
 
 list(POP_BACK CMAKE_MESSAGE_INDENT)
 message(STATUS "...done auto-detecting the environment")
+
+###########################################################
+############### Find or install dependencies ##############
+message(STATUS "")
+message(STATUS "Searching for dependencies...")
+list(APPEND CMAKE_MESSAGE_INDENT "  ")
+
+include(GNUInstallDirs)
+
+# set root of location to find PETSc's pkg-config
+set(PETSC "${PETSC_DIR}/${PETSC_ARCH}")
+set(ENV{PKG_CONFIG_PATH} "$ENV{PKG_CONFIG_PATH}:${PETSC}/lib/pkgconfig")
+
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${PETSC} ${FFTW_DIR} ${NETCDF_DIR}  ${MPI_DIR} ${FSM_DIR})
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${PETSC}/lib/pkgconfig/" ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR})
+
+find_package(PkgConfig REQUIRED)
+include(FetchContent)
+
+# 1. Check if not already included via Cray Module and ftn
+# 2. If not included via Cray module, link to the package libraries manually
+
+# 3. If not found, try to find package using find library
+# 4. If not found, try to find package using find package
+# 5. If not on machine, try to fetch and install package
+# 5. Enforce requirement, check that package was found/installed
+
+# 6. Link to the package libraries
+set (NETCDF_F90 "YES")
+find_package(MPI REQUIRED)
+find_package(OpenMP)
+find_package(FFTW REQUIRED)
+find_package(NetCDF REQUIRED)
+find_package(PETSc REQUIRED)
+find_package(OpenACC)
+
+# Handle OpenACC flag and library detection
+if(OPENACC AND OpenACC_Fortran_FOUND)
+	message(STATUS "OpenACC support enabled")
+	
+	# Fetch and build rte-rrtmgp when OpenACC is enabled
+	message(STATUS "Fetching rte-rrtmgp library for OpenACC support...")
+	
+	# Get the content without building it yet
+	FetchContent_Declare(
+		rte-rrtmgp
+		GIT_REPOSITORY    https://github.com/earth-system-radiation/rte-rrtmgp.git
+		GIT_TAG           v1.9.2
+		GIT_SHALLOW       TRUE
+	)
+
+	FetchContent_GetProperties(rte-rrtmgp)
+	if(NOT rte-rrtmgp_POPULATED)
+		FetchContent_Populate(rte-rrtmgp)
+
+		# Configure build options for rte-rrtmgp
+		set(BUILD_TESTING OFF)
+		set(BUILD_C_HEADERS OFF)
+		set(KERNEL_MODE "accel" CACHE STRING "Select the kernel mode for rte-rrtmgp" FORCE)
+		set(BUILD_SHARED_LIBS OFF)
+		
+		# Set compiler flags for rte-rrtmgp to match HICAR's flags
+		# Save current CMAKE_Fortran_FLAGS
+		set(SAVED_CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS}")
+		
+		# Determine and set appropriate compiler flags based on MODE and COMPILER
+		if(MODE STREQUAL "debug")
+			if (COMPILER STREQUAL "gnu")
+				set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -c -O0 -g -fopenmp -fbounds-check -fcheck=all -Wall -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion")
+			elseif (COMPILER STREQUAL "intel")
+				set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost")
+			elseif (COMPILER STREQUAL "cray")
+				set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -h noomp -c -eI -g -O0")
+			elseif (COMPILER STREQUAL "nvfortran")
+				if(OPENACC)
+					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O0 -g -traceback -Mnoopenmp -Mbounds -Minfo=accel -Mpreprocess -march=native -acc=gpu -gpu=mem:separate,ccnative")
+				else()
+					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O0 -g -traceback -Mnoopenmp -Mbounds -Mpreprocess -march=native")
+				endif()
+			endif()
+		elseif(MODE STREQUAL "release")
+			if (COMPILER STREQUAL "gnu")
+				set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -fopenmp -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native -fno-protect-parens")
+			elseif (COMPILER STREQUAL "intel")
+				set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -c -u -O3 -xHost -ftz -fpe0")
+			elseif (COMPILER STREQUAL "cray")
+				set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -h omp -hfp3 -O2 -c -eI -eZ")
+			elseif (COMPILER STREQUAL "nvfortran")
+				if(OPENACC)
+					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative")
+				else()
+					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -march=native")
+				endif()
+			endif()
+		endif()
+		
+		message(STATUS "Using compiler flags for rte-rrtmgp: ${CMAKE_Fortran_FLAGS}")
+
+		# Add the rte-rrtmgp subdirectory with configured options
+		add_subdirectory(${rte-rrtmgp_SOURCE_DIR} ${rte-rrtmgp_BINARY_DIR} EXCLUDE_FROM_ALL)
+		
+		# Restore original CMAKE_Fortran_FLAGS
+		set(CMAKE_Fortran_FLAGS "${SAVED_CMAKE_Fortran_FLAGS}")
+	endif()
+	
+	# Add preprocessor definition to indicate rte-rrtmgp is available
+	add_definitions(-DUSE_RTE_RRTMGP)
+	
+	message(STATUS "rte-rrtmgp library configured successfully")
+else()
+	if(OPENACC)
+		message(WARNING "OpenACC support requested but OpenACC library not found. Disabling OpenACC support.")
+		set(OPENACC OFF CACHE BOOL "Enable OpenACC support for GPU acceleration" FORCE)
+	endif()
+	# remove files matching src/physics/ra-mo*.F90 from SOURCE_FILES
+	file(GLOB RA_MO_SOURCES ${PROJECT_SOURCE_DIR}/src/physics/ra_mo*.F90)
+	list(REMOVE_ITEM SOURCE_FILES ${RA_MO_SOURCES})
+endif()
+
+#########################################################
+
+
+list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
+add_library(hicar_lib STATIC ${SOURCE_FILES})
+add_executable(HICAR ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
+
+set_property(TARGET hicar_lib PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
+set_property(TARGET HICAR PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
+
+############################################
 
 ##########################################################
 ############## Set up the compiler options ###############
@@ -287,120 +406,7 @@ endif()
 
 
 ###########################################################
-############### Find or install dependencies ##############
-message(STATUS "")
-message(STATUS "Searching for dependencies...")
-list(APPEND CMAKE_MESSAGE_INDENT "  ")
-
-include(GNUInstallDirs)
-
-# set root of location to find PETSc's pkg-config
-set(PETSC "${PETSC_DIR}/${PETSC_ARCH}")
-set(ENV{PKG_CONFIG_PATH} "$ENV{PKG_CONFIG_PATH}:${PETSC}/lib/pkgconfig")
-
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${PETSC} ${FFTW_DIR} ${NETCDF_DIR}  ${MPI_DIR} ${FSM_DIR})
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${PETSC}/lib/pkgconfig/" ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR})
-
-find_package(PkgConfig REQUIRED)
-include(FetchContent)
-
-# 1. Check if not already included via Cray Module and ftn
-# 2. If not included via Cray module, link to the package libraries manually
-
-# 3. If not found, try to find package using find library
-# 4. If not found, try to find package using find package
-# 5. If not on machine, try to fetch and install package
-# 5. Enforce requirement, check that package was found/installed
-
-# 6. Link to the package libraries
-set (NETCDF_F90 "YES")
-find_package(MPI REQUIRED)
-find_package(OpenMP)
-find_package(FFTW REQUIRED)
-find_package(NetCDF REQUIRED)
-find_package(PETSc REQUIRED)
-
-# Handle OpenACC flag and library detection
-if(OPENACC)
-	find_package(OpenACC)
-	if(NOT OpenACC_Fortran_FOUND)
-		message(WARNING "OpenACC support requested but OpenACC library not found. Disabling OpenACC support.")
-		set(OPENACC OFF CACHE BOOL "Enable OpenACC support for GPU acceleration" FORCE)
-	else()
-		message(STATUS "OpenACC support enabled")
-		
-		# Fetch and build rte-rrtmgp when OpenACC is enabled
-		message(STATUS "Fetching rte-rrtmgp library for OpenACC support...")
-		
-		# Get the content without building it yet
-		FetchContent_Declare(
-			rte-rrtmgp
-			GIT_REPOSITORY    https://github.com/earth-system-radiation/rte-rrtmgp.git
-			GIT_TAG           v1.9.2
-			GIT_SHALLOW       TRUE
-		)
-
-		FetchContent_GetProperties(rte-rrtmgp)
-		if(NOT rte-rrtmgp_POPULATED)
-			FetchContent_Populate(rte-rrtmgp)
-
-			# Configure build options for rte-rrtmgp
-			set(BUILD_TESTING OFF)
-			set(BUILD_C_HEADERS OFF)
-			set(KERNEL_MODE "accel" CACHE STRING "Select the kernel mode for rte-rrtmgp" FORCE)
-			set(BUILD_SHARED_LIBS OFF)
-			
-			# Set compiler flags for rte-rrtmgp to match HICAR's flags
-			# Save current CMAKE_Fortran_FLAGS
-			set(SAVED_CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS}")
-			
-			# Determine and set appropriate compiler flags based on MODE and COMPILER
-			if(MODE STREQUAL "debug")
-				if (COMPILER STREQUAL "gnu")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -c -O0 -g -fopenmp -fbounds-check -fcheck=all -Wall -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion")
-				elseif (COMPILER STREQUAL "intel")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost")
-				elseif (COMPILER STREQUAL "cray")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -h noomp -c -eI -g -O0")
-				elseif (COMPILER STREQUAL "nvfortran")
-					if(OPENACC)
-						set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O0 -g -traceback -Mnoopenmp -Mbounds -Minfo=accel -Mpreprocess -march=native -acc=gpu -gpu=mem:separate,ccnative")
-					else()
-						set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O0 -g -traceback -Mnoopenmp -Mbounds -Mpreprocess -march=native")
-					endif()
-				endif()
-			elseif(MODE STREQUAL "release")
-				if (COMPILER STREQUAL "gnu")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -fopenmp -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native -fno-protect-parens")
-				elseif (COMPILER STREQUAL "intel")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -c -u -O3 -xHost -ftz -fpe0")
-				elseif (COMPILER STREQUAL "cray")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -h omp -hfp3 -O2 -c -eI -eZ")
-				elseif (COMPILER STREQUAL "nvfortran")
-					if(OPENACC)
-						set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative")
-					else()
-						set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -march=native")
-					endif()
-				endif()
-			endif()
-			
-			message(STATUS "Using compiler flags for rte-rrtmgp: ${CMAKE_Fortran_FLAGS}")
-
-			# Add the rte-rrtmgp subdirectory with configured options
-			add_subdirectory(${rte-rrtmgp_SOURCE_DIR} ${rte-rrtmgp_BINARY_DIR} EXCLUDE_FROM_ALL)
-			
-			# Restore original CMAKE_Fortran_FLAGS
-			set(CMAKE_Fortran_FLAGS "${SAVED_CMAKE_Fortran_FLAGS}")
-		endif()
-		
-		# Add preprocessor definition to indicate rte-rrtmgp is available
-		#add_definitions(-DUSE_RTE_RRTMGP)
-		
-		message(STATUS "rte-rrtmgp library configured successfully")
-	endif()
-endif()
-
+########### Find and link required libraries ##############
 if (PETSC_FOUND)
 	if (${PETSC_VERSION} VERSION_GREATER_EQUAL 3.23)
 		message(FATAL_ERROR "PETSc version ${PETSC_VERSION} is greater than or equal to 3.23, code currently only supports versions less than 3.23.")
