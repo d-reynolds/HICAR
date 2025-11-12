@@ -548,6 +548,8 @@ contains
         if (options%physics%windtype==kWIND_LINEAR .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS) then
             if (options%physics%windtype==kWIND_LINEAR .or. options%physics%windtype==kLINEAR_ITERATIVE_WINDS) then
                 call linear_perturb(domain,options,options%lt%vert_smooth,.False.,options%adv%advect_density, update=.False.)
+                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
+                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
             endif
             
             if (options%physics%windtype==kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype==kITERATIVE_WINDS) then

@@ -914,13 +914,13 @@ contains
         !very lazy GPU integration -- just move all data from gpu to host, continue with calculation on host as before, then copy relevant fields back to gpu at the end
         !$acc update host(domain)
         if (update) then
-            u3d = domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d
-            v3d = domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d
+            allocate(u3d,source=domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d)
+            allocate(v3d,source=domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d)
         else
-            u3d = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d
-            v3d = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d
+            allocate(u3d,source=domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d)
+            allocate(v3d,source=domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d)
         endif
-        nsquared = domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d
+        allocate(nsquared,source=domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d)
 
         ims_u = lbound(u3d,1)
         ime_u = ubound(u3d,1)
@@ -1049,8 +1049,8 @@ contains
             uk = min(k,ny)
             do i=1,nxu
                 vi = min(i,nx)
-                u1d(i)  = sum(u3d(i+ims_u-1,:,uk+jms-1)) / nz
-                v1d(i)  = sum(v3d(vi+ims-1, :,k+jms_v-1)) / nz
+                u1d(i)  = sum(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,:,uk+jms-1)) / nz
+                v1d(i)  = sum(domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(vi+ims-1, :,k+jms_v-1)) / nz
             enddo
 
             do j=1, nz
@@ -1068,8 +1068,8 @@ contains
 
                         n = (((east-west)+1) * ((north-south)+1))
                         if (reverse) then
-                            u = u3d(i+ims_u-1,j,uk+jms-1 ) ! u3d(i,j,uk)
-                            v = v3d(vi+ims-1, j,k+jms_v-1) ! v3d(vi,j,k)
+                            u = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,uk+jms-1 ) ! u3d(i,j,uk)
+                            v = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(vi+ims-1, j,k+jms_v-1) ! v3d(vi,j,k)
                             ! WARNING: see below for why this does not work (yet)
                             ! u = sum( domain%u(west:east,j,south:north) ) / n
                             ! v = sum( domain%v(west:east,j,south:north) ) / n
@@ -1138,7 +1138,7 @@ contains
                             ! if (reverse) then
                             !     u3d(i,j,k) = u3d(i,j,k) - u_perturbation(i,j,k) * linear_contribution
                             ! else
-                                ! domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+                                domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,k+jms-1) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
                             ! endif
                         endif
                         if (i<=nx) then
@@ -1155,7 +1155,7 @@ contains
                             !     v3d(i,j,k) = v3d(i,j,k) - v_perturbation(i,j,k) * linear_contribution
                             ! else
                                 ! for the high res domain, linear_mask should incorporate linear_contribution
-                                ! domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+                                domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i+ims-1,j,k+jms_v-1) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
                             ! endif
                         endif
                 end do
@@ -1165,30 +1165,30 @@ contains
         deallocate(u1d, v1d)
         !$omp end parallel
 
-        if (update) then
-            do k=1, nyv
-                do j=1, nz
-                    do i=1, nxu
-                        if (i<=nx) domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
-                        if (k<=ny) domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
-                    enddo
-                enddo
-            enddo
-            !$acc update device(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d)
-            !$acc update device(domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d)
-        else
-            do k=1, nyv
-                do j=1, nz
-                    do i=1, nxu
-                        if (i<=nx) domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
-                        if (k<=ny) domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
-                    enddo
-                enddo
-            enddo
-            !$acc update device(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d)
-            !$acc update device(domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d)
-        endif
-        domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d = exp(domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d)
+        ! if (update) then
+        !     do k=1, nyv
+        !         do j=1, nz
+        !             do i=1, nxu
+        !                 if (i<=nx) domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+        !                 if (k<=ny) domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+        !             enddo
+        !         enddo
+        !     enddo
+        !     !$acc update device(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d)
+        !     !$acc update device(domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d)
+        ! else
+        !     do k=1, nyv
+        !         do j=1, nz
+        !             do i=1, nxu
+        !                 if (i<=nx) domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+        !                 if (k<=ny) domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
+        !             enddo
+        !         enddo
+        !     enddo
+        !     !$acc update device(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d)
+        !     !$acc update device(domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d)
+        ! endif
+        domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d = exp(nsquared)
         !$acc update device(domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d)
 
     end subroutine spatial_winds
@@ -1226,6 +1226,8 @@ contains
         spdmin = options%lt%spdmin
         nsqmax = options%lt%nsqmax
         nsqmin = options%lt%nsqmin
+        ! nsqmax  = min(log(max_stability),nsqmax)
+        ! nsqmin  = max(log(min_stability),nsqmin)
         n_dir_values = options%lt%n_dir_values
         n_nsq_values = options%lt%n_nsq_values
         n_spd_values = options%lt%n_spd_values
