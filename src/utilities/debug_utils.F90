@@ -56,7 +56,7 @@ contains
         if (domain%var_indx(kVARS%exner)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d	,   less_than    =-1e5,              name="pii",     msg=error_msg)
         if (domain%var_indx(kVARS%exner)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d	,   greater_than    =5.0,              name="pii",     msg=error_msg)
         if (domain%var_indx(kVARS%pressure_interface)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d	,    name="pi",      msg=error_msg)
-        if (domain%var_indx(kVARS%pressure)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d	,              name="p",       msg=error_msg)
+        if (domain%var_indx(kVARS%pressure)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d	,  less_than    =0.0, greater_than=110000.0, name="p",       msg=error_msg)
         if (domain%var_indx(kVARS%density)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d	,                     name="density",       msg=error_msg, less_than    =0.0,  fix=fix_data)
         if (domain%var_indx(kVARS%density)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d	,                     name="density",       msg=error_msg, greater_than =2.0,   fix=fix_data)
 

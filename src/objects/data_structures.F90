@@ -16,7 +16,7 @@ module data_structures
 ! ------------------------------------------------
 
     type :: dim_arrays_type
-        integer, allocatable :: dims(:)
+        integer :: dims(10)
         integer :: num_dims
     end type dim_arrays_type
 

@@ -82,6 +82,36 @@ contains
 
     end subroutine check_file_exists
 
+    logical function can_file_parallel(filename)
+        implicit none
+        character(len=*), intent(in) :: filename
+        
+        integer :: ncid, format_type, ierr
+        
+        can_file_parallel = .false.
+        
+        ! Try to open file in serial mode first to check format
+        ierr = nf90_open(filename, NF90_NOWRITE, ncid)
+        if (ierr /= NF90_NOERR) then
+            ! Can't even open the file
+            return
+        endif
+        
+        ! Check the file format
+        ierr = nf90_inquire(ncid, formatNum=format_type)
+        if (ierr == NF90_NOERR) then
+            ! NetCDF-4 formats support parallel access
+            if (format_type == nf90_format_netcdf4 .or. &
+                format_type == nf90_format_netcdf4_classic) then
+                can_file_parallel = .true.
+            endif
+        endif
+        
+        ! Close the file
+        ierr = nf90_close(ncid)
+        
+    end function can_file_parallel
+
     !>------------------------------------------------------------
     !! Tests to see if a variable is present in a netcdf file
     !! returns true of it is, false if it isn't
