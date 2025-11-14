@@ -867,8 +867,7 @@ contains
 
                 ! if we are using the linear wind solver, we need dz and z information for the global grid. 
                 ! but to save memory, global_z/dz is setup by default for the neighbor grid. Change here
-                if ( (opt%physics%windtype == kWIND_LINEAR) .or. (opt%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-                     (opt%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+                if (opt%wind%linear_theory)  then
                     if (i==kVARS%h1 .or. i==kVARS%h2) then
                         grid = this%global_grid_2d
                     else if (i==kVARS%global_z_interface) then
@@ -999,8 +998,7 @@ contains
 
         allocate(temp_offset(1:this%grid%ide+1,1:this%grid%jde+1))
 
-        if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-             (options%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+        if (options%wind%linear_theory) then
                 this%vars_2d(this%var_indx(kVARS%global_terrain)%v)%data_2d = temporary_data
         end if
 
@@ -1288,8 +1286,7 @@ contains
 
             ! use temp to store global z-interface so that global-jacobian can be calculated
 
-            if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-                 (options%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+            if (options%wind%linear_theory) then
                  
                 allocate(temp(this%ids:this%ide, this%kds:this%kde+1, this%jds:this%jde))
                 temp(:,kms,:)   = this%vars_2d(this%var_indx(kVARS%global_terrain)%v)%data_2d
@@ -1490,8 +1487,7 @@ contains
             i = this%grid%kms
             
             
-            if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-                 (options%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+            if (options%wind%linear_theory) then
                 global_z_interface(:,i,:)   = global_terrain
                 allocate(global_jacobian(this%ids:this%ide, this%kds:this%kde, this%jds:this%jde))
             else
@@ -2440,7 +2436,7 @@ contains
         this%neighborhood_max = max(nsmooth,8)
         
         !Considering blocking terrain...
-        if (options%physics%windtype == kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype ==  kITERATIVE_WINDS) then
+        if (options%physics%windtype == kITERATIVE_WINDS) then
             this%neighborhood_max = int(max(4000.0/this%dx,1.0))
         endif
         

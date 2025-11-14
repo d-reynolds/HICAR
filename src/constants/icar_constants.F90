@@ -523,11 +523,7 @@ module icar_constants
 
     integer, parameter :: kFLUXCOR_MONO   = 1
 
-    integer, parameter :: kWIND_LINEAR   = 1
-    integer, parameter :: kOBRIEN_WINDS  = 2
-    integer, parameter :: kITERATIVE_WINDS = 3
-    integer, parameter :: kLINEAR_OBRIEN_WINDS = 4
-    integer, parameter :: kLINEAR_ITERATIVE_WINDS = 5
+    integer, parameter :: kITERATIVE_WINDS = 1
 
     integer, parameter :: kLC_LAND       = 1
     integer, parameter :: kLC_WATER      = 2 ! 0  ! This should maybe become an argument in the namelist if we use different hi-es files?

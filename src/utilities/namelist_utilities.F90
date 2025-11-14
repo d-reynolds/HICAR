@@ -2348,15 +2348,11 @@ contains
                 group = "Physics"
             case ("wind")
                 description = "Wind solver to use: "//achar(10)//BLNK_CHR_N// &
-                                                   "0 = no LT,"//achar(10)//BLNK_CHR_N// &
-                                                   "1 = linear theory wind perturbations"//achar(10)//BLNK_CHR_N// &
-                                                   "2 = Adjustment to horizontal winds to reduce divergence, based on technique from O'brien et al., 1970"//achar(10)//BLNK_CHR_N// &
-                                                   "3 = Mass-conserving wind solver based on variational calculus technique, requires PETSc"//achar(10)//BLNK_CHR_N// &
-                                                   "4 = Combination of options 1 & 2"//achar(10)//BLNK_CHR_N// &
-                                                   "5 = Combination of options 1 & 3"
-                allocate(values(6))
-                values = [0, 1, 2, 3, 4, 5]
-                default = "0"
+                                                   "0 = no wind solver,"//achar(10)//BLNK_CHR_N// &
+                                                   "1 = Mass-conserving wind solver based on variational calculus technique, requires PETSc(cpu) or AMGX(gpu)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "1"
                 group = "Physics"
             case ("radiation_downscaling")
                 description = "0 = no downcaling"//achar(10)//BLNK_CHR_N//      &
@@ -3340,6 +3336,10 @@ contains
                 description = "Use Sx-terrain sheltering to modify wind field (T/F)"
                 default = ".False."
                 group = "Wind"
+            case ("linear_theory")
+                description = "Use linear theory wind perturbations"
+                default = ".False."
+                group = "Wind"
             case ("thermal")
                 description = "Use thermal wind parameterization from Reynolds et al., 2024a to modify wind field (T/F)"
                 default = ".False."
@@ -3352,10 +3352,10 @@ contains
                 default = "-9999"
                 group = "Wind"
             case ("wind_iterations")
-                description = "Number of iterations to use for the O'Brien iterative wind solver (wind=2)"
+                description = "Number of iterations to use for the iterative wind solver (wind=1)"
                 min = 0
-                max = 1000
-                default = "800"
+                max = 10
+                default = "2"
                 group = "Wind"
             case ("Sx_dmax")
                 description = "Maximum lateral distance over which to calculate the Sx parameter"

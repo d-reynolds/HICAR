@@ -34,6 +34,7 @@ module options_types
     type wind_type
         logical :: Sx
         logical :: thermal
+        logical :: linear_theory
         real    :: TPI_scale
         real    :: TPI_dmax
         real    :: Sx_dmax

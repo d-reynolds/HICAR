@@ -13,7 +13,12 @@ module flow_events
         can_update_child_nest, end_nest_context, switch_nest_context, wake_nest
     use time_step, only: step
     use initialization, only: init_model, init_model_state
-    use wind_iterative_old, only: finalize_petsc
+#ifdef USE_AMGX
+    use wind_iterative_amgx, only: finalize_amgx
+#elif defined USE_PETSC
+    use wind_iterative_petsc, only: finalize_petsc
+#endif
+
     use string, only : as_string
 
     implicit none
@@ -547,8 +552,12 @@ subroutine component_program_end(component, options)
                 if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "CPU-GPU transfers", ":", t_val, " | ", t_val2, " | ", t_val3
 #endif
                 if (STD_OUT_PE) flush(output_unit)
-                if ( ANY(options%physics%windtype == kITERATIVE_WINDS) .or. ANY(options%physics%windtype == kLINEAR_ITERATIVE_WINDS)) then
+                if ( ANY(options%physics%windtype == kITERATIVE_WINDS)) then
+#ifdef USE_AMGX
+                    call finalize_amgx()
+#elif defined USE_PETSC
                     call finalize_petsc()
+#endif
                 endif
             type is (ioserver_t)
                 if (i==1) call comp%close_files()

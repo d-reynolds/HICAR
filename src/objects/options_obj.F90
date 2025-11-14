@@ -2056,11 +2056,11 @@ contains
         logical :: print_info, gennml
         !Define parameters
         integer, dimension(kMAX_NESTS) :: wind_iterations, update_frequency
-        logical, dimension(kMAX_NESTS) :: Sx, thermal, wind_only
+        logical, dimension(kMAX_NESTS) :: Sx, thermal, wind_only, linear_theory
         real, dimension(kMAX_NESTS)    :: Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, smooth_wind_distance
         
         !Make name-list
-        namelist /wind/ Sx, thermal, wind_only, Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, &
+        namelist /wind/ Sx, thermal, wind_only, linear_theory, Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, &
                         update_frequency, smooth_wind_distance, wind_iterations
         CHARACTER(LEN=200) :: error_msg
 
@@ -2072,6 +2072,7 @@ contains
 
         call set_nml_var_default(Sx, 'Sx', print_info, gennml)
         call set_nml_var_default(thermal, 'thermal', print_info, gennml)
+        call set_nml_var_default(linear_theory, 'linear_theory', print_info, gennml)
         call set_nml_var_default(wind_only, 'wind_only', print_info, gennml)
         call set_nml_var_default(Sx_dmax, 'Sx_dmax', print_info, gennml)
         call set_nml_var_default(Sx_scale_ang, 'Sx_scale_ang', print_info, gennml)
@@ -2094,6 +2095,7 @@ contains
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             Sx(n_indx) = Sx(1)
             thermal(n_indx) = thermal(1)
+            linear_theory(n_indx) = linear_theory(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             !Read namelist file
             open(io_newunit(name_unit), file=filename)
@@ -2108,6 +2110,7 @@ contains
 
         call set_nml_var(wind_options%Sx, Sx(n_indx), 'Sx', Sx(1))
         call set_nml_var(wind_options%thermal, thermal(n_indx), 'thermal', thermal(1))
+        call set_nml_var(wind_options%linear_theory, linear_theory(n_indx), 'linear_theory', linear_theory(1))
         call set_nml_var(wind_options%wind_only, wind_only(n_indx), 'wind_only', wind_only(1))
         call set_nml_var(wind_options%Sx_dmax, Sx_dmax(n_indx), 'Sx_dmax', Sx_dmax(1))
         call set_nml_var(wind_options%TPI_dmax, TPI_dmax(n_indx), 'TPI_dmax', TPI_dmax(1))
