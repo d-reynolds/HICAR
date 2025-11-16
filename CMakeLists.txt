@@ -305,7 +305,7 @@ if(OPENACC)
 		endif()
 		
 		# Add preprocessor definition to indicate rte-rrtmgp is available
-		#add_definitions(-DUSE_RTE_RRTMGP)
+		add_definitions(-DUSE_RTE_RRTMGP)
 		
 		message(STATUS "rte-rrtmgp library configured successfully")
 

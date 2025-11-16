@@ -33,6 +33,8 @@ module radiation
     use icar_constants, only : kVARS, kRA_BASIC, kRA_SIMPLE, kRA_RRTMG, kRA_RRTMGP, STD_OUT_PE, kMP_THOMP_AER, kMAX_NESTS
     use mod_wrf_constants, only : cp, R_d, gravity, DEGRAD, DPD, piconst
     use mod_atm_utilities, only : cal_cldfra3, calc_solar_elevation, calc_solar_date
+
+#ifdef USE_RTE_RRTMGP
     use mo_rte_kind,           only: wp, i8, wl
     use mo_rte_lw,             only: rte_lw
     use mo_rte_sw,             only: rte_sw
@@ -95,7 +97,21 @@ module radiation
     !> Mixed species
     REAL(wp), PARAMETER :: amd   = 28.970_wp        !> [g/mol] dry air
 
+    type(ty_gas_optics_rrtmgp)   :: k_dist_lw, k_dist_sw
+    type(ty_cloud_optics_rrtmgp) :: cloud_optics_lw, cloud_optics_sw
+    type(ty_aerosol_optics_rrtmgp_merra)   &
+                                    :: aerosol_optics_lw, aerosol_optics_sw
+    logical :: do_aerosols = .False.
+    integer, parameter :: ngas = 8
+    integer :: nblocks = 1
 
+    character(len=3), dimension(ngas), parameter :: &
+                gas_names = ['h2o', 'o3', 'co2', 'n2o', 'co ', 'ch4', 'o2 ', 'n2 ']
+    type(ty_gas_concs)           :: gas_concs
+
+#else
+    implicit none
+#endif
 
     integer :: update_interval
     real*8  :: last_model_time(kMAX_NESTS)
@@ -110,17 +126,6 @@ module radiation
     integer :: its, ite, jts, jte, kts, kte
     integer :: ids, ide, jds, jde, kds, kde
 
-    type(ty_gas_optics_rrtmgp)   :: k_dist_lw, k_dist_sw
-    type(ty_cloud_optics_rrtmgp) :: cloud_optics_lw, cloud_optics_sw
-    type(ty_aerosol_optics_rrtmgp_merra)   &
-                                    :: aerosol_optics_lw, aerosol_optics_sw
-    logical :: do_aerosols = .False.
-    integer, parameter :: ngas = 8
-    integer :: nblocks = 1
-
-    character(len=3), dimension(ngas), parameter :: &
-                gas_names = ['h2o', 'o3', 'co2', 'n2o', 'co ', 'ch4', 'o2 ', 'n2 ']
-    type(ty_gas_concs)           :: gas_concs
 
     private
     public :: radiation_init, ra_var_request, rad_apply_dtheta, rad
@@ -252,40 +257,43 @@ contains
                 domain%tend%th_swrad = 0
                 domain%tend%th_lwrad = 0
         else if (options%physics%radiation == kRA_RRTMGP) then
+#ifdef USE_RTE_RRTMGP
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    RRTMGP"    
-            ! if (.not.(k_dist_sw%is_loaded())) then
 
-                !determine number of blocks to use for RRTMGP. This is done to reduce
-                ! the GPU memory requirements. A good base is 200x200 horizontal points per block
-                nblocks = MAX(1, ((ite - its + 1)*(jte - jts + 1)) / 40000)
-    
-                if (k_dist_sw%is_loaded() .or. k_dist_lw%is_loaded()) then
-                    call k_dist_sw%finalize()
-                    call k_dist_lw%finalize()
-                    call cloud_optics_sw%finalize()
-                    call cloud_optics_lw%finalize()
-                endif
-                call rte_config_checks(logical(.false., wl))
+            !determine number of blocks to use for RRTMGP. This is done to reduce
+            ! the GPU memory requirements. A good base is 200x200 horizontal points per block
+            nblocks = MAX(1, ((ite - its + 1)*(jte - jts + 1)) / 40000)
 
-                call set_atmo_gas_conc(domain)
+            if (k_dist_sw%is_loaded() .or. k_dist_lw%is_loaded()) then
+                call k_dist_sw%finalize()
+                call k_dist_lw%finalize()
+                call cloud_optics_sw%finalize()
+                call cloud_optics_lw%finalize()
+            endif
+            call rte_config_checks(logical(.false., wl))
 
-                ! ----------------------------------------------------------------------------
-                ! load data into classes
-                call load_and_init(k_dist_sw, k_dist_sw_file, gas_concs)
-                call load_and_init(k_dist_lw, k_dist_lw_file, gas_concs)
+            call set_atmo_gas_conc(domain)
 
-                !
-                call load_cld_lutcoeff(cloud_optics_lw, cloud_optics_lw_file)
-                call load_cld_lutcoeff(cloud_optics_sw, cloud_optics_sw_file)
-                call stop_on_err(cloud_optics_lw%set_ice_roughness(2))
-                call stop_on_err(cloud_optics_sw%set_ice_roughness(2))
+            ! ----------------------------------------------------------------------------
+            ! load data into classes
+            call load_and_init(k_dist_sw, k_dist_sw_file, gas_concs)
+            call load_and_init(k_dist_lw, k_dist_lw_file, gas_concs)
 
-                if (do_aerosols) then
-                    ! Load aerosol optics coefficients from lookup tables
-                    call load_aero_lutcoeff (aerosol_optics_lw, aerosol_optics_lw_file)
-                    call load_aero_lutcoeff (aerosol_optics_sw, aerosol_optics_sw_file)
-                end if
-            ! endif
+            !
+            call load_cld_lutcoeff(cloud_optics_lw, cloud_optics_lw_file)
+            call load_cld_lutcoeff(cloud_optics_sw, cloud_optics_sw_file)
+            call stop_on_err(cloud_optics_lw%set_ice_roughness(2))
+            call stop_on_err(cloud_optics_sw%set_ice_roughness(2))
+
+            if (do_aerosols) then
+                ! Load aerosol optics coefficients from lookup tables
+                call load_aero_lutcoeff (aerosol_optics_lw, aerosol_optics_lw_file)
+                call load_aero_lutcoeff (aerosol_optics_sw, aerosol_optics_sw_file)
+            end if
+#else
+            write(*,*) "ERROR: RRTMGP radiation option selected but HICAR not compiled with RTE-RRTMGP library."
+            stop
+#endif
         endif
 
     end subroutine radiation_init
@@ -392,7 +400,7 @@ contains
         logical :: f_qr, f_qc, f_qi, F_QI2, F_QI3, f_qs, f_qg, f_qv, f_qndrop
         integer :: mp_options, F_REC, F_REI, F_RES
 
-
+#ifdef USE_RTE_RRTMGP
         real(wp), dimension(:,:),   allocatable :: p_lay, t_lay, p_lev, t_lev ! t_lev is only needed for LW
         real(wp), dimension(:,:),   allocatable :: q, o3
 
@@ -439,12 +447,12 @@ contains
             flx_up, & !< upward SW flux profile, all sky
             flx_dn, & !< downward SW flux profile, all sky
             flx_dnsw_dir !< downward SW flux profile, all sky
-
+#endif
 
         !! MJ added
         real :: trans_atm, trans_atm_dir, max_dir_1, max_dir_2, max_dir, elev_th, ratio_dif, tzone
         integer :: zdx, zdx_max
-        
+
         if (options%physics%radiation == 0) return
         
         !We only need to calculate these variables if we are using terrain shading, otherwise only call on each radiation update
@@ -887,7 +895,7 @@ contains
                     !$acc update device(domain%vars_3d, domain%vars_2d, domain%tend)
 
                 else if (options%physics%radiation==kRA_RRTMGP) then
-
+#ifdef USE_RTE_RRTMGP
                     !cut RRTMGP up into blocks to reduce memory usage
                     do block = 1, nblocks
                     if (block == 1 .and. nblocks==1) then
@@ -1170,6 +1178,7 @@ contains
                     deallocate(toa_flux, sfc_alb_dir, sfc_alb_dif, mu0, flx_up, flx_dn, flx_dnsw_dir, t_sfc, emis_sfc)
 
                     enddo
+#endif ! end USE_RTE_RRTMGP
                 endif 
 
                 ! If the user has provided sky view fraction, then apply this to the diffuse SW now, 
@@ -1311,7 +1320,7 @@ contains
 
     subroutine set_atmo_gas_conc(domain, block_num)
         implicit none
-§
+
         type(domain_t), intent(in) :: domain
         integer, optional, intent(in) :: block_num
 
