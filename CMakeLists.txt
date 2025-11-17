@@ -75,6 +75,8 @@ FILE(GLOB_RECURSE SOURCE_FILES  ${PROJECT_SOURCE_DIR}/src/*.F90)
 # depending on library support
 list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_petsc.F90)
 list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_amgx.F90)
+FILE(GLOB_RECURSE ra_mo_files  ${PROJECT_SOURCE_DIR}/src/physics/ra_mo_*.F90)
+list(REMOVE_ITEM SOURCE_FILES ${ra_mo_files})
 
 
 macro(Disable_FSM)
@@ -306,7 +308,8 @@ if(OPENACC)
 		
 		# Add preprocessor definition to indicate rte-rrtmgp is available
 		add_definitions(-DUSE_RTE_RRTMGP)
-		
+		list(APPEND SOURCE_FILES ${ra_mo_files})
+
 		message(STATUS "rte-rrtmgp library configured successfully")
 
 
@@ -353,6 +356,18 @@ if(OPENACC)
 endif()
 #########################################################
 
+if(NOT AMGX_LIBRARY)
+	find_package(PETSc)
+	if (PETSC_FOUND)
+		if (${PETSC_VERSION} VERSION_GREATER_EQUAL 3.23)
+			message(FATAL_ERROR "PETSc version ${PETSC_VERSION} is greater than or equal to 3.23, code currently only supports versions less than 3.23.")
+		endif()
+		add_definitions(-DUSE_PETSC)
+		list(APPEND SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_petsc.F90)
+	endif()
+endif()
+#########################################################
+
 
 list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
 add_library(hicar_lib STATIC ${SOURCE_FILES})
@@ -375,17 +390,9 @@ if(AMGX_LIBRARY)
 	target_include_directories(hicar_lib PUBLIC ${AMGX_INCLUDE_DIR})
 	
 	message(STATUS "Linked AmgX and CUDA libraries to hicar_lib")
-else()
-	find_package(PETSc)
-	if (PETSC_FOUND)
-		if (${PETSC_VERSION} VERSION_GREATER_EQUAL 3.23)
-			message(FATAL_ERROR "PETSc version ${PETSC_VERSION} is greater than or equal to 3.23, code currently only supports versions less than 3.23.")
-		endif()
-		add_definitions(-DUSE_PETSC)
-		list(APPEND SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_petsc.F90)
-		target_link_libraries(hicar_lib PUBLIC ${PETSC_LIBRARIES})
-		target_include_directories(hicar_lib PUBLIC ${PETSC_INCLUDES})
-	endif()
+elseif(PETSC_FOUND)
+	target_link_libraries(hicar_lib PUBLIC ${PETSC_LIBRARIES})
+	target_include_directories(hicar_lib PUBLIC ${PETSC_INCLUDES})
 endif()
 
 if(OpenMP_CXX_FOUND)

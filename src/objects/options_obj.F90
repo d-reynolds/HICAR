@@ -2203,7 +2203,7 @@ contains
                 
                 !options%physics%boundarylayer = at some point, add a scale aware / LES turbulence scheme
                 
-                options%physics%windtype = 4
+                options%physics%windtype = 1
                 options%physics%convection = 0
                 options%wind%Sx = .True.
                 options%time%RK3 = .True.

@@ -31,7 +31,7 @@ module wind
 
     integer :: ids, ide, jds, jde, kds, kde,  &
                ims, ime, jms, jme, kms, kme,  &
-               its, ite, jts, jte, kts, kte, j, k, i, &
+               its, ite, jts, jte, kts, kte,  &
                i_s, i_e, j_s, j_e
 
     logical :: first_wind=.True.
@@ -162,7 +162,7 @@ contains
         !------------------------------------------------------------
         
         ! if (options%physics%convection > 0) then
-        ! ! calculate horizontal divergence
+        ! ! calculate horizontal divergence 
         ! dv = domain%v_cu(2:nx-1,i,3:ny) - domain%v_cu(2:nx-1,i,2:ny-1)
         ! du = domain%u_cu(3:nx,i,2:ny-1) - domain%u_cu(2:nx-1,i,2:ny-1)
         ! divergence = du + dv
@@ -184,7 +184,8 @@ contains
         logical, intent(in)    :: adv_den
         
         real, dimension(ims:ime,kms:kme,jms:jme) :: rho_i
-        
+        integer :: i, j, k
+
         !$acc data present(w, div, dz, jaco_w, rho) create(rho_i)
         !$acc parallel loop gang vector collapse(3) async(1)
         do j = jms, jme
@@ -246,6 +247,7 @@ contains
         real, dimension(ims:ime,kms:kme,jms:jme+1) :: v_met
         real, dimension(ims:ime,kms:kme-1,jms:jme) :: rho_i
         logical :: horz
+        integer :: i, j, k
 
         horz = .False.
         if (present(horz_only)) horz=horz_only
@@ -399,7 +401,8 @@ contains
         
         real, dimension(ims+1:ime,jms:jme) :: costheta_ustag, sintheta_ustag
         real, dimension(ims:ime,jms+1:jme) :: costheta_vstag, sintheta_vstag
-        
+        integer :: i, j, k
+
         !$acc data present(u, v, sintheta, costheta) create(v_ustag, u_vstag, costheta_ustag, sintheta_ustag, costheta_vstag, sintheta_vstag)
 
         !$acc kernels
@@ -431,6 +434,7 @@ contains
         type(domain_t), intent(inout) :: domain
         logical, intent(in) :: w_var_given
 
+        integer :: i, j, k
 
         associate(u => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
                   v => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
@@ -502,6 +506,7 @@ contains
 
         real, allocatable, dimension(:,:,:) :: div
         integer :: nx, ny, nz, it
+        integer :: i, j, k
         logical :: newinput, w_var_given
         real :: wind_dt_seconds, alpha_const_val
 
@@ -717,6 +722,8 @@ contains
         type(domain_t), intent(inout)  :: domain
         real, intent(in)                :: dt
 
+        integer :: i, j, k
+
         associate(u => domain%vars_3d(domain%var_indx(kVARS%u)%v), &
                   v => domain%vars_3d(domain%var_indx(kVARS%v)%v))
 
@@ -760,6 +767,8 @@ contains
         type(domain_t), intent(inout) :: domain
 
         real, allocatable, dimension(:,:,:) :: zero_arr
+
+        integer :: i, j, k
 
         allocate(zero_arr(ims:ime,kms:kme,jms:jme))
         zero_arr = 0.0
@@ -817,9 +826,9 @@ contains
         implicit none
         real,    intent(in)    :: froude(ims:ime,kms:kme,jms:jme)
         real,    intent(inout) :: alpha(ims:ime,kms:kme,jms:jme)
-        integer :: k
 
         real :: alpha_min, alpha_max
+        integer :: i, j, k
 
         alpha_min = 0.2
         alpha_max = 2.0
@@ -1154,6 +1163,7 @@ contains
         integer, dimension(ims:ime,kms:kme,jms:jme) :: dir_indices
         
         integer :: n, ob_k, Ri_k_max
+        integer :: i, j, k
         real :: z_top, z_bot, z_mean, th_top, th_bot, obstacle_height, RI_Z_MAX
         integer :: ymin, ymax, xmin, xmax, n_smoothing_passes, nsmooth_gridcells, ubound_terrain
         
@@ -1290,6 +1300,7 @@ contains
         type(domain_t), intent(inout) :: domain
         real, dimension(1:72,ims:ime,kms:kme,jms:jme)   :: temp_ft_array
         integer           :: ang, is, js
+        integer           :: i, j, k
         integer           :: rear_ang, fore_ang, test_ang, rear_ang_diff, fore_ang_diff, ang_diff, k_max, window_rear, window_fore, window_width
         integer :: x, y, azm_index
         integer :: xs,xe, ys,ye, n, np

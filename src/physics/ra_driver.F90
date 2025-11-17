@@ -435,7 +435,6 @@ contains
 
         character(len=8) :: char_input
         integer :: ncol, nlay, block, jb_s, jb_e
-        real(real64) :: sun_declin_deg, eq_of_time_minutes
         !
         ! Timing variables
         !
@@ -452,6 +451,7 @@ contains
         !! MJ added
         real :: trans_atm, trans_atm_dir, max_dir_1, max_dir_2, max_dir, elev_th, ratio_dif, tzone
         integer :: zdx, zdx_max
+        real(real64) :: sun_declin_deg, eq_of_time_minutes
 
         if (options%physics%radiation == 0) return
         
@@ -1317,7 +1317,7 @@ contains
         endif
 
     end subroutine rad_apply_dtheta
-
+#ifdef USE_RTE_RRTMGP
     subroutine set_atmo_gas_conc(domain, block_num)
         implicit none
 
@@ -1347,7 +1347,7 @@ contains
         call stop_on_err(gas_concs%set_vmr("co ",  0._wp))
 
     end subroutine set_atmo_gas_conc
-    
+#endif
 ! DR 2023: Taken from WRF mod_radiation_driver
 !---------------------------------------------------------------------
 !BOP
