@@ -82,7 +82,7 @@
 
 
 
-MODULE MODULE_MP_MORR_TWO_MOMENT
+MODULE MODULE_MP_MORR_TWO_MOMENT_gpu
    ! USE     module_wrf_error
    ! USE module_utility, ONLY: WRFU_Clock, WRFU_Alarm  ! GT
    ! USE module_domain, ONLY : HISTORY_ALARM, Is_alarm_tstep  ! GT
@@ -94,7 +94,7 @@ MODULE MODULE_MP_MORR_TWO_MOMENT
 
    IMPLICIT NONE
    private
-   PUBLIC  ::  MP_MORR_TWO_MOMENT, MORR_TWO_MOMENT_INIT
+   PUBLIC  ::  MP_MORR_TWO_MOMENT_gpu, MORR_TWO_MOMENT_INIT_gpu
 
    REAL, PARAMETER :: PI = 3.1415926535897932384626434
    REAL, PARAMETER :: SQRTPI = 0.9189385332046727417803297
@@ -253,7 +253,7 @@ MODULE MODULE_MP_MORR_TWO_MOMENT
 CONTAINS
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-SUBROUTINE MORR_TWO_MOMENT_INIT(hail_opt) ! RAS
+SUBROUTINE MORR_TWO_MOMENT_INIT_gpu(hail_opt) ! RAS
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ! THIS SUBROUTINE INITIALIZES ALL PHYSICAL CONSTANTS AMND PARAMETERS
 ! NEEDED BY THE MICROPHYSICS SCHEME.
@@ -557,7 +557,7 @@ SUBROUTINE MORR_TWO_MOMENT_INIT(hail_opt) ! RAS
       !$acc   CONS30, CONS31, CONS32, CONS33, CONS34, CONS35, CONS36, CONS37, CONS38, &
       !$acc   CONS39, CONS40, CONS41)
 
-END SUBROUTINE MORR_TWO_MOMENT_INIT
+END SUBROUTINE MORR_TWO_MOMENT_INIT_gpu
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ! THIS SUBROUTINE IS MAIN INTERFACE WITH THE TWO-MOMENT MICROPHYSICS SCHEME
@@ -574,7 +574,7 @@ END SUBROUTINE MORR_TWO_MOMENT_INIT
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
+SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
                 TH, QV, QC, QR, QI, QS, QG, NI, NS, NR, NG, &
                 RHO_IN, PII, P, DT_IN, DZ, W,          &
                 RAINNC, RAINNCV, SR,                    &
@@ -4143,7 +4143,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT(ITIMESTEP,                       &
    ! !$omp end parallel
    !$acc end data
 
-END SUBROUTINE MP_MORR_TWO_MOMENT
+END SUBROUTINE MP_MORR_TWO_MOMENT_gpu
 
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 
@@ -4744,6 +4744,6 @@ END SUBROUTINE MP_MORR_TWO_MOMENT
 !
 !+---+-----------------------------------------------------------------+
 
-END MODULE module_mp_morr_two_moment
+END MODULE module_mp_morr_two_moment_gpu
 !+---+-----------------------------------------------------------------+
 !+---+-----------------------------------------------------------------+
