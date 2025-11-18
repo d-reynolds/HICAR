@@ -672,7 +672,7 @@ contains
                     enddo
                 enddo
             else
-                call calc_alpha(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%froude)%v)%data_3d)
+                call calc_alpha(wind_alpha, domain%vars_3d(domain%var_indx(kVARS%froude)%v)%data_3d)
             endif
 
             do i = 1, options%wind%wind_iterations
@@ -683,9 +683,9 @@ contains
                                 domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options%adv%advect_density,horz_only=.False.)
 
 #ifdef USE_AMGX                
-                call calc_iter_winds_amgx(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
+                call calc_iter_winds_amgx(domain,wind_alpha,div,options%adv%advect_density)
 #elif defined USE_PETSC
-                call calc_iter_winds_petsc(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
+                call calc_iter_winds_petsc(domain,wind_alpha,div,options%adv%advect_density)
 #endif                
                 !Exchange u and v, since the outer points are not updated in above function
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
@@ -1259,10 +1259,10 @@ contains
                 do k=kms, kme-1
                     do i = ims, ime
 
-                        th_bot = potential_temperature(i,kms,j)
-                        th_top = potential_temperature(i,Ri_k_max,j)
-                        z_bot  = z(i,kms,j)
-                        z_top  = z(i,Ri_k_max,j)
+                        th_bot = potential_temperature(i,k,j)
+                        th_top = potential_temperature(i,k+1,j)
+                        z_bot  = z(i,k,j)
+                        z_top  = z(i,k+1,j)
 
                         ! If we have an upwind obstacle, use the obstacle height to calculate a bulk Froude Number over the column
                         ! If there is nothing blocking, we calculate a local bulk Froude Number, using the local th and z indexed 

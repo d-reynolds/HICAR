@@ -840,7 +840,7 @@ contains
         associate(density => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                     u       => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
                     v       => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
-                    w       => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                    w       => domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
                     alpha  => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d, &
                     jaco_u_domain => domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, &
                     jaco_v_domain => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &

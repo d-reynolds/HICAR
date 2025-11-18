@@ -173,7 +173,7 @@ contains
         associate(density => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                     u       => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
                     v       => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
-                    w       => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                    w       => domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
                     jaco_u_domain => domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, &
                     jaco_v_domain => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
                     jaco_domain   => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
@@ -530,12 +530,12 @@ contains
                 else if (k.eq.0) then
                     denom = 2*(dzdx_surf(i,j)**2 + dzdy_surf(i,j)**2 + alpha(i,1,j)**2)/(jaco(i,1,j))
                     !k
-                    v(cnt) = -1/dz_if(i,k+1,j)
+                    v(cnt+1) = -1/dz_if(i,k+1,j)
                     gnd_col(MatStencil_i,2) = i
                     gnd_col(MatStencil_j,2) = k
                     gnd_col(MatStencil_k,2) = j
                     !k + 1
-                    v(cnt+1) = 1/dz_if(i,k+1,j)
+                    v(cnt) = 1/dz_if(i,k+1,j)
                     gnd_col(MatStencil_i,1) = i
                     gnd_col(MatStencil_j,1) = k+1
                     gnd_col(MatStencil_k,1) = j
