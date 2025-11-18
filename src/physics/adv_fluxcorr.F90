@@ -567,9 +567,9 @@ contains
         ! STEP 1: FUSED KERNEL - Compute qmax/qmin + scale_in/scale_out using pre-computed upwind fluxes
         ! ==========================================
         !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(1000)
-        do j = jts, jte+1
+        do j = jts-1, jte+1
             do k = kms, kme
-                do i = its, ite+1                    
+                do i = its-1, ite+1                    
                     ! ==========================================
                     ! 2. Compute qmax/qmin on-the-fly (no array storage)
                     ! ==========================================

@@ -883,22 +883,17 @@ do j = jts,jte
 !$acc loop gang vector tile(32,16)
   do j = jts,jte
    do i = its,ite
-      if(.not.stable(i,j))then
-        brdn(i,j) = brup(i,j)
-
-        !find k index where brup_precalc(i,k,j) .gt. brcr(i,j)
-        !$acc loop seq
-        do k = 2,klpbl
-          if (brup_precalc(i,k,j) .gt. brcr(i,j)) then
-            stable(i,j) = .true.
-            exit
-          endif
-        enddo
-        
-        kpbl(i,j) = k-1
-        brup(i,j) = brup_precalc(i,kpbl(i,j),j)
-        if (kpbl(i,j) > 2) brdn(i,j) = brup_precalc(i,kpbl(i,j)-1,j)
-     endif
+!$acc loop seq
+     do k = 2,klpbl
+       if(.not.stable(i,j))then
+         brdn(i,j) = brup(i,j)
+         brup(i,j) = brup_precalc(i,k,j)
+         kpbl(i,j) = k
+         stable(i,j) = brup(i,j).gt.brcr(i,j)
+       else
+          exit
+       endif
+     enddo
      k = kpbl(i,j)
      if(brdn(i,j).ge.brcr(i,j))then
        brint = 0.
@@ -988,22 +983,17 @@ do j = jts,jte
 !$acc loop gang vector tile(32,16)
   do j = jts,jte
    do i = its,ite
-      if(.not.stable(i,j).and.pblflg(i,j))then
-        brdn(i,j) = brup(i,j)
-
-        !find k index where brup_precalc(i,k,j) .gt. brcr(i,j)
-        !$acc loop seq
-        do k = 2,klpbl
-          if (brup_precalc(i,k,j) .gt. brcr(i,j)) then
-            stable(i,j) = .true.
-            exit
-          endif
-        enddo
-        
-        kpbl(i,j) = k-1
-        brup(i,j) = brup_precalc(i,kpbl(i,j),j)
-        if (kpbl(i,j) > 2) brdn(i,j) = brup_precalc(i,kpbl(i,j)-1,j)
-     endif
+!$acc loop seq
+     do k = 2,klpbl
+       if(.not.stable(i,j).and.pblflg(i,j))then
+         brdn(i,j) = brup(i,j)
+         brup(i,j) = brup_precalc(i,k,j)
+         kpbl(i,j) = k
+         stable(i,j) = brup(i,j).gt.brcr(i,j)
+       else
+          exit
+        endif
+     enddo
    enddo
    enddo
 !$acc end parallel
@@ -1072,22 +1062,17 @@ do j = jts,jte
          brcr(i,j) = brcr_sb
        endif
      endif
-      if(.not.stable(i,j).and.pblflg(i,j))then
-        brdn(i,j) = brup(i,j)
-
-        !find k index where brup_precalc(i,k,j) .gt. brcr(i,j)
-        !$acc loop seq
-        do k = 2,klpbl
-          if (brup_precalc(i,k,j) .gt. brcr(i,j)) then
-            stable(i,j) = .true.
-            exit
-          endif
-        enddo
-        
-        kpbl(i,j) = k-1
-        brup(i,j) = brup_precalc(i,kpbl(i,j),j)
-        if (kpbl(i,j) > 2) brdn(i,j) = brup_precalc(i,kpbl(i,j)-1,j)
-     endif
+!$acc loop seq
+     do k = 2,klpbl
+       if(.not.stable(i,j))then
+         brdn(i,j) = brup(i,j)
+         brup(i,j) = brup_precalc(i,k,j)
+         kpbl(i,j) = k
+         stable(i,j) = brup(i,j).gt.brcr(i,j)
+       else
+          exit
+       endif
+     enddo
      if((.not.sfcflg(i,j)).and.hpbl(i,j).lt.zq(i,2,j)) then
        k = kpbl(i,j)
        if(brdn(i,j).ge.brcr(i,j))then
