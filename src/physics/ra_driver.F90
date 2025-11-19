@@ -390,7 +390,7 @@ contains
         real, dimension(:,:,:,:), pointer :: tauaer_sw=>null(), ssaaer_sw=>null(), asyaer_sw=>null()
         real, allocatable:: albedo(:,:),gsw(:,:)
         real, allocatable:: t_1d(:), p_1d(:), Dz_1d(:), qv_1d(:), qc_1d(:), qi_1d(:), qs_1d(:), cf_1d(:)
-        real, allocatable :: qi(:,:,:), qc(:,:,:), qs(:,:,:), cldfra(:,:,:)
+        real, allocatable :: qi(:,:,:), qc(:,:,:), qs(:,:,:), cldfra(:,:,:), re_c(:,:,:), re_i(:,:,:), re_s(:,:,:)
 
         real :: gridkm, ra_dt, declin, hour_frac, air_mass_lay, cld_frc
         real :: relmax, relmin, reimax, reimin
@@ -461,7 +461,7 @@ contains
             tzone = options%rad%tzone
             date_seconds = domain%sim_time%seconds()
             sim_month = domain%sim_time%month
-            julian_day = domain%sim_time%date_to_jd()
+            julian_day = domain%sim_time%date_to_jd()-tzone/24.
             hour_frac = domain%sim_time%TOD_hours()
 
             call calc_solar_date(date_seconds, julian_day, sun_declin_deg, eq_of_time_minutes)
@@ -523,9 +523,9 @@ contains
                       exner => domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d, &
                       water_vapor => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
                       density => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
-                      re_cloud => domain%vars_3d(domain%var_indx(kVARS%re_cloud)%v)%data_3d, &
-                      re_ice => domain%vars_3d(domain%var_indx(kVARS%re_ice)%v)%data_3d, &
-                      re_snow => domain%vars_3d(domain%var_indx(kVARS%re_snow)%v)%data_3d, &
+                      re_c_dom => domain%vars_3d(domain%var_indx(kVARS%re_cloud)%v)%data_3d, &
+                      re_i_dom => domain%vars_3d(domain%var_indx(kVARS%re_ice)%v)%data_3d, &
+                      re_s_dom => domain%vars_3d(domain%var_indx(kVARS%re_snow)%v)%data_3d, &
                       land_emissivity => domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d, &
                       cosine_zenith_angle => domain%vars_2d(domain%var_indx(kVARS%cosine_zenith_angle)%v)%data_2d, &
                       qv_dom => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
@@ -577,6 +577,9 @@ contains
             allocate(qi(ims:ime,kms:kme,jms:jme))
             allocate(qc(ims:ime,kms:kme,jms:jme))
             allocate(qs(ims:ime,kms:kme,jms:jme))
+            allocate(re_c(ims:ime,kms:kme,jms:jme))
+            allocate(re_i(ims:ime,kms:kme,jms:jme))
+            allocate(re_s(ims:ime,kms:kme,jms:jme))
 
             allocate(cldfra(ims:ime,kms:kme,jms:jme))
 
@@ -642,7 +645,36 @@ contains
                     enddo
                 enddo
             endif
-
+            if (F_REC > 0) then
+                !$acc parallel loop gang vector collapse(3) present(re_c_dom, re_c)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                        re_c(i,k,j) = re_c_dom(i,k,j)
+                        enddo
+                    enddo
+                enddo
+            endif
+            if (F_REI > 0) then
+                !$acc parallel loop gang vector collapse(3) present(re_i_dom, re_i)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                        re_i(i,k,j) = re_i_dom(i,k,j)
+                        enddo
+                    enddo
+                enddo
+            endif
+            if (F_RES > 0) then
+                !$acc parallel loop gang vector collapse(3) present(re_s_dom, re_s)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                        re_s(i,k,j) = re_s_dom(i,k,j)
+                        enddo
+                    enddo
+                enddo
+            endif
 
             mp_options=0
 
