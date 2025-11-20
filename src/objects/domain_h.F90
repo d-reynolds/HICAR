@@ -79,7 +79,6 @@ module domain_interface
     logical :: south_boundary = .True.
     logical :: east_boundary = .True.
     logical :: west_boundary = .True.
-    integer :: FILTER_WIDTH = 7
 
     ! store the start (s) and end (e) for the i,j,k dimensions
     integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)

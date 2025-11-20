@@ -883,7 +883,7 @@ contains
         integer, optional,                           intent(in)      :: flux_corr_in, q_id_in
 
         ! interal parameters
-        real    :: t_factor, flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val
+        real    :: t_factor, flux_diff_x, flux_diff_y, denom_val, dz_val
         integer :: i, k, j, flux_corr, q_id
 
         
@@ -898,13 +898,24 @@ contains
 
         ! Choose optimized path based on whether flux correction is needed
         if (flux_corr == 0) then
-            ! FUSED PATH: No flux correction needed
-            ! Compute fluxes on-the-fly and directly update qfluxes
-            ! Saves 6N reads + 3N writes (no intermediate flux storage)
-            call flux_time%start()
-            !$acc wait(q_id) !qold is needed for following function
-            call flux_and_advect_fused(qfluxes,qold,U_m,V_m,W_m,denom,dz,t_factor,q_id)
-            call flux_time%stop()
+            if ((horder==vorder) .or. (horder==5 .and. vorder==3)) then
+                ! FUSED PATH: No flux correction needed
+                ! Compute fluxes and directly update qfluxes
+
+                call flux_time%start()
+                !$acc wait(q_id) !qold is needed for following function
+                call flux_and_advect_fused(qfluxes,qold,U_m,V_m,W_m,denom,dz,t_factor,q_id)
+                call flux_time%stop()
+            else
+                call flux_time%start()
+                !$acc wait(q_id) !qold is needed for following function
+                call flux3(qfluxes,U_m,V_m,W_m,flux_x,flux_z,flux_y,t_factor)
+                call flux_time%stop()
+
+                call sum_time%start()
+                call sum_kernel(flux_x, flux_y, flux_z, qold, qfluxes, denom, dz, q_id)
+                call sum_time%stop()
+            endif
             
         else
             ! STANDARD PATH: Flux correction enabled
@@ -913,29 +924,44 @@ contains
             call flux3(qfluxes,U_m, V_m, W_m, flux_x,flux_z,flux_y,t_factor)
             !$acc wait(q_id) !qold is not needed until after this point
             call flux_time%stop()
-
+            
             call flux_corr_time%start()
             ! Use async version which waits on q_id+100 then applies corrections
             call WRF_flux_corr(qold,U_m, V_m, W_m, flux_x,flux_z,flux_y,dz,denom,(q_id+100))
             call flux_corr_time%stop()
-            
+
             call sum_time%start()
-            !$acc parallel loop gang vector async(q_id) tile(64,2,1) present(qfluxes, qold, flux_x, flux_y, flux_z, denom, dz) private(flux_diff_z)
-            do j = jts, jte
-                do k = kms, kme
-                    do i = its, ite
-                        flux_diff_z = flux_z(i,k+1,j) - merge(0.0, flux_z(i,k,j), k==kms)
-                        qfluxes(i,k,j) = qold(i,k,j) - ((flux_x(i+1,k,j) - flux_x(i,k,j) + &
-                                         flux_y(i,k,j+1) - flux_y(i,k,j) + &
-                                         flux_diff_z / dz(i,k,j)) * denom(i,k,j))
-                    enddo
-                enddo
-            enddo
-            !$acc wait(q_id)
+            call sum_kernel(flux_x, flux_y, flux_z, qold, qfluxes, denom, dz, q_id)
             call sum_time%stop()
         endif
 
     end subroutine adv_std_advect3d
+
+    subroutine sum_kernel(flux_x, flux_y, flux_z, qold, qfluxes, denom, dz, q_id)
+        implicit none
+        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in) :: flux_x, flux_y
+        real, dimension(i_s:i_e+1,kms:kme+1,j_s:j_e+1), intent(in) :: flux_z
+        real, dimension(ims:ime,kms:kme,jms:jme), intent(in) :: qold, denom, dz
+        real, dimension(ims:ime,kms:kme,jms:jme), intent(out) :: qfluxes
+        integer, intent(in) :: q_id
+
+        integer :: i, j, k
+        real :: flux_diff_z
+
+        !$acc parallel loop gang vector async(q_id) tile(64,2,1) present(qfluxes, qold, flux_x, flux_y, flux_z, denom, dz) private(flux_diff_z)
+        do j = jts, jte
+            do k = kms, kme
+                do i = its, ite
+                    flux_diff_z = flux_z(i,k+1,j) - merge(0.0, flux_z(i,k,j), k==kms)
+                    qfluxes(i,k,j) = qold(i,k,j) - ((flux_x(i+1,k,j) - flux_x(i,k,j) + &
+                                        flux_y(i,k,j+1) - flux_y(i,k,j) + &
+                                        flux_diff_z / dz(i,k,j)) * denom(i,k,j))
+                enddo
+            enddo
+        enddo
+        !$acc wait(q_id)
+
+    end subroutine sum_kernel
     
 
     ! subroutine test_divergence(dz)

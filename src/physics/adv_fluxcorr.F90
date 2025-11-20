@@ -47,6 +47,7 @@ contains
         if (allocated(flux_x_up)) deallocate(flux_x_up)
         if (allocated(flux_y_up)) deallocate(flux_y_up)
         if (allocated(flux_z_up)) deallocate(flux_z_up)
+        if (allocated(dumb_q)) deallocate(dumb_q)
 
         allocate(usign(its-1:ite+1,kms:kme,jts-1:jte+1))
         allocate(vsign(its-1:ite+1,kms:kme,jts-1:jte+1))

@@ -120,7 +120,7 @@ contains
                     stop
                 endif
             end do
-            if (STD_OUT_PE) write(*,*) "WARNING: NUM_IO_PER_NODE was not evenly divisible by NUM_IO_PER_NODE. Setting NUM_IO_PER_NODE to ",NUM_IO_PER_NODE
+            if (STD_OUT_PE) write(*,*) "WARNING: NUM_PROC_PER_NODE was not evenly divisible by NUM_IO_PER_NODE. Setting NUM_IO_PER_NODE to ",NUM_IO_PER_NODE
         endif
 
         !Assign one io process per node, this results in best co-array transfer times
