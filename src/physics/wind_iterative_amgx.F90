@@ -33,7 +33,7 @@ module wind_iterative_amgx
     type(c_ptr) :: amgx_vector_rhs = c_null_ptr
     type(c_ptr) :: amgx_solver = c_null_ptr
     
-    logical :: initialized = .False.
+    logical :: initialized_amgx = .False.
     logical :: first_solve = .True.
     ! Grid parameters (same as PETSc version)
     real, parameter::deg2rad=0.017453293
@@ -301,7 +301,7 @@ contains
         character(len=1024) :: solver_file = 'amgx_solver_config.json'
         logical :: file_exists = .false.
 
-        if (initialized) return
+        if (initialized_amgx) return
         
         ! Determine which MPI communicator to use
         if (present(compute_comm)) then
@@ -365,13 +365,8 @@ contains
         
         deallocate(device_ids)
         
-        ! Create matrix, vectors, and solver
-        rc = AMGX_matrix_create(amgx_matrix, amgx_resources, AMGX_mode_dDDI)
-        rc = AMGX_vector_create(amgx_vector_rhs, amgx_resources, AMGX_mode_dDDI)
-        rc = AMGX_vector_create(amgx_vector_solution, amgx_resources, AMGX_mode_dDDI)
-        rc = AMGX_solver_create(amgx_solver, amgx_resources, AMGX_mode_dDDI, amgx_config)
         
-        initialized = .True.
+        initialized_amgx = .True.
     end subroutine
     !>------------------------------------------------------------
     !! Initialize AmgX solver
@@ -381,6 +376,7 @@ contains
         type(domain_t), intent(in) :: domain
         integer :: ierr, rank, nprocs
         integer :: local_n
+        integer(c_int) :: rc
 
 
         call finalize_iter_winds_amgx()  ! Clean up any previous AmgX state
@@ -404,7 +400,13 @@ contains
         
         ! Initialize AmgX with the compute communicator (only compute ranks participate)
         call init_amgx(domain%compute_comms)
-        
+
+        ! Create matrix, vectors, and solver
+        rc = AMGX_matrix_create(amgx_matrix, amgx_resources, AMGX_mode_dDDI)
+        rc = AMGX_vector_create(amgx_vector_rhs, amgx_resources, AMGX_mode_dDDI)
+        rc = AMGX_vector_create(amgx_vector_solution, amgx_resources, AMGX_mode_dDDI)
+        rc = AMGX_solver_create(amgx_solver, amgx_resources, AMGX_mode_dDDI, amgx_config)
+
         if (STD_OUT_PE) print*, "AmgX solver initialized successfully"
         
     end subroutine init_iter_winds_amgx
@@ -658,14 +660,6 @@ contains
             ! (arrays may be over-allocated from initial estimate)
             ! Use the partition_vec we built in build_csr_matrix
 
-            !print out size information for all arrays and n_rows, nnz
-                !print first index where partition_vec == 1
-            do i = 1, size(partition_vec)
-                if (partition_vec(i) == 1) then
-                    print*, "  First index where partition_vec == 1: ", i
-                    exit
-                endif
-            enddo
             print*, "  ----------------------------------------"
             rc = AMGX_matrix_upload_all_global(amgx_matrix, n_rows_global, n_rows, nnz, 1, 1, &
                                                 row_ptrs, col_indices, &
@@ -1378,36 +1372,67 @@ contains
         implicit none
         integer(c_int) :: rc
         
-        if (.not. initialized) return
         
         ! Destroy AmgX objects
-        rc = AMGX_solver_destroy(amgx_solver)
-        rc = AMGX_vector_destroy(amgx_vector_solution)
-        rc = AMGX_vector_destroy(amgx_vector_rhs)
-        rc = AMGX_matrix_destroy(amgx_matrix)
-        rc = AMGX_resources_destroy(amgx_resources)
-        rc = AMGX_config_destroy(amgx_config)
         
         
         ! Unpin and deallocate arrays
         ! Deallocate arrays (no unpinning needed since we don't pin them)
-        if (allocated(row_ptrs)) deallocate(row_ptrs)
+        if (allocated(row_ptrs)) then
+            deallocate(row_ptrs)
+            rc = AMGX_solver_destroy(amgx_solver)
+            rc = AMGX_vector_destroy(amgx_vector_solution)
+            rc = AMGX_vector_destroy(amgx_vector_rhs)
+            rc = AMGX_matrix_destroy(amgx_matrix)
+        endif
         if (allocated(col_indices)) deallocate(col_indices)
         if (allocated(values)) deallocate(values)
         if (allocated(rhs)) deallocate(rhs)
         if (allocated(solution)) deallocate(solution)
         if (allocated(partition_vec)) deallocate(partition_vec)
-        
-        initialized = .False.
-        
+
+        if (allocated(A_coef)) deallocate(A_coef)
+        if (allocated(B_coef)) deallocate(B_coef)
+        if (allocated(C_coef)) deallocate(C_coef)
+        if (allocated(D_coef)) deallocate(D_coef)
+        if (allocated(E_coef)) deallocate(E_coef)
+        if (allocated(F_coef)) deallocate(F_coef)
+        if (allocated(G_coef)) deallocate(G_coef)
+        if (allocated(H_coef)) deallocate(H_coef)
+        if (allocated(I_coef)) deallocate(I_coef)
+        if (allocated(J_coef)) deallocate(J_coef)
+        if (allocated(K_coef)) deallocate(K_coef)
+        if (allocated(L_coef)) deallocate(L_coef)
+        if (allocated(M_coef)) deallocate(M_coef)
+        if (allocated(N_coef)) deallocate(N_coef)
+        if (allocated(O_coef)) deallocate(O_coef)
+
+        if (allocated(dz_if)) then
+            !$acc exit data delete(dz_if, div, alpha)
+            deallocate(dz_if)
+        endif
+        if (allocated(jaco)) deallocate(jaco)
+        if (allocated(dzdx)) deallocate(dzdx)
+        if (allocated(dzdy)) deallocate(dzdy)
+        if (allocated(dzdx_surf)) deallocate(dzdx_surf)
+        if (allocated(dzdy_surf)) deallocate(dzdy_surf)
+        if (allocated(sigma)) deallocate(sigma)
+        if (allocated(alpha)) deallocate(alpha)
+        if (allocated(div)) deallocate(div)
+
+        first_solve = .True.
     end subroutine finalize_iter_winds_amgx
 
     subroutine finalize_amgx()
         implicit none
+        integer(c_int) :: rc
 
-        if (initialized) then
+        if (initialized_amgx) then
+            rc = AMGX_resources_destroy(amgx_resources)
+            rc = AMGX_config_destroy(amgx_config)
             ! ! Finalize library
             call AMGX_finalize()
+            initialized_amgx = .False.
         endif
 
     end subroutine finalize_amgx

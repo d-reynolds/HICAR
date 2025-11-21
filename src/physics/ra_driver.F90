@@ -264,32 +264,40 @@ contains
             ! the GPU memory requirements. A good base is 200x200 horizontal points per block
             nblocks = MAX(1, ((ite - its + 1)*(jte - jts + 1)) / 40000)
 
-            if (k_dist_sw%is_loaded() .or. k_dist_lw%is_loaded()) then
-                call k_dist_sw%finalize()
-                call k_dist_lw%finalize()
-                call cloud_optics_sw%finalize()
-                call cloud_optics_lw%finalize()
+            ! if (k_dist_sw%is_loaded() .or. k_dist_lw%is_loaded()) then
+                ! call k_dist_sw%finalize()
+                ! call k_dist_lw%finalize()
+                ! call cloud_optics_sw%finalize()
+                ! call cloud_optics_lw%finalize()
+            ! endif
+
+            if (.not.(k_dist_sw%is_loaded()) .and. .not.(k_dist_lw%is_loaded())) then
+
+                call rte_config_checks(logical(.false., wl))
+
+                call stop_on_err(gas_concs%init(gas_names))
+
+                DO i = 1, ngas
+                    CALL stop_on_err(gas_concs%set_vmr(gas_names(i), 0._wp))
+                ENDDO
+
+                ! ----------------------------------------------------------------------------
+                ! load data into classes
+                call load_and_init(k_dist_sw, trim(k_dist_sw_file), gas_concs)
+                call load_and_init(k_dist_lw, trim(k_dist_lw_file), gas_concs)
+
+                !
+                call load_cld_lutcoeff(cloud_optics_lw, trim(cloud_optics_lw_file))
+                call load_cld_lutcoeff(cloud_optics_sw, trim(cloud_optics_sw_file))
+                call stop_on_err(cloud_optics_lw%set_ice_roughness(2))
+                call stop_on_err(cloud_optics_sw%set_ice_roughness(2))
+
+                if (do_aerosols) then
+                    ! Load aerosol optics coefficients from lookup tables
+                    call load_aero_lutcoeff (aerosol_optics_lw, trim(aerosol_optics_lw_file))
+                    call load_aero_lutcoeff (aerosol_optics_sw, trim(aerosol_optics_sw_file))
+                end if
             endif
-            call rte_config_checks(logical(.false., wl))
-
-            call set_atmo_gas_conc(domain)
-
-            ! ----------------------------------------------------------------------------
-            ! load data into classes
-            call load_and_init(k_dist_sw, k_dist_sw_file, gas_concs)
-            call load_and_init(k_dist_lw, k_dist_lw_file, gas_concs)
-
-            !
-            call load_cld_lutcoeff(cloud_optics_lw, cloud_optics_lw_file)
-            call load_cld_lutcoeff(cloud_optics_sw, cloud_optics_sw_file)
-            call stop_on_err(cloud_optics_lw%set_ice_roughness(2))
-            call stop_on_err(cloud_optics_sw%set_ice_roughness(2))
-
-            if (do_aerosols) then
-                ! Load aerosol optics coefficients from lookup tables
-                call load_aero_lutcoeff (aerosol_optics_lw, aerosol_optics_lw_file)
-                call load_aero_lutcoeff (aerosol_optics_sw, aerosol_optics_sw_file)
-            end if
 #else
             write(*,*) "ERROR: RRTMGP radiation option selected but HICAR not compiled with RTE-RRTMGP library."
             stop
@@ -586,7 +594,7 @@ contains
             allocate(albedo(ims:ime,jms:jme))
             allocate(gsw(ims:ime,jms:jme))
 
-            !$acc data create(t_1d, p_1d, Dz_1d, qv_1d, qc_1d, qi_1d, qs_1d, cf_1d, qi, qc, qs, cldfra, albedo, gsw)
+            !$acc data create(t_1d, p_1d, Dz_1d, qv_1d, qc_1d, qi_1d, qs_1d, cf_1d, qi, qc, qs, re_c, re_i, re_s, cldfra, albedo, gsw)
 
             !$acc kernels
             qi = 0
@@ -965,7 +973,7 @@ contains
                     !$acc data create(p_lay, t_lay, p_lev, t_lev, q, rel, rei, lwp, zwp, iwp, swp, res)
 
                     !$acc parallel loop gang vector collapse(2) private(col_indx) present(density, dz_interface, pressure, temperature, &
-                    !$acc            qv_dom, re_cloud, re_ice, re_snow, pressure_i, temperature_i, p_lay, t_lay, q, rel, rei, lwp, zwp, iwp, swp, res, p_lev, t_lev, qi) wait(1)
+                    !$acc            qv_dom, re_c_dom, re_i_dom, re_s_dom, pressure_i, temperature_i, p_lay, t_lay, q, rel, rei, lwp, zwp, iwp, swp, res, p_lev, t_lev, qi) wait(1)
                     do j = jb_s, jb_e
                         do i = its, ite
                             col_indx = (i-its+1) + (j - jb_s)*(ite - its + 1)
@@ -986,9 +994,9 @@ contains
                                     
                                     lwp(col_indx,k) = 1000.0*qc(i,k,j) * air_mass_lay / cld_frc
                                     iwp(col_indx,k) = 1000.0*qi(i,k,j) * air_mass_lay / cld_frc
-                                    rel(col_indx,k) = max(relmin, min(relmax, re_cloud(i,k,j)))
-                                    rei(col_indx,k) = max(reimin, min(reimax, re_ice(i,k,j)))
-                                    res(col_indx,k) = max(reimin, min(reimax, re_snow(i,k,j)))
+                                    rel(col_indx,k) = max(relmin, min(relmax, re_c_dom(i,k,j)))
+                                    rei(col_indx,k) = max(reimin, min(reimax, re_i_dom(i,k,j)))
+                                    res(col_indx,k) = max(reimin, min(reimax, re_s_dom(i,k,j)))
                                 else
                                     lwp(col_indx,k) = 0.0_wp
                                     iwp(col_indx,k) = 0.0_wp

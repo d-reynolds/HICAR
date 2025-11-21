@@ -7,10 +7,10 @@ submodule(options_interface) options_implementation
     use time_object,                only : Time_type
     use string,                     only : str
     use model_tracking,             only : print_model_diffs
-    use output_metadata,            only : get_varname, get_varindx
+    use output_metadata,            only : get_varname, get_varindx, get_varmeta
     use namelist_utils,             only : set_nml_var, set_nml_var_default, set_namelist, write_nml_file_end
     use iso_fortran_env
-
+    use meta_data_interface,        only : meta_data_t
     implicit none
 
 
@@ -139,8 +139,9 @@ contains
         implicit none
         class(options_t), intent(inout)::this
 
+        type(meta_data_t) :: tmp_meta
         integer :: i
-
+        logical :: output_zvar = .False.
         ! Check that static domain file exists
         if (trim(this%domain%init_conditions_file) /= '') then
             call check_file_exists(trim(this%domain%init_conditions_file), message='A static domain file does not exist.')
@@ -161,7 +162,16 @@ contains
                 if (this%output%vars_for_output(i) > 0) this%output%vars_for_output(i) = 0
                 if (this%vars_for_restart(i) > 0) this%vars_for_restart(i) = 0
             endif
+            !see if we have any 3d variables requested, if so we will need to output z levels
+            if (this%output%vars_for_output(i)+this%vars_for_restart(i) > 0) then
+                tmp_meta = get_varmeta(i)
+                if (tmp_meta%three_d) output_zvar = .True.
+            endif
         enddo
+        ! Force the output of lat/lon, since these should always be present with output data
+        this%output%vars_for_output(kVARS%latitude) = 1
+        this%output%vars_for_output(kVARS%longitude) = 1
+        if (output_zvar) this%output%vars_for_output(kVARS%z) = 1
 
         if (this%mp%top_mp_level < 0) this%mp%top_mp_level = this%domain%nz + this%mp%top_mp_level
 
@@ -496,6 +506,15 @@ contains
             read(name_unit,iostat=rc,nml=output,IOMSG=error_msg)
             close(name_unit)
             if (rc /= 0) call print_nml_error('output',msg=error_msg,iostat=rc)
+        endif
+        if (ALL(output_vars(:,n_indx)==kCHAR_NO_VAL)) then
+            if (STD_OUT_PE) write(*,*) "  WARNING: output_vars not specified in namelist for domain: ", n_indx
+            if (n_indx == 1) then
+                stop 'output_vars must be specified in namelist for at least the first domain'
+            else
+                if (STD_OUT_PE) write(*,*) "  WARNING: Copying over the values from the first domain"
+            endif
+            output_vars(:,n_indx) = output_vars(:,1)
         endif
 
         do j=1, kMAX_STORAGE_VARS
