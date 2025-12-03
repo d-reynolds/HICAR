@@ -2948,12 +2948,12 @@ contains
                         dz = input_z(i,1,j)-output_z(i,k,j)
                         
                         !Assume lapse rate of -6.5ºC/1km
-                        potential_temp(i,k,j) = potential_temp(i,k,j) + 6.5*dz/1000.0
+                        !potential_temp(i,k,j) = potential_temp(i,k,j) + 6.5*dz/1000.0
                         
                         !estimate pressure difference 1100 Pa for each 100m difference for exner function
-                        H = 29.3 * (potential_temp(i,k,j) * exner_function(pressure(i,k,j)))
-                        pressure(i,k,j) = pressure(i,k,j) * exp(dz/H)
-                        !pressure(i,k,j) = pressure(i,k,j) * exp( ((gravity/R_d) * dz) / t )
+                        p_guess = pressure(i,k,j) + 1100*dz/100.0
+                        t = exner_function(p_guess) * potential_temp(i,k,j)
+                        pressure(i,k,j) = pressure(i,k,j) * exp( ((gravity/R_d) * dz) / t )
                     else
                         exit
                     endif
