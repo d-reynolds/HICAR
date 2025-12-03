@@ -129,7 +129,7 @@ contains
     !   The convective wind field balancing is currently commented out.
     !
     !------------------------------------------------------------------------------    
-    subroutine balance_uvw(domain, options)
+    subroutine balance_uvw(domain, options, update_in)
         ! This subroutine balances the u, v, and w wind components in the domain
         
         implicit none
@@ -139,9 +139,15 @@ contains
         
         ! options: a derived data type containing various options
         type(options_t), intent(in) :: options
-                
+        
+        ! update_in: an optional logical variable indicating whether to update the wind components
+        logical, optional, intent(in) :: update_in
+        
         ! divergence: a 3D array to store the divergence of the wind field
         real, dimension(ims:ime, kms:kme, jms:jme) :: divergence
+        
+        ! update: a logical variable to control whether to update the wind components
+        logical :: update
         
         ! Associate various variables from the domain data structure for easier access
         associate(dx => domain%dx, &
@@ -151,9 +157,24 @@ contains
                     jaco_v => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
                     jaco_w => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
         
-        call calc_divergence(divergence, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
-                domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only=.True.)
-        call calc_w(domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, divergence, dz, jaco_w, rho, options%adv%advect_density)
+        ! Set the update flag to false initially
+        update = .False.
+        ! If update_in is present, set update flag based on its value
+        if (present(update_in)) update = update_in
+        
+        ! If update is true, calculate the divergence and w component from the dqdt_3d arrays
+        if (update) then
+            call calc_divergence(divergence, domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+            domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only=.True.)
+            call calc_w(domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, divergence, dz, jaco_w, rho, &
+                        options%adv%advect_density)
+
+        ! If update is false, calculate the divergence and w component from the data_3d arrays
+        else
+            call calc_divergence(divergence, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                    domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, jaco_u, jaco_v, jaco_w, dz, dx, rho, options, horz_only=.True.)
+            call calc_w(domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, divergence, dz, jaco_w, rho, options%adv%advect_density)
+        endif
         
         end associate
                 
@@ -320,42 +341,90 @@ contains
         
     end subroutine
 
+    !>------------------------------------------------------------
+    !! Apply the base wind field from the forcing data
+    !!!! This subroutine applies the wind forcing data to the model domain.
+    !! It handles both the initial application of the wind field and subsequent updates
+    !! based on the specified update time interval.
+    !! !!------------------------------------------------------------
     subroutine apply_base_from_forcing(domain, options)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t), intent(in)    :: options
 
-        !Compute the forcing wind field at the next update step, assuming a linear interpolation through time
-        do i = ims,ime+1
-            do k = kms, kme
-                do j = jms, jme
-                    domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d(i,k,j)
-                enddo
-            enddo
-        enddo
-        
-        do i = ims,ime
-            do k = kms, kme
-                do j = jms, jme+1
-                    domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d(i,k,j)
-                enddo
-            enddo
-        enddo
-        
-        if (.not.(options%forcing%wvar=="")) then
-            do i = ims,ime
+        if (first_wind) then
+            !Compute the forcing wind field at the current step
+            do i = ims,ime+1
                 do k = kms, kme
                     do j = jms, jme
-                        domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d(i,k,j)
+                        domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d(i,k,j)
                     enddo
                 enddo
             enddo
-        else
-            !If we have not read in W_real from forcing, set target w_real to 0.0. This minimizes vertical motion in solution
-            domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d = 0.0
-        endif
             
-        end subroutine apply_base_from_forcing
+            do i = ims,ime
+                do k = kms, kme
+                    do j = jms, jme+1
+                        domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
+            
+            if (.not.(options%forcing%wvar=="")) then
+                do i = ims,ime
+                    do k = kms, kme
+                        do j = jms, jme
+                            domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d(i,k,j)
+                        enddo
+                    enddo
+                enddo
+            else
+                do i = ims,ime
+                    do k = kms, kme
+                        do j = jms, jme
+                            domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i,k,j) = 0.0
+                        enddo
+                    enddo
+                enddo
+            endif
+        else
+            !Compute the forcing wind field at the next update step, assuming a linear interpolation through time
+            do i = ims,ime+1
+                do k = kms, kme
+                    do j = jms, jme
+                        domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d(i,k,j)+domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%dqdt_3d(i,k,j)*options%wind%update_dt%seconds()
+                    enddo
+                enddo
+            enddo
+            
+            do i = ims,ime
+                do k = kms, kme
+                    do j = jms, jme+1
+                        domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d(i,k,j)+domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%dqdt_3d(i,k,j)*options%wind%update_dt%seconds()
+                    enddo
+                enddo
+            enddo
+            
+            if (.not.(options%forcing%wvar=="")) then
+                do i = ims,ime
+                    do k = kms, kme
+                        do j = jms, jme
+                            domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i,k,j) = domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d(i,k,j)+domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%dqdt_3d(i,k,j)*options%wind%update_dt%seconds()
+                        enddo
+                    enddo
+                enddo
+            else
+                do i = ims,ime
+                    do k = kms, kme
+                        do j = jms, jme
+                            domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(i,k,j) = 0.0
+                        enddo
+                    enddo
+                enddo
+            endif
+        endif
+
+    end subroutine apply_base_from_forcing
 
     !>------------------------------------------------------------
     !! Apply wind field physics and adjustments
@@ -364,76 +433,42 @@ contains
     !! This should ONLY be called once for each forcing step, otherwise effects will be additive.
     !!
     !!------------------------------------------------------------
-    subroutine update_winds(domain, options, new_input)
+    subroutine update_winds(domain, options)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in)    :: options
-        logical, optional, intent(in)           :: new_input
 
         real, allocatable, dimension(:,:,:) :: div
         integer :: nx, ny, nz, it
-        logical :: newinput
-
-        newinput = .False.
-        if (present(new_input)) newinput = new_input
+        logical :: update
         
         if (first_wind) then            
-            first_wind = .False.
             ! do nothing if this is a restart run -- then we have read in the already calculated winds
-            if (options%restart%restart) return
-
-            !do this now, so that we will have some values in data_3d when calling update_stability
-            call apply_base_from_forcing(domain, options)
+            if (options%restart%restart) then
+                first_wind = .False.
+                return
+            endif
         endif
+
+        call apply_base_from_forcing(domain, options)
 
         if (( (options%wind%alpha_const<=0 .and. (options%physics%windtype==kLINEAR_ITERATIVE_WINDS &
             .or. options%physics%windtype==kITERATIVE_WINDS)) .or. options%wind%Sx) ) then
             call update_stability(domain, options)
         endif
 
-        if (newinput) then
-
-            !Set the state of the forcing winds to be at the end of the next wind update step
-            domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d = domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d + &
-                        domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%dqdt_3d*options%wind%update_dt%seconds()
-            domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d = domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d + &
-                        domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%dqdt_3d*options%wind%update_dt%seconds()
-
-            if (.not.(options%forcing%wvar=="")) domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d = domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d + domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%dqdt_3d*options%wind%update_dt%seconds()
-            
-            call update_winds(domain, options)
-
-            !Set the state of the forcing winds back to be at the current time
-            domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d = domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d - &
-                        domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%dqdt_3d*options%wind%update_dt%seconds()
-            domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d = domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d - &
-                        domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%dqdt_3d*options%wind%update_dt%seconds()
-
-            if (.not.(options%forcing%wvar=="")) domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d = domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d - domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%dqdt_3d*options%wind%update_dt%seconds()
-
-            domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d
-            domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d
-
-            ! call a diagnostic update to overwrite the value for density
-            ! which was earlier calculated using the future pressure field
-            call domain%diagnostic_update()
-
-        endif
-
-        call apply_base_from_forcing(domain, options)
-
         ! rotate winds from cardinal directions to grid orientation (e.g. u is grid relative not truly E-W)
-        call make_winds_grid_relative(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, domain%vars_2d(domain%var_indx(kVARS%sintheta)%v)%data_2d, domain%vars_2d(domain%var_indx(kVARS%costheta)%v)%data_2d)
+        call make_winds_grid_relative(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, domain%vars_2d(domain%var_indx(kVARS%sintheta)%v)%data_2d, domain%vars_2d(domain%var_indx(kVARS%costheta)%v)%data_2d)
 
-        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
-        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
+        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+
         if (options%wind%Sx) then
-            call apply_Sx(domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d,domain%vars_2d(domain%var_indx(kVARS%TPI)%v)%data_2d, &
-                    domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
-                    domain%vars_3d(domain%var_indx(kVARS%blk_ri)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, &
-                    domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d, ims, ime, kms, kme, jms, jme, its, ite, jts, jte)
-            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
-            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
+            call apply_Sx(domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d,domain%vars_2d(domain%var_indx(kVARS%TPI)%v)%data_2d,domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%blk_ri)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,ims,ime,kms,kme,jms,jme,its,ite,jts,jte)
+
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+
         endif 
 
         if (options%wind%thermal) then
@@ -444,15 +479,15 @@ contains
             ! If model is running with a pbl scheme that supplies a 3D K_h, pass that here
             if (options%physics%boundarylayer == kPBL_YSU) then
                 call apply_thermal_winds(domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,  &
-                                     domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dz)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d,&
+                                     domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dz)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,&
                                      domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%coeff_heat_exchange_3d)%v)%data_3d)
             else
                 call apply_thermal_winds(domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,  &
                                      domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dz)%v)%data_3d,                                                       &
-                                     domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d)
+                                     domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d)
             endif
-            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
-            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
         endif 
 
         ! linear winds
@@ -473,7 +508,7 @@ contains
 
                 call calc_idealized_wgrid(domain)
 
-                call calc_divergence(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                call calc_divergence(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
                                 domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,domain%dx, &
                                 domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options,horz_only=.False.)
 
@@ -482,7 +517,7 @@ contains
                 ! -- Do this all a second time to minimize discretization artifacts
                 call calc_idealized_wgrid(domain)
 
-                call calc_divergence(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                call calc_divergence(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,domain%dx, &
                         domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options,horz_only=.False.)
 
@@ -495,12 +530,12 @@ contains
             call Obrien_winds(domain, options, update_in=.True.)
         endif
 
-        call balance_uvw(domain,options)
-        
-        !reset w_real back to the original forcing field
-        call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,  &
-                domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d,      &
-                domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d,      &
+        call balance_uvw(domain,options,update_in=.True.)
+
+
+        call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,  &
+                domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,      &
+                domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
                 domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
                 domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, &
                 domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, &
@@ -508,6 +543,34 @@ contains
                 domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
                 domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
 
+        !If not an update, then transfer the dqdt fields to data_3d
+        if (first_wind) then
+            do i = ims,ime+1
+                do k = kms, kme
+                    do j = jms, jme
+                        domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
+
+            do i = ims,ime
+                do k = kms, kme
+                    do j = jms, jme+1
+                        domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
+
+            do i = ims,ime
+                do k = kms, kme
+                    do j = jms, jme
+                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
+        endif
+        
+        first_wind = .False.
         
     end subroutine update_winds
     
@@ -538,28 +601,28 @@ contains
         type(domain_t), intent(inout) :: domain
 
         !Call this, passing 0 for w_grid, to get vertical components of vertical motion
-        call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v) %data_3d,      &
-                        domain%vars_3d(domain%var_indx(kVARS%v)%v) %data_3d,      &
-                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d*0.0,      &
-                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d,      &
-                        domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
-                        domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
+        call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v) %dqdt_3d,      &
+                domain%vars_3d(domain%var_indx(kVARS%v)%v) %dqdt_3d,      &
+                domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d*0.0,      &
+                domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
+                domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
+                domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
 
         !apply any w_real
-        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d = (domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d-domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d)
+        domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = (domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d-domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
 
         !stagger w, which was just calculated at the mass points, to the vertical k-levels, so that we can calculate divergence with it
         do i = ims,ime
             do j = jms, jme
                 do k = kms, kme-1
-                    domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j) = (domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j) + &
-                                                            domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k+1,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j))/ &
+                    domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k,j) = (domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j) + &
+                                                            domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(i,k+1,j)*domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j))/ &
                                         (domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k,j)+domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,k+1,j))
                 enddo
             enddo
         enddo
-        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(:,kme,:) = 0.0
-        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d = domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d / domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d
+        domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(:,kme,:) = 0.0
+        domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d / domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d
 
     end subroutine calc_idealized_wgrid
     
@@ -688,7 +751,7 @@ contains
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.False.,corners=.True.)
 
         !First call bal_uvw to generate an initial-guess for vertical winds
-        call balance_uvw(domain, options)
+        call balance_uvw(domain, options, update_in=.False.)
 
         ! Calculate and apply correction to w-winds
         wind_k = kme
