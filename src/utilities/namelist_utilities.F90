@@ -378,10 +378,12 @@ contains
                 end do
             endif
         ! Check if the variable was not set. In this case, we just set it to be blank ("")
-        elseif (trim(var_val) == kCHAR_NO_VAL) then
+        elseif (trim(var_val) == "" .or. trim(var_val) == kCHAR_NO_VAL) then
             var = ""
             return
         endif
+
+
 
         ! if (var == kCHAR_NO_VAL) then
         !     var = ""
