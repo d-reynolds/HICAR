@@ -268,6 +268,21 @@ contains
             call check_file_exists(trim(this%restart%restart_folder), message='Restart folder does not exist.')
         endif
 
+        ! Check that auto_sleve options are consistent
+        if (this%domain%auto_sleve > 0) then
+            if (this%domain%auto_sleve == 1 .and. (this%domain%stretch_fac <= 0.5 .or. this%domain%stretch_fac > 1.0)) then
+                write(*,*) "  WARNING WARNING WARNING"
+                write(*,*) "  WARNING When using auto_sleve = 1, stretch_fac should be 0.5 < stretch_fac < 1.0 but is currently ", this%domain%stretch_fac
+                write(*,*) "  WARNING WARNING WARNING"
+                stop
+            else if (this%domain%auto_sleve == 2 .and. (this%domain%stretch_fac > 1.0)) then
+                write(*,*) "  WARNING WARNING WARNING"
+                write(*,*) "  WARNING When using auto_sleve = 2, stretch_fac should be 0.0001 < stretch_fac < 1.0 but is currently ", this%domain%stretch_fac
+                write(*,*) "  WARNING WARNING WARNING"
+                stop
+            endif
+        endif
+
         !clean output var list
         do i=1, size(this%output%vars_for_output)
             if ((this%output%vars_for_output(i)+this%vars_for_restart(i) > 0) .and. (this%vars_to_allocate(i) <= 0)) then
@@ -310,7 +325,7 @@ contains
         if (this%physics%snowmodel==kSM_FSM) then
             kSNOW_GRID_Z = this%sm%fsm_nsnow_max
             kSNOWSOIL_GRID_Z = kSNOW_GRID_Z+kSOIL_GRID_Z
-    endif
+        endif
 
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
         if ((this%physics%landsurface>0).and.(this%physics%boundarylayer==0)) then
@@ -400,7 +415,7 @@ contains
         ! check if the last entry in dz_levels is zero, which would indicate that nz is larger than the number
         ! of entries in dz_levels, or that the user passed bad data
         if (this%domain%nz > 1) then
-            if (this%domain%dz_levels(this%domain%nz) == 0) then
+            if ( (this%domain%dz_levels(this%domain%nz) == 0) .and. (this%domain%auto_sleve == 0) ) then
                 if (STD_OUT_PE) write(*,*) "  nz is larger than the number of entries in dz_levels, or the last entry in dz_levels is zero."
                 stop
             endif
@@ -1122,8 +1137,8 @@ contains
         real, dimension(MAXLEVELS, kMAX_NESTS) :: dz_levels
         logical, dimension(kMAX_NESTS) :: sleve, use_agl_height
 
-        real, dimension(kMAX_NESTS) :: dx, flat_z_height, decay_rate_L_topo, decay_rate_S_topo, sleve_n, agl_cap, max_agl_height
-        integer, dimension(kMAX_NESTS) :: nz, longitude_system, terrain_smooth_windowsize, terrain_smooth_cycles
+        real, dimension(kMAX_NESTS) :: dx, flat_z_height, decay_rate_L_topo, decay_rate_S_topo, sleve_n, agl_cap, max_agl_height, height_lowest_level, model_top_height, stretch_fac
+        integer, dimension(kMAX_NESTS) :: nz, longitude_system, terrain_smooth_windowsize, terrain_smooth_cycles, auto_sleve
 
         character(len=kMAX_FILE_LENGTH) :: init_conditions_file(kMAX_NESTS)
 
@@ -1139,7 +1154,9 @@ contains
                             soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
                             vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
                             sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, & !! MJ added
-                            dz_levels, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n
+                            dz_levels, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n, &
+                            auto_sleve, height_lowest_level, model_top_height, stretch_fac !! MS added
+
         CHARACTER(LEN=200) :: error_msg
 
         read_namelist = .True.
@@ -1164,6 +1181,12 @@ contains
         call set_nml_var_default(sleve_n, 'sleve_n', print_info, gennml)
         call set_nml_var_default(use_agl_height, 'use_agl_height', print_info, gennml)
         call set_nml_var_default(agl_cap, 'agl_cap', print_info, gennml)
+
+        call set_nml_var_default(dz_levels, 'dz_levels', print_info, gennml)
+        call set_nml_var_default(auto_sleve, 'auto_sleve', print_info, gennml)
+        call set_nml_var_default(height_lowest_level, 'height_lowest_level', print_info, gennml)
+        call set_nml_var_default(model_top_height, 'model_top_height', print_info, gennml)
+        call set_nml_var_default(stretch_fac, 'stretch_fac', print_info, gennml)
 
         call set_nml_var_default(hgt_hi, 'hgt_hi', print_info, gennml)
         call set_nml_var_default(landvar, 'landvar', print_info, gennml)
@@ -1196,8 +1219,6 @@ contains
         call set_nml_var_default(slope_angle_var, 'slope_angle_var', print_info, gennml)
         call set_nml_var_default(aspect_angle_var, 'aspect_angle_var', print_info, gennml)
         call set_nml_var_default(shd_var, 'shd_var', print_info, gennml)
-
-        call set_nml_var_default(dz_levels, 'dz_levels', print_info, gennml)
 
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
@@ -1235,6 +1256,12 @@ contains
         call set_nml_var(domain_options%sleve_n, sleve_n(n_indx), 'sleve_n', sleve_n(1))
         call set_nml_var(domain_options%use_agl_height, use_agl_height(n_indx), 'use_agl_height', use_agl_height(1))
         call set_nml_var(domain_options%agl_cap, agl_cap(n_indx), 'agl_cap', agl_cap(1))
+
+        call set_nml_var(domain_options%auto_sleve, auto_sleve(n_indx), 'auto_sleve', auto_sleve(1))
+        call set_nml_var(domain_options%height_lowest_level, height_lowest_level(n_indx), 'height_lowest_level', height_lowest_level(1))
+        call set_nml_var(domain_options%model_top_height, model_top_height(n_indx), 'model_top_height', model_top_height(1))
+        call set_nml_var(domain_options%stretch_fac, stretch_fac(n_indx), 'stretch_fac', stretch_fac(1))
+
 
         allocate(domain_options%dz_levels(domain_options%nz))
         
@@ -1295,7 +1322,7 @@ contains
         
         ! if nz wasn't specified in the namelist, we assume a HUGE number of levels
         ! so now we have to figure out what the actual number of levels read was
-        if (ALL(dz_levels(:,n_indx)==kREAL_NO_VAL)) then
+        if (ALL(dz_levels(:,n_indx)==kREAL_NO_VAL) .and. ( (sleve(n_indx) .eqv. .True. .and. auto_sleve(n_indx)==0) .or. (sleve(n_indx) .eqv. .False.) ) ) then
             if (STD_OUT_PE) write(*,*) "  WARNING: dz_levels not specified in namelist for domain: ", n_indx
             if (n_indx == 1) then
                 stop 'dz_levels must be specified in namelist for at least the first domain'
@@ -1304,7 +1331,7 @@ contains
             endif
             dz_levels(:,n_indx) = dz_levels(:,1)
         endif
-        if (domain_options%nz==MAXLEVELS) then
+        if ((domain_options%nz==MAXLEVELS) .and. (auto_sleve(n_indx) == 0)) then
             do this_level=1,MAXLEVELS-1
                 if (dz_levels(this_level+1,n_indx)<=0) then
                     domain_options%nz=this_level
