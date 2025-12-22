@@ -135,7 +135,8 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
         call C_F_POINTER(tmp_ptr, this%south_in_3d, [nx, nz, ny])
 #endif
         allocate(this%south_in_buffer(1:this%grid%ns_halo_nx, 1:nz, 1:this%halo_size+1))
-
+        allocate(this%south_in_buffer_2d(1:this%grid%ns_halo_nx, 1:this%halo_size+1))
+        !$acc enter data copyin(this%south_in_buffer_2d, this%south_in_buffer)
 #ifdef _OPENACC
         allocate(this%north_in_3d(nx, nz, ny))
         !$acc enter data copyin(this%north_in_3d)
@@ -147,6 +148,8 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
         call C_F_POINTER(tmp_ptr, this%north_in_3d, [nx, nz, ny])
 #endif
         allocate(this%north_in_buffer(1:this%grid%ns_halo_nx, 1:nz, 1:this%halo_size+1))
+        allocate(this%north_in_buffer_2d(1:this%grid%ns_halo_nx, 1:this%halo_size+1))
+        !$acc enter data copyin(this%north_in_buffer_2d, this%north_in_buffer)
 
         nx = this%halo_size+1
         nz = this%grid%halo_nz
@@ -164,6 +167,8 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
         call C_F_POINTER(tmp_ptr, this%east_in_3d, [nx, nz, ny])
 #endif
         allocate(this%east_in_buffer(1:this%halo_size+1, 1:nz, 1:this%grid%ew_halo_ny))
+        allocate(this%east_in_buffer_2d(1:this%halo_size+1, 1:this%grid%ew_halo_ny))
+        !$acc enter data copyin(this%east_in_buffer_2d, this%east_in_buffer)
 
 #ifdef _OPENACC
         allocate(this%west_in_3d(nx, nz, ny))
@@ -176,7 +181,8 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
         call C_F_POINTER(tmp_ptr, this%west_in_3d, [nx, nz, ny])
 #endif
         allocate(this%west_in_buffer(1:this%halo_size+1, 1:nz, 1:this%grid%ew_halo_ny))
-
+        allocate(this%west_in_buffer_2d(1:this%halo_size+1, 1:this%grid%ew_halo_ny))
+        !$acc enter data copyin(this%west_in_buffer_2d, this%west_in_buffer)
         this%north_in_3d = 1
         this%south_in_3d = 1
         this%east_in_3d = 1
@@ -1367,15 +1373,20 @@ module subroutine put_north(this,var,do_dqdt)
   msg_size = 1
   indx_start = var%grid%jte-offs-var%grid%halo_size+1
 
-  !$acc data present(var, this%north_in_buffer)
+  !$acc data present(var, this%north_in_buffer, this%north_in_buffer_2d)
 
   if (var%two_d) then
     !$acc parallel loop gang vector collapse(2)
     do j = indx_start, var%grid%jte
         do i = var%grid%its, var%grid%ite
-            this%north_in_buffer(i-var%grid%its+1,1,j-indx_start+1) = var%data_2d(i,j)
+            this%north_in_buffer_2d(i-var%grid%its+1,j-indx_start+1) = var%data_2d(i,j)
         enddo
     enddo
+    !$acc host_data use_device(this%north_in_buffer_2d)
+    call MPI_Put(this%north_in_buffer_2d, msg_size, &
+        var%grid%NS_halo, this%north_neighbor, disp, msg_size, var%grid%NS_win_halo, this%south_in_win)
+    !$acc end host_data
+
   else
       if (dqdt) then
           !$acc parallel loop gang vector collapse(3)
@@ -1396,12 +1407,12 @@ module subroutine put_north(this,var,do_dqdt)
             enddo
           enddo
       endif
+    !$acc host_data use_device(this%north_in_buffer)
+    call MPI_Put(this%north_in_buffer, msg_size, &
+        var%grid%NS_halo, this%north_neighbor, disp, msg_size, var%grid%NS_win_halo, this%south_in_win)
+    !$acc end host_data
   endif
 
-  !$acc host_data use_device(this%north_in_buffer)
-  call MPI_Put(this%north_in_buffer, msg_size, &
-      var%grid%NS_halo, this%north_neighbor, disp, msg_size, var%grid%NS_win_halo, this%south_in_win)
-  !$acc end host_data
 
   !$acc end data
 end subroutine
@@ -1425,15 +1436,19 @@ module subroutine put_south(this,var,do_dqdt)
   msg_size = 1
   indx_end = var%grid%jts+offs+var%grid%halo_size-1
 
-  !$acc data present(var, this%south_in_buffer)
+  !$acc data present(var, this%south_in_buffer, this%south_in_buffer_2d)
 
   if (var%two_d) then
           !$acc parallel loop gang vector collapse(2)
           do j = var%grid%jts, indx_end
             do i = var%grid%its, var%grid%ite
-              this%south_in_buffer(i-var%grid%its+1,1,j-var%grid%jts+1) = var%data_2d(i,j)
+              this%south_in_buffer_2d(i-var%grid%its+1,j-var%grid%jts+1) = var%data_2d(i,j)
             enddo
           enddo
+        !$acc host_data use_device(this%south_in_buffer_2d)
+        call MPI_Put(this%south_in_buffer_2d, msg_size, &
+            var%grid%NS_halo, this%south_neighbor, disp, msg_size, var%grid%NS_win_halo, this%north_in_win)
+        !$acc end host_data
   else
       if (dqdt) then
           !$acc parallel loop gang vector collapse(3)
@@ -1454,12 +1469,11 @@ module subroutine put_south(this,var,do_dqdt)
             enddo
           enddo
       endif
+    !$acc host_data use_device(this%south_in_buffer)
+    call MPI_Put(this%south_in_buffer, msg_size, &
+        var%grid%NS_halo, this%south_neighbor, disp, msg_size, var%grid%NS_win_halo, this%north_in_win)
+    !$acc end host_data
   endif
-
-  !$acc host_data use_device(this%south_in_buffer)
-  call MPI_Put(this%south_in_buffer, msg_size, &
-      var%grid%NS_halo, this%south_neighbor, disp, msg_size, var%grid%NS_win_halo, this%north_in_win)
-  !$acc end host_data
 
   !$acc end data
 
@@ -1483,15 +1497,19 @@ module subroutine put_east(this,var,do_dqdt)
   msg_size = 1
   indx_start = var%grid%ite-offs-var%grid%halo_size+1
 
-  !$acc data present(var, this%east_in_buffer)
+  !$acc data present(var, this%east_in_buffer, this%east_in_buffer_2d)
 
   if (var%two_d) then
     !$acc parallel loop gang vector collapse(2)
     do j = var%grid%jts, var%grid%jte
         do i = indx_start, var%grid%ite
-            this%east_in_buffer(i-indx_start+1,1,j-var%grid%jts+1) = var%data_2d(i,j)
+            this%east_in_buffer_2d(i-indx_start+1,j-var%grid%jts+1) = var%data_2d(i,j)
         enddo
     enddo
+    !$acc host_data use_device(this%east_in_buffer_2d)
+    call MPI_Put(this%east_in_buffer_2d, msg_size, &
+    var%grid%EW_halo, this%east_neighbor, disp, msg_size, var%grid%EW_win_halo, this%west_in_win)
+    !$acc end host_data
   else
       if (dqdt) then
           !$acc parallel loop gang vector collapse(3)
@@ -1512,12 +1530,12 @@ module subroutine put_east(this,var,do_dqdt)
             enddo
           enddo
       endif
+    !$acc host_data use_device(this%east_in_buffer)
+    call MPI_Put(this%east_in_buffer, msg_size, &
+    var%grid%EW_halo, this%east_neighbor, disp, msg_size, var%grid%EW_win_halo, this%west_in_win)
+    !$acc end host_data
   endif
 
-  !$acc host_data use_device(this%east_in_buffer)
-  call MPI_Put(this%east_in_buffer, msg_size, &
-  var%grid%EW_halo, this%east_neighbor, disp, msg_size, var%grid%EW_win_halo, this%west_in_win)
-  !$acc end host_data
 
   !$acc end data
 end subroutine
@@ -1543,15 +1561,19 @@ module subroutine put_west(this,var,do_dqdt)
   indx_end = var%grid%its+offs+var%grid%halo_size-1
 
 
-    !$acc data present(var, this%west_in_buffer)
+    !$acc data present(var, this%west_in_buffer, this%west_in_buffer_2d)
 
   if (var%two_d) then
           !$acc parallel loop gang vector collapse(2)
           do j = var%grid%jts, var%grid%jte
             do i = var%grid%its, indx_end
-              this%west_in_buffer(i-var%grid%its+1,1,j-var%grid%jts+1) = var%data_2d(i,j)
+              this%west_in_buffer_2d(i-var%grid%its+1,j-var%grid%jts+1) = var%data_2d(i,j)
             enddo
           enddo
+        !$acc host_data use_device(this%west_in_buffer_2d)
+        call MPI_Put(this%west_in_buffer_2d, msg_size, &
+            var%grid%EW_halo, this%west_neighbor, disp, msg_size, var%grid%EW_win_halo, this%east_in_win)
+        !$acc end host_data
   else
       if (dqdt) then
           !$acc parallel loop gang vector collapse(3)
@@ -1572,12 +1594,11 @@ module subroutine put_west(this,var,do_dqdt)
             enddo
           enddo
       endif
+    !$acc host_data use_device(this%west_in_buffer)
+    call MPI_Put(this%west_in_buffer, msg_size, &
+        var%grid%EW_halo, this%west_neighbor, disp, msg_size, var%grid%EW_win_halo, this%east_in_win)
+    !$acc end host_data
   endif
-
-  !$acc host_data use_device(this%west_in_buffer)
-  call MPI_Put(this%west_in_buffer, msg_size, &
-      var%grid%EW_halo, this%west_neighbor, disp, msg_size, var%grid%EW_win_halo, this%east_in_win)
-  !$acc end host_data
 
   !$acc end data
 

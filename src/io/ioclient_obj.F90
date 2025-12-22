@@ -292,9 +292,9 @@ contains
         n_3d = 1
         ! Do MPI_Win_Wait on forcing_win. This is mostly unnecesarry, since the server process is what will be waiting on us, which is handeled by the MPI_Win_Start call
         ! in ioserver%gather_foring. Still, MPI_Win_Wait is called here for completeness of PSCW model
-        if (this%nest_updated) then
-            call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
-        endif
+        ! if (this%nest_updated) then
+        !     call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
+        ! endif
 
         this%nest_updated = .False.
         !This is false only when it is the first call to push (i.e. first write call)
@@ -332,6 +332,7 @@ contains
         this%nest_updated = .True.
         ! Do MPI_Win_Post on forcing_win to inform that server process can begin gathering of nest data
         call MPI_Win_Post(this%parent_group,0,this%forcing_win)
+        call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
 
     end subroutine
     
@@ -476,12 +477,11 @@ contains
         type(MPI_Win), intent(in) :: window
         character(len=*), intent(in) :: err_msg
 
-        integer :: wait_count, ierr
-        logical :: flag, write_flag
+        integer :: wait_count, ierr, global_rank
+        logical :: flag
         
         wait_count = 0
         flag = .False.
-        write_flag = .False.
 
         call MPI_Win_Test(window, flag, ierr)
         do while (.not.(flag))
@@ -489,18 +489,20 @@ contains
             ! Check if we've waited too long
             wait_count = wait_count + 1
 
-            if (wait_count > 60.0 .and. .not.(write_flag)) then
-                write_flag = .True.
+            if (wait_count > 600.0) then
+                ! write_flag = .True.
                 if (STD_OUT_PE) write(*,*) err_msg
                 if (STD_OUT_PE) flush(output_unit)
 
-                ! stop
+                stop
             endif
             
             ! Small sleep to avoid busy waiting
             call sleep(1)
 
             call MPI_Win_Test(window, flag, ierr)
+
+            if (ierr /= 0) write(*,*) "MPI_Win_Test returned error: ",ierr
         end do
     end subroutine
 

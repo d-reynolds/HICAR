@@ -130,10 +130,12 @@ contains
         ! If we have too small a time step throw an error
         ! something is probably wrong in the physics or input data
         if (dt<1e-1) then
-            write(*,*) "dt   = ", dt
-            write(*,*) "Umax = ", maxval(abs(u))
-            write(*,*) "Vmax = ", maxval(abs(v))
-            write(*,*) "Wmax = ", maxval(abs(w))
+            if (STD_OUT_PE) then 
+                write(*,*) "dt   = ", dt
+                write(*,*) "Umax = ", maxval(abs(u))
+                write(*,*) "Vmax = ", maxval(abs(v))
+                write(*,*) "Wmax = ", maxval(abs(w))
+            endif
             error stop "ERROR time step too small"
         endif
 

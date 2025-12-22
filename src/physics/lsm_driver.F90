@@ -1098,7 +1098,8 @@ contains
 
             ! exchange coefficients
             windspd = sqrt(domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d**2 + domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d**2)
-            
+            where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
+
             !If there is no surface layer scheme, then we should compute exchange coefficients here. Assign CHS to CHS2 and CQS2 as well...
             if (options%physics%surfacelayer ==  0) then
                 if (exchange_term==1) then
@@ -1203,9 +1204,6 @@ contains
                 )
 
             endif
-
-
-            where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
             
             
             ! --------------------------------------------------

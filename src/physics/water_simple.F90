@@ -41,7 +41,7 @@ contains
                     )                                                                         &
                 )then
                     qv_surf(i,j) = 0.98 * sat_mr(sst(i,j),psfc(i,j)) ! multiply by 0.98 to account for salinity
-
+                    qv_surf(i,j) = max(min(qv_surf(i,j),qv(i,j)), 1.0e-6)
                     sensible_heat(i,j) = coef_heat_exch(i,j) * wind(i,j) * (sst(i,j)-temperature(i,j))
                     evap_flux(i,j)     = coef_heat_exch(i,j) * wind(i,j) * (qv_surf(i,j)-qv(i,j))
                     latent_heat(i,j)   = evap_flux(i,j) * XLV

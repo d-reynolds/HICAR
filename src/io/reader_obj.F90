@@ -128,7 +128,7 @@ contains
 
         !See if we must open the file
 
-        is_file_parallel = .False.!can_file_parallel(this%file_list(this%curfile))
+        is_file_parallel = .True.!can_file_parallel(this%file_list(this%curfile))
         if (this%ncfile_id < 0) then
             if (.not.(is_file_parallel)) then
                 call check_ncdf( nf90_open(this%file_list(this%curfile), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id), " Opening file "//trim(this%file_list(this%curfile)))
