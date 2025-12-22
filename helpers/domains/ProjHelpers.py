@@ -1,4 +1,4 @@
-import xesmf as xe
+#import xesmf as xe
 import numpy as np
 import pyproj
 #import ESMF

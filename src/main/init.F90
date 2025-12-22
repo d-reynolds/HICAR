@@ -170,14 +170,10 @@ contains
                     CALL MPI_Comm_dup( mainComms, comp%compute_comms, ierr )
                     CALL MPI_Comm_dup( IOComms, ioclient(n)%parent_comms, ierr )
 
-                    ! comp%compute_comms = mainComms
-                    ! ioclient(n)%parent_comms = IOComms
                 type is (ioserver_t)
                     CALL MPI_Comm_dup( mainComms, comp%IO_comms, ierr )
                     CALL MPI_Comm_dup( IOComms, comp%client_comms, ierr )
 
-                    ! comp%IO_comms = mainComms
-                    ! comp%client_comms = IOComms
                 class default
                     ! some default behavior
             end select

@@ -357,26 +357,27 @@ contains
       type(grid_t), intent(inout)   :: grid
       integer, optional, intent(in) :: win_nz
 
-      integer :: nz_win
+      integer :: nz_win, loc_nz
 
       nz_win = grid%nz
       if (present(win_nz)) nz_win = win_nz
+      loc_nz = max(1,grid%nz)
 
       if (grid%is3d) then
-        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, grid%nz, grid%halo_size+1], [(grid%ite-grid%its+1), grid%nz, grid%halo_size+1], &
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), loc_nz, grid%halo_size+1], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_halo)
-        call MPI_Type_create_subarray(3, [grid%halo_size+1, grid%nz, grid%ew_halo_ny], [grid%halo_size+1, grid%nz, (grid%jte-grid%jts+1)], &
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size+1, loc_nz, (grid%jte-grid%jts+1)], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_halo)
-        call MPI_Type_create_subarray(3, [grid%nx, grid%nz, grid%ny], [grid%halo_size+grid%nx_e, grid%nz, grid%halo_size+grid%ny_e], &
+        call MPI_Type_create_subarray(3, [grid%nx, nz_win, grid%ny], [grid%halo_size+grid%nx_e, loc_nz, grid%halo_size+grid%ny_e], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_halo)
 
-        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), grid%nz, grid%halo_size+1], &
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), loc_nz, grid%halo_size+1], &
                 [grid%halo_size,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_win_halo)
-        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size+1, grid%nz, (grid%jte-grid%jts+1)], &
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size+1, loc_nz, (grid%jte-grid%jts+1)], &
                 [0,0,grid%halo_size], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_win_halo)
-        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [grid%halo_size+grid%nx_e, grid%nz, grid%halo_size+grid%ny_e], &
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [grid%halo_size+grid%nx_e, loc_nz, grid%halo_size+grid%ny_e], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_NS_win_halo)
-        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size+grid%nx_e, grid%nz, grid%halo_size+grid%ny_e], &
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size+grid%nx_e, loc_nz, grid%halo_size+grid%ny_e], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_EW_win_halo)
 
       else

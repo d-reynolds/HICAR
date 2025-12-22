@@ -74,13 +74,12 @@ contains
 
         call get_outputfiles(this,file_list)
 
-        call check_file_exists(this%output_fn, message='Trying to initialize a restart run, but the supplied output file to append to: "'//trim(this%output_fn)//'" does not exist')
-
         if (size(file_list) > 0) then
             !Find output file and step in output filelist
             this%output_counter = find_timestep_in_filelist(file_list, 'time', options%restart%restart_time,this%output_fn,error=error)
         endif
-        
+        call check_file_exists(this%output_fn, message='Trying to initialize a restart run, but the supplied output file to append to: "'//trim(this%output_fn)//'" does not exist')
+
         !If there was no error getting output step, then a file already exists which contains our time step
         if (error == 0) then
             !Open output file, setting out_ncfile_id

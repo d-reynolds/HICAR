@@ -83,6 +83,10 @@ module halo_interface
         real, contiguous, pointer :: south_in_buffer(:,:,:)
         real, contiguous, pointer :: east_in_buffer(:,:,:)
         real, contiguous, pointer :: west_in_buffer(:,:,:)
+        real, contiguous, pointer :: north_in_buffer_2d(:,:)
+        real, contiguous, pointer :: south_in_buffer_2d(:,:)
+        real, contiguous, pointer :: east_in_buffer_2d(:,:)
+        real, contiguous, pointer :: west_in_buffer_2d(:,:)
 
         integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor, halo_rank
         integer :: northwest_neighbor, southwest_neighbor, northeast_neighbor, southeast_neighbor

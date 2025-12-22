@@ -187,6 +187,7 @@ contains
 
         type(Time_type), allocatable :: times_in_file_up(:), times_in_file_down(:)
         type(time_delta_t) :: max_dt
+        type(Time_type) :: tmp_time
         integer :: i, n_t_down, n_t_up, nup, ndown, nup_o, ndown_o, ierr
         logical :: found, fileExists, limit_loop
 
@@ -223,7 +224,8 @@ contains
         call read_times(filelist(nup), time_var, times_in_file_up)
 
         !Quick check that time is bounded by min and max existing files in list
-        if (times_in_file_down(1) > time .or. times_in_file_up(size(times_in_file_up)) < time) then
+        if ( (times_in_file_down(1) > time .and. .not.(times_in_file_down(1)%equals(time, precision=max_dt))) .or. &
+             (times_in_file_up(size(times_in_file_up)) < time .and. .not.(times_in_file_up(size(times_in_file_up))%equals(time, precision=max_dt))) ) then
             if (present(error)) then
                 error = 1
                 found = .True.
@@ -315,6 +317,22 @@ contains
                     call read_times(filelist(nup), time_var, times_in_file_up)
                     call read_times(filelist(ndown), time_var, times_in_file_down)
 
+                    tmp_time = times_in_file_down(size(times_in_file_down))
+                    if (tmp_time%equals(time, precision=max_dt)) then
+                        step = size(times_in_file_down)
+                        filename = filelist(ndown)
+                        found = .True.
+                        cycle
+                    endif
+
+                    tmp_time = times_in_file_up(1)
+                    if (tmp_time%equals(time, precision=max_dt)) then
+                        step = 1
+                        filename = filelist(nup)
+                        found = .True.
+                        cycle
+                    endif
+
                     if (times_in_file_down(size(times_in_file_down)) < time .and. times_in_file_up(1) > time) then
                         !Time is between the two
                         if (present(forward)) then
@@ -331,8 +349,11 @@ contains
                             write(*,*) "WARNING: Unable to find requested date in filelist."
                             write(*,*) "Time appears to lay between two files."
                             write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
-                            write(*,*) "First filename: ",trim(filelist(1))
-                            write(*,*) "  time  : ",trim(as_string(time))
+                            write(*,*) "'Lower' filename: ",trim(filelist(ndown))
+                            write(*,*) "'Upper' filename: ",trim(filelist(nup))
+                            write(*,*) "Last time in 'Upper' file: ",trim(as_string(times_in_file_up(size(times_in_file_up))))
+                            write(*,*) "First time in 'Lower' file: ",trim(as_string(times_in_file_down(1)))
+                            write(*,*) "  searched for time  : ",trim(as_string(time))
                             write(*,*) "  last attempted step  : ",step
                             stop "Unable to find date in file"
                         endif

@@ -407,16 +407,36 @@ if (FFTW_FOUND)
 endif()
 
 if (NETCDF_FOUND)
-	#This is the most robust way to find the NetCDF flags -- covering both custom installs, static or shared, and cray PEs
-	execute_process(COMMAND nf-config --flibs OUTPUT_VARIABLE NETCDF_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
-	#if the nf-config method worked...
-	if(${NETCDF_FLAGS} MATCHES "-lnetcdff")
-		target_link_libraries(hicar_lib PUBLIC ${NETCDF_FLAGS})
-	else()
-	#else hope that the library flags as found by find_package are enough (should be as long as netCDF is a shared library)
-		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
-	endif()
-	target_include_directories(hicar_lib PUBLIC ${NETCDF_INCLUDES})
+    # Check for parallel NetCDF support
+    execute_process(COMMAND nc-config --has-parallel
+                    OUTPUT_VARIABLE NETCDF_HAS_PARALLEL
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    
+    if(NETCDF_HAS_PARALLEL STREQUAL "yes")
+        message(STATUS "NetCDF built with parallel support")
+        add_definitions(-DNETCDF_PARALLEL)
+    else()
+        message(STATUS "NetCDF built WITHOUT parallel support")
+    endif()
+    
+    # Get compiler and linker flags
+    execute_process(COMMAND nc-config --flibs 
+                    OUTPUT_VARIABLE NETCDF_FLAGS 
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND nc-config --fflags
+                    OUTPUT_VARIABLE NETCDF_FFLAGS
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    
+    # Use nf-config flags if available
+    # if(NETCDF_FLAGS MATCHES "-lnetcdff")
+    #     target_link_libraries(hicar_lib PUBLIC ${NETCDF_FLAGS})
+    #     # target_compile_options(hicar_lib PUBLIC ${NETCDF_FFLAGS})
+    # else()
+        # Fallback to FindNetCDF results
+        target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
+    # endif()
+    
+    target_include_directories(hicar_lib PUBLIC ${NETCDF_INCLUDES})
 endif()
 
 
