@@ -1428,6 +1428,7 @@ contains
         integer(c_int) :: rc
 
         if (initialized_amgx) then
+            call finalize_iter_winds_amgx()
             rc = AMGX_resources_destroy(amgx_resources)
             rc = AMGX_config_destroy(amgx_config)
             ! ! Finalize library
