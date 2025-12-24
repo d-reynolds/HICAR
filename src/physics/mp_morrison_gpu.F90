@@ -1031,9 +1031,9 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
    !$acc             qrcu1d, qscu1d, qicu1d, &
    !$acc             QGSTEN, QRSTEN, QISTEN, QNISTEN, QCSTEN, LTRUE_COL, NSTEP, NSTEP_FLAT, &
    !$acc             nc1d, nc_tend1d, C2PREC,CSED,ISED,SSED,GSED,RSED, &
-   !$acc             lamg,acn,abi,arn,ain,agn,ltrue,n0s,qvqvs,qvi,pgam, &
-   !$acc             qvqvsi,dv,eis,cdist1,xlf,xxlv,xxls,nc3d,lams,sc,asn, &
-   !$acc             n0g,cpm,lamr,n0rr,lami,n0i,kap,nc3dten,mu,lamc,ab,qvs,dap,evs, &
+   !$acc             lamg,acn,arn,ain,agn,ltrue,n0s,pgam, &
+   !$acc             cdist1,xlf,xxlv,xxls,nc3d,lams,asn, &
+   !$acc             n0g,cpm,lamr,n0rr,lami,nc3dten,mu,lamc,dap, &
    !$acc             precprt1d,snowrt1d,snowprt1d,grplprt1d, &
    !$acc             fnc,fc,fi,dumr,fni,fnr,fs,fr,fng,fg,fns,dumg, &
    !$acc             dumi,dumqs,dumfng,dumfnr,dumfni,dumc,dumfns,dumfnc, &
