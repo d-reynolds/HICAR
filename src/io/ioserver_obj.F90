@@ -62,6 +62,7 @@ contains
             this%n_f = count(options(some_child_id)%forcing%vars_to_read /= "")
             if (this%n_f > 0) then
                 allocate(this%gather_buffer(this%n_f,this%i_s_w:this%i_e_w+1,this%k_s_w:this%k_e_w,this%j_s_w:this%j_e_w+1))
+                if (options(nest_indx)%general%parent_nest == 0) allocate(this%forcing_buffer(this%n_f,this%i_s_r:this%i_e_r+1,this%k_s_r:this%k_e_r, this%j_s_r:this%j_e_r+1))
             endif
 
             allocate(this%send_nest_types(this%n_child_ioservers,this%n_servers))
@@ -174,11 +175,19 @@ contains
 
         !Fill write buffer with fake values to simulate a write
         if (allocated(test_write_buffer_2d)) deallocate(test_write_buffer_2d)
-        allocate(test_write_buffer_2d(this%i_s_re:this%i_e_re+1, this%j_s_re:this%j_e_re+1))
+        allocate(test_write_buffer_2d(this%i_s_w:this%i_e_w+1, this%j_s_w:this%j_e_w+1))
 
         test_write_buffer_2d = kEMPT_BUFF
         do i=1,this%n_children
-            test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)) = 1.0
+            if (this%iewc(i)==this%ide .and. this%jewc(i)==this%jde) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i)+1,this%jswc(i):this%jewc(i)+1) = 1.0
+            else if (this%iewc(i)==this%ide) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i)+1,this%jswc(i):this%jewc(i)) = 1.0
+            else if (this%jewc(i)==this%jde) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)+1) = 1.0
+            else
+                test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)) = 1.0
+            endif
         enddo
 
         ! call MPI_Allreduce(MPI_IN_PLACE,parent_ims,this%n_servers,MPI_INT,MPI_MIN,this%IO_Comms,ierr)
@@ -186,9 +195,9 @@ contains
             ! find where we have a "block" (hole) in the domain, since the child ioclients may not give us a perfect rectangle
             
             i_start = max(child_isr(n),this%i_s_w)
-            i_end = min(child_ier(n),this%i_e_w)
+            i_end = min(child_ier(n),this%i_e_w)+1
             j_start = max(child_jsr(n),this%j_s_w)
-            j_end = min(child_jer(n),this%j_e_w)
+            j_end = min(child_jer(n),this%j_e_w)+1
 
             ! See if any of the child ioserver domain is within the parent ioserver domain
             if (i_end > i_start .and. j_end > j_start) then
@@ -226,9 +235,9 @@ contains
             call MPI_Type_commit(send_nest_types(n))
 
             i_start = max(parent_ims(n),child_ioserver%i_s_r)
-            i_end = min(parent_ime(n),child_ioserver%i_e_r)
+            i_end = min(parent_ime(n),child_ioserver%i_e_r)+1
             j_start = max(parent_jms(n),child_ioserver%j_s_r)
-            j_end = min(parent_jme(n),child_ioserver%j_e_r)
+            j_end = min(parent_jme(n),child_ioserver%j_e_r)+1
 
             ! To calculate the receive buffer, we need to know the mask of the sending IO process
             ! Do a MPI_Scatter here to get the mask of the sending IO process
@@ -438,30 +447,13 @@ contains
 
         integer :: i
 
-        ! allocate(this%get_types_3d(this%n_children))
-        ! allocate(this%get_types_2d(this%n_children))
         allocate(this%rst_types_3d(this%n_children))
         allocate(this%rst_types_2d(this%n_children))
-        ! allocate(this%put_types(this%n_children))
-        allocate(this%force_types(this%n_children))
 
-        ! allocate(this%child_get_types_3d(this%n_children))
-        ! allocate(this%child_get_types_2d(this%n_children))
         allocate(this%child_rst_types_3d(this%n_children))
         allocate(this%child_rst_types_2d(this%n_children))
-        ! allocate(this%child_put_types(this%n_children))
-        allocate(this%child_force_types(this%n_children))
 
         do i = 1,this%n_children
-            ! +2 included to account for staggered grids for output variables
-            ! call MPI_Type_create_subarray(4, [this%n_w_3d, (this%i_e_re-this%i_s_re+2), (this%k_e_w-this%k_s_w+1), (this%j_e_re-this%j_s_re+2)], &
-            !     [this%n_w_3d, (this%iewc(i)-this%iswc(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jewc(i)-this%jswc(i)+2)], &
-            !     [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%get_types_3d(i))
-                
-            ! call MPI_Type_create_subarray(3, [this%n_w_2d, (this%i_e_re-this%i_s_re+2), (this%j_e_re-this%j_s_re+2)], &
-            !     [this%n_w_2d, (this%iewc(i)-this%iswc(i)+2), (this%jewc(i)-this%jswc(i)+2)], &
-            !     [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%get_types_2d(i))
-
             call MPI_Type_create_subarray(4, [this%n_w_3d, (this%i_e_re-this%i_s_re+2), (this%k_e_w-this%k_s_w+1), (this%j_e_re-this%j_s_re+2)], &
                 [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jerec(i)-this%jsrec(i)+2)], &
                 [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%rst_types_3d(i))
@@ -469,18 +461,6 @@ contains
             call MPI_Type_create_subarray(3, [this%n_w_2d, (this%i_e_re-this%i_s_re+2), (this%j_e_re-this%j_s_re+2)], &
                 [this%n_w_2d, (this%ierec(i)-this%isrec(i)+2), (this%jerec(i)-this%jsrec(i)+2)], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%rst_types_2d(i))
-
-            ! call MPI_Type_create_subarray(4, [this%n_r, (this%i_e_r-this%i_s_r+1), (this%k_e_r-this%k_s_r+1), (this%j_e_r-this%j_s_r+1)], &
-            !     [this%n_r, (this%ierc(i)-this%isrc(i)+1), (this%kerc(i)-this%ksrc(i)+1), (this%jerc(i)-this%jsrc(i)+1)], &
-            !     [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%put_types(i))
-
-            ! call MPI_Type_create_subarray(4, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re], &
-            !     [this%n_w_3d, (this%iewc(i)-this%iswc(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jewc(i)-this%jswc(i)+2)], &
-            !     [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_get_types_3d(i))
-
-            ! call MPI_Type_create_subarray(3, [this%n_w_2d, this%nx_re, this%ny_re], &
-            !     [this%n_w_2d, (this%iewc(i)-this%iswc(i)+2), (this%jewc(i)-this%jswc(i)+2)], &
-            !     [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_get_types_2d(i))
 
             call MPI_Type_create_subarray(4, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re], &
                 [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jerec(i)-this%jsrec(i)+2)], &
@@ -490,32 +470,10 @@ contains
                 [this%n_w_2d, (this%ierec(i)-this%isrec(i)+2), (this%jerec(i)-this%jsrec(i)+2)], &
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_rst_types_2d(i))
 
-            ! call MPI_Type_create_subarray(4, [this%n_r, this%nx_r, this%nz_r, this%ny_r], &
-            !     [this%n_r, (this%ierc(i)-this%isrc(i)+1), (this%kerc(i)-this%ksrc(i)+1), (this%jerc(i)-this%jsrc(i)+1)], &
-            !     [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_put_types(i))
-
-            ! if (this%n_f > 0) then
-            !     call MPI_Type_create_subarray(4, [this%n_f, (this%i_e_w-this%i_s_w+2), (this%k_e_w-this%k_s_w+1), (this%j_e_w-this%j_s_w+2)], &
-            !         [this%n_f, (this%iewc(i)-this%iswc(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jewc(i)-this%jswc(i)+2)], &
-            !         [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%force_types(i))
-            !     call MPI_Type_commit(this%force_types(i))
-
-            !     call MPI_Type_create_subarray(4, [this%n_f, this%nx_w, this%nz_w, this%ny_w], &
-            !         [this%n_f, (this%iewc(i)-this%iswc(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jewc(i)-this%jswc(i)+2)], &
-            !         [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_force_types(i))
-            !     call MPI_Type_commit(this%child_force_types(i))
-
-            ! endif
-            ! call MPI_Type_commit(this%get_types_3d(i))
-            ! call MPI_Type_commit(this%get_types_2d(i))
             call MPI_Type_commit(this%rst_types_3d(i))
             call MPI_Type_commit(this%rst_types_2d(i))
-            ! call MPI_Type_commit(this%put_types(i))
-            ! call MPI_Type_commit(this%child_get_types_3d(i))
-            ! call MPI_Type_commit(this%child_get_types_2d(i))
             call MPI_Type_commit(this%child_rst_types_3d(i))
             call MPI_Type_commit(this%child_rst_types_2d(i))
-            ! call MPI_Type_commit(this%child_put_types(i))
         enddo
     end subroutine setup_MPI_types
 
@@ -707,16 +665,14 @@ contains
     module subroutine read_file(this)
         class(ioserver_t), intent(inout) :: this
 
-        real, allocatable, dimension(:,:,:,:) :: parent_read_buffer
-
         !See if we even have files to read
         if (this%files_to_read) then
             ! read file into buffer array
-            call this%reader%read_next_step(parent_read_buffer,this%IO_Comms)
+            call this%reader%read_next_step(this%forcing_buffer,this%IO_Comms)
             this%files_to_read = .not.(this%reader%eof)
 
             ! Loop through child images and send chunks of buffer array to each one
-            call this%scatter_forcing(parent_read_buffer)
+            call this%scatter_forcing()
         endif
 
         ! increment input time whether we have files to read or not
@@ -745,11 +701,19 @@ contains
 
         ! Loop through child images and get chunks of buffer array from each one
         do i=1,this%n_children
-            ! call MPI_Get(this%gather_buffer(1,this%iswc(i),1,this%jswc(i)), msg_size, &
-            !     this%force_types(i), this%children_ranks(i), disp, msg_size, this%child_force_types(i), this%nest_win)
-            this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,:,this%jswc(i):this%jewc(i)+1) = &
+            if (this%iewc(i)==this%ide .and. this%jewc(i)==this%jde) then
+                this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,:,this%jswc(i):this%jewc(i)+1) = &
                     this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+2),:,1:(this%jewc(i)-this%jswc(i)+2))
-
+            else if (this%iewc(i)==this%ide) then
+                this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,:,this%jswc(i):this%jewc(i)) = &
+                    this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+2),:,1:(this%jewc(i)-this%jswc(i)+1))
+            else if (this%jewc(i)==this%jde) then
+                this%gather_buffer(:,this%iswc(i):this%iewc(i),:,this%jswc(i):this%jewc(i)+1) = &
+                    this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+1),:,1:(this%jewc(i)-this%jswc(i)+2))
+            else
+                this%gather_buffer(:,this%iswc(i):this%iewc(i),:,this%jswc(i):this%jewc(i)) = &
+                    this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+1),:,1:(this%jewc(i)-this%jswc(i)+1))
+            endif
         enddo
 
         ! Do MPI_Win_Complete on read_win to end put
@@ -765,18 +729,18 @@ contains
         integer :: i, nx, ny, n, ierr, msg_size, real_size
         integer, allocatable :: send_msg_size_alltoall(:), buff_msg_size_alltoall(:), disp_alltoall(:)
         INTEGER(KIND=MPI_ADDRESS_KIND) :: lowerbound, extent
-        real, allocatable, dimension(:,:,:,:) :: forcing_buffer
 
         allocate(send_msg_size_alltoall(this%n_servers))
         allocate(buff_msg_size_alltoall(this%n_servers))
         allocate(disp_alltoall(this%n_servers))
 
         disp_alltoall = 0
-    
-        allocate(forcing_buffer(this%n_f,child_ioserver%i_s_r:child_ioserver%i_e_r+1,child_ioserver%k_s_r:child_ioserver%k_e_r, child_ioserver%j_s_r:child_ioserver%j_e_r+1))
 
         ! If this is the first time calling gather_forcing, we are still in initialization. Call setup_nest_types now, passing in the child ioserver
         if (this%nest_types_initialized(child_indx) .eqv. .False.) then
+            if (allocated(child_ioserver%forcing_buffer))  deallocate(child_ioserver%forcing_buffer)
+
+            allocate(child_ioserver%forcing_buffer(this%n_f,child_ioserver%i_s_r:child_ioserver%i_e_r+1,child_ioserver%k_s_r:child_ioserver%k_e_r, child_ioserver%j_s_r:child_ioserver%j_e_r+1))
             call this%setup_nest_types(child_ioserver, this%send_nest_types(child_indx,:), this%buffer_nest_types(child_indx,:))
             this%nest_types_initialized(child_indx) = .true.
             call test_nest_types(this, child_ioserver, child_indx)
@@ -804,17 +768,18 @@ contains
         enddo
 
         call MPI_Alltoallw(this%gather_buffer,  send_msg_size_alltoall, disp_alltoall, this%send_nest_types(child_indx,:), &
-                        forcing_buffer, buff_msg_size_alltoall, disp_alltoall, this%buffer_nest_types(child_indx,:), this%IO_Comms)
+                        child_ioserver%forcing_buffer, buff_msg_size_alltoall, disp_alltoall, this%buffer_nest_types(child_indx,:), this%IO_Comms)
+
         ! This call will scatter the forcing fields to the ioclients of the nest child
-        call child_ioserver%scatter_forcing(forcing_buffer)
+        call child_ioserver%scatter_forcing()
         ! call child_ioserver%increment_input_time()
     end subroutine
 
-    module subroutine scatter_forcing(this, forcing_buffer)
+    module subroutine scatter_forcing(this)
         class(ioserver_t), intent(inout) :: this
-        real, dimension(:,:,:,:), intent(in) :: forcing_buffer
 
-        integer :: i, msg_size
+        integer :: i, msg_size, p
+        real :: vmax, vmin
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
 
         msg_size = 1
@@ -823,12 +788,20 @@ contains
         ! Do MPI_Win_Start on read_win to initiate put
         call MPI_Win_Start(this%children_group,0,this%read_win)
 
+        ! write(*,*) 'Current IOserver nest level:', this%nest_indx
+        ! do i = 1, ubound(this%forcing_buffer,1)
+        !     vmax = -1.0e8
+        !     vmin = 1.0e8
+        !     do p=1,this%n_children
+        !         vmax = max(maxval(this%forcing_buffer(i,this%isrc(p):this%ierc(p),:,this%jsrc(p):this%jerc(p))), vmax)
+        !         vmin = min(minval(this%forcing_buffer(i,this%isrc(p):this%ierc(p),:,this%jsrc(p):this%jerc(p))), vmin)
+        !     enddo
+        !     write(*,*) 'forcing_buffer(',i,',:,:,:) min:', vmin, ' max:', vmax
+        ! enddo
         ! Loop through child images and send chunks of buffer array to each one
         do i=1,this%n_children
-            ! call MPI_Put(forcing_buffer(1,(this%isrc(i)-this%i_s_r+1),1,(this%jsrc(i)-this%j_s_r+1)), msg_size, &
-            !     this%put_types(i), this%children_ranks(i), disp, msg_size, this%child_put_types(i), this%read_win)
             this%read_buffer(i)%buff(:,1:(this%ierc(i)-this%isrc(i)+1)+1,:,1:(this%jerc(i)-this%jsrc(i)+1)+1) = &
-                forcing_buffer(:,(this%isrc(i)-this%i_s_r+1):(this%ierc(i)-this%i_s_r+1)+1,:,(this%jsrc(i)-this%j_s_r+1):(this%jerc(i)-this%j_s_r+1)+1)
+                this%forcing_buffer(:,this%isrc(i):this%ierc(i)+1,:,this%jsrc(i):this%jerc(i)+1)
         enddo
 
         ! Do MPI_Win_Complete on read_win to end put

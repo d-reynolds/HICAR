@@ -55,7 +55,8 @@ module ioserver_interface
         type(output_t) :: outputer
         type(reader_t) :: reader
         
-        real, dimension(:,:,:,:), pointer :: gather_buffer
+        real, dimension(:,:,:,:), allocatable     :: gather_buffer, forcing_buffer
+        ! real, dimension(:,:,:,:), allocatable :: forcing_buffer
 
         type(buffer_3d_t), allocatable :: write_buffer_3d(:), read_buffer(:), child_gather_buffers(:)
         type(buffer_2d_t), allocatable :: write_buffer_2d(:)
@@ -65,8 +66,7 @@ module ioserver_interface
 
         ! These MPI datatypes describe the access patterns between the IO read/write buffers and
         ! the child read/write buffers
-        type(MPI_Datatype), allocatable, dimension(:) :: get_types_3d, get_types_2d, rst_types_3d, rst_types_2d, put_types, child_get_types_3d, child_get_types_2d, &
-                                                        child_put_types, force_types, child_force_types, child_rst_types_3d, child_rst_types_2d
+        type(MPI_Datatype), allocatable, dimension(:) :: rst_types_3d, rst_types_2d, child_rst_types_3d, child_rst_types_2d
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types, buffer_nest_types
         
         ! coarray-indices of child io processes, indexed according to the COMPUTE_TEAM
@@ -188,9 +188,8 @@ module ioserver_interface
         !! Scatter the forcing data to the child processes ioclients
         !!
         !!----------------------------------------------------------
-        module subroutine scatter_forcing(this, forcing_buffer)
+        module subroutine scatter_forcing(this)
             class(ioserver_t), intent(inout) :: this
-            real, dimension(:,:,:,:), intent(in) :: forcing_buffer
         end subroutine
 
         !>----------------------------------------------------------

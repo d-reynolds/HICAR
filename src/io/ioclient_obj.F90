@@ -323,8 +323,8 @@ contains
 
             i_s_w = this%i_s_w; i_e_w = this%i_e_w
             j_s_w = this%j_s_w; j_e_w = this%j_e_w
-            if (domain%ime == domain%ide) i_e_w = i_e_w+var%xstag !Add extra to accomodate staggered vars
-            if (domain%jme == domain%jde) j_e_w = j_e_w+var%ystag !Add extra to accomodate staggered vars
+            i_e_w = i_e_w+var%xstag !Add extra to accomodate staggered vars
+            j_e_w = j_e_w+var%ystag !Add extra to accomodate staggered vars
             nx = i_e_w - i_s_w + 1
             ny = j_e_w - j_s_w + 1
 
