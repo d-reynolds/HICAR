@@ -278,6 +278,83 @@ contains
         enddo
 
     end subroutine setup_nest_types
+
+    subroutine test_nest_types(ioserver, child_ioserver, child_indx)
+        implicit none
+        class(ioserver_t), intent(in) :: ioserver
+        class(ioserver_t), intent(in) :: child_ioserver
+        integer, intent(in) :: child_indx
+
+        integer :: i,j, nx, ny, n, ierr, msg_size, real_size
+        integer :: ix, jy, k, v
+        real :: forcing_buffer_init, gather_buffer_init
+        integer, allocatable :: send_msg_size_alltoall(:), buff_msg_size_alltoall(:), disp_alltoall(:)
+        INTEGER(KIND=MPI_ADDRESS_KIND) :: lowerbound, extent
+        real, allocatable, dimension(:,:,:,:) :: forcing_buffer, gather_buffer_test
+
+        allocate(send_msg_size_alltoall(ioserver%n_servers))
+        allocate(buff_msg_size_alltoall(ioserver%n_servers))
+        allocate(disp_alltoall(ioserver%n_servers))
+
+        disp_alltoall = 0
+        forcing_buffer_init = -1111.0
+        gather_buffer_init = -2222.0
+        allocate(forcing_buffer(ioserver%n_f,child_ioserver%i_s_r:child_ioserver%i_e_r+1,child_ioserver%k_s_r:child_ioserver%k_e_r, child_ioserver%j_s_r:child_ioserver%j_e_r+1))
+        allocate(gather_buffer_test(ioserver%n_f,ioserver%i_s_w:ioserver%i_e_w+1,ioserver%k_s_w:ioserver%k_e_w,ioserver%j_s_w:ioserver%j_e_w+1))
+
+        forcing_buffer = forcing_buffer_init
+        gather_buffer_test = gather_buffer_init
+        ! Loop through child images and get chunks of buffer array from each one
+        do i=1,ioserver%n_children
+            do jy = ioserver%jswc(i), ioserver%jewc(i)+1
+                do k = ioserver%k_s_w, ioserver%k_e_w
+                    do ix = ioserver%iswc(i), ioserver%iewc(i)+1
+                        gather_buffer_test(1,ix,k,jy) = ix + (k-1)*(ioserver%ide+1) + (jy-1)*(ioserver%ide+1)*(ioserver%kde)
+                    enddo
+                enddo
+            enddo
+        enddo
+
+        ! Get size of an MPI_REAL
+        call MPI_Type_size(MPI_REAL, real_size, ierr)
+        do n = 1, ioserver%n_servers
+            call MPI_Type_get_extent(ioserver%send_nest_types(child_indx,n), lowerbound, extent)
+            if (extent > real_size) then
+                send_msg_size_alltoall(n) = 1
+            else
+                send_msg_size_alltoall(n) = 0
+            endif
+            call MPI_Type_get_extent(ioserver%buffer_nest_types(child_indx,n), lowerbound, extent)
+            if (extent > real_size) then
+                buff_msg_size_alltoall(n) = 1
+            else
+                buff_msg_size_alltoall(n) = 0
+            endif
+        enddo
+
+        call MPI_Alltoallw(gather_buffer_test,  send_msg_size_alltoall, disp_alltoall, ioserver%send_nest_types(child_indx,:), &
+                        forcing_buffer, buff_msg_size_alltoall, disp_alltoall, ioserver%buffer_nest_types(child_indx,:), ioserver%IO_Comms)
+
+
+        ! check that the whole of the forcing buffer has been filled correctly
+        do j = child_ioserver%j_s_r, child_ioserver%j_e_r+1
+            do k = child_ioserver%k_s_r, child_ioserver%k_e_r
+                do i = child_ioserver%i_s_r, child_ioserver%i_e_r+1
+                    if (forcing_buffer(1,i,k,j) /= i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)) then
+                        write(*,*) 'Error in test_nest_types: Mismatch in forcing buffer at (', 1, ',', i, ',', k, ',', j, ') : ', &
+                                    ' expected ', (i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)), &
+                                    ' but got ', forcing_buffer(1,i,k,j)
+                        if (forcing_buffer(1,i,k,j) == forcing_buffer_init) then
+                            write(*,*) ' (Buffer value indicates that alltoall was done incorrectly)'
+                        endif
+                        if (forcing_buffer(1,i,k,j) == gather_buffer_init) then
+                            write(*,*) ' (Buffer value indicates that gather operation was done incorrectly)'
+                        endif
+                    endif
+                enddo
+            enddo
+        enddo
+    end subroutine test_nest_types
     
     subroutine setup_MPI_windows(this)
         class(ioserver_t),   intent(inout)  :: this
@@ -702,6 +779,7 @@ contains
         if (this%nest_types_initialized(child_indx) .eqv. .False.) then
             call this%setup_nest_types(child_ioserver, this%send_nest_types(child_indx,:), this%buffer_nest_types(child_indx,:))
             this%nest_types_initialized(child_indx) = .true.
+            call test_nest_types(this, child_ioserver, child_indx)
         endif
 
         ! What would be smart here, is to send our forcing buffer to only the processes, on which the child ioservers need the data

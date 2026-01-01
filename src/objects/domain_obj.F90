@@ -20,6 +20,7 @@ submodule(domain_interface) domain_implementation
     use output_metadata,            only : get_varname, get_varmeta, get_varindx
     use mod_wrf_constants,    only : gravity, R_d, KARMAN, cp
     use iso_fortran_env
+    use debug_module,       only : domain_check
 
     implicit none
     
@@ -2747,7 +2748,10 @@ contains
         !include "-1" to accomodate rounding errors
         if (dt_seconds < (this%input_dt%seconds()-1)) dt_seconds = this%input_dt%seconds() - dt_seconds
 
-
+        if (dt_seconds <= 10.0) then
+            write(*,*) "WARNING: In domain_obj::update_delta_fields, dt_seconds <= 10.0"
+        endif
+        
         ! Now iterate through the dictionary as long as there are more elements present
         !$acc data present(this)
         do n = 1,size(this%forcing_hi)
@@ -3087,6 +3091,7 @@ contains
         !This will be overwriten as soon as we enter the physics loop, but it is necesery to compute density
         !For the future step so that the wind solver uses both future winds, and future density.
         call this%diagnostic_update(forcing_update=update_only)
+        call domain_check(this, error_msg="domain_obj::end_interpolate_forcing")
 
     end subroutine
 

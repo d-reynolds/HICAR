@@ -307,6 +307,9 @@ contains
         this%four_d = var_meta%four_d
         this%dtype = var_meta%dtype
         this%dim_len = var_meta%dim_len
+        this%maxval = var_meta%maxval
+        this%minval = var_meta%minval
+
         ! this%global_dim_len = var_meta%global_dim_len
         ! this%dim_ids = var_meta%dim_ids
         ! this%file_var_id = var_meta%file_var_id

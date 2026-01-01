@@ -13,11 +13,12 @@
 !!
 !!----------------------------------------------------------
 submodule(ioclient_interface) ioclient_implementation
-  use debug_module,             only : check_ncdf
+  use debug_module,             only : check_ncdf, check_var
   use iso_fortran_env
   use, intrinsic :: iso_c_binding
   use output_metadata,          only : get_varindx, get_varmeta
   use meta_data_interface,      only : meta_data_t
+  use string,           only  : str
 
   implicit none
 
@@ -288,6 +289,8 @@ contains
         type(variable_t) :: var
         type(meta_data_t) :: tmp_var
         integer :: i, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, var_indx
+        logical :: var_val_check
+        character(len=kMAX_NAME_LENGTH) :: err_msg
 
         n_3d = 1
         ! Do MPI_Win_Wait on forcing_win. This is mostly unnecesarry, since the server process is what will be waiting on us, which is handeled by the MPI_Win_Start call
@@ -304,6 +307,7 @@ contains
             if (this%vars_for_nest(i) == '') cycle
             var_indx = get_varindx(this%vars_for_nest(i))
             tmp_var = get_varmeta(var_indx)
+            var_val_check = (var%maxval /= kUNSET_REAL .and. var%minval /= kUNSET_REAL)
 
             if (tmp_var%two_d) cycle
 
@@ -326,6 +330,11 @@ contains
 
             this%forcing_buffer(n_3d,1:nx,1:var%dim_len(2),1:ny) = &
                 var%data_3d(i_s_w:i_e_w,1:var%dim_len(2),j_s_w:j_e_w)
+            if (var_val_check) then
+                err_msg = 'Warning on ioclient_obj::update_nest: Nest level: '// str(domain%nest_indx)
+                call check_var(var, trim(err_msg))
+            endif
+
             n_3d = n_3d+1
         enddo
 
@@ -346,6 +355,8 @@ contains
 
         type(variable_t)     :: var
         integer :: i, n, nx, ny, var_id
+        logical :: var_val_check
+        character(len=kMAX_NAME_LENGTH) :: err_msg
                 
         n = 1
         ! Do MPI_Win_Wait on read_buffer to make sure that server process has completed data transfer
@@ -359,6 +370,7 @@ contains
         do while (forcing%variables%has_more_elements())
             ! get the next variable in the structure
             var = forcing%variables%next(var_id)
+            var_val_check = (var%maxval /= kUNSET_REAL .and. var%minval /= kUNSET_REAL)
             if (var%computed) then
                 cycle
             else
@@ -375,6 +387,11 @@ contains
                     ny = size(var%data_3d,3)
 
                     var%data_3d(:,1:var%dim_len(2),:) = this%read_buffer(n,1:nx,1:var%dim_len(2),1:ny)
+                endif
+
+                if (var_val_check) then
+                    err_msg = 'Warning on ioclient_obj::receive: Nest level: '// str(domain%nest_indx)
+                    call check_var(var, trim(err_msg))
                 endif
                 n = n+1
             endif

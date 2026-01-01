@@ -52,14 +52,14 @@ contains
     !! @return dt [ scalar ]        Maximum stable time step    [s]
     !!
     !!------------------------------------------------------------
-    function compute_dt(dx, u, v, w, rho, dz, ims, ime, kms, kme, jms, jme, its, ite, jts, jte, CFL, use_density) result(dt)
+    function compute_dt(dx, u, v, w, rho, dz, ims, ime, kms, kme, jms, jme, its, ite, jts, jte, CFL, err_msg) result(dt)
         real,       intent(in)                   :: dx
         real,       intent(in), dimension(ims:ime+1,kms:kme,jms:jme) :: u 
         real,       intent(in), dimension(ims:ime,kms:kme,jms:jme+1) :: v
         real,       intent(in), dimension(ims:ime,kms:kme,jms:jme)   :: w, rho, dz
         integer,    intent(in)                   :: ims, ime, kms, kme, jms, jme, its, ite, jts, jte
         real,       intent(in)                   :: CFL
-        logical,    intent(in)                   :: use_density
+        character(len=*), intent(in), optional  :: err_msg
         
         ! output value
         real :: dt
@@ -131,6 +131,7 @@ contains
         ! something is probably wrong in the physics or input data
         if (dt<1e-1) then
             if (STD_OUT_PE) then 
+                if (present(err_msg)) write(*,*) trim(err_msg)
                 write(*,*) "dt   = ", dt
                 write(*,*) "Umax = ", maxval(abs(u))
                 write(*,*) "Vmax = ", maxval(abs(v))
@@ -205,7 +206,7 @@ contains
                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
-                        use_density=.false.)
+                        err_msg="error computing dt for winds at the current time step")
         max_i_loc = max_i
         max_j_loc = max_j
         max_k_loc = max_k
@@ -215,7 +216,7 @@ contains
                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
-                        use_density=.false.)
+                        err_msg="error computing dt for winds at the future input timestep")
 
         !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
         call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_REAL, MPI_MIN, domain%compute_comms)
