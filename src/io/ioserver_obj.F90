@@ -259,8 +259,8 @@ contains
                                 do v = 1,this%n_f
                                     if (mask(i,j) /= kEMPT_BUFF) then
                                         counter = counter + 1
-                                        displacements(counter) = (v-1) + ((i-child_ioserver%i_s_r) + (k-child_ioserver%k_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+1) + &
-                                                                        (j-child_ioserver%j_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+1) * (child_ioserver%k_e_r-child_ioserver%k_s_r+1))*this%n_f
+                                        displacements(counter) = (v-1) + ((i-child_ioserver%i_s_r) + (k-child_ioserver%k_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+2) + &
+                                                                        (j-child_ioserver%j_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+2) * (child_ioserver%k_e_r-child_ioserver%k_s_r+1))*this%n_f
                                     endif
                                 enddo
                             enddo
