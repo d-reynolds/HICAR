@@ -177,7 +177,7 @@ contains
 
         test_write_buffer_2d = kEMPT_BUFF
         do i=1,this%n_children
-            test_write_buffer_2d(this%iswc(i):this%iewc(i)+1,this%jswc(i):this%jewc(i)+1) = 1.0
+            test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)) = 1.0
         enddo
 
         ! call MPI_Allreduce(MPI_IN_PLACE,parent_ims,this%n_servers,MPI_INT,MPI_MIN,this%IO_Comms,ierr)
@@ -185,9 +185,9 @@ contains
             ! find where we have a "block" (hole) in the domain, since the child ioclients may not give us a perfect rectangle
             
             i_start = max(child_isr(n),this%i_s_w)
-            i_end = min(child_ier(n),this%i_e_w)+1
+            i_end = min(child_ier(n),this%i_e_w)
             j_start = max(child_jsr(n),this%j_s_w)
-            j_end = min(child_jer(n),this%j_e_w)+1
+            j_end = min(child_jer(n),this%j_e_w)
 
             ! See if any of the child ioserver domain is within the parent ioserver domain
             if (i_end > i_start .and. j_end > j_start) then
@@ -225,9 +225,9 @@ contains
             call MPI_Type_commit(send_nest_types(n))
 
             i_start = max(parent_ims(n),child_ioserver%i_s_r)
-            i_end = min(parent_ime(n),child_ioserver%i_e_r)+1
+            i_end = min(parent_ime(n),child_ioserver%i_e_r)
             j_start = max(parent_jms(n),child_ioserver%j_s_r)
-            j_end = min(parent_jme(n),child_ioserver%j_e_r)+1
+            j_end = min(parent_jme(n),child_ioserver%j_e_r)
 
             ! To calculate the receive buffer, we need to know the mask of the sending IO process
             ! Do a MPI_Scatter here to get the mask of the sending IO process
@@ -259,8 +259,8 @@ contains
                                 do v = 1,this%n_f
                                     if (mask(i,j) /= kEMPT_BUFF) then
                                         counter = counter + 1
-                                        displacements(counter) = (v-1) + ((i-child_ioserver%i_s_r) + (k-child_ioserver%k_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+2) + &
-                                                                        (j-child_ioserver%j_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+2) * (child_ioserver%k_e_r-child_ioserver%k_s_r+1))*this%n_f
+                                        displacements(counter) = (v-1) + ((i-child_ioserver%i_s_r) + (k-child_ioserver%k_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+1) + &
+                                                                        (j-child_ioserver%j_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+1) * (child_ioserver%k_e_r-child_ioserver%k_s_r+1))*this%n_f
                                     endif
                                 enddo
                             enddo
