@@ -256,10 +256,7 @@ contains
         type(Time_type),  intent(in)  :: time
         type(MPI_Comm),   intent(in)     :: par_comms
         integer,          intent(in)  :: out_var_indices(:)
-        real :: cpu_time_s, cpu_time_e, cpu_time_s2, cpu_time_e2
 
-        !get cpu time to time this function:
-        call cpu_time(cpu_time_s)
         !Check if we should change the file
         if (this%output_counter > this%output_count) then
             write(this%output_fn, '(A,A,".nc")')    &
@@ -283,13 +280,7 @@ contains
         if (.not.this%block_checked) call block_hunter(this)
         ! store output
 
-        !get cpu time to time this function:
-        call cpu_time(cpu_time_s2)
-
         call save_data(this, this%output_counter, time, out_var_indices)
-        !get cpu time to time this function:
-        call cpu_time(cpu_time_e2)
-        write(*,*) "Data written to file in ", cpu_time_e2 - cpu_time_s2, " seconds."
 
         !In case we had creating set to true, set to false
         this%creating = .false.
@@ -302,9 +293,6 @@ contains
             call check_ncdf(nf90_close(this%out_ncfile_id), "Closing output file ")
             this%out_ncfile_id = -1
         endif
-        !get cpu time to time this function:
-        call cpu_time(cpu_time_e)
-        write(*,*) "Output file saved in ", cpu_time_e - cpu_time_s, " seconds."
 
     end subroutine
     

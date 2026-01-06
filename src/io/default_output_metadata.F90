@@ -385,8 +385,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%w) then
             var_meta%name        = "w_grid"
-            var_meta%maxval      = 200.0
-            var_meta%minval      = -200.0
+            var_meta%maxval      = 100.0
+            var_meta%minval      = -100.0
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "grid_upward_air_velocity"),    &
                                attribute_t("long_name",     "Vertical wind"),                   &
@@ -2981,8 +2981,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%sensible_heat) then
             var_meta%name        = "hfss"
-            var_meta%maxval      = 1500.0
-            var_meta%minval      = -1500.0
+            var_meta%maxval      = 4000.0
+            var_meta%minval      = -4000.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "surface_upward_sensible_heat_flux"),   &
                                attribute_t("units",         "W m-2"),                               &
@@ -2995,8 +2995,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%latent_heat) then
             var_meta%name        = "hfls"
-            var_meta%maxval      = 1500.0
-            var_meta%minval      = -1500.0
+            var_meta%maxval      = 4000.0
+            var_meta%minval      = -4000.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "surface_upward_latent_heat_flux"),     &
                                attribute_t("units",         "W m-2"),                               &

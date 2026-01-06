@@ -18,10 +18,12 @@ submodule(ioserver_interface) ioserver_implementation
   use iso_c_binding
   use output_metadata,          only : get_varindx
   use meta_data_interface,      only : meta_data_t
-  use time_object,        only : Time_type
+  use time_object,              only : Time_type
   use string,                   only : split_str, as_string
-  use io_routines,              only : check_file_exists
-  use time_io,                    only : find_timestep_in_file
+  use io_routines,              only : check_file_exists, io_write
+  use string,                   only : str
+  use time_io,                  only : find_timestep_in_file
+  use mpi_utils_module,         only : get_mpi_global_rank
   implicit none
 
 contains
@@ -56,12 +58,18 @@ contains
 
         this%n_child_ioservers = size(options(nest_indx)%general%child_nests)
         this%n_f = 0
-        
+
+        !determine if we need to increase our k index due to some very large soil field
+        this%n_w_3d = 0
+
+        ! Save the number of vertical levels in the domain, since this is what our child ioserver will expect as the z-dimension for forcing data
+        this%k_e_f = options(nest_indx)%domain%nz
+
         if (size(options(nest_indx)%general%child_nests) > 0) then
             some_child_id = options(nest_indx)%general%child_nests(1)
             this%n_f = count(options(some_child_id)%forcing%vars_to_read /= "")
             if (this%n_f > 0) then
-                allocate(this%gather_buffer(this%n_f,this%i_s_w:this%i_e_w+1,this%k_s_w:this%k_e_w,this%j_s_w:this%j_e_w+1))
+                allocate(this%gather_buffer(this%n_f,this%i_s_w:this%i_e_w+1,this%k_s_w:this%k_e_f,this%j_s_w:this%j_e_w+1))
                 if (options(nest_indx)%general%parent_nest == 0) allocate(this%forcing_buffer(this%n_f,this%i_s_r:this%i_e_r+1,this%k_s_r:this%k_e_r, this%j_s_r:this%j_e_r+1))
             endif
 
@@ -74,11 +82,6 @@ contains
         !Setup writing capability
         call this%outputer%init(options(nest_indx),this%i_s_w,this%i_e_w,this%k_s_w,this%k_e_w,this%j_s_w,this%j_e_w,this%ide,this%kde,this%jde)
 
-        !determine if we need to increase our k index due to some very large soil field
-        this%n_w_3d = 0
-
-        ! Save the number of vertical levels in the domain, since this is what our child ioserver will expect as the z-dimension for forcing data
-        this%k_e_f = options(nest_indx)%domain%nz
 
         do n = 1,this%outputer%n_vars
             if (this%outputer%var_meta(n)%three_d) then
@@ -177,6 +180,9 @@ contains
         if (allocated(test_write_buffer_2d)) deallocate(test_write_buffer_2d)
         allocate(test_write_buffer_2d(this%i_s_w:this%i_e_w+1, this%j_s_w:this%j_e_w+1))
 
+        ! We want to designate all cells for which this ioserver is resonsible for gathering data
+        ! This should be just cells covered by the compute processes of this ioserver. Only at the edges
+        ! of the domain do we also add the staggered cells, since no other ioserver will cover these. 
         test_write_buffer_2d = kEMPT_BUFF
         do i=1,this%n_children
             if (this%iewc(i)==this%ide .and. this%jewc(i)==this%jde) then
@@ -200,7 +206,7 @@ contains
             j_end = min(child_jer(n),this%j_e_w)+1
 
             ! See if any of the child ioserver domain is within the parent ioserver domain
-            if (i_end > i_start .and. j_end > j_start) then
+            if (i_end >= i_start .and. j_end >= j_start) then
                 counter = count(test_write_buffer_2d(i_start:i_end,j_start:j_end)/=kEMPT_BUFF)*this%n_f*(this%k_e_f-this%k_s_w+1)
 
                 if (counter > 0) then
@@ -219,7 +225,7 @@ contains
                                     if (test_write_buffer_2d(i,j) /= kEMPT_BUFF) then
                                         counter = counter + 1
                                         displacements(counter) = (v-1) + ((i-this%i_s_w) + (k-this%k_s_w) * (this%i_e_w-this%i_s_w+2) + &
-                                                                        (j-this%j_s_w) * (this%i_e_w-this%i_s_w+2) * (this%k_e_w-this%k_s_w+1))*this%n_f
+                                                                        (j-this%j_s_w) * (this%i_e_w-this%i_s_w+2) * (this%k_e_f-this%k_s_w+1))*this%n_f
                                     endif
                                 enddo
                             enddo
@@ -244,14 +250,15 @@ contains
             if (allocated(mask)) deallocate(mask)
             allocate(mask(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1))
             mask_size = (parent_ime(n)-parent_ims(n)+2)*(parent_jme(n)-parent_jms(n)+2)
-
+            mask = kEMPT_BUFF
             if (my_rank == n-1) then
-                mask = test_write_buffer_2d(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1)
+                mask(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1) = &
+                    test_write_buffer_2d(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1)
             endif
             call MPI_Bcast(mask, mask_size, MPI_REAL, n-1, this%IO_Comms, ierr)
 
             ! See if any of the child ioserver domain is within the parent ioserver domain
-            if (i_end > i_start .and. j_end > j_start) then
+            if (i_end >= i_start .and. j_end >= j_start) then
                 counter = count(mask(i_start:i_end,j_start:j_end)/=kEMPT_BUFF)*this%n_f*(child_ioserver%k_e_r-child_ioserver%k_s_r+1)
 
                 if (counter > 0) then
@@ -299,26 +306,51 @@ contains
         real :: forcing_buffer_init, gather_buffer_init
         integer, allocatable :: send_msg_size_alltoall(:), buff_msg_size_alltoall(:), disp_alltoall(:)
         INTEGER(KIND=MPI_ADDRESS_KIND) :: lowerbound, extent
-        real, allocatable, dimension(:,:,:,:) :: forcing_buffer, gather_buffer_test
+        real, allocatable, dimension(:,:,:,:) :: forcing_buffer_test, gather_buffer_test
+        logical :: tripped = .False.
+        integer :: PE_rank_global
 
         allocate(send_msg_size_alltoall(ioserver%n_servers))
         allocate(buff_msg_size_alltoall(ioserver%n_servers))
         allocate(disp_alltoall(ioserver%n_servers))
 
-        disp_alltoall = 0
-        forcing_buffer_init = -1111.0
-        gather_buffer_init = -2222.0
-        allocate(forcing_buffer(ioserver%n_f,child_ioserver%i_s_r:child_ioserver%i_e_r+1,child_ioserver%k_s_r:child_ioserver%k_e_r, child_ioserver%j_s_r:child_ioserver%j_e_r+1))
-        allocate(gather_buffer_test(ioserver%n_f,ioserver%i_s_w:ioserver%i_e_w+1,ioserver%k_s_w:ioserver%k_e_w,ioserver%j_s_w:ioserver%j_e_w+1))
+        PE_rank_global = get_mpi_global_rank()
 
-        forcing_buffer = forcing_buffer_init
+        disp_alltoall = 0
+        forcing_buffer_init = -1000.0*PE_rank_global
+        gather_buffer_init = 1e30
+        allocate(forcing_buffer_test(ioserver%n_f,child_ioserver%i_s_r:child_ioserver%i_e_r+1,child_ioserver%k_s_r:child_ioserver%k_e_r, child_ioserver%j_s_r:child_ioserver%j_e_r+1))
+        allocate(gather_buffer_test(ioserver%n_f, ioserver%i_s_w:ioserver%i_e_w+1,ioserver%k_s_w:ioserver%k_e_f,ioserver%j_s_w:ioserver%j_e_w+1))
+
+        forcing_buffer_test = forcing_buffer_init
         gather_buffer_test = gather_buffer_init
         ! Loop through child images and get chunks of buffer array from each one
         do i=1,ioserver%n_children
             do jy = ioserver%jswc(i), ioserver%jewc(i)+1
-                do k = ioserver%k_s_w, ioserver%k_e_w
+                do k = ioserver%k_s_w, ioserver%k_e_f
                     do ix = ioserver%iswc(i), ioserver%iewc(i)+1
                         gather_buffer_test(1,ix,k,jy) = ix + (k-1)*(ioserver%ide+1) + (jy-1)*(ioserver%ide+1)*(ioserver%kde)
+                    enddo
+                enddo
+            enddo
+            do jy = ioserver%jswc(i), ioserver%jewc(i)
+                do k = ioserver%k_s_w, ioserver%k_e_f
+                    do ix = ioserver%iswc(i), ioserver%iewc(i)+1
+                        gather_buffer_test(2,ix,k,jy) = ix + (k-1)*(ioserver%ide+1) + (jy-1)*(ioserver%ide+1)*(ioserver%kde)
+                    enddo
+                enddo
+            enddo
+            do jy = ioserver%jswc(i), ioserver%jewc(i)+1
+                do k = ioserver%k_s_w, ioserver%k_e_f
+                    do ix = ioserver%iswc(i), ioserver%iewc(i)
+                        gather_buffer_test(3,ix,k,jy) = ix + (k-1)*(ioserver%ide+1) + (jy-1)*(ioserver%ide+1)*(ioserver%kde)
+                    enddo
+                enddo
+            enddo
+            do jy = ioserver%jswc(i), ioserver%jewc(i)
+                do k = ioserver%k_s_w, ioserver%k_e_f
+                    do ix = ioserver%iswc(i), ioserver%iewc(i)
+                        gather_buffer_test(4,ix,k,jy) = ix + (k-1)*(ioserver%ide+1) + (jy-1)*(ioserver%ide+1)*(ioserver%kde)
                     enddo
                 enddo
             enddo
@@ -342,27 +374,104 @@ contains
         enddo
 
         call MPI_Alltoallw(gather_buffer_test,  send_msg_size_alltoall, disp_alltoall, ioserver%send_nest_types(child_indx,:), &
-                        forcing_buffer, buff_msg_size_alltoall, disp_alltoall, ioserver%buffer_nest_types(child_indx,:), ioserver%IO_Comms)
+                          forcing_buffer_test,  buff_msg_size_alltoall, disp_alltoall, ioserver%buffer_nest_types(child_indx,:), ioserver%IO_Comms)
 
 
         ! check that the whole of the forcing buffer has been filled correctly
         do j = child_ioserver%j_s_r, child_ioserver%j_e_r+1
             do k = child_ioserver%k_s_r, child_ioserver%k_e_r
                 do i = child_ioserver%i_s_r, child_ioserver%i_e_r+1
-                    if (forcing_buffer(1,i,k,j) /= i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)) then
+                    if (forcing_buffer_test(1,i,k,j) /= i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)) then
                         write(*,*) 'Error in test_nest_types: Mismatch in forcing buffer at (', 1, ',', i, ',', k, ',', j, ') : ', &
                                     ' expected ', (i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)), &
-                                    ' but got ', forcing_buffer(1,i,k,j)
-                        if (forcing_buffer(1,i,k,j) == forcing_buffer_init) then
-                            write(*,*) ' (Buffer value indicates that alltoall was done incorrectly)'
+                                    ' but got ', forcing_buffer_test(1,i,k,j)
+                        write(*,*) 'child_ioserver%i_s_r: ', child_ioserver%i_s_r, ' child_ioserver%i_e_r: ', child_ioserver%i_e_r
+                        write(*,*) 'child_ioserver%j_s_r: ', child_ioserver%j_s_r, ' child_ioserver%j_e_r: ', child_ioserver%j_e_r
+                        
+                        if (forcing_buffer_test(1,i,k,j) < 0) then
+                            forcing_buffer_test(1,i,k,j) = forcing_buffer_init
+                            write(*,*) ' (Buffer value indicates that alltoall was done incorrectly for x and y stagger)'
                         endif
-                        if (forcing_buffer(1,i,k,j) == gather_buffer_init) then
+                        if (forcing_buffer_test(1,i,k,j) == gather_buffer_init) then
                             write(*,*) ' (Buffer value indicates that gather operation was done incorrectly)'
                         endif
+                        write(*,*) '------------------------------------------------------------------------'
+                        tripped = .True.
                     endif
                 enddo
             enddo
         enddo
+        do j = child_ioserver%j_s_r, child_ioserver%j_e_r
+            do k = child_ioserver%k_s_r, child_ioserver%k_e_r
+                do i = child_ioserver%i_s_r, child_ioserver%i_e_r+1
+                    if (forcing_buffer_test(2,i,k,j) /= i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)) then
+                        write(*,*) 'Error in test_nest_types: Mismatch in forcing buffer at (', 2, ',', i, ',', k, ',', j, ') : ', &
+                                    ' expected ', (i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)), &
+                                    ' but got ', forcing_buffer_test(2,i,k,j)
+                        write(*,*) 'child_ioserver%i_s_r: ', child_ioserver%i_s_r, ' child_ioserver%i_e_r: ', child_ioserver%i_e_r
+                        write(*,*) 'child_ioserver%j_s_r: ', child_ioserver%j_s_r, ' child_ioserver%j_e_r: ', child_ioserver%j_e_r
+                        if (forcing_buffer_test(2,i,k,j) < 0) then
+                            forcing_buffer_test(2,i,k,j) = forcing_buffer_init
+                            write(*,*) ' (Buffer value indicates that alltoall was done incorrectly for x)'
+                        endif
+                        if (forcing_buffer_test(2,i,k,j) == gather_buffer_init) then
+                            write(*,*) ' (Buffer value indicates that gather operation was done incorrectly)'
+                        endif
+                        write(*,*) '------------------------------------------------------------------------'
+                        tripped = .True.
+                    endif
+                enddo
+            enddo
+        enddo
+        do j = child_ioserver%j_s_r, child_ioserver%j_e_r+1
+            do k = child_ioserver%k_s_r, child_ioserver%k_e_r
+                do i = child_ioserver%i_s_r, child_ioserver%i_e_r
+                    if (forcing_buffer_test(3,i,k,j) /= i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)) then
+                        write(*,*) 'Error in test_nest_types: Mismatch in forcing buffer at (', 3, ',', i, ',', k, ',', j, ') : ', &
+                                    ' expected ', (i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)), &
+                                    ' but got ', forcing_buffer_test(3,i,k,j)
+                        write(*,*) 'child_ioserver%i_s_r: ', child_ioserver%i_s_r, ' child_ioserver%i_e_r: ', child_ioserver%i_e_r
+                        write(*,*) 'child_ioserver%j_s_r: ', child_ioserver%j_s_r, ' child_ioserver%j_e_r: ', child_ioserver%j_e_r
+                        if (forcing_buffer_test(3,i,k,j) < 0) then
+                            forcing_buffer_test(3,i,k,j) = forcing_buffer_init
+                            write(*,*) ' (Buffer value indicates that alltoall was done incorrectly for y stagger)'
+                        endif
+                        if (forcing_buffer_test(3,i,k,j) == gather_buffer_init) then
+                            write(*,*) ' (Buffer value indicates that gather operation was done incorrectly)'
+                        endif
+                        write(*,*) '------------------------------------------------------------------------'
+                        tripped = .True.
+                    endif
+                enddo
+            enddo
+        enddo
+        do j = child_ioserver%j_s_r, child_ioserver%j_e_r
+            do k = child_ioserver%k_s_r, child_ioserver%k_e_r
+                do i = child_ioserver%i_s_r, child_ioserver%i_e_r
+                    if (forcing_buffer_test(4,i,k,j) /= i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)) then
+                        write(*,*) 'Error in test_nest_types: Mismatch in forcing buffer at (', 4, ',', i, ',', k, ',', j, ') : ', &
+                                    ' expected ', (i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)), &
+                                    ' but got ', forcing_buffer_test(4,i,k,j)
+                        write(*,*) 'child_ioserver%i_s_r: ', child_ioserver%i_s_r, ' child_ioserver%i_e_r: ', child_ioserver%i_e_r
+                        write(*,*) 'child_ioserver%j_s_r: ', child_ioserver%j_s_r, ' child_ioserver%j_e_r: ', child_ioserver%j_e_r
+                        if (forcing_buffer_test(4,i,k,j) < 0) then
+                            forcing_buffer_test(4,i,k,j) = forcing_buffer_init
+                            write(*,*) ' (Buffer value indicates that alltoall was done incorrectly)'
+                        endif
+                        if (forcing_buffer_test(4,i,k,j) == gather_buffer_init) then
+                            write(*,*) ' (Buffer value indicates that gather operation was done incorrectly)'
+                        endif
+                        write(*,*) '------------------------------------------------------------------------'
+                        tripped = .True.
+                    endif
+                enddo
+            enddo
+        enddo
+
+        if (tripped) then
+            !get rank of this MPI process on the global communicator
+            call io_write('debug/buffer_'//trim(str(PE_rank_global))//".nc",'buffer',forcing_buffer_test)
+        endif
     end subroutine test_nest_types
     
     subroutine setup_MPI_windows(this)
@@ -701,19 +810,8 @@ contains
 
         ! Loop through child images and get chunks of buffer array from each one
         do i=1,this%n_children
-            if (this%iewc(i)==this%ide .and. this%jewc(i)==this%jde) then
-                this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,:,this%jswc(i):this%jewc(i)+1) = &
-                    this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+2),:,1:(this%jewc(i)-this%jswc(i)+2))
-            else if (this%iewc(i)==this%ide) then
-                this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,:,this%jswc(i):this%jewc(i)) = &
-                    this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+2),:,1:(this%jewc(i)-this%jswc(i)+1))
-            else if (this%jewc(i)==this%jde) then
-                this%gather_buffer(:,this%iswc(i):this%iewc(i),:,this%jswc(i):this%jewc(i)+1) = &
-                    this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+1),:,1:(this%jewc(i)-this%jswc(i)+2))
-            else
-                this%gather_buffer(:,this%iswc(i):this%iewc(i),:,this%jswc(i):this%jewc(i)) = &
-                    this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+1),:,1:(this%jewc(i)-this%jswc(i)+1))
-            endif
+            this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,this%k_s_w:this%k_e_f,this%jswc(i):this%jewc(i)+1) = &
+                this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+2),this%k_s_w:this%k_e_f,1:(this%jewc(i)-this%jswc(i)+2))
         enddo
 
         ! Do MPI_Win_Complete on read_win to end put
