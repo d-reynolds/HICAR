@@ -2488,11 +2488,17 @@ contains
         ! this%geo and forcing%geo have to be of class interpolable
         ! which means they must contain lat, lon, z, geolut, and vLUT components
 
-        call geo_LUT(this%geo,    forcing%geo)
-        call geo_LUT(this%geo_agl,forcing%geo_agl)
-        call geo_LUT(this%geo_u,  forcing%geo_u)
-        call geo_LUT(this%geo_v,  forcing%geo_v)
-
+        if (options%general%debug) then
+            call geo_LUT(this%geo,    forcing%geo, err_msg='Hi-res: domain%geo   Low-res: forcing%geo')
+            call geo_LUT(this%geo_agl,forcing%geo_agl, err_msg='Hi-res: domain%geo_agl   Low-res: forcing%geo_agl')
+            call geo_LUT(this%geo_u,  forcing%geo_u, err_msg='Hi-res: domain%geo_u   Low-res: forcing%geo_u')
+            call geo_LUT(this%geo_v,  forcing%geo_v, err_msg='Hi-res: domain%geo_v   Low-res: forcing%geo_v')
+        else
+            call geo_LUT(this%geo,    forcing%geo)
+            call geo_LUT(this%geo_agl,forcing%geo_agl)
+            call geo_LUT(this%geo_u,  forcing%geo_u)
+            call geo_LUT(this%geo_v,  forcing%geo_v)
+        end if
         if (allocated(forcing%z)) then  ! In case of external 2D forcing data, skip the VLUTs.
 
             ! This function will do any necessary interpolation of z if it is on interface, or
@@ -2503,10 +2509,14 @@ contains
             forc_v_from_mass%lat = forcing%geo%lat
             forc_v_from_mass%lon = forcing%geo%lon
 
-            call geo_LUT(this%geo_u, forc_u_from_mass)
-            
-            call geo_LUT(this%geo_v, forc_v_from_mass)
-            
+            if (options%general%debug) then
+                call geo_LUT(this%geo_u, forc_u_from_mass, err_msg='Hi-res: domain%geo_u   Low-res: forc_u_from_mass')
+                call geo_LUT(this%geo_v, forc_v_from_mass, err_msg='Hi-res: domain%geo_v   Low-res: forc_v_from_mass')
+            else
+                call geo_LUT(this%geo_u, forc_u_from_mass)
+                call geo_LUT(this%geo_v, forc_v_from_mass)
+            end if
+
             nz = ubound(forcing%z,  2)
             ims = lbound(this%geo_u%z,1)
             ime = ubound(this%geo_u%z,1)
