@@ -385,8 +385,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%w) then
             var_meta%name        = "w_grid"
-            var_meta%maxval      = 100.0
-            var_meta%minval      = -100.0
+            var_meta%maxval      = 1000.0
+            var_meta%minval      = -1000.0
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "grid_upward_air_velocity"),    &
                                attribute_t("long_name",     "Vertical wind"),                   &

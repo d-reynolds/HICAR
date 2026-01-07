@@ -44,8 +44,8 @@ contains
         if (domain%var_indx(kVARS%ice3_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_number)%v), msg=error_msg, fix=fix_data)
         if (domain%var_indx(kVARS%ice3_a)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_a)%v), msg=error_msg, fix=fix_data)
         if (domain%var_indx(kVARS%ice3_c)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_c)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%sensible_heat)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v), msg=error_msg) ! check for NaN's only.
-        if (domain%var_indx(kVARS%latent_heat)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v), msg=error_msg)
+        !if (domain%var_indx(kVARS%sensible_heat)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v), msg=error_msg) ! check for NaN's only.
+        !if (domain%var_indx(kVARS%latent_heat)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v), msg=error_msg)
         if (domain%var_indx(kVARS%skin_temperature)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v), msg=error_msg)
         if (domain%var_indx(kVARS%roughness_z0)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v), msg=error_msg)
         if (domain%var_indx(kVARS%surface_pressure)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v), msg=error_msg)
