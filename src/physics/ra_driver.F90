@@ -1251,7 +1251,7 @@ contains
             ! cache shortwave from RRTMG_SWRAD for downscaling.
             ! needed if we are to call the terrain shading routine more frequently than RRTMG_SWRAD
             if (options%physics%radiation_downScaling==1) then
-                !$acc kernels present(shortwave, shortwave_cached) copyin(kVARS)
+                !$acc kernels present(shortwave, shortwave_cached)
                 shortwave_cached = shortwave
                 !$acc end kernels
             endif

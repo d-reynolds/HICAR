@@ -700,9 +700,18 @@ contains
             this%mass_to_v%lat = this%geo%lat
             this%mass_to_v%lon = this%geo%lon
 
-            call geo_LUT(this%geo_u, this%mass_to_u)
-            call geo_LUT(this%geo_v, this%mass_to_v)
-
+            if (options%general%debug) then
+                ! These will likely always complain. The below function is intended to generate an interpolation table for moving
+                ! between a high-res and low-res grid. Here we use it to generate an interpolation table between the staggered and non-staggered grids.
+                ! since the staggered grid will always be offset by half a grid cell, this will likely always complain that the high-res data is not contained
+                ! in the low-res data.
+                call geo_LUT(this%geo_u, this%mass_to_u, err_msg='Hi-res: forcing%geo_u     Low-res: forcing%mass_to_u')
+                call geo_LUT(this%geo_v, this%mass_to_v, err_msg='Hi-res: forcing%geo_v     Low-res: forcing%mass_to_v')
+            else
+                call geo_LUT(this%geo_u, this%mass_to_u)
+                call geo_LUT(this%geo_v, this%mass_to_v)
+            endif
+            
             if (allocated(this%original_geo_u%z)) deallocate(this%original_geo_u%z)
             if (allocated(this%original_geo_v%z)) deallocate(this%original_geo_v%z)
             allocate(this%original_geo_u%z(lbound(this%geo_u%lon,1):ubound(this%geo_u%lon,1), this%kts:this%kte, lbound(this%geo_u%lon,2):ubound(this%geo_u%lon,2)))            

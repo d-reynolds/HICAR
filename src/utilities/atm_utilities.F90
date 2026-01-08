@@ -854,7 +854,7 @@ contains
             RHUM = rh(k)
 
             if (qc(k).gt.1.E-6 .or. qi(k).ge.1.E-7                         &
-        &                    .or. (qs(k).gt.1.E-5 .and. t(k).lt.273.)) then
+        &                    .or. (qs(k).gt.1.E-6 .and. t(k).lt.273.)) then
                CLDFRA(K) = 1.0
                qvs(k) = qv(k)
             else if (((qc(k)+qi(k)).gt.1.E-10) .and.                        &

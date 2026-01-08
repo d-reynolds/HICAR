@@ -13,11 +13,12 @@
 !!
 !!----------------------------------------------------------
 submodule(ioclient_interface) ioclient_implementation
-  use debug_module,             only : check_ncdf
+  use debug_module,             only : check_ncdf, check_var
   use iso_fortran_env
   use, intrinsic :: iso_c_binding
   use output_metadata,          only : get_varindx, get_varmeta
   use meta_data_interface,      only : meta_data_t
+  use string,           only  : str
 
   implicit none
 
@@ -286,13 +287,15 @@ contains
         type(variable_t) :: var
         type(meta_data_t) :: tmp_var
         integer :: i, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, var_indx
+        logical :: var_val_check
+        character(len=kMAX_NAME_LENGTH) :: err_msg
 
         n_3d = 1
         ! Do MPI_Win_Wait on forcing_win. This is mostly unnecesarry, since the server process is what will be waiting on us, which is handeled by the MPI_Win_Start call
         ! in ioserver%gather_foring. Still, MPI_Win_Wait is called here for completeness of PSCW model
-        if (this%nest_updated) then
-            call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
-        endif
+        ! if (this%nest_updated) then
+        !     call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
+        ! endif
 
         this%nest_updated = .False.
         !This is false only when it is the first call to push (i.e. first write call)
@@ -302,6 +305,7 @@ contains
             if (this%vars_for_nest(i) == '') cycle
             var_indx = get_varindx(this%vars_for_nest(i))
             tmp_var = get_varmeta(var_indx)
+            var_val_check = (var%maxval /= kUNSET_REAL .and. var%minval /= kUNSET_REAL)
 
             if (tmp_var%two_d) cycle
 
@@ -315,19 +319,25 @@ contains
 
             i_s_w = this%i_s_w; i_e_w = this%i_e_w
             j_s_w = this%j_s_w; j_e_w = this%j_e_w
-            if (domain%ime == domain%ide) i_e_w = i_e_w+var%xstag !Add extra to accomodate staggered vars
-            if (domain%jme == domain%jde) j_e_w = j_e_w+var%ystag !Add extra to accomodate staggered vars
+            i_e_w = i_e_w+var%xstag !Add extra to accomodate staggered vars
+            j_e_w = j_e_w+var%ystag !Add extra to accomodate staggered vars
             nx = i_e_w - i_s_w + 1
             ny = j_e_w - j_s_w + 1
 
             this%forcing_buffer(n_3d,1:nx,1:var%dim_len(2),1:ny) = &
                 var%data_3d(i_s_w:i_e_w,1:var%dim_len(2),j_s_w:j_e_w)
+            if (var_val_check) then
+                err_msg = 'Warning on ioclient_obj::update_nest: Nest level: '// str(domain%nest_indx)
+                call check_var(var, trim(err_msg))
+            endif
+
             n_3d = n_3d+1
         enddo
 
         this%nest_updated = .True.
         ! Do MPI_Win_Post on forcing_win to inform that server process can begin gathering of nest data
         call MPI_Win_Post(this%parent_group,0,this%forcing_win)
+        call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
 
     end subroutine
     
@@ -341,6 +351,8 @@ contains
 
         type(variable_t)     :: var
         integer :: i, n, nx, ny, var_id
+        logical :: var_val_check
+        character(len=kMAX_NAME_LENGTH) :: err_msg
                 
         n = 1
         ! Do MPI_Win_Wait on read_buffer to make sure that server process has completed data transfer
@@ -354,6 +366,7 @@ contains
         do while (forcing%variables%has_more_elements())
             ! get the next variable in the structure
             var = forcing%variables%next(var_id)
+            var_val_check = (var%maxval /= kUNSET_REAL .and. var%minval /= kUNSET_REAL)
             if (var%computed) then
                 cycle
             else
@@ -370,6 +383,11 @@ contains
                     ny = size(var%data_3d,3)
 
                     var%data_3d(:,1:var%dim_len(2),:) = this%read_buffer(n,1:nx,1:var%dim_len(2),1:ny)
+                endif
+
+                if (var_val_check) then
+                    err_msg = 'Warning on ioclient_obj::receive: Nest level: '// str(domain%nest_indx)
+                    call check_var(var, trim(err_msg))
                 endif
                 n = n+1
             endif
@@ -472,12 +490,11 @@ contains
         type(MPI_Win), intent(in) :: window
         character(len=*), intent(in) :: err_msg
 
-        integer :: wait_count, ierr
-        logical :: flag, write_flag
+        integer :: wait_count, ierr, global_rank
+        logical :: flag
         
         wait_count = 0
         flag = .False.
-        write_flag = .False.
 
         call MPI_Win_Test(window, flag, ierr)
         do while (.not.(flag))
@@ -485,18 +502,20 @@ contains
             ! Check if we've waited too long
             wait_count = wait_count + 1
 
-            if (wait_count > 60.0 .and. .not.(write_flag)) then
-                write_flag = .True.
+            if (wait_count > 600.0) then
+                ! write_flag = .True.
                 if (STD_OUT_PE) write(*,*) err_msg
                 if (STD_OUT_PE) flush(output_unit)
 
-                ! stop
+                stop
             endif
             
             ! Small sleep to avoid busy waiting
             call sleep(1)
 
             call MPI_Win_Test(window, flag, ierr)
+
+            if (ierr /= 0) write(*,*) "MPI_Win_Test returned error: ",ierr
         end do
     end subroutine
 

@@ -24,6 +24,7 @@ module wind
     use wind_thermal, only      : apply_thermal_winds, init_thermal_winds
     use mod_atm_utilities,   only : calc_froude, calc_Ri, calc_dry_stability
     use array_utilities,      only : smooth_array
+    use debug_module,     only : domain_check_winds
 
     implicit none
     private
@@ -618,14 +619,18 @@ contains
             call domain%diagnostic_update()
 
         endif
-
+        if (options%general%debug) call domain_check_winds(domain, "Pre update_winds::apply_base_from_forcing")
         call apply_base_from_forcing(domain, w_var_given)
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_base_from_forcing")
 
         ! rotate winds from cardinal directions to grid orientation (e.g. u is grid relative not truly E-W)
         call make_winds_grid_relative(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, domain%vars_2d(domain%var_indx(kVARS%sintheta)%v)%data_2d, domain%vars_2d(domain%var_indx(kVARS%costheta)%v)%data_2d)
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::make_winds_grid_relative")
 
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::make_winds_grid_relative_exch")
+
         if (options%wind%Sx) then
             call apply_Sx(domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d,domain%vars_2d(domain%var_indx(kVARS%TPI)%v)%data_2d, &
                     domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
@@ -633,6 +638,7 @@ contains
                     domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d, ims, ime, kms, kme, jms, jme, its, ite, jts, jte)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_Sx")
         endif 
 
         if (options%wind%thermal) then
@@ -652,6 +658,7 @@ contains
             endif
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_thermal_winds")
         endif 
 
         ! linear winds
@@ -659,6 +666,7 @@ contains
             call linear_perturb(domain,options,options%lt%vert_smooth,.False.,options%adv%advect_density, update=.False.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::linear_perturb")
         endif
             
         if (options%physics%windtype==kITERATIVE_WINDS) then
@@ -693,8 +701,9 @@ contains
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),corners=.True.)
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),corners=.True.)
             end do
-
             !$acc end data
+
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::iterative_winds")
         endif
     ! elseif (options%physics%windtype==kOBRIEN_WINDS) then
     !     call Obrien_winds(domain, options, update_in=.True.)
@@ -716,7 +725,11 @@ contains
                 domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
 
         !$acc end data
+
         end associate
+
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::balance_uvw")
+
     end subroutine update_winds
     
     subroutine update_wind_dqdt(domain, dt)

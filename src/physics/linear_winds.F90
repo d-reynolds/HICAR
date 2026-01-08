@@ -1043,7 +1043,7 @@ contains
         !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution), &
         !$omp shared(min_stability, max_stability, n_dir_values, n_spd_values, n_nsq_values, smooth_nsq)
         allocate(u1d(nxu), v1d(nxu))
-        !$omp do
+        ! $omp do
         do k=1, nyv
 
             uk = min(k,ny)
@@ -1161,9 +1161,9 @@ contains
                 end do
             end do
         end do
-        !$omp end do
+        ! $omp end do
         deallocate(u1d, v1d)
-        !$omp end parallel
+        ! $omp end parallel
 
         ! if (update) then
         !     do k=1, nyv

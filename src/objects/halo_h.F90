@@ -21,6 +21,10 @@ module halo_interface
         type(MPI_Win)     :: south_in_win
         type(MPI_Win)     :: east_in_win
         type(MPI_Win)     :: west_in_win
+        type(MPI_Win)     :: northwest_in_win
+        type(MPI_Win)     :: southwest_in_win
+        type(MPI_Win)     :: northeast_in_win
+        type(MPI_Win)     :: southeast_in_win
 
         type(MPI_win)     :: north_3d_win
         type(MPI_win)     :: south_3d_win
@@ -68,6 +72,10 @@ module halo_interface
         real, pointer     :: north_in_3d(:,:,:)
         real, pointer     :: west_in_3d(:,:,:)
         real, pointer     :: east_in_3d(:,:,:)
+        real, pointer     :: southwest_in_3d(:,:,:)
+        real, pointer     :: northwest_in_3d(:,:,:)
+        real, pointer     :: southeast_in_3d(:,:,:)
+        real, pointer     :: northeast_in_3d(:,:,:)
 
         real, contiguous, pointer :: south_batch_in_2d(:,:,:)
         real, contiguous, pointer :: north_batch_in_2d(:,:,:)
@@ -83,6 +91,10 @@ module halo_interface
         real, contiguous, pointer :: south_in_buffer(:,:,:)
         real, contiguous, pointer :: east_in_buffer(:,:,:)
         real, contiguous, pointer :: west_in_buffer(:,:,:)
+        real, contiguous, pointer :: north_in_buffer_2d(:,:)
+        real, contiguous, pointer :: south_in_buffer_2d(:,:)
+        real, contiguous, pointer :: east_in_buffer_2d(:,:)
+        real, contiguous, pointer :: west_in_buffer_2d(:,:)
 
         integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor, halo_rank
         integer :: northwest_neighbor, southwest_neighbor, northeast_neighbor, southeast_neighbor
@@ -96,6 +108,8 @@ module halo_interface
         logical :: southwest_boundary = .True.
         logical :: northeast_boundary = .True.
         logical :: southeast_boundary = .True.
+
+        logical :: corner, interior
 
         ! store the start (s) and end (e) for the i,j,k dimensions
         integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)

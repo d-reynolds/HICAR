@@ -123,12 +123,10 @@ contains
         character(len=kMAX_DIM_LENGTH) :: time_dim_name, attr_val
         logical :: has_time, flip_y, is_reversed, is_file_parallel
 
-        if (allocated(buffer)) deallocate(buffer)
-        allocate(buffer(this%n_vars,this%its:this%ite+1,this%kts:this%kte,this%jts:this%jte+1))
-
+        buffer = 0.0
         !See if we must open the file
 
-        is_file_parallel = .False.!can_file_parallel(this%file_list(this%curfile))
+        is_file_parallel = .True.!can_file_parallel(this%file_list(this%curfile))
         if (this%ncfile_id < 0) then
             if (.not.(is_file_parallel)) then
                 call check_ncdf( nf90_open(this%file_list(this%curfile), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id), " Opening file "//trim(this%file_list(this%curfile)))

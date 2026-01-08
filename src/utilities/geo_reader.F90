@@ -800,10 +800,11 @@ contains
     !!  Compute the geographic look up table from LOw resolution grid to HIgh resolution grid
     !!
     !!------------------------------------------------------------
-    subroutine geo_LUT(hi, lo)
+    subroutine geo_LUT(hi, lo, err_msg)
         implicit none
         type(interpolable_type), intent(in)    :: hi
         type(interpolable_type), intent(inout) :: lo
+        character(len=*), optional, intent(in) :: err_msg
         type(fourpos) :: xy
         type(position) :: curpos, lastpos
         integer :: nx, ny, i, j, k, lo_nx, lo_ny
@@ -821,29 +822,33 @@ contains
         jms = lbound(hi%lat,2)
         jme = ubound(hi%lat,2)
 
-        if (minval(hi%lat) < minval(lo%lat)) then
-            write(*,*) "WARNING : geo_LUT : Minimum latitude of high resolution data is less than that of low resolution data"
-            write(*,*) "  Min latitude of high resolution data: ", minval(hi%lat)
-            write(*,*) "  Min latitude of low resolution data:  ", minval(lo%lat)
-            ! error stop
-        endif
-        if (maxval(hi%lat) > maxval(lo%lat)) then
-            write(*,*) "WARNING : geo_LUT : Maximum latitude of high resolution data is greater than that of low resolution data"
-            write(*,*) "  Max latitude of high resolution data: ", maxval(hi%lat)
-            write(*,*) "  Max latitude of low resolution data:  ", maxval(lo%lat)
-            ! error stop
-        endif
-        if (minval(hi%lon) < minval(lo%lon)) then
-            write(*,*) "WARNING : geo_LUT : Minimum longitude of high resolution data is less than that of low resolution data"
-            write(*,*) "  Min longitude of high resolution data: ", minval(hi%lon)
-            write(*,*) "  Min longitude of low resolution data:  ", minval(lo%lon)
-            ! error stop
-        endif
-        if (maxval(hi%lon) > maxval(lo%lon)) then
-            write(*,*) "WARNING : geo_LUT : Maximum longitude of high resolution data is greater than that of low resolution data"
-            write(*,*) "  Max longitude of high resolution data: ", maxval(hi%lon)
-            write(*,*) "  Max longitude of low resolution data:  ", maxval(lo%lon)
-            ! error stop
+        if (present(err_msg)) then
+            if (.not.(trim(err_msg)=='')) then
+                if (minval(hi%lat) < minval(lo%lat)) then
+                    if (present(err_msg)) write(*,*) trim(err_msg)
+                    write(*,*) "WARNING : geo_LUT : Minimum latitude of high resolution data is less than that of low resolution data, extrapolating..."
+                    write(*,*) "  Min latitude of high resolution data: ", minval(hi%lat)
+                    write(*,*) "  Min latitude of low resolution data:  ", minval(lo%lat)
+                endif
+                if (maxval(hi%lat) > maxval(lo%lat)) then
+                    if (present(err_msg)) write(*,*) trim(err_msg)
+                    write(*,*) "WARNING : geo_LUT : Maximum latitude of high resolution data is greater than that of low resolution data, extrapolating..."
+                    write(*,*) "  Max latitude of high resolution data: ", maxval(hi%lat)
+                    write(*,*) "  Max latitude of low resolution data:  ", maxval(lo%lat)
+                endif
+                if (minval(hi%lon) < minval(lo%lon)) then
+                    if (present(err_msg)) write(*,*) trim(err_msg)
+                    write(*,*) "WARNING : geo_LUT : Minimum longitude of high resolution data is less than that of low resolution data, extrapolating..."
+                    write(*,*) "  Min longitude of high resolution data: ", minval(hi%lon)
+                    write(*,*) "  Min longitude of low resolution data:  ", minval(lo%lon)
+                endif
+                if (maxval(hi%lon) > maxval(lo%lon)) then
+                    if (present(err_msg)) write(*,*) trim(err_msg)
+                    write(*,*) "WARNING : geo_LUT : Maximum longitude of high resolution data is greater than that of low resolution data, extrapolating..."
+                    write(*,*) "  Max longitude of high resolution data: ", maxval(hi%lon)
+                    write(*,*) "  Max longitude of low resolution data:  ", maxval(lo%lon)
+                endif
+            endif
         endif
         allocate(lo%geolut%x(4,ims:ime, jms:jme))
         allocate(lo%geolut%y(4,ims:ime, jms:jme))

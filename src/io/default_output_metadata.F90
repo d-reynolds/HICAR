@@ -356,6 +356,8 @@ contains
         !!------------------------------------------------------------
         if (var_idx==kVARS%u) then
             var_meta%name        = "u"
+            var_meta%maxval      = 1000.0
+            var_meta%minval      = -1000.0
             var_meta%dimensions  = three_d_u_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "grid_eastward_wind"),              &
                                attribute_t("long_name",     "Grid relative eastward wind"),     &
@@ -368,6 +370,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%v) then
             var_meta%name        = "v"
+            var_meta%maxval      = 1000.0
+            var_meta%minval      = -1000.0
             var_meta%dimensions  = three_d_v_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "grid_northward_wind"),             &
                                attribute_t("long_name",     "Grid relative northward wind"),    &
@@ -381,6 +385,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%w) then
             var_meta%name        = "w_grid"
+            var_meta%maxval      = 1000.0
+            var_meta%minval      = -1000.0
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "grid_upward_air_velocity"),    &
                                attribute_t("long_name",     "Vertical wind"),                   &
@@ -391,6 +397,8 @@ contains
 
         else if (var_idx==kVARS%w_real) then
             var_meta%name        = "w"
+            var_meta%maxval      = 100.0
+            var_meta%minval      = -100.0
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "upward_air_velocity"),             &
                                attribute_t("long_name",     "Vertical wind"),                   &
@@ -416,6 +424,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%pressure) then
             var_meta%name        = "pressure"
+            var_meta%maxval      = 110000.0
+            var_meta%minval      = 0.0
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "air_pressure"),                    &
                                attribute_t("long_name",     "Pressure"),                        &
@@ -429,6 +439,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%pressure_interface) then
             var_meta%name        = "pressure_i"
+            var_meta%maxval      = 110000.0
+            var_meta%minval      = 0.0
             var_meta%dimensions  = three_d_t_interface_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "air_pressure"),                    &
                                attribute_t("long_name",     "Pressure"),                        &
@@ -440,6 +452,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%surface_pressure) then
             var_meta%name        = "psfc"
+            var_meta%maxval      = 110000.0
+            var_meta%minval      = 0.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "surface_air_pressure"),            &
                                attribute_t("long_name",     "Surface Pressure"),                &
@@ -451,6 +465,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%potential_temperature) then
             var_meta%name        = "potential_temperature"
+            var_meta%maxval      = 350.0
+            var_meta%minval      = 150.0
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "air_potential_temperature"),       &
                                attribute_t("long_name",     "Potential Temperature"),           &
@@ -463,6 +479,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%temperature) then
             var_meta%name        = "temperature"
+            var_meta%maxval      = 350.0
+            var_meta%minval      = 100.0
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "air_temperature"),                 &
                                attribute_t("long_name",     "Temperature"),                     &
@@ -474,6 +492,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%water_vapor) then
             var_meta%name        = "qv"
+            var_meta%maxval      = 0.1
+            var_meta%minval      = -1e-10
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "mass_fraction_of_water_vapor_in_air"), &
                                attribute_t("long_name",     "Water Vapor Mixing Ratio"),            &
@@ -486,6 +506,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%cloud_water_mass) then
             var_meta%name        = "qc"
+            var_meta%maxval      = 0.1
+            var_meta%minval      = -1e-10
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "cloud_liquid_water_mixing_ratio"),     &
                                attribute_t("units",         "kg kg-1"),                             &
@@ -497,6 +519,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%cloud_number) then
             var_meta%name        = "nc"
+            var_meta%maxval      = 1.0e8
+            var_meta%minval      = -1e-1
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "number_concentration_of_cloud_droplets_in_air"), &
                                attribute_t("units",         "cm-3"),                                              &
@@ -507,6 +531,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice_mass) then
             var_meta%name        = "qi"
+            var_meta%maxval      = 0.1
+            var_meta%minval      = -1e-10
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "cloud_ice_mixing_ratio"),              &
                                attribute_t("units",         "kg kg-1"),                             &
@@ -517,6 +543,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%ice_number) then
             var_meta%name        = "ni"
+            var_meta%maxval      = 1.0e8
+            var_meta%minval      = -1e-1
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "number_concentration_of_ice_crystals_in_air"), &
                                attribute_t("units",         "cm-3"),                                            &
@@ -527,6 +555,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%rain_mass) then
             var_meta%name        = "qr"
+            var_meta%maxval      = 0.1
+            var_meta%minval      = -1e-10
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "mass_fraction_of_rain_in_air"),        &
                                attribute_t("units",         "kg kg-1"),                             &
@@ -537,6 +567,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%rain_number) then
             var_meta%name        = "nr"
+            var_meta%maxval      = 1.0e8
+            var_meta%minval      = -1e-1
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "number_concentration_of_rain_particles_in_air"), &
                                attribute_t("units",         "cm-3"),                                              &
@@ -547,6 +579,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_mass) then
             var_meta%name        = "qs"
+            var_meta%maxval      = 0.1
+            var_meta%minval      = -1e-10
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "mass_fraction_of_snow_in_air"),        &
                                attribute_t("units",         "kg kg-1"),                             &
@@ -557,6 +591,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_number) then
             var_meta%name        = "ns"
+            var_meta%maxval      = 1.0e8
+            var_meta%minval      = -1e-1
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "number_concentration_of_snow_particles_in_air"), &
                                attribute_t("units",         "cm-3"),                                              &
@@ -567,6 +603,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%graupel_mass) then
             var_meta%name        = "qg"
+            var_meta%maxval      = 0.1
+            var_meta%minval      = -1e-10
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "mass_fraction_of_graupel_in_air"),     &
                                attribute_t("units",         "kg kg-1"),                             &
@@ -577,6 +615,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%graupel_number) then
             var_meta%name        = "ng"
+            var_meta%maxval      = 1.0e8
+            var_meta%minval      = -1e-1
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "number_concentration_of_graupel_particles_in_air"), &
                                attribute_t("units",         "cm-3"),                                                 &
@@ -739,6 +779,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%exner) then
             var_meta%name        = "exner"
+            var_meta%maxval      = 5
+            var_meta%minval      = -1e5
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "exner_function_result"),           &
                                attribute_t("units",         "K K-1"),                               &
@@ -749,6 +791,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%density) then
             var_meta%name        = "density"
+            var_meta%maxval      = 2.0
+            var_meta%minval      = 0.0
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "air_density"),                         &
                                attribute_t("units",         "kg m-3"),                              &
@@ -2677,6 +2721,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%roughness_z0) then
             var_meta%name        = "surface_roughness"
+            var_meta%maxval    = 100.0
+            var_meta%minval    = 0.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "surface_roughness_length"),            &
                                attribute_t("long_name",     "Surface roughness length"),            &
@@ -2911,6 +2957,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%skin_temperature) then
             var_meta%name        = "tsfe"
+            var_meta%maxval      = 400.0
+            var_meta%minval      = 100.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "surface_temperature"),                 &
                                attribute_t("units",         "K"),                                   &
@@ -2933,6 +2981,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%sensible_heat) then
             var_meta%name        = "hfss"
+            var_meta%maxval      = 4000.0
+            var_meta%minval      = -4000.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "surface_upward_sensible_heat_flux"),   &
                                attribute_t("units",         "W m-2"),                               &
@@ -2945,6 +2995,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%latent_heat) then
             var_meta%name        = "hfls"
+            var_meta%maxval      = 4000.0
+            var_meta%minval      = -4000.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "surface_upward_latent_heat_flux"),     &
                                attribute_t("units",         "W m-2"),                               &

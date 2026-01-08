@@ -269,7 +269,7 @@ subroutine component_read(component, options, boundary, ioclient)
 
             call ioclient%receive(boundary, component)
             
-            ! after reading all variables that can be read, not compute any remaining variables (e.g. z from p+ps)
+            ! after reading all variables that can be read, now compute any remaining variables (e.g. z from p+ps)
             call boundary%update_computed_vars(options)
             call component%interpolate_forcing(boundary, update=.True.)
 

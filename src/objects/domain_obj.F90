@@ -20,6 +20,7 @@ submodule(domain_interface) domain_implementation
     use output_metadata,            only : get_varname, get_varmeta, get_varindx
     use mod_wrf_constants,    only : gravity, R_d, KARMAN, cp
     use iso_fortran_env
+    use debug_module,       only : domain_check
 
     implicit none
     
@@ -2631,11 +2632,17 @@ contains
         ! this%geo and forcing%geo have to be of class interpolable
         ! which means they must contain lat, lon, z, geolut, and vLUT components
 
-        call geo_LUT(this%geo,    forcing%geo)
-        call geo_LUT(this%geo_agl,forcing%geo_agl)
-        call geo_LUT(this%geo_u,  forcing%geo_u)
-        call geo_LUT(this%geo_v,  forcing%geo_v)
-
+        if (options%general%debug) then
+            call geo_LUT(this%geo,    forcing%geo, err_msg='Hi-res: domain%geo   Low-res: forcing%geo')
+            call geo_LUT(this%geo_agl,forcing%geo_agl, err_msg='Hi-res: domain%geo_agl   Low-res: forcing%geo_agl')
+            call geo_LUT(this%geo_u,  forcing%geo_u, err_msg='Hi-res: domain%geo_u   Low-res: forcing%geo_u')
+            call geo_LUT(this%geo_v,  forcing%geo_v, err_msg='Hi-res: domain%geo_v   Low-res: forcing%geo_v')
+        else
+            call geo_LUT(this%geo,    forcing%geo)
+            call geo_LUT(this%geo_agl,forcing%geo_agl)
+            call geo_LUT(this%geo_u,  forcing%geo_u)
+            call geo_LUT(this%geo_v,  forcing%geo_v)
+        end if
         if (allocated(forcing%z)) then  ! In case of external 2D forcing data, skip the VLUTs.
 
             ! This function will do any necessary interpolation of z if it is on interface, or
@@ -2646,10 +2653,14 @@ contains
             forc_v_from_mass%lat = forcing%geo%lat
             forc_v_from_mass%lon = forcing%geo%lon
 
-            call geo_LUT(this%geo_u, forc_u_from_mass)
-            
-            call geo_LUT(this%geo_v, forc_v_from_mass)
-            
+            if (options%general%debug) then
+                call geo_LUT(this%geo_u, forc_u_from_mass, err_msg='Hi-res: domain%geo_u   Low-res: forc_u_from_mass')
+                call geo_LUT(this%geo_v, forc_v_from_mass, err_msg='Hi-res: domain%geo_v   Low-res: forc_v_from_mass')
+            else
+                call geo_LUT(this%geo_u, forc_u_from_mass)
+                call geo_LUT(this%geo_v, forc_v_from_mass)
+            end if
+
             nz = ubound(forcing%z,  2)
             ims = lbound(this%geo_u%z,1)
             ime = ubound(this%geo_u%z,1)
@@ -2891,7 +2902,10 @@ contains
         !include "-1" to accomodate rounding errors
         if (dt_seconds < (this%input_dt%seconds()-1)) dt_seconds = this%input_dt%seconds() - dt_seconds
 
-
+        if (dt_seconds <= 10.0) then
+            write(*,*) "WARNING: In domain_obj::update_delta_fields, dt_seconds <= 10.0"
+        endif
+        
         ! Now iterate through the dictionary as long as there are more elements present
 
         do n = 1,size(this%forcing_hi)
@@ -3268,6 +3282,7 @@ contains
         !This will be overwriten as soon as we enter the physics loop, but it is necesery to compute density
         !For the future step so that the wind solver uses both future winds, and future density.
         call this%diagnostic_update(forcing_update=update_only)
+        call domain_check(this, error_msg="domain_obj::end_interpolate_forcing")
 
     end subroutine
 
@@ -3295,12 +3310,12 @@ contains
                         dz = input_z(i,1,j)-output_z(i,k,j)
                         
                         !Assume lapse rate of -6.5ºC/1km
-                        potential_temp(i,k,j) = potential_temp(i,k,j) + 6.5*dz/1000.0
+                        !potential_temp(i,k,j) = potential_temp(i,k,j) + 6.5*dz/1000.0
                         
                         !estimate pressure difference 1100 Pa for each 100m difference for exner function
-                        H = 29.3 * (potential_temp(i,k,j) * exner_function(pressure(i,k,j)))
-                        pressure(i,k,j) = pressure(i,k,j) * exp(dz/H)
-                        !pressure(i,k,j) = pressure(i,k,j) * exp( ((gravity/R_d) * dz) / t )
+                        p_guess = pressure(i,k,j) + 1100*dz/100.0
+                        t = exner_function(p_guess) * potential_temp(i,k,j)
+                        pressure(i,k,j) = pressure(i,k,j) * exp( ((gravity/R_d) * dz) / t )
                     else
                         exit
                     endif

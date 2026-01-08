@@ -13,12 +13,16 @@ res = 250
 
 # The target domain, including lat and lon variables named as "lat" and "lon", and
 # a DEM labeled as "topo". Optionally, landuse and landmask variables should be specified here.
-target_domain_fn = 'Target_domain.nc'
-# A domain with extent ~20km beyond the borders of the above target domain. 
+target_domain_fn = '/capstor/store/cscs/userlab/s1308/dreynold/HIMA/domains/Tajiki_250m_filled_nested.nc'
+# A domain with extent ~20km beyond the borders of the above target domain.
 # Only lat,lon, and topo are required variables.
-large_domain_fn = 'Large_domain.nc'
+large_domain_fn = '/capstor/store/cscs/userlab/s1308/dreynold/HIMA/domains/Tajiki_1km.nc'
 # Name of output file
-output_domain_fn = 'output_domain.nc'
+output_domain_fn = '/capstor/store/cscs/userlab/s1308/dreynold/HIMA/domains/Tajiki_250m_filled_nested_rad.nc'
+
+topo_var = 'HGT_M'
+lat_var = 'XLAT_M'
+lon_var = 'XLONG_M'
 
 # classification system for land use categories. Used to create land mask
 # based on what the water type is for the land use classification. Currently
