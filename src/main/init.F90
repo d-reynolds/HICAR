@@ -120,7 +120,7 @@ contains
                     stop
                 endif
             end do
-            if (STD_OUT_PE) write(*,*) "WARNING: NUM_IO_PER_NODE was not evenly divisible by NUM_IO_PER_NODE. Setting NUM_IO_PER_NODE to ",NUM_IO_PER_NODE
+            if (STD_OUT_PE) write(*,*) "WARNING: NUM_PROC_PER_NODE was not evenly divisible by NUM_IO_PER_NODE. Setting NUM_IO_PER_NODE to ",NUM_IO_PER_NODE
         endif
 
         !Assign one io process per node, this results in best co-array transfer times
@@ -190,6 +190,7 @@ contains
     call MPI_Comm_size(local_comm, comm_size)
     
     if (color == kCOMPUTE_TEAM) then
+        call acc_set_device_type(acc_device_nvidia)
         devtype = acc_get_device_type()
         NUM_GPU_PER_NODE = acc_get_num_devices(devtype)
 

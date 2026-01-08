@@ -185,6 +185,12 @@ MODULE MODULE_SF_NOAHMPLSM
                       !   1 -> sprinkler method
                       !   2 -> micro/drip irrigation
                       !   3 -> surface flooding
+  CHARACTER(LEN=256)                  :: USGS_const = 'USGS' ! Constant with fixed length 256 to avoid calling trim() below
+  CHARACTER(LEN=256)                  :: MODIS_const = 'MODIFIED_IGBP_MODIS_NOAH' ! Constant with fixed length 256 to avoid calling trim() below
+
+!$acc declare create(DVEG,OPT_CRS,OPT_BTR,OPT_RUN,OPT_SFC,OPT_FRZ,OPT_INF, &
+!$acc &                   OPT_RAD,OPT_ALB,OPT_SNF,OPT_TBOT,OPT_STC,OPT_RSF,OPT_SOIL,OPT_PEDO,OPT_CROP, &
+!$acc &                   OPT_IRR,OPT_IRRM, USGS_const,MODIS_const)
 
 !------------------------------------------------------------------------------------------!
 ! Physical Constants:                                                                      !
@@ -461,7 +467,9 @@ contains
 ! Initial code: Guo-Yue Niu, Oct. 2007
 ! --------------------------------------------------------------------------------------------------
 
-  implicit none
+  !$acc routine seq
+  IMPLICIT NONE
+
 ! --------------------------------------------------------------------------------------------------
 ! input
   type (noahmp_parameters), INTENT(IN) :: parameters
@@ -803,12 +811,12 @@ contains
         FVEG = SHDMAX
         IF(FVEG <= 0.05) FVEG = 0.05
      ELSE
-       IF (STD_OUT_PE) THEN
+      !  IF (STD_OUT_PE) THEN
          WRITE(*,*) "-------- FATAL CALLED IN SFLX -----------"
          WRITE(*,*) "Namelist parameter DVEG unknown"
          STOP
          !CALL wrf_error_fatal("Namelist parameter DVEG unknown")
-       ENDIF
+      !  ENDIF
      ENDIF
      IF(OPT_CROP > 0 .and. CROPTYPE > 0) THEN
         FVEG = SHDMAX
@@ -818,9 +826,9 @@ contains
      IF(ELAI+ESAI == 0.0) FVEG = 0.0
 
 ! Calling dynamic irrigation scheme-prasanth
-     IF ( TRIM(LLANDUSE) == "USGS" ) THEN
+     IF ( LLANDUSE == USGS_const ) THEN
          IF(VEGTYP .GE. 3 .AND. VEGTYP .LE. 6) CROPLU = .TRUE.
-     ELSE IF ( TRIM(LLANDUSE) == "MODIFIED_IGBP_MODIS_NOAH") THEN
+     ELSE IF ( LLANDUSE == MODIS_const) THEN
          IF(VEGTYP == 12 .OR. VEGTYP == 14) CROPLU = .TRUE.
      END IF
 
@@ -924,7 +932,10 @@ contains
                  JULIAN, SWDOWN, PRCP, FB, GECROS1D )
 !jref:end
 
-    SICE(:) = MAX(0.0, SMC(:) - SH2O(:))
+    do IZ = 1,NSOIL
+      SICE(IZ) = MAX(0.0, SMC(IZ) - SH2O(IZ))
+    enddo
+
     SNEQVO  = SNEQV
 
     QVAP = MAX( FGEV/LATHEAG, 0.)       ! positive part of fgev; Barlage change to ground v3.6
@@ -1036,7 +1047,9 @@ END IF
 ! --------------------------------------------------------------------------------------------------
 ! re-process atmospheric forcing
 ! ----------------------------------------------------------------------
+  !$acc routine seq
   IMPLICIT NONE
+
 ! --------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -1223,7 +1236,8 @@ END IF
 ! --------------------------------------------------------------------------------------------------
 ! vegetation phenology considering vegeation canopy being buries by snow and evolution in time
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
   type (noahmp_parameters), intent(in) :: parameters
@@ -1337,7 +1351,8 @@ ENDIF   ! CROPTYPE == 0
 ! Michael Barlage: Oct 2013 - split CANWATER to calculate precip movement for
 !                             tracking of advected heat
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ------------------------ input/output variables --------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -1564,7 +1579,8 @@ ENDIF   ! CROPTYPE == 0
 ! --------------------------------------------------------------------------------------------------
 ! check surface energy balance and water balance
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
   type (noahmp_parameters), intent(in) :: parameters
@@ -1616,7 +1632,7 @@ ENDIF   ! CROPTYPE == 0
   REAL                                        :: ERRENG !error in surface energy balance [w/m2]
   REAL                                        :: ERRSW  !error in shortwave radiation balance [w/m2]
   REAL                                        :: FSRVG
-  CHARACTER(len=256)                          :: message
+  ! CHARACTER(len=256)                          :: message
 ! --------------------------------------------------------------------------------------------------
 !jref:start
    ERRSW   = SWDOWN - (FSA + FSR)
@@ -1646,7 +1662,7 @@ ENDIF   ! CROPTYPE == 0
    !WRITE(*,*) "JLOC    =",JLOC
    
 !jref:end
-      !WRITE(message,*) 'ERRSW =',ERRSW
+      !WRITE(*,*) 'ERRSW =',ERRSW
       !WRITE(*,*) "Stop in Noah-MP"
       !STOP
 !      call wrf_message(trim(message))
@@ -1657,32 +1673,32 @@ ENDIF   ! CROPTYPE == 0
 !   ERRENG = FVEG*SAV+SAG-(FIRA+FSH+FCEV+FGEV+FCTR+SSOIL)
 !   WRITE(*,*) "ERRENG =",ERRENG
    IF(ABS(ERRENG) > 0.01) THEN
-      WRITE(message,*) 'ERRENG =',ERRENG,' at i,j: ',ILOC,JLOC
+      WRITE(*,*) 'ERRENG =',ERRENG,' at i,j: ',ILOC,JLOC
 !      call wrf_message(trim(message))
-      WRITE(message,'(a17,F10.4)') "Net solar:       ",FSA
+      WRITE(*,*) "Net solar:       ",FSA
 !      call wrf_message(trim(message))
-      WRITE(message,'(a17,F10.4)') "Net longwave:    ",FIRA
+      WRITE(*,*) "Net longwave:    ",FIRA
 !      call wrf_message(trim(message))
-      WRITE(message,'(a17,F10.4)') "Total sensible:  ",FSH
+      WRITE(*,*) "Total sensible:  ",FSH
 !      call wrf_message(trim(message))
-      WRITE(message,'(a17,F10.4)') "Canopy evap:     ",FCEV
+      WRITE(*,*) "Canopy evap:     ",FCEV
 !      call wrf_message(trim(message))
-      WRITE(message,'(a17,F10.4)') "Ground evap:     ",FGEV
+      WRITE(*,*) "Ground evap:     ",FGEV
 !      call wrf_message(trim(message))
-      WRITE(message,'(a17,F10.4)') "Transpiration:   ",FCTR
+      WRITE(*,*) "Transpiration:   ",FCTR
 !      call wrf_message(trim(message))
-      WRITE(message,'(a17,F10.4)') "Total ground:    ",SSOIL
+      WRITE(*,*) "Total ground:    ",SSOIL
 !      call wrf_message(trim(message))
-      WRITE(message,'(a17,F10.4)') "Sprinkler:       ",FIRR
+      WRITE(*,*) "Sprinkler:       ",FIRR
 !      call wrf_message(trim(message))
-      WRITE(message,'(a17,4F10.4)') "Precip advected: ",PAH,PAHV,PAHG,PAHB
+      WRITE(*,*) "Precip advected: ",PAH,PAHV,PAHG,PAHB
 !      call wrf_message(trim(message))
-      WRITE(message,'(a17,F10.4)') "Precip: ",PRCP
+      WRITE(*,*) "Precip: ",PRCP
 !      call wrf_message(trim(message))
-      WRITE(message,'(a17,F10.4)') "Veg fraction: ",FVEG
+      WRITE(*,*) "Veg fraction: ",FVEG
 !      call wrf_message(trim(message))
       WRITE(*,*) "Energy budget problem in Noah-MP LSM"
-      ERROR STOP
+      STOP
 !      call wrf_error_fatal("Energy budget problem in NOAHMP LSM")
    END IF
 
@@ -1779,7 +1795,8 @@ ENDIF   ! CROPTYPE == 0
 !             /    |   |   |   |   |   |   |   |   / fraction, but with gaps. The 'tile'
 !            -------------------------------------- approach overlaps too much shadows.
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
   type (noahmp_parameters), intent(in) :: parameters
@@ -2142,7 +2159,10 @@ ENDIF   ! CROPTYPE == 0
        END DO
        BTRAN = MAX(MPE,BTRAN)
 
-       BTRANI(1:parameters%NROOT) = BTRANI(1:parameters%NROOT)/BTRAN
+      do IZ = 1, parameters%NROOT
+        BTRANI(IZ) = BTRANI(IZ)/BTRAN
+      end do
+
      END IF
 
 ! soil surface resistance for ground evap.
@@ -2266,7 +2286,7 @@ ENDIF   ! CROPTYPE == 0
         SSOIL = FVEG * GHV       + (1.0 - FVEG) * GHB
         FCEV  = EVC
         FCTR  = TR
-	PAH   = FVEG * PAHG      + (1.0 - FVEG) * PAHB   + PAHV
+	      PAH   = FVEG * PAHG      + (1.0 - FVEG) * PAHB   + PAHV
         TG    = FVEG * TGV       + (1.0 - FVEG) * TGB
         T2M   = FVEG * T2MV      + (1.0 - FVEG) * T2MB
         TS    = FVEG * TV        + (1.0 - FVEG) * TGB
@@ -2274,7 +2294,7 @@ ENDIF   ! CROPTYPE == 0
         CH    = FVEG * CHV       + (1.0 - FVEG) * CHB
         Q1    = FVEG * (EAH*0.622/(SFCPRS - 0.378*EAH)) + (1.0 - FVEG)*QSFC
         Q2E   = FVEG * Q2V       + (1.0 - FVEG) * Q2B
-	Z0WRF = Z0M
+	      Z0WRF = Z0M
     ELSE
         TAUX  = TAUXB
         TAUY  = TAUYB
@@ -2286,7 +2306,7 @@ ENDIF   ! CROPTYPE == 0
         T2M   = T2MB
         FCEV  = 0.
         FCTR  = 0.
-	PAH   = PAHB
+	      PAH   = PAHB
         TS    = TG
         CM    = CMB
         CH    = CHB
@@ -2296,7 +2316,7 @@ ENDIF   ! CROPTYPE == 0
         RSSHA = 0.0
         TGV   = TGB
         CHV   = CHB
-	Z0WRF = Z0MG
+	      Z0WRF = Z0MG
     END IF
 
     FIRE = LWDN + FIRA
@@ -2369,7 +2389,8 @@ ENDIF   ! CROPTYPE == 0
                          DF      ,HCPCT   ,SNICEV  ,SNLIQV  ,EPORE   , & !out
                          FACT    )                                       !out
 ! -------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
   type (noahmp_parameters), intent(in) :: parameters
@@ -2478,7 +2499,8 @@ ENDIF   ! CROPTYPE == 0
 ! --------------------------------------------------------------------------------------------------
 ! Snow bulk density,volumetric capacity, and thermal conductivity
 !---------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 !---------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -2540,7 +2562,8 @@ ENDIF   ! CROPTYPE == 0
 ! Code history:
 ! June 2001 changes: frozen soil condition.
 ! --------------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   type (noahmp_parameters), intent(in) :: parameters
     INTEGER, INTENT(IN)    :: ISOIL  ! soil layer
     REAL, INTENT(IN)       :: SMC    ! total soil water
@@ -2653,7 +2676,8 @@ ENDIF   ! CROPTYPE == 0
                         SAV     ,SAG     ,FSR     ,FSA     ,FSRV    , &
                         FSRG    ,ALBSND  ,ALBSNI  ,BGAP    ,WGAP    )   !out
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -2785,7 +2809,8 @@ ENDIF   ! CROPTYPE == 0
 ! radiation) reflected, transmitted, and absorbed by vegetation.
 ! also sunlit fraction of the canopy.
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -2882,7 +2907,7 @@ ENDIF   ! CROPTYPE == 0
     IF (IB.EQ.1) FSUN = 0.
   END DO
 
-  IF(COSZ <= 0) GOTO 100
+  IF(COSZ <= 0) return
 
 ! weight reflectance/transmittance by LAI and SAI
 
@@ -2947,8 +2972,6 @@ ENDIF   ! CROPTYPE == 0
   END IF
   FSUN = WL
 
-100 CONTINUE
-
   END SUBROUTINE ALBEDO
 
 !== begin surrad ===================================================================================
@@ -2963,6 +2986,7 @@ ENDIF   ! CROPTYPE == 0
                      FSRG) !inout
 
 ! --------------------------------------------------------------------------------------------------
+!$acc routine seq
   IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
@@ -3080,7 +3104,8 @@ ENDIF   ! CROPTYPE == 0
 
   SUBROUTINE SNOW_AGE (parameters,DT,TG,SNEQVO,SNEQV,TAUSS,FAGE)
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ------------------------ code history ------------------------------------------------------------
 ! from BATS
 ! ------------------------ input/output variables --------------------------------------------------
@@ -3132,7 +3157,8 @@ ENDIF   ! CROPTYPE == 0
 
   SUBROUTINE SNOWALB_BATS (parameters,NBAND,FSNO,COSZ,FAGE,ALBSND,ALBSNI)
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
 
@@ -3164,8 +3190,10 @@ ENDIF   ! CROPTYPE == 0
 ! ---------------------------------------------------------------------------------------------
 ! zero albedos for all points
 
-        ALBSND(1: NBAND) = 0.
-        ALBSNI(1: NBAND) = 0.
+      do IB = 1, NBAND
+        ALBSND(IB) = 0.
+        ALBSNI(IB) = 0.
+      end do
 
 ! when cosz > 0
 
@@ -3187,7 +3215,8 @@ ENDIF   ! CROPTYPE == 0
 
   SUBROUTINE SNOWALB_CLASS (parameters,NBAND,QSNOW,DT,ALB,ALBOLD,ALBSND,ALBSNI,ILOC,JLOC)
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
 
@@ -3215,9 +3244,10 @@ ENDIF   ! CROPTYPE == 0
 ! ---------------------------------------------------------------------------------------------
 ! zero albedos for all points
 
-        ALBSND(1: NBAND) = 0.
-        ALBSNI(1: NBAND) = 0.
-
+      do IB = 1, NBAND
+        ALBSND(IB) = 0.
+        ALBSNI(IB) = 0.
+      end do
 ! when cosz > 0
 
          ALB = 0.55 + (ALBOLD-0.55) * EXP(-0.01*DT/3600.)
@@ -3243,7 +3273,8 @@ ENDIF   ! CROPTYPE == 0
                         TG      ,ILOC    ,JLOC    ,                   & !in
                         ALBGRD  ,ALBGRI  )                              !out
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 !input
 
@@ -3315,7 +3346,8 @@ ENDIF   ! CROPTYPE == 0
 ! and transmitted through vegetation for unit incoming direct or diffuse
 ! flux given an underlying surface with known albedo.
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
 
@@ -3582,7 +3614,8 @@ ENDIF   ! CROPTYPE == 0
 ! -SAV + IRC[TV] + SHC[TV] + EVC[TV] + TR[TV] = 0
 ! -SAG + IRG[TG] + SHG[TG] + EVG[TG] + GH[TG] = 0
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -3837,19 +3870,19 @@ ENDIF   ! CROPTYPE == 0
         UC = UR*LOG(HCAN/Z0M)/LOG(ZLVL/Z0M)
         UC = UR*LOG((HCAN-ZPD+Z0M)/Z0M)/LOG(ZLVL/Z0M)   ! MB: add ZPD v3.7
         IF((HCAN-ZPD) <= 0.) THEN
-          WRITE(message,*) "CRITICAL PROBLEM: HCAN <= ZPD"
+          WRITE(*,*) "CRITICAL PROBLEM: HCAN <= ZPD"
       !    call wrf_message ( message )
-          WRITE(message,*) 'i,j point=',ILOC, JLOC
+          WRITE(*,*) 'i,j point=',ILOC, JLOC
       !    call wrf_message ( message )
-          WRITE(message,*) 'HCAN  =',HCAN
+          WRITE(*,*) 'HCAN  =',HCAN
       !    call wrf_message ( message )
-          WRITE(message,*) 'ZPD   =',ZPD
+          WRITE(*,*) 'ZPD   =',ZPD
       !    call wrf_message ( message )
-          write (message, *) 'SNOWH =',SNOWH
+          write (*, *) 'SNOWH =',SNOWH
       !    call wrf_message ( message )
           WRITE(*,*) "FATAL ERROR: CRITICAL PROBLEM IN MODULE_SF_NOAHMPLSM: VEGEFLUX"
-          STOP
       !    call wrf_error_fatal ( "CRITICAL PROBLEM IN MODULE_SF_NOAHMPLSM:VEGEFLUX" )
+          STOP "FATAL ERROR: CRITICAL PROBLEM IN MODULE_SF_NOAHMPLSM: VEGEFLUX"
         END IF
 
 ! prepare for longwave rad.
@@ -3857,7 +3890,7 @@ ENDIF   ! CROPTYPE == 0
         AIR = -EMV*(1.+(1.-EMV)*(1.-EMG))*LWDN - EMV*EMG*SB*TG**4
         CIR = (2.-EMV*(1.-EMG))*EMV*SB
 ! ---------------------------------------------------------------------------------------------
-      loop1: DO ITER = 1, NITERC    !  begin stability iteration
+      DO ITER = 1, NITERC    !  begin stability iteration
 
        IF(ITER == 1) THEN
             Z0H  = Z0M
@@ -4076,13 +4109,13 @@ ENDIF   ! CROPTYPE == 0
         ENDIF
         
         IF (LITER == 1) THEN
-           exit loop1
+           exit
         ENDIF
         IF (ITER >= 5 .AND. ABS(DTV) <= 0.01 .AND. LITER == 0) THEN
            LITER = 1
         ENDIF
 
-     END DO loop1 ! end stability iteration
+     END DO ! end stability iteration
 
 ! under-canopy fluxes and tg
 
@@ -4092,7 +4125,7 @@ ENDIF   ! CROPTYPE == 0
         CEV = RHOAIR*CPAIR / (GAMMAG*(RAWG+RSURF))  ! Barlage: change to ground v3.6
         CGH = 2.*DF(ISNOW+1)/DZSNSO(ISNOW+1)
 
-     loop2: DO ITER = 1, NITERG
+     DO ITER = 1, NITERG
 
         T = TDC(TG)
         CALL ESAT(T, ESATW, ESATI, DSATW, DSATI)
@@ -4119,7 +4152,7 @@ ENDIF   ! CROPTYPE == 0
         GH  = GH  + CGH*DTG
         TG  = TG  + DTG
 
-     END DO loop2
+     END DO
 
 !     TAH = (CAH*SFCTMP + CVH*TV + CGH*TG)/(CAH + CVH + CGH)
 
@@ -4204,7 +4237,8 @@ ENDIF   ! CROPTYPE == 0
 ! bare soil:
 ! -SAB + IRB[TG] + SHB[TG] + EVB[TG] + GHB[TG] = 0
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -4364,7 +4398,7 @@ ENDIF   ! CROPTYPE == 0
         CGH = 2.*DF(ISNOW+1)/DZSNSO(ISNOW+1)
 
 ! -----------------------------------------------------------------
-      loop3: DO ITER = 1, NITERB  ! begin stability iteration
+      DO ITER = 1, NITERB  ! begin stability iteration
 
         IF(ITER == 1) THEN
             Z0H = Z0M
@@ -4478,7 +4512,7 @@ ENDIF   ! CROPTYPE == 0
 
         QFX = (QSFC-QAIR)*CEV*GAMMA/CPAIR
 
-     END DO loop3 ! end stability iteration
+     END DO ! end stability iteration
 ! -----------------------------------------------------------------
 
 ! if snow on ground and TG > TFRZ: reset TG = TFRZ. reevaluate ground fluxes.
@@ -4545,7 +4579,8 @@ ENDIF   ! CROPTYPE == 0
 ! compute under-canopy aerodynamic resistance RAG and leaf boundary layer
 ! resistance RB
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -4644,7 +4679,8 @@ ENDIF   ! CROPTYPE == 0
 ! -------------------------------------------------------------------------------------------------
 ! computing surface drag coefficient CM for momentum and CH for heat
 ! -------------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! -------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -4812,7 +4848,8 @@ ENDIF   ! CROPTYPE == 0
 ! CALCULATE SURFACE LAYER EXCHANGE COEFFICIENTS VIA ITERATIVE PROCESS.
 ! SEE CHEN ET AL (1997, BLM)
 ! -------------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   type (noahmp_parameters), intent(in) :: parameters
     INTEGER, INTENT(IN) :: ILOC
     INTEGER, INTENT(IN) :: JLOC
@@ -5020,7 +5057,8 @@ ENDIF   ! CROPTYPE == 0
 !  Joakim Refslund, 2011. Modified from NoahMP v3.6, which was modified from YSU SFCLAY.
 !  Modifications for Rev SFCLAY done by Dylan Reynolds, 2023.
 !-------------------------------------------------------------------                                                      
-   IMPLICIT NONE                                                                                                          
+!$acc routine seq
+IMPLICIT NONE                                                                                                          
 !-------------------------------------------------------------------                                                      
 ! parameters                                                                                                              
    REAL,   PARAMETER     :: XKA=2.4E-5                                                                                    
@@ -5415,7 +5453,8 @@ ENDIF   ! CROPTYPE == 0
 !---------------------------------------------------------------------------------------------------
 ! use polynomials to calculate saturation vapor pressure and derivative with
 ! respect to temperature: over water when t > 0 c and over ice when t <= 0 c
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 !---------------------------------------------------------------------------------------------------
 ! in
 
@@ -5469,7 +5508,8 @@ ENDIF   ! CROPTYPE == 0
                       O2      ,CO2     ,IGS     ,BTRAN   ,RB      , & !in
                       RS      ,PSN     )                              !out
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -5612,7 +5652,8 @@ ENDIF   ! CROPTYPE == 0
 ! --------------------------------------------------------------------------------------------------
 !niu    USE module_Noahlsm_utility
 ! --------------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 ! inputs
 
@@ -5683,7 +5724,8 @@ ENDIF   ! CROPTYPE == 0
 
         SUBROUTINE CALHUM(parameters,SFCTMP, SFCPRS, Q2SAT, DQSDT2)
 
-        IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 
   type (noahmp_parameters), intent(in) :: parameters
         REAL, INTENT(IN)       :: SFCTMP, SFCPRS
@@ -5722,7 +5764,8 @@ ENDIF   ! CROPTYPE == 0
 ! during melting season may exceed melting point (TFRZ) but later in PHASECHANGE
 ! subroutine the snow temperatures are reset to TFRZ for melting snow.
 ! --------------------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------------------------
 !input
 
@@ -5766,7 +5809,9 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! compute solar penetration through water, needs more work
 
-    PHI(ISNOW+1:NSOIL) = 0.
+  do IZ = ISNOW+1, NSOIL
+     PHI(IZ) = 0.
+  enddo
 
 ! adjust ZBOT from soil surface to ZBOTSNO from snow surface
 
@@ -5821,9 +5866,9 @@ ENDIF   ! CROPTYPE == 0
     IF (ABS(ERR_EST) > 1.) THEN
        IF (STD_OUT_PE) THEN
          ! W/m2
-         WRITE(message,*) 'TSNOSOI is losing(-)/gaining(+) false energy',ERR_EST,' W/m2'
+         WRITE(*,*) 'TSNOSOI is losing(-)/gaining(+) false energy',ERR_EST,' W/m2'
 !        call wrf_message(trim(message))
-         WRITE(message,'(i6,1x,i6,1x,i3,F18.13,5F20.12)') &
+         WRITE(*,'(i6,1x,i6,1x,i3,F18.13,5F20.12)') &
               ILOC, JLOC, IST,ERR_EST,SSOIL,SNOWH,TG,STC(ISNOW+1),EFLXB
 !         call wrf_message(trim(message))
        !niu      STOP
@@ -5845,7 +5890,8 @@ ENDIF   ! CROPTYPE == 0
 ! thermal diffusion equation.  also to compute ( prepare ) the matrix
 ! coefficients for the tri-diagonal matrix of the implicit time scheme.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -5942,7 +5988,8 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! CALCULATE/UPDATE THE SOIL TEMPERATURE FIELD.
 ! ----------------------------------------------------------------------
-    implicit none
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -6012,7 +6059,8 @@ ENDIF   ! CROPTYPE == 0
 ! # 0  , . . . , 0 ,   0   ,   0   ,  A(M) ,  B(M) # # P(M) #   # D(M) #
 ! ###                                            ### ###  ###   ###  ###
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 
     INTEGER, INTENT(IN)   :: NTOP
     INTEGER, INTENT(IN)   :: NSOIL,NSNOW
@@ -6062,7 +6110,8 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! melting/freezing of snow water and soil water
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! inputs
 
@@ -6300,7 +6349,8 @@ ENDIF   ! CROPTYPE == 0
 ! OUTPUT:
 !   FREE..........SUPERCOOLED LIQUID WATER CONTENT [m3/m3]
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   type (noahmp_parameters), intent(in) :: parameters
     INTEGER,INTENT(IN)   :: ISOIL
     REAL, INTENT(IN)     :: SH2O,SMC,TKELV
@@ -6348,9 +6398,8 @@ ENDIF   ! CROPTYPE == 0
 !  START OF ITERATIONS
 ! ----------------------------------------------------------------------
           IF (SWL < 0.) SWL = 0.
-1001      Continue
-          IF (.NOT.( (NLOG < 10) .AND. (KCOUNT == 0)))   goto 1002
-          NLOG = NLOG +1
+          DO NLOG =1,10
+          ! NLOG = NLOG +1
           DF = ALOG ( ( parameters%PSISAT(ISOIL) * GRAV / HFUS ) * ( ( 1. + CK * SWL )**2.) * &
                ( parameters%SMCMAX(ISOIL) / (SMC - SWL) )** BX) - ALOG ( - (               &
                TKELV - TFRZ)/ TKELV)
@@ -6372,14 +6421,14 @@ ENDIF   ! CROPTYPE == 0
           SWL = SWLK
           IF ( DSWL <= ERROR ) THEN
              KCOUNT = KCOUNT +1
+             exit
           END IF
 ! ----------------------------------------------------------------------
 !  END OF ITERATIONS
 ! ----------------------------------------------------------------------
 ! BOUNDS APPLIED WITHIN DO-BLOCK ARE VALID FOR PHYSICAL SOLUTION.
 ! ----------------------------------------------------------------------
-          goto 1001
-1002      continue
+          END DO
           FREE = SMC - SWL
        END IF
 ! ----------------------------------------------------------------------
@@ -6391,9 +6440,9 @@ ENDIF   ! CROPTYPE == 0
 ! APPLY PHYSICAL BOUNDS TO FLERCHINGER SOLUTION
 ! ----------------------------------------------------------------------
        IF (KCOUNT == 0) THEN
-          IF (STD_OUT_PE) THEN
-            write(message, '("Flerchinger used in NEW version. Iterations=", I6)') NLOG
-          ENDIF
+          ! IF (STD_OUT_PE) THEN
+            write(*, *) "Flerchinger used in NEW version. Iterations=", NLOG
+          ! ENDIF
   !        call wrf_message(trim(message))
           FK = ( ( (HFUS / (GRAV * ( - parameters%PSISAT(ISOIL))))*                    &
                ( (TKELV - TFRZ)/ TKELV))** ( -1/ BX))* parameters%SMCMAX(ISOIL)
@@ -6436,7 +6485,8 @@ ENDIF   ! CROPTYPE == 0
 ! Code history:
 ! Initial code: Guo-Yue Niu, Oct. 2007
 ! ----------------------------------------------------------------------
-  implicit none
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -6548,7 +6598,9 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! initialize
 
-   ETRANI(1:NSOIL) = 0.
+  do IZ = 1, NSOIL
+    ETRANI(IZ) = 0.
+  enddo
    SNOFLOW         = 0.
    RUNSUB          = 0.
    QINSUR          = 0.
@@ -6690,7 +6742,8 @@ ENDIF   ! CROPTYPE == 0
 ! ------------------------ code history ------------------------------
 ! canopy hydrology
 ! --------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ------------------------ input/output variables --------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -6818,7 +6871,8 @@ ENDIF   ! CROPTYPE == 0
                         SH2O   ,SICE   ,STC    ,ZSNSO  ,DZSNSO , & !inout
                         QSNBOT ,SNOFLOW,PONDING1       ,PONDING2)  !out
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -6952,7 +7006,8 @@ ENDIF   ! CROPTYPE == 0
 ! snow depth and density to account for the new snowfall.
 ! new values of snow depth & density returned.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -7019,7 +7074,8 @@ ENDIF   ! CROPTYPE == 0
                       DZSNSO ,SICE   ,SNOWH  ,SNEQV  ,         & !inout
                       PONDING1       ,PONDING2)                  !out
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -7205,7 +7261,8 @@ ENDIF   ! CROPTYPE == 0
   SUBROUTINE DIVIDE (parameters,NSNOW  ,NSOIL  ,                         & !in
                      ISNOW  ,STC    ,SNICE  ,SNLIQ  ,DZSNSO  )  !inout
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -7332,7 +7389,8 @@ ENDIF   ! CROPTYPE == 0
 
   SUBROUTINE COMBO(parameters,DZ,  WLIQ,  WICE, T, DZ2, WLIQ2, WICE2, T2)
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 
 ! ----------------------------------------------------------------------s
@@ -7388,7 +7446,8 @@ ENDIF   ! CROPTYPE == 0
                       SNLIQ  ,ZSOIL  ,IMELT  ,FICEOLD,ILOC   , JLOC , & !in
                       ISNOW  ,DZSNSO ,ZSNSO )                    !inout
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -7499,7 +7558,8 @@ ENDIF   ! CROPTYPE == 0
 ! Renew the mass of ice lens (SNICE) and liquid (SNLIQ) of the
 ! surface snow layer resulting from sublimation (frost) / evaporation (dew)
 ! ----------------------------------------------------------------------
-   IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -7649,7 +7709,8 @@ ENDIF   ! CROPTYPE == 0
 ! calculate surface runoff and soil moisture.
 ! ----------------------------------------------------------------------
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -7913,7 +7974,8 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! calculate equilibrium water table depth (Niu et al., 2005)
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
 
@@ -7971,7 +8033,8 @@ ENDIF   ! CROPTYPE == 0
 ! --------------------------------------------------------------------------------
 ! compute inflitration rate at soil surface and surface runoff
 ! --------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! --------------------------------------------------------------------------------
 ! inputs
   type (noahmp_parameters), intent(in) :: parameters
@@ -8052,7 +8115,7 @@ ENDIF   ! CROPTYPE == 0
 ! jref for urban areas
 !       IF ( parameters%urban_flag ) INFMAX == INFMAX * 0.05
 
-       CALL WDFCND2 (parameters,WDF,WCND,SH2O(1),SICEMAX,1)
+       CALL WDFCND2 (WDF,WCND,SH2O(1),SICEMAX,parameters%SMCMAX(1),parameters%BEXP(1),parameters%DWSAT(1),parameters%DKSAT(1))
        INFMAX = MAX (INFMAX,WCND)
        INFMAX = MIN (INFMAX,PX)
 
@@ -8075,7 +8138,8 @@ ENDIF   ! CROPTYPE == 0
 ! water diffusion equation.  also to compute ( prepare ) the matrix
 ! coefficients for the tri-diagonal matrix of the implicit time scheme.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 !input
 
@@ -8122,7 +8186,7 @@ ENDIF   ! CROPTYPE == 0
 
     IF(OPT_INF == 1) THEN
       DO K = 1, NSOIL
-        CALL WDFCND1 (parameters,WDF(K),WCND(K),SMC(K),FCR(K),K)
+        CALL WDFCND1 (WDF(K),WCND(K),SMC(K),FCR(K),parameters%SMCMAX(K),parameters%BEXP(K),parameters%DWSAT(K),parameters%DKSAT(K))
         SMX(K) = SMC(K)
       END DO
         IF(OPT_RUN == 5)SMXWTD=SMCWTD
@@ -8130,7 +8194,7 @@ ENDIF   ! CROPTYPE == 0
 
     IF(OPT_INF == 2) THEN
       DO K = 1, NSOIL
-        CALL WDFCND2 (parameters,WDF(K),WCND(K),SH2O(K),SICEMAX,K)
+        CALL WDFCND2 (WDF(K),WCND(K),SH2O(K),SICEMAX,parameters%SMCMAX(K),parameters%BEXP(K),parameters%DWSAT(K),parameters%DKSAT(K))
         SMX(K) = SH2O(K)
       END DO
           IF(OPT_RUN == 5)SMXWTD=SMCWTD*SH2O(NSOIL)/SMC(NSOIL)  !same liquid fraction as in the bottom layer
@@ -8207,7 +8271,8 @@ ENDIF   ! CROPTYPE == 0
 ! ----------------------------------------------------------------------
 ! calculate/update soil moisture content values
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 !input
 
@@ -8325,17 +8390,17 @@ ENDIF   ! CROPTYPE == 0
 
 !== begin wdfcnd1 ==================================================================================
 
-  SUBROUTINE WDFCND1 (parameters,WDF,WCND,SMC,FCR,ISOIL)
+  SUBROUTINE WDFCND1 (WDF,WCND,SMC,FCR,SMCMAX, BEXP, DWSAT, DKSAT)
 ! ----------------------------------------------------------------------
 ! calculate soil water diffusivity and soil hydraulic conductivity.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
-  type (noahmp_parameters), intent(in) :: parameters
     REAL,INTENT(IN)  :: SMC
     REAL,INTENT(IN)  :: FCR
-    INTEGER,INTENT(IN)  :: ISOIL
+    REAL,INTENT(IN)  :: SMCMAX, BEXP, DWSAT, DKSAT
 
 ! output
     REAL,INTENT(OUT) :: WCND
@@ -8349,32 +8414,32 @@ ENDIF   ! CROPTYPE == 0
 
 ! soil water diffusivity
 
-    FACTR = MAX(0.01, SMC/parameters%SMCMAX(ISOIL))
-    EXPON = parameters%BEXP(ISOIL) + 2.0
-    WDF   = parameters%DWSAT(ISOIL) * FACTR ** EXPON
+    FACTR = MAX(0.01, SMC/SMCMAX)
+    EXPON = BEXP + 2.0
+    WDF   = DWSAT * FACTR ** EXPON
     WDF   = WDF * (1.0 - FCR)
 
 ! hydraulic conductivity
 
-    EXPON = 2.0*parameters%BEXP(ISOIL) + 3.0
-    WCND  = parameters%DKSAT(ISOIL) * FACTR ** EXPON
+    EXPON = 2.0*BEXP + 3.0
+    WCND  = DKSAT * FACTR ** EXPON
     WCND  = WCND * (1.0 - FCR)
 
   END SUBROUTINE WDFCND1
 
 !== begin wdfcnd2 ==================================================================================
 
-  SUBROUTINE WDFCND2 (parameters,WDF,WCND,SMC,SICE,ISOIL)
+  SUBROUTINE WDFCND2 (WDF,WCND,SMC,SICE,SMCMAX, BEXP, DWSAT, DKSAT)
 ! ----------------------------------------------------------------------
 ! calculate soil water diffusivity and soil hydraulic conductivity.
 ! ----------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
-  type (noahmp_parameters), intent(in) :: parameters
     REAL,INTENT(IN)  :: SMC
     REAL,INTENT(IN)  :: SICE
-    INTEGER,INTENT(IN)  :: ISOIL
+    REAL,INTENT(IN)  :: SMCMAX, BEXP, DWSAT, DKSAT
 
 ! output
     REAL,INTENT(OUT) :: WCND
@@ -8388,21 +8453,21 @@ ENDIF   ! CROPTYPE == 0
 
 ! soil water diffusivity
 
-    FACTR1 = 0.05/parameters%SMCMAX(ISOIL)
-    FACTR2 = MAX(0.01, SMC/parameters%SMCMAX(ISOIL))
+    FACTR1 = 0.05/SMCMAX
+    FACTR2 = MAX(0.01, SMC/SMCMAX)
     FACTR1 = MIN(FACTR1,FACTR2)
-    EXPON = parameters%BEXP(ISOIL) + 2.0
-    WDF   = parameters%DWSAT(ISOIL) * FACTR2 ** EXPON
+    EXPON = BEXP + 2.0
+    WDF   = DWSAT * FACTR2 ** EXPON
 
     IF (SICE > 0.0) THEN
     VKWGT = 1./ (1. + (500.* SICE)**3.)
-    WDF   = VKWGT * WDF + (1.-VKWGT)*parameters%DWSAT(ISOIL)*(FACTR1)**EXPON
+    WDF   = VKWGT * WDF + (1.-VKWGT)*DWSAT*(FACTR1)**EXPON
     END IF
 
 ! hydraulic conductivity
 
-    EXPON = 2.0*parameters%BEXP(ISOIL) + 3.0
-    WCND  = parameters%DKSAT(ISOIL) * FACTR2 ** EXPON
+    EXPON = 2.0*BEXP + 3.0
+    WCND  = DKSAT * FACTR2 ** EXPON
 
   END SUBROUTINE WDFCND2
 
@@ -8422,7 +8487,8 @@ ENDIF   ! CROPTYPE == 0
   ! Author: Prasanth Valayamkunnath (NCAR) <prasanth@ucar.edu>
   ! Date  : 08/06/2020
   !-----------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   ! ----------------------------------------------------------------------------------------------
     ! inputs
     type (noahmp_parameters), intent(in)   :: parameters
@@ -8537,7 +8603,8 @@ ENDIF   ! CROPTYPE == 0
   ! Author: Prasanth Valayamkunnath (NCAR) <prasanth@ucar.edu>
   ! Date  : 08/06/2020
   !---------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   ! --------------------------------------------------------------------------------------------
     ! inputs
     type (noahmp_parameters), intent(in)    :: parameters
@@ -8613,7 +8680,8 @@ ENDIF   ! CROPTYPE == 0
   ! Author: Prasanth Valayamkunnath (NCAR) <prasanth@ucar.edu>
   ! Date  : 08/06/2020
   !---------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   ! --------------------------------------------------------------------------------------------
     ! inputs
     type (noahmp_parameters), intent(in)    :: parameters
@@ -8658,7 +8726,8 @@ ENDIF   ! CROPTYPE == 0
   ! Author: Prasanth Valayamkunnath (NCAR) <prasanth@ucar.edu>
   ! Date  : 08/06/2020
   !---------------------------------------------------------------------------------------------
-    IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   ! --------------------------------------------------------------------------------------------
     ! inputs
     type (noahmp_parameters), intent(in)    :: parameters
@@ -8702,7 +8771,8 @@ ENDIF   ! CROPTYPE == 0
   ! Author: Prasanth Valayamkunnath (NCAR) <prasanth@ucar.edu>
   ! Date  : 08/06/2020
   !---------------------------------------------------------------------------------------------
-   IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
   ! --------------------------------------------------------------------------------------------
    type (noahmp_parameters), intent(in) :: parameters
    INTEGER,                  INTENT(IN) :: NSOIL  !number of soil layers
@@ -8729,7 +8799,7 @@ ENDIF   ! CROPTYPE == 0
 
   ! estimate initial soil hydraulic conductivty and diffusivity (Ki, D(theta) in the equation)
    ISOIL = 1
-   CALL WDFCND2 (parameters,WDF,WCND,SH2O(ISOIL),SICEMAX,ISOIL)
+   CALL WDFCND2 (WDF,WCND,SH2O(ISOIL),SICEMAX,parameters%SMCMAX(ISOIL),parameters%BEXP(ISOIL),parameters%DWSAT(ISOIL),parameters%DKSAT(ISOIL))
 
   ! sorptivity based on Eq. 10b from Kutilek, Miroslav, and Jana Valentova (1986)
   ! sorptivity approximations. Transport in Porous Media 1.1, 57-62.
@@ -8759,7 +8829,8 @@ ENDIF   ! CROPTYPE == 0
                          SH2O   ,ZWT    ,WA     ,WT     ,         & !inout
                          QIN    ,QDIS   )                           !out
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -8948,7 +9019,8 @@ ENDIF   ! CROPTYPE == 0
 !Diagnoses water table depth and computes recharge when the water table is within the resolved soil layers,
 !according to the Miguez-Macho&Fan scheme
 ! ----------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ----------------------------------------------------------------------
 ! input
   type (noahmp_parameters), intent(in) :: parameters
@@ -8977,8 +9049,9 @@ ENDIF   ! CROPTYPE == 0
   REAL,  DIMENSION(       0:NSOIL)            :: ZSOIL0
 ! -------------------------------------------------------------
 
-
-ZSOIL0(1:NSOIL) = ZSOIL(1:NSOIL)
+do IZ=1,NSOIL
+   ZSOIL0(IZ)=ZSOIL(IZ)
+enddo
 ZSOIL0(0) = 0.
 
 !find the layer where the water table is
@@ -9092,7 +9165,8 @@ END  SUBROUTINE SHALLOWWATERTABLE
                      GPP    ,NPP    ,NEE    ,AUTORS ,HETERS ,TOTSC  , & !out
                      TOTLB  ,XLAI   ,XSAI   )                   !out
 ! ------------------------------------------------------------------------------------------
-      IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ------------------------------------------------------------------------------------------
 ! inputs (carbon)
 
@@ -9208,7 +9282,8 @@ END  SUBROUTINE SHALLOWWATERTABLE
 ! -----------------------------------------------------------------------------------------
 ! The original code is from RE Dickinson et al.(1998), modifed by Guo-Yue Niu, 2004
 ! -----------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! -----------------------------------------------------------------------------------------
 
 ! input
@@ -9480,7 +9555,8 @@ END  SUBROUTINE SHALLOWWATERTABLE
 ! Initial crop version added by Barlage v3.8
 
 ! ------------------------------------------------------------------------------------------
-      IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! ------------------------------------------------------------------------------------------
 ! inputs (carbon)
 
@@ -9599,7 +9675,8 @@ END  SUBROUTINE SHALLOWWATERTABLE
 ! modified by Xing Liu, 2014.
 !
 ! -----------------------------------------------------------------------------------------
-  IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
 ! -----------------------------------------------------------------------------------------
 
 ! input
@@ -10173,7 +10250,8 @@ END SUBROUTINE PSN_CROP
 !*----------------------------------------------------------------------*
 
 SUBROUTINE EMERG(DT, TSOIL, DD, TBEM, EMA, EMB, STATE_GECROS)
-      IMPLICIT NONE
+!$acc routine seq
+IMPLICIT NONE
       REAL, INTENT(IN) :: DT, TSOIL, DD, TBEM, EMA, EMB
       REAL, DIMENSION(1:60), INTENT(INOUT) :: STATE_GECROS
       REAL :: EMTH, TINT
@@ -10206,7 +10284,8 @@ END SUBROUTINE EMERG
                              iopt_inf  ,iopt_rad  ,iopt_alb  ,iopt_snf  ,iopt_tbot, iopt_stc, &
 			     iopt_rsf , iopt_soil, iopt_pedo, iopt_crop, iopt_irr, iopt_irrm)
 
-  implicit none
+!$acc routine seq
+IMPLICIT NONE
 
   INTEGER,  INTENT(IN) :: idveg     !dynamic vegetation (1 -> off ; 2 -> on) with opt_crs = 1
   INTEGER,  INTENT(IN) :: iopt_crs  !canopy stomatal resistance (1-> Ball-Berry; 2->Jarvis)
@@ -10536,6 +10615,40 @@ MODULE NOAHMP_TABLES
     REAL :: sr2006_smcmax_a             ! sand adjustment
     REAL :: sr2006_smcmax_b             ! constant adjustment
 
+    !$acc declare create(ISURBAN_TABLE, ISWATER_TABLE, ISBARREN_TABLE, ISICE_TABLE, ISCROP_TABLE, EBLFOREST_TABLE, NATURAL_TABLE, &
+    !$acc                  LCZ_1_TABLE,LCZ_2_TABLE,LCZ_3_TABLE,LCZ_4_TABLE,LCZ_5_TABLE,LCZ_6_TABLE,LCZ_7_TABLE,LCZ_8_TABLE,LCZ_9_TABLE,LCZ_10_TABLE,LCZ_11_TABLE, &
+    !$acc                  CH2OP_TABLE, DLEAF_TABLE, Z0MVT_TABLE, HVT_TABLE, HVB_TABLE, DEN_TABLE, RC_TABLE, MFSNO_TABLE, SCFFAC_TABLE, SLA_TABLE, &
+    !$acc                  SAIM_TABLE, LAIM_TABLE, DILEFC_TABLE, DILEFW_TABLE, FRAGR_TABLE, LTOVRC_TABLE, &
+    !$acc                  C3PSN_TABLE, KC25_TABLE, AKC_TABLE, KO25_TABLE, AKO_TABLE, VCMX25_TABLE, AVCMX_TABLE, BP_TABLE, MP_TABLE, QE25_TABLE, AQE_TABLE, &
+    !$acc                  RMF25_TABLE, RMS25_TABLE, RMR25_TABLE, ARM_TABLE, FOLNMX_TABLE, TMIN_TABLE, &
+    !$acc                  XL_TABLE, RHOL_TABLE, RHOS_TABLE, TAUL_TABLE, TAUS_TABLE, &
+    !$acc                  MRP_TABLE, CWPVT_TABLE, WRRAT_TABLE, WDPOOL_TABLE, TDLEF_TABLE, &
+    !$acc                  NROOT_TABLE, RGL_TABLE, RS_TABLE, HS_TABLE, TOPT_TABLE, RSMAX_TABLE, &
+    !$acc                  BEXP_TABLE, SMCDRY_TABLE, F1_TABLE, SMCMAX_TABLE, SMCREF_TABLE, PSISAT_TABLE, DKSAT_TABLE, DWSAT_TABLE, SMCWLT_TABLE, QUARTZ_TABLE, &
+    !$acc                  SLOPE_TABLE, CSOIL_TABLE, REFDK_TABLE    , REFKDT_TABLE, FRZK_TABLE, ZBOT_TABLE, CZIL_TABLE, &
+    !$acc                  ALBSAT_TABLE, ALBDRY_TABLE, ALBICE_TABLE, ALBLAK_TABLE, OMEGAS_TABLE, BETADS_TABLE, BETAIS_TABLE, EG_TABLE, &
+    !$acc                  CO2_TABLE, O2_TABLE, TIMEAN_TABLE, FSATMX_TABLE, Z0SNO_TABLE, SSI_TABLE, SNOW_RET_FAC_TABLE, SNOW_EMIS_TABLE, SWEMX_TABLE, &
+    !$acc                  TAU0_TABLE, GRAIN_GROWTH_TABLE, EXTRA_GROWTH_TABLE, DIRT_SOOT_TABLE, BATS_COSZ_TABLE, BATS_VIS_NEW_TABLE, BATS_NIR_NEW_TABLE, &
+    !$acc                  BATS_VIS_AGE_TABLE, BATS_NIR_AGE_TABLE, BATS_VIS_DIR_TABLE, BATS_NIR_DIR_TABLE, RSURF_SNOW_TABLE, RSURF_EXP_TABLE, &
+    !$acc                  IRR_FRAC_TABLE, IRR_HAR_TABLE, IRR_LAI_TABLE, IRR_MAD_TABLE, FILOSS_TABLE, SPRIR_RATE_TABLE, MICIR_RATE_TABLE, FIRTFAC_TABLE, IR_RAIN_TABLE, &
+    !$acc                  DEFAULT_CROP_TABLE, PLTDAY_TABLE, HSDAY_TABLE, PLANTPOP_TABLE, IRRI_TABLE, &
+    !$acc                  GDDTBASE_TABLE, GDDTCUT_TABLE, GDDS1_TABLE, GDDS2_TABLE, GDDS3_TABLE, GDDS4_TABLE, GDDS5_TABLE, &
+    !$acc                  C3PSNI_TABLE, KC25I_TABLE, AKCI_TABLE, KO25I_TABLE, AKOI_TABLE, VCMX25I_TABLE, AVCMXI_TABLE, BPI_TABLE, MPI_TABLE, QE25I_TABLE, FOLNMXI_TABLE, &
+    !$acc                  C3C4_TABLE, AREF_TABLE, PSNRF_TABLE, I2PAR_TABLE, TASSIM0_TABLE, TASSIM1_TABLE, TASSIM2_TABLE, K_TABLE, EPSI_TABLE, &
+    !$acc                  Q10MR_TABLE, FOLN_MX_TABLE, LEFREEZ_TABLE, &
+    !$acc                  DILE_FC_TABLE, DILE_FW_TABLE, FRA_GR_TABLE, &
+    !$acc                  LF_OVRC_TABLE, ST_OVRC_TABLE, RT_OVRC_TABLE, LFMR25_TABLE, STMR25_TABLE, RTMR25_TABLE, GRAINMR25_TABLE, &
+    !$acc                  LFPT_TABLE, STPT_TABLE, RTPT_TABLE, GRAINPT_TABLE, LFCT_TABLE, STCT_TABLE, RTCT_TABLE, BIO2LAI_TABLE, &
+    !$acc                  sr2006_theta_1500t_a, sr2006_theta_1500t_b, sr2006_theta_1500t_c, sr2006_theta_1500t_d, sr2006_theta_1500t_e, sr2006_theta_1500t_f, sr2006_theta_1500t_g, &
+    !$acc                  sr2006_theta_1500_a, sr2006_theta_1500_b, &
+    !$acc                  sr2006_theta_33t_a, sr2006_theta_33t_b, sr2006_theta_33t_c, sr2006_theta_33t_d, sr2006_theta_33t_e, sr2006_theta_33t_f, sr2006_theta_33t_g, &
+    !$acc                  sr2006_theta_33_a, sr2006_theta_33_b, sr2006_theta_33_c, &
+    !$acc                  sr2006_theta_s33t_a, sr2006_theta_s33t_b, sr2006_theta_s33t_c, sr2006_theta_s33t_d, sr2006_theta_s33t_e, sr2006_theta_s33t_f, sr2006_theta_s33t_g, &
+    !$acc                  sr2006_theta_s33_a, sr2006_theta_s33_b, &
+    !$acc                  sr2006_psi_et_a, sr2006_psi_et_b, sr2006_psi_et_c, sr2006_psi_et_d, sr2006_psi_et_e, sr2006_psi_et_f, sr2006_psi_et_g, &
+    !$acc                  sr2006_psi_e_a, sr2006_psi_e_b, sr2006_psi_e_c, &
+    !$acc                  sr2006_smcmax_a, sr2006_smcmax_b)
+
 CONTAINS
 
   subroutine read_mp_veg_parameters(DATASET_IDENTIFIER)
@@ -10696,6 +10809,7 @@ CONTAINS
   !     call wrf_error_fatal("STOP in Noah-MP read_mp_veg_parameters")
     endif
     close(unit)
+    !$acc kernels
 
                       ISURBAN_TABLE   = ISURBAN
                       ISWATER_TABLE   = ISWATER
@@ -10796,7 +10910,7 @@ CONTAINS
     TAUL_TABLE(1:NVEG,2)  = TAUL_NIR(1:NVEG) !leaf transmittance: 1=vis, 2=nir
     TAUS_TABLE(1:NVEG,1)  = TAUS_VIS(1:NVEG) !stem transmittance: 1=vis, 2=nir
     TAUS_TABLE(1:NVEG,2)  = TAUS_NIR(1:NVEG) !stem transmittance: 1=vis, 2=nir
-
+    !$acc end kernels
   end subroutine read_mp_veg_parameters
 
   subroutine read_mp_soil_parameters()
@@ -10913,6 +11027,9 @@ CONTAINS
 
     CLOSE (unit)
 
+    !$acc update device(BEXP_TABLE, SMCDRY_TABLE, F1_TABLE, SMCMAX_TABLE, SMCREF_TABLE, &
+    !$acc               PSISAT_TABLE, DKSAT_TABLE, DWSAT_TABLE, SMCWLT_TABLE, QUARTZ_TABLE, &
+    !$acc               SLOPE_TABLE, CSOIL_TABLE, REFDK_TABLE, REFKDT_TABLE, FRZK_TABLE, ZBOT_TABLE, CZIL_TABLE)
   end subroutine read_mp_soil_parameters
 
   subroutine read_mp_rad_parameters()
@@ -10957,7 +11074,7 @@ CONTAINS
 
     READ(unit,noahmp_rad_parameters)
     close(unit)
-
+    !$acc kernels
     ALBSAT_TABLE(:,1) = ALBSAT_VIS ! saturated soil albedos: 1=vis, 2=nir
     ALBSAT_TABLE(:,2) = ALBSAT_NIR ! saturated soil albedos: 1=vis, 2=nir
     ALBDRY_TABLE(:,1) = ALBDRY_VIS ! dry soil albedos: 1=vis, 2=nir
@@ -10968,7 +11085,7 @@ CONTAINS
     BETADS_TABLE      = BETADS
     BETAIS_TABLE      = BETAIS
     EG_TABLE          = EG
-
+    !$acc end kernels
   end subroutine read_mp_rad_parameters
 
   subroutine read_mp_global_parameters()
@@ -11028,7 +11145,7 @@ RSURF_SNOW_TABLE     = -1.E36
 
     READ(unit,noahmp_global_parameters)
     close(unit)
-
+    !$acc kernels
        CO2_TABLE     = CO2
         O2_TABLE     = O2
     TIMEAN_TABLE     = TIMEAN
@@ -11051,7 +11168,7 @@ BATS_VIS_DIR_TABLE   = BATS_VIS_DIR
 BATS_NIR_DIR_TABLE   = BATS_NIR_DIR
 RSURF_SNOW_TABLE     = RSURF_SNOW
  RSURF_EXP_TABLE     = RSURF_EXP
-
+    !$acc end kernels
   end subroutine read_mp_global_parameters
 
   subroutine read_mp_crop_parameters()
@@ -11213,7 +11330,7 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
 
     READ(unit,noahmp_crop_parameters)
     close(unit)
-
+    !$acc kernels
  DEFAULT_CROP_TABLE      = DEFAULT_CROP
        PLTDAY_TABLE      = PLTDAY
         HSDAY_TABLE      = HSDAY
@@ -11351,7 +11468,7 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
          RTCT_TABLE(:,7) = RTCT_S7
          RTCT_TABLE(:,8) = RTCT_S8
       BIO2LAI_TABLE      = BIO2LAI
-
+    !$acc end kernels
   end subroutine read_mp_crop_parameters
 
   subroutine read_mp_irrigation_parameters()
@@ -11401,6 +11518,7 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
     READ(unit,noahmp_irrigation_parameters)
     close(unit)
 
+    !$acc kernels
     IRR_FRAC_TABLE   = IRR_FRAC    ! irrigation Fraction
     IRR_HAR_TABLE    = IRR_HAR     ! number of days before harvest date to stop irrigation
     IRR_LAI_TABLE    = IRR_LAI     ! Minimum lai to trigger irrigation
@@ -11410,7 +11528,7 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
     MICIR_RATE_TABLE = MICIR_RATE  ! mm/h, micro irrigation rate
     FIRTFAC_TABLE    = FIRTFAC     ! flood application rate factor
     IR_RAIN_TABLE    = IR_RAIN     ! maximum precipitation to stop irrigation trigger
-
+    !$acc end kernels
   end subroutine read_mp_irrigation_parameters
 
   subroutine read_mp_optional_parameters()
@@ -11456,7 +11574,23 @@ RSURF_SNOW_TABLE     = RSURF_SNOW
     READ(unit,noahmp_optional_parameters)
     close(unit)
 
-
+    !$acc update device(sr2006_theta_1500t_a, sr2006_theta_1500t_b, sr2006_theta_1500t_c, &
+    !$acc               sr2006_theta_1500t_d, sr2006_theta_1500t_e, sr2006_theta_1500t_f, &
+    !$acc               sr2006_theta_1500t_g                                            , &
+    !$acc               sr2006_theta_1500_a , sr2006_theta_1500_b                       , &
+    !$acc               sr2006_theta_33t_a  , sr2006_theta_33t_b  , sr2006_theta_33t_c  , &
+    !$acc               sr2006_theta_33t_d  , sr2006_theta_33t_e  , sr2006_theta_33t_f  , &
+    !$acc               sr2006_theta_33t_g                                              , &
+    !$acc               sr2006_theta_33_a   , sr2006_theta_33_b   , sr2006_theta_33_c   , &
+    !$acc               sr2006_theta_s33t_a , sr2006_theta_s33t_b , sr2006_theta_s33t_c , &
+    !$acc               sr2006_theta_s33t_d , sr2006_theta_s33t_e , sr2006_theta_s33t_f , &
+    !$acc               sr2006_theta_s33t_g                                             , &
+    !$acc               sr2006_theta_s33_a  , sr2006_theta_s33_b                        , &
+    !$acc               sr2006_psi_et_a     , sr2006_psi_et_b     , sr2006_psi_et_c     , &
+    !$acc               sr2006_psi_et_d     , sr2006_psi_et_e     , sr2006_psi_et_f     , &
+    !$acc               sr2006_psi_et_g                                                 , &
+    !$acc               sr2006_psi_e_a      , sr2006_psi_e_b      , sr2006_psi_e_c      , &
+    !$acc               sr2006_smcmax_a     , sr2006_smcmax_b)
   end subroutine read_mp_optional_parameters
 
 END MODULE NOAHMP_TABLES

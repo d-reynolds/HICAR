@@ -391,12 +391,13 @@ contains
         allocate(Sx_U_corr(ims:ime,kms:Sx_k_max,jms:jme))
         allocate(Sx_V_corr(ims:ime,kms:Sx_k_max,jms:jme))
 
-        !$acc data present(Sx, TPI, u, v, Ri, dzdx, dzdy) &
-        !$acc create(x_norm, y_norm, thresh_ang, Sx_curr, Sx_corr, TPI_corr, Sx_U_corr, Sx_V_corr)
+        Sx_curr = 0
+
+        !$acc data present(TPI, u, v, Ri, dzdx, dzdy) &
+        !$acc create(x_norm, y_norm, max_spd, thresh_ang, Sx_corr, TPI_corr, Sx_U_corr, Sx_V_corr)
 
         !Initialize Sx_curr. This will keep the border values from being updated
         !$acc kernels
-        Sx_curr = 0
         thresh_ang = 0.
         max_spd = 0.
         Sx_corr = 0.
@@ -424,7 +425,7 @@ contains
         
 
         !Loop through i,j
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) copyin(Sx_curr)
         do j = jms, jme
             !Loop through vertical column
             do k = kms, Sx_k_max
@@ -524,15 +525,15 @@ contains
         allocate(v_m(ims:ime,kms:Sx_k_max,jms:jme))
         allocate(dir_indices(ims:ime,kms:Sx_k_max,jms:jme))
 
-        !$acc data present(Sx, u, v, Sx_curr) &
-        !$acc create(u_m, v_m, dir_indices)
+        !$acc data present(u, v) &
+        !$acc create(u_m, v_m)
         !$acc kernels
         u_m = (u(ims:ime,1:Sx_k_max,:) + u(ims+1:ime+1,1:Sx_k_max,:))/2
         v_m = (v(:,1:Sx_k_max,jms:jme) + v(:,1:Sx_k_max,jms+1:jme+1))/2
         !$acc end kernels
 
         !Compute wind direction for each cell on mass grid
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) copyout(dir_indices)
         do j = jms, jme
             do k = kms, Sx_k_max
                 do i = ims, ime
@@ -545,7 +546,7 @@ contains
         enddo
 
         !Build grid of Sx values based on wind direction at that cell
-        !$acc parallel loop gang vector collapse(3)
+        ! !$acc parallel loop gang vector collapse(3) 
         do j = jms, jme
             do k = kms, Sx_k_max
                 do i = ims, ime

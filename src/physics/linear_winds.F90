@@ -1034,14 +1034,14 @@ contains
             call smooth_array(nsquared, winsz, ydim=3)
         endif
 
-        ! $omp parallel firstprivate(ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme, nx,nxu,ny,nyv,nz), &
-        ! $omp firstprivate(reverse, vsmooth, winsz), default(none), &
-        ! $omp private(i,j,k,step, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
-        ! $omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v), &
-        ! $omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
-        ! $omp shared(domain, u3d,v3d, nsquared, spd_values, dir_values, nsq_values, hi_u_LUT, hi_v_LUT), &
-        ! $omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution), &
-        ! $omp shared(min_stability, max_stability, n_dir_values, n_spd_values, n_nsq_values, smooth_nsq)
+        !$omp parallel firstprivate(ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme, nx,nxu,ny,nyv,nz), &
+        !$omp firstprivate(reverse, vsmooth, winsz), default(none), &
+        !$omp private(i,j,k,step, kVARS, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
+        !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v), &
+        !$omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
+        !$omp shared(domain, u3d,v3d, nsquared, spd_values, dir_values, nsq_values, hi_u_LUT, hi_v_LUT), &
+        !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution), &
+        !$omp shared(min_stability, max_stability, n_dir_values, n_spd_values, n_nsq_values, smooth_nsq)
         allocate(u1d(nxu), v1d(nxu))
         ! $omp do
         do k=1, nyv

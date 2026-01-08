@@ -29,6 +29,7 @@ module variable_interface
         procedure, private :: set_from_metadata
         generic,   public  :: initialize => init_grid
         generic,   public  :: initialize => init_dims
+        final              :: finalize_variable
 
     ! inherited from meta_data
     !     procedure, public : add_attribute
@@ -68,6 +69,11 @@ module variable_interface
             implicit none
             class(variable_t), intent(inout) :: this
             integer, intent(in) :: var_id
+        end subroutine
+
+        elemental module subroutine finalize_variable(this)
+            implicit none
+            type(variable_t), intent(inout) :: this
         end subroutine
     
     end interface

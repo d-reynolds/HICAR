@@ -31,6 +31,7 @@ module microphysics
     use mod_wrf_constants,          only: EP_1, EP_2, cp, cpv, XLS, XLV, XLF, R_d, R_v, gravity, epsilon, cliq, cice, psat, rhowater, rhosnow, rhoair0
     use module_mp_thompson_aer,     only: mp_gt_driver_aer, thompson_aer_init
     use module_mp_thompson,         only: mp_gt_driver, thompson_init
+    use MODULE_MP_MORR_TWO_MOMENT_gpu,  only: MORR_TWO_MOMENT_INIT_gpu, MP_MORR_TWO_MOMENT_gpu
     use MODULE_MP_MORR_TWO_MOMENT,  only: MORR_TWO_MOMENT_INIT, MP_MORR_TWO_MOMENT
     use module_mp_wsm6,             only: wsm6, wsm6init
     use module_mp_wsm3,             only: wsm3, wsm3init
@@ -99,7 +100,11 @@ contains
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Simple Microphysics"
         elseif (options%physics%microphysics==kMP_MORRISON) then
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Morrison Microphysics"
+#ifdef _OPENACC
+            call MORR_TWO_MOMENT_INIT_gpu(hail_opt=1)
+#else
             call MORR_TWO_MOMENT_INIT(hail_opt=1)
+#endif
         elseif (options%physics%microphysics==kMP_ISHMAEL) then
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Jensen-Ischmael Microphysics"
             call jensen_ishmael_init()
@@ -457,6 +462,50 @@ contains
                                   kts = kts, kte = kte)
 
         elseif (options%physics%microphysics==kMP_MORRISON) then
+#ifdef _OPENACC
+            call MP_MORR_TWO_MOMENT_gpu(ITIMESTEP = 1,                   &
+                             TH = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,   &
+                             QV = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,             &
+                             QC = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d,        &
+                             QR = domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d,               &
+                             QI = domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d,          &
+                             QS = domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d,               &
+                             QG = domain%vars_3d(domain%var_indx(kVARS%graupel_mass)%v)%data_3d,            &
+                             NI = domain%vars_3d(domain%var_indx(kVARS%ice_number)%v)%data_3d,        &
+                             NS = domain%vars_3d(domain%var_indx(kVARS%snow_number)%v)%data_3d,             &
+                             NR = domain%vars_3d(domain%var_indx(kVARS%rain_number)%v)%data_3d,             &
+                             NG = domain%vars_3d(domain%var_indx(kVARS%graupel_number)%v)%data_3d,          &
+                             RHO = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,                &
+                             PII = domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,                  &
+                             P = domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                 &
+                             DT_IN = dt, DZ = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d,     &
+                             W = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d,                        &
+                             RAINNC = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
+                             RAINNCV = last_rain, SR=SR,                  &
+                             SNOWNC = domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d,&
+                             SNOWNCV = last_snow,                         &
+                             GRAUPELNC = domain%vars_2d(domain%var_indx(kVARS%graupel)%v)%data_2d,          &
+                             GRAUPELNCV = last_graup,                    & ! hm added 7/13/13
+                             EFFC = domain%vars_3d(domain%var_indx(kVARS%re_cloud)%v)%data_3d,          &
+                             EFFI = domain%vars_3d(domain%var_indx(kVARS%re_ice)%v)%data_3d,            &
+                             EFFS = domain%vars_3d(domain%var_indx(kVARS%re_snow)%v)%data_3d,           &
+                             ISED3D = domain%vars_3d(domain%var_indx(kVARS%ice2_vmi)%v)%data_3d,           &
+                             SSED3D = domain%vars_3d(domain%var_indx(kVARS%ice1_vmi)%v)%data_3d,           &
+                             refl_10cm = refl_10cm, diagflag = .False.,   &
+                             do_radar_ref=0,                              & ! GT added for reflectivity calcs
+                             qrcuten=domain%tend%qr,                      &
+                             qscuten=domain%tend%qs,                      &
+                             qicuten=domain%tend%qi,                      &
+                             ids = ids, ide = ide,                   & ! domain dims
+                             jds = jds, jde = jde,                   &
+                             kds = kds, kde = kde,                   &
+                             ims = ims, ime = ime,                   & ! memory dims
+                             jms = jms, jme = jme,                   &
+                             kms = kms, kme = kme,                   &
+                             its = its, ite = ite,                   & ! tile dims
+                             jts = jts, jte = jte,                   &
+                             kts = kts, kte = kte)
+#else
             call MP_MORR_TWO_MOMENT(ITIMESTEP = 1,                   &
                              TH = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,   &
                              QV = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,             &
@@ -499,6 +548,8 @@ contains
                              its = its, ite = ite,                   & ! tile dims
                              jts = jts, jte = jte,                   &
                              kts = kts, kte = kte)
+#endif
+
         elseif (options%physics%microphysics==kMP_ISHMAEL) then
             call mp_jensen_ishmael(ITIMESTEP=1,                &  !*                                                                         
                              DT_IN=dt,                           &  !*

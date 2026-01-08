@@ -25,7 +25,7 @@ submodule(domain_interface) domain_implementation
     implicit none
     
     real, parameter::deg2rad=0.017453293 !2*pi/360
-
+    integer :: FILTER_WIDTH = 7
     ! primary public routines : init, get_initial_conditions, halo_send, halo_retrieve, or halo_exchange
 contains
 
@@ -58,9 +58,59 @@ contains
 
         call init_batch_exch(this)
         
-        !$acc enter data copyin(this)
-
+        !$acc enter data copyin(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
+        !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
+        !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, &
+        !$acc                   this%vars_2d, this%vars_3d, this%var_indx, this%forcing_var_indx, this%forcing_hi, &
+        !$acc                   this%adv_vars, this%exch_vars, this%tend, this%halo)
+        
+        !update all relevant data_2d/data_3d fields of vars_2d/vars_3d to device
+        call this%update_device()
     end subroutine init_domain
+
+    module subroutine update_device(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        integer :: i
+
+        do i = 1, size(this%vars_2d)
+            if (allocated(this%vars_2d(i)%data_2d)) then
+                !$acc update device(this%vars_2d(i)%data_2d)
+            endif
+            if (allocated(this%vars_2d(i)%data_2di)) then
+                !$acc update device(this%vars_2d(i)%data_2di)
+            endif
+        end do
+        do i = 1, size(this%vars_3d)
+            if (allocated(this%vars_3d(i)%data_3d)) then
+                !$acc update device(this%vars_3d(i)%data_3d)
+            endif
+        end do
+
+    end subroutine update_device
+
+    module subroutine update_host(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        integer :: i
+
+        do i = 1, size(this%vars_2d)
+            if (allocated(this%vars_2d(i)%data_2d)) then
+                !$acc update host(this%vars_2d(i)%data_2d)
+            endif
+            if (allocated(this%vars_2d(i)%data_2di)) then
+                !$acc update host(this%vars_2d(i)%data_2di)
+            endif
+        end do
+
+        do i = 1, size(this%vars_3d)
+            if (allocated(this%vars_3d(i)%data_3d)) then
+                !$acc update host(this%vars_3d(i)%data_3d)
+            endif
+        end do
+
+    end subroutine update_host
+
 
     subroutine init_batch_exch(this)
         implicit none
@@ -163,7 +213,63 @@ contains
     module subroutine release(this)
         class(domain_t), intent(inout) :: this
 
-        !$acc exit data delete(this)
+        integer :: i
+        
+        !$acc exit data finalize delete(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
+        !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
+        !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, &
+        !$acc                   this%vars_2d, this%vars_3d, this%var_indx, this%forcing_var_indx, this%forcing_hi, &
+        !$acc                   this%adv_vars, this%exch_vars, this%tend, this%halo)
+        
+        do i = 1, size(this%vars_2d)
+            if (allocated(this%vars_2d(i)%data_2d)) then
+                !$acc exit data finalize delete(this%vars_2d(i)%data_2d)
+                deallocate(this%vars_2d(i)%data_2d)
+            endif
+            if (allocated(this%vars_2d(i)%dqdt_2d)) then
+                !$acc exit data finalize delete(this%vars_2d(i)%dqdt_2d)
+                deallocate(this%vars_2d(i)%dqdt_2d)
+            endif
+            if (allocated(this%vars_2d(i)%data_2di)) then
+                !$acc exit data finalize delete(this%vars_2d(i)%data_2di)
+                deallocate(this%vars_2d(i)%data_2di)
+            endif
+        end do
+        do i = 1, size(this%vars_3d)
+            if (allocated(this%vars_3d(i)%data_3d)) then
+                !$acc exit data finalize delete(this%vars_3d(i)%data_3d)
+                deallocate(this%vars_3d(i)%data_3d)
+            endif
+            if (allocated(this%vars_3d(i)%dqdt_3d)) then
+                !$acc exit data finalize delete(this%vars_3d(i)%dqdt_3d)
+                deallocate(this%vars_3d(i)%dqdt_3d)
+            endif
+        end do
+        do i = 1, size(this%vars_4d)
+            if (allocated(this%vars_4d(i)%data_4d)) then
+                deallocate(this%vars_4d(i)%data_4d)
+            endif
+        end do
+
+        do i = 1, size(this%forcing_hi)
+            if (allocated(this%forcing_hi(i)%data_2d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%data_2d)
+                deallocate(this%forcing_hi(i)%data_2d)
+            endif
+            if (allocated(this%forcing_hi(i)%dqdt_2d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%dqdt_2d)
+                deallocate(this%forcing_hi(i)%dqdt_2d)
+            endif
+            if (allocated(this%forcing_hi(i)%data_3d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%data_3d)
+                deallocate(this%forcing_hi(i)%data_3d)
+            endif
+            if (allocated(this%forcing_hi(i)%dqdt_3d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%dqdt_3d)
+                deallocate(this%forcing_hi(i)%dqdt_3d)
+            endif
+        end do
+
         call this%halo%finalize()
 
     end subroutine
@@ -347,12 +453,12 @@ contains
                   u_mass                => this%vars_3d(this%var_indx(kVARS%u_mass)%v)%data_3d,                 &
                   v_mass                => this%vars_3d(this%var_indx(kVARS%v_mass)%v)%data_3d,                 &
                   potential_temperature => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d )
-        !$acc data present(exner, pressure, pressure_i, dz_i, dz_mass, psfc, density, temperature, temperature_i, qv, u, v, u_mass, v_mass, potential_temperature) create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3)
+        ! !$acc data present(exner, pressure, future_pressure, pressure_i, dz_i, dz_mass, psfc, density, temperature, temperature_i, qv, u, v, u_mass, v_mass, potential_temperature) create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3)
 
         !Calculation of density
 
         if (forcing_update_only) then
-            !$acc parallel loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jms,jme
             do k = kms,kme
             do i = ims,ime
@@ -363,16 +469,78 @@ contains
             enddo
             enddo
         else
-            !$acc parallel loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) async(1)
             do j = jms,jme
             do k = kms,kme
             do i = ims,ime
-                exner(i,k,j) = exner_function(pressure(i,k,j))
+                exner(i,k,j) =  exner_function(pressure(i,k,j))
                 temperature(i,k,j) = potential_temperature(i,k,j) * exner(i,k,j)
                 density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,j))) ! kg/m^3
             enddo
             enddo
             enddo
+
+            if (this%var_indx(kVARS%u_mass)%v > 0) then
+                !$acc parallel loop gang vector collapse(3) async(2)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                            u_mass(i,k,j) = (u(i+1,k,j) + u(i,k,j)) * 0.5
+                            v_mass(i,k,j) = (v(i,k,j+1) + v(i,k,j)) * 0.5
+                        enddo
+                    enddo
+                enddo
+            endif
+
+            ! temporary constant
+            if (this%var_indx(kVARS%roughness_z0)%v > 0) then
+                associate(z            => this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d, &
+                          roughness_z0 => this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+                          terrain      => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d)
+
+                !$acc parallel loop gang vector collapse(2) async(3) present(z,roughness_z0,terrain)
+                do j = jms,jme
+                    do i = ims,ime
+                        ! use log-law of the wall to convert from first model level to surface
+                        surf_temp_1(i,j) = karman / log((z(i,kms,j) - terrain(i,j)) / roughness_z0(i,j))
+                        ! use log-law of the wall to convert from surface to 10m height
+                        surf_temp_2(i,j) = log(10.0 / roughness_z0(i,j)) / karman
+                    enddo
+                enddo
+
+                end associate
+            endif
+
+            if (this%var_indx(kVARS%u_10m)%v > 0) then
+                associate(v_10m => this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d, &
+                          u_10m => this%vars_2d(this%var_indx(kVARS%u_10m)%v)%data_2d)
+
+                !$acc parallel loop gang vector collapse(2) wait(2,3) async(4) present(u_10m, v_10m)
+                do j = jms,jme
+                    do i = ims,ime
+                        surf_temp_3(i,j)                         = u_mass      (i,kms,j) * surf_temp_1(i,j)
+                        u_10m(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
+                        surf_temp_3(i,j)                         = v_mass      (i,kms,j) * surf_temp_1(i,j)
+                        v_10m(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
+                    enddo
+                enddo
+
+                end associate
+            endif
+
+            if (this%var_indx(kVARS%ustar)%v > 0) then
+                associate(ustar => this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d)
+
+                !$acc parallel loop gang vector collapse(2) wait(2,3) async(5) present(ustar)
+                do j = jts,jte
+                    do i = its,ite
+                        ! now calculate master ustar based on U and V combined in quadrature
+                        ustar(i,j) = sqrt(u_mass(i,kms,j)**2 + v_mass(i,kms,j)**2) * surf_temp_1(i,j)
+                    enddo
+                enddo
+
+                end associate
+            endif
         endif
 
 
@@ -380,7 +548,7 @@ contains
         ! these then affect density, leading to discontinuities in density, and thus winds. So, here we set the density for points on the "frame"
         ! to be the same as the density in the first cell within the physics region of the domain
         if (ims==ids) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jms,jme
                 do k = kms,kme
                     do i = ims,its-1
@@ -395,7 +563,7 @@ contains
             enddo
         endif
         if (ime==ide) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jms,jme
                 do k = kms,kme
                     do i = ite+1,ime
@@ -410,7 +578,7 @@ contains
             enddo
         endif
         if (jms==jds) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jms,jts-1
                 do k = kms,kme
                     do i = ims,ime
@@ -425,7 +593,7 @@ contains
             enddo
         endif
         if (jme==jde) then 
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jte+1,jme
                 do k = kms,kme
                     do i = ims,ime
@@ -441,7 +609,7 @@ contains
         endif
 
         if (ims==ids .and. jms==jds) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jms,jts-1
                 do k = kms,kme
                     do i = ims,its-1
@@ -457,7 +625,7 @@ contains
         endif
 
         if (ims==ids .and. jme==jde) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jte+1,jme
                 do k = kms,kme
                     do i = ims,its-1
@@ -473,7 +641,7 @@ contains
         endif
 
         if (ime==ide .and. jms==jds) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jms,jts-1
                 do k = kms,kme
                     do i = ite+1,ime
@@ -489,7 +657,7 @@ contains
         endif
 
         if (ime==ide .and. jme==jde) then
-            !$acc parallel loop gang vector collapse(3) async(1)
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jte+1,jme
                 do k = kms,kme
                     do i = ite+1,ime
@@ -505,7 +673,7 @@ contains
         endif
 
         if (.not.(forcing_update_only)) then
-            !$acc parallel loop gang vector collapse(2) wait(1) async(2)
+            !$acc parallel loop gang vector collapse(2) wait(6) async(7)
             do j = jms,jme
                 do i = ims,ime
                     temperature_i(i,kms,j) = temperature(i,kms,j) + (temperature(i,kms,j) - temperature(i,kms+1,j)) * 0.5
@@ -513,7 +681,7 @@ contains
                 enddo
             enddo
 
-            !$acc parallel loop gang vector collapse(3)  wait(2) async(3)
+            !$acc parallel loop gang vector collapse(3)  wait(7) async(8)
             do j = jms,jme
                 do k = kms+1,kme
                     do i = ims,ime
@@ -523,7 +691,7 @@ contains
                 enddo
             enddo
 
-            !$acc parallel loop gang vector collapse(2)  wait(3) async(4)
+            !$acc parallel loop gang vector collapse(2)  wait(8) async(9)
             do j = jms,jme
                 do i = ims,ime
                     temperature_i(i,kme+1,j) = temperature(i,kme,j) + (temperature(i,kme,j) - temperature(i,kme-1,j)) * 0.5
@@ -531,26 +699,16 @@ contains
                 enddo
             enddo
 
-            if (this%var_indx(kVARS%u_mass)%v > 0) then
-                !$acc parallel loop gang vector collapse(3) async(5)
-                do j = jms,jme
-                    do k = kms,kme
-                        do i = ims,ime
-                            u_mass(i,k,j) = (u(i+1,k,j) + u(i,k,j)) * 0.5
-                            v_mass(i,k,j) = (v(i,k,j+1) + v(i,k,j)) * 0.5
-                        enddo
-                    enddo
-                enddo
-            endif
-
             if (this%var_indx(kVARS%surface_pressure)%v > 0) then
-                !$acc parallel loop gang vector collapse(2) async(6)
+                !$acc parallel loop gang vector collapse(2) async(10)
                 do j = jms,jme
                     do i = ims,ime
                         psfc(i,j) = pressure_i(i, kms, j)
                     enddo
                 enddo
             endif
+
+            !$acc wait
 
             if (this%var_indx(kVARS%ivt)%v > 0) then
                 call compute_ivt(this%vars_2d(this%var_indx(kVARS%ivt)%v)%data_2d, qv, u_mass, v_mass, pressure_i(:,kms:kme,:))
@@ -571,62 +729,9 @@ contains
                 if (this%var_indx(kVARS%graupel_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%graupel_mass)%v)%data_3d(i,k,j)
                 call compute_iq(this%vars_2d(this%var_indx(kVARS%iwi)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
             endif
-            
-            ! temporary constant
-            if (this%var_indx(kVARS%roughness_z0)%v > 0) then
-                associate(z            => this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d, &
-                          roughness_z0 => this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d, &
-                          terrain      => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d)
-
-                !$acc parallel loop gang vector collapse(2) async(7) present(z,roughness_z0,terrain)
-                do j = jms,jme
-                    do i = ims,ime
-                        ! use log-law of the wall to convert from first model level to surface
-                        surf_temp_1(i,j) = karman / log((z(i,kms,j) - terrain(i,j)) / roughness_z0(i,j))
-                        ! use log-law of the wall to convert from surface to 10m height
-                        surf_temp_2(i,j) = log(10.0 / roughness_z0(i,j)) / karman
-                    enddo
-                enddo
-
-                end associate
-            endif
-
-            if (this%var_indx(kVARS%u_10m)%v > 0) then
-                associate(v_10m => this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d, &
-                          u_10m => this%vars_2d(this%var_indx(kVARS%u_10m)%v)%data_2d)
-
-                !$acc parallel loop gang vector collapse(2) wait(5,7) async(8) present(u_10m, v_10m)
-                do j = jms,jme
-                    do i = ims,ime
-                        surf_temp_3(i,j)                         = u_mass      (i,kms,j) * surf_temp_1(i,j)
-                        u_10m(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
-                        surf_temp_3(i,j)                         = v_mass      (i,kms,j) * surf_temp_1(i,j)
-                        v_10m(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
-                    enddo
-                enddo
-
-                end associate
-            endif
-
-            if (this%var_indx(kVARS%ustar)%v > 0) then
-                associate(ustar => this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d)
-
-                !$acc parallel loop gang vector collapse(2) wait(5,7) async(8) present(ustar)
-                do j = jts,jte
-                    do i = its,ite
-                        ! now calculate master ustar based on U and V combined in quadrature
-                        ustar(i,j) = sqrt(u_mass(i,kms,j)**2 + v_mass(i,kms,j)**2) * surf_temp_1(i,j)
-                    enddo
-                enddo
-
-                end associate
-            endif
-
         endif
 
-        !$acc wait(1,2,3,4,5,6,7,8)
-
-        !$acc end data
+        ! !$acc end data
         end associate
 
     end subroutine diagnostic_update
@@ -643,7 +748,6 @@ contains
 
         integer :: ims, ime, jms, jme, kms, kme
         type(meta_data_t) :: var_meta
-        type(variable_t)  :: tmp_var, forcing_var_hi
         type(grid_t)     :: grid
         integer :: n_one_d, n_two_d, n_three_d, n_four_d, n_forcing_var
         logical :: is_forcing_var
@@ -763,8 +867,7 @@ contains
 
                 ! if we are using the linear wind solver, we need dz and z information for the global grid. 
                 ! but to save memory, global_z/dz is setup by default for the neighbor grid. Change here
-                if ( (opt%physics%windtype == kWIND_LINEAR) .or. (opt%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-                     (opt%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+                if (opt%wind%linear_theory)  then
                     if (i==kVARS%h1 .or. i==kVARS%h2) then
                         grid = this%global_grid_2d
                     else if (i==kVARS%global_z_interface) then
@@ -774,57 +877,100 @@ contains
                     endif
                 endif
 
-                call tmp_var%initialize(i, grid, forcing_var=is_forcing_var)
 
                 ! test if forcing var is empty
                 if (is_forcing_var) then
 
                     n_forcing_var = n_forcing_var + 1
-                    call forcing_var_hi%initialize(i, grid, forcing_var=is_forcing_var)
                     this%forcing_var_indx(i)%id = i
                     this%forcing_var_indx(i)%v = n_forcing_var
 
-                    this%forcing_hi(this%forcing_var_indx(i)%v) = forcing_var_hi
+                    call this%forcing_hi(this%forcing_var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
                 endif
 
                 this%var_indx(i)%id = i
-                if (tmp_var%one_d) then
+                if (var_meta%one_d) then
                     n_one_d = n_one_d + 1
                     this%var_indx(i)%v = n_one_d
-                    this%vars_1d(this%var_indx(i)%v) = tmp_var
-                else if (tmp_var%two_d) then
+                    call this%vars_1d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                else if (var_meta%two_d) then
                     n_two_d = n_two_d + 1
                     this%var_indx(i)%v = n_two_d
-                    this%vars_2d(this%var_indx(i)%v) = tmp_var
-                else if (tmp_var%three_d) then
+                    call this%vars_2d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                else if (var_meta%three_d) then
                     n_three_d = n_three_d + 1
                     this%var_indx(i)%v = n_three_d
-                    this%vars_3d(this%var_indx(i)%v) = tmp_var
-                else if (tmp_var%four_d) then
+                    call this%vars_3d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                else if (var_meta%four_d) then
                     n_four_d = n_four_d + 1
                     this%var_indx(i)%v = n_four_d
-                    this%vars_4d(this%var_indx(i)%v) = tmp_var
+                    call this%vars_4d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
                 endif
             endif
         enddo
 
 
-        if (0<opt%vars_to_allocate( kVARS%tend_qv_adv) )                allocate(this%tend%qv_adv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qv_pbl) )                allocate(this%tend%qv_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qv) )                    allocate(this%tend%qv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_th) )                    allocate(this%tend%th(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_th_pbl) )                allocate(this%tend%th_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qc_pbl) )                allocate(this%tend%qc_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qi_pbl) )                allocate(this%tend%qi_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qc) )                    allocate(this%tend%qc(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qi) )                    allocate(this%tend%qi(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qs) )                    allocate(this%tend%qs(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qr) )                    allocate(this%tend%qr(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_u) )                     allocate(this%tend%u(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_v) )                     allocate(this%tend%v(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+        if (0<opt%vars_to_allocate( kVARS%tend_qv_adv) )   then
+            allocate(this%tend%qv_adv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
+            !$acc enter data copyin(this%tend%qv_adv)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qv_pbl) )   then
+            allocate(this%tend%qv_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
+            !$acc enter data copyin(this%tend%qv_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qv) )       then
+            allocate(this%tend%qv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qv)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_th) )       then
+            allocate(this%tend%th(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%th)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_th_pbl) )   then
+            allocate(this%tend%th_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%th_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qc_pbl) )   then
+            allocate(this%tend%qc_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qc_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qi_pbl) )   then
+            allocate(this%tend%qi_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qi_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qc) )       then
+            allocate(this%tend%qc(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qc)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qi) )       then
+            allocate(this%tend%qi(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qi)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qs) )       then
+            allocate(this%tend%qs(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qs)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qr) )       then
+            allocate(this%tend%qr(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qr)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_u) )        then
+            allocate(this%tend%u(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+            !$acc enter data copyin(this%tend%u)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_v) )        then
+            allocate(this%tend%v(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+            !$acc enter data copyin(this%tend%v)
+        endif
 
-        if (0<opt%vars_to_allocate( kVARS%tend_th_lwrad) )              allocate(this%tend%th_lwrad(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_th_swrad) )              allocate(this%tend%th_swrad(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+        if (0<opt%vars_to_allocate( kVARS%tend_th_lwrad) ) then
+            allocate(this%tend%th_lwrad(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+            !$acc enter data copyin(this%tend%th_lwrad)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_th_swrad) ) then
+            allocate(this%tend%th_swrad(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+            !$acc enter data copyin(this%tend%th_swrad)
+        endif
 
     end subroutine
 
@@ -852,8 +998,7 @@ contains
 
         allocate(temp_offset(1:this%grid%ide+1,1:this%grid%jde+1))
 
-        if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-             (options%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+        if (options%wind%linear_theory) then
                 this%vars_2d(this%var_indx(kVARS%global_terrain)%v)%data_2d = temporary_data
         end if
 
@@ -1141,8 +1286,7 @@ contains
 
             ! use temp to store global z-interface so that global-jacobian can be calculated
 
-            if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-                 (options%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+            if (options%wind%linear_theory) then
                  
                 allocate(temp(this%ids:this%ide, this%kds:this%kde+1, this%jds:this%jde))
                 temp(:,kms,:)   = this%vars_2d(this%var_indx(kVARS%global_terrain)%v)%data_2d
@@ -1343,8 +1487,7 @@ contains
             i = this%grid%kms
             
             
-            if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-                 (options%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+            if (options%wind%linear_theory) then
                 global_z_interface(:,i,:)   = global_terrain
                 allocate(global_jacobian(this%ids:this%ide, this%kds:this%kde, this%jds:this%jde))
             else
@@ -2131,6 +2274,7 @@ contains
         if (this%var_indx(kVARS%temperature_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d=init_surf_temp
         if (this%var_indx(kVARS%humidity_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%humidity_2m)%v)%data_2d=0.001
         if (this%var_indx(kVARS%surface_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%surface_pressure)%v)%data_2d=102000
+        if (this%var_indx(kVARS%land_emissivity)%v > 0) this%vars_2d(this%var_indx(kVARS%land_emissivity)%v)%data_2d=0.95
         if (this%var_indx(kVARS%longwave_up)%v > 0) this%vars_2d(this%var_indx(kVARS%longwave_up)%v)%data_2d=0
         if (this%var_indx(kVARS%ground_heat_flux)%v > 0) this%vars_2d(this%var_indx(kVARS%ground_heat_flux)%v)%data_2d=0
         if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d=init_surf_temp
@@ -2292,7 +2436,7 @@ contains
         this%neighborhood_max = max(nsmooth,8)
         
         !Considering blocking terrain...
-        if (options%physics%windtype == kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype ==  kITERATIVE_WINDS) then
+        if (options%physics%windtype == kITERATIVE_WINDS) then
             this%neighborhood_max = int(max(4000.0/this%dx,1.0))
         endif
         
@@ -2763,43 +2907,57 @@ contains
         endif
         
         ! Now iterate through the dictionary as long as there are more elements present
-        !$acc data present(this)
+
         do n = 1,size(this%forcing_hi)
+            associate(forcing_hi => this%forcing_hi(n))
             !Update delta fields on the high-resolution forcing varaibles...
             if (this%forcing_hi(n)%two_d) then
-                !$acc kernels
-                this%forcing_hi(n)%dqdt_2d = (this%forcing_hi(n)%dqdt_2d - this%forcing_hi(n)%data_2d) / dt_seconds
+                !$acc kernels present(forcing_hi%dqdt_2d, forcing_hi%data_2d)
+                forcing_hi%dqdt_2d = (forcing_hi%dqdt_2d - forcing_hi%data_2d) / dt_seconds
                 !$acc end kernels
             else if (this%forcing_hi(n)%three_d) then
-                !$acc kernels
-                this%forcing_hi(n)%dqdt_3d = (this%forcing_hi(n)%dqdt_3d - this%forcing_hi(n)%data_3d) / dt_seconds
+                !$acc kernels present(forcing_hi%dqdt_3d, forcing_hi%data_3d)
+                forcing_hi%dqdt_3d = (forcing_hi%dqdt_3d - forcing_hi%data_3d) / dt_seconds
                 !$acc end kernels
             endif
 
             ! now update delta fields for domain variables
-            var_indx = this%forcing_hi(n)%id
-
-            if (.not.(this%forcing_hi(n)%force_boundaries)) then
-                if (this%forcing_hi(n)%two_d) then
-                    !$acc parallel loop gang vector collapse(2)
-                    do j = this%vars_2d(this%var_indx(var_indx)%v)%grid%jms, this%vars_2d(this%var_indx(var_indx)%v)%grid%jme
-                        do i = this%vars_2d(this%var_indx(var_indx)%v)%grid%ims, this%vars_2d(this%var_indx(var_indx)%v)%grid%ime
-                            this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d(i,j) = (this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d(i,j) - this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j)) / dt_seconds
+            var_indx = forcing_hi%id
+            if (.not.(forcing_hi%force_boundaries)) then
+                if (forcing_hi%two_d) then
+                    associate(var_2d => this%vars_2d(this%var_indx(var_indx)%v), &
+                              ims => this%vars_2d(this%var_indx(var_indx)%v)%grid%ims, &
+                              ime => this%vars_2d(this%var_indx(var_indx)%v)%grid%ime, &
+                              jms => this%vars_2d(this%var_indx(var_indx)%v)%grid%jms, &
+                              jme => this%vars_2d(this%var_indx(var_indx)%v)%grid%jme)
+                    !$acc parallel loop gang vector collapse(2) present(var_2d%dqdt_2d, var_2d%data_2d, ims, ime, jms, jme)
+                    do j = jms, jme
+                        do i = ims, ime
+                            var_2d%dqdt_2d(i,j) = (var_2d%dqdt_2d(i,j) - var_2d%data_2d(i,j)) / dt_seconds
                         enddo
                     enddo
+                    end associate
                 else if (this%forcing_hi(n)%three_d) then
-                    !$acc parallel loop gang vector collapse(3)
-                    do j = this%vars_3d(this%var_indx(var_indx)%v)%grid%jms, this%vars_3d(this%var_indx(var_indx)%v)%grid%jme
-                        do k = this%kms, this%kme
-                            do i = this%vars_3d(this%var_indx(var_indx)%v)%grid%ims, this%vars_3d(this%var_indx(var_indx)%v)%grid%ime
-                                this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d(i,k,j) = (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d(i,k,j) - this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j)) / dt_seconds
+                    associate(var_3d => this%vars_3d(this%var_indx(var_indx)%v), &
+                              ims => this%vars_3d(this%var_indx(var_indx)%v)%grid%ims, &
+                              ime => this%vars_3d(this%var_indx(var_indx)%v)%grid%ime, &
+                              kms => this%kms, &
+                              kme => this%kme, &
+                              jms => this%vars_3d(this%var_indx(var_indx)%v)%grid%jms, &
+                              jme => this%vars_3d(this%var_indx(var_indx)%v)%grid%jme)
+                    !$acc parallel loop gang vector collapse(3) present(var_3d%dqdt_3d, var_3d%data_3d, ims, ime, kms, kme, jms, jme)
+                    do j = jms, jme
+                        do k = kms, kme
+                            do i = ims, ime
+                                var_3d%dqdt_3d(i,k,j) = (var_3d%dqdt_3d(i,k,j) - var_3d%data_3d(i,k,j)) / dt_seconds
                             enddo
                         enddo
                     enddo
+                    end associate
                 endif
             endif
+            end associate
         enddo
-        !$acc end data
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
         ! this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d = (this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d - this%vars_3d(this%var_indx(kVARS%w)%v)%data_3d) / dt%seconds()
@@ -2831,20 +2989,23 @@ contains
         !calculate dt in units of hours
         dt_h = dt/3600.0
 
-        ims_b = 0; ime_b = 0; jms_b = 0; jme_b = 0
-
-        do_west = (this%ims < this%ids+this%grid%halo_size+this%FILTER_WIDTH)
-        do_east = (this%ime > this%ide-this%grid%halo_size-this%FILTER_WIDTH)
-        do_south = (this%jms < this%jds+this%grid%halo_size+this%FILTER_WIDTH)
-        do_north = (this%jme > this%jde-this%grid%halo_size-this%FILTER_WIDTH)
+        do_west = (this%ims < this%ids+this%grid%halo_size+FILTER_WIDTH)
+        do_east = (this%ime > this%ide-this%grid%halo_size-FILTER_WIDTH)
+        do_south = (this%jms < this%jds+this%grid%halo_size+FILTER_WIDTH)
+        do_north = (this%jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
 
         do_boundary = (do_west .or. do_east .or. do_north .or. do_south)
 
+        !$acc data create(ims_b,ime_b,jms_b,jme_b)
+        associate( ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, halo_size => this%grid%halo_size )
+        !$acc parallel present(ims, ime, jms, jme, halo_size)
+        ims_b = 0; ime_b = 0; jms_b = 0; jme_b = 0
+
         if (do_boundary) then
-            if (do_west) ims_b(1) = this%ims; ime_b(1) = this%ims+this%FILTER_WIDTH+this%grid%halo_size; jms_b(1) = this%jms; jme_b(1) = this%jme;
-            if (do_east) ims_b(2) = this%ime-this%FILTER_WIDTH-this%grid%halo_size; ime_b(2) = this%ime; jms_b(2) = this%jms; jme_b(2) = this%jme;
-            if (do_north) ims_b(3) = this%ims; ime_b(3) = this%ime; jms_b(3) = this%jme-this%FILTER_WIDTH-this%grid%halo_size; jme_b(3) = this%jme;
-            if (do_south) ims_b(4) = this%ims; ime_b(4) = this%ime; jms_b(4) = this%jms; jme_b(4) = this%jms+this%FILTER_WIDTH+this%grid%halo_size;
+            if (do_west) ims_b(1) = ims; ime_b(1) = ims+FILTER_WIDTH+halo_size; jms_b(1) = jms; jme_b(1) = jme;
+            if (do_east) ims_b(2) = ime-FILTER_WIDTH-halo_size; ime_b(2) = ime; jms_b(2) = jms; jme_b(2) = jme;
+            if (do_north) ims_b(3) = ims; ime_b(3) = ime; jms_b(3) = jme-FILTER_WIDTH-halo_size; jme_b(3) = jme;
+            if (do_south) ims_b(4) = ims; ime_b(4) = ime; jms_b(4) = jms; jme_b(4) = jms+FILTER_WIDTH+halo_size;
 
             ! limit vertical extent of west and east boundaries to the extent of the north/south indices
             ! this prevents double-calculating points in the corners
@@ -2854,8 +3015,8 @@ contains
             if (do_west .and. do_north) jme_b(1) = min(jme_b(1),jms_b(3)-1)
             if (do_east .and. do_north) jme_b(2) = min(jme_b(2),jms_b(3)-1)
         endif
-
-        !$acc data copyin(ims_b,ime_b,jms_b,jme_b)
+        !$acc end parallel
+        end associate
 
         do n = 1,size(this%forcing_hi)
 
@@ -2872,7 +3033,7 @@ contains
 
                 ! apply forcing throughout the domain for 2D diagnosed variables (e.g. SST, SW)
                 if (.not.(forcing%force_boundaries)) then
-                    !$acc parallel loop gang vector collapse(2) present(var, forcing)
+                    !$acc parallel loop gang vector collapse(2) present(var%data_2d, var%dqdt_2d, forcing%data_2d, forcing%dqdt_2d)
                     do j = jms,jme
                         do i = ims,ime
                             var%data_2d(i,j) = var%data_2d(i,j) + (var%dqdt_2d(i,j) * dt)
@@ -2880,7 +3041,7 @@ contains
                         enddo
                     enddo
                 else if (do_boundary) then
-                    !$acc parallel present(var,forcing,relax_filter,ims_b,ime_b,jms_b,jme_b) 
+                    !$acc parallel present(var%data_2d, var%dqdt_2d, forcing%data_2d, forcing%dqdt_2d, relax_filter, ims_b, ime_b, jms_b, jme_b)
                     do p = 1,4
                         if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
@@ -2920,7 +3081,7 @@ contains
                 ! only apply forcing data on the boundaries for advected scalars (e.g. temperature, humidity)
                 ! applying forcing to the edges has already been handeled when updating dqdt using the relaxation filter
                 if (.not.(forcing%force_boundaries)) then
-                    !$acc parallel loop gang vector collapse(3) present(var, forcing)
+                    !$acc parallel loop gang vector collapse(3) present(var%data_3d, var%dqdt_3d, forcing%data_3d, forcing%dqdt_3d)
                     do j = jms,jme
                         do k = kms, kme
                             do i = ims,ime
@@ -2935,7 +3096,7 @@ contains
                         enddo
                     enddo
                 else if (do_boundary) then
-                    !$acc parallel present(var,forcing,relax_filter,ims_b,ime_b,jms_b,jme_b)
+                    !$acc parallel present(var%data_3d, var%dqdt_3d, forcing%data_3d, forcing%dqdt_3d,relax_filter,ims_b,ime_b,jms_b,jme_b)
                     do p = 1,4
                         if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
@@ -2998,18 +3159,17 @@ contains
         type(variable_t) :: input_data
 
         ! number of layers has to be used when subsetting for update_pressure (for now)
-        integer :: nz, i, var_indx, pressure_indx, pot_temp_indx
+        integer :: nz, p, var_indx, pressure_indx, pot_temp_indx, i, j, k
         logical :: var_is_u, var_is_v, var_is_pressure, var_is_potential_temp, agl_interp, force_boundaries
 
         update_only = .False.
         if (present(update)) update_only = update
 
         ! Now iterate through the dictionary as long as there are more elements present
-        !$acc data present(this)
-        do i = 1,size(this%forcing_hi)
+        do p = 1,size(this%forcing_hi)
 
-            ! var_indx = get_varindx(trim(this%forcing_hi(i)%name))
-            var_indx = this%forcing_hi(i)%id
+            ! var_indx = get_varindx(trim(this%forcing_hi(p)%name))
+            var_indx = this%forcing_hi(p)%id
 
             var_to_interpolate = get_varmeta(var_indx, force_boundaries=force_boundaries)
 
@@ -3017,21 +3177,23 @@ contains
             input_data = forcing%variables%get_var(var_indx)
             ! interpolate
             if (input_data%two_d) then
-                associate(var     => this%vars_2d(this%var_indx(var_indx)%v) )
+                associate(var     => this%vars_2d(this%var_indx(var_indx)%v), forcing_hi => this%forcing_hi(p) )
                 if (update_only) then
-                    call geo_interp2d(this%forcing_hi(i)%dqdt_2d, input_data%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(forcing_hi%dqdt_2d, input_data%data_2d, forcing%geo%geolut)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    !$acc update device(this%forcing_hi(i)%dqdt_2d)
-                    !$acc kernels present(this%forcing_hi(i), var)
-                    if (.not.(force_boundaries)) var%dqdt_2d = this%forcing_hi(i)%dqdt_2d
+                    !$acc update device(forcing_hi%dqdt_2d)
+                     if (.not.(force_boundaries)) then
+                    !$acc kernels present(forcing_hi%dqdt_2d, var%dqdt_2d)
+                    var%dqdt_2d = forcing_hi%dqdt_2d
                     !$acc end kernels
+                    endif
                 else
-                    call geo_interp2d(this%forcing_hi(i)%data_2d, input_data%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(forcing_hi%data_2d, input_data%data_2d, forcing%geo%geolut)
                     !If this is an initialization step, copy high res directly over to domain
 
-                    !$acc update device(this%forcing_hi(i)%data_2d)
-                    !$acc kernels present(this%forcing_hi(i), var)
-                    var%data_2d = this%forcing_hi(i)%data_2d
+                    !$acc update device(forcing_hi%data_2d)
+                    !$acc kernels present(forcing_hi%data_2d, var%data_2d)
+                    var%data_2d = forcing_hi%data_2d
                     !$acc end kernels
                 endif
                 end associate
@@ -3044,29 +3206,32 @@ contains
                 !for interpolation. If the user has not selected AGL interpolation in the namelist, this will result in standard z-interpolation
                 agl_interp = .not.(var_is_pressure .or. var_is_potential_temp)
 
-                associate(var     => this%vars_3d(this%var_indx(var_indx)%v) )
+                associate(var     => this%vars_3d(this%var_indx(var_indx)%v), &
+                          forcing_hi => this%forcing_hi(p) )
 
                 ! if just updating, use the dqdt variable otherwise use the 3D variable
                 if (update_only) then
-                    call interpolate_variable(this%forcing_hi(i)%dqdt_3d, input_data, forcing, this, &
+                    call interpolate_variable(forcing_hi%dqdt_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    !$acc update device(this%forcing_hi(i)%dqdt_3d)
-                    !$acc kernels present(this%forcing_hi(i), var)
-                    if (.not.(force_boundaries).and..not.var_is_u.and..not.var_is_v) var%dqdt_3d = this%forcing_hi(i)%dqdt_3d
-                    !$acc end kernels
+                    !$acc update device(forcing_hi%dqdt_3d)
+                    if (.not.(force_boundaries).and..not.var_is_u.and..not.var_is_v) then
+                        !$acc kernels present(forcing_hi%dqdt_3d, var%dqdt_3d)
+                        var%dqdt_3d = forcing_hi%dqdt_3d
+                        !$acc end kernels
+                    endif
                 else
-                    call interpolate_variable(this%forcing_hi(i)%data_3d, input_data, forcing, this, &
+                    call interpolate_variable(forcing_hi%data_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     !If this is an initialization step, copy high res directly over to domain
-                    !$acc update device(this%forcing_hi(i)%data_3d)
-                    !$acc kernels present(this%forcing_hi(i), var)
-                    var%data_3d = this%forcing_hi(i)%data_3d
+                    !$acc update device(forcing_hi%data_3d)
+                    !$acc kernels present(forcing_hi%data_3d, var%data_3d)
+                    var%data_3d = forcing_hi%data_3d
                     !$acc end kernels
                 endif
                 end associate
-                if (var_is_pressure) pressure_indx = i
-                if (var_is_potential_temp) pot_temp_indx = i
+                if (var_is_pressure) pressure_indx = p
+                if (var_is_potential_temp) pot_temp_indx = p
             endif
             call forcing%variables%add_var(var_indx, input_data)
         enddo
@@ -3074,25 +3239,41 @@ contains
         !Adjust potential temperature (first) and pressure (second) to account for points below forcing grid
         !Only domain-wide-forced variables are updated with the domain dqdt_3d
         
-        associate(pressure     => this%vars_3d(this%var_indx(kVARS%pressure)%v), &
-                   pot_temp     => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v))
+        associate( forcing_pressure => this%forcing_hi(pressure_indx), &
+                   forcing_pot_temp => this%forcing_hi(pot_temp_indx), &
+                   pressure     => this%vars_3d(this%var_indx(kVARS%pressure)%v), &
+                   pot_temp     => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v), &
+                   ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, kms => this%kms, kme => this%kme )
         if (update_only) then
-            call adjust_pressure_temp(this%forcing_hi(pressure_indx)%dqdt_3d,this%forcing_hi(pot_temp_indx)%dqdt_3d, forcing%geo%z, this%geo%z)
-            !$acc update device(this%forcing_hi(pressure_indx)%dqdt_3d,this%forcing_hi(pot_temp_indx)%dqdt_3d)
-            !$acc kernels present(this%forcing_hi(pressure_indx), this%forcing_hi(pot_temp_indx), pressure, pot_temp)
-            pressure%dqdt_3d = this%forcing_hi(pressure_indx)%dqdt_3d
-            pot_temp%dqdt_3d = this%forcing_hi(pot_temp_indx)%dqdt_3d
-            !$acc end kernels
+            call adjust_pressure_temp(forcing_pressure%dqdt_3d,forcing_pot_temp%dqdt_3d, forcing%geo%z, this%geo%z)
+            !$acc update device(forcing_pressure%dqdt_3d,forcing_pot_temp%dqdt_3d)
+            !$acc parallel loop gang vector collapse(3) &
+            !$acc present(forcing_pressure%dqdt_3d, forcing_pot_temp%dqdt_3d, pressure%dqdt_3d, pot_temp%dqdt_3d, &
+            !$acc          jms, jme, kms, kme, ims, ime)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                pressure%dqdt_3d(i,k,j) = forcing_pressure%dqdt_3d(i,k,j)
+                pot_temp%dqdt_3d(i,k,j) = forcing_pot_temp%dqdt_3d(i,k,j)
+            enddo
+            enddo
+            enddo
         else
-            call adjust_pressure_temp(this%forcing_hi(pressure_indx)%data_3d,this%forcing_hi(pot_temp_indx)%data_3d, forcing%geo%z, this%geo%z)
-            !$acc update device(this%forcing_hi(pressure_indx)%data_3d,this%forcing_hi(pot_temp_indx)%data_3d)
-            !$acc kernels present(this%forcing_hi(pressure_indx), this%forcing_hi(pot_temp_indx), pressure, pot_temp)
-            pressure%data_3d = this%forcing_hi(pressure_indx)%data_3d
-            pot_temp%data_3d = this%forcing_hi(pot_temp_indx)%data_3d
-            !$acc end kernels
+            call adjust_pressure_temp(forcing_pressure%data_3d,forcing_pot_temp%data_3d, forcing%geo%z, this%geo%z)
+            !$acc update device(forcing_pressure%data_3d,forcing_pot_temp%data_3d)
+            !$acc parallel loop gang vector collapse(3) &
+            !$acc present(forcing_pressure%data_3d, forcing_pot_temp%data_3d, pressure%data_3d, pot_temp%data_3d, &
+            !$acc          jms, jme, kms, kme, ims, ime)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                pressure%data_3d(i,k,j) = forcing_pressure%data_3d(i,k,j)
+                pot_temp%data_3d(i,k,j) = forcing_pot_temp%data_3d(i,k,j)
+            enddo
+            enddo
+            enddo
         endif
         end associate
-        !$acc end data
 
         !Ensure that input data for hydrometeors after interpolation have been forced to 0-minimum
         !call this%enforce_limits(update_in=update_only)

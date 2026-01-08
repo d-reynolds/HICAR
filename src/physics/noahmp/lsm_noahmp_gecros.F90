@@ -97,6 +97,8 @@ REAL :: NRTI   !Initial value of NRT
 REAL :: HTI    !Initial value of HT
 REAL :: RDI    !Initial value of RD
 
+!$acc declare create(YGO, CFO, LNCMIN, CLVI, CRTI, NLVI, NRTI, HTI, RDI)
+
 !*** Debugging on/off
 LOGICAL :: debugging=.false.
 
@@ -107,8 +109,8 @@ SUBROUTINE gecros (DOY, DT, CROP, RB, RT, RTS, FB, SNOWH,        & !I
            STATE_GECROS,                                                  & !H
            ATRJC, ATRJS, FSR, FRSU, ARSWSU, ARSWSH)  !O
 
+!$acc routine seq
 IMPLICIT NONE
-
 !    character(len=19), INTENT(IN)  :: nowdate ! string of current date e.g. 2012-30-10_12:00:00
     INTEGER, INTENT(IN) :: CROP     !CROP=1 -> early-covering crop, CROP=2 -> later covering crop
     REAL, INTENT(IN)    :: DOY      !Julian day of the current time step

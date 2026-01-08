@@ -294,20 +294,19 @@ contains
     !!  
     !! MJ added  
     !!------------------------------------------------------------
-    module function date_to_jd(this, year, month, day, hour, minute, second)
+    module function date_to_jd(this)
         implicit none
         class(Time_type), intent(in) :: this
-        integer, intent(in) :: year, month, day, hour, minute, second
         real(real64) :: date_to_jd
 
         if (this%calendar==GREGORIAN) then
-            date_to_jd = gregorian_julian_day(year, month, day, hour, minute, second)
+            date_to_jd = gregorian_julian_day(this%year, this%month, this%day, this%hour, this%minute, this%second)
 
         else if (this%calendar==NOLEAP) then
-            date_to_jd = (year*365 + this%month_start(month)-1 + day-1 + (hour + (minute+second/60d+0)/60d+0)/24d+0)
+            date_to_jd = (this%year*365 + this%month_start(this%month)-1 + this%day-1 + (this%hour + (this%minute+this%second/60d+0)/60d+0)/24d+0)
                          
         else if (this%calendar==THREESIXTY) then
-            date_to_jd = (year*360 + this%month_start(month)-1 + day-1 + (hour + (minute+second/60d+0)/60d+0)/24d+0)
+            date_to_jd = (this%year*360 + this%month_start(this%month)-1 + this%day-1 + (this%hour + (this%minute+this%second/60d+0)/60d+0)/24d+0)
         end if
 
     end function date_to_jd
@@ -503,7 +502,18 @@ contains
     end function calc_year_fraction
 
 
+    !>------------------------------------------------------------
+    !!  Return the time of day in hours as a floating point
+    !!
+    !!------------------------------------------------------------
+    module function TOD_hours(this)
+        implicit none
+        real                        :: TOD_hours
+        class(Time_type)            :: this
 
+        TOD_hours = (real(this%hour) + real(this%minute)/60.0 + real(this%second)/3600.0) / 24.0
+
+    end function TOD_hours
     !>------------------------------------------------------------
     !!  Set the current date based on an input string
     !!

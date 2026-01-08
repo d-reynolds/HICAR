@@ -6,6 +6,7 @@ docs/doxygen_sqlite3.db
 *.a
 *.so
 *.mod
+*.xmod
 *.smod
 *.i
 *.stamp
@@ -26,4 +27,4 @@ run/*_support
 *code-workspace
 FSM2trans/build/*
 FSM2trans/lib/*
-tests/Test_Cases/*
+tests/Test_Cases*

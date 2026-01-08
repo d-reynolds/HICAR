@@ -7,10 +7,10 @@ submodule(options_interface) options_implementation
     use time_object,                only : Time_type
     use string,                     only : str
     use model_tracking,             only : print_model_diffs
-    use output_metadata,            only : get_varname, get_varindx
+    use output_metadata,            only : get_varname, get_varindx, get_varmeta
     use namelist_utils,             only : set_nml_var, set_nml_var_default, set_namelist, write_nml_file_end
     use iso_fortran_env
-
+    use meta_data_interface,        only : meta_data_t
     implicit none
 
 
@@ -139,8 +139,9 @@ contains
         implicit none
         class(options_t), intent(inout)::this
 
+        type(meta_data_t) :: tmp_meta
         integer :: i
-
+        logical :: output_zvar = .False.
         ! Check that static domain file exists
         if (trim(this%domain%init_conditions_file) /= '') then
             call check_file_exists(trim(this%domain%init_conditions_file), message='A static domain file does not exist.')
@@ -161,7 +162,16 @@ contains
                 if (this%output%vars_for_output(i) > 0) this%output%vars_for_output(i) = 0
                 if (this%vars_for_restart(i) > 0) this%vars_for_restart(i) = 0
             endif
+            !see if we have any 3d variables requested, if so we will need to output z levels
+            if (this%output%vars_for_output(i)+this%vars_for_restart(i) > 0) then
+                tmp_meta = get_varmeta(i)
+                if (tmp_meta%three_d) output_zvar = .True.
+            endif
         enddo
+        ! Force the output of lat/lon, since these should always be present with output data
+        this%output%vars_for_output(kVARS%latitude) = 1
+        this%output%vars_for_output(kVARS%longitude) = 1
+        if (output_zvar) this%output%vars_for_output(kVARS%z) = 1
 
         if (this%mp%top_mp_level < 0) this%mp%top_mp_level = this%domain%nz + this%mp%top_mp_level
 
@@ -496,6 +506,15 @@ contains
             read(name_unit,iostat=rc,nml=output,IOMSG=error_msg)
             close(name_unit)
             if (rc /= 0) call print_nml_error('output',msg=error_msg,iostat=rc)
+        endif
+        if (ALL(output_vars(:,n_indx)==kCHAR_NO_VAL)) then
+            if (STD_OUT_PE) write(*,*) "  WARNING: output_vars not specified in namelist for domain: ", n_indx
+            if (n_indx == 1) then
+                stop 'output_vars must be specified in namelist for at least the first domain'
+            else
+                if (STD_OUT_PE) write(*,*) "  WARNING: Copying over the values from the first domain"
+            endif
+            output_vars(:,n_indx) = output_vars(:,1)
         endif
 
         do j=1, kMAX_STORAGE_VARS
@@ -1992,13 +2011,13 @@ contains
         integer :: name_unit, rc
         logical :: print_info, gennml
 
-        real    :: update_interval_rrtmg(kMAX_NESTS)             ! minimum number of seconds between RRTMG updates
+        real    :: update_interval_rad(kMAX_NESTS)             ! minimum number of seconds between RRTMG updates
         integer :: icloud(kMAX_NESTS)                            ! how RRTMG interacts with clouds
         integer :: cldovrlp(kMAX_NESTS)                          ! how RRTMG considers cloud overlapping
         logical :: read_ghg(kMAX_NESTS)
         real    :: tzone(kMAX_NESTS) !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
         ! define the namelist
-        namelist /rad_parameters/ update_interval_rrtmg, icloud, read_ghg, cldovrlp, tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
+        namelist /rad_parameters/ update_interval_rad, icloud, read_ghg, cldovrlp, tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
         CHARACTER(LEN=200) :: error_msg
 
         print_info = .False.
@@ -2007,7 +2026,7 @@ contains
         gennml = .False.
         if (present(gen_nml)) gennml = gen_nml
 
-        call set_nml_var_default(update_interval_rrtmg, 'update_interval_rrtmg', print_info, gennml)
+        call set_nml_var_default(update_interval_rad, 'update_interval_rad', print_info, gennml)
         call set_nml_var_default(icloud, 'icloud', print_info, gennml)
         call set_nml_var_default(cldovrlp, 'cldovrlp', print_info, gennml)
         call set_nml_var_default(read_ghg, 'read_ghg', print_info, gennml)
@@ -2035,7 +2054,7 @@ contains
             ! endif
         endif
 
-        call set_nml_var(rad_options%update_interval_rrtmg, update_interval_rrtmg(n_indx), 'update_interval_rrtmg', update_interval_rrtmg(1))
+        call set_nml_var(rad_options%update_interval_rad, update_interval_rad(n_indx), 'update_interval_rad', update_interval_rad(1))
         call set_nml_var(rad_options%icloud, icloud(n_indx), 'icloud', icloud(1))
         call set_nml_var(rad_options%cldovrlp, cldovrlp(n_indx), 'cldovrlp', cldovrlp(1))
         call set_nml_var(rad_options%read_ghg, read_ghg(n_indx), 'read_ghg', read_ghg(1))
@@ -2056,11 +2075,11 @@ contains
         logical :: print_info, gennml
         !Define parameters
         integer, dimension(kMAX_NESTS) :: wind_iterations, update_frequency
-        logical, dimension(kMAX_NESTS) :: Sx, thermal, wind_only
+        logical, dimension(kMAX_NESTS) :: Sx, thermal, wind_only, linear_theory
         real, dimension(kMAX_NESTS)    :: Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, smooth_wind_distance
         
         !Make name-list
-        namelist /wind/ Sx, thermal, wind_only, Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, &
+        namelist /wind/ Sx, thermal, wind_only, linear_theory, Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, &
                         update_frequency, smooth_wind_distance, wind_iterations
         CHARACTER(LEN=200) :: error_msg
 
@@ -2072,6 +2091,7 @@ contains
 
         call set_nml_var_default(Sx, 'Sx', print_info, gennml)
         call set_nml_var_default(thermal, 'thermal', print_info, gennml)
+        call set_nml_var_default(linear_theory, 'linear_theory', print_info, gennml)
         call set_nml_var_default(wind_only, 'wind_only', print_info, gennml)
         call set_nml_var_default(Sx_dmax, 'Sx_dmax', print_info, gennml)
         call set_nml_var_default(Sx_scale_ang, 'Sx_scale_ang', print_info, gennml)
@@ -2094,6 +2114,7 @@ contains
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             Sx(n_indx) = Sx(1)
             thermal(n_indx) = thermal(1)
+            linear_theory(n_indx) = linear_theory(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             !Read namelist file
             open(io_newunit(name_unit), file=filename)
@@ -2108,6 +2129,7 @@ contains
 
         call set_nml_var(wind_options%Sx, Sx(n_indx), 'Sx', Sx(1))
         call set_nml_var(wind_options%thermal, thermal(n_indx), 'thermal', thermal(1))
+        call set_nml_var(wind_options%linear_theory, linear_theory(n_indx), 'linear_theory', linear_theory(1))
         call set_nml_var(wind_options%wind_only, wind_only(n_indx), 'wind_only', wind_only(1))
         call set_nml_var(wind_options%Sx_dmax, Sx_dmax(n_indx), 'Sx_dmax', Sx_dmax(1))
         call set_nml_var(wind_options%TPI_dmax, TPI_dmax(n_indx), 'TPI_dmax', TPI_dmax(1))
@@ -2200,7 +2222,7 @@ contains
                 
                 !options%physics%boundarylayer = at some point, add a scale aware / LES turbulence scheme
                 
-                options%physics%windtype = 4
+                options%physics%windtype = 1
                 options%physics%convection = 0
                 options%wind%Sx = .True.
                 options%time%RK3 = .True.

@@ -29,6 +29,9 @@ program icar
     use namelist_utils,     only : get_nml_var_default
     use output_metadata,    only : list_output_vars
     use flow_events,        only : component_init, component_loop, component_program_end
+#ifdef _OPENACC
+    use openacc
+#endif
     implicit none
 
     type(options_t), allocatable :: options(:)
@@ -94,6 +97,9 @@ program icar
 
     call component_program_end(components(1:n_nests), options)
 
+#ifdef _OPENACC
+    call acc_shutdown(acc_device_nvidia)
+#endif
     CALL MPI_Finalize()
 
 contains
