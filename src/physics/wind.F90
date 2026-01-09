@@ -701,8 +701,6 @@ contains
                 domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
                 domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
 
-        !$acc end data
-
         !If not an update, then transfer the dqdt fields to data_3d
         if (first_wind) then
             associate(u_data_3d => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &

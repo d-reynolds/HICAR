@@ -94,6 +94,8 @@ contains
 
         err_flag = .False.
 
+        !$acc update host(var%data_2d, var%data_3d)
+        
         !get name for given id
         name = trim(get_varname(var%id))
 

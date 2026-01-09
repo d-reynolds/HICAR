@@ -238,8 +238,6 @@ contains
 
       call this%domain_decomposition(nx, ny, comms_size, image=image)
 
-      if (STD_OUT_PE) write(*,*) 'Domain decomposed into ',this%ximages,'x',this%yimages,' compute processes.'
-
       this%nz         = nz                                            ! note nz is both global and local
       this%nx         = my_n(nx, this%ximg, this%ximages) ! local grid size
       this%ny         = my_n(ny, this%yimg, this%yimages) ! local grid size

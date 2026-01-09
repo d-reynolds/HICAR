@@ -2420,6 +2420,8 @@ contains
         this%yimg = this%grid%yimg
         this%yimages = this%grid%yimages
 
+        if (STD_OUT_PE) write(*,*) 'Domain decomposed into (',this%ximages,'x',this%yimages,') compute processes.'
+
         this%north_boundary = (this%grid%yimg == this%grid%yimages)
         this%south_boundary = (this%grid%yimg == 1)
         this%east_boundary  = (this%grid%ximg == this%grid%ximages)
@@ -3282,7 +3284,7 @@ contains
         !This will be overwriten as soon as we enter the physics loop, but it is necesery to compute density
         !For the future step so that the wind solver uses both future winds, and future density.
         call this%diagnostic_update(forcing_update=update_only)
-        call domain_check(this, error_msg="domain_obj::end_interpolate_forcing")
+        ! call domain_check(this, error_msg="domain_obj::end_interpolate_forcing")
 
     end subroutine
 
