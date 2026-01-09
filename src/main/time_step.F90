@@ -313,7 +313,7 @@ contains
             !Determine dt
             if (last_wind_update >= options%wind%update_dt%seconds() .or. options%wind%wind_only) then
                 call domain%wind_timer%start()
-                call update_winds(domain, options, new_input=.True.)
+                call update_winds(domain, options)
                 call domain%wind_timer%stop()
 
                 !Now that new winds have been calculated, get new time step in seconds, and see if they require adapting the time step
