@@ -51,6 +51,8 @@ contains
             !this%n_children = size(this%children)
             this%n_r = this%reader%n_vars
             this%files_to_read = .not.(this%reader%eof)
+
+            allocate(this%forcing_buffer(this%n_r,this%i_s_r:this%i_e_r+1,this%k_s_r:this%k_e_r, this%j_s_r:this%j_e_r+1))
         else
             this%n_r = count(options(nest_indx)%forcing%vars_to_read /= "")
             this%files_to_read = .False.
@@ -70,7 +72,6 @@ contains
             this%n_f = count(options(some_child_id)%forcing%vars_to_read /= "")
             if (this%n_f > 0) then
                 allocate(this%gather_buffer(this%n_f,this%i_s_w:this%i_e_w+1,this%k_s_w:this%k_e_f,this%j_s_w:this%j_e_w+1))
-                if (options(nest_indx)%general%parent_nest == 0) allocate(this%forcing_buffer(this%n_f,this%i_s_r:this%i_e_r+1,this%k_s_r:this%k_e_r, this%j_s_r:this%j_e_r+1))
             endif
 
             allocate(this%send_nest_types(this%n_child_ioservers,this%n_servers))

@@ -398,8 +398,7 @@ contains
 
         if (steps_in_file < this%curstep) then
             ! close current file
-            call check_ncdf(nf90_close(this%ncfile_id), "Closing file "//trim(this%file_list(this%curfile)))
-            this%ncfile_id = -1
+            call this%close_file()
             
             ! if we have, use the next file
             this%curfile = this%curfile + 1
@@ -565,7 +564,7 @@ contains
         class(reader_t),   intent(inout)  :: this
 
         if (this%ncfile_id > 0) then
-            call check_ncdf(nf90_close(this%ncfile_id), "Closing file ")
+            call check_ncdf(nf90_close(this%ncfile_id), "Closing file: " // trim(this%file_list(this%curfile)))
             this%ncfile_id = -1
         endif
 
