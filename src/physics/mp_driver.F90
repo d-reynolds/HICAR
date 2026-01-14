@@ -737,7 +737,7 @@ contains
                          domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, &
                          domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,   &
                          domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
-                         domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)                             
+                         domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)                             
 
             last_model_time = domain%sim_time%seconds()                             
             call process_subdomain(domain, options, mp_dt,  &

@@ -699,7 +699,7 @@ contains
                 domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, &
                 domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,   &
                 domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
-                domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
+                domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
 
         !If not an update, then transfer the dqdt fields to data_3d
         if (first_wind) then
@@ -808,7 +808,7 @@ contains
                         zero_arr,      &
                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
                         domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
-                        domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
+                        domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
         !$acc end data
 
 
@@ -951,7 +951,7 @@ contains
         !calculate the real vertical motions (including U*dzdx + V*dzdy)
         !$acc kernels
         w_grid_ext(:,kms,:) = 0
-        w_grid_ext(:,kms+1:kme+1,:) = w_grid
+        w_grid_ext(:,kms+1:kme+1,:) = w_grid*jaco
         !$acc end kernels
 
         !$acc parallel loop gang vector collapse(3)
@@ -974,9 +974,9 @@ contains
             
             ! compute the real vertical velocity of air by combining the different components onto the mass grid
             ! includes vertical interpolation between w_z-1/2 and w_z+1/2
-            w_real(i, k, j) = (u(i,k,j) + u(i+1,k,j))*0.5*dzdx(i,k,j) &
-                                                 +(v(i,k,j) + v(i,k,j+1))*0.5*dzdy(i,k,j) &
-                                                 +(w_grid_ext(i, k, j) + w_grid_ext(i, k+1, j))*jaco(i,k,j) * 0.5
+            w_real(i, k, j) = (u(i,k,j)*dzdx_u(i,k,j) + u(i+1,k,j)*dzdx_u(i+1,k,j))*0.5 &
+                                                 +(v(i,k,j)*dzdy_v(i,k,j) + v(i,k,j+1)*dzdy_v(i,k,j+1))*0.5 &
+                                                 +(w_grid_ext(i, k, j) + w_grid_ext(i, k+1, j)) * 0.5
         end do
         end do
         end do
