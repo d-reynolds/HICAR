@@ -588,9 +588,9 @@ contains
         endif
 
         !do this now, so that we will have some values in data_3d when calling update_stability
-        if (options%general%debug) call domain_check_winds(domain, "Pre update_winds::apply_base_from_forcing")
+        if (options%general%debug) call domain_check_winds(domain, "Pre update_winds::apply_base_from_forcing",dqdt=.True.)
         call apply_base_from_forcing(domain, w_var_given, wind_dt_seconds)
-        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_base_from_forcing")
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_base_from_forcing",dqdt=.True.)
 
         if (( (options%wind%alpha_const<=0 .and. (options%physics%windtype==kITERATIVE_WINDS)) .or. options%wind%Sx) ) then
             call update_stability(domain, options)
@@ -599,11 +599,11 @@ contains
 
         ! rotate winds from cardinal directions to grid orientation (e.g. u is grid relative not truly E-W)
         call make_winds_grid_relative(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, domain%vars_2d(domain%var_indx(kVARS%sintheta)%v)%data_2d, domain%vars_2d(domain%var_indx(kVARS%costheta)%v)%data_2d)
-        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::make_winds_grid_relative")
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::make_winds_grid_relative",dqdt=.True.)
 
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
-        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::make_winds_grid_relative_exch")
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::make_winds_grid_relative_exch",dqdt=.True.)
 
         if (options%wind%Sx) then
             call apply_Sx(domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d,domain%vars_2d(domain%var_indx(kVARS%TPI)%v)%data_2d, &
@@ -612,7 +612,7 @@ contains
                     domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d, ims, ime, kms, kme, jms, jme, its, ite, jts, jte)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
-            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_Sx")
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_Sx",dqdt=.True.)
         endif 
 
         if (options%wind%thermal) then
@@ -632,7 +632,7 @@ contains
             endif
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
-            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_thermal_winds")
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_thermal_winds",dqdt=.True.)
         endif 
 
         ! linear winds
@@ -640,7 +640,7 @@ contains
             call linear_perturb(domain,options,options%lt%vert_smooth,.False.,options%adv%advect_density, update=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
-            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::linear_perturb")
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::linear_perturb",dqdt=.True.)
         endif
             
         if (options%physics%windtype==kITERATIVE_WINDS) then
@@ -680,7 +680,7 @@ contains
             !$acc end data
             end associate
 
-            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::iterative_winds")
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::iterative_winds",dqdt=.True.)
         endif
     ! elseif (options%physics%windtype==kOBRIEN_WINDS) then
     !     call Obrien_winds(domain, options, update_in=.True.)
@@ -742,7 +742,7 @@ contains
 
         first_wind = .False.
         
-        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::balance_uvw")
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::balance_uvw",dqdt=.True.)
 
     end subroutine update_winds
     

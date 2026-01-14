@@ -66,6 +66,8 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
     this%kme = this%grid%kme; this%kte = this%grid%kte; this%kde = this%grid%kde
     this%jms = this%grid%jms; this%jts = this%grid%jts; this%jds = this%grid%jds
     this%jme = this%grid%jme; this%jte = this%grid%jte; this%jde = this%grid%jde
+    this%north_neighbor = -1; this%south_neighbor = -1; this%west_neighbor = -1; this%east_neighbor = -1
+    this%northwest_neighbor = -1; this%southwest_neighbor = -1; this%northeast_neighbor = -1; this%southeast_neighbor = -1
 
     call MPI_Comm_Rank(comms,this%halo_rank)
     !Setup the parent-child group used for buffer communication
@@ -858,9 +860,9 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
                     if (.not.(this%northwest_boundary)) then
                         j_start = jte-halo_size
                         i_start = its-1 
-                        if (this%northwest_neighbor==this%west_neighbor) then
+                        if (this%north_boundary) then
                             j_start = j_start + halo_size
-                        elseif (this%northwest_neighbor==this%north_neighbor) then
+                        elseif (this%west_boundary) then
                             i_start = i_start - halo_size
                         endif
                         associate(buff => this%northwest_buffer_3d)
@@ -878,9 +880,9 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
                     if (.not.(this%southeast_boundary)) then
                         j_start = jts-1
                         i_start = ite-halo_size
-                        if (this%southeast_neighbor==this%east_neighbor) then
+                        if (this%south_boundary) then
                             j_start = j_start - halo_size
-                        elseif (this%southeast_neighbor==this%south_neighbor) then
+                        elseif (this%east_boundary) then
                             i_start = i_start + halo_size
                         endif
                         associate(buff => this%southeast_buffer_3d)
@@ -898,9 +900,9 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
                     if (.not.(this%southwest_boundary)) then
                         j_start = jts-1
                         i_start = its-1
-                        if (this%southwest_neighbor==this%west_neighbor) then
+                        if (this%south_boundary) then
                             j_start = j_start - halo_size
-                        elseif (this%southwest_neighbor==this%south_neighbor) then
+                        elseif (this%west_boundary) then
                             i_start = i_start - halo_size
                         endif
                         associate(buff => this%southwest_buffer_3d)
@@ -918,9 +920,9 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
                     if (.not.(this%northeast_boundary)) then
                         j_start = jte-halo_size
                         i_start = ite-halo_size
-                        if (this%northeast_neighbor==this%east_neighbor) then
+                        if (this%north_boundary) then
                             j_start = j_start + halo_size
-                        elseif (this%northeast_neighbor==this%north_neighbor) then
+                        elseif (this%east_boundary) then
                             i_start = i_start + halo_size
                         endif
                         associate(buff => this%northeast_buffer_3d)
@@ -2006,10 +2008,10 @@ module subroutine put_northeast(this,var,do_dqdt)
 
     ! select which destination window to use for MPI_Put. This handles
     ! the case for corner exchanges on domain boundaries
-    if (this%northeast_neighbor == this%east_neighbor) then
+    if (this%north_boundary) then
         dst_win = this%northwest_in_win
         j_start = j_start + this%halo_size
-    elseif (this%northeast_neighbor == this%north_neighbor) then
+    elseif (this%east_boundary) then
         dst_win = this%southeast_in_win
         i_start = i_start + this%halo_size
     else
@@ -2057,10 +2059,10 @@ module subroutine put_northwest(this,var,do_dqdt)
 
     ! select which destination window to use for MPI_Put. This handles
     ! the case for corner exchanges on domain boundaries
-    if (this%northwest_neighbor == this%west_neighbor) then
+    if (this%north_boundary) then
         dst_win = this%northeast_in_win
         j_start = j_start + this%halo_size
-    elseif (this%northwest_neighbor == this%north_neighbor) then
+    elseif (this%west_boundary) then
         dst_win = this%southwest_in_win
         i_start = i_start - this%halo_size
     else
@@ -2106,10 +2108,10 @@ module subroutine put_southwest(this,var,do_dqdt)
 
     ! select which destination window to use for MPI_Put. This handles
     ! the case for corner exchanges on domain boundaries
-    if (this%southwest_neighbor == this%west_neighbor) then
+    if (this%south_boundary) then
         dst_win = this%southeast_in_win
         j_start = j_start - this%halo_size
-    elseif (this%southwest_neighbor == this%south_neighbor) then
+    elseif (this%west_boundary) then
         dst_win = this%northwest_in_win
         i_start = i_start - this%halo_size
     else
@@ -2156,10 +2158,10 @@ module subroutine put_southeast(this,var,do_dqdt)
 
     ! select which destination window to use for MPI_Put. This handles
     ! the case for corner exchanges on domain boundaries
-    if (this%southeast_neighbor == this%east_neighbor) then
+    if (this%south_boundary) then
         dst_win = this%southwest_in_win
         j_start = j_start - this%halo_size
-    elseif (this%southeast_neighbor == this%south_neighbor) then
+    elseif (this%east_boundary) then
         dst_win = this%northeast_in_win
         i_start = i_start + this%halo_size
     else

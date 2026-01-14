@@ -57,42 +57,50 @@ contains
 
     end subroutine domain_check
 
-    subroutine domain_check_winds(domain, error_msg)
+    subroutine domain_check_winds(domain, error_msg, dqdt)
         implicit none
         type(domain_t), intent(inout) :: domain
         character(len=*), intent(in) :: error_msg
+        logical, intent(in), optional :: dqdt
 
+        logical :: do_dqdt
+
+        do_dqdt = .False.
+        if (present(dqdt)) do_dqdt = dqdt
         associate(u => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
                   v => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
                   w => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d)
         !$acc update host(u, v, w)
         end associate
 
-        if (domain%var_indx(kVARS%u)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%u)%v), msg=error_msg)
-        if (domain%var_indx(kVARS%u)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%u)%v), msg=error_msg)
-        if (domain%var_indx(kVARS%v)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%v)%v), msg=error_msg)
-        if (domain%var_indx(kVARS%v)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%v)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%u)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%u)%v), msg=error_msg, dqdt=do_dqdt)
+        if (domain%var_indx(kVARS%u)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%u)%v), msg=error_msg, dqdt=do_dqdt)
+        if (domain%var_indx(kVARS%v)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%v)%v), msg=error_msg, dqdt=do_dqdt)
+        if (domain%var_indx(kVARS%v)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%v)%v), msg=error_msg, dqdt=do_dqdt)
         if (domain%var_indx(kVARS%w)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%w)%v), msg=error_msg)
         if (domain%var_indx(kVARS%w)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%w)%v), msg=error_msg)
 
 
     end subroutine domain_check_winds
 
-    subroutine check_var(var, msg, fix)
+    subroutine check_var(var, msg, fix, dqdt)
         implicit none
         type(variable_t),                intent(inout)      :: var
         character(len=*),   intent(in)                      :: msg
-        logical,            intent(in),    optional         :: fix
+        logical,            intent(in),    optional         :: fix, dqdt
         integer :: n, i,j,k
         real :: vmax, vmin, greater_than, less_than
         real, allocatable :: var_3d(:,:,:)
         real, allocatable :: var_2d(:,:)
-        logical :: err_flag
+        logical :: err_flag, do_dqdt
         integer :: PE_rank_global
         character(len=256) :: file_name
         character(len=kMAX_NAME_LENGTH) :: name
 
         err_flag = .False.
+
+        do_dqdt = .False.
+        if (present(dqdt)) do_dqdt = dqdt
 
         !$acc update host(var%data_2d, var%data_3d)
         
@@ -101,11 +109,13 @@ contains
 
         if (var%three_d) then
             var_3d = var%data_3d
+            if (do_dqdt) var_3d = var%dqdt_3d
             vmax = maxval(var_3d)
             vmin = minval(var_3d)
             n = COUNT(ieee_is_nan(var_3d))
         else if (var%two_d) then
             var_2d = var%data_2d
+            if (do_dqdt) var_2d = var%dqdt_2d
             vmax = maxval(var_2d)
             vmin = minval(var_2d)
             n = COUNT(ieee_is_nan(var_2d))
