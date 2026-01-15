@@ -539,8 +539,6 @@ contains
                       qv_dom => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
                       qc_dom => domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d, &
                       qi_dom => domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d, &
-                      i2_dom => domain%vars_3d(domain%var_indx(kVARS%ice2_mass)%v)%data_3d, &
-                      i3_dom => domain%vars_3d(domain%var_indx(kVARS%ice3_mass)%v)%data_3d, &
                       qs_dom => domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d)
             ra_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
             last_model_time(domain%nest_indx) = domain%sim_time%seconds()
@@ -634,6 +632,7 @@ contains
                 enddo
             endif
             if (F_QI2) then
+                associate(i2_dom => domain%vars_3d(domain%var_indx(kVARS%ice2_mass)%v)%data_3d)
                 !$acc parallel loop gang vector collapse(3) present(i2_dom, qi)
                 do j = jms,jme
                     do k = kms,kme
@@ -642,8 +641,10 @@ contains
                         enddo
                     enddo
                 enddo
+                end associate
             endif
             if (F_QI3) then
+                associate(i3_dom => domain%vars_3d(domain%var_indx(kVARS%ice3_mass)%v)%data_3d)
                 !$acc parallel loop gang vector collapse(3) present(i3_dom, qi)
                 do j = jms,jme
                     do k = kms,kme
@@ -652,6 +653,7 @@ contains
                         enddo
                     enddo
                 enddo
+                end associate
             endif
             if (F_REC > 0) then
                 !$acc parallel loop gang vector collapse(3) present(re_c_dom, re_c)

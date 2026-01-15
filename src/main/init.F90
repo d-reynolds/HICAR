@@ -305,8 +305,8 @@ contains
         type(ioclient_t),intent(inout) :: ioclient
         integer, intent(in) :: nest_indx
         
-        if (STD_OUT_PE .and. nest_indx == 1) write(*,*) "Initializing Domain"
-        if (STD_OUT_PE .and. nest_indx == 1) flush(output_unit)
+        if (STD_OUT_PE) write(*,*) "Initializing Domain ", nest_indx
+        if (STD_OUT_PE) flush(output_unit)
         call domain%init(options(nest_indx), nest_indx)
 
         if (options(nest_indx)%general%parent_nest == 0) then

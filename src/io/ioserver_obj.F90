@@ -39,9 +39,14 @@ contains
         ! Call the parent type's init procedure
         call this%init_flow_obj(options(nest_indx),nest_indx)
 
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
+        if (STD_OUT_PE_IO) write(*,*) "IOServer: initializing with clients"
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
         ! Perform a series of MPI Gather/reduction to communicate the grid dimensions of the children clients to the parent server
         call init_with_clients(this)
-
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
+        if (STD_OUT_PE_IO) write(*,*) "IOServer: After init with clients in ioserver init"
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------" 
         !Determine number of IOServers in the this%IO_Comms communicator, i.e. size of communicator
         call MPI_Comm_size(this%IO_Comms, this%n_servers, ierr)
 
@@ -79,6 +84,9 @@ contains
             allocate(this%nest_types_initialized(this%n_child_ioservers))
             this%nest_types_initialized = .false.
         endif
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
+        if (STD_OUT_PE_IO) write(*,*) "IOServer: Setting up outputter..."
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------" 
 
         !Setup writing capability
         call this%outputer%init(options(nest_indx),this%i_s_w,this%i_e_w,this%k_s_w,this%k_e_w,this%j_s_w,this%j_e_w,this%ide,this%kde,this%jde)
@@ -95,6 +103,10 @@ contains
 
         if (this%n_w_2d == 0) write(*,*) 'Warning: No 2D variables set for output, this should never happen'
         if (this%n_w_3d == 0) write(*,*) 'Warning: No 3D variables set for output, this should never happen'
+
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
+        if (STD_OUT_PE_IO) write(*,*) "IOServer: Setting up MPI Windows..."
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------" 
 
         call setup_MPI_windows(this)
         call setup_MPI_types(this)
@@ -129,6 +141,10 @@ contains
             ! that the restart counter should be auto-incremented to 2 (1 + 1) here 
             this%restart_counter = this%restart_counter + 1
         endif
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
+        if (STD_OUT_PE_IO) write(*,*) "IOServer: Initialization finished"
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------" 
+
     end subroutine init_ioserver
 
     ! This subroutine creates MPI datatypes which are used to collect domain data from all parent ioserver processes

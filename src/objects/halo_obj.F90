@@ -150,6 +150,10 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
         call MPI_Info_set(info_in, "alloc_mem", "device", ierr)
         call MPI_Info_set(info_in, "mpi_assert_memory_alloc_kinds", "gpu:device", ierr)
         call MPI_Info_set(info_in, "cuda_aware", ".true.", ierr)
+#else
+        call MPI_INFO_SET(info_in, 'no_locks', '.true.')
+        call MPI_INFO_SET(info_in, 'same_size', '.true.')
+        call MPI_INFO_SET(info_in, 'same_disp_unit', '.true.')
 #endif
         nx = this%grid%ns_halo_nx
         nz = this%grid%halo_nz
@@ -2404,7 +2408,7 @@ subroutine detect_shared_memory(this, comms)
     integer :: ierr, shared_size, shared_rank
     type(MPI_Comm) :: shared_comm
     type(MPI_Group) :: shared_comm_grp
-    integer :: neighbor_shared_rank(1), neighbor_rank
+    integer :: neighbor_shared_rank(1)
     
     ! Create communicator for processes that can create shared memory
     call MPI_Comm_split_type(comms, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, shared_comm, ierr)
@@ -2427,46 +2431,38 @@ subroutine detect_shared_memory(this, comms)
 #ifndef _OPENACC
     ! Check if each neighbor is in same shared memory space
     if (.not. this%north_boundary) then
-        neighbor_rank = this%north_neighbor
         call MPI_Group_translate_ranks(this%north_neighbor_grp, 1, [0], shared_comm_grp, neighbor_shared_rank, ierr)
         this%north_shared = (neighbor_shared_rank(1) /= MPI_UNDEFINED)
     endif
     
     if (.not. this%south_boundary) then
-        neighbor_rank = this%south_neighbor
         call MPI_Group_translate_ranks(this%south_neighbor_grp, 1, [0], shared_comm_grp, neighbor_shared_rank, ierr)
         this%south_shared = (neighbor_shared_rank(1) /= MPI_UNDEFINED)
     endif
     
     if (.not. this%east_boundary) then
-        neighbor_rank = this%east_neighbor
         call MPI_Group_translate_ranks(this%east_neighbor_grp, 1, [0], shared_comm_grp, neighbor_shared_rank, ierr)
         this%east_shared = (neighbor_shared_rank(1) /= MPI_UNDEFINED)
     endif
     
     if (.not. this%west_boundary) then
-        neighbor_rank = this%west_neighbor
         call MPI_Group_translate_ranks(this%west_neighbor_grp, 1, [0], shared_comm_grp, neighbor_shared_rank, ierr)
         this%west_shared = (neighbor_shared_rank(1) /= MPI_UNDEFINED)
     endif
 
     if (.not. this%northwest_boundary) then
-        neighbor_rank = this%northwest_neighbor
         call MPI_Group_translate_ranks(this%northwest_neighbor_grp, 1, [0], shared_comm_grp, neighbor_shared_rank, ierr)
         this%northwest_shared = (neighbor_shared_rank(1) /= MPI_UNDEFINED)
     endif
     if (.not. this%northeast_boundary) then
-        neighbor_rank = this%northeast_neighbor
         call MPI_Group_translate_ranks(this%northeast_neighbor_grp, 1, [0], shared_comm_grp, neighbor_shared_rank, ierr)
         this%northeast_shared = (neighbor_shared_rank(1) /= MPI_UNDEFINED)
     endif
     if (.not. this%southwest_boundary) then
-        neighbor_rank = this%southwest_neighbor
         call MPI_Group_translate_ranks(this%southwest_neighbor_grp, 1, [0], shared_comm_grp, neighbor_shared_rank, ierr)
         this%southwest_shared = (neighbor_shared_rank(1) /= MPI_UNDEFINED)
     endif
     if (.not. this%southeast_boundary) then
-        neighbor_rank = this%southeast_neighbor
         call MPI_Group_translate_ranks(this%southeast_neighbor_grp, 1, [0], shared_comm_grp, neighbor_shared_rank, ierr)
         this%southeast_shared = (neighbor_shared_rank(1) /= MPI_UNDEFINED)
     endif

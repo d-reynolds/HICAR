@@ -469,12 +469,10 @@ contains
                   w => domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
                   fu => domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d, &
                   fv => domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d, &
-                  fw => domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d, &
                   u_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
                   v_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
                   fu_dqdt_3d => domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%dqdt_3d, &
-                  fv_dqdt_3d => domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%dqdt_3d, &
-                  fw_dqdt_3d => domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%dqdt_3d)
+                  fv_dqdt_3d => domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%dqdt_3d)
         
         !$acc data present(u, v, w, u_dqdt_3d, v_dqdt_3d, fu, fv, fu_dqdt_3d, fv_dqdt_3d)
 
@@ -513,6 +511,7 @@ contains
             !$acc end parallel
 
             if (w_var_given) then
+                associate(fw => domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d)
                 !$acc parallel loop gang vector collapse(3) present(fw)
                 do j = jms, jme
                     do k = kms, kme
@@ -521,6 +520,7 @@ contains
                         enddo
                     enddo
                 enddo
+                end associate
             endif
         else
             !Compute the forcing wind field at the next update step, assuming a linear interpolation through time
@@ -544,6 +544,8 @@ contains
             !$acc end parallel
 
             if (w_var_given) then
+                associate(fw => domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d, &
+                          fw_dqdt_3d => domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%dqdt_3d)
                 !$acc parallel loop gang vector collapse(3) present(fw, fw_dqdt_3d)
                 do i = ims,ime
                     do k = kms, kme
@@ -552,6 +554,7 @@ contains
                         enddo
                     enddo
                 enddo
+                end associate
             endif
         endif
         !$acc end data
