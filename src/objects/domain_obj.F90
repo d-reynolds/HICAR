@@ -1699,10 +1699,8 @@ contains
             !Smooth cos/sin in case there are jumps from the lat/lon grids (more likely at low resolutions)
             smooth_loops = int(1000/this%dx)
             
-            do i=1,smooth_loops
-             call smooth_array_2d( costheta , windowsize  =  4)!int((ime-ims)/5))
-             call smooth_array_2d( sintheta , windowsize  =  4)!int((ime-ims)/5))
-            enddo
+            call smooth_array_2d( costheta , windowsize  =  4, nsmooths=smooth_loops)!int((ime-ims)/5))
+            call smooth_array_2d( sintheta , windowsize  =  4, nsmooths=smooth_loops)!int((ime-ims)/5))
             this%vars_2d(this%var_indx(kVARS%costheta)%v)%data_2d(this%ims:this%ime,this%jms:this%jme) = costheta(this%ims:this%ime,this%jms:this%jme)
             this%vars_2d(this%var_indx(kVARS%sintheta)%v)%data_2d(this%ims:this%ime,this%jms:this%jme) = sintheta(this%ims:this%ime,this%jms:this%jme)
              
@@ -1837,9 +1835,7 @@ contains
         temp =  global_terr
 
         ! Smooth the terrain to attain the large-scale contribution h1 (_u/v):
-        do i =1,options%domain%terrain_smooth_cycles
-          call smooth_array( temp, windowsize  =  options%domain%terrain_smooth_windowsize)
-        enddo
+        call smooth_array( temp, windowsize  =  options%domain%terrain_smooth_windowsize, nsmooths=options%domain%terrain_smooth_cycles)
         
         if (this%var_indx(kVARS%global_terrain)%v > 0) then
                 h1   =  temp
@@ -1856,9 +1852,7 @@ contains
         !temp(this%ide+1,this%jds:this%jde) = temp(this%ide,this%jds:this%jde)
         
         h2_u = temp(this%u_grid2d%ims:this%u_grid2d%ime, this%u_grid2d%jms:this%u_grid2d%jme)
-        do i =1,options%domain%terrain_smooth_cycles
-          call smooth_array( temp, windowsize = options%domain%terrain_smooth_windowsize)
-        enddo
+        call smooth_array( temp, windowsize  =  options%domain%terrain_smooth_windowsize, nsmooths=options%domain%terrain_smooth_cycles)
         
         h1_u = temp(this%u_grid2d%ims:this%u_grid2d%ime, this%u_grid2d%jms:this%u_grid2d%jme)
         h2_u =  h2_u  - h1_u
@@ -1872,9 +1866,7 @@ contains
         !temp(this%ids:this%ide,this%jde+1) = temp(this%ids:this%ide,this%jde)
         h2_v = temp(this%v_grid2d%ims:this%v_grid2d%ime, this%v_grid2d%jms:this%v_grid2d%jme)
         
-        do i =1,options%domain%terrain_smooth_cycles
-          call smooth_array( temp, windowsize = options%domain%terrain_smooth_windowsize)
-        enddo
+        call smooth_array( temp, windowsize  =  options%domain%terrain_smooth_windowsize, nsmooths=options%domain%terrain_smooth_cycles)
         
         h1_v = temp(this%v_grid2d%ims:this%v_grid2d%ime, this%v_grid2d%jms:this%v_grid2d%jme)
         h2_v =  h2_v  - h1_v

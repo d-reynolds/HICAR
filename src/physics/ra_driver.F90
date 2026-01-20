@@ -125,6 +125,7 @@ module radiation
     integer :: ims, ime, jms, jme, kms, kme
     integer :: its, ite, jts, jte, kts, kte
     integer :: ids, ide, jds, jde, kds, kde
+    logical :: rrtmg_init = .False.
 
 
     private
@@ -244,18 +245,21 @@ contains
             p_top = min(p_top, minval(domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d(domain%ims:domain%ime,domain%kme+1,domain%jms:domain%jme)))
 
             call rrtmg_lwinit(                           &
-                p_top=p_top,     allowed_to_read=.not.(context_change) ,                &
+                p_top=p_top,     allowed_to_read=.not.(rrtmg_init) ,                &
                 ids=domain%ids, ide=domain%ide, jds=domain%jds, jde=domain%jde, kds=domain%kds, kde=domain%kde,                &
                 ims=domain%ims, ime=domain%ime, jms=domain%jms, jme=domain%jme, kms=domain%kms, kme=domain%kme,                &
                 its=domain%its, ite=domain%ite, jts=domain%jts, jte=domain%jte, kts=domain%kts, kte=domain%kte                 )
 
             call rrtmg_swinit(                           &
-                allowed_to_read=.not.(context_change),                     &
+                allowed_to_read=.not.(rrtmg_init),                     &
                 ids=domain%ids, ide=domain%ide, jds=domain%jds, jde=domain%jde, kds=domain%kds, kde=domain%kde,                &
                 ims=domain%ims, ime=domain%ime, jms=domain%jms, jme=domain%jme, kms=domain%kms, kme=domain%kme,                &
                 its=domain%its, ite=domain%ite, jts=domain%jts, jte=domain%jte, kts=domain%kts, kte=domain%kte                 )
                 domain%tend%th_swrad = 0
                 domain%tend%th_lwrad = 0
+
+            rrtmg_init = .True.
+
         else if (options%physics%radiation == kRA_RRTMGP) then
 #ifdef USE_RTE_RRTMGP
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    RRTMGP"    

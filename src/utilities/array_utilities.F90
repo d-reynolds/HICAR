@@ -453,43 +453,54 @@ contains
     !!   > call smooth_array_2d(my_array, 1)
     !!     This will smooth the 2D array "my_array" using a 3x3 moving window.
     !!     The result will be stored in "my_array".
-    subroutine smooth_array_2d(input, windowsize)
+    subroutine smooth_array_2d(input, windowsize,nsmooths)
         implicit none
         real, intent(inout), dimension(:,:):: input
         integer, intent(in):: windowsize
+        integer, optional, intent(in) :: nsmooths
         real, dimension(:,:), allocatable:: temp
-        integer:: i, j, nx, ny, starti, endi, startj, endj
-        real:: runningsum, count
+        integer:: i, j, nx, ny, n, starti, endi, startj, endj, iters
+        real:: inv_count
     
+        iters = 1
+        if (present(nsmooths)) iters = nsmooths
+
         nx = size(input, 1)
         ny = size(input, 2)
         allocate(temp(nx, ny))
-    
-        temp = input
-    
-        !$omp parallel private(i, j, starti, endi, startj, endj, runningsum, count)
-        !$omp do schedule(static)
-        !$acc data present_or_copy(input) copyin(temp)
-        !$acc parallel loop gang vector collapse(2)
-        do j = 1, ny
-            do i = 1, nx
-                runningsum = 0.0
-                count = 0.0
-                starti = max(1, i - windowsize)
-                endi = min(nx, i + windowsize)
-                startj = max(1, j - windowsize)
-                endj = min(ny, j + windowsize)
-                runningsum = sum(temp(starti:endi, startj:endj)) / ((endi - starti + 1) * (endj - startj + 1))
-                input(i, j) = runningsum
+
+        !$acc data copy(input) create(temp)
+        do n = 1, iters
+            !$omp parallel do collapse(2) private(i, j, starti, endi, startj, endj, inv_count) schedule(static)
+            !$acc parallel loop gang vector collapse(2)
+            do j = 1, ny
+                do i = 1, nx
+                    starti = max(1, i - windowsize)
+                    endi = min(nx, i + windowsize)
+                    startj = max(1, j - windowsize)
+                    endj = min(ny, j + windowsize)
+                    
+                    inv_count = 1.0 / real((endi - starti + 1) * (endj - startj + 1))
+                    temp(i, j) = sum(input(starti:endi, startj:endj)) * inv_count
+                end do
             end do
+            !$omp end parallel do
+            !$acc end parallel loop
+            
+            !$omp parallel do collapse(2)
+            !$acc parallel loop gang vector collapse(2)
+            do j = 1, ny
+                do i = 1, nx
+                    input(i, j) = temp(i, j)
+                end do
+            end do
+            !$omp end parallel do
+            !$acc end parallel loop
         end do
-        !$omp end do
-        !$omp end parallel
-        !$acc update host(input)
-        !$acc end data 
-    
+        !$acc end data
+
         deallocate(temp)
-    
+        
     end subroutine smooth_array_2d
 
     ! subroutine smooth_array_2d(input,windowsize)
