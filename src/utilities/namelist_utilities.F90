@@ -2292,11 +2292,10 @@ contains
                 description = "Land surface model to use:"//achar(10)//BLNK_CHR_N// &
                                                         "0 = no LSM,"//achar(10)//BLNK_CHR_N// &
                                                         "1 = Fluxes from forcing data,"//achar(10)//BLNK_CHR_N// &
-                                                        "2 = Noah LSM"//achar(10)//BLNK_CHR_N// &
-                                                        "3 = Noah MP"
+                                                        "2 = Noah MP"
 
-                allocate(values(4))
-                values = [0, 1, 2, 3]
+                allocate(values(3))
+                values = [0, 1, 2]
                 default = "0"
                 group = "Physics"
                 ! type = 1
@@ -2304,7 +2303,7 @@ contains
                 description = "Radiation scheme to use: "//achar(10)//BLNK_CHR_N// &
                                                        "0 = no RAD,"//achar(10)//BLNK_CHR_N// &
                                                        "1 = Surface fluxes from forcing data"//achar(10)//BLNK_CHR_N// &
-                                                       "2 = cloud fraction based radiation + radiative cooling"//achar(10)//BLNK_CHR_N// &
+                                                       "2 = cloud fraction based radiation + radiative cooling (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
                                                        "3 = RRTMG"//achar(10)//BLNK_CHR_N// &
                                                        "4 = RRTMGP"
 
@@ -2326,11 +2325,11 @@ contains
                 description = "Microphysics scheme to use: "//achar(10)//BLNK_CHR_N// &
                                                           "0 = no MP,"//achar(10)//BLNK_CHR_N// &
                                                           "1 = Thompson et al (2008),"//achar(10)//BLNK_CHR_N// &
-                                                          "2 = 'Linear' microphysics"//achar(10)//BLNK_CHR_N// &
+                                                          "2 = 'Linear' microphysics (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
                                                           "3 = Morrison"//achar(10)//BLNK_CHR_N// &
-                                                          "4 = WSM6"//achar(10)//BLNK_CHR_N// &
-                                                          "5 = Thompson Aerosol"//achar(10)//BLNK_CHR_N// &
-                                                          "6 = WSM3"//achar(10)//BLNK_CHR_N// &
+                                                          "4 = WSM6 (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
+                                                          "5 = Thompson Aerosol (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
+                                                          "6 = WSM3 (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
                                                           "7 = ISHMAEL"
                 allocate(values(8))
                 values = [0, 1, 2, 3, 4, 5, 6, 7]
@@ -2365,7 +2364,7 @@ contains
                 description = "Advection scheme to use:  "//achar(10)//BLNK_CHR_N// &
                                                         "0 = no ADV,"//achar(10)//BLNK_CHR_N// &
                                                         "1 = standard advection scheme"//achar(10)//BLNK_CHR_N// &
-                                                        "2 = MPDATA"
+                                                        "2 = MPDATA (NOT SUPPORTED)"
                 allocate(values(3))
                 values = [0, 1, 2]
                 default = "0"
@@ -2909,7 +2908,7 @@ contains
                 description = "Urban physics parameterization to use for Noah LSM (not enabled in code)."
                 allocate(values(3))
                 values = [0, 1, 2]
-                default = "1"
+                default = "0"
                 group = "LSM_Parameters"
             case ("nmp_dveg")
                 description = "Dynamic vegetation type for Noah MP of vegetation types in the LSM."//achar(10)//BLNK_CHR_N// &
@@ -2952,15 +2951,52 @@ contains
                 values = [1, 2, 3]
                 default = "2"
                 group = "LSM_Parameters"
-            case ("nmp_opt_run")
-                description = "Noah-MP Runoff and Groundwater option"//achar(10)//BLNK_CHR_N// &
-                                                     "1 = TOPMODEL with groundwater"//achar(10)//BLNK_CHR_N// &
-                                                     "2 = TOPMODEL with equilibrium water table"//achar(10)//BLNK_CHR_N// &
-                                                     "3 = original surface and subsurface runoff (free drainage)"//achar(10)//BLNK_CHR_N// &
-                                                     "4 = BATS surface and subsurface runoff (free drainage)"//achar(10)//BLNK_CHR_N// &
-                                                     "5 = Miguez-Macho&Fan groundwater scheme (Miguez-Macho et al. 2007 JGR; Fan et al. 2007 JGR)"
+            case ("nmp_opt_runsrf")
+                description = "Noah-MP Runoff option"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = SIMGM"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = SIMTOP"//achar(10)//BLNK_CHR_N// &
+                                                     "3 = Schaake96"//achar(10)//BLNK_CHR_N// &
+                                                     "4 = BATS"//achar(10)//BLNK_CHR_N// &
+                                                     "5 = MMF (Miguez-Macho et al. 2007 JGR; Fan et al. 2007 JGR)"//achar(10)//BLNK_CHR_N// &
+                                                     "6 = VIC"//achar(10)//BLNK_CHR_N// &
+                                                     "7 = XianAnJiang"//achar(10)//BLNK_CHR_N// &
+                                                     "8 = DynVIC"
+                allocate(values(8))
+                values = [1, 2, 3, 4, 5, 6, 7, 8]
+                default = "1"
+                group = "LSM_Parameters"
+            case ("nmp_opt_runsub")
+                description = "Noah-MP Subsurface Runoff option"//achar(10)//BLNK_CHR_N// &
+                                                     "same options as nmp_opt_runsrf"
+                allocate(values(8))
+                values = [1, 2, 3, 4, 5, 6, 7, 8]
+                default = "1"
+                group = "LSM_Parameters"
+            case ("nmp_opt_tksno")
+                description = "Noah-MP Snow Thermal Conductivity option"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = Stieglitz(yen,1965)"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = Anderson, 1976"//achar(10)//BLNK_CHR_N// &
+                                                     "3 = Constant value"//achar(10)//BLNK_CHR_N// &
+                                                     "4 = Verseghy (1991)"//achar(10)//BLNK_CHR_N// &
+                                                     "5 = Douvill (Yen, 1981)"
                 allocate(values(5))
                 values = [1, 2, 3, 4, 5]
+                default = "1"
+                group = "LSM_Parameters"
+            case ("nmp_opt_compact")
+                description = "Noah-MP Snow Compaction option"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = Anderson1976"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = Abolafia-Rosenzweig2024"
+                allocate(values(2))
+                values = [1, 2]
+                default = "1"
+                group = "LSM_Parameters"
+            case ("nmp_opt_scf")
+                description = "Noah-MP Snow Cover Fraction option"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = NiuYang07"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = Abolafia-Rosenzweig2025"
+                allocate(values(2))
+                values = [1, 2]
                 default = "1"
                 group = "LSM_Parameters"
             case ("nmp_opt_frz")
@@ -2995,6 +3031,15 @@ contains
                 allocate(values(2))
                 values = [1, 2]
                 default = "2"
+                group = "LSM_Parameters"
+            case ("nmp_opt_wet")
+                description = "Noah-MP Wetland option"//achar(10)//BLNK_CHR_N// &
+                                                     "0 = No wetland model"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = use Zhang et al., 2022 wetland model; fixed parameter"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = use Zhang et al., 2022 wetland model; read in 2D parameter"
+                allocate(values(3))
+                values = [0, 1, 2]
+                default = "0"
                 group = "LSM_Parameters"
             case ("nmp_opt_snf")
                 description = "Noah-MP Precipitation Partitioning between snow and rain"//achar(10)//BLNK_CHR_N// &
@@ -3292,6 +3337,81 @@ contains
                     "(.False. = OFF, .True. = ON)"
                 default = ".False."
                 group = "SM_Parameters"
+            case("snicar_snowoptics_opt")
+                description = "Option for SNICAR snow optics used in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = Warren (1984) "//achar(10)//BLNK_CHR_N// &
+                    "2 = Warren and Brandt (2008) "//achar(10)//BLNK_CHR_N// &
+                    "3 = Picard et al (2016)"
+                allocate(values(3))
+                values = [1, 2, 3]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_dustoptics_opt")
+                description = "Option for SNICAR dust optics used in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = Saharan dust (Balkanski et al., 2007, central hematite)"//achar(10)//BLNK_CHR_N// &
+                    "2 = San Juan Mountains, CO (Skiles et al, 2017)"//achar(10)//BLNK_CHR_N// &
+                    "3 = Greenland (Polashenski et al., 2015, central absorptivity)"
+                allocate(values(3))
+                values = [1, 2, 3]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_solarspec_opt")
+                description = "Option for SNICAR solar spectrum used in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = mid-latitude winter"//achar(10)//BLNK_CHR_N// &
+                    "2 = mid-latitude summer"//achar(10)//BLNK_CHR_N// &
+                    "3 = sub-Arctic winter"//achar(10)//BLNK_CHR_N// &
+                    "4 = sub-Arctic summer"//achar(10)//BLNK_CHR_N// &
+                    "5 = Summit,Greenland,summer"//achar(10)//BLNK_CHR_N// &
+                    "6 = High Mountain summer"
+                allocate(values(6))
+                values = [1, 2, 3, 4, 5, 6]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_bandnumber_opt")
+                description = "Option for SNICAR band number used in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = 5 bands, 2 = 480 bands"
+                allocate(values(2))
+                values = [1, 2]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_rtsolver_opt")
+                description = "option for two different SNICAR radiative transfer solver in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = Toon et al. solver, 2 = Adding-doubling solver"
+                allocate(values(2))
+                values = [1, 2]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_snowshape_opt")
+                description = "option for snow grain shape in SNICAR in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = Spheres"//achar(10)//BLNK_CHR_N// &
+                    "2 = Spheroid"//achar(10)//BLNK_CHR_N// &
+                    "3 = Hexagonal Plate"//achar(10)//BLNK_CHR_N// &
+                    "4 = Koch Snowflake"
+                allocate(values(4))
+                values = [1, 2, 3, 4]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_use_aerosol")
+                description = "option to turn on/off aerosol deposition flux effect in snow in SNICAR"
+                default = ".False."
+                group = "SM_Parameters"
+            case("snicar_snowbc_intmix")
+                description = "option to activate BC-snow internal mixing in SNICAR"
+                default = ".False."
+                group = "SM_Parameters"
+            case("snicar_snowdust_intmix")
+                description = "option to activate dust-snow internal mixing in SNICAR"
+                default = ".False."
+                group = "SM_Parameters"
+            case("snicar_use_oc")
+                description = "option to activate organic carbon in snow in SNICAR"
+                default = ".False."
+                group = "SM_Parameters"
+            case("snicar_aerosol_readtable")
+                description = "option to read aerosol deposition fluxes from table (on) or NetCDF forcing file (off)"
+                default = ".True."
+                group = "SM_Parameters"
+
             ! --------------------------------------
             ! --------------------------------------
             ! Radiation parameters namelist variables

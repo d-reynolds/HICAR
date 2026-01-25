@@ -19,176 +19,18 @@ module output_metadata
 
 contains
 
-    !>------------------------------------------------------------
-    !! Get generic metadata for a no-data object
-    !!------------------------------------------------------------
-    ! function get_metadata_nod(var_idx) result(meta_data)
-    !     implicit none
-    !     integer, intent(in) :: var_idx
-    !     type(variable_t), pointer :: meta_data
 
-    !     else if (var_idx > kMAX_STORAGE_VARS) then
-    !         write(*,*) "Invalid variable metadata requested, metadata index was: ", var_idx
-    !         stop
-    !     endif
-
-    !     ! initialize the module level var_meta data
-    !     if (.not.allocated(var_meta)) then    
-    !         call init_var_meta()
-    !     endif
-
-    !     ! get the var_idx index into var_meta to return
-    !     meta_data => var_meta(var_idx)
-
-    ! end function get_metadata_nod
-
-    ! !>------------------------------------------------------------
-    ! !! Get generic metadata for a variable
-    ! !!
-    ! !! Sets the internal data pointer to point to the input data provided
-    ! !!------------------------------------------------------------
-    ! function get_metadata_var(var_idx, input_var) result(meta_data)
-    !     implicit none
-    !     integer, intent(in)          :: var_idx
-    !     type(variable_t),intent(in)  :: input_var
-
-    !     type(variable_t) :: meta_data       ! function result
-    !     !integer          :: local_shape(2)  ! store the shape of the input data array
-
-    !     else if (var_idx>kMAX_STORAGE_VARS) then
-    !         stop "Invalid variable metadata requested"
-    !     endif
-
-    !     if (.not.allocated(var_meta)) call init_var_meta()
-
-    !     meta_data = var_meta(var_idx)
-
-    !     meta_data%two_d     = input_var_meta%two_d
-    !     meta_data%three_d   = input_var_meta%three_d
-    !     meta_data%grid      = input_var_meta%grid
-
-    !     if(meta_data%two_d) then
-    !         if (allocated(input_var_meta%dim_len)) allocate(meta_data%dim_len,source=input_var_meta%dim_len)
-    !         if (allocated(input_var_meta%global_dim_len)) allocate(meta_data%global_dim_len,source=input_var_meta%global_dim_len)
-
-    !         meta_data%data_2d => input_var_meta%data_2d
-    !     else
-    !         if (allocated(input_var_meta%dim_len)) then
-    !             allocate(meta_data%dim_len(3))
-    !             meta_data%dim_len(1) = input_var_meta%dim_len(1)
-    !             meta_data%dim_len(2) = input_var_meta%dim_len(3)
-    !             meta_data%dim_len(3) = input_var_meta%dim_len(2)
-    !         endif
-    !         if (allocated(input_var_meta%global_dim_len)) then
-    !             allocate(meta_data%global_dim_len(3))
-    !             meta_data%global_dim_len(1) = input_var_meta%global_dim_len(1)
-    !             meta_data%global_dim_len(2) = input_var_meta%global_dim_len(3)
-    !             meta_data%global_dim_len(3) = input_var_meta%global_dim_len(2)
-    !         endif
-    !         meta_data%data_3d => input_var_meta%data_3d
-    !     endif
-
-    ! end function get_metadata_var
-
-    ! !>------------------------------------------------------------
-    ! !! Get generic metadata for a two-dimensional variable
-    ! !!
-    ! !! Sets the internal data pointer to point to the input data provided
-    ! !!------------------------------------------------------------
-    ! function get_metadata_2d(var_idx, input_data) result(meta_data)
-    !     implicit none
-    !     integer, intent(in)          :: var_idx
-    !     real,    intent(in), pointer :: input_data(:,:)
-
-    !     type(variable_t) :: meta_data       ! function result
-    !     integer          :: local_shape(2)  ! store the shape of the input data array
-
-    !     else if (var_idx>kMAX_STORAGE_VARS) then
-    !         stop "Invalid variable metadata requested"
-    !     endif
-
-    !     if (.not.allocated(var_meta)) call init_var_meta()
-
-    !     meta_data = var_meta(var_idx)
-    !     meta_data%dtype=kREAL
-
-    !     if (associated(input_data)) then
-    !         meta_data%data_2d   => input_data
-    !         meta_data%two_d     = .True.
-    !         meta_data%three_d   = .False.
-    !         local_shape(1) = size(input_data, 1)
-    !         local_shape(2) = size(input_data, 2)
-    !         ! for some reason if shape(input_data) is passed as source, then the dim_len bounds are (0:1) instead of 1:2
-    !         allocate(meta_data%dim_len, source=local_shape)
-    !     endif
-
-    ! end function get_metadata_2d
-
-    ! function get_metadata_2dd(var_idx, input_data) result(meta_data)
-    !     implicit none
-    !     integer, intent(in)          :: var_idx
-    !     double precision,    intent(in), pointer :: input_data(:,:)
-
-    !     type(variable_t) :: meta_data       ! function result
-    !     integer          :: local_shape(2)  ! store the shape of the input data array
-
-    !     else if (var_idx>kMAX_STORAGE_VARS) then
-    !         stop "Invalid variable metadata requested"
-    !     endif
-
-    !     if (.not.allocated(var_meta)) call init_var_meta()
-
-    !     meta_data = var_meta(var_idx)
-    !     meta_data%dtype=kDOUBLE
-
-    !     if (associated(input_data)) then
-    !         meta_data%data_2dd  => input_data
-    !         meta_data%two_d     = .True.
-    !         meta_data%three_d   = .False.
-    !         local_shape(1) = size(input_data, 1)
-    !         local_shape(2) = size(input_data, 2)
-    !         ! for some reason if shape(input_data) is passed as source, then the dim_len bounds are (0:1) instead of 1:2
-    !         allocate(meta_data%dim_len, source=local_shape)
-    !     endif
-
-    ! end function get_metadata_2dd
-
-    ! !>------------------------------------------------------------
-    ! !! Get generic metadata for a three-dimensional variable
-    ! !!
-    ! !! Sets the internal data pointer to point to the input data provided
-    ! !!------------------------------------------------------------
-    ! function get_metadata_3d(var_idx, input_data) result(meta_data)
-    !     implicit none
-    !     integer, intent(in)          :: var_idx
-    !     real,    intent(in), pointer :: input_data(:,:,:)
-
-    !     type(variable_t) :: meta_data       ! function result
-    !     integer          :: local_shape(3)  ! store the shape of the input data array
-
-    !     else if (var_idx>kMAX_STORAGE_VARS) then
-    !         stop "Invalid variable metadata requested"
-    !     endif
-
-    !     ! initialize the module level constant data structure
-    !     if (.not.allocated(var_meta)) call init_var_meta()
-
-    !     meta_data = var_meta(var_idx)
-    !     meta_data%dtype=kREAL
-
-    !     if (associated(input_data)) then
-    !         meta_data%data_3d   => input_data
-    !         meta_data%two_d     = .False.
-    !         meta_data%three_d   = .True.
-    !         local_shape(1) = size(input_data, 1)
-    !         local_shape(2) = size(input_data, 3)
-    !         local_shape(3) = size(input_data, 2)
-    !         ! for some reason if shape(input_data) is passed as source, then the dim_len bounds are (0:1) instead of 1:2
-    !         allocate(meta_data%dim_len, source=local_shape)
-    !     endif
-
-    ! end function get_metadata_3d
-
+    subroutine initialize_var_constants()
+        integer :: i
+        integer, allocatable :: values(:)
+        
+        allocate(values(kMAX_STORAGE_VARS))
+        do i = 1, kMAX_STORAGE_VARS
+            values(i) = i
+        end do
+        
+        kVARS = transfer(values, kVARS)
+    end subroutine
 
     !>------------------------------------------------------------
     !! Get metadata variable name associated with a given index
@@ -2147,6 +1989,29 @@ contains
                                attribute_t("coordinates",   "lat lon")]
         
         !>------------------------------------------------------------
+        !!  Direct soil albedo
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%soil_albedo_dir) then
+            var_meta%name        = "soil_albedo_dir"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%dim_len(2)  = 2
+            var_meta%attributes  = [attribute_t("non_standard_name", "soil_albedo_direct"),            &
+                               attribute_t("units",         "-"),                                   &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Diffuse soil albedo
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%soil_albedo_diff) then
+            var_meta%name        = "soil_albedo_diff"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%dim_len(2)  = 2
+            var_meta%attributes  = [attribute_t("non_standard_name", "soil_albedo_diffuse"),            &
+                               attribute_t("units",         "-"),                                   &
+                               attribute_t("coordinates",   "lat lon")]
+
+
+        !>------------------------------------------------------------
         !!  Snow Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%snow_temperature) then
@@ -3005,6 +2870,27 @@ contains
             if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%lhvar /= "")
 
         !>------------------------------------------------------------
+        !!  saturation fraction of a grid cell for NoahMP wetland scheme
+        !>------------------------------------------------------------
+        else if (var_idx==kVARS%wetland_sat_frac) then
+            var_meta%name        = "wetland_sat_frac"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "wetland_saturation_fraction"),     &
+                               attribute_t("units",         "-"),                               &
+                               attribute_t("coordinates",   "lat lon")]
+        
+        !>------------------------------------------------------------
+        !!  water storage of a grid cell for NoahMP wetland scheme
+        !>------------------------------------------------------------
+        else if (var_idx==kVARS%wetland_h20_store) then
+            var_meta%name        = "wetland_h20_store"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "wetland_water_storage"),     &
+                               attribute_t("units",         "-"),                               &
+                               attribute_t("coordinates",   "lat lon")]
+
+        
+        !>------------------------------------------------------------
         !!  Lake temperature 3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%t_lake3d) then
@@ -3511,6 +3397,228 @@ contains
             var_meta%attributes  = [attribute_t("standard_name", "sliding snow transport"),   &
                                attribute_t("units",         "kg m-2 t-1"),                        &
                                attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  snow layer effective radius from SNICAR
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_sn_rad) then
+            var_meta%name        = "snow_radius"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "snow_effective_radius"),   &
+                               attribute_t("units",         "microns"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  snow layerfreezing rate from SNICAR
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_sn_fr) then
+            var_meta%name        = "snow_freeze_rate"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "snow_freezing_rate"),   &
+                               attribute_t("units",         "kg m-2 s-1"),                        &
+                               attribute_t("coordinates",   "lat  lon")]
+
+        !>------------------------------------------------------------
+        !!  BCPHI mass in snow layer from SNICAR
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_bcphi) then
+            var_meta%name        = "bcphi_mass"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "black_carbon_hydrophillic_mass_in_snow"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  BCPHO mass in snow layer from SNICAR
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_bcpho) then
+            var_meta%name        = "bcpho_mass"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "black_carbon_hydrophobic_mass_in_snow"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+        
+        !>------------------------------------------------------------
+        !!  OCPHI mass in snow layer from SNICAR
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_ocphi) then
+            var_meta%name        = "ocphi_mass"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "organic_carbon_hydrophillic_mass_in_snow"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  OCPHO mass in snow layer from SNICAR
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_ocpho) then
+            var_meta%name        = "ocpho_mass"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "organic_carbon_hydrophobic_mass_in_snow"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Dust1 mass in snow layer from SNICAR
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_dust1) then
+            var_meta%name        = "dust1_mass"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "dust1_mass_in_snow"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Dust2 mass in snow layer from SNICAR
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_dust2) then
+            var_meta%name        = "dust2_mass"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "dust2_mass_in_snow"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Dust3 mass in snow layer from SNICAR
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_dust3) then
+            var_meta%name        = "dust3_mass"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "dust3_mass_in_snow"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Dust4 mass in snow layer from SNICAR
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_dust4) then
+            var_meta%name        = "dust4_mass"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "dust4_mass_in_snow"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Dust5 mass in snow layer from SNICAR
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_dust5) then
+            var_meta%name        = "dust5_mass"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "dust5_mass_in_snow"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  BCPHI mass concentration in snow layer from SNICAR
+        !------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_bcphi_conc) then
+            var_meta%name        = "bcphi_conc"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "black_carbon_hydrophillic_concentration_in_snow"),   &
+                               attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  BCPHO mass concentration in snow layer from SNICAR
+        !------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_bcpho_conc) then
+            var_meta%name        = "bcpho_conc"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "black_carbon_hydrophobic_concentration_in_snow"),   &
+                               attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  OCPHI mass concentration in snow layer from SNICAR
+        !------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_ocphi_conc) then
+            var_meta%name        = "ocphi_conc"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "organic_carbon_hydrophillic_concentration_in_snow"),   &
+                               attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  OCPHO mass concentration in snow layer from SNICAR
+        !------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_ocpho_conc) then
+            var_meta%name        = "ocpho_conc"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "organic_carbon_hydrophobic_concentration_in_snow"),   &
+                               attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Dust1 mass concentration in snow layer from SNICAR
+        !------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_dust1_conc) then
+            var_meta%name        = "dust1_conc"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "dust1_concentration_in_snow"),   &
+                               attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Dust2 mass concentration in snow layer from SNICAR
+        !------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_dust2_conc) then
+            var_meta%name        = "dust2_conc"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "dust2_concentration_in_snow"),   &
+                               attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Dust3 mass concentration in snow layer from SNICAR
+        !------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_dust3_conc) then
+            var_meta%name        = "dust3_conc"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "dust3_concentration_in_snow"),   &
+                               attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+                               
+        !>------------------------------------------------------------
+        !!  Dust4 mass concentration in snow layer from SNICAR
+        !------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_dust4_conc) then
+            var_meta%name        = "dust4_conc"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "dust4_concentration_in_snow"),   &
+                               attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Dust5 mass concentration in snow layer from SNICAR
+        !------------------------------------------------------------
+        else if (var_idx==kVARS%snicar_dust5_conc) then
+            var_meta%name        = "dust5_conc"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "dust5_concentration_in_snow"),   &
+                               attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+
         end if  
 
         ! loop through entire array setting n_dimensions and n_attrs based on the data that were supplied

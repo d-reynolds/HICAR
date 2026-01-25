@@ -293,9 +293,9 @@ contains
         n_3d = 1
         ! Do MPI_Win_Wait on forcing_win. This is mostly unnecesarry, since the server process is what will be waiting on us, which is handeled by the MPI_Win_Start call
         ! in ioserver%gather_foring. Still, MPI_Win_Wait is called here for completeness of PSCW model
-        ! if (this%nest_updated) then
-        !     call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
-        ! endif
+        if (this%nest_updated) then
+            call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
+        endif
 
         this%nest_updated = .False.
         !This is false only when it is the first call to push (i.e. first write call)
@@ -337,7 +337,7 @@ contains
         this%nest_updated = .True.
         ! Do MPI_Win_Post on forcing_win to inform that server process can begin gathering of nest data
         call MPI_Win_Post(this%parent_group,0,this%forcing_win)
-        call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
+        ! call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
 
     end subroutine
     
@@ -461,6 +461,10 @@ contains
                     domain%vars_2d(domain%vars_to_out(i)%v)%data_2d(i_s_re:i_e_re,j_s_re:j_e_re) = &
                         this%write_buffer_2d(n_2d,1:nx,1:ny)
                     !$acc update device(domain%vars_2d(domain%vars_to_out(i)%v)%data_2d)
+                elseif (var%dtype == kINTEGER) then
+                    domain%vars_2d(domain%vars_to_out(i)%v)%data_2di(i_s_re:i_e_re,j_s_re:j_e_re) = &
+                        int(this%write_buffer_2d(n_2d,1:nx,1:ny))
+                    !$acc update device(domain%vars_2d(domain%vars_to_out(i)%v)%data_2di)
                 ! elseif (var%dtype == kDOUBLE) then
                 !     var%data_2dd(i_s_re:i_e_re,j_s_re:j_e_re) = &
                 !             dble(this%write_buffer_2d(n_2d,1:nx,1:ny))

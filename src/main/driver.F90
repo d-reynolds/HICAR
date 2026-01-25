@@ -27,7 +27,7 @@ program icar
     use initialization,     only : split_processes, init_options
     use icar_constants
     use namelist_utils,     only : get_nml_var_default
-    use output_metadata,    only : list_output_vars
+    use output_metadata,    only : list_output_vars, initialize_var_constants
     use flow_events,        only : component_init, component_loop, component_program_end
 #ifdef _OPENACC
     use openacc
@@ -123,6 +123,8 @@ contains
         !Turn this on to enable output by default -- likely that we are only running as a single process
         !If we do any output from this subroutine
         STD_OUT_PE = .True.
+
+        call initialize_var_constants()
 
         cnt = command_argument_count()
 

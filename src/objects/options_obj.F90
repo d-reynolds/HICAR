@@ -206,7 +206,7 @@ contains
         if (this%physics%snowmodel==kSM_FSM) then
             kSNOW_GRID_Z = this%sm%fsm_nsnow_max
             kSNOWSOIL_GRID_Z = kSNOW_GRID_Z+kSOIL_GRID_Z
-    endif
+        endif
 
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
         if ((this%physics%landsurface>0).and.(this%physics%boundarylayer==0)) then
@@ -288,7 +288,8 @@ contains
             this%sfc%scm_force_flux = 1
         endif
         
-        !Allow for microphysics precipitation partitioning with NoahMP if using a snow model
+        ! we will want to allow splitting of snow and rainfall if we have a snowmodel active
+        ! so deactivate NoahMP's automatic partitioning
         if (this%physics%snowmodel>0) then
             this%lsm%nmp_opt_snf = 4
         endif
@@ -326,10 +327,7 @@ contains
         ! Check if supporting files exist, if they are needed by physics modules
         if (this%physics%landsurface==kLSM_NOAHMP) then
             if (STD_OUT_PE) write(*,*) '  NoahMP LSM turned on, checking for supporting files...'
-            call check_file_exists('GENPARM.TBL', message='GENPARM.TBL file does not exist. This should be in the same directory as the namelist.')
-            call check_file_exists('MPTABLE.TBL', message='MPTABLE.TBL file does not exist. This should be in the same directory as the namelist.')
-            call check_file_exists('SOILPARM.TBL', message='SOILPARM.TBL file does not exist. This should be in the same directory as the namelist.')
-            call check_file_exists('VEGPARM.TBL', message='VEGPARM.TBL file does not exist. This should be in the same directory as the namelist.')
+            call check_file_exists('NoahmpTable.TBL', message='NoahmpTable.TBL file does not exist. This should be in the same directory as the namelist.')
         endif
         if (this%physics%radiation==kRA_RRTMG) then
             if (STD_OUT_PE) write(*,*) '  RRTMG radiation turned on, checking for supporting files...'
@@ -1776,15 +1774,16 @@ contains
         integer :: sf_urban_phys(kMAX_NESTS)
         integer :: num_soil_layers(kMAX_NESTS)
         real    :: nmp_soiltstep(kMAX_NESTS)
-        integer, dimension(kMAX_NESTS) :: nmp_dveg, nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_run, nmp_opt_frz, nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot, nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo, nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, noahmp_output
-
+        integer, dimension(kMAX_NESTS) :: nmp_dveg, nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_frz, nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_wet, nmp_opt_snf, nmp_opt_tbot, nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo, nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, noahmp_output
+        integer, dimension(kMAX_NESTS) :: nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact
         integer :: lake_category(kMAX_NESTS)                    ! index that defines the lake category in (some) LU_Categories
 
         ! define the namelist
         namelist /lsm_parameters/ LU_Categories, update_interval_lsm, &
                                   urban_category, ice_category, water_category, lake_category, snow_den_const,&
                                   monthly_vegfrac, monthly_albedo, max_swe,  nmp_dveg,   &
-                                  nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_run, nmp_opt_frz, &
+                                  nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_frz, nmp_opt_wet, &
+                                  nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact, &
                                   nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot,           &
                                   nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo,          &
                                   nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, nmp_soiltstep,       &
@@ -1814,11 +1813,16 @@ contains
         call set_nml_var_default(nmp_opt_crs, 'nmp_opt_crs', print_info, gennml)
         call set_nml_var_default(nmp_opt_sfc, 'nmp_opt_sfc', print_info, gennml)
         call set_nml_var_default(nmp_opt_btr, 'nmp_opt_btr', print_info, gennml)
-        call set_nml_var_default(nmp_opt_run, 'nmp_opt_run', print_info, gennml)
+        call set_nml_var_default(nmp_opt_runsrf, 'nmp_opt_runsrf', print_info, gennml)
+        call set_nml_var_default(nmp_opt_runsub, 'nmp_opt_runsub', print_info, gennml)
+        call set_nml_var_default(nmp_opt_tksno, 'nmp_opt_tksno', print_info, gennml)
+        call set_nml_var_default(nmp_opt_scf, 'nmp_opt_scf', print_info, gennml)
+        call set_nml_var_default(nmp_opt_compact, 'nmp_opt_compact', print_info, gennml)
         call set_nml_var_default(nmp_opt_frz, 'nmp_opt_frz', print_info, gennml)
         call set_nml_var_default(nmp_opt_inf, 'nmp_opt_inf', print_info, gennml)
         call set_nml_var_default(nmp_opt_rad, 'nmp_opt_rad', print_info, gennml)
         call set_nml_var_default(nmp_opt_alb, 'nmp_opt_alb', print_info, gennml)
+        call set_nml_var_default(nmp_opt_wet, 'nmp_opt_wet', print_info, gennml)
         call set_nml_var_default(nmp_opt_snf, 'nmp_opt_snf', print_info, gennml)
         call set_nml_var_default(nmp_opt_tbot, 'nmp_opt_tbot', print_info, gennml)
         call set_nml_var_default(nmp_opt_stc, 'nmp_opt_stc', print_info, gennml)
@@ -1878,11 +1882,16 @@ contains
         call set_nml_var(lsm_options%nmp_opt_crs, nmp_opt_crs(n_indx), 'nmp_opt_crs', nmp_opt_crs(1))
         call set_nml_var(lsm_options%nmp_opt_sfc, nmp_opt_sfc(n_indx), 'nmp_opt_sfc', nmp_opt_sfc(1))
         call set_nml_var(lsm_options%nmp_opt_btr, nmp_opt_btr(n_indx), 'nmp_opt_btr', nmp_opt_btr(1))
-        call set_nml_var(lsm_options%nmp_opt_run, nmp_opt_run(n_indx), 'nmp_opt_run', nmp_opt_run(1))
+        call set_nml_var(lsm_options%nmp_opt_runsrf, nmp_opt_runsrf(n_indx), 'nmp_opt_runsrf', nmp_opt_runsrf(1))
+        call set_nml_var(lsm_options%nmp_opt_runsub, nmp_opt_runsub(n_indx), 'nmp_opt_runsub', nmp_opt_runsub(1))
+        call set_nml_var(lsm_options%nmp_opt_tksno, nmp_opt_tksno(n_indx), 'nmp_opt_tksno', nmp_opt_tksno(1))
+        call set_nml_var(lsm_options%nmp_opt_scf, nmp_opt_scf(n_indx), 'nmp_opt_scf', nmp_opt_scf(1))
+        call set_nml_var(lsm_options%nmp_opt_compact, nmp_opt_compact(n_indx), 'nmp_opt_compact', nmp_opt_compact(1))
         call set_nml_var(lsm_options%nmp_opt_frz, nmp_opt_frz(n_indx), 'nmp_opt_frz', nmp_opt_frz(1))
         call set_nml_var(lsm_options%nmp_opt_inf, nmp_opt_inf(n_indx), 'nmp_opt_inf', nmp_opt_inf(1))
         call set_nml_var(lsm_options%nmp_opt_rad, nmp_opt_rad(n_indx), 'nmp_opt_rad', nmp_opt_rad(1))
         call set_nml_var(lsm_options%nmp_opt_alb, nmp_opt_alb(n_indx), 'nmp_opt_alb', nmp_opt_alb(1))
+        call set_nml_var(lsm_options%nmp_opt_wet, nmp_opt_wet(n_indx), 'nmp_opt_wet', nmp_opt_wet(1))
         call set_nml_var(lsm_options%nmp_opt_snf, nmp_opt_snf(n_indx), 'nmp_opt_snf', nmp_opt_snf(1))
         call set_nml_var(lsm_options%nmp_opt_tbot, nmp_opt_tbot(n_indx), 'nmp_opt_tbot', nmp_opt_tbot(1))
         call set_nml_var(lsm_options%nmp_opt_stc, nmp_opt_stc(n_indx), 'nmp_opt_stc', nmp_opt_stc(1))
@@ -1917,10 +1926,15 @@ contains
         real, dimension(kMAX_NESTS)    :: fsm_ds_min, fsm_ds_surflay
         logical, dimension(kMAX_NESTS) :: fsm_hn_on, fsm_for_hn
 
+        integer, dimension(kMAX_NESTS) :: snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt
+        logical, dimension(kMAX_NESTS) :: snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable
         ! define the namelist
         namelist /sm_parameters/ fsm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
                                  fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst, &
-                                 fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn
+                                 fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn, &
+                                 snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt, &
+                                 snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable
+                                 
 
         CHARACTER(LEN=200) :: error_msg
 
@@ -1949,6 +1963,17 @@ contains
         
         call set_nml_var_default(fsm_hn_on, 'fsm_hn_on', print_info, gennml)
         call set_nml_var_default(fsm_for_hn, 'fsm_for_hn', print_info, gennml)
+        call set_nml_var_default(snicar_bandnumber_opt, 'snicar_bandnumber_opt', print_info, gennml)
+        call set_nml_var_default(snicar_snowoptics_opt, 'snicar_snowoptics_opt', print_info, gennml)
+        call set_nml_var_default(snicar_solarspec_opt, 'snicar_solarspec_opt', print_info, gennml)
+        call set_nml_var_default(snicar_dustoptics_opt, 'snicar_dustoptics_opt', print_info, gennml)
+        call set_nml_var_default(snicar_rtsolver_opt, 'snicar_rtsolver_opt', print_info, gennml)
+        call set_nml_var_default(snicar_snowshape_opt, 'snicar_snowshape_opt', print_info, gennml)
+        call set_nml_var_default(snicar_use_aerosol, 'snicar_use_aerosol', print_info, gennml)
+        call set_nml_var_default(snicar_snowbc_intmix, 'snicar_snowbc_intmix', print_info, gennml)
+        call set_nml_var_default(snicar_snowdust_intmix, 'snicar_snowdust_intmix', print_info, gennml)
+        call set_nml_var_default(snicar_use_oc, 'snicar_use_oc', print_info, gennml)
+        call set_nml_var_default(snicar_aerosol_readtable, 'snicar_aerosol_readtable', print_info, gennml)
 
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
@@ -1962,6 +1987,12 @@ contains
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             fsm_hn_on(n_indx) = fsm_hn_on(1)
             fsm_for_hn(n_indx) = fsm_for_hn(1)
+
+            snicar_use_aerosol(n_indx) = snicar_use_aerosol(1)
+            snicar_snowbc_intmix(n_indx) = snicar_snowbc_intmix(1)
+            snicar_snowdust_intmix(n_indx) = snicar_snowdust_intmix(1)
+            snicar_use_oc(n_indx) = snicar_use_oc(1)
+            snicar_aerosol_readtable(n_indx) = snicar_aerosol_readtable(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             ! read the namelist options
             open(io_newunit(name_unit), file=filename)
@@ -1993,6 +2024,18 @@ contains
 
         call set_nml_var(sm_options%fsm_hn_on, fsm_hn_on(n_indx), 'fsm_hn_on')
         call set_nml_var(sm_options%fsm_for_hn, fsm_for_hn(n_indx), 'fsm_for_hn')
+
+        call set_nml_var(sm_options%snicar_bandnumber_opt, snicar_bandnumber_opt(n_indx), 'snicar_bandnumber_opt', snicar_bandnumber_opt(1))
+        call set_nml_var(sm_options%snicar_snowoptics_opt, snicar_snowoptics_opt(n_indx), 'snicar_snowoptics_opt', snicar_snowoptics_opt(1))
+        call set_nml_var(sm_options%snicar_solarspec_opt, snicar_solarspec_opt(n_indx), 'snicar_solarspec_opt', snicar_solarspec_opt(1))
+        call set_nml_var(sm_options%snicar_dustoptics_opt, snicar_dustoptics_opt(n_indx), 'snicar_dustoptics_opt', snicar_dustoptics_opt(1))
+        call set_nml_var(sm_options%snicar_rtsolver_opt, snicar_rtsolver_opt(n_indx), 'snicar_rtsolver_opt', snicar_rtsolver_opt(1))
+        call set_nml_var(sm_options%snicar_snowshape_opt, snicar_snowshape_opt(n_indx), 'snicar_snowshape_opt', snicar_snowshape_opt(1))
+        call set_nml_var(sm_options%snicar_use_aerosol, snicar_use_aerosol(n_indx), 'snicar_use_aerosol')
+        call set_nml_var(sm_options%snicar_snowbc_intmix, snicar_snowbc_intmix(n_indx), 'snicar_snowbc_intmix')
+        call set_nml_var(sm_options%snicar_snowdust_intmix, snicar_snowdust_intmix(n_indx), 'snicar_snowdust_intmix')
+        call set_nml_var(sm_options%snicar_use_oc, snicar_use_oc(n_indx), 'snicar_use_oc')
+        call set_nml_var(sm_options%snicar_aerosol_readtable, snicar_aerosol_readtable(n_indx), 'snicar_aerosol_readtable')
         
     end subroutine sm_parameters_namelist
     !> -------------------------------
