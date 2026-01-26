@@ -1025,15 +1025,15 @@ contains
 
         ! Choose optimized path based on whether flux correction is needed
         if (flux_corr == 0) then
-            if ((horder==vorder) .or. (horder==5 .and. vorder==3)) then
-                ! FUSED PATH: No flux correction needed
-                ! Compute fluxes and directly update qfluxes
+            ! if ((horder==vorder) .or. (horder==5 .and. vorder==3)) then
+            !     ! FUSED PATH: No flux correction needed
+            !     ! Compute fluxes and directly update qfluxes
 
-                call flux_time%start()
-                !$acc wait(q_id) !qold is needed for following function
-                call flux_and_advect_fused(qfluxes,qold,U_m,V_m,W_m,denom,dz,t_factor,q_id)
-                call flux_time%stop()
-            else
+            !     call flux_time%start()
+            !     !$acc wait(q_id) !qold is needed for following function
+            !     call flux_and_advect_fused(qfluxes,qold,U_m,V_m,W_m,denom,dz,t_factor,q_id)
+            !     call flux_time%stop()
+            ! else
                 call flux_time%start()
                 !$acc wait(q_id) !qold is needed for following function
                 call flux3(qfluxes,U_m,V_m,W_m,flux_x,flux_z,flux_y,t_factor)
@@ -1042,7 +1042,7 @@ contains
                 call sum_time%start()
                 call sum_kernel(flux_x, flux_y, flux_z, qold, qfluxes, denom, dz, q_id)
                 call sum_time%stop()
-            endif
+            ! endif
             
         else
             ! STANDARD PATH: Flux correction enabled
