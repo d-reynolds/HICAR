@@ -128,7 +128,17 @@ include(FetchContent)
 
 # 6. Link to the package libraries
 set (NETCDF_F90 "YES")
-find_package(MPI REQUIRED)
+
+#bruteforce to not call gnu specific things using cray compiler wrappers
+
+add_library(MPI::MPI_Fortran INTERFACE IMPORTED)
+
+set_target_properties(MPI::MPI_Fortran PROPERTIES
+  INTERFACE_LINK_LIBRARIES mpi
+  INTERFACE_INCLUDE_DIRECTORIES /user-environment/env/default/include
+)
+
+#find_package(MPI REQUIRED)
 find_package(OpenMP)
 find_package(FFTW REQUIRED)
 find_package(NetCDF REQUIRED)
@@ -156,7 +166,7 @@ endif()
 
 if (NETCDF_FOUND)
 	#This is the most robust way to find the NetCDF flags -- covering both custom installs, static or shared, and cray PEs
-	execute_process(COMMAND nf-config --flibs OUTPUT_VARIABLE NETCDF_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+	#execute_process(COMMAND nf-config --flibs OUTPUT_VARIABLE NETCDF_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
 	#if the nf-config method worked...
 	if(${NETCDF_FLAGS} MATCHES "-lnetcdff")
 		target_link_libraries(hicar_lib PUBLIC ${NETCDF_FLAGS})
@@ -268,6 +278,11 @@ else()
 		set(CMAKE_Fortran_COMPILER_ID "GNU")
 		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
 		set(COMPILER "gnu")
+	elseif (FC MATCHES "mpifort")
+		set(CMAKE_Fortran_COMPILER "mpifort")
+		set(CMAKE_Fortran_COMPILER_ID "mpifort")
+		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
+		set(COMPILER "gnu")
 	elseif (FC MATCHES "ifort")
 		set(CMAKE_Fortran_COMPILER "ifort")
 		set(CMAKE_Fortran_COMPILER_ID "Intel")
@@ -321,7 +336,8 @@ elseif(MODE STREQUAL "profile")
 	set(CMAKE_BUILD_TYPE Profile)
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fbounds-check -fbacktrace -finit-real=nan -fopt-info-missed=opt_info.txt -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
+		#target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fbounds-check -fbacktrace -finit-real=nan -fopt-info-missed=opt_info.txt -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
+		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fbounds-check -fbacktrace -finit-real=nan -fopt-info-missed=opt_info.txt -c -ffast-math -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens)
 		target_link_options(HICAR PUBLIC -pg)
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -pg -debug inline-debug-info -shared-intel)
@@ -333,7 +349,8 @@ elseif(MODE STREQUAL "release")
 	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR")
 
 	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -O3 -fopenmp -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
+		#target_compile_options(HICAR PUBLIC -O3 -fopenmp -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
+		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fbounds-check -fbacktrace -finit-real=nan -fopt-info-missed=opt_info.txt -c -ffast-math -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native  -fno-protect-parens)
 	elseif (COMPILER STREQUAL "intel")
 		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
 	elseif (COMPILER STREQUAL "cray")
