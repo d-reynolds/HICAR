@@ -242,10 +242,10 @@ contains
         endif
         
         !! MJ added
-        if ((this%physics%radiation_downScaling==1).and.(this%physics%radiation==0)) then
+        if ((this%rad%terrain_shading).and.(this%physics%radiation==0)) then
             if (STD_OUT_PE) write(*,*) "  "
             if (STD_OUT_PE) write(*,*) "  STOP STOP STOP"
-            if (STD_OUT_PE) write(*,*) "  STOP, Running radiation_downScaling=1 cannot not be used with rad=0"
+            if (STD_OUT_PE) write(*,*) "  STOP, Running terrain_shading=.True. cannot not be used with rad=0"
             if (STD_OUT_PE) write(*,*) "  STOP STOP STOP"
             stop
         endif
@@ -383,10 +383,10 @@ contains
         logical, intent(in), optional  :: read_nml, info_only, gen_nml
         integer :: name_unit, rc
         !variables to be used in the namelist
-        integer, dimension(kMAX_NESTS) :: pbl, lsm, mp, sfc, sm, water, rad, conv, adv, wind, radiation_downscaling
+        integer, dimension(kMAX_NESTS) :: pbl, lsm, mp, sfc, sm, water, rad, conv, adv, wind
         logical :: print_info, gennml, read_namelist
         !define the namelist
-        namelist /physics/ pbl, lsm, sfc, sm, water, mp, rad, conv, adv, wind, radiation_downscaling
+        namelist /physics/ pbl, lsm, sfc, sm, water, mp, rad, conv, adv, wind
         CHARACTER(LEN=200) :: error_msg
 
         read_namelist = .True.
@@ -408,7 +408,6 @@ contains
         call set_nml_var_default(conv, 'conv', print_info, gennml)
         call set_nml_var_default(adv, 'adv', print_info, gennml)
         call set_nml_var_default(wind, 'wind', print_info, gennml)
-        call set_nml_var_default(radiation_downscaling, 'radiation_downscaling', print_info, gennml)
 
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
@@ -432,7 +431,6 @@ contains
         call set_nml_var(phys_options%convection, conv(n_indx), 'conv', conv(1))
         call set_nml_var(phys_options%advection, adv(n_indx), 'adv', adv(1))
         call set_nml_var(phys_options%windtype, wind(n_indx), 'wind', wind(1))
-        call set_nml_var(phys_options%radiation_downScaling, radiation_downscaling(n_indx), 'radiation_downscaling', radiation_downscaling(1))
 
     end subroutine physics_namelist
 
@@ -2057,10 +2055,11 @@ contains
         real    :: update_interval_rad(kMAX_NESTS)             ! minimum number of seconds between RRTMG updates
         integer :: icloud(kMAX_NESTS)                            ! how RRTMG interacts with clouds
         integer :: cldovrlp(kMAX_NESTS)                          ! how RRTMG considers cloud overlapping
-        logical :: read_ghg(kMAX_NESTS)
+        logical :: read_ghg(kMAX_NESTS)                            ! read GHG concentrations from file
+        logical :: terrain_shading(kMAX_NESTS)                     ! whether to use terrain shading
         real    :: tzone(kMAX_NESTS) !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
         ! define the namelist
-        namelist /rad_parameters/ update_interval_rad, icloud, read_ghg, cldovrlp, tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
+        namelist /rad_parameters/ terrain_shading, update_interval_rad, icloud, read_ghg, cldovrlp, tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
         CHARACTER(LEN=200) :: error_msg
 
         print_info = .False.
@@ -2069,6 +2068,7 @@ contains
         gennml = .False.
         if (present(gen_nml)) gennml = gen_nml
 
+        call set_nml_var_default(terrain_shading, 'terrain_shading', print_info, gennml)
         call set_nml_var_default(update_interval_rad, 'update_interval_rad', print_info, gennml)
         call set_nml_var_default(icloud, 'icloud', print_info, gennml)
         call set_nml_var_default(cldovrlp, 'cldovrlp', print_info, gennml)
@@ -2086,6 +2086,7 @@ contains
             if (rc /= 0) call print_nml_error('rad_parameters',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             read_ghg(n_indx) = read_ghg(1)
+            terrain_shading(n_indx) = terrain_shading(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             open(io_newunit(name_unit), file=filename)
             read(name_unit, iostat=rc, nml=rad_parameters)
@@ -2097,6 +2098,7 @@ contains
             ! endif
         endif
 
+        call set_nml_var(rad_options%terrain_shading, terrain_shading(n_indx), 'terrain_shading', terrain_shading(1))
         call set_nml_var(rad_options%update_interval_rad, update_interval_rad(n_indx), 'update_interval_rad', update_interval_rad(1))
         call set_nml_var(rad_options%icloud, icloud(n_indx), 'icloud', icloud(1))
         call set_nml_var(rad_options%cldovrlp, cldovrlp(n_indx), 'cldovrlp', cldovrlp(1))

@@ -2204,7 +2204,7 @@ contains
             endif
         endif
 
-        if (options%physics%radiation_downScaling==1) then
+        if (options%rad%terrain_shading) then
             !!
             if (options%domain%hlm_var /= "") then
                 call io_read(options%domain%init_conditions_file,   &
@@ -2217,7 +2217,7 @@ contains
                     enddo
                 endif
             else  
-                stop "hlm_var not specified in domain file, but required for radiation downscaling"
+                stop "hlm_var not specified in domain file, but required for terrain shading"
             endif
             !!
             if (options%domain%svf_var /= "") then
@@ -2228,7 +2228,7 @@ contains
                     this%vars_2d(this%var_indx(kVARS%svf)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
                 endif
             else
-                stop "svf_var not specified in domain file, but required for radiation downscaling"
+                stop "svf_var not specified in domain file, but required for terrain shading"
             endif            
             !!
             if (options%domain%slope_var /= "") then
@@ -2239,7 +2239,7 @@ contains
                     this%vars_2d(this%var_indx(kVARS%slope)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
                 endif
             else
-                stop "slope_var not specified in domain file, but required for radiation downscaling"
+                stop "slope_var not specified in domain file, but required for terrain shading"
             endif            
             !!
             if (options%domain%slope_angle_var /= "") then
@@ -2250,7 +2250,7 @@ contains
                     this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
                 endif
             else
-                stop "slope_angle_var not specified in domain file, but required for radiation downscaling"
+                stop "slope_angle_var not specified in domain file, but required for terrain shading"
             endif
             !!
             if (options%domain%aspect_angle_var /= "") then
@@ -2261,7 +2261,7 @@ contains
                     this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
                 endif
             else
-                stop "aspect_angle_var not specified in domain file, but required for radiation downscaling"
+                stop "aspect_angle_var not specified in domain file, but required for terrain shading"
             endif
         endif
 

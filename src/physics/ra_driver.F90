@@ -186,7 +186,7 @@ contains
             endif
         endif
         
-        ! if (options%physics%radiation_downScaling==1) then
+        ! if (options%rad%terrain_shading) then
             if (allocated(cos_project_angle)) then
                 !$acc exit data delete(cos_project_angle)
                 deallocate(cos_project_angle)
@@ -323,8 +323,8 @@ contains
             call ra_rrtmg_var_request(options)
         endif
         
-        !! MJ added: the vars requested if we have radiation_downScaling  
-        if (options%physics%radiation_downScaling==1) then        
+        !! MJ added: the vars requested if we have terrain shading  
+        if (options%rad%terrain_shading) then        
             call options%alloc_vars( [kVARS%slope, kVARS%slope_angle, kVARS%aspect_angle, kVARS%svf, kVARS%hlm, kVARS%shortwave_direct, &
                                       kVARS%shortwave_diffuse, kVARS%shortwave_direct_above]) 
         endif
@@ -468,7 +468,7 @@ contains
         if (options%physics%radiation == 0) return
         
         !We only need to calculate these variables if we are using terrain shading, otherwise only call on each radiation update
-        if (options%physics%radiation_downScaling == 1 .or. &
+        if (options%rad%terrain_shading .or. &
             ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval)) then
             tzone = options%rad%tzone
             date_seconds = domain%sim_time%seconds()
@@ -490,7 +490,7 @@ contains
                     ims=ims,ime=ime,jms=jms,jme=jme,its=its,ite=ite, solar_azimuth=solar_azimuth_store(:,j))
             enddo
 
-            if (options%physics%radiation_downScaling == 1) then
+            if (options%rad%terrain_shading) then
                 associate(slope => domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d, &
                           aspect => domain%vars_2d(domain%var_indx(kVARS%aspect_angle)%v)%data_2d)
                 !$acc parallel loop gang vector collapse(2) async(1)
@@ -1256,7 +1256,7 @@ contains
             endif ! end if rrtmg or rrtmgp
             ! cache shortwave from RRTMG_SWRAD for downscaling.
             ! needed if we are to call the terrain shading routine more frequently than RRTMG_SWRAD
-            if (options%physics%radiation_downScaling==1) then
+            if (options%rad%terrain_shading) then
                 !$acc kernels present(shortwave, shortwave_cached)
                 shortwave_cached = shortwave
                 !$acc end kernels
@@ -1269,7 +1269,7 @@ contains
         !! MJ: note that radiation down scaling works only for simple and rrtmg schemes as they provide the above-topography radiation per horizontal plane
         !! MJ corrected, as calc_solar_elevation has largley understimated the zenith angle in Switzerland
         !! MJ added: this is Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
-        if (options%physics%radiation_downScaling==1) then            
+        if (options%rad%terrain_shading) then            
             !! partitioning the total radiation per horizontal plane into the diffusive and direct ones based on https://www.sciencedirect.com/science/article/pii/S0168192320300058, HPEval
             if (.not.(options%physics%radiation==kRA_RRTMG .or. options%physics%radiation==kRA_RRTMGP)) then
                 ratio_dif=0.            

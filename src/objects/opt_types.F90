@@ -24,7 +24,6 @@ module options_types
         integer::radiation
         integer::convection
         integer::windtype
-        integer::radiation_downScaling        
     end type physics_type
     
     
@@ -254,6 +253,7 @@ module options_types
     ! store Radiation options
     ! ------------------------------------------------
     type rad_options_type
+       logical :: terrain_shading                      ! whether to use terrain shading
        real    :: update_interval_rad                  ! how ofen to update the radiation in seconds.
                                                        ! RRTMG scheme is expensive. Default is 1800s (30 minutes)
        integer :: icloud                               ! How RRTMG interact with clouds

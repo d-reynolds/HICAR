@@ -1810,12 +1810,12 @@ contains
                 units = "radians"
                 group = "Domain"
             case ("svf_var")
-                description = "Name of the sky view factor variable in domain file, used for radiation_downscaling=1"
+                description = "Name of the sky view factor variable in domain file, used for terrain_shading=.True."
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Domain"
             case ("hlm_var")
-                description = "Name of the horizon line matrix variable in domain file, used for radiation_downscaling=1"
+                description = "Name of the horizon line matrix variable in domain file, used for terrain_shading=.True."
                 allocate(dimensions(3))
                 dimensions = ["a", "Y", "X"]
                 group = "Domain"
@@ -2352,13 +2352,6 @@ contains
                 allocate(values(2))
                 values = [0, 1]
                 default = "1"
-                group = "Physics"
-            case ("radiation_downscaling")
-                description = "0 = no downcaling"//achar(10)//BLNK_CHR_N//      &
-                              "1 = terrain shading effect is considered in the radiation calculation"
-                default = "0"
-                allocate(values(2))
-                values = [0, 1]
                 group = "Physics"
             case ("adv")
                 description = "Advection scheme to use:  "//achar(10)//BLNK_CHR_N// &
@@ -3417,6 +3410,11 @@ contains
             ! Radiation parameters namelist variables
             ! --------------------------------------
             ! --------------------------------------
+            case ("terrain_shading")
+                description = "Applies terrain shading to radiation. Requires supplying the relevant domain"//achar(10)//BLNK_CHR_N// &
+                              "with 'hlm' and 'svf' variables in the input files."
+                default = ".False."
+                group = "RAD_Parameters"
             case ("update_interval_rad")
                 description = "Time interval for updating the radiation. If = 0, update every time step."
                 min = 0
