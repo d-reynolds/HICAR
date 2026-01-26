@@ -1,9 +1,8 @@
 module namelist_utils
     use netcdf
-    use string,           only  : str, as_string
+    use string,           only  : str, as_string, to_lower
     use ieee_arithmetic
-    use icar_constants,    only : STD_OUT_PE, MAXLEVELS, kMAX_NESTS, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH, kVERSION_STRING, &
-                                  kREAL_NO_VAL, kINT_NO_VAL, kCHAR_NO_VAL
+    use icar_constants
     use mod_wrf_constants, only : piconst
     use options_types,     only : forcing_options_type, domain_options_type
     use io_routines,       only : check_file_exists, check_variable_present, io_getdims, io_getdimnames, io_newunit
@@ -31,7 +30,7 @@ module namelist_utils
 
     interface set_nml_var
         module procedure set_real_nml_var, set_integer_nml_var, set_logical_nml_var, set_char_nml_var, &
-            set_char_forcing_nml_var, set_char_domain_nml_var, set_real_list_nml_var
+            set_char_forcing_nml_var, set_char_domain_nml_var, set_real_list_nml_var, set_decode_phys_nml_var
     end interface
 
 contains
@@ -787,6 +786,71 @@ contains
 
     end subroutine set_char_nml_var
 
+    ! This subroutine works like set_char_nml_var, but decodes the strings
+    ! used as physics options into model constants, the mapping of which
+    ! is supplied by get_nml_var_mapping
+    subroutine set_decode_phys_nml_var(var, var_val, name, usr_default)
+        implicit none
+        integer,   intent(out) :: var
+        character(len=*),    intent(in) :: var_val
+        character(len=*), intent(in) :: name
+        character(len=*), optional, intent(in) :: usr_default
+
+        character(len=kMAX_STRING_LENGTH) :: default, tmp_val
+        character(len=kMAX_NAME_LENGTH), allocatable :: mapping(:)
+        
+        integer :: i, mapped_val, default_val
+
+        if (present(usr_default)) then
+            call set_char_nml_var(tmp_val, var_val, name, usr_default)
+        else
+            call set_char_nml_var(tmp_val, var_val, name)
+        endif
+
+        !convert tmp_val to lowercase for case-insensitive matching
+        tmp_val = to_lower(trim(tmp_val))
+
+        ! check that value conforms to the rules for the nml option type
+        if (present(usr_default)) then
+            if (trim(usr_default) /= kCHAR_NO_VAL) then
+                call check_var_entry_type(usr_default,tmp_val,name)
+            else
+                default = trim(get_nml_var_default(name))
+
+                call check_var_entry_type(default,tmp_val,name)
+            endif
+        endif
+
+        mapping = get_nml_var_mapping(name)
+
+        ! check that mapping has an even number of entries
+        if (mod(size(mapping),2) /= 0) then
+            if (STD_OUT_PE) write(*,*) "DEVELOPER Error: mapping for namelist variable '", trim(name), "' does not have an even number of entries"
+            error stop
+        endif
+
+        ! get index of tmp_val in mapping
+        mapped_val = -1
+        do i = 1, size(mapping)
+            if (trim(tmp_val) == trim(to_lower(mapping(i)))) then
+                ! mapped values are stored at the index after the string values
+                ! cast to integer
+                read(mapping(i+1), *) mapped_val
+                exit
+            endif
+        end do
+
+        if (mapped_val == -1) then
+            if (STD_OUT_PE) write(*,*) "Error: '", trim(tmp_val), "' is not a valid option for '", trim(name), "'"
+            if (STD_OUT_PE) write(*,*) "Valid options are: ", mapping(1::2)
+            error stop
+        endif
+
+        var = mapped_val
+
+
+    end subroutine set_decode_phys_nml_var
+
     subroutine set_real_nml_var_default(var, name, info, gen_nml)
         implicit none
         real,    intent(inout) :: var
@@ -1130,6 +1194,22 @@ contains
 
     end function get_nml_var_values
 
+    function get_nml_var_mapping(name) result(mapping)
+        implicit none
+        character(len=*), intent(in) :: name
+
+        character(len=kMAX_STRING_LENGTH) :: group, default, description, units
+        character(len=1), allocatable :: dimensions(:)
+        real :: min, max
+        integer :: type
+        integer, allocatable :: values(:)
+        character(len=kMAX_NAME_LENGTH), allocatable :: mapping(:)
+        integer :: i
+
+        call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions,mapping)
+
+    end function get_nml_var_mapping
+
     function get_nml_var_default(name,info,gen_nml) result(default)
         implicit none
         character(len=*), intent(in) :: name
@@ -1444,7 +1524,7 @@ contains
     end subroutine write_nml_var_info
 
 
-    subroutine get_nml_var_metadata(name, group, description, default, min, max, type, values, units, dimensions)
+    subroutine get_nml_var_metadata(name, group, description, default, min, max, type, values, units, dimensions, mapping)
         implicit none
         character(len=*), intent(in) :: name
         character(len=*), intent(out) :: group, description, default, units
@@ -1452,6 +1532,7 @@ contains
         real,    intent(out) :: min, max
         integer, intent(out) :: type
         integer, allocatable, intent(out) :: values(:)
+        character(len=*), allocatable, optional, intent(out) :: mapping(:)
 
         group = ""
         description = ""
@@ -2282,101 +2363,111 @@ contains
             ! --------------------------------------
             case ("pbl")
                 description = "Planetary boundary layer scheme to use: "//achar(10)//BLNK_CHR_N// &
-                                                                       "0 = no PBL,"//achar(10)//BLNK_CHR_N// &
-                                                                       "1 = YSU PBL"
-                allocate(values(2))
-                values = [0, 1]
-                default = "0"
+                                                                       "'none' = no PBL,"//achar(10)//BLNK_CHR_N// &
+                                                                       "'ysu'  = YSU PBL"
+                default = "none"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "ysu", trim(str(kPBL_YSU))]
+                endif
                 group = "Physics"
             case ("lsm")
                 description = "Land surface model to use:"//achar(10)//BLNK_CHR_N// &
-                                                        "0 = no LSM,"//achar(10)//BLNK_CHR_N// &
-                                                        "1 = Fluxes from forcing data,"//achar(10)//BLNK_CHR_N// &
-                                                        "2 = Noah MP"
+                                                        "'none'   = no LSM,"//achar(10)//BLNK_CHR_N// &
+                                                        "'fluxes' = Fluxes from forcing data,"//achar(10)//BLNK_CHR_N// &
+                                                        "'noahmp' = Noah MP"
 
-                allocate(values(3))
-                values = [0, 1, 2]
-                default = "0"
+                default = "none"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kLSM_BASIC)), "noahmp", trim(str(kLSM_NOAHMP))]
+                endif
                 group = "Physics"
                 ! type = 1
             case ("rad")
                 description = "Radiation scheme to use: "//achar(10)//BLNK_CHR_N// &
-                                                       "0 = no RAD,"//achar(10)//BLNK_CHR_N// &
-                                                       "1 = Surface fluxes from forcing data"//achar(10)//BLNK_CHR_N// &
-                                                       "2 = cloud fraction based radiation + radiative cooling (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
-                                                       "3 = RRTMG"//achar(10)//BLNK_CHR_N// &
-                                                       "4 = RRTMGP"
+                                                       "'none'   = no RAD,"//achar(10)//BLNK_CHR_N// &
+                                                       "'fluxes' = Surface fluxes from forcing data"//achar(10)//BLNK_CHR_N// &
+                                                       "'simple' = cloud fraction based radiation + radiative cooling (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
+                                                       "'RRTMG'  = RRTMG"//achar(10)//BLNK_CHR_N// &
+                                                       "'RRTMGP' = RRTMGP"
 
-                allocate(values(5))
-                values = [0, 1, 2, 3, 4]
-                default = "0"
+                default = "none"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kRA_BASIC)), "simple", trim(str(kRA_SIMPLE)), "RRTMG", trim(str(kRA_RRTMG)), "RRTMGP", trim(str(kRA_RRTMGP))]
+                endif
                 group = "Physics"
             case ("conv")
                 description = "Cumulus scheme to use: "//achar(10)//BLNK_CHR_N// &
-                                                     "0 = no CONV,"//achar(10)//BLNK_CHR_N// &
-                                                     "1 = Tiedke scheme"//achar(10)//BLNK_CHR_N// &
-                                                     "2 = NSAS scheme"//achar(10)//BLNK_CHR_N// &
-                                                     "3 = BMJ scheme"
-                allocate(values(4))
-                values = [0, 1, 2, 3]
-                default = "0"
+                                                     "'none'   = no CONV,"//achar(10)//BLNK_CHR_N// &
+                                                     "'Tiedke' = Tiedke scheme"//achar(10)//BLNK_CHR_N// &
+                                                     "'NSAS'   = NSAS scheme"//achar(10)//BLNK_CHR_N// &
+                                                     "'BMJ'    = BMJ scheme"
+                default = "none"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "tiedke", trim(str(kCU_TIEDTKE)), "nsas", trim(str(kCU_NSAS)), "bmj", trim(str(kCU_BMJ))]
+                endif
                 group = "Physics"
             case ("mp")
                 description = "Microphysics scheme to use: "//achar(10)//BLNK_CHR_N// &
-                                                          "0 = no MP,"//achar(10)//BLNK_CHR_N// &
-                                                          "1 = Thompson et al (2008),"//achar(10)//BLNK_CHR_N// &
-                                                          "2 = 'Linear' microphysics (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
-                                                          "3 = Morrison"//achar(10)//BLNK_CHR_N// &
-                                                          "4 = WSM6 (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
-                                                          "5 = Thompson Aerosol (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
-                                                          "6 = WSM3 (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
-                                                          "7 = ISHMAEL"
-                allocate(values(8))
-                values = [0, 1, 2, 3, 4, 5, 6, 7]
-                default = "0"
+                                                          "'none'             = no MP,"//achar(10)//BLNK_CHR_N// &
+                                                          "'Morrison'         = Morrison"//achar(10)//BLNK_CHR_N// &
+                                                          "'ISHMAEL'          = ISHMAEL,"//achar(10)//BLNK_CHR_N// &
+                                                          "'Thompson'         = Thompson et al (2008),"//achar(10)//BLNK_CHR_N// &
+                                                          "'Linear'           = 'Linear' microphysics (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
+                                                          "'WSM6'             = WSM6 (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
+                                                          "'Thompson Aerosol' = Thompson Aerosol (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
+                                                          "'WSM3'             = WSM3 (NOT SUPPORTED)"
+                default = "none"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "thompson", trim(str(kMP_THOMPSON)), "linear", trim(str(kMP_SB04)), "morrison", trim(str(kMP_MORRISON)), "wsm6", trim(str(kMP_WSM6)), "thompson_aerosol", trim(str(kMP_THOMP_AER)), "wsm3", trim(str(kMP_WSM3)), "ishmael", trim(str(kMP_ISHMAEL))]
+                endif
                 group = "Physics"
                 type = 1
             case ("water")
                 description = "Water model to use:  "//achar(10)//BLNK_CHR_N// &
-                                                   "0 = no open water fluxes,"//achar(10)//BLNK_CHR_N// &
-                                                   "1 = Simple fluxes (needs SST in forcing data)"//achar(10)//BLNK_CHR_N// &
-                                                   "2 = WRF's lake model (needs lake depth in hi-res data))"
-                allocate(values(3))
-                values = [0, 1, 2]
-                default = "0"
+                                                   "'none'   = no open water fluxes,"//achar(10)//BLNK_CHR_N// &
+                                                   "'simple' = Simple fluxes (uses SST in forcing data, otherwise SST=280°C)"//achar(10)//BLNK_CHR_N// &
+                                                   "'lake'   = WRF's lake model (needs lake depth in hi-res data))"
+                default = "none"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "simple", trim(str(kWATER_SIMPLE)), "lake", trim(str(kWATER_LAKE))]
+                endif
                 group = "Physics"
             case ("wind")
                 description = "Wind solver to use: "//achar(10)//BLNK_CHR_N// &
-                                                   "0 = no wind solver,"//achar(10)//BLNK_CHR_N// &
-                                                   "1 = Mass-conserving wind solver based on variational calculus technique, requires PETSc(cpu) or AMGX(gpu)"
-                allocate(values(2))
-                values = [0, 1]
-                default = "1"
+                                                   "'none'               = no wind solver,"//achar(10)//BLNK_CHR_N// &
+                                                   "'variational solver' = Mass-conserving wind solver based on variational calculus technique, requires PETSc(cpu) or AMGX(gpu)"
+                default = "variational solver"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "variational solver", trim(str(kITERATIVE_WINDS))]
+                endif
                 group = "Physics"
             case ("adv")
                 description = "Advection scheme to use:  "//achar(10)//BLNK_CHR_N// &
-                                                        "0 = no ADV,"//achar(10)//BLNK_CHR_N// &
-                                                        "1 = standard advection scheme"//achar(10)//BLNK_CHR_N// &
-                                                        "2 = MPDATA (NOT SUPPORTED)"
-                allocate(values(3))
-                values = [0, 1, 2]
-                default = "0"
+                                                        "'none'     = no ADV,"//achar(10)//BLNK_CHR_N// &
+                                                        "'standard' = standard advection scheme"//achar(10)//BLNK_CHR_N// &
+                                                        "'MPDATA'   = MPDATA (NOT SUPPORTED)"
+                default = "standard"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "standard", trim(str(kADV_STD)), "MPDATA", trim(str(kADV_MPDATA))]
+                endif
                 group = "Physics"
             case ("sfc")
                 description = "Surface model to use: "//achar(10)//BLNK_CHR_N// &
-                                                    "0 = no surface layer"//achar(10)//BLNK_CHR_N// &
-                                                    "1 = Revised MM5 Monin-Obukhov scheme"
-                allocate(values(2))
-                values = [0, 1]
-                default = "0"
+                                                    "'none'   = no surface layer"//achar(10)//BLNK_CHR_N// &
+                                                    "'RevMM5' = Revised MM5 Monin-Obukhov scheme"
+                default = "none"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "RevMM5", trim(str(kSFC_MM5REV))]
+                endif
                 group = "Physics"
             case ("sm")
                 description = "Snow model to use: "//achar(10)//BLNK_CHR_N// &
-                                                 "0 = no snow model"//achar(10)//BLNK_CHR_N// &
-                                                 "1 = FSM2trans snow model (must be compiled, see docs/compiling.md)"
-                allocate(values(2))
-                values = [0, 1]
-                default = "0"
+                                                 "'none'      = no snow model"//achar(10)//BLNK_CHR_N// &
+                                                 "'FSM2trans' = FSM2trans snow model (must be compiled, see docs/compiling.md)"
+                default = "none"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "FSM2trans", trim(str(kSM_FSM))]
+                endif
                 group = "Physics"
             ! --------------------------------------
             ! --------------------------------------

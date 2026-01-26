@@ -383,7 +383,7 @@ contains
         logical, intent(in), optional  :: read_nml, info_only, gen_nml
         integer :: name_unit, rc
         !variables to be used in the namelist
-        integer, dimension(kMAX_NESTS) :: pbl, lsm, mp, sfc, sm, water, rad, conv, adv, wind
+        character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: pbl, lsm, mp, sfc, sm, water, rad, conv, adv, wind
         logical :: print_info, gennml, read_namelist
         !define the namelist
         namelist /physics/ pbl, lsm, sfc, sm, water, mp, rad, conv, adv, wind
