@@ -160,7 +160,7 @@ else()
 		message(STATUS "Using Fortran compiler specified by the user in variable FC: ${FC}")
 	endif()
 	if (FC MATCHES "gfortran")
-		set(CMAKE_Fortran_COMPILER "gfortran")
+		set(CMAKE_Fortran_COMPILER "${FC}")
 		set(CMAKE_Fortran_COMPILER_ID "GNU")
 		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
 		set(COMPILER "gnu")
@@ -492,7 +492,8 @@ if (NETCDF_FOUND)
     # Check for parallel NetCDF support
     execute_process(COMMAND nc-config --has-parallel
                     OUTPUT_VARIABLE NETCDF_HAS_PARALLEL
-                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET)
     
     if(NETCDF_HAS_PARALLEL STREQUAL "yes")
         message(STATUS "NetCDF built with parallel support")
@@ -501,22 +502,29 @@ if (NETCDF_FOUND)
         message(STATUS "NetCDF built WITHOUT parallel support")
     endif()
     
-    # Get compiler and linker flags
-    execute_process(COMMAND nc-config --flibs 
-                    OUTPUT_VARIABLE NETCDF_FLAGS 
-                    OUTPUT_STRIP_TRAILING_WHITESPACE)
-    execute_process(COMMAND nc-config --fflags
-                    OUTPUT_VARIABLE NETCDF_FFLAGS
-                    OUTPUT_STRIP_TRAILING_WHITESPACE)
-    
-    # Use nf-config flags if available
-    # if(NETCDF_FLAGS MATCHES "-lnetcdff")
-    #     target_link_libraries(hicar_lib PUBLIC ${NETCDF_FLAGS})
-    #     # target_compile_options(hicar_lib PUBLIC ${NETCDF_FFLAGS})
-    # else()
-        # Fallback to FindNetCDF results
-        target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
-    # endif()
+	find_program(NF_CONFIG nf-config)
+	if(NF_CONFIG)
+		execute_process(COMMAND ${NF_CONFIG} --flibs 
+						OUTPUT_VARIABLE NETCDF_LIBRARIES 
+						OUTPUT_STRIP_TRAILING_WHITESPACE
+						ERROR_QUIET)
+		separate_arguments(NETCDF_LIBRARIES)
+
+		# Clean up any duplicate libraries and references to -lnetcdf
+		list(REMOVE_DUPLICATES NETCDF_LIBRARIES)
+		# clean references to base netcdf-c library
+		list(REMOVE_ITEM NETCDF_LIBRARIES -lnetcdf)
+
+		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
+		message(STATUS "NetCDF libraries (with dependencies): ${NETCDF_LIBRARIES}")
+	else()
+		message(WARNING "nf-config not found, falling back to manual dependency resolution")
+		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
+		find_package(HDF5 COMPONENTS C HL)
+		if(HDF5_FOUND)
+			target_link_libraries(hicar_lib PUBLIC ${HDF5_LIBRARIES})
+		endif()
+	endif()
     
     target_include_directories(hicar_lib PUBLIC ${NETCDF_INCLUDES})
 endif()
