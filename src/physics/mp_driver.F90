@@ -131,12 +131,6 @@ contains
                       kVARS%snowfall,    kVARS%precipitation,           kVARS%graupel,      kVARS%graupel_mass,     &
                       kVARS%dz, kVARS%re_cloud, kVARS%re_ice, kVARS%re_snow ])
 
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,  kVARS%rain_number, &
-                       kVARS%snow_mass,           kVARS%ice_mass,   &
-                       kVARS%rain_mass,           kVARS%ice_number, kVARS%graupel_mass   ] )
-
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &
                        [kVARS%pressure,     kVARS%potential_temperature,    kVARS%water_vapor,   &
@@ -161,12 +155,6 @@ contains
                       kVARS%snow_mass, kVARS%ice_mass,               kVARS%dz,                               &
                       kVARS%snowfall,    kVARS%precipitation,           kVARS%graupel,   kVARS%graupel_mass])
 
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,  &
-                       kVARS%snow_mass,           kVARS%ice_mass,   &
-                       kVARS%rain_mass,           kVARS%graupel_mass   ] )
-
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &
                        [kVARS%pressure,     kVARS%potential_temperature,    kVARS%water_vapor,   &
@@ -188,11 +176,6 @@ contains
                      [kVARS%pressure,    kVARS%potential_temperature,   kVARS%exner,        kVARS%density,      &
                       kVARS%water_vapor, kVARS%cloud_water_mass,             kVARS%rain_mass,                      &
                       kVARS%dz,          kVARS%snowfall,                kVARS%precipitation ])
-
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,  &
-                       kVARS%rain_mass ] )
 
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &
@@ -219,12 +202,6 @@ contains
                        kVARS%ice1_rho, kVARS%ice1_phi, kVARS%ice1_vmi, kVARS%ice2_rho, kVARS%ice2_phi, kVARS%ice2_vmi, &
 			kVARS%ice3_rho, kVARS%ice3_phi, kVARS%ice3_vmi  ])
 
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,  kVARS%rain_number, &
-                       kVARS%ice_mass,   kVARS%rain_mass,           kVARS%ice_number, kVARS%ice1_a, &
-                       kVARS%ice1_c, kVARS%ice2_mass, kVARS%ice2_number, kVARS%ice2_a, kVARS%ice2_c, &
-                       kVARS%ice3_mass, kVARS%ice3_number, kVARS%ice3_a, kVARS%ice3_c] )
 
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &
@@ -253,12 +230,6 @@ contains
                       kVARS%tend_qr, kVARS%tend_qs, kVARS%tend_qi, kVARS%dz,   &
                       kVARS%re_cloud, kVARS%re_ice, kVARS%re_snow, kVARS%ice1_vmi, kVARS%ice2_vmi    ])
 
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,  kVARS%rain_number, &
-                       kVARS%snow_mass,           kVARS%ice_mass,   &
-                       kVARS%rain_mass,           kVARS%ice_number, kVARS%graupel_mass, &
-                       kVARS%graupel_number, kVARS%snow_number] )
 
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &
@@ -285,11 +256,6 @@ contains
                      [kVARS%pressure,    kVARS%potential_temperature,   kVARS%exner,        kVARS%density,      &
                       kVARS%water_vapor, kVARS%cloud_water_mass,             kVARS%rain_mass,  kVARS%snow_mass,  &
                       kVARS%precipitation, kVARS%snowfall,              kVARS%dz])
-
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,   &
-                       kVARS%rain_mass,           kVARS%snow_mass   ] )
 
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &

@@ -61,8 +61,6 @@ contains
                          kVARS%chs, kVARS%chs2, kVARS%cqs2,                           &
                          kVARS%u, kVARS%v, kVARS%psim, kVARS%psih, kVARS%fm, kVARS%fh])
 
-             call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
-
              call options%restart_vars( &
                          [kVARS%water_vapor, kVARS%temperature, kVARS%potential_temperature, kVARS%surface_pressure, &
                          kVARS%dz_interface, kVARS%pressure,  kVARS%skin_temperature, &

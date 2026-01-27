@@ -132,8 +132,6 @@ contains
                          kVARS%snow_height, kVARS%lai, kVARS%temperature_2m_veg, kVARS%albedo, kVARS%lsm_last_snow,     &
                          kVARS%lsm_last_precip, kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%land_emissivity])
 
-             call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
-
              call options%restart_vars( &
                          [kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature,       &
                          kVARS%density, kVARS%pressure_interface, kVARS%shortwave, kVARS%lsm_last_snow, kVARS%lsm_last_precip,   &
@@ -196,8 +194,6 @@ contains
                          kVARS%snicar_dust1_conc, kVARS%snicar_dust2_conc, kVARS%snicar_dust3_conc, kVARS%snicar_dust4_conc, kVARS%snicar_dust5_conc, &
                          kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%land_emissivity])
 
-             call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
-
              call options%restart_vars( &
                          [kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature,       &
                          kVARS%density, kVARS%pressure_interface, kVARS%shortwave,  kVARS%hpbl, kVARS%land_emissivity,  &
@@ -241,10 +237,6 @@ contains
                          kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%Nsnow,   &
                          kVARS%shd, kVARS%meltflux_out_tstep, kVARS%Sliq_out, &
                          kVARS%windspd_10m, kVARS%dSWE_salt, kVARS%dSWE_susp, kVARS%dSWE_subl, kVARS%dSWE_slide])
-
-             call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
-
-             call options%exch_vars([kVARS%Ds, kVARS%Nsnow, kVARS%fsnow, kVARS%Sice, kVARS%Sliq, kVARS%snow_temperature])
              
              call options%restart_vars( &
                          [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
@@ -265,8 +257,6 @@ contains
                          kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2,                                            &
                          kVARS%humidity_2m, kVARS%temperature_2m, kVARS%skin_temperature, kVARS%u_10m, kVARS%v_10m])
 
-             call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
-
              call options%restart_vars( &
                          [kVARS%sst, kVARS%potential_temperature, kVARS%water_vapor, kVARS%skin_temperature,        &
                          kVARS%surface_pressure, kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m,  &
@@ -285,8 +275,6 @@ contains
             kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%land_emissivity, kVARS%xice, kVARS%lsm_last_precip, &
             kVARS%tksatu3d, kVARS%tkdry3d, kVARS%snl2d, kVARS%t_grnd2d,  kVARS%savedtke12d, kVARS%lakedepth2d,      & !  kVARS%snowdp2d, kVARS%h2osno2d,
             kVARS%lake_icefrac3d, kVARS%z_lake3d,kVARS%water_vapor, kVARS%potential_temperature     ])
-
-            ! call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
 
             call options%restart_vars( &
             [kVARS%lake_depth,kVARS%veg_type,kVARS%soil_type, kVARS%land_mask,kVARS%terrain,                        &

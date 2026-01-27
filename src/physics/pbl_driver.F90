@@ -58,21 +58,6 @@ contains
         implicit none
         type(options_t),intent(inout) :: options
 
-        !if (options%physics%landsurface == kPBL_SIMPLE) then
-        !    call options%alloc_vars( &
-        !                 [kVARS%water_vapor, kVARS%potential_temperature, &
-        !                 kVARS%cloud_water_mass, kVARS%ice_mass,              &
-        !                 kVARS%rain_mass, kVARS%snow_mass,            &
-        !                 kVARS%exner, kVARS%dz_interface, kVARS%density,  &
-        !                 kVARS%u, kVARS%v, kVARS%land_mask])
-!
-        !     call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
-!
-        !     call options%restart_vars( &
-        !                 [kVARS%water_vapor, kVARS%potential_temperature, &
-        !                 kVARS%exner, kVARS%dz_interface, kVARS%density,  &
-        !                 kVARS%u, kVARS%v, kVARS%land_mask])
-        !endif
         if (options%physics%boundarylayer==kPBL_YSU) then
 
             call options%alloc_vars( &
@@ -87,7 +72,6 @@ contains
                          kVARS%fm, kVARS%fh, kVARS%QFX, kVARS%br,                                          &
                          kVARS%land_mask, kVARS%cloud_water_mass, kVARS%coeff_heat_exchange_3d, kVARS%coeff_momentum_exchange_3d, kVARS%hpbl ]) !kVARS%tend_qv_adv,kVARS%tend_qv, kVARS%tend_qs, kVARS%tend_qr,, kVARS%u_mass, kVARS%v_mass,
 !           kVARS%coeff_momentum_drag, ??
-             call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor, kVARS%ice_mass, kVARS%cloud_water_mass]) !??
 
              call options%restart_vars( &
                         [kVARS%water_vapor, kVARS%potential_temperature, kVARS%temperature,                &

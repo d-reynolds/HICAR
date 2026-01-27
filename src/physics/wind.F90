@@ -53,11 +53,6 @@ contains
                             kVARS%u,           kVARS%v,                       kVARS%w,                &
                             kVARS%dz, kVARS%global_terrain])
 
-        ! List the variables that are required to be advected
-        ! call options%advect_vars( &
-        !               [, &
-        !                , &
-        !                ] )
 
         ! List the variables that are required for restarts with the linear wind solution
         call options%restart_vars( &
@@ -89,7 +84,6 @@ contains
         
         if (options%wind%thermal) then
             call options%alloc_vars([kVARS%potential_temperature, kVARS%skin_temperature])
-            call options%exch_vars([kVARS%skin_temperature])
             
             call options%restart_vars([kVARS%potential_temperature, kVARS%skin_temperature])
         endif

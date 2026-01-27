@@ -346,10 +346,6 @@ contains
                      [kVARS%pressure,    kVARS%potential_temperature,   kVARS%exner,        kVARS%cloud_fraction,   &
                       kVARS%shortwave,   kVARS%longwave, kVARS%cosine_zenith_angle])
 
-        ! List the variables that are required to be advected for the simple radiation code
-        call options%advect_vars( &
-                      [kVARS%potential_temperature] )
-
         ! List the variables that are required when restarting for the simple radiation code
         call options%restart_vars( &
                        [kVARS%pressure,     kVARS%potential_temperature, kVARS%shortwave,   kVARS%longwave, kVARS%cloud_fraction, kVARS%cosine_zenith_angle] )

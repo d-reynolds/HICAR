@@ -291,7 +291,7 @@ contains
         type(options_t), intent(in)    :: options
 
         type(meta_data_t) :: tmp_var
-        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(22), kEXCH_VARS(7)
+        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(22), kEXCH_VARS(8)
         
         kADV_VARS = (/kVARS%potential_temperature,&
                       kVARS%water_vapor,&
@@ -316,20 +316,14 @@ contains
                       kVARS%ice3_a,&
                       kVARS%ice3_c/)
 
-        kEXCH_VARS = (/0,&
-                       0,&
-                       0,&
-                       0,&
-                       0,&
-                       0,&
-                       0/)
-        ! kEXCH_VARS = (/"hfss ",&
-        !                "tsfe ",&
-        !                "Ds   ",&
-        !                "scfe ",&
-        !                "Sice ",&
-        !                "Sliq ",&
-        !                "Nsnow"/)
+        kEXCH_VARS = (/kVARS%sensible_heat,&
+                       kVARS%skin_temperature,&
+                       kVARS%Ds,&
+                       kVARS%fsnow,&
+                       kVARS%Sice,&
+                       kVARS%Sliq,&
+                       kVARS%Tsnow,&
+                       kVARS%Nsnow/)
 
         !Advection variables -- these are exchanged AND advected
         n_vars = 0
@@ -355,7 +349,6 @@ contains
 
         n_vars = 0
         do i = 1, size(kEXCH_VARS)
-            if (kEXCH_VARS(i)==0) cycle
             var_indx = kEXCH_VARS(i)
             if (var_indx > 0) then
                 if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
@@ -365,7 +358,6 @@ contains
         n_vars = 0
 
         do i = 1, size(kEXCH_VARS)
-            if (kEXCH_VARS(i)==0) cycle
             var_indx = kEXCH_VARS(i)
             if (var_indx > 0) then
                 if (this%var_indx(var_indx)%v > 0) then

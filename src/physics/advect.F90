@@ -72,8 +72,6 @@ contains
         call options%alloc_vars( &
                         [kVARS%u,    kVARS%v,   kVARS%w,     kVARS%dz_interface, kVARS%water_vapor])
 
-        call options%advect_vars([kVARS%water_vapor, kVARS%potential_temperature])
-
         ! List the variables that are required for restarts with adv4 advection
         call options%restart_vars( &
                         [kVARS%u,    kVARS%v,   kVARS%w,     kVARS%dz_interface, kVARS%water_vapor])

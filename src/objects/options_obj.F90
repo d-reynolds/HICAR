@@ -2580,61 +2580,6 @@ contains
 
 
     !> -------------------------------
-    !! Add a set of variable(s) to the internal list of variables to be advected
-    !!
-    !! Sets error /= 0 if an error occurs in add_to_varlist
-    !!
-    !! -------------------------------
-    module subroutine advect_vars(this, input_vars, var_idx, error)
-        class(options_t),  intent(inout):: this
-        integer, optional, intent(in)  :: input_vars(:)
-        integer, optional, intent(in)  :: var_idx
-        integer, optional, intent(out) :: error
-
-        integer :: ierr
-
-        ierr=0
-        if (present(var_idx)) then
-            call add_to_varlist(this%vars_to_advect,[var_idx], ierr)
-        endif
-
-        if (present(input_vars)) then
-            call add_to_varlist(this%vars_to_advect,input_vars, ierr)
-        endif
-
-        if (present(error)) error=ierr
-
-    end subroutine
-
-    !> -------------------------------
-    !! Add a set of variable(s) to the internal list of variables to be exchanged-only
-    !!
-    !! Sets error /= 0 if an error occurs in add_to_varlist
-    !!
-    !! -------------------------------
-    module subroutine exch_vars(this, input_vars, var_idx, error)
-        class(options_t),  intent(inout):: this
-        integer, optional, intent(in)  :: input_vars(:)
-        integer, optional, intent(in)  :: var_idx
-        integer, optional, intent(out) :: error
-
-        integer :: ierr
-
-        ierr=0
-        if (present(var_idx)) then
-            call add_to_varlist(this%vars_to_exch,[var_idx], ierr)
-        endif
-
-        if (present(input_vars)) then
-            call add_to_varlist(this%vars_to_exch,input_vars, ierr)
-        endif
-
-        if (present(error)) error=ierr
-
-    end subroutine
-
-
-    !> -------------------------------
     !! Check the version number in the namelist file and compare to the current model version
     !!
     !! If the namelist version doesn't match, print the differences between that version and this
