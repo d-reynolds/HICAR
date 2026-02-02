@@ -31,6 +31,7 @@ module surface_layer
     use mod_wrf_constants,   only : KARMAN, gravity, cp, R_d, rcp, EP_1, EP_2, SVPT0, SVP1, SVP2, SVP3, EOMEG, STBOLT, p1000mb, XLV
     use ieee_arithmetic ! for debugging
     use icar_constants
+    use mod_atm_utilities, only : calc_Richardson_nr
 
     implicit none
     real,allocatable, dimension(:,:)    ::  windspd, gz1oz0, th2d, regime, flhc, flqc, &
@@ -268,9 +269,51 @@ contains
                ,iz0tlnd=options%sfc%iz0tlnd    &
                ,isftcflx=options%sfc%isftcflx  &
                ,scm_force_flux=options%sfc%scm_force_flux)
-                                             
+            
+            else if (options%physics%surfacelayer==0 .and. (options%physics%landsurface > 0 .or. options%physics%watersurface > 0)) then
+                call calc_exchange_coefficient(domain)
             endif
+
     end subroutine sfc
+
+    ! --------------------------------------------------
+    ! Quick and dirty implementation of exchange coefficient calculation
+    ! DR -- Moved from lsm_driver to here for modularity Jan 2026
+    ! --------------------------------------------------
+    subroutine calc_exchange_coefficient(domain)
+        implicit none
+        type(domain_t),  intent(inout)  :: domain
+        
+        real, dimension(ims:ime,jms:jme)  :: lnz_atm_term, base_exchange_term, windspd, Ri, z_atm
+        real, parameter :: MAX_EXCHANGE_C = 0.5
+        real, parameter :: MIN_EXCHANGE_C = 0.004
+
+        windspd = sqrt(domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d**2 + domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d**2)
+        where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
+
+        z_atm = domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(:,kts,:) - domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d
+
+        lnz_atm_term = log((z_atm+domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)/domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)
+        base_exchange_term=(75*karman**2 * sqrt((z_atm+domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)/domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)) / (lnz_atm_term**2)
+        lnz_atm_term=(karman/lnz_atm_term)**2
+
+        ! Ri now is a function in atm_utlilities:
+        call calc_Richardson_nr(Ri, domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d, &
+                                domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                                z_atm, &
+                                windspd)
+
+        !  "Surface Richardson number"
+        where(Ri<0)  domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d = lnz_atm_term * (1.0-(15.0*Ri)/(1.0+(base_exchange_term * sqrt((-1.0)*Ri))))
+        where(Ri>=0) domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d = lnz_atm_term * 1.0/((1.0+15.0*Ri)*sqrt(1.0+5.0*Ri))
+
+        where(domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d > MAX_EXCHANGE_C) domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d=MAX_EXCHANGE_C
+        where(domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d < MIN_EXCHANGE_C) domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d=MIN_EXCHANGE_C
+
+        domain%vars_2d(domain%var_indx(kVARS%chs2)%v)%data_2d = domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d
+        domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d = domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d
+
+    end subroutine calc_exchange_coefficient
 
    subroutine sfc_finalize(options)
        implicit none

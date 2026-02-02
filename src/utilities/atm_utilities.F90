@@ -9,7 +9,7 @@
 !!
 !!----------------------------------------------------------
 module mod_atm_utilities
-    use mod_wrf_constants,   only : piconst, DEGRAD, gravity, R_d, R_v, cp, XLV
+    use mod_wrf_constants,   only : piconst, DEGRAD, gravity, R_d, R_v, cp, XLV, epsilon
     ! use data_structures
     use options_interface,  only : options_t
     use time_object,        only : Time_type
@@ -1230,7 +1230,7 @@ contains
         REAL, DIMENSION(:,:), INTENT(IN):: tskin, wind_2d, z_atm
         ! ! Richardson number (from lsm driver)
         ! where(wind_2d==0) wind_2d=1e-5
-        Ri = gravity/airt_3d(:,1,:) * (airt_3d(:,1,:)-tskin)*z_atm/(wind_2d**2)
+        Ri = gravity/airt_3d(:,1,:) * (airt_3d(:,1,:)-tskin)*z_atm/(wind_2d**2+epsilon)
     end subroutine calc_Richardson_nr
 
 
