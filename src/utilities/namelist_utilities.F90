@@ -2463,10 +2463,11 @@ contains
             case ("sm")
                 description = "Snow model to use: "//achar(10)//BLNK_CHR_N// &
                                                  "'none'      = no snow model"//achar(10)//BLNK_CHR_N// &
+                                                 "'snowpack'  = SNOWPACK snow model"//achar(10)//BLNK_CHR_N// &
                                                  "'FSM2trans' = FSM2trans snow model (must be compiled, see docs/compiling.md)"
                 default = "none"
                 if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "FSM2trans", trim(str(kSM_FSM))]
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "snowpack", trim(str(kSM_SNOWPACK)), "FSM2trans", trim(str(kSM_FSM))]
                 endif
                 group = "Physics"
             ! --------------------------------------
@@ -3495,7 +3496,41 @@ contains
                 description = "option to read aerosol deposition fluxes from table (on) or NetCDF forcing file (off)"
                 default = ".True."
                 group = "SM_Parameters"
-
+            case("snowpack_atmospheric_stability")
+                description = "which atmospheric stability calculation method to use in SnowPack model"//achar(10)//BLNK_CHR_N// &
+                    "'MO_HOLTSLAG' = Holtslag and DeBruin (1988). Should be better than MO_MICHLMAYR during melt periods"//achar(10)//BLNK_CHR_N// &
+                    "'MO_MICHLMAYR' = Stearns and Weidner (1993) modified by Michlmayr (2008)"
+                default = "MO_HOLTSLAG"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "MO_HOLTSLAG", trim(str(kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG)), "MO_MICHLMAYR", trim(str(kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR))]
+                endif
+                group = "SM_Parameters"
+            case("snowpack_albedo_parameterization")
+                description = "which albedo parameterization to use in SnowPack model"//achar(10)//BLNK_CHR_N// &
+                    "'LEHNING_2' = default SnowPack albedo parameterization"//achar(10)//BLNK_CHR_N// &
+                    "'SCHMUCKI_OGS' = from SCHMUCKI_ALLX32 regression with optical grain size"
+                default = "LEHNING_2"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "LEHNING_2", trim(str(kSNOWPACK_ALBEDO_PARAM_LEHNING_2)), "SCHMUCKI_OGS", trim(str(kSNOWPACK_ALBEDO_PARAM_SCHMUCKI_OGS))]
+                endif
+                group = "SM_Parameters"
+            case("snowpack_enable_vapour_transport")
+                description = "Enable mass transport by vapour flow (default: FALSE). See https://doi.org/10.3389/feart.2020.00249 Jafari et al. (2020) for details"
+                default = ".False."
+                group = "SM_Parameters"
+            case("snowpack_variant")
+                description = "which SnowPack model variant to use"//achar(10)//BLNK_CHR_N// &
+                    "'antarctica' = SnowPack model suited for Antarctica simulations"//achar(10)//BLNK_CHR_N// &
+                    "'alps' = SnowPack model suited for Alps simulations"
+                if (present(mapping)) then
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "antarctica", trim(str(kSNOWPACK_VARIANT_ANTARCTICA)), "alps", trim(str(kSNOWPACK_VARIANT_ALPS))]
+                endif
+                default = "none"
+                group = "SM_Parameters"
+            case("snowpack_reduce_n_elements")
+                description = "Enable more 'aggressive' combining for layers deeper in the snowpack"
+                default = ".False."
+                group = "SM_Parameters"
             ! --------------------------------------
             ! --------------------------------------
             ! Radiation parameters namelist variables

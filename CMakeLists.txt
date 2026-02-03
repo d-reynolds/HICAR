@@ -41,6 +41,17 @@ if (NOT DEFINED FSM_DIR OR FSM_DIR STREQUAL "")
 	set(FSM_DIR $ENV{FSM_DIR} CACHE PATH "Path to the compiled FSM installation (root directory of the lib and build directories)")
 endif()
 
+if (NOT DEFINED SNOWPACK_DIR OR SNOWPACK_DIR STREQUAL "")
+	set(SNOWPACK_DIR $ENV{SNOWPACK_DIR} CACHE PATH "Path to the compiled SNOWPACK installation (root directory of the lib and include directories)")
+endif()
+if (NOT DEFINED METEOIO_DIR OR METEOIO_DIR STREQUAL "")
+	set(METEOIO_DIR $ENV{METEOIO_DIR} CACHE PATH "Path to the compiled MeteoIO installation (root directory of the lib and include directories)")
+endif()
+
+if (NOT $ENV{NOAHMP_LIBRARY} STREQUAL "")
+	set(NOAHMP_LIBRARY $ENV{NOAHMP_LIBRARY} CACHE PATH "Path to the Noah-MP source directory")
+endif()
+
 if (NOT DEFINED MPICH_DIR AND DEFINED ENV{MPICH_DIR})
     set(MPI_DIR $ENV{MPICH_DIR} CACHE STRING "Path to MPI directory" FORCE)
 endif()
@@ -55,6 +66,7 @@ endif()
 
 option(ASSERTIONS "Check logical assertions at runtime" ON)
 option(FSM "Link to the FSM2 snow model, requires separate compilation of the FSM2 model" ON)
+option(SNOWPACK "Link to the SNOWPACK snow model, requires separate compilation of the SNOWPACK model" ON)
 option(OPENACC "Enable OpenACC support for GPU acceleration" OFF)
 option(SRUN_FLAGS "srun flags to use for running the test cases" "")
 #########################################
@@ -96,7 +108,6 @@ endif()
 #-DFSM -- controls compilation of FSM2 driver and linking to the FSM2 library
 IF (FSM AND IS_DIRECTORY ${FSM_DIR}/lib AND
 			IS_DIRECTORY ${FSM_DIR}/build)
-	add_definitions(-DFSM)
 elseif(FSM AND NOT (IS_DIRECTORY ${FSM_DIR}/lib AND
 					IS_DIRECTORY ${FSM_DIR}/build))
 	message(WARNING "FSM2 not found, disabling FSM2 support.\nTo enable, set the FSM_DIR variable to the root directory of the FSM2 install (i.e. the directory which contains the 'lib' and 'build' subdirectories).")
@@ -280,8 +291,8 @@ include(GNUInstallDirs)
 set(PETSC "${PETSC_DIR}/${PETSC_ARCH}")
 set(ENV{PKG_CONFIG_PATH} "$ENV{PKG_CONFIG_PATH}:${PETSC}/lib/pkgconfig")
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${PETSC} ${AMGX_DIR} ${FFTW_DIR} ${NETCDF_DIR}  ${MPI_DIR} ${FSM_DIR})
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${PETSC}/lib/pkgconfig/" ${AMGX_DIR} ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR})
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${PETSC} ${AMGX_DIR} ${FFTW_DIR} ${NETCDF_DIR}  ${MPI_DIR} ${FSM_DIR} ${SNOWPACK_DIR})
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${PETSC}/lib/pkgconfig/" ${AMGX_DIR} ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR} ${SNOWPACK_DIR})
 
 find_package(PkgConfig REQUIRED)
 include(FetchContent)
@@ -300,6 +311,9 @@ find_package(MPI REQUIRED)
 find_package(OpenMP)
 find_package(FFTW REQUIRED)
 find_package(NetCDF REQUIRED)
+if (SNOWPACK)
+	find_package(SNOWPACK REQUIRED)
+endif()
 
 #########################################################
 ############# Declare all content used ##################
@@ -325,8 +339,7 @@ FetchContent_Declare(
 FetchContent_Declare(
 	noah_mp
 	GIT_REPOSITORY    https://github.com/d-reynolds/noahmp.git
-	GIT_TAG           OpenACC
-	GIT_SHALLOW       TRUE
+	GIT_TAG           92862dbfd431f94b408bd047f8a8aacd343c9f52
 )
 
 # Fetch specific folders from icar_supporting_files repo
@@ -429,23 +442,27 @@ if(NOT AMGX_LIBRARY)
 endif()
 #########################################################
 
-# Now fetch Noah-MP repo
-message(STATUS "Fetching External Noah-MP library...")
 
-FetchContent_MakeAvailable(noah_mp)
+if (NOT DEFINED NOAHMP_LIBRARY)
+	# Now fetch Noah-MP repo
+	message(STATUS "Fetching External Noah-MP library...")
 
-# Use the predefined HICAR compiler flags
-message(STATUS "Using compiler flags for Noah-MP: ${CMAKE_Fortran_FLAGS}")
+	FetchContent_MakeAvailable(noah_mp)
 
-# Add the noah_mp subdirectory with configured options
-if(NOT TARGET noahmp)
-	add_subdirectory(${noah_mp_SOURCE_DIR}/drivers/hicar ${noah_mp_BINARY_DIR} EXCLUDE_FROM_ALL)
+	# Use the predefined HICAR compiler flags
+	message(STATUS "Using compiler flags for Noah-MP: ${CMAKE_Fortran_FLAGS}")
+
+	# Add the noah_mp subdirectory with configured options
+	if(NOT TARGET noahmp)
+		add_subdirectory(${noah_mp_SOURCE_DIR}/drivers/hicar ${noah_mp_BINARY_DIR} EXCLUDE_FROM_ALL)
+	endif()
+
+	# copy NoahmpTable.TBL from the ${noah_mp_SOURCE_DIR}/parameters into the run directory
+	file(COPY ${noah_mp_SOURCE_DIR}/parameters/NoahmpTable.TBL DESTINATION ${PROJECT_SOURCE_DIR}/run)
+	message(STATUS "Noah-MP library configured successfully")
+else()
+	message(STATUS "Using precompiled Noah-MP library specified by NOAHMP_LIBRARY environment variable: ${NOAHMP_LIBRARY}")
 endif()
-
-# copy NoahmpTable.TBL from the ${noah_mp_SOURCE_DIR}/parameters into the run directory
-file(COPY ${noah_mp_SOURCE_DIR}/parameters/NoahmpTable.TBL DESTINATION ${PROJECT_SOURCE_DIR}/run)
-
-message(STATUS "Noah-MP library configured successfully")
 
 
 ###########################################################
@@ -513,7 +530,7 @@ if (NETCDF_FOUND)
 		# Clean up any duplicate libraries and references to -lnetcdf
 		list(REMOVE_DUPLICATES NETCDF_LIBRARIES)
 		# clean references to base netcdf-c library
-		list(REMOVE_ITEM NETCDF_LIBRARIES -lnetcdf)
+		# list(REMOVE_ITEM NETCDF_LIBRARIES -lnetcdf)
 
 		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
 		message(STATUS "NetCDF libraries (with dependencies): ${NETCDF_LIBRARIES}")
@@ -534,8 +551,29 @@ if (FSM)
 	find_library(FSM2_LIB NAMES FSM2 REQUIRED)
 	target_include_directories(hicar_lib PUBLIC ${FSM_DIR}/build)
 	target_link_libraries(hicar_lib PUBLIC ${FSM2_LIB})
+	add_definitions(-DFSM)
 endif()
 
+if(SNOWPACK_FOUND)
+    # If SNOWPACK should be built from source, add dependency
+    if(BUILD_SNOWPACK_FROM_SOURCE)
+        add_dependencies(hicar_lib SNOWPACK)
+    endif()
+    
+	# Set RPATH to find SNOWPACK and MeteoIO libraries at runtime
+	# Use BUILD_WITH_INSTALL_RPATH to avoid install_name_tool errors on macOS
+	set_target_properties(HICAR PROPERTIES
+		INSTALL_RPATH "${SNOWPACK_DIR}/lib;${METEOIO_DIR}/lib"
+		BUILD_WITH_INSTALL_RPATH TRUE
+	)
+
+    # Link SNOWPACK and MeteoIO libraries
+    target_link_libraries(hicar_lib PUBLIC ${SNOWPACK_FORTRAN_LIBRARY} ${SNOWPACK_LIBRARY} ${METEOIO_LIBRARY})
+    target_include_directories(hicar_lib PUBLIC ${SNOWPACK_INCLUDE_DIR})
+    
+	add_definitions(-DSNOWPACK)
+    message(STATUS "SNOWPACK support enabled")
+endif()
 if (OpenACC_Fortran_FOUND AND OPENACC)
 	target_link_libraries(hicar_lib PUBLIC OpenACC::OpenACC_Fortran)
 	
@@ -553,8 +591,12 @@ target_include_directories(hicar_lib PUBLIC ${MPI_INCLUDE_DIR})
 target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
 # Link Noah-MP(Required) to hicar_lib 
-target_link_libraries(hicar_lib PUBLIC noahmp)
-
+if(NOT DEFINED NOAHMP_LIBRARY)
+		target_link_libraries(hicar_lib PUBLIC noahmp)
+else()
+		target_link_libraries(hicar_lib PUBLIC ${NOAHMP_LIBRARY})
+		target_include_directories(hicar_lib PUBLIC $ENV{NOAHMP_INCLUDES})
+endif()
 # link the hicar_lib library to the HICAR executable
 target_link_libraries(HICAR PUBLIC hicar_lib)
 ###########################################################
@@ -675,6 +717,11 @@ if (FSM)
 else()
 	message(STATUS "  FSM:    Not Used")
 endif()
+if (SNOWPACK)
+	message(STATUS "  SNOWPACK:    ${SNOWPACK_DIR}")
+else()
+	message(STATUS "  SNOWPACK:    Not Used")
+endif()
 if (OPENACC AND OpenACC_Fortran_FOUND)
 	message(STATUS "  OpenACC: Enabled")
 	if(TARGET rte-rrtmgp::rte AND TARGET rte-rrtmgp::rrtmgp)
@@ -714,8 +761,6 @@ install(TARGETS HICAR  DESTINATION  ${CMAKE_INSTALL_EXEDIR})
 #install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/build DESTINATION ${CMAKE_Fortran_MODULE_DIRECTORY}) 
 #install(PROGRAMS ${modeFiles} DESTINATION ${CMAKE_Fortran_MODULE_DIRECTORY}/sec) # not working
     
-#add_executable(test_FSM_interface test/test_FSM_interface.f90)
-#target_link_libraries(test_FSM_interface FSM_interface ${PROJECT_LINK_LIBS})
 
 ADD_CUSTOM_TARGET( distclean make clean
 				   COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/CMakeFiles

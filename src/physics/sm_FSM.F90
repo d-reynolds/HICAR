@@ -1,7 +1,7 @@
 
 !!
 !!----------------------------------------------------------
-module module_sf_FSMdrv
+module module_sm_FSMdrv
     use time_object,         only : Time_type
     use mod_wrf_constants,   only : piconst, XLS
     use icar_constants
@@ -732,4 +732,4 @@ contains
 
 
 !!
-end module module_sf_FSMdrv
+end module module_sm_FSMdrv

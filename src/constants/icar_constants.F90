@@ -496,6 +496,7 @@ module icar_constants
     integer, parameter :: kLSM_NOAHMP    = 2
     
     integer, parameter :: kSM_FSM        = 1 !! MJ added
+    integer, parameter :: kSM_SNOWPACK   = 2
 
     integer, parameter :: kRA_BASIC      = 1
     integer, parameter :: kRA_SIMPLE     = 2
@@ -526,6 +527,16 @@ module icar_constants
     integer, parameter :: kLAKE_SOI_Z        = 4
     integer, parameter :: kLAKE_SOISNO_1_Z   = 10
 
+
+    ! SNOWPACK constants
+    integer, parameter :: kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG = 1
+    integer, parameter :: kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR = 2
+
+    integer, parameter :: kSNOWPACK_ALBEDO_PARAM_LEHNING_2 = 1
+    integer, parameter :: kSNOWPACK_ALBEDO_PARAM_SCHMUCKI_OGS = 2
+
+    integer, parameter :: kSNOWPACK_VARIANT_ANTARCTICA = 1
+    integer, parameter :: kSNOWPACK_VARIANT_ALPS      = 2
 
     ! mm of accumulated precip before "tipping" into the bucket
     ! only performed on output operations

@@ -1926,12 +1926,17 @@ contains
 
         integer, dimension(kMAX_NESTS) :: snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt
         logical, dimension(kMAX_NESTS) :: snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable
+
+        logical, dimension(kMAX_NESTS) :: snowpack_enable_vapour_transport
+        character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_variant
+        logical, dimension(kMAX_NESTS) :: snowpack_reduce_n_elements
         ! define the namelist
         namelist /sm_parameters/ fsm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
                                  fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst, &
                                  fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn, &
                                  snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt, &
-                                 snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable
+                                 snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable, &
+                                 snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_reduce_n_elements, snowpack_variant, snowpack_enable_vapour_transport
                                  
 
         CHARACTER(LEN=200) :: error_msg
@@ -1973,6 +1978,11 @@ contains
         call set_nml_var_default(snicar_use_oc, 'snicar_use_oc', print_info, gennml)
         call set_nml_var_default(snicar_aerosol_readtable, 'snicar_aerosol_readtable', print_info, gennml)
 
+        call set_nml_var_default(snowpack_albedo_parameterization, 'snowpack_albedo_parameterization', print_info, gennml)
+        call set_nml_var_default(snowpack_atmospheric_stability, 'snowpack_atmospheric_stability', print_info, gennml)
+        call set_nml_var_default(snowpack_reduce_n_elements, 'snowpack_reduce_n_elements', print_info, gennml)
+        call set_nml_var_default(snowpack_variant, 'snowpack_variant', print_info, gennml)
+        call set_nml_var_default(snowpack_enable_vapour_transport, 'snowpack_enable_vapour_transport', print_info, gennml)
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
 
@@ -1991,6 +2001,8 @@ contains
             snicar_snowdust_intmix(n_indx) = snicar_snowdust_intmix(1)
             snicar_use_oc(n_indx) = snicar_use_oc(1)
             snicar_aerosol_readtable(n_indx) = snicar_aerosol_readtable(1)
+            snowpack_enable_vapour_transport(n_indx) = snowpack_enable_vapour_transport(1)
+            snowpack_reduce_n_elements(n_indx) = snowpack_reduce_n_elements(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             ! read the namelist options
             open(io_newunit(name_unit), file=filename)
@@ -2034,6 +2046,12 @@ contains
         call set_nml_var(sm_options%snicar_snowdust_intmix, snicar_snowdust_intmix(n_indx), 'snicar_snowdust_intmix')
         call set_nml_var(sm_options%snicar_use_oc, snicar_use_oc(n_indx), 'snicar_use_oc')
         call set_nml_var(sm_options%snicar_aerosol_readtable, snicar_aerosol_readtable(n_indx), 'snicar_aerosol_readtable')
+
+        call set_nml_var(sm_options%snowpack_albedo_parameterization, snowpack_albedo_parameterization(n_indx), 'snowpack_albedo_parameterization', snowpack_albedo_parameterization(1))
+        call set_nml_var(sm_options%snowpack_atmospheric_stability, snowpack_atmospheric_stability(n_indx), 'snowpack_atmospheric_stability', snowpack_atmospheric_stability(1))
+        call set_nml_var(sm_options%snowpack_reduce_n_elements, snowpack_reduce_n_elements(n_indx), 'snowpack_reduce_n_elements', snowpack_reduce_n_elements(1))
+        call set_nml_var(sm_options%snowpack_variant, snowpack_variant(n_indx), 'snowpack_variant', snowpack_variant(1))
+        call set_nml_var(sm_options%snowpack_enable_vapour_transport, snowpack_enable_vapour_transport(n_indx), 'snowpack_enable_vapour_transport')
         
     end subroutine sm_parameters_namelist
     !> -------------------------------

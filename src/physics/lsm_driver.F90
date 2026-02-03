@@ -43,9 +43,7 @@ module land_surface
     use NoahmpHICARmainMod
     use NoahmpHICARinitMod
     use NoahmpIOVarType, only : NoahmpIO_type
-#ifdef FSM
-    use module_sf_FSMdrv,   only : sm_FSM_init, sm_FSM
-#endif
+    use snow_model_driver, only : sm_var_request, sm_init, snow_model
 
     implicit none
 
@@ -207,35 +205,6 @@ contains
         endif
 
 
-
-        if (options%physics%snowmodel == kSM_FSM) then
-            call options%alloc_vars( &
-                         [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
-                         kVARS%exner, kVARS%dz_interface, kVARS%density, kVARS%pressure_interface, kVARS%shortwave,     &
-                         kVARS%longwave, kVARS%vegetation_fraction, kVARS%canopy_water, kVARS%snow_water_equivalent,    &
-                         kVARS%skin_temperature, kVARS%soil_water_content, kVARS%soil_temperature, kVARS%terrain,       &
-                         kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
-                         kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
-                         kVARS%soil_totalmoisture, kVARS%soil_deep_temperature, kVARS%roughness_z0, kVARS%ustar,        &
-                         kVARS%snow_height, kVARS%lai, kVARS%temperature_2m_veg, kVARS%slope_angle, kVARS%lsm_last_snow,&
-                         kVARS%lsm_last_precip, kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%land_emissivity,    &
-                         kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%snowfall, kVARS%albedo,                &
-                         kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%Nsnow,   &
-                         kVARS%shd, kVARS%meltflux_out_tstep, kVARS%Sliq_out, &
-                         kVARS%windspd_10m, kVARS%dSWE_salt, kVARS%dSWE_susp, kVARS%dSWE_subl, kVARS%dSWE_slide])
-             
-             call options%restart_vars( &
-                         [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
-                         kVARS%density, kVARS%pressure_interface, kVARS%shortwave,                                      &
-                         kVARS%longwave, kVARS%canopy_water, kVARS%snow_water_equivalent,                               &
-                         kVARS%skin_temperature, kVARS%soil_water_content, kVARS%soil_temperature, kVARS%terrain,       &
-                         kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
-                         kVARS%snow_height,  kVARS%snowfall, kVARS%albedo, kVARS%QFX, kVARS%land_emissivity,            &
-                         kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
-                         kVARS%soil_totalmoisture, kVARS%roughness_z0, kVARS%lsm_last_snow, kVARS%lsm_last_precip,      &
-                         kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%Nsnow  ])
-        endif
-
        if (options%physics%watersurface > 0) then
             call options%alloc_vars( &
                          [kVARS%sst, kVARS%ustar, kVARS%surface_pressure, kVARS%water_vapor,            &
@@ -275,6 +244,8 @@ contains
         endif
 
 
+        ! request variables for any snow models
+        call sm_var_request(options)
 
     end subroutine lsm_var_request
 
@@ -287,7 +258,7 @@ contains
         integer :: i, j, k, dev_num
         logical :: context_change, restart, monthly_albedo, monthly_vegfrac
 
-        if (options%physics%landsurface == 0) return   !! So we cannot (currently) run without lsm but with water.
+        if (options%physics%landsurface > 0 .or. options%physics%watersurface > 0) then
 
         associate(temperature_2m => domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d, &
                   humidity_2m    => domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d,  &
@@ -383,10 +354,6 @@ contains
             !$acc enter data copyin(current_snow, current_rain)
         endif
         
-        if (options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
-            num_soil_layers=options%lsm%num_soil_layers ! to .nml?
-            call allocate_noah_data(num_soil_layers)
-        endif
 
         ! initial guesses
         !$acc parallel loop gang vector collapse(2) present(temperature_2m, humidity_2m, temperature, water_vapor)
@@ -405,6 +372,9 @@ contains
         endif
 
         if (options%physics%landsurface==kLSM_NOAHMP) then
+
+            num_soil_layers=options%lsm%num_soil_layers ! to .nml?
+            call allocate_noah_data(num_soil_layers)
 
             FNDSOILW=.False. ! calculate SOILW
 
@@ -734,18 +704,11 @@ contains
                 )
         endif ! WRF lake model
 
-        if (options%physics%snowmodel == kSM_FSM) then
-#ifdef FSM
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: FSM2"
-            call sm_FSM_init(domain,options,context_change)
-            !DZs already allocated in alloc_noah above
-#else
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    User asked to use FSM, but it is not compiled in this version of HICAR"
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Please de-select FSM in the namelist, or recompile HICAR with the FSM library linked"
-            stop "FSM2 not compiled in this version of HICAR"
-#endif
-        endif ! FSM snow model
+        end associate
 
+        endif ! end if physics%landsurface /=0
+
+        call sm_init(domain, options)
         update_interval=options%lsm%update_interval
         if (.not.(context_change)) then
             if (update_interval<=10) then
@@ -754,7 +717,6 @@ contains
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
             endif
         endif
-        end associate
 
     end subroutine lsm_init
 
@@ -768,11 +730,12 @@ contains
         integer :: i,j, k, month, dev_num
         logical :: monthly_albedo, monthly_vegfrac
 
-        if (options%physics%landsurface == 0) return
-
         if ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval) then
             lsm_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
             last_model_time(domain%nest_indx) = domain%sim_time%seconds()
+
+            if (options%physics%landsurface > 0 .or. options%physics%watersurface > 0) then
+
             landuse_name = options%lsm%LU_Categories            !test whether this works or if we need something separate
             julian_day = domain%sim_time%day_of_year()
 
@@ -805,7 +768,7 @@ contains
             current_precipitation = (precipitation - lsm_last_precip) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
             !$acc end kernels
 
-            if (options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
+            if (options%physics%landsurface==kLSM_NOAHMP) then
                 !$acc kernels
                 current_snow = (snowfall-lsm_last_snow) !+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
                 current_rain = max(current_precipitation-current_snow,0.) !! MJ: rainfall in kg m-2
@@ -1184,22 +1147,6 @@ contains
                 ! where(domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d > options%lsm%max_swe) domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = options%lsm%max_swe
             endif !end if noahmp
 
-#ifdef FSM
-            !! MJ added: this block is for FSM as sm.
-            if (options%physics%snowmodel == kSM_FSM) then
-                !!
-                domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d(its:ite,jts:jte)=windspd(its:ite,jts:jte)
-                !!
-                call sm_FSM(domain,options,lsm_dt,current_rain,current_snow,windspd)
-                !!
-                
-                !do i = 1, num_soil_layers              ! soil
-                !   domain%vars_3d(domain%var_indx(kVARS%soil_water_content_liq)%v)%data_3d(its:ite,i,jts:jte) =  domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d(its:ite,i,jts:jte)    / (1000. * DZS(i))
-                !end do
-                
-            endif
-            !!
-#endif
 
             if (options%physics%landsurface > kLSM_BASIC) then
             
@@ -1223,7 +1170,11 @@ contains
             endif
             !!
             end associate
-        endif
+            endif ! end if landsurface > 0 .or. watersurface > 0
+
+            call snow_model(domain, options, lsm_dt)
+
+        endif ! end if time to call lsm
 
     end subroutine lsm
 
