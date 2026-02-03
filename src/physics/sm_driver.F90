@@ -230,7 +230,7 @@ contains
             !!! - hs;       ///< The measured height of snow (m)
             ! - geo_heat; ///< Geo heat flux (W/m^2), for the neumann lower boundary condition in the heat equation
 
-            call sm_SNOWPACK(domain,options,lsm_dt)
+            call sm_SNOWPACK(domain,options,lsm_dt,current_rain,current_snow,windspd)
 #endif
         endif
 

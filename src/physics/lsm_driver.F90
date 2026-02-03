@@ -833,8 +833,9 @@ contains
                                       domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d,                   &
                                       domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,      &
                                       domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d,   &
-                                      domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di,                      &
-                                      ims, ime, kms, kme, jms, jme)
+                                      domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di,             &
+                                      ims, ime, kms, kme, jms, jme,                                           &
+                                      its, ite, jts, jte)
                                 !   ,domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d               & ! terrain height [m] if ht(i,j)>=lake_min_elev -> lake (in case no lake category is provided, but lake model is selected, we need to not run the simple water as well - left comment in for future reference)
             endif
 

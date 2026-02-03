@@ -16,15 +16,15 @@ contains
 
     subroutine water_simple(options, sst, psfc, wind, qv, temperature,  &
                             sensible_heat, latent_heat, landmask, &
-                            qv_surf, evap_flux, tskin, coef_heat_exch, vegtype, ims, ime, kms, kme, jms, jme)
+                            qv_surf, evap_flux, tskin, coef_heat_exch, vegtype, ims, ime, kms, kme, jms, jme, its, ite, jts, jte)
         implicit none
         type(options_t),intent(in)    :: options        
         real,    dimension(ims:ime,jms:jme),  intent(inout) :: sensible_heat, latent_heat, qv_surf, evap_flux, tskin
         real,    dimension(ims:ime,jms:jme),  intent(in)    :: sst, psfc, wind, coef_heat_exch
         real,    dimension(ims:ime,jms:jme),  intent(in)    :: landmask
         real,    dimension(ims:ime,kms:kme,jms:jme),  intent(in)    :: qv, temperature
-        integer, dimension(ims:ime,jms:jme),  optional, intent(in)    :: vegtype
-        integer, intent(in)                     :: ims, ime, kms, kme, jms, jme
+        integer, dimension(ims:ime,jms:jme), intent(in)    :: vegtype
+        integer, intent(in)                     :: ims, ime, kms, kme, jms, jme, its, ite, jts, jte
 
         integer :: i, j, options_water, options_water_cat, options_lake_cat
 
@@ -34,8 +34,8 @@ contains
 
         !$acc data present(sst,psfc,wind,qv,temperature,sensible_heat,latent_heat,landmask,qv_surf,evap_flux,tskin,coef_heat_exch,vegtype) copyin(ims,ime,jms,jme)
         !$acc parallel loop gang vector collapse(2)
-        do j=jms,jme
-            do i=ims,ime
+        do j=jts,jte
+            do i=its,ite
                 if(                                                                         &
                     ( (options_water==kWATER_SIMPLE) .AND.                   &   ! If lakemodel is not selected, use this
                       (landmask(i,j)==kLC_WATER)                                            & !(n.b. in case noah (mp or lsm) is not used, landmask may not be set correctly!)

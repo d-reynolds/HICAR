@@ -851,6 +851,42 @@ contains
 
     end subroutine set_decode_phys_nml_var
 
+    function translate_numeric_mapping(var_name, var_value) result(translated_value)
+        implicit none
+        character(len=*), intent(in) :: var_name
+        integer, intent(in) :: var_value
+        character(len=kMAX_NAME_LENGTH) :: translated_value
+
+        character(len=kMAX_NAME_LENGTH), allocatable :: mapping(:)
+        integer :: i, mapped_val
+
+        mapping = get_nml_var_mapping(trim(var_name))
+
+        ! check that mapping has an even number of entries
+        if (mod(size(mapping),2) /= 0) then
+            if (STD_OUT_PE) write(*,*) "DEVELOPER Error: mapping for namelist variable '", trim(var_name), "' does not have an even number of entries"
+            error stop
+        endif
+
+        translated_value = ""
+
+        ! get string value corresponding to var_value
+        do i = 2, size(mapping), 2
+            read(mapping(i), *) mapped_val
+            if (var_value == mapped_val) then
+                translated_value = mapping(i-1)
+                exit
+            endif
+        end do
+
+        if (translated_value == "") then
+            if (STD_OUT_PE) write(*,*) "Error: '", str(var_value), "' is not a valid mapped value for '", trim(var_name), "'"
+            error stop
+        endif
+
+    end function translate_numeric_mapping
+
+
     subroutine set_real_nml_var_default(var, name, info, gen_nml)
         implicit none
         real,    intent(inout) :: var
@@ -3502,7 +3538,7 @@ contains
                     "'MO_MICHLMAYR' = Stearns and Weidner (1993) modified by Michlmayr (2008)"
                 default = "MO_HOLTSLAG"
                 if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "MO_HOLTSLAG", trim(str(kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG)), "MO_MICHLMAYR", trim(str(kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR))]
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "MO_HOLTSLAG", trim(str(kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG)), "MO_MICHLMAYR", trim(str(kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR))]
                 endif
                 group = "SM_Parameters"
             case("snowpack_albedo_parameterization")
@@ -3511,7 +3547,7 @@ contains
                     "'SCHMUCKI_OGS' = from SCHMUCKI_ALLX32 regression with optical grain size"
                 default = "LEHNING_2"
                 if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "LEHNING_2", trim(str(kSNOWPACK_ALBEDO_PARAM_LEHNING_2)), "SCHMUCKI_OGS", trim(str(kSNOWPACK_ALBEDO_PARAM_SCHMUCKI_OGS))]
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "LEHNING_2", trim(str(kSNOWPACK_ALBEDO_PARAM_LEHNING_2)), "SCHMUCKI_OGS", trim(str(kSNOWPACK_ALBEDO_PARAM_SCHMUCKI_OGS))]
                 endif
                 group = "SM_Parameters"
             case("snowpack_enable_vapour_transport")
@@ -3523,9 +3559,9 @@ contains
                     "'antarctica' = SnowPack model suited for Antarctica simulations"//achar(10)//BLNK_CHR_N// &
                     "'alps' = SnowPack model suited for Alps simulations"
                 if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "antarctica", trim(str(kSNOWPACK_VARIANT_ANTARCTICA)), "alps", trim(str(kSNOWPACK_VARIANT_ALPS))]
+                    mapping = [character(len=kMAX_NAME_LENGTH) :: "default", "0", "antarctica", trim(str(kSNOWPACK_VARIANT_ANTARCTICA)), "alps", trim(str(kSNOWPACK_VARIANT_ALPS))]
                 endif
-                default = "none"
+                default = "default"
                 group = "SM_Parameters"
             case("snowpack_reduce_n_elements")
                 description = "Enable more 'aggressive' combining for layers deeper in the snowpack"

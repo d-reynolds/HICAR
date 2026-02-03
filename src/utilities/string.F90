@@ -22,6 +22,7 @@ module string
         module procedure str_d
         module procedure str_r
         module procedure str_i
+        module procedure str_bool
     end interface
 
     interface as_string
@@ -134,6 +135,30 @@ contains
         output_string=trim(adjustl(output_string))
     end function str_i
 
+    elemental function str_bool(value,c_bool) result(output_string)
+        implicit none
+        logical, intent(in) :: value                                ! logical value to be converted
+        logical, intent(in), optional :: c_bool                     ! if true, use C-style TRUE/FALSE
+        character(len=kMAX_STRING_LENGTH) :: output_string ! return value
+
+        if (value) then
+            output_string = ".true."
+        else
+            output_string = ".false."
+        endif
+
+        if (present(c_bool)) then
+            if (c_bool) then
+                if (value) then
+                    output_string = "TRUE"
+                else
+                    output_string = "FALSE"
+                endif
+            endif
+        endif
+
+    end function str_bool
+
     !>------------------------------
     !! Split a string into tokens according to a delimiter
     !!
@@ -194,6 +219,24 @@ contains
         str_out = trim(str_out)
 
     end function to_lower
+
+    !>------------------------------
+    !! Convert a string to upper case
+    !!
+    !!------------------------------
+    pure function to_upper(str_in) result(str_out)
+        implicit none
+        character(len=*), intent(in) :: str_in
+        character(len=len(str_in)) :: str_out
+        integer :: i
+        str_out = trim(str_in)
+        do i = 1, len(trim(str_in))
+            if (ichar(str_in(i:i)) >= iachar('a') .and. ichar(str_in(i:i)) <= iachar('z')) then
+                str_out(i:i) = char(ichar(str_in(i:i)) + iachar('A') - iachar('a'))
+            endif
+        end do
+        str_out = trim(str_out)
+    end function to_upper
 
         !>------------------------------
     !! Convert a double precision real number to a string
