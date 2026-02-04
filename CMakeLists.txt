@@ -325,8 +325,7 @@ FetchContent_Declare(
 FetchContent_Declare(
 	noah_mp
 	GIT_REPOSITORY    https://github.com/d-reynolds/noahmp.git
-	GIT_TAG           OpenACC
-	GIT_SHALLOW       TRUE
+	GIT_TAG           92862dbfd431f94b408bd047f8a8aacd343c9f52
 )
 
 # Fetch specific folders from icar_supporting_files repo
