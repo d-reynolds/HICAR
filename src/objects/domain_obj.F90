@@ -322,8 +322,8 @@ contains
                        kVARS%fsnow,&
                        kVARS%Sice,&
                        kVARS%Sliq,&
-                       kVARS%Tsnow,&
-                       kVARS%Nsnow/)
+                       kVARS%snow_temperature,&
+                       kVARS%snow_nlayers/)
 
         !Advection variables -- these are exchanged AND advected
         n_vars = 0
@@ -2071,46 +2071,26 @@ contains
         endif
 
         if (options%domain%albedo_var /= "") then
-            if (options%lsm%monthly_albedo) then
-                call io_read(options%domain%init_conditions_file,   &
+            call io_read(options%domain%init_conditions_file,   &
                             options%domain%albedo_var,          &
-                            temporary_data_3d)
+                            temporary_data)
+            if (this%var_indx(kVARS%albedo)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
 
-                if (this%var_indx(kVARS%albedo)%v > 0) then
-                    do i=1,size(this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d, 2)
-                        this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d(:,i,:) = temporary_data_3d(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme,i)
-                    enddo
-
-                    if (maxval(temporary_data_3d) > 1) then
-                        if (STD_OUT_PE) write(*,*) "Changing input ALBEDO % to fraction"
-                        this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d = this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d / 100
-                    endif
-                endif
-            else
-                call io_read(options%domain%init_conditions_file,   &
-                               options%domain%albedo_var,          &
-                               temporary_data)
-                if (this%var_indx(kVARS%albedo)%v > 0) then
-                    do i=1,size(this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d, 2)
-                        this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d(:,i,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-                    enddo
-
-                    if (maxval(temporary_data) > 1) then
-                        if (STD_OUT_PE) write(*,*) "Changing input ALBEDO % to fraction"
-                        this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d = this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d / 100
-                    endif
+                if (maxval(temporary_data) > 1) then
+                    if (STD_OUT_PE) write(*,*) "Changing input ALBEDO % to fraction"
+                    this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d = this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d / 100
                 endif
             endif
-
         else
             if (this%var_indx(kVARS%albedo)%v > 0) then
-                this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d = 0.17
+                this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d = 0.17
             endif
         endif
 
 
         if (options%domain%vegfrac_var /= "") then
-            if (options%lsm%monthly_albedo) then
+            if (options%lsm%monthly_vegfrac) then
                 call io_read(options%domain%init_conditions_file,   &
                             options%domain%vegfrac_var,          &
                             temporary_data_3d)
@@ -2311,7 +2291,7 @@ contains
         if (this%var_indx(kVARS%Sliq)%v > 0)                this%vars_3d(this%var_indx(kVARS%Sliq)%v)%data_3d=0.
         if (this%var_indx(kVARS%Ds)%v > 0)                  this%vars_3d(this%var_indx(kVARS%Ds)%v)%data_3d=0.
         if (this%var_indx(kVARS%fsnow)%v > 0)               this%vars_2d(this%var_indx(kVARS%fsnow)%v)%data_2d=0.
-        if (this%var_indx(kVARS%Nsnow)%v > 0)               this%vars_2d(this%var_indx(kVARS%Nsnow)%v)%data_2d=0.
+        if (this%var_indx(kVARS%snow_nlayers)%v > 0)        this%vars_2d(this%var_indx(kVARS%snow_nlayers)%v)%data_2di=0
         if (this%var_indx(kVARS%dSWE_salt)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_salt)%v)%data_2d=0.
         if (this%var_indx(kVARS%dSWE_susp)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_susp)%v)%data_2d=0.
         if (this%var_indx(kVARS%dSWE_subl)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_subl)%v)%data_2d=0.

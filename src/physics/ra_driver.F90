@@ -396,7 +396,7 @@ contains
 
 
         real, dimension(:,:,:,:), pointer :: tauaer_sw=>null(), ssaaer_sw=>null(), asyaer_sw=>null()
-        real, allocatable:: albedo(:,:),gsw(:,:)
+        real, allocatable:: gsw(:,:)
         real, allocatable:: t_1d(:), p_1d(:), Dz_1d(:), qv_1d(:), qc_1d(:), qi_1d(:), qs_1d(:), cf_1d(:)
         real, allocatable :: qi(:,:,:), qc(:,:,:), qs(:,:,:), cldfra(:,:,:), re_c(:,:,:), re_i(:,:,:), re_s(:,:,:)
 
@@ -514,7 +514,7 @@ contains
         !If we are not over the update interval, don't run any of this, since it contains allocations, etc...
         if ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval) then
 
-            associate(albedo_dom => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d, &
+            associate(albedo_dom => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
                       shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
                       shortwave_diffuse => domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
                       shortwave_direct => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d, &
@@ -589,10 +589,9 @@ contains
 
             allocate(cldfra(ims:ime,kms:kme,jms:jme))
 
-            allocate(albedo(ims:ime,jms:jme))
             allocate(gsw(ims:ime,jms:jme))
 
-            !$acc data create(t_1d, p_1d, Dz_1d, qv_1d, qc_1d, qi_1d, qs_1d, cf_1d, qi, qc, qs, re_c, re_i, re_s, cldfra, albedo, gsw)
+            !$acc data create(t_1d, p_1d, Dz_1d, qv_1d, qc_1d, qi_1d, qs_1d, cf_1d, qi, qc, qs, re_c, re_i, re_s, cldfra, gsw)
 
             !$acc kernels
             qi = 0
@@ -712,22 +711,6 @@ contains
                                its=its, ite=ite, jts=jts, jte=jte, kts=kts, kte=kte, F_runlw=.True.)
             else if (options%physics%radiation==kRA_RRTMG .or. options%physics%radiation==kRA_RRTMGP) then
 
-                if (options%lsm%monthly_albedo) then
-                    !$acc parallel loop gang vector collapse(2) present(albedo_dom, albedo)
-                    do j = jms,jme
-                        do i = ims,ime
-                            ALBEDO(i,j) = albedo_dom(i, sim_month, j)
-                        enddo
-                    enddo
-                else
-                    !$acc parallel loop gang vector collapse(2) present(albedo_dom, albedo)
-                    do j = jms,jme
-                        do i = ims,ime
-                            ALBEDO(i,j) = albedo_dom(i, 1, j)
-                        enddo
-                    enddo
-                endif
-
                 ! domain%tend%th_swrad = 0
                 ! domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d = 0
                 ! Calculate cloud fraction
@@ -788,7 +771,7 @@ contains
                         coszr = domain%vars_2d(domain%var_indx(kVARS%cosine_zenith_angle)%v)%data_2d,           &
                         julday = 0,                                           &  ! not used
                         solcon = solar_constant,                              &
-                        albedo = albedo,                                      &
+                        albedo = albedo_dom,                                      &
                         t3d = domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d,                     &
                         t8w = domain%vars_3d(domain%var_indx(kVARS%temperature_interface)%v)%data_3d,           &
                         tsk = domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,                &
@@ -1153,7 +1136,7 @@ contains
                     !$acc   create(snow_sw%tau, snow_sw%ssa, snow_sw%g)
                     ! !$acc data create(aerosols_sw, aerosols_sw%tau, aerosols_sw%ssa, aerosols_sw%g)
 
-                    !$acc parallel loop gang vector collapse(2) private(col_indx) present(cosine_zenith_angle, ALBEDO, sfc_alb_dir, sfc_alb_dif, mu0)
+                    !$acc parallel loop gang vector collapse(2) private(col_indx) present(cosine_zenith_angle, albedo_dom, sfc_alb_dir, sfc_alb_dif, mu0)
                     do j = jb_s, jb_e
                         do i = its, ite
                             col_indx = (i-its+1) + (j - jb_s)*(ite - its + 1)
@@ -1162,8 +1145,8 @@ contains
 
                             !$acc loop
                             do k = 1, nbnd
-                                sfc_alb_dir(k,col_indx) = ALBEDO(i,j)
-                                sfc_alb_dif(k,col_indx) = ALBEDO(i,j)
+                                sfc_alb_dir(k,col_indx) = albedo_dom(i,j)
+                                sfc_alb_dif(k,col_indx) = albedo_dom(i,j)
                             enddo
                         enddo
                     enddo

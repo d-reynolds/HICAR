@@ -169,7 +169,6 @@ module options_types
         ! integer :: snow_category ! = ice cat
         ! use monthly vegetation fraction data, not just a single value
         logical :: monthly_vegfrac
-        logical :: monthly_albedo
         integer :: sf_urban_phys
         integer :: num_soil_layers
         

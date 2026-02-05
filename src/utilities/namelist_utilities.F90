@@ -2987,10 +2987,6 @@ contains
                 description = "Use monthly vegetation fraction data (T/F)"
                 default = ".False."
                 group = "LSM_Parameters"
-            case ("monthly_albedo")
-                description = "Use monthly albedo data (T/F)"
-                default = ".False."
-                group = "LSM_Parameters"
             case ("num_soil_layers")
                 description = "Number of soil layers in the LSM"
                 default = "4"

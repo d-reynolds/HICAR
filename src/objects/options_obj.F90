@@ -1764,7 +1764,6 @@ contains
         real    :: snow_den_const(kMAX_NESTS)                    ! variable for converting snow height into SWE or visa versa when input data is incomplete 
 
         logical :: monthly_vegfrac(kMAX_NESTS)                   ! read in 12 months of vegfrac data
-        logical :: monthly_albedo(kMAX_NESTS)                    ! same for albedo (requires vegfrac be monthly)
         real :: update_interval_lsm(kMAX_NESTS)                  ! minimum number of seconds between LSM updates
         integer :: urban_category(kMAX_NESTS)                    ! index that defines the urban category in LU_Categories
         integer :: ice_category(kMAX_NESTS)                      ! index that defines the ice category in LU_Categories
@@ -1779,7 +1778,7 @@ contains
         ! define the namelist
         namelist /lsm_parameters/ LU_Categories, update_interval_lsm, &
                                   urban_category, ice_category, water_category, lake_category, snow_den_const,&
-                                  monthly_vegfrac, monthly_albedo, max_swe,  nmp_dveg,   &
+                                  monthly_vegfrac, max_swe,  nmp_dveg,   &
                                   nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_frz, nmp_opt_wet, &
                                   nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact, &
                                   nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot,           &
@@ -1799,7 +1798,6 @@ contains
         call set_nml_var_default(monthly_vegfrac, 'monthly_vegfrac', print_info, gennml)
         call set_nml_var_default(num_soil_layers, 'num_soil_layers', print_info, gennml)
 
-        call set_nml_var_default(monthly_albedo, 'monthly_albedo', print_info, gennml)
         call set_nml_var_default(urban_category, 'urban_category', print_info, gennml)
         call set_nml_var_default(ice_category, 'ice_category', print_info, gennml)
         call set_nml_var_default(water_category, 'water_category', print_info, gennml)
@@ -1846,7 +1844,6 @@ contains
             close(name_unit)
             if (rc /= 0) call print_nml_error('lsm_parameters',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
-            monthly_albedo(n_indx) = monthly_albedo(1)
             monthly_vegfrac(n_indx) = monthly_vegfrac(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             ! read the namelist options
@@ -1867,7 +1864,6 @@ contains
         call set_nml_var(lsm_options%monthly_vegfrac, monthly_vegfrac(n_indx), 'monthly_vegfrac', monthly_vegfrac(1))
         call set_nml_var(lsm_options%num_soil_layers, num_soil_layers(n_indx), 'num_soil_layers', num_soil_layers(1))
 
-        call set_nml_var(lsm_options%monthly_albedo, monthly_albedo(n_indx), 'monthly_albedo', monthly_albedo(1))
         call set_nml_var(lsm_options%urban_category, urban_category(n_indx), 'urban_category', urban_category(1))
         call set_nml_var(lsm_options%ice_category, ice_category(n_indx), 'ice_category', ice_category(1))
         call set_nml_var(lsm_options%water_category, water_category(n_indx), 'water_category', water_category(1))

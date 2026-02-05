@@ -219,16 +219,12 @@ module icar_constants
         integer :: storage_gw
         integer :: storage_lake
         integer :: roughness_z0
-        integer :: snow_water_equivalent
         integer :: snow_water_eq_prev
         integer :: snow_albedo_prev
-        integer :: snow_temperature
         integer :: snow_layer_depth
         integer :: snow_layer_ice
         integer :: snow_layer_liquid_water
         integer :: snow_age_factor
-        integer :: snow_height
-        integer :: snow_nlayers
         integer :: soil_water_content
         integer :: soil_water_content_liq
         integer :: eq_soil_moisture
@@ -281,19 +277,6 @@ module icar_constants
         integer :: tend_swrad
         integer :: runoff_tstep
 
-        !FSM2Trans Variables
-        integer :: Tsnow
-        integer :: Sice
-        integer :: Sliq
-        integer :: Ds
-        integer :: fsnow
-        integer :: Nsnow
-        integer :: dSWE_salt
-        integer :: dSWE_susp
-        integer :: dSWE_subl
-        integer :: dSWE_slide
-        integer :: meltflux_out_tstep
-        integer :: Sliq_out
 
         integer :: kpbl
         integer :: hpbl
@@ -385,6 +368,42 @@ module icar_constants
         integer :: snicar_dust1, snicar_dust2, snicar_dust3, snicar_dust4, snicar_dust5
         integer :: snicar_bcphi_conc, snicar_bcpho_conc, snicar_ocphi_conc, snicar_ocpho_conc
         integer :: snicar_dust1_conc, snicar_dust2_conc, snicar_dust3_conc, snicar_dust4_conc, snicar_dust5_conc
+
+        !General Snow model Variables
+        integer :: Sice
+        integer :: Sliq
+        integer :: Ds
+        integer :: fsnow
+        integer :: snow_water_equivalent
+        integer :: snow_temperature
+        integer :: snow_height
+        integer :: snow_nlayers
+
+        ! FSM2trans variables
+        integer :: dSWE_salt
+        integer :: dSWE_susp
+        integer :: dSWE_subl
+        integer :: dSWE_blow_subl
+        integer :: dSWE_slide
+        integer :: meltflux_out_tstep
+        integer :: Sliq_out
+
+        !SNOWPACK variables
+        integer :: depositionDate
+        integer :: snow_temperature_i
+        integer :: Vol_Frac_I
+        integer :: Vol_Frac_W
+        integer :: Vol_Frac_A
+        integer :: Vol_Frac_S
+        integer :: Rg
+        integer :: Rb
+        integer :: Dd
+        integer :: Sp
+        integer :: mk
+        integer :: mass_hoar
+        integer :: CDot
+        integer :: metamo
+
 
         integer :: last_var
     end type var_constants_type
