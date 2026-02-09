@@ -843,6 +843,8 @@ contains
                                 grid = this%grid_soil
                             case ("nsnow")
                                 grid = this%grid_snow
+                            case ("nsnow_i")
+                                grid = this%grid_snow_i
                             case ("nsnowsoil")
                                 grid = this%grid_snowsoil
                             case ("nsoil_composition")
@@ -2370,6 +2372,7 @@ contains
         call this%column_grid%set_grid_dimensions(               0,         0, nz_global, image=my_index, comms=this%compute_comms, adv_order=adv_order) !! MJ added
         call this%grid_soil%set_grid_dimensions(         nx_global, ny_global, kSOIL_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
         call this%grid_snow%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_snow_i%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z+1, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
         call this%grid_snowsoil%set_grid_dimensions(     nx_global, ny_global, kSNOWSOIL_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
         call this%grid_soilcomp%set_grid_dimensions(     nx_global, ny_global, kSOILCOMP_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
         call this%grid_gecros%set_grid_dimensions(       nx_global, ny_global, kGECROS_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)

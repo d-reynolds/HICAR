@@ -22,7 +22,7 @@ module domain_interface
     type(grid_t)         :: neighbor_grid_2d, neighbor_grid, neighbor_grid8w
     type(grid_t)         :: grid2d, u_grid2d, v_grid2d
     type(grid_t)         :: grid_monthly, grid_soil
-    type(grid_t)         :: grid_snow, grid_snowsoil
+    type(grid_t)         :: grid_snow, grid_snow_i, grid_snowsoil
     type(grid_t)         :: grid_soilcomp, grid_gecros, grid_croptype
     type(grid_t)         :: grid_hlm, grid_Sx !! MJ added
     type(grid_t)         :: grid_lake , grid_lake_soisno, grid_lake_soi, grid_lake_soisno_1

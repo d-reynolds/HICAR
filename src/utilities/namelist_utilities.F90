@@ -1251,7 +1251,8 @@ contains
         character(len=*), intent(in) :: name
         logical,          intent(in), optional :: info, gen_nml
 
-        character(len=kMAX_STRING_LENGTH) :: group, default, description, units
+        character(len=kMAX_STRING_LENGTH) :: group, default, units
+        character(len=10000) :: description
         character(len=1), allocatable :: dimensions(:)
         real :: min, max
         integer :: type
@@ -1322,7 +1323,7 @@ contains
         ! Three cases: description is formatted with newlines, description is too long for one line, or description is short enough for one line
 
         ! calculate the number of blank characters to write for the first comment 
-        num_blnks = NML_BLNK_LEN - len(trim(var_string))
+        num_blnks = max(1,NML_BLNK_LEN - len(trim(var_string)))
 
         ! see if is formatted with newlines
         indx = index(trim(description),achar(10))

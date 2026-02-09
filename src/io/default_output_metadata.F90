@@ -3621,8 +3621,8 @@ contains
         !------------------------------------------------------------
         else if (var_idx==kVARS%snow_temperature_i) then
             var_meta%name        = "snow_temperature_i"
-            var_meta%dimensions  = three_d_t_snow_dimensions
-            var_meta%dim_len(2)  = kSNOW_GRID_Z !TODO: THIS SHOULD BE STAGGERED ONTO THE SNOW+1 GRID
+            var_meta%dimensions  = three_d_t_snow_i_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z+1 !TODO: THIS SHOULD BE STAGGERED ONTO THE SNOW+1 GRID
             var_meta%attributes  = [attribute_t("standard_name", "snow_layer_interface_temperature"),   &
                                attribute_t("units",         "kg kg-1"),                        &
                                attribute_t("coordinates",   "lat lon")]
