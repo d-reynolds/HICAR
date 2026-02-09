@@ -395,6 +395,7 @@ module icar_constants
         integer :: Vol_Frac_W
         integer :: Vol_Frac_A
         integer :: Vol_Frac_S
+        integer :: Vol_Frac_WP
         integer :: Rg
         integer :: Rb
         integer :: Dd

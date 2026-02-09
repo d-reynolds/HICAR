@@ -98,6 +98,7 @@ else()
         GIT_REPOSITORY    https://git.wsl.ch/snow-models/meteoio.git
         GIT_TAG           master
         GIT_SHALLOW       TRUE
+        UPDATE_DISCONNECTED TRUE
         PREFIX            "${METEOIO_STAMPS}"
         SOURCE_DIR        "${METEOIO_DIR}"
         BINARY_DIR        "${METEOIO_BUILD}"
@@ -128,6 +129,7 @@ else()
         GIT_REPOSITORY    https://git.wsl.ch/snow-models/snowpack.git
         GIT_TAG           fortran-bindings
         GIT_SHALLOW       TRUE
+        UPDATE_DISCONNECTED TRUE
         PREFIX            "${SNOWPACK_STAMPS}"
         SOURCE_DIR        "${SNOWPACK_DIR}"
         BINARY_DIR        "${SNOWPACK_BUILD}"

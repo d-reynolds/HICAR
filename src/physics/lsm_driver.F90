@@ -462,6 +462,11 @@ contains
             SNICAR_USE_OC = options%sm%snicar_use_oc
             SNICAR_AEROSOL_READTABLE = options%sm%snicar_aerosol_readtable
 
+            ! This will either override NoahMP's initialisation of snow to a small value,
+            ! or preserve any snow values read from an init file. Necesarry if we want to
+            ! "neuteralize" noahMP's snow state when running with a snow model.
+            if (options%physics%snowmodel>0) FNDSNOWH= .True.
+
 
             !$acc enter data copyin(landuse_name, XICE_THRESHOLD, &
             !$acc                                    IDVEG, IOPT_CRS,  IOPT_BTR, IOPT_RUNSUB,     &
@@ -728,7 +733,7 @@ contains
             next_update_time(domain%nest_indx) = next_update_time(domain%nest_indx) + update_interval
             if (options%physics%landsurface > 0 .or. options%physics%watersurface > 0) then
 
-            landuse_name = options%lsm%LU_Categories            !test whether this works or if we need something separate
+            landuse_name = options%lsm%LU_Categories
             julian_day = domain%sim_time%day_of_year()
 
             associate( &
@@ -766,9 +771,7 @@ contains
                 current_snow = (snowfall-lsm_last_snow) !+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
                 current_rain = max(current_precipitation-current_snow,0.) !! MJ: rainfall in kg m-2
                 !$acc end kernels
-            endif
 
-            if (options%physics%landsurface == kLSM_NOAHMP) then
                 ! 2m saturated mixing ratio
                 monthly_vegfrac = options%lsm%monthly_vegfrac
                 cur_vegmonth = domain%sim_time%month
@@ -784,21 +787,23 @@ contains
                     end do
                 end do
 
-                if (options%physics%snowmodel==kSM_FSM) then
+                if (options%physics%snowmodel>0) then
                     SR = 0.0 ! This, in combination with setting OPT_SNF to 4 in the LSM_init, will turn off snowfall partitioning in NoahMP
                     current_precipitation = current_precipitation-current_snow ! Now remove snowfall from precipitation, so we only have liquid precip going into NMP
                     
                     nmp_snowh = 0.0
                     nmp_snow = 0.0
                     nmp_snow_t = 273.15
+                    nmp_snow_nlayers = 0
                 else
-                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_snow_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
+                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_snow_nlayers, nmp_snow_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
                     do j = jms, jme
                         do i = ims, ime
                             SR(i,j) = current_snow(i,j)/(current_precipitation(i,j)+epsilon)
                             nmp_snowh(i,j) = snow_height(i,j)
                             nmp_snow(i,j) = snow_water_equivalent(i,j)
                             nmp_snow_t(i,1:3,j) = snow_temperature(i,1:3,j)
+                            nmp_snow_nlayers(i,j) = snow_nlayers(i,j)
                         end do
                     end do
                 endif
@@ -979,7 +984,7 @@ contains
                             domain%vars_2d(domain%var_indx(kVARS%irr_amt_flood)%v)%data_2d,             &  ! only used if iopt_irr > 0
                             domain%vars_2d(domain%var_indx(kVARS%evap_heat_sprinkler)%v)%data_2d,       &  ! only used if iopt_irr > 0
                             landuse_name,                             &
-                            domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di,             &
+                            nmp_snow_nlayers,             &
                             domain%vars_2d(domain%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d,      &
                             domain%vars_2d(domain%var_indx(kVARS%ground_surf_temperature)%v)%data_2d,   &
                             domain%vars_2d(domain%var_indx(kVARS%canopy_water_ice)%v)%data_2d,          &
@@ -1112,12 +1117,13 @@ contains
                     end do
                 end do
 
-                if ( .not.(options%physics%snowmodel==kSM_FSM)) then
-                    !$acc parallel loop gang vector collapse(2) copyin(nmp_snow, nmp_snowh, nmp_snow_t, kVARS) present(snow_height, snow_water_equivalent, snow_temperature)
+                if ( .not.(options%physics%snowmodel>0)) then
+                    !$acc parallel loop gang vector collapse(2) copyin(nmp_snow, nmp_snowh, nmp_snow_nlayers, nmp_snow_t, kVARS) present(snow_height, snow_water_equivalent, snow_nlayers, snow_temperature)
                     do j = jts, jte
                         do i = its, ite
                             snow_height(i,j) = nmp_snowh(i,j)
                             snow_water_equivalent(i,j) = nmp_snow(i,j)
+                            snow_nlayers(i,j) = nmp_snow_nlayers(i,j)
                             !$acc loop
                             do k = 1, 3
                                 snow_temperature(i,k,j) = nmp_snow_t(i,k,j)
@@ -1130,25 +1136,33 @@ contains
             endif !end if noahmp
 
 
-            if (options%physics%landsurface > kLSM_BASIC) then
+            if (options%physics%landsurface+options%physics%watersurface+options%physics%snowmodel > 0) then
             
-                !$acc parallel loop gang vector collapse(2) present(lsm_last_precip, precipitation, lsm_last_snow, snowfall, longwave_up, land_emissivity, skin_temperature, soil_totalmoisture, soil_water_content) copyin(kVARS, DZS)
+                !$acc parallel 
+                !$acc loop gang vector collapse(2) present(lsm_last_precip, precipitation, lsm_last_snow, snowfall) 
                 do j = jts, jte
                     do i = its, ite
                         lsm_last_precip(i,j) = precipitation(i,j)
                         lsm_last_snow(i,j) = snowfall(i,j)
-                        
-                        longwave_up(i,j) = STBOLT * land_emissivity(i,j) * skin_temperature(i,j)**4
-                        ! accumulate soil moisture over the entire column
-                        soil_totalmoisture(i,j) = 0.0
-
-                        do k = 1,num_soil_layers
-                            soil_totalmoisture(i,j) = soil_totalmoisture(i,j) + soil_water_content(i,k,j) * DZS(k) * 1000
-                        enddo
                     enddo
                 enddo
-                ITIMESTEP = ITIMESTEP + 1
 
+                if (options%physics%landsurface > kLSM_BASIC) then
+                    !$acc loop gang vector collapse(2) present(longwave_up, land_emissivity, skin_temperature, soil_totalmoisture, soil_water_content) copyin(DZS)
+                    do j = jts, jte
+                        do i = its, ite
+                            longwave_up(i,j) = STBOLT * land_emissivity(i,j) * skin_temperature(i,j)**4
+                            ! accumulate soil moisture over the entire column
+                            soil_totalmoisture(i,j) = 0.0
+
+                            do k = 1,num_soil_layers
+                                soil_totalmoisture(i,j) = soil_totalmoisture(i,j) + soil_water_content(i,k,j) * DZS(k) * 1000
+                            enddo
+                        enddo
+                    enddo
+                    ITIMESTEP = ITIMESTEP + 1
+                endif
+                !$acc end parallel
             endif
             !!
             end associate

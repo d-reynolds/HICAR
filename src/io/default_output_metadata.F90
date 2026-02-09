@@ -3674,6 +3674,17 @@ contains
         !>------------------------------------------------------------
         !!  SNOWPACK: snow layer deposition date
         !------------------------------------------------------------
+        else if (var_idx==kVARS%Vol_Frac_WP) then
+            var_meta%name        = "Vol_Frac_WP"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "Volumetric fraction of preferential flow water in snowpack"),   &
+                               attribute_t("units",         "m3 m-3"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  SNOWPACK: snow layer deposition date
+        !------------------------------------------------------------
         else if (var_idx==kVARS%Rg) then
             var_meta%name        = "Rg"
             var_meta%dimensions  = three_d_t_snow_dimensions

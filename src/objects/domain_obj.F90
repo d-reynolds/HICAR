@@ -2297,6 +2297,7 @@ contains
         if (this%var_indx(kVARS%dSWE_salt)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_salt)%v)%data_2d=0.
         if (this%var_indx(kVARS%dSWE_susp)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_susp)%v)%data_2d=0.
         if (this%var_indx(kVARS%dSWE_subl)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_subl)%v)%data_2d=0.
+        if (this%var_indx(kVARS%dSWE_blow_subl)%v > 0)        this%vars_2d(this%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d=0.
         if (this%var_indx(kVARS%dSWE_slide)%v > 0)            this%vars_2d(this%var_indx(kVARS%dSWE_slide)%v)%data_2d=0.
 
         !!
