@@ -114,7 +114,7 @@ module radiation
 #endif
 
     integer :: update_interval
-    real*8  :: last_model_time(kMAX_NESTS)
+    real*8  :: last_model_time(kMAX_NESTS), next_update_time(kMAX_NESTS)
     real    :: solar_constant
     real    :: p_top = 100000.0
     
@@ -181,8 +181,10 @@ contains
         if (.not.(context_change)) then
             if (update_interval<=10) then
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-10
+                next_update_time(domain%nest_indx) = domain%sim_time%seconds()
             else
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
+                next_update_time(domain%nest_indx) = domain%sim_time%seconds()
             endif
         endif
         
@@ -465,7 +467,7 @@ contains
         
         !We only need to calculate these variables if we are using terrain shading, otherwise only call on each radiation update
         if (options%rad%terrain_shading .or. &
-            ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval)) then
+            (domain%sim_time%seconds()) >= next_update_time(domain%nest_indx)) then
             tzone = options%rad%tzone
             date_seconds = domain%sim_time%seconds()
             sim_month = domain%sim_time%month
@@ -512,7 +514,7 @@ contains
         endif
 
         !If we are not over the update interval, don't run any of this, since it contains allocations, etc...
-        if ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval) then
+        if ((domain%sim_time%seconds()) >= next_update_time(domain%nest_indx)) then
 
             associate(albedo_dom => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
                       shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
@@ -542,6 +544,7 @@ contains
                       qs_dom => domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d)
             ra_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
             last_model_time(domain%nest_indx) = domain%sim_time%seconds()
+            next_update_time(domain%nest_indx) = next_update_time(domain%nest_indx) + update_interval
 
             F_QI=.false.
             F_QI2 = .false.

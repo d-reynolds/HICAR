@@ -72,7 +72,7 @@ module land_surface
     character(len=kMAX_NAME_LENGTH) :: MMINLU
     logical :: FNDSOILW,FNDSNOWH
     integer :: num_soil_layers,ISURBAN,ISICE,ISWATER, ISLAKE
-    real*8  :: last_model_time(kMAX_NESTS)
+    real*8  :: last_model_time(kMAX_NESTS), next_update_time(kMAX_NESTS)
 
     !Noah-MP specific
     real    :: NMP_SOILTSTEP
@@ -703,8 +703,10 @@ contains
         if (.not.(context_change)) then
             if (update_interval<=10) then
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-10
+                next_update_time(domain%nest_indx) = domain%sim_time%seconds()
             else
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
+                next_update_time(domain%nest_indx) = domain%sim_time%seconds()
             endif
         endif
 
@@ -720,10 +722,10 @@ contains
         integer :: i,j, k, month, dev_num
         logical :: monthly_vegfrac
 
-        if ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval) then
+        if ((domain%sim_time%seconds()) >= next_update_time(domain%nest_indx)) then
             lsm_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
-            last_model_time(domain%nest_indx) = domain%sim_time%seconds()
-
+            last_model_time(domain%nest_indx) = domain%sim_time%seconds() 
+            next_update_time(domain%nest_indx) = next_update_time(domain%nest_indx) + update_interval
             if (options%physics%landsurface > 0 .or. options%physics%watersurface > 0) then
 
             landuse_name = options%lsm%LU_Categories            !test whether this works or if we need something separate
