@@ -65,8 +65,8 @@ contains
     subroutine set_sign_arrays(u,v,w)
         implicit none
         real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+2),  intent(in) :: w
-        real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+1),  intent(in) :: u
-        real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+2),  intent(in) :: v
+        real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+2),  intent(in) :: u
+        real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+2),  intent(in) :: v
 
         integer :: i, j, k
 
@@ -602,8 +602,10 @@ contains
                     
                     if (k == kms) then
                         flux_z_up_0 = 0.0
+                        fz = 0.0
                     else
                         flux_z_up_0 = flux_z_up(i,k,j)
+                        fz = flux_z(i,k,j) - flux_z_up_0
                     endif
                     
                     ! ==========================================
@@ -613,7 +615,6 @@ contains
                     fx1 = flux_x(i+1,k,j) - flux_x_up_1
                     fy = flux_y(i,k,j) - flux_y_up_0
                     fy1 = flux_y(i,k,j+1) - flux_y_up_1
-                    fz = flux_z(i,k,j) - flux_z_up_0
                     fz1 = flux_z(i,k+1,j) - flux_z_up_1
                     
                     ! ==========================================

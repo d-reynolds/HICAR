@@ -41,6 +41,10 @@ if (NOT DEFINED FSM_DIR OR FSM_DIR STREQUAL "")
 	set(FSM_DIR $ENV{FSM_DIR} CACHE PATH "Path to the compiled FSM installation (root directory of the lib and build directories)")
 endif()
 
+if (NOT $ENV{NOAHMP_LIBRARY} STREQUAL "")
+	set(NOAHMP_LIBRARY $ENV{NOAHMP_LIBRARY} CACHE PATH "Path to the Noah-MP source directory")
+endif()
+
 if (NOT DEFINED MPICH_DIR AND DEFINED ENV{MPICH_DIR})
     set(MPI_DIR $ENV{MPICH_DIR} CACHE STRING "Path to MPI directory" FORCE)
 endif()
@@ -428,23 +432,26 @@ if(NOT AMGX_LIBRARY)
 endif()
 #########################################################
 
-# Now fetch Noah-MP repo
-message(STATUS "Fetching External Noah-MP library...")
+if (NOT DEFINED NOAHMP_LIBRARY)
+	# Now fetch Noah-MP repo
+	message(STATUS "Fetching External Noah-MP library...")
 
-FetchContent_MakeAvailable(noah_mp)
+	FetchContent_MakeAvailable(noah_mp)
 
-# Use the predefined HICAR compiler flags
-message(STATUS "Using compiler flags for Noah-MP: ${CMAKE_Fortran_FLAGS}")
+	# Use the predefined HICAR compiler flags
+	message(STATUS "Using compiler flags for Noah-MP: ${CMAKE_Fortran_FLAGS}")
 
-# Add the noah_mp subdirectory with configured options
-if(NOT TARGET noahmp)
-	add_subdirectory(${noah_mp_SOURCE_DIR}/drivers/hicar ${noah_mp_BINARY_DIR} EXCLUDE_FROM_ALL)
+	# Add the noah_mp subdirectory with configured options
+	if(NOT TARGET noahmp)
+		add_subdirectory(${noah_mp_SOURCE_DIR}/drivers/hicar ${noah_mp_BINARY_DIR} EXCLUDE_FROM_ALL)
+	endif()
+
+	# copy NoahmpTable.TBL from the ${noah_mp_SOURCE_DIR}/parameters into the run directory
+	file(COPY ${noah_mp_SOURCE_DIR}/parameters/NoahmpTable.TBL DESTINATION ${PROJECT_SOURCE_DIR}/run)
+	message(STATUS "Noah-MP library configured successfully")
+else()
+	message(STATUS "Using precompiled Noah-MP library specified by NOAHMP_LIBRARY environment variable: ${NOAHMP_LIBRARY}")
 endif()
-
-# copy NoahmpTable.TBL from the ${noah_mp_SOURCE_DIR}/parameters into the run directory
-file(COPY ${noah_mp_SOURCE_DIR}/parameters/NoahmpTable.TBL DESTINATION ${PROJECT_SOURCE_DIR}/run)
-
-message(STATUS "Noah-MP library configured successfully")
 
 
 ###########################################################
@@ -512,7 +519,7 @@ if (NETCDF_FOUND)
 		# Clean up any duplicate libraries and references to -lnetcdf
 		list(REMOVE_DUPLICATES NETCDF_LIBRARIES)
 		# clean references to base netcdf-c library
-		list(REMOVE_ITEM NETCDF_LIBRARIES -lnetcdf)
+		# list(REMOVE_ITEM NETCDF_LIBRARIES -lnetcdf)
 
 		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
 		message(STATUS "NetCDF libraries (with dependencies): ${NETCDF_LIBRARIES}")
@@ -552,7 +559,12 @@ target_include_directories(hicar_lib PUBLIC ${MPI_INCLUDE_DIR})
 target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
 # Link Noah-MP(Required) to hicar_lib 
-target_link_libraries(hicar_lib PUBLIC noahmp)
+if(NOT DEFINED NOAHMP_LIBRARY)
+	target_link_libraries(hicar_lib PUBLIC noahmp)
+else()
+	target_link_libraries(hicar_lib PUBLIC ${NOAHMP_LIBRARY})
+	target_include_directories(hicar_lib PUBLIC $ENV{NOAHMP_INCLUDES})
+endif()
 
 # link the hicar_lib library to the HICAR executable
 target_link_libraries(HICAR PUBLIC hicar_lib)

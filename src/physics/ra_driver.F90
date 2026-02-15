@@ -479,7 +479,7 @@ contains
                       cosine_zenith_angle => domain%vars_2d(domain%var_indx(kVARS%cosine_zenith_angle)%v)%data_2d)
 
             !$acc parallel loop gang async(1)
-            do j = jms,jme
+            do j = jts,jte
                !! MJ used corr version, as other does not work in Erupe
                 call calc_solar_elevation(solar_elevation=solar_elevation_store(:,j), hour_frac=hour_frac, sun_declin_deg=sun_declin_deg, eq_of_time_minutes=eq_of_time_minutes, tzone=tzone, &
                     lon=lon, lat=lat, j=j, &
@@ -490,8 +490,8 @@ contains
                 associate(slope => domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d, &
                           aspect => domain%vars_2d(domain%var_indx(kVARS%aspect_angle)%v)%data_2d)
                 !$acc parallel loop gang vector collapse(2) async(1)
-                do j = jms,jme
-                    do i = ims,ime
+                do j = jts,jte
+                    do i = its,ite
                         cosine_zenith_angle(i,j)=sin(solar_elevation_store(i,j))
 
                         cos_project_angle(i,j)= cos(slope(i,j))*sin(solar_elevation_store(i,j)) + &
@@ -502,8 +502,8 @@ contains
                 end associate
             else
                 !$acc parallel loop gang vector collapse(2) async(1)
-                do j = jms,jme
-                    do i = ims,ime
+                do j = jts,jte
+                    do i = its,ite
                         cosine_zenith_angle(i,j)=sin(solar_elevation_store(i,j))
                     enddo
                 enddo

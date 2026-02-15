@@ -842,7 +842,16 @@ contains
 
         if (mapped_val == -1) then
             if (STD_OUT_PE) write(*,*) "Error: '", trim(tmp_val), "' is not a valid option for '", trim(name), "'"
-            if (STD_OUT_PE) write(*,*) "Valid options are: ", mapping(1::2)
+            if (STD_OUT_PE) then
+                write(*,'(A)', advance='no') "Valid options are: "
+                do i = 1, size(mapping), 2
+                    if (i < size(mapping) - 1) then
+                        write(*,'(A)', advance='no') trim(mapping(i)) // ", "
+                    else
+                        write(*,'(A)') trim(mapping(i))
+                    endif
+                end do
+            endif
             error stop
         endif
 
