@@ -22,7 +22,7 @@ cd HORAYZON
 python -m pip install .
 ```
 
-Your python environment should now be complete. To generate the domain file, open gen_HICAR_dom.py and edit the paths for the target domain, radiation domain, and output domain. HICAR_Domain.py and ProjHelpers.py, both contained in the helpers/domains directory, must be in the same directory as gen_HICAR_dom.py.
+Your python environment should now be complete. To generate the domain file, open helpers/gen_HICAR_dom.py and edit the paths for the target domain, radiation domain, and output domain. HICAR_Domain.py and ProjHelpers.py, both contained in the helpers/domains directory, must be in the same directory as gen_HICAR_dom.py.
 
 Now run:
 
