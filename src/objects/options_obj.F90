@@ -83,7 +83,7 @@ contains
                 stop
             endif
         else
-            if (.not.(gen_nml)) then
+            if (.not.(gen_nml .or. info_only)) then
                 if (STD_OUT_PE) write(*,*) 'ERROR: namelist file: ',trim(namelist_file),' does not exist'
                 stop
             endif

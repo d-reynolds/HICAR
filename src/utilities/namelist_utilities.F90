@@ -1224,7 +1224,8 @@ contains
         character(len=*), intent(in) :: name
         logical,          intent(in), optional :: info, gen_nml
 
-        character(len=kMAX_STRING_LENGTH) :: group, default, description, units
+        character(len=kMAX_STRING_LENGTH) :: group, default, units
+        character(len=10000) :: description
         character(len=1), allocatable :: dimensions(:)
         real :: min, max
         integer :: type
@@ -1508,7 +1509,7 @@ contains
         if (STD_OUT_PE .and. is_minmax) write(*,*)        "    Maximum Allowed Value:..|", str(max)
         if (STD_OUT_PE .and. is_units) write(*,*)         "    Units:..................|", trim(units)
         if (STD_OUT_PE .and. is_dimensions) then
-            write(*,'(A$)', advance="no")      "     Dimensions:.............|["
+            write(*,'(A)', advance="no")      "     Dimensions:.............|["
             do i = 1, size(dimensions)
                 if (i==size(dimensions)) then
                     WRITE(*, '(A1, A)', ADVANCE='NO') dimensions(i), "]"
@@ -1519,7 +1520,7 @@ contains
             write(*,*)
         endif
         if (STD_OUT_PE .and. is_values) then
-            write(*,'(A$)', advance="no")                   "    Allowed Values:..........|"
+            write(*,'(A)', advance="no")                   "    Allowed Values:..........|"
             do i = 1, size(values)
                 if (i==size(values)) then
                     WRITE(*, '(I1)', ADVANCE='NO') values(i)
