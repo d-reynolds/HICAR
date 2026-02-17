@@ -4,7 +4,6 @@ on:
   pull_request:
     branches: [master, develop]
   push:
-    branches: [master, develop]
 
   workflow_dispatch:
 
@@ -18,7 +17,14 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/installdir
+          key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
+          restore-keys: hicar-deps-${{ runner.os }}-
 
       # Build Dependencies then HICAR
       - name: Dependencies
@@ -26,8 +32,16 @@ jobs:
       - name: Build
         run: bash .github/scripts/hicar_install_utils.sh hicar_install
 
-      # Run HICAR with generated test data
+      # Build test executable and download test data
       - name: Generate Test Run Data
         run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
-      - name: Execute Test Run
-        run: bash .github/scripts/hicar_install_utils.sh execute_test_run
+
+      # Run tests in separate steps for better CI reporting
+      - name: CLI Options Tests
+        run: bash tests/test_cli_options.sh $GITHUB_WORKSPACE
+      - name: Unit Tests
+        run: cd build && mpiexec -np 4 tests/HICAR-tester
+      - name: Integration Tests
+        run: |
+          cd tests/Test_Cases
+          bash test_case_runner.sh $GITHUB_WORKSPACE Standard

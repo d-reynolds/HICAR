@@ -783,6 +783,15 @@ else()
 	WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
 	COMMENT "Running test case suite"
 	VERBATIM
-	)  
+	)
 
 endif()
+
+add_custom_target(test_cli
+    COMMAND ${CMAKE_COMMAND} -E echo "Running CLI option tests..."
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_cli_options.sh ${PROJECT_SOURCE_DIR}
+    DEPENDS HICAR
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests
+    COMMENT "Running CLI options test suite"
+    VERBATIM
+)
