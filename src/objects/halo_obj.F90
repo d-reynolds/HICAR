@@ -1812,7 +1812,7 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
         nx = size(var%data_2d,1)
         !$acc parallel loop gang vector collapse(2) present(var%data_2d)
         do j = n-this%halo_size+1-offs_y, n
-            do i = var%grid%its, var%grid%ite-offs_x
+            do i = var%grid%its, var%grid%ite
                 var%data_2d(i,j) = this%north_in_3d(i-var%grid%its+1+this%halo_size,1,j-(n-this%halo_size+1-offs_y)+1)
             enddo
         enddo
@@ -1823,7 +1823,7 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(3) present(var%dqdt_3d)
             do j = n-this%halo_size+1-offs_y, n
                 do k = var%grid%kts, var%grid%kte
-                    do i = var%grid%its, var%grid%ite-offs_x
+                    do i = var%grid%its, var%grid%ite
                         var%dqdt_3d(i,k,j) = this%north_in_3d(i-var%grid%its+1+this%halo_size,k,j-(n-this%halo_size+1-offs_y)+1)
                     enddo
                 enddo
@@ -1832,7 +1832,7 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(3) present(var%data_3d)
             do j = n-this%halo_size+1-offs_y, n
                 do k = var%grid%kts, var%grid%kte
-                    do i = var%grid%its, var%grid%ite-offs_x
+                    do i = var%grid%its, var%grid%ite
                         var%data_3d(i,k,j) = this%north_in_3d(i-var%grid%its+1+this%halo_size,k,j-(n-this%halo_size+1-offs_y)+1)
                     enddo
                 enddo
@@ -1862,7 +1862,7 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
         start = lbound(var%data_2d,2)
         !$acc parallel loop gang vector collapse(2) present(var%data_2d)
         do j = start,start+this%halo_size-1
-        do i = var%grid%its,var%grid%ite-offs_x
+        do i = var%grid%its,var%grid%ite
             var%data_2d(i,j) = this%south_in_3d(i-var%grid%its+1+this%halo_size,1,j-start+1)
         enddo
         enddo
@@ -1872,7 +1872,7 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(3) present(var%dqdt_3d)
             do j = start,start+this%halo_size-1
             do k = var%grid%kts,var%grid%kte
-            do i = var%grid%its,var%grid%ite-offs_x
+            do i = var%grid%its,var%grid%ite
                 var%dqdt_3d(i,k,j) = this%south_in_3d(i-var%grid%its+1+this%halo_size,k,j-start+1)
             enddo
             enddo
@@ -1881,7 +1881,7 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(3) present(var%data_3d)
             do j = start,start+this%halo_size-1
             do k = var%grid%kts,var%grid%kte
-            do i = var%grid%its,var%grid%ite-offs_x
+            do i = var%grid%its,var%grid%ite
                 var%data_3d(i,k,j) = this%south_in_3d(i-var%grid%its+1+this%halo_size,k,j-start+1)
             enddo
             enddo
@@ -1910,7 +1910,7 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
     if (var%two_d) then
         n = ubound(var%data_2d,1)
         !$acc parallel loop gang vector collapse(2) present(var%data_2d)
-        do j = var%grid%jts,var%grid%jte-offs_y
+        do j = var%grid%jts,var%grid%jte
         do i = n-this%halo_size+1-offs_x,n
             var%data_2d(i,j) = this%east_in_3d(i-(n-this%halo_size+1-offs_x)+1,1,j-var%grid%jts+1+this%halo_size)
         enddo
@@ -1919,7 +1919,7 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
         n = ubound(var%data_3d,1)
         if (dqdt) then
             !$acc parallel loop gang vector collapse(3) present(var%dqdt_3d)
-            do j = var%grid%jts,var%grid%jte-offs_y
+            do j = var%grid%jts,var%grid%jte
             do k = var%grid%kts,var%grid%kte
             do i = n-this%halo_size+1-offs_x,n
                 var%dqdt_3d(i,k,j) = this%east_in_3d(i-(n-this%halo_size+1-offs_x)+1,k,j-var%grid%jts+1+this%halo_size)
@@ -1928,7 +1928,7 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
             enddo
         else
             !$acc parallel loop gang vector collapse(3) present(var%data_3d)
-            do j = var%grid%jts,var%grid%jte-offs_y
+            do j = var%grid%jts,var%grid%jte
             do k = var%grid%kts,var%grid%kte
             do i = n-this%halo_size+1-offs_x,n
                 var%data_3d(i,k,j) = this%east_in_3d(i-(n-this%halo_size+1-offs_x)+1,k,j-var%grid%jts+1+this%halo_size)
@@ -1958,7 +1958,7 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
     if (var%two_d) then
         start = lbound(var%data_2d,1)
         !$acc parallel loop gang vector collapse(2) present(var%data_2d)
-        do j = var%grid%jts,var%grid%jte-offs_y
+        do j = var%grid%jts,var%grid%jte
         do i = start,start+this%halo_size-1
             var%data_2d(i,j) = this%west_in_3d(i-start+1,1,j-var%grid%jts+1+this%halo_size)
         enddo
@@ -1967,7 +1967,7 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
         start = lbound(var%data_3d,1)
         if (dqdt) then
             !$acc parallel loop gang vector collapse(3) present(var%dqdt_3d)
-            do j = var%grid%jts,var%grid%jte-offs_y
+            do j = var%grid%jts,var%grid%jte
             do k = var%grid%kts,var%grid%kte
             do i = start,start+this%halo_size-1
                 var%dqdt_3d(i,k,j) = this%west_in_3d(i-start+1,k,j-var%grid%jts+1+this%halo_size)
@@ -1976,7 +1976,7 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
             enddo
         else
             !$acc parallel loop gang vector collapse(3) present(var%data_3d)
-            do j = var%grid%jts,var%grid%jte-offs_y
+            do j = var%grid%jts,var%grid%jte
             do k = var%grid%kts,var%grid%kte
             do i = start,start+this%halo_size-1
                 var%data_3d(i,k,j) = this%west_in_3d(i-start+1,k,j-var%grid%jts+1+this%halo_size)

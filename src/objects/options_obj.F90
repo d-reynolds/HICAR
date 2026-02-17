@@ -504,6 +504,10 @@ contains
             if (rc /= 0) call print_nml_error('output',msg=error_msg,iostat=rc)
         endif
         if (ALL(output_vars(:,n_indx)==kCHAR_NO_VAL)) then
+            if (.not.read_namelist) then
+                ! Test/mock mode: no namelist file, so skip output_vars requirement
+                return
+            endif
             if (STD_OUT_PE) write(*,*) "  WARNING: output_vars not specified in namelist for domain: ", n_indx
             if (n_indx == 1) then
                 stop 'output_vars must be specified in namelist for at least the first domain'

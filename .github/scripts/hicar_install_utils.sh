@@ -83,10 +83,9 @@ function install_zlib {
 
     cd zlib-1.3.1/
 
-    # check if make file exists and if not, run configure
-    if [ ! -f "Makefile" ]; then
-        ./configure --prefix=$INSTALLDIR &> config.log
-    fi
+    # Always run configure for zlib (its tarball ships with a Makefile
+    # that lacks install targets until configure sets the prefix)
+    ./configure --prefix=$INSTALLDIR &> config.log
 
     make -j 8 &> make.log
     make install
