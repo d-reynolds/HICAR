@@ -11,8 +11,10 @@ if [ $# -eq 0 ] || [ $# -eq 1 -a \( "$1" == "-h" -o "$1" == "--help" \) ]; then
     echo "Usage: hicar_install_utils.sh [function1] [function2] ..."
     echo ""
     echo "Available functions:"
-    echo "  ${bold}hicar_install${normal}: install HICAR"
     echo "  ${bold}hicar_dependencies${normal}: install dependencies for HICAR"
+    echo "  ${bold}hicar_install${normal}: build and install HICAR"
+    echo "  ${bold}gen_test_run_data${normal}: build test executable and download test data"
+    echo "  ${bold}execute_test_run${normal}: run CLI, unit, and integration tests"
     echo "  ${bold}install_zlib${normal}: install zlib"
     echo "  ${bold}install_hdf5${normal}: install hdf5"
     echo "  ${bold}install_PETSc${normal}: install PETSc"
@@ -253,7 +255,7 @@ function hicar_install {
     fi
     export NETCDF_DIR=${INSTALLDIR}
     export FFTW_DIR=/usr
-    export PETSC_DIR=/usr #${INSTALLDIR}
+    export PETSC_DIR=${INSTALLDIR}
     export PATH=${INSTALLDIR}/bin:$PATH
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     cmake ../ -DFSM=OFF -DMODE=debug
@@ -262,6 +264,34 @@ function hicar_install {
     
     echo "hicar install succeeded"
 
+}
+
+function gen_test_run_data {
+    echo gen_test_run_data
+    cd ${GITHUB_WORKSPACE}/build
+    make download_test_data
+    make HICAR-tester
+}
+
+function execute_test_run {
+    echo execute_test_run
+    cd ${GITHUB_WORKSPACE}
+
+    # 1. CLI options test (fast, no MPI needed)
+    echo "--- Running CLI options tests ---"
+    bash tests/test_cli_options.sh ${GITHUB_WORKSPACE}
+
+    # 2. Unit tests (MPI)
+    echo "--- Running unit tests ---"
+    cd build
+    mpiexec -np 4 tests/HICAR-tester
+    cd ..
+
+    # 3. Integration tests (MPI + test data)
+    echo "--- Running integration tests ---"
+    cd tests/Test_Cases
+    bash test_case_runner.sh ${GITHUB_WORKSPACE} Standard
+    cd ../..
 }
 
 for func in "$@"
@@ -273,6 +303,8 @@ do
             hicar_install;;
         gen_test_run_data)
             gen_test_run_data;;
+        execute_test_run)
+            execute_test_run;;
         install_zlib)
             install_zlib;;
         install_hdf5)
