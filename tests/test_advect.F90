@@ -186,8 +186,7 @@ module test_advect
                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
-                        options%time%cfl_reduction_factor, &
-                        use_density=.false.)
+                        options%time%cfl_reduction_factor)
 
         STD_OUT_PE = .True.
 
