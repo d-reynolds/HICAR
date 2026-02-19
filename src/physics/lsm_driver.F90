@@ -73,7 +73,7 @@ module land_surface
 
     character(len=kMAX_NAME_LENGTH) :: MMINLU
     logical :: FNDSOILW,FNDSNOWH
-    integer :: num_soil_layers,ISURBAN,ISICE,ISWATER, ISLAKE
+    integer :: num_soil_layers,num_snow_layers,ISURBAN,ISICE,ISWATER, ISLAKE
     real*8  :: last_model_time(kMAX_NESTS)
 
     !Noah-MP specific
@@ -352,7 +352,7 @@ contains
             !$acc                                    IOPT_GLA, IOPT_RSF, IOPT_SOIL,IOPT_PEDO,  &
             !$acc                                    IOPT_CROP, IOPT_IRR, IOPT_IRRM, IZ0TLND,  &
             !$acc                                    SF_URBAN_PHYSICS, NMP_SOILTSTEP, lsm_dt, &
-            !$acc                                    num_soil_layers,ISURBAN,ISICE,ISWATER, ISLAKE)
+            !$acc                                    num_soil_layers,num_snow_layers,ISURBAN,ISICE,ISWATER, ISLAKE)
 
             deallocate(QSFC)
         end if
@@ -385,7 +385,9 @@ contains
         
         if (options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
             num_soil_layers=options%lsm%num_soil_layers ! to .nml?
-            call allocate_noah_data(num_soil_layers)
+            num_snow_layers=3!options%sm%num_snow_layers ! to .nml?
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    num_soil_layers=", num_soil_layers, " num_snow_layers=", num_snow_layers
+            call allocate_noah_data(num_soil_layers, num_snow_layers)
         endif
 
         ! initial guesses
@@ -516,7 +518,7 @@ contains
             !$acc                                    IOPT_GLA, IOPT_RSF, IOPT_SOIL,IOPT_PEDO,  &
             !$acc                                    IOPT_CROP, IOPT_IRR, IOPT_IRRM, IZ0TLND,  &
             !$acc                                    SF_URBAN_PHYSICS, NMP_SOILTSTEP, lsm_dt, &
-            !$acc                                    num_soil_layers,ISURBAN,ISICE,ISWATER, ISLAKE)
+            !$acc                                    num_soil_layers,num_snow_layers,ISURBAN,ISICE,ISWATER, ISLAKE)
 
             call NoahmpHICARinit( NoahmpIO(domain%nest_indx), MMINLU,                                  &
                                 domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d,   &
@@ -603,7 +605,7 @@ contains
                                 domain%vars_3d(domain%var_indx(kVARS%snicar_dust5_conc)%v)%data_3d(:,1:3,:),  & ! SNICAR DUST5 mass concentration in snow
                                 domain%vars_3d(domain%var_indx(kVARS%soil_albedo_dir)%v)%data_3d,            & ! Diffuse soil albedo
                                 domain%vars_3d(domain%var_indx(kVARS%soil_albedo_diff)%v)%data_3d,             & ! Direct soil albedo
-                                num_soil_layers,                        &
+                                num_soil_layers, num_snow_layers,                       &
                                 restart,             &    !restart
                                 .True.,                                 &    !allowed_to_read
                                 IOPT_RUNSUB,  IOPT_CROP, IOPT_IRR, IOPT_IRRM, &
@@ -1277,9 +1279,9 @@ contains
         endif
     end subroutine lsm_apply_fluxes
 
-    subroutine allocate_noah_data(num_soil_layers)
+    subroutine allocate_noah_data(num_soil_layers, num_snow_layers)
         implicit none
-        integer, intent(in) :: num_soil_layers
+        integer, intent(in) :: num_soil_layers, num_snow_layers
         integer :: i
 
         ITIMESTEP=1
@@ -1315,7 +1317,7 @@ contains
 
         allocate(nmp_snow(ims:ime,jms:jme))
         allocate(nmp_snowh(ims:ime,jms:jme))
-        allocate(nmp_snow_t(ims:ime,1:3,jms:jme), source=273.15)
+        allocate(nmp_snow_t(ims:ime,1:num_snow_layers,jms:jme), source=273.15)
         allocate(DZs(num_soil_layers))
 
         DZs = [0.1,0.2,0.4,0.8]
