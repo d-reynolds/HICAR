@@ -384,8 +384,9 @@ contains
         endif
         
         if (options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
-            num_soil_layers=options%lsm%num_soil_layers
-            num_snow_layers=3!options%sm%num_snow_layers
+            num_soil_layers=options%lsm%num_soil_layers ! to .nml?
+            num_snow_layers=3!options%sm%num_snow_layers ! to .nml?
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    num_soil_layers=", num_soil_layers, " num_snow_layers=", num_snow_layers
             call allocate_noah_data(num_soil_layers, num_snow_layers)
         endif
 
@@ -1315,7 +1316,7 @@ contains
 
         allocate(nmp_snow(ims:ime,jms:jme))
         allocate(nmp_snowh(ims:ime,jms:jme))
-        allocate(nmp_snow_t(ims:ime,num_snow_layers,jms:jme), source=273.15)
+        allocate(nmp_snow_t(ims:ime,1:num_snow_layers,jms:jme), source=273.15)
         allocate(DZs(num_soil_layers))
 
         DZs = [0.1,0.2,0.4,0.8]
