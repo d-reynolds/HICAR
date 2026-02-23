@@ -384,8 +384,8 @@ contains
         endif
         
         if (options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
-            num_soil_layers=options%lsm%num_soil_layers ! to .nml?
-            num_snow_layers=3!options%sm%num_snow_layers ! to .nml?
+            num_soil_layers=options%lsm%num_soil_layers
+            num_snow_layers=3!options%sm%num_snow_layers
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    num_soil_layers=", num_soil_layers, " num_snow_layers=", num_snow_layers
             call allocate_noah_data(num_soil_layers, num_snow_layers)
         endif
