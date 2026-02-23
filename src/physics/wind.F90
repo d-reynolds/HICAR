@@ -642,10 +642,11 @@ contains
             
         if (options%physics%windtype==kITERATIVE_WINDS) then
             allocate(div(ims:ime,kms:kme,jms:jme))
-            associate(wind_alpha => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d)
-            !$acc data present(wind_alpha) create(div)
+            associate(wind_alpha => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v))
+            !$acc data create(div)
             if (alpha_const_val>0) then
-                !$acc parallel loop gang vector collapse(3)
+                associate(wind_alpha => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d)
+                !$acc parallel loop gang vector collapse(3) present(wind_alpha)
                 do j = jms,jme
                     do k = kms,kme
                         do i = ims,ime
@@ -653,8 +654,14 @@ contains
                         enddo
                     enddo
                 enddo
+                end associate
             else
-                call calc_alpha(wind_alpha, domain%vars_3d(domain%var_indx(kVARS%froude)%v)%data_3d)
+                call calc_alpha(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%froude)%v)%data_3d)
+
+                !$acc update host(alpha)
+                ! smooth alpha to avoid sharp transitions
+                call smooth_array(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v),windowsize=2,ydim=3,nsmooths=3,halo=domain%halo)
+                !$acc update device(alpha)
             endif
 
             do i = 1, options%wind%wind_iterations
@@ -665,9 +672,9 @@ contains
                                 domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options%adv%advect_density,horz_only=.False.)
 
 #ifdef USE_AMGX                
-                call calc_iter_winds_amgx(domain,wind_alpha,div,options%adv%advect_density)
+                call calc_iter_winds_amgx(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
 #elif defined USE_PETSC
-                call calc_iter_winds_petsc(domain,wind_alpha,div,options%adv%advect_density)
+                call calc_iter_winds_petsc(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
 #endif                
                 !Exchange u and v, since the outer points are not updated in above function
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
@@ -918,12 +925,6 @@ contains
 
         !$acc end data
 
-        !$acc update host(alpha)
-        !smooth alpha to avoid sharp transitions
-        do k = 1,3
-            call smooth_array(alpha,2,ydim=3)
-        enddo
-        !$acc update device(alpha)
 
     end subroutine calc_alpha
     

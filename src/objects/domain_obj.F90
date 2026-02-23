@@ -3211,6 +3211,11 @@ contains
                 if (update_only) then
                     call interpolate_variable(forcing_hi%dqdt_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
+                    ! Parallel-consistent post-interpolation smoothing of u/v wind tendencies
+                    if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
+                        call smooth_array(forcing_hi, windowsize=1, ydim=3, &
+                                          nsmooths=this%nsmooth, halo=this%halo, do_dqdt=.true.)
+                    endif
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
                     !$acc update device(forcing_hi%dqdt_3d)
                     if (.not.(force_boundaries).and..not.var_is_u.and..not.var_is_v) then
@@ -3221,6 +3226,11 @@ contains
                 else
                     call interpolate_variable(forcing_hi%data_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
+                    ! Parallel-consistent post-interpolation smoothing of u/v wind fields
+                    if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
+                        call smooth_array(forcing_hi, windowsize=1, ydim=3, &
+                                          nsmooths=this%nsmooth, halo=this%halo)
+                    endif
                     !If this is an initialization step, copy high res directly over to domain
                     !$acc update device(forcing_hi%data_3d)
                     !$acc kernels present(forcing_hi%data_3d, var%data_3d)
@@ -3441,23 +3451,19 @@ contains
         else if (uvar) then
 
             ! One grid cell smoothing of original input data
-            ! if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
+            if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_u%geolut)
 
             call vinterp(var_data, temp_3d, forcing%geo_u%vert_lut)
-            ! temp_3d = pre_smooth(:,:nz,:) ! no vertical interpolation option
-            ! if (windowsize > 0) call smooth_array(var_data, windowsize=windowsize, ydim=3)
                         
         ! Interpolate to the v staggered grid
         else if (vvar) then
 
             ! One grid cell smoothing of original input data
-            ! if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
+            if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_v%geolut)
             
             call vinterp(var_data, temp_3d, forcing%geo_v%vert_lut)
-            ! temp_3d = pre_smooth(:,:nz,:) ! no vertical interpolation option
-            ! if (windowsize > 0) call smooth_array(var_data, windowsize=windowsize, ydim=3)
         endif
         
     end subroutine
