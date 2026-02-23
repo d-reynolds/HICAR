@@ -165,6 +165,12 @@ contains
             !see if we have any 3d variables requested, if so we will need to output z levels
             if (this%output%vars_for_output(i)+this%vars_for_restart(i) > 0) then
                 tmp_meta = get_varmeta(i)
+                ! Also clean entries that have no metadata defined (no output name) or are not 2d or 3d
+                if (tmp_meta%name == "" .or. .not.(tmp_meta%two_d .or. tmp_meta%three_d)) then
+                    this%output%vars_for_output(i) = 0
+                    this%vars_for_restart(i) = 0
+                    cycle
+                endif
                 if (tmp_meta%three_d) output_zvar = .True.
             endif
         enddo
@@ -517,14 +523,18 @@ contains
             output_vars(:,n_indx) = output_vars(:,1)
         endif
 
-        do j=1, kMAX_STORAGE_VARS
-            if (trim(output_vars(j, n_indx)) /= "" .and. trim(output_vars(j, n_indx)) /= kCHAR_NO_VAL ) then
+        if (trim(output_vars(1, n_indx)) == 'all') then
+            output_options%vars_for_output(:) = 1
+        else
+            do j=1, kMAX_STORAGE_VARS
+                if (trim(output_vars(j, n_indx)) /= "" .and. trim(output_vars(j, n_indx)) /= kCHAR_NO_VAL ) then
 
-                !get the var index for this output variable name
-                var_indx = get_varindx(trim(output_vars(j, n_indx)))
-                if (var_indx <= kMAX_STORAGE_VARS) call add_to_varlist(output_options%vars_for_output, [var_indx])
-            endif
-        enddo        
+                    !get the var index for this output variable name
+                    var_indx = get_varindx(trim(output_vars(j, n_indx)))
+                    if (var_indx <= kMAX_STORAGE_VARS) call add_to_varlist(output_options%vars_for_output, [var_indx])
+                endif
+            enddo
+        endif        
 
         call set_nml_var(output_options%output_folder, output_folder(n_indx), 'output_folder', output_folder(1))
         call set_nml_var(output_options%outputinterval, outputinterval(n_indx), 'outputinterval', outputinterval(1))

@@ -278,7 +278,6 @@ module icar_constants
         integer :: shortwave_cloud_forcing
         integer :: land_emissivity
         integer :: temperature_interface
-        integer :: tend_swrad
         integer :: runoff_tstep
 
         !FSM2Trans Variables
