@@ -3439,23 +3439,23 @@ contains
         else if (uvar) then
 
             ! One grid cell smoothing of original input data
-            if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
+            ! if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_u%geolut)
 
             call vinterp(var_data, temp_3d, forcing%geo_u%vert_lut)
             ! temp_3d = pre_smooth(:,:nz,:) ! no vertical interpolation option
-            if (windowsize > 0) call smooth_array(var_data, windowsize=windowsize, ydim=3)
+            ! if (windowsize > 0) call smooth_array(var_data, windowsize=windowsize, ydim=3)
                         
         ! Interpolate to the v staggered grid
         else if (vvar) then
 
             ! One grid cell smoothing of original input data
-            if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
+            ! if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_v%geolut)
             
             call vinterp(var_data, temp_3d, forcing%geo_v%vert_lut)
             ! temp_3d = pre_smooth(:,:nz,:) ! no vertical interpolation option
-            if (windowsize > 0) call smooth_array(var_data, windowsize=windowsize, ydim=3)
+            ! if (windowsize > 0) call smooth_array(var_data, windowsize=windowsize, ydim=3)
         endif
         
     end subroutine

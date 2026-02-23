@@ -802,9 +802,9 @@ contains
         integer :: i, mapped_val, default_val
 
         if (present(usr_default)) then
-            call set_char_nml_var(tmp_val, var_val, name, usr_default)
+            call set_char_nml_var(tmp_val, to_lower(trim(var_val)), name, to_lower(trim(usr_default)))
         else
-            call set_char_nml_var(tmp_val, var_val, name)
+            call set_char_nml_var(tmp_val, to_lower(trim(var_val)), name)
         endif
 
         !convert tmp_val to lowercase for case-insensitive matching
@@ -813,7 +813,7 @@ contains
         ! check that value conforms to the rules for the nml option type
         if (present(usr_default)) then
             if (trim(usr_default) /= kCHAR_NO_VAL) then
-                call check_var_entry_type(usr_default,tmp_val,name)
+                call check_var_entry_type(to_lower(usr_default),tmp_val,name)
             else
                 default = trim(get_nml_var_default(name))
 
@@ -3568,7 +3568,7 @@ contains
                 min = 0
                 max = 10000
                 units = "m"
-                default = "-9999"
+                default = "0"
                 group = "Wind"
             case ("wind_iterations")
                 description = "Number of iterations to use for the iterative wind solver (wind=1)"

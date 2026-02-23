@@ -95,7 +95,7 @@ contains
         do n = 1,this%outputer%n_vars
             if (this%outputer%var_meta(n)%three_d) then
                 this%n_w_3d = this%n_w_3d+1
-        !         if(this%outputer%variables(n)%dim_len(2) > this%k_e_w) this%k_e_w = this%outputer%variables(n)%dim_len(2)
+                if(this%outputer%var_meta(n)%dim_len(2) > this%k_e_w) this%k_e_w = this%outputer%var_meta(n)%dim_len(2)
             endif
         enddo
 
@@ -114,8 +114,17 @@ contains
 
 
         !Setup arrays for information about accessing variables from write buffer
-        allocate(this%out_var_indices(count(options(nest_indx)%output%vars_for_output > 0)))
-        allocate(this%rst_var_indices(count(options(nest_indx)%vars_for_restart > 0)))
+        ! Count actual output/restart vars from the outputer to ensure allocation matches fill
+        out_i = 0
+        rst_i = 0
+        do n=1,this%outputer%n_vars
+            var_indx = get_varindx(this%outputer%var_meta(n)%name)
+            if (options(nest_indx)%output%vars_for_output(var_indx) > 0) out_i = out_i + 1
+            if (options(nest_indx)%vars_for_restart(var_indx) > 0) rst_i = rst_i + 1
+        enddo
+
+        allocate(this%out_var_indices(out_i))
+        allocate(this%rst_var_indices(rst_i))
 
         this%restart_counter = 1
         this%restart_count = options(nest_indx)%restart%restart_count
@@ -581,7 +590,7 @@ contains
 
         do i = 1,this%n_children
             call MPI_Type_create_subarray(4, [this%n_w_3d, (this%i_e_re-this%i_s_re+2), (this%k_e_w-this%k_s_w+1), (this%j_e_re-this%j_s_re+2)], &
-                [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jerec(i)-this%jsrec(i)+2)], &
+                [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), (this%k_e_w-this%k_s_w+1), (this%jerec(i)-this%jsrec(i)+2)], &
                 [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%rst_types_3d(i))
         
             call MPI_Type_create_subarray(3, [this%n_w_2d, (this%i_e_re-this%i_s_re+2), (this%j_e_re-this%j_s_re+2)], &
@@ -589,7 +598,7 @@ contains
                 [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%rst_types_2d(i))
 
             call MPI_Type_create_subarray(4, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re], &
-                [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jerec(i)-this%jsrec(i)+2)], &
+                [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), this%nz_w, (this%jerec(i)-this%jsrec(i)+2)], &
                 [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_rst_types_3d(i))
 
             call MPI_Type_create_subarray(3, [this%n_w_2d, this%nx_re, this%ny_re], &

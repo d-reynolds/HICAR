@@ -503,12 +503,15 @@ contains
         integer, dimension(:), intent(in):: vars_to_out
 
         integer :: i
+        type(meta_data_t) :: tmp_var
 
         !Loop through domain vars_to_out, get the var index for the given variable name, and add that var's meta data to local list
         do i = 1,kMAX_STORAGE_VARS
             if (vars_to_out(i)>0) then
                 !i should equal the kVARS index of the variable we want to output
-                call this%add_to_output(get_varmeta(i))
+                tmp_var = get_varmeta(i)
+                if (tmp_var%name == "") cycle
+                call this%add_to_output(tmp_var)
             endif
         enddo
     end subroutine
