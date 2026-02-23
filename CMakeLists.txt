@@ -354,13 +354,13 @@ if(OPENACC)
 		# Fetch and build rte-rrtmgp when OpenACC is enabled
 		message(STATUS "Fetching rte-rrtmgp library for OpenACC support...")
 
-		FetchContent_MakeAvailable(rte-rrtmgp)
-
 		# Configure build options for rte-rrtmgp
 		set(BUILD_TESTING OFF)
 		set(BUILD_C_HEADERS OFF)
 		set(KERNEL_MODE "accel" CACHE STRING "Select the kernel mode for rte-rrtmgp" FORCE)
 		set(BUILD_SHARED_LIBS OFF)
+
+		FetchContent_MakeAvailable(rte-rrtmgp)
 			
 		# Use the predefined HICAR compiler flags			
 		message(STATUS "Using compiler flags for rte-rrtmgp: ${CMAKE_Fortran_FLAGS}")
@@ -711,8 +711,11 @@ message(STATUS "")
 # get_target_property(hicar_lib HICAR LINK_LIBRARIES)
 # message(STATUS "Libraries linked against HICAR target: ${HICAR_LIBS}")
 
-# Set the location for library installation -- i.e., /usr/lib in this case
-# not really necessary in this example. Use "sudo make install" to apply 
+# Set the install prefix to the project source directory so that
+# "make install" works without root permissions
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX ${PROJECT_SOURCE_DIR} CACHE PATH "Install path prefix" FORCE)
+endif()
 set(CMAKE_INSTALL_EXEDIR ${PROJECT_SOURCE_DIR}/bin)
 set(CMAKE_Fortran_MODULE_DIRECTORY  ${CMAKE_BINARY_DIR})
 

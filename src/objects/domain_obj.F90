@@ -60,7 +60,7 @@ contains
         
         !$acc enter data copyin(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
         !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
-        !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, &
+        !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, this%filter_width, &
         !$acc                   this%vars_2d, this%vars_3d, this%var_indx, this%forcing_var_indx, this%forcing_hi, &
         !$acc                   this%adv_vars, this%exch_vars, this%tend, this%halo)
         
@@ -2995,15 +2995,15 @@ contains
         do_boundary = (do_west .or. do_east .or. do_north .or. do_south)
 
         !$acc data create(ims_b,ime_b,jms_b,jme_b)
-        associate( ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, halo_size => this%grid%halo_size )
-        !$acc parallel present(ims, ime, jms, jme, halo_size)
+        associate( ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, halo_size => this%grid%halo_size, filter_width => this%FILTER_WIDTH)
+        !$acc parallel present(ims, ime, jms, jme, halo_size, filter_width)
         ims_b = 0; ime_b = 0; jms_b = 0; jme_b = 0
 
         if (do_boundary) then
-            if (do_west) ims_b(1) = ims; ime_b(1) = ims+this%FILTER_WIDTH+halo_size; jms_b(1) = jms; jme_b(1) = jme;
-            if (do_east) ims_b(2) = ime-this%FILTER_WIDTH-halo_size; ime_b(2) = ime; jms_b(2) = jms; jme_b(2) = jme;
-            if (do_north) ims_b(3) = ims; ime_b(3) = ime; jms_b(3) = jme-this%FILTER_WIDTH-halo_size; jme_b(3) = jme;
-            if (do_south) ims_b(4) = ims; ime_b(4) = ime; jms_b(4) = jms; jme_b(4) = jms+this%FILTER_WIDTH+halo_size;
+            if (do_west) ims_b(1) = ims; ime_b(1) = ims+filter_width+halo_size; jms_b(1) = jms; jme_b(1) = jme;
+            if (do_east) ims_b(2) = ime-filter_width-halo_size; ime_b(2) = ime; jms_b(2) = jms; jme_b(2) = jme;
+            if (do_north) ims_b(3) = ims; ime_b(3) = ime; jms_b(3) = jme-filter_width-halo_size; jme_b(3) = jme;
+            if (do_south) ims_b(4) = ims; ime_b(4) = ime; jms_b(4) = jms; jme_b(4) = jms+filter_width+halo_size;
 
             ! limit vertical extent of west and east boundaries to the extent of the north/south indices
             ! this prevents double-calculating points in the corners

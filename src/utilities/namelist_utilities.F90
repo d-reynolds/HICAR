@@ -1534,7 +1534,7 @@ contains
     end subroutine write_nml_var_info
 
 
-    subroutine get_nml_var_metadata(name, group, description, default, min, max, type, values, units, dimensions, mapping)
+    subroutine get_nml_var_metadata(name, group, description, default, min, max, type, values, units, dimensions, val_keys)
         implicit none
         character(len=*), intent(in) :: name
         character(len=*), intent(out) :: group, description, default, units
@@ -1542,7 +1542,7 @@ contains
         real,    intent(out) :: min, max
         integer, intent(out) :: type
         integer, allocatable, intent(out) :: values(:)
-        character(len=*), allocatable, optional, intent(out) :: mapping(:)
+        character(len=*), allocatable, optional, intent(out) :: val_keys(:)
 
         group = ""
         description = ""
@@ -2376,8 +2376,8 @@ contains
                                                                        "'none' = no PBL,"//achar(10)//BLNK_CHR_N// &
                                                                        "'ysu'  = YSU PBL"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "ysu", trim(str(kPBL_YSU))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "ysu", trim(str(kPBL_YSU))]
                 endif
                 group = "Physics"
             case ("lsm")
@@ -2387,8 +2387,8 @@ contains
                                                         "'noahmp' = Noah MP"
 
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kLSM_BASIC)), "noahmp", trim(str(kLSM_NOAHMP))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kLSM_BASIC)), "noahmp", trim(str(kLSM_NOAHMP))]
                 endif
                 group = "Physics"
                 ! type = 1
@@ -2401,8 +2401,8 @@ contains
                                                        "'RRTMGP' = RRTMGP"
 
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kRA_BASIC)), "simple", trim(str(kRA_SIMPLE)), "RRTMG", trim(str(kRA_RRTMG)), "RRTMGP", trim(str(kRA_RRTMGP))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kRA_BASIC)), "simple", trim(str(kRA_SIMPLE)), "RRTMG", trim(str(kRA_RRTMG)), "RRTMGP", trim(str(kRA_RRTMGP))]
                 endif
                 group = "Physics"
             case ("conv")
@@ -2412,8 +2412,8 @@ contains
                                                      "'NSAS'   = NSAS scheme"//achar(10)//BLNK_CHR_N// &
                                                      "'BMJ'    = BMJ scheme"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "tiedke", trim(str(kCU_TIEDTKE)), "nsas", trim(str(kCU_NSAS)), "bmj", trim(str(kCU_BMJ))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "tiedke", trim(str(kCU_TIEDTKE)), "nsas", trim(str(kCU_NSAS)), "bmj", trim(str(kCU_BMJ))]
                 endif
                 group = "Physics"
             case ("mp")
@@ -2427,8 +2427,8 @@ contains
                                                           "'Thompson Aerosol' = Thompson Aerosol (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
                                                           "'WSM3'             = WSM3 (NOT SUPPORTED)"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "thompson", trim(str(kMP_THOMPSON)), "linear", trim(str(kMP_SB04)), "morrison", trim(str(kMP_MORRISON)), "wsm6", trim(str(kMP_WSM6)), "thompson_aerosol", trim(str(kMP_THOMP_AER)), "wsm3", trim(str(kMP_WSM3)), "ishmael", trim(str(kMP_ISHMAEL))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "thompson", trim(str(kMP_THOMPSON)), "linear", trim(str(kMP_SB04)), "morrison", trim(str(kMP_MORRISON)), "wsm6", trim(str(kMP_WSM6)), "thompson_aerosol", trim(str(kMP_THOMP_AER)), "wsm3", trim(str(kMP_WSM3)), "ishmael", trim(str(kMP_ISHMAEL))]
                 endif
                 group = "Physics"
                 type = 1
@@ -2438,8 +2438,8 @@ contains
                                                    "'simple' = Simple fluxes (uses SST in forcing data, otherwise SST=280°C)"//achar(10)//BLNK_CHR_N// &
                                                    "'lake'   = WRF's lake model (needs lake depth in hi-res data))"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "simple", trim(str(kWATER_SIMPLE)), "lake", trim(str(kWATER_LAKE))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "simple", trim(str(kWATER_SIMPLE)), "lake", trim(str(kWATER_LAKE))]
                 endif
                 group = "Physics"
             case ("wind")
@@ -2447,8 +2447,8 @@ contains
                                                    "'none'               = no wind solver,"//achar(10)//BLNK_CHR_N// &
                                                    "'variational solver' = Mass-conserving wind solver based on variational calculus technique, requires PETSc(cpu) or AMGX(gpu)"
                 default = "variational solver"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "variational solver", trim(str(kITERATIVE_WINDS))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "variational solver", trim(str(kITERATIVE_WINDS))]
                 endif
                 group = "Physics"
             case ("adv")
@@ -2457,8 +2457,8 @@ contains
                                                         "'standard' = standard advection scheme"//achar(10)//BLNK_CHR_N// &
                                                         "'MPDATA'   = MPDATA (NOT SUPPORTED)"
                 default = "standard"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "standard", trim(str(kADV_STD)), "MPDATA", trim(str(kADV_MPDATA))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "standard", trim(str(kADV_STD)), "MPDATA", trim(str(kADV_MPDATA))]
                 endif
                 group = "Physics"
             case ("sfc")
@@ -2466,8 +2466,8 @@ contains
                                                     "'none'   = no surface layer"//achar(10)//BLNK_CHR_N// &
                                                     "'RevMM5' = Revised MM5 Monin-Obukhov scheme"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "RevMM5", trim(str(kSFC_MM5REV))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "RevMM5", trim(str(kSFC_MM5REV))]
                 endif
                 group = "Physics"
             case ("sm")
@@ -2475,8 +2475,8 @@ contains
                                                  "'none'      = no snow model"//achar(10)//BLNK_CHR_N// &
                                                  "'FSM2trans' = FSM2trans snow model (must be compiled, see docs/compiling.md)"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "FSM2trans", trim(str(kSM_FSM))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "FSM2trans", trim(str(kSM_FSM))]
                 endif
                 group = "Physics"
             ! --------------------------------------
@@ -3190,9 +3190,9 @@ contains
                 group = "LSM_Parameters"
             case ("nmp_opt_pedo")
                 description = "Noah-MP options for pedotransfer functions (used when OPT_SOIL = 3; not implemented in code)"
-                allocate(values(1))
-                values = [1]
-                default = "1"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
                 group = "LSM_Parameters"
             case ("nmp_opt_crop")
                 description = "options for crop model"//achar(10)//BLNK_CHR_N// &

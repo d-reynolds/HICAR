@@ -73,7 +73,7 @@ module land_surface
 
     character(len=kMAX_NAME_LENGTH) :: MMINLU
     logical :: FNDSOILW,FNDSNOWH
-    integer :: num_soil_layers,ISURBAN,ISICE,ISWATER, ISLAKE
+    integer :: num_soil_layers, num_snow_layers, ISURBAN,ISICE,ISWATER, ISLAKE
     real*8  :: last_model_time(kMAX_NESTS)
 
     !Noah-MP specific
@@ -351,8 +351,8 @@ contains
             !$acc                                    SNICAR_AEROSOL_READTABLE, &
             !$acc                                    IOPT_GLA, IOPT_RSF, IOPT_SOIL,IOPT_PEDO,  &
             !$acc                                    IOPT_CROP, IOPT_IRR, IOPT_IRRM, IZ0TLND,  &
-            !$acc                                    SF_URBAN_PHYSICS, NMP_SOILTSTEP, lsm_dt, &
-            !$acc                                    num_soil_layers,ISURBAN,ISICE,ISWATER, ISLAKE)
+            !$acc                                    SF_URBAN_PHYSICS, NMP_SOILTSTEP, lsm_dt, julian_day, &
+            !$acc                                    num_soil_layers,num_snow_layers,ISURBAN,ISICE,ISWATER, ISLAKE)
 
             deallocate(QSFC)
         end if
@@ -384,8 +384,9 @@ contains
         endif
         
         if (options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
-            num_soil_layers=options%lsm%num_soil_layers ! to .nml?
-            call allocate_noah_data(num_soil_layers)
+            num_soil_layers=options%lsm%num_soil_layers
+            num_snow_layers=3!options%sm%num_snow_layers
+            call allocate_noah_data(num_soil_layers, num_snow_layers)
         endif
 
         ! initial guesses
@@ -515,8 +516,8 @@ contains
             !$acc                                    SNICAR_AEROSOL_READTABLE, &
             !$acc                                    IOPT_GLA, IOPT_RSF, IOPT_SOIL,IOPT_PEDO,  &
             !$acc                                    IOPT_CROP, IOPT_IRR, IOPT_IRRM, IZ0TLND,  &
-            !$acc                                    SF_URBAN_PHYSICS, NMP_SOILTSTEP, lsm_dt, &
-            !$acc                                    num_soil_layers,ISURBAN,ISICE,ISWATER, ISLAKE)
+            !$acc                                    SF_URBAN_PHYSICS, NMP_SOILTSTEP, lsm_dt, julian_day, &
+            !$acc                                    num_soil_layers, num_snow_layers, ISURBAN,ISICE,ISWATER, ISLAKE)
 
             call NoahmpHICARinit( NoahmpIO(domain%nest_indx), MMINLU,                                  &
                                 domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d,   &
@@ -550,10 +551,10 @@ contains
                                 domain%vars_2d(domain%var_indx(kVARS%water_table_depth)%v)%data_2d,       &
                                 domain%vars_2d(domain%var_indx(kVARS%water_aquifer)%v)%data_2d,           &
                                 domain%vars_2d(domain%var_indx(kVARS%storage_gw)%v)%data_2d,              &
-                                domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(:,1:3,:),        &
-                                domain%vars_3d(domain%var_indx(kVARS%snow_layer_depth)%v)%data_3d(:,1:7,:),        &
-                                domain%vars_3d(domain%var_indx(kVARS%snow_layer_ice)%v)%data_3d(:,1:3,:),          &
-                                domain%vars_3d(domain%var_indx(kVARS%snow_layer_liquid_water)%v)%data_3d(:,1:3,:), &
+                                domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d,        &
+                                domain%vars_3d(domain%var_indx(kVARS%snow_layer_depth)%v)%data_3d,        &
+                                domain%vars_3d(domain%var_indx(kVARS%snow_layer_ice)%v)%data_3d,          &
+                                domain%vars_3d(domain%var_indx(kVARS%snow_layer_liquid_water)%v)%data_3d, &
                                 domain%vars_2d(domain%var_indx(kVARS%mass_leaf)%v)%data_2d,               &
                                 domain%vars_2d(domain%var_indx(kVARS%mass_root)%v)%data_2d,               &
                                 domain%vars_2d(domain%var_indx(kVARS%mass_stem)%v)%data_2d,               &
@@ -581,29 +582,29 @@ contains
                                 domain%vars_2d(domain%var_indx(kVARS%temperature_2m_bare)%v)%data_2d,     &
                                 domain%vars_2d(domain%var_indx(kVARS%wetland_sat_frac)%v)%data_2d,            & ! saturation fraction of a grid cell for wetland scheme
                                 domain%vars_2d(domain%var_indx(kVARS%wetland_h20_store)%v)%data_2d,           & ! water storage of a grid cell for wetland scheme (mm)
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_sn_rad)%v)%data_3d(:,1:3,:),      & ! SNICAR snow radius
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_sn_fr)%v)%data_3d(:,1:3,:),       & ! SNICAR snow freezing rate
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_bcphi)%v)%data_3d(:,1:3,:),       & ! SNICAR BCPHI mass in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_bcpho)%v)%data_3d(:,1:3,:),       & ! SNICAR BCPHO mass in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_ocphi)%v)%data_3d(:,1:3,:),       & ! SNICAR OCPHI mass in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_ocpho)%v)%data_3d(:,1:3,:),       & ! SNICAR OCPHO mass in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust1)%v)%data_3d(:,1:3,:),       & ! SNICAR DUST1 mass in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust2)%v)%data_3d(:,1:3,:),       & ! SNICAR DUST2 mass in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust3)%v)%data_3d(:,1:3,:),       & ! SNICAR DUST3 mass in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust4)%v)%data_3d(:,1:3,:),       & ! SNICAR DUST4 mass in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust5)%v)%data_3d(:,1:3,:),       & ! SNICAR DUST5 mass in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_bcphi_conc)%v)%data_3d(:,1:3,:),  & ! SNICAR BCPHI mass concentration in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_bcpho_conc)%v)%data_3d(:,1:3,:),  & ! SNICAR BCPHO mass concentration in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_ocphi_conc)%v)%data_3d(:,1:3,:),  & ! SNICAR OCPHI mass concentration in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_ocpho_conc)%v)%data_3d(:,1:3,:),  & ! SNICAR OCPHO mass concentration in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust1_conc)%v)%data_3d(:,1:3,:),  & ! SNICAR DUST1 mass concentration in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust2_conc)%v)%data_3d(:,1:3,:),  & ! SNICAR DUST2 mass concentration in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust3_conc)%v)%data_3d(:,1:3,:),  & ! SNICAR DUST3 mass concentration in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust4_conc)%v)%data_3d(:,1:3,:),  & ! SNICAR DUST4 mass concentration in snow
-                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust5_conc)%v)%data_3d(:,1:3,:),  & ! SNICAR DUST5 mass concentration in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_sn_rad)%v)%data_3d,      & ! SNICAR snow radius
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_sn_fr)%v)%data_3d,       & ! SNICAR snow freezing rate
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_bcphi)%v)%data_3d,       & ! SNICAR BCPHI mass in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_bcpho)%v)%data_3d,       & ! SNICAR BCPHO mass in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_ocphi)%v)%data_3d,       & ! SNICAR OCPHI mass in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_ocpho)%v)%data_3d,       & ! SNICAR OCPHO mass in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust1)%v)%data_3d,       & ! SNICAR DUST1 mass in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust2)%v)%data_3d,       & ! SNICAR DUST2 mass in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust3)%v)%data_3d,       & ! SNICAR DUST3 mass in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust4)%v)%data_3d,       & ! SNICAR DUST4 mass in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust5)%v)%data_3d,       & ! SNICAR DUST5 mass in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_bcphi_conc)%v)%data_3d,  & ! SNICAR BCPHI mass concentration in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_bcpho_conc)%v)%data_3d,  & ! SNICAR BCPHO mass concentration in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_ocphi_conc)%v)%data_3d,  & ! SNICAR OCPHI mass concentration in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_ocpho_conc)%v)%data_3d,  & ! SNICAR OCPHO mass concentration in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust1_conc)%v)%data_3d,  & ! SNICAR DUST1 mass concentration in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust2_conc)%v)%data_3d,  & ! SNICAR DUST2 mass concentration in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust3_conc)%v)%data_3d,  & ! SNICAR DUST3 mass concentration in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust4_conc)%v)%data_3d,  & ! SNICAR DUST4 mass concentration in snow
+                                domain%vars_3d(domain%var_indx(kVARS%snicar_dust5_conc)%v)%data_3d,  & ! SNICAR DUST5 mass concentration in snow
                                 domain%vars_3d(domain%var_indx(kVARS%soil_albedo_dir)%v)%data_3d,            & ! Diffuse soil albedo
                                 domain%vars_3d(domain%var_indx(kVARS%soil_albedo_diff)%v)%data_3d,             & ! Direct soil albedo
-                                num_soil_layers,                        &
+                                num_soil_layers, num_snow_layers,                       &
                                 restart,             &    !restart
                                 .True.,                                 &    !allowed_to_read
                                 IOPT_RUNSUB,  IOPT_CROP, IOPT_IRR, IOPT_IRRM, &
@@ -798,7 +799,6 @@ contains
 
             !$acc update device(lsm_dt, landuse_name, julian_day)
 
-            ! exchange coefficients
             !$acc kernels
             windspd = sqrt(u_10m**2 + v_10m**2)
             where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
@@ -1277,9 +1277,9 @@ contains
         endif
     end subroutine lsm_apply_fluxes
 
-    subroutine allocate_noah_data(num_soil_layers)
+    subroutine allocate_noah_data(num_soil_layers, num_snow_layers)
         implicit none
-        integer, intent(in) :: num_soil_layers
+        integer, intent(in) :: num_soil_layers, num_snow_layers
         integer :: i
 
         ITIMESTEP=1
@@ -1315,7 +1315,7 @@ contains
 
         allocate(nmp_snow(ims:ime,jms:jme))
         allocate(nmp_snowh(ims:ime,jms:jme))
-        allocate(nmp_snow_t(ims:ime,1:3,jms:jme), source=273.15)
+        allocate(nmp_snow_t(ims:ime,num_snow_layers,jms:jme), source=273.15)
         allocate(DZs(num_soil_layers))
 
         DZs = [0.1,0.2,0.4,0.8]
@@ -1323,7 +1323,6 @@ contains
 
 
         !$acc enter data copyin(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, ALBEDO, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_snow_t)
-
     end subroutine allocate_noah_data
 
 end module land_surface
