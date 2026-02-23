@@ -1,9 +1,12 @@
 module array_utilities
 
+    use variable_interface, only : variable_t
+    use halo_interface,     only : halo_t
+
     implicit none
 
     interface smooth_array
-        module procedure smooth_array_2d, smooth_array_3d
+        module procedure smooth_array_2d, smooth_array_3d, smooth_array_var
     end interface
 
     interface array_offset_x
@@ -628,6 +631,86 @@ contains
         data=temporary_data
 
     end subroutine swap_y_z_dimensions
+
+
+    !>------------------------------------------------------------
+    !! Smooth a variable_t with optional halo exchange between iterations
+    !! for MPI-consistent results across domain decompositions.
+    !!
+    !! When a halo is supplied, an exchange is performed before the first
+    !! smoothing pass (to guarantee consistent halos after independent
+    !! per-process interpolation) and after every subsequent pass.
+    !!
+    !! IMPORTANT: windowsize must be <= var%grid%halo_size.  smooth_array_3d
+    !! uses edge-replication at the memory boundary.  On interior process
+    !! boundaries that edge is inside the halo region, so the replicated
+    !! values are overwritten by the post-pass halo exchange.  But if
+    !! windowsize exceeds the halo width, interior (tile) cells within
+    !! windowsize of the tile boundary will read edge-replicated values
+    !! that *cannot* be corrected by the exchange — producing results
+    !! that depend on the domain decomposition.  To apply a larger
+    !! effective smoothing radius, use multiple iterations of a small
+    !! windowsize (nsmooths > 1, windowsize <= halo_size) with halo
+    !! exchanges between passes.
+    !!
+    !! @param var          variable_t to be smoothed (data_3d/2d or dqdt_3d/2d)
+    !! @param windowsize   halfwidth of smoothing window in grid cells
+    !!                     (must be <= var%grid%halo_size when halo is present)
+    !! @param ydim         axis the y dimension is on (2 or 3) — only used for 3D
+    !! @param nsmooths     number of smoothing iterations (default 1)
+    !! @param halo         optional halo_t for MPI exchange between iterations
+    !! @param do_dqdt      if .true., smooth the dqdt field instead of data field
+    !!------------------------------------------------------------
+    subroutine smooth_array_var(var, windowsize, ydim, nsmooths, halo, do_dqdt)
+        implicit none
+        type(variable_t), intent(inout) :: var
+        integer,          intent(in)    :: windowsize
+        integer,          intent(in)    :: ydim
+        integer, optional, intent(in)   :: nsmooths
+        type(halo_t), intent(inout), optional :: halo
+        logical, optional, intent(in)   :: do_dqdt
+
+        integer :: iters, n
+        logical :: dqdt
+
+        iters = 1
+        if (present(nsmooths)) iters = nsmooths
+        dqdt = .false.
+        if (present(do_dqdt)) dqdt = do_dqdt
+
+        ! Guard: windowsize must fit within the halo so that every tile-
+        ! interior cell's smoothing window is backed by real neighbor data.
+        if (present(halo) .and. windowsize > var%grid%halo_size) then
+            write(*,*) "ERROR smooth_array_var: windowsize (", windowsize, &
+                       ") exceeds halo_size (", var%grid%halo_size, ")."
+            write(*,*) "  Use nsmooths > 1 with a smaller windowsize instead."
+            stop
+        endif
+
+        ! Ensure halos are consistent before the first smoothing pass.
+        ! Each process fills its memory extent (including halos) independently
+        ! via interpolation, so halo values may not exactly match the
+        ! neighbor's interior.  Exchanging up front guarantees the first
+        ! smooth pass reads correct neighbor data.
+        if (present(halo)) call halo%exch_var(var, do_dqdt=dqdt)
+
+        do n = 1, iters
+            if (var%three_d) then
+                if (dqdt) then
+                    call smooth_array_3d(var%dqdt_3d, windowsize, ydim)
+                else
+                    call smooth_array_3d(var%data_3d, windowsize, ydim)
+                endif
+            else if (var%two_d) then
+                if (dqdt) then
+                    call smooth_array_2d(var%dqdt_2d, windowsize)
+                else
+                    call smooth_array_2d(var%data_2d, windowsize)
+                endif
+            endif
+            if (present(halo)) call halo%exch_var(var, do_dqdt=dqdt)
+        enddo
+    end subroutine smooth_array_var
 
 
 end module array_utilities
