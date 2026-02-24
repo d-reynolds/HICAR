@@ -257,6 +257,12 @@ contains
         endif
         
         if (this%time%RK3) then
+            if (this%adv%h_order == 1) then
+                if (STD_OUT_PE) write(*,*) "  ----------------- WARNING -----------------"
+                if (STD_OUT_PE) write(*,*) "  RK3 time stepping is not supported with h_order=1"
+                if (STD_OUT_PE) write(*,*) "  ----------------- WARNING -----------------"
+                stop
+            endif
             if (max(this%adv%h_order,this%adv%v_order)==5 .and. this%time%cfl_reduction_factor > 1.4) then
                 if (STD_OUT_PE) write(*,*) "  CFL reduction factor should be less than 1.4 when horder or vorder = 5, limiting to 1.4"
                 this%time%cfl_reduction_factor = min(1.4,this%time%cfl_reduction_factor)
