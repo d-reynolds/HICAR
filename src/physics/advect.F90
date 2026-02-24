@@ -49,17 +49,17 @@ contains
         vorder = options%adv%v_order
         
         !Define bounds of advection computation. If using monotonic flux-limiter, it is necesarry to increase
-        !advection bounds by 1. The necesarry extension of the halo is handeled in domain_object
+        !advection bounds by 2. The necesarry extension of the halo is handeled in domain_object
         i_s = its
         i_e = ite
         j_s = jts
         j_e = jte
         
         if (options%adv%flux_corr==kFLUXCOR_MONO) then
-            i_s = its - 1
-            i_e = ite + 1
-            j_s = jts - 1
-            j_e = jte + 1
+            i_s = its - 2
+            i_e = ite + 2
+            j_s = jts - 2
+            j_e = jte + 2
         endif
         
     end subroutine
