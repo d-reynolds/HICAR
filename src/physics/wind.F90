@@ -871,7 +871,7 @@ contains
         !Following Moussiopoulos, et al. (1988). Bounding low Fr to avoid /0 error and negative Fr
 
         !$acc kernels
-        alpha = 1.0 - 0.5*max(froude**4,0.00001)*(sqrt(1.0+4.0/max(froude**4,0.00001)) - 1.0) 
+        alpha = 1.0 - 0.5*max((1.0/froude)**4,0.00001)*(sqrt(1.0+4.0/max((1.0/froude)**4,0.00001)) - 1.0) 
         alpha = sqrt(max(alpha,0.00001))
         alpha = min(max(alpha,alpha_min),alpha_max)
 
@@ -1315,8 +1315,6 @@ contains
                         !endif
                         stability(i,k,j) = calc_dry_stability(th_top, th_bot, z_top, z_bot, potential_temperature(i,kms,j)) 
 
-                        !Above function calculates N^2, but froude number wants just N
-                        stability(i,k,j) = sqrt(max(stability(i,k,j), 0.0))
                         froude(i,k,j) = calc_froude(stability(i,k,j), temp_froude(i,k,j), wind_speed(i,k,j))
                     enddo
                 enddo
