@@ -472,17 +472,21 @@ contains
     !! Used to identify topographically blocked flow (Fr < 0.75-1.25)
     !!
     !!----------------------------------------------------------
-    pure function calc_froude(brunt_vaisalla_frequency, barrier_height, wind_speed) result(froude)
+    pure function calc_froude(brunt_vaisalla_frequency_sq, barrier_height, wind_speed) result(froude)
         !$acc routine seq
         implicit none
-        real, intent(in) :: brunt_vaisalla_frequency    ! [ 1 / s ]
+        real, intent(in) :: brunt_vaisalla_frequency_sq    ! [ 1 / s ]
         real, intent(in) :: barrier_height              ! [ m ]
         real, intent(in) :: wind_speed                  ! [ m / s ]
         real :: froude                                  ! []
-        real :: denom
+        real :: denom, brunt_vaisalla_frequency
 
+        ! input brunt vaisalla frequency is squared, but we need the actual frequency for the calculation
+        brunt_vaisalla_frequency = sqrt(max(brunt_vaisalla_frequency_sq, 0.0))
         denom = (barrier_height * brunt_vaisalla_frequency)
 
+        ! This will give very unstable conditions (high Fr) if stability is 0, which will occur when 
+        ! brunt vaisalla frequency is imaginary (i.e. when the atmosphere is unstable)
         if (denom==0) then
             froude = 100 ! anything over ~5 is effectively infinite anyway
         else

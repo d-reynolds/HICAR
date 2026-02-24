@@ -3592,7 +3592,9 @@ contains
                 group = "Wind"
             case ("alpha_const")
                 description = "Option for setting the alpha parameter in the wind=3 euqtions to a constant"//achar(10)//BLNK_CHR_N// &
-                              "(between 0.2 and 2). Default of -1.0 allows for dynamic alpha. For more information, see Reynolds et al., 2023."
+                              "(between 0.2 and 2). Default of -1.0 allows for dynamic alpha."//achar(10)//BLNK_CHR_N// &
+                              "larger values allow for more adjustment of vertical winds (less stable)"//achar(10)//BLNK_CHR_N// &
+                              "smaller values allow for less adjustment of vertical winds (more stable)"
                 min = 0.2
                 max = 2.0
                 default = "-1.0"
