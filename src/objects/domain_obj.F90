@@ -48,15 +48,16 @@ contains
         
         call create_variables(this, options)
         
+        call init_relax_filters(this,options)
+
+        call set_var_lists(this, options)
+
+        call init_batch_exch(this)
+
         call initialize_core_variables(this, options)  ! split into several subroutines?
 
         call read_land_variables(this, options)
 
-        call set_var_lists(this, options)
-
-        call init_relax_filters(this,options)
-
-        call init_batch_exch(this)
         
         !$acc enter data copyin(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
         !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
@@ -1415,16 +1416,6 @@ contains
                 dzdy(:,i,jms)   = (-neighbor_z(ims:ime,i,jms+2) + 4*neighbor_z(ims:ime,i,jms+1) - 3*neighbor_z(ims:ime,i,jms) )/(2*this%dx)
                 dzdy(:,i,jme)   = (neighbor_z(ims:ime,i,jme-2) - 4*neighbor_z(ims:ime,i,jme-1) + 3*neighbor_z(ims:ime,i,jme) )/(2*this%dx)
                 
-                dzdx_u(ims+1:ime,i,:) = (b1_mass*(h1(ims+1:ime,jms:jme)-h1(ims:ime-1,jms:jme))   + b2_mass*(h2(ims+1:ime,jms:jme)-h2(ims:ime-1,jms:jme)))/(this%dx)
-                dzdy_v(:,i,jms+1:jme) = (b1_mass*(h1(ims:ime,jms+1:jme)-h1(ims:ime,jms:jme-1))   + b2_mass*(h2(ims:ime,jms+1:jme)-h2(ims:ime,jms:jme-1)))/(this%dx)
-
-                dzdx_u(ims+1:ime,i,:) = (dzdx(ims:ime-1,i,:)+dzdx(ims+1:ime,i,:))*0.5
-                dzdx_u(ims,i,:)   = dzdx(ims,i,:)*1.5 - dzdx(ims+1,i,:)*0.5
-                dzdx_u(ime+1,i,:)   = dzdx(ime,i,:)*1.5 - dzdx(ime-1,i,:)*0.5
-
-                dzdy_v(:,i,jms+1:jme) = (dzdy(:,i,jms:jme-1)+dzdy(:,i,jms+1:jme))*0.5
-                dzdy_v(:,i,jms)   = dzdy(:,i,jms)*1.5 - dzdy(:,i,jms+1)*0.5
-                dzdy_v(:,i,jme+1)   = dzdy(:,i,jme)*1.5 - dzdy(:,i,jme-1)*0.5
                 
             enddo
             
@@ -1442,6 +1433,14 @@ contains
             jacobian     = neighbor_jacobian(ims:ime,:,jms:jme)
 
         end associate
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdx)%v),corners=.True.)
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdy)%v),corners=.True.)
+
+        this%vars_3d(this%var_indx(kVARS%dzdx_u)%v)%data_3d(this%ims+1:this%ime,:,:) = (this%vars_3d(this%var_indx(kVARS%dzdx)%v)%data_3d(this%ims:this%ime-1,:,:)+this%vars_3d(this%var_indx(kVARS%dzdx)%v)%data_3d(this%ims+1:this%ime,:,:))*0.5
+        this%vars_3d(this%var_indx(kVARS%dzdy_v)%v)%data_3d(:,:,this%jms+1:this%jme) = (this%vars_3d(this%var_indx(kVARS%dzdy)%v)%data_3d(:,:,this%jms:this%jme-1)+this%vars_3d(this%var_indx(kVARS%dzdy)%v)%data_3d(:,:,this%jms+1:this%jme))*0.5
+
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdx_u)%v),corners=.True.)
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdy_v)%v),corners=.True.)
         ! call array_offset_x(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
         ! this%vars_3d(this%var_indx(kVARS%jacobian_u)%v)%data_3d(this%ims:this%ime+1,:,this%jms:this%jme) = temp
         ! call array_offset_y(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
@@ -1810,8 +1809,7 @@ contains
                   h1_u                  => this%vars_2d(this%var_indx(kVARS%h1_u)%v)%data_2d,                           &
                   h2_u                  => this%vars_2d(this%var_indx(kVARS%h2_u)%v)%data_2d,                           &
                   h1_v                  => this%vars_2d(this%var_indx(kVARS%h1_v)%v)%data_2d,                           &
-                  h2_v                  => this%vars_2d(this%var_indx(kVARS%h2_v)%v)%data_2d,                           &
-                  terrain               => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d)
+                  h2_v                  => this%vars_2d(this%var_indx(kVARS%h2_v)%v)%data_2d)
 
 
         if ((STD_OUT_PE)) then

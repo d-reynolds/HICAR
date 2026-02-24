@@ -33,6 +33,7 @@ module radiation
     use icar_constants, only : kVARS, kRA_BASIC, kRA_SIMPLE, kRA_RRTMG, kRA_RRTMGP, STD_OUT_PE, kMP_THOMP_AER, kMAX_NESTS
     use mod_wrf_constants, only : cp, R_d, gravity, DEGRAD, DPD, piconst
     use mod_atm_utilities, only : cal_cldfra3, calc_solar_elevation, calc_solar_date
+    use mpi_f08
 
 #ifdef USE_RTE_RRTMGP
     use mo_rte_kind,           only: wp, i8, wl
@@ -243,6 +244,7 @@ contains
             !$acc update host(domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d)
             ! This will capture the highest pressure level of all nests in this simulation
             p_top = min(p_top, minval(domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d(domain%ims:domain%ime,domain%kme+1,domain%jms:domain%jme)))
+            call MPI_Allreduce(MPI_IN_PLACE, p_top, 1, MPI_REAL, MPI_MIN, domain%compute_comms)
 
             call rrtmg_lwinit(                           &
                 p_top=p_top,     allowed_to_read=.not.(rrtmg_init) ,                &
@@ -369,7 +371,7 @@ contains
                       kVARS%land_mask,    kVARS%snow_water_equivalent,                                                        &
                       kVARS%dz_interface, kVARS%skin_temperature,      kVARS%temperature,             kVARS%density,          &
                       kVARS%longwave_cloud_forcing,                    kVARS%land_emissivity,         kVARS%temperature_interface,  &
-                      kVARS%cosine_zenith_angle,                       kVARS%shortwave_cloud_forcing, kVARS%tend_swrad,           &
+                      kVARS%cosine_zenith_angle,                       kVARS%shortwave_cloud_forcing,           &
                       kVARS%tend_th_lwrad, kVARS%tend_th_swrad, kVARS%cloud_fraction, kVARS%albedo])
 
 
@@ -381,7 +383,7 @@ contains
                       kVARS%snow_water_equivalent,                                                                            &
                       kVARS%dz_interface, kVARS%skin_temperature,      kVARS%temperature,             kVARS%density,          &
                       kVARS%longwave_cloud_forcing,                    kVARS%land_emissivity, kVARS%temperature_interface,    &
-                      kVARS%cosine_zenith_angle,                       kVARS%shortwave_cloud_forcing, kVars%tend_swrad] )
+                      kVARS%cosine_zenith_angle,                       kVARS%shortwave_cloud_forcing] )
 
     end subroutine ra_rrtmg_var_request
 
@@ -865,7 +867,9 @@ contains
                     ! p_top is not fixed throughout the simulation. p_top must be reset for each call of RRTMG_LW, 
                     ! which is what RRTMG_LWINIT does. Pass allowed_to_read=.False.
                     ! to avoid re-reading look up tables (already done in init).
-                    CALL RRTMG_LWINIT(minval(domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d(:,domain%kme+1,:)), &
+                    p_top = minval(domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d(:,domain%kme+1,:))
+                    call MPI_Allreduce(MPI_IN_PLACE, p_top, 1, MPI_REAL, MPI_MIN, domain%compute_comms)
+                    CALL RRTMG_LWINIT(p_top, &
                                     allowed_to_read=.FALSE.,         &
                                     ids=ids, ide=ide, jds=jds, jde=jde, kds=kds, kde=kde, &
                                     ims=ims, ime=ime, jms=jms, jme=jme, kms=kms, kme=kme, &
@@ -1226,8 +1230,7 @@ contains
                 ! If the user has provided sky view fraction, then apply this to the diffuse SW now, 
                 ! since svf is time-invariant
 
-                associate(tend_swrad => domain%vars_3d(domain%var_indx(kVARS%tend_swrad)%v)%data_3d, &
-                          tend_th_swrad => domain%tend%th_swrad)
+                associate(tend_th_swrad => domain%tend%th_swrad)
 
                 if (domain%var_indx(kVARS%svf)%v > 0) then
                     associate(svf => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d)
@@ -1240,14 +1243,6 @@ contains
                     end associate
                 endif
 
-                !$acc parallel loop gang vector collapse(3) present(tend_swrad, tend_th_swrad)
-                do j = jts,jte
-                    do k = kts,kte
-                        do i = its,ite
-                            tend_swrad(i,k,j) = tend_th_swrad(i,k,j)
-                        enddo
-                    enddo
-                enddo
                 end associate
             endif ! end if rrtmg or rrtmgp
             ! cache shortwave from RRTMG_SWRAD for downscaling.
@@ -1341,15 +1336,14 @@ contains
         if (options%physics%radiation==kRA_RRTMG .or. options%physics%radiation==kRA_RRTMGP) then
             associate(pot_temp => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,  &
                       tend_th_swrad => domain%tend%th_swrad, &
-                      tend_th_lwrad => domain%tend%th_lwrad, &
-                      tend_swrad    => domain%vars_3d(domain%var_indx(kVARS%tend_swrad)%v)%data_3d)
+                      tend_th_lwrad => domain%tend%th_lwrad  & 
+                      )
 
-            !$acc parallel loop gang vector collapse(3) present(pot_temp, tend_th_lwrad, tend_th_swrad, tend_swrad) async(1)
+            !$acc parallel loop gang vector collapse(3) present(pot_temp, tend_th_lwrad, tend_th_swrad) async(1)
             do j = jts,jte
                 do k = kts,kte
                     do i = its,ite
                         pot_temp(i,k,j) = pot_temp(i,k,j)+tend_th_lwrad(i,k,j)*dt+tend_th_swrad(i,k,j)*dt
-                        tend_swrad(i,k,j) = tend_th_swrad(i,k,j)
                     enddo
                 enddo
             enddo
