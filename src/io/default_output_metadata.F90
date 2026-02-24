@@ -307,7 +307,7 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%potential_temperature) then
             var_meta%name        = "potential_temperature"
-            var_meta%maxval      = 350.0
+            var_meta%maxval      = 400.0
             var_meta%minval      = 150.0
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "air_potential_temperature"),       &
