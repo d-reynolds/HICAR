@@ -2993,9 +2993,7 @@ contains
 
         do_boundary = (do_west .or. do_east .or. do_north .or. do_south)
 
-        !$acc data create(ims_b,ime_b,jms_b,jme_b)
         associate( ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, halo_size => this%grid%halo_size, filter_width => this%FILTER_WIDTH)
-        !$acc parallel present(ims, ime, jms, jme, halo_size, filter_width)
         ims_b = 0; ime_b = 0; jms_b = 0; jme_b = 0
 
         if (do_boundary) then
@@ -3012,8 +3010,8 @@ contains
             if (do_west .and. do_north) jme_b(1) = min(jme_b(1),jms_b(3)-1)
             if (do_east .and. do_north) jme_b(2) = min(jme_b(2),jms_b(3)-1)
         endif
-        !$acc end parallel
         end associate
+        !$acc data copyin(ims_b, ime_b, jms_b, jme_b)
 
         do n = 1,size(this%forcing_hi)
 
@@ -3038,7 +3036,7 @@ contains
                         enddo
                     enddo
                 else if (do_boundary) then
-                    !$acc parallel present(var%data_2d, var%dqdt_2d, forcing%data_2d, forcing%dqdt_2d, relax_filter, ims_b, ime_b, jms_b, jme_b)
+                    !$acc parallel present(var%data_2d, forcing%data_2d, forcing%dqdt_2d, relax_filter, ims_b, ime_b, jms_b, jme_b)
                     do p = 1,4
                         if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
@@ -3093,7 +3091,7 @@ contains
                         enddo
                     enddo
                 else if (do_boundary) then
-                    !$acc parallel present(var%data_3d, var%dqdt_3d, forcing%data_3d, forcing%dqdt_3d,relax_filter,ims_b,ime_b,jms_b,jme_b)
+                    !$acc parallel present(var%data_3d, forcing%data_3d, forcing%dqdt_3d,relax_filter,ims_b,ime_b,jms_b,jme_b)
                     do p = 1,4
                         if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
