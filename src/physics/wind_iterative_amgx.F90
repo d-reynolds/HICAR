@@ -334,11 +334,13 @@ contains
             "main:use_scalar_norm=1, " // &
             "main:max_iters=1000, " // &
             "main:convergence=RELATIVE_INI_CORE, " // &
-            "main:tolerance=1e-3, " // &
+            "main:tolerance=1e-10, " // &
             "main:monitor_residual=1, " // &
             "main:store_res_history=1, " // &
             "main:obtain_timings=1, " // &
-            "main:norm=L2" // c_null_char
+            "main:norm=L2, " // &
+            "main:abs_tolerance=1e-5, " // &
+            "main:divergence_threshold=1000.0" // c_null_char
         
         !check if the solver configuration file exists
         inquire(file=solver_file,exist=file_exists)
@@ -785,7 +787,7 @@ contains
         real(c_double), intent(in) :: lambda(1:n_rows)
         logical, intent(in) :: adv_den
         
-        real, allocatable, dimension(:,:,:)    :: u_dlambdz, v_dlambdz, dlambdz, u_temp, v_temp, lambda_3d, rho, rho_u, rho_v
+        real, allocatable, dimension(:,:,:)    :: u_dlambdz, v_dlambdz, dlambdz, u_temp, v_temp, lambda_3d, rho, rho_u, rho_v, rho_w
         integer :: i, j, k, i_start, i_end, j_start, j_end, idx
 
         i_start = i_s
@@ -804,7 +806,8 @@ contains
         allocate(rho(domain%ims:domain%ime,k_s:k_e,domain%jms:domain%jme))
         allocate(rho_u(i_start:i_end,k_s:k_e,j_s:j_e))
         allocate(rho_v(i_s:i_e,k_s:k_e,j_start:j_end))
-        
+        allocate(rho_w(i_s:i_e,k_s:k_e,j_s:j_e))
+
         ! Initialize lambda_3d with zeros for extended bounds
         lambda_3d = 0.0
         
@@ -835,6 +838,7 @@ contains
                     u       => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
                     v       => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
                     w       => domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
+                    dz      => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                     alpha  => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d, &
                     jaco_u_domain => domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, &
                     jaco_v_domain => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
@@ -843,11 +847,12 @@ contains
                     dzdy_v => domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d)
         ! Create GPU data for local arrays
 
-        !$acc enter data create(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v)
-        !$acc data present(density, u, v, jaco_u_domain, jaco_v_domain, jaco_domain, dzdx_u, dzdy_v, u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, alpha, dz_if) copyin(lambda_3d)
+        !$acc enter data create(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, rho_w)
+        !$acc data present(density, u, v, jaco_u_domain, jaco_v_domain, jaco_domain, dzdx_u, dzdy_v, u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, rho_w, alpha, dz_if) copyin(lambda_3d)
 
         !$acc kernels
         rho = 1.0
+        rho_w = 1.0
         rho_u = 1.0
         rho_v = 1.0
         !$acc end kernels
@@ -982,6 +987,24 @@ contains
         endif
         !$acc end parallel
         
+        !$acc parallel loop gang vector tile(32,2,1) async(4)
+        do j = j_s, j_e
+            do k = k_s, k_e-1
+                do i = i_s, i_e
+                    rho_w(i,k,j) = ( rho(i,k,j)*dz(i,k+1,j) + &
+                        rho(i,k+1,j)*dz(i,k,j) ) / &
+                        (dz(i,k,j)+dz(i,k+1,j))
+                enddo
+            enddo
+        enddo
+        
+        !$acc parallel loop gang vector collapse(2) async(5)
+        do j = j_s, j_e
+            do i = i_s, i_e
+                rho_w(i,k_e,j)= rho(i,k_e,j)
+            enddo
+        enddo
+        
         !stager lambda to u grid - GPU computation
         !$acc parallel loop gang vector collapse(3)
         do j = j_s, j_e
@@ -1058,13 +1081,13 @@ contains
         do j = j_s, j_e
             do k = k_s, k_e
                 do i = i_s, i_e
-                    w(i,k,j) = w(i,k,j) + 0.5*(alpha(i,k,j)**2)*dlambdz(i,k,j)/jaco_domain(i,k,j)
+                    w(i,k,j) = w(i,k,j) + 0.5*(alpha(i,k,j)**2)*dlambdz(i,k,j)/jaco_domain(i,k,j)/rho_w(i,k,j)
                 end do
             end do
         end do
 
         !$acc end data
-        !$acc exit data delete(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v)
+        !$acc exit data delete(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, rho_w)
         end associate     
     end subroutine calc_updated_winds
 
