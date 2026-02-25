@@ -144,7 +144,9 @@ subroutine update_component_nest(comp_arr,options,ioclient)
     associate (comp => comp_arr(options%nest_indx)%comp)
     select type (comp)
         type is (domain_t)
+            call comp%nest_timer%start()
             call ioclient%update_nest(comp)
+            call comp%nest_timer%stop()
         type is (ioserver_t)
             ! This call will gather the model state of the forcing fields from the nest parent
             if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",comp%nest_indx," --------------"
@@ -269,7 +271,7 @@ subroutine component_read(component, options, boundary, ioclient)
 
             call ioclient%receive(boundary, component)
             
-            ! after reading all variables that can be read, not compute any remaining variables (e.g. z from p+ps)
+            ! after reading all variables that can be read, now compute any remaining variables (e.g. z from p+ps)
             call boundary%update_computed_vars(options)
             call component%interpolate_forcing(boundary, update=.True.)
 
@@ -477,6 +479,12 @@ subroutine component_program_end(component, options)
                 t_val2 = comp%output_timer%min(comp%compute_comms)
                 t_val3 = comp%output_timer%max(comp%compute_comms)
                 if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "output", ":", t_val, " | ", t_val2, " | ", t_val3
+                if (size(options(i)%general%child_nests) > 0) then
+                    t_val = comp%nest_timer%mean(comp%compute_comms)
+                    t_val2 = comp%nest_timer%min(comp%compute_comms)
+                    t_val3 = comp%nest_timer%max(comp%compute_comms)
+                    if (STD_OUT_PE) write(*,'(A30, A1, F10.3, A3, F10.3, A3, F10.3)') "nest-update", ":", t_val, " | ", t_val2, " | ", t_val3
+                endif
                 t_val = comp%physics_timer%mean(comp%compute_comms)
                 t_val2 = comp%physics_timer%min(comp%compute_comms)
                 t_val3 = comp%physics_timer%max(comp%compute_comms)

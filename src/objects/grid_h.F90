@@ -36,8 +36,7 @@ module grid_interface
         type(MPI_Datatype) :: EW_win_halo
 
         type(MPI_Datatype) :: corner_halo
-        type(MPI_Datatype) :: corner_NS_win_halo
-        type(MPI_Datatype) :: corner_EW_win_halo
+        type(MPI_Datatype) :: corner_win_halo
     contains
         procedure :: get_dims
         procedure :: domain_decomposition

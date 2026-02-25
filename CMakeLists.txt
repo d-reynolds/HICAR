@@ -41,6 +41,10 @@ if (NOT DEFINED FSM_DIR OR FSM_DIR STREQUAL "")
 	set(FSM_DIR $ENV{FSM_DIR} CACHE PATH "Path to the compiled FSM installation (root directory of the lib and build directories)")
 endif()
 
+if (NOT $ENV{NOAHMP_LIBRARY} STREQUAL "")
+	set(NOAHMP_LIBRARY $ENV{NOAHMP_LIBRARY} CACHE PATH "Path to the Noah-MP source directory")
+endif()
+
 if (NOT DEFINED MPICH_DIR AND DEFINED ENV{MPICH_DIR})
     set(MPI_DIR $ENV{MPICH_DIR} CACHE STRING "Path to MPI directory" FORCE)
 endif()
@@ -160,7 +164,7 @@ else()
 		message(STATUS "Using Fortran compiler specified by the user in variable FC: ${FC}")
 	endif()
 	if (FC MATCHES "gfortran")
-		set(CMAKE_Fortran_COMPILER "gfortran")
+		set(CMAKE_Fortran_COMPILER "${FC}")
 		set(CMAKE_Fortran_COMPILER_ID "GNU")
 		set(CMAKE_Fortran_COMPILER_LOADED TRUE)
 		set(COMPILER "gnu")
@@ -198,6 +202,75 @@ message(STATUS "...done auto-detecting the environment")
 
 
 
+###########################################################
+############### Define Compiler Flags Once ###############
+message(STATUS "")
+message(STATUS "Setting up compiler flags...")
+
+# Define compiler flags based on MODE and COMPILER
+# These will be used consistently throughout the project
+# Define as a list (semicolon-separated) for proper handling in CMake
+if(MODE STREQUAL "debug")
+	set(CMAKE_BUILD_TYPE Debug)
+
+	if (COMPILER STREQUAL "gnu")
+		set(HICAR_Fortran_FLAGS -O0 -g -fopenmp -fbounds-check -fcheck=all -Wall -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion)
+	elseif (COMPILER STREQUAL "intel")
+		set(HICAR_Fortran_FLAGS -debug -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
+	elseif (COMPILER STREQUAL "cray")
+		set(HICAR_Fortran_FLAGS -h noomp -eI -g -O0)
+	elseif (COMPILER STREQUAL "nvfortran")
+		if(OPENACC)
+			set(HICAR_Fortran_FLAGS -O0 -g -traceback -Mnoopenmp -Mbounds -Minfo=accel -Mpreprocess -march=native -acc=gpu -gpu=mem:separate,ccnative)
+		else()
+			set(HICAR_Fortran_FLAGS -O0 -g -traceback -Mnoopenmp -Mbounds -Mpreprocess -march=native)
+		endif()
+	endif()
+elseif(MODE STREQUAL "debugslow")
+	set(CMAKE_BUILD_TYPE Debug)
+
+	if (COMPILER STREQUAL "gnu")
+		set(HICAR_Fortran_FLAGS -g -ffree-line-length-none -Wconversion)
+	elseif (COMPILER STREQUAL "intel")
+		set(HICAR_Fortran_FLAGS -debug -debug-parameters all -traceback -ftrapuv -g -fpe0 -u -check all -check noarg_temp_created -CB)
+	elseif (COMPILER STREQUAL "cray")
+		set(HICAR_Fortran_FLAGS -h noomp -eI -m 2 -O0 -g -R bcs)
+	endif()
+elseif(MODE STREQUAL "profile")
+	set(CMAKE_BUILD_TYPE Profile)
+
+	if (COMPILER STREQUAL "gnu")
+		set(HICAR_Fortran_FLAGS -g -O3 -fopenmp -fbounds-check -fbacktrace -finit-real=nan -fopt-info-missed=opt_info.txt -ffast-math -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native -fno-protect-parens)
+	elseif (COMPILER STREQUAL "intel")
+		set(HICAR_Fortran_FLAGS -pg -debug inline-debug-info -shared-intel)
+	elseif (COMPILER STREQUAL "cray")
+		set(HICAR_Fortran_FLAGS -h noomp -eI -hfp3 -O2 -g -R bcs)
+	endif()
+elseif(MODE STREQUAL "release")
+	set(CMAKE_BUILD_TYPE Release)
+	if (COMPILER STREQUAL "gnu")
+		set(HICAR_Fortran_FLAGS -O3 -fopenmp -ffast-math -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native -fno-protect-parens)
+	elseif (COMPILER STREQUAL "intel")
+		set(HICAR_Fortran_FLAGS -u -O3 -xHost -ftz -fpe0)
+	elseif (COMPILER STREQUAL "cray")
+		set(HICAR_Fortran_FLAGS -h omp -hfp3 -O2 -e0 -eI -eZ)
+	elseif (COMPILER STREQUAL "nvfortran")
+		if(OPENACC)
+			set(HICAR_Fortran_FLAGS -O3 -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative)
+		else()
+			set(HICAR_Fortran_FLAGS -O3 -march=native)
+		endif()
+	endif()
+endif()
+
+# Convert list to space-separated string for display and external projects
+string(REPLACE ";" " " HICAR_Fortran_FLAGS_STR "${HICAR_Fortran_FLAGS}")
+message(STATUS "Fortran compiler flags: ${HICAR_Fortran_FLAGS_STR}")
+message(STATUS "...done setting up compiler flags")
+###########################################################
+
+
+
 
 ###########################################################
 ############### Find or install dependencies ##############
@@ -232,6 +305,44 @@ find_package(OpenMP)
 find_package(FFTW REQUIRED)
 find_package(NetCDF REQUIRED)
 
+#########################################################
+############# Declare all content used ##################
+#########################################################
+
+# rte-rrtmgp library for OpenACC support
+FetchContent_Declare(
+	rte-rrtmgp
+	GIT_REPOSITORY    https://github.com/earth-system-radiation/rte-rrtmgp.git
+	GIT_TAG           v1.9.2
+	GIT_SHALLOW       TRUE
+)
+
+# rrtgmp supporting data for rrtmgp scheme
+FetchContent_Declare(
+	rrtmgp_data
+	GIT_REPOSITORY    https://github.com/earth-system-radiation/rrtmgp-data.git
+	GIT_TAG           main
+	GIT_SHALLOW       TRUE
+)
+
+# Noah-MP library
+FetchContent_Declare(
+	noah_mp
+	GIT_REPOSITORY    https://github.com/d-reynolds/noahmp.git
+	GIT_TAG           OpenACC
+	GIT_SHALLOW       TRUE
+)
+
+# Fetch specific folders from icar_supporting_files repo
+FetchContent_Declare(
+	icar_supporting_files
+	GIT_REPOSITORY    https://github.com/NCAR/icar_supporting_files.git
+	GIT_TAG           main
+)
+
+
+#########################################################
+set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${HICAR_Fortran_FLAGS_STR}")
 # Handle OpenACC flag and library detection
 if(OPENACC)
 	find_package(OpenACC)
@@ -243,67 +354,21 @@ if(OPENACC)
 		
 		# Fetch and build rte-rrtmgp when OpenACC is enabled
 		message(STATUS "Fetching rte-rrtmgp library for OpenACC support...")
-		
-		# Get the content without building it yet
-		FetchContent_Declare(
-			rte-rrtmgp
-			GIT_REPOSITORY    https://github.com/earth-system-radiation/rte-rrtmgp.git
-			GIT_TAG           v1.9.2
-			GIT_SHALLOW       TRUE
-		)
 
-		FetchContent_GetProperties(rte-rrtmgp)
-		if(NOT rte-rrtmgp_POPULATED)
-			FetchContent_Populate(rte-rrtmgp)
+		# Configure build options for rte-rrtmgp
+		set(BUILD_TESTING OFF)
+		set(BUILD_C_HEADERS OFF)
+		set(KERNEL_MODE "accel" CACHE STRING "Select the kernel mode for rte-rrtmgp" FORCE)
+		set(BUILD_SHARED_LIBS OFF)
 
-			# Configure build options for rte-rrtmgp
-			set(BUILD_TESTING OFF)
-			set(BUILD_C_HEADERS OFF)
-			set(KERNEL_MODE "accel" CACHE STRING "Select the kernel mode for rte-rrtmgp" FORCE)
-			set(BUILD_SHARED_LIBS OFF)
+		FetchContent_MakeAvailable(rte-rrtmgp)
 			
-			# Set compiler flags for rte-rrtmgp to match HICAR's flags
-			# Save current CMAKE_Fortran_FLAGS
-			set(SAVED_CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS}")
-			
-			# Determine and set appropriate compiler flags based on MODE and COMPILER
-			if(MODE STREQUAL "debug")
-				if (COMPILER STREQUAL "gnu")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -c -O0 -g -fopenmp -fbounds-check -fcheck=all -Wall -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion")
-				elseif (COMPILER STREQUAL "intel")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost")
-				elseif (COMPILER STREQUAL "cray")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -h noomp -c -eI -g -O0")
-				elseif (COMPILER STREQUAL "nvfortran")
-					if(OPENACC)
-						set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O0 -g -traceback -Mnoopenmp -Mbounds -Minfo=accel -Mpreprocess -march=native -acc=gpu -gpu=mem:separate,ccnative")
-					else()
-						set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O0 -g -traceback -Mnoopenmp -Mbounds -Mpreprocess -march=native")
-					endif()
-				endif()
-			elseif(MODE STREQUAL "release")
-				if (COMPILER STREQUAL "gnu")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -fopenmp -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native -fno-protect-parens")
-				elseif (COMPILER STREQUAL "intel")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -c -u -O3 -xHost -ftz -fpe0")
-				elseif (COMPILER STREQUAL "cray")
-					set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -h omp -hfp3 -O2 -c -eI -eZ")
-				elseif (COMPILER STREQUAL "nvfortran")
-					if(OPENACC)
-						set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative")
-					else()
-						set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -march=native")
-					endif()
-				endif()
-			endif()
-			
-			message(STATUS "Using compiler flags for rte-rrtmgp: ${CMAKE_Fortran_FLAGS}")
+		# Use the predefined HICAR compiler flags			
+		message(STATUS "Using compiler flags for rte-rrtmgp: ${CMAKE_Fortran_FLAGS}")
 
+		if(NOT TARGET rte-rrtmgp::rte AND NOT TARGET rte-rrtmgp::rrtmgp)
 			# Add the rte-rrtmgp subdirectory with configured options
 			add_subdirectory(${rte-rrtmgp_SOURCE_DIR} ${rte-rrtmgp_BINARY_DIR} EXCLUDE_FROM_ALL)
-			
-			# Restore original CMAKE_Fortran_FLAGS
-			set(CMAKE_Fortran_FLAGS "${SAVED_CMAKE_Fortran_FLAGS}")
 		endif()
 		
 		# Add preprocessor definition to indicate rte-rrtmgp is available
@@ -368,6 +433,30 @@ if(NOT AMGX_LIBRARY)
 endif()
 #########################################################
 
+if (NOT DEFINED NOAHMP_LIBRARY)
+	# Now fetch Noah-MP repo
+	message(STATUS "Fetching External Noah-MP library...")
+
+	FetchContent_MakeAvailable(noah_mp)
+
+	# Use the predefined HICAR compiler flags
+	message(STATUS "Using compiler flags for Noah-MP: ${CMAKE_Fortran_FLAGS}")
+
+	# Add the noah_mp subdirectory with configured options
+	if(NOT TARGET noahmp)
+		add_subdirectory(${noah_mp_SOURCE_DIR}/drivers/hicar ${noah_mp_BINARY_DIR} EXCLUDE_FROM_ALL)
+	endif()
+
+	# copy NoahmpTable.TBL from the ${noah_mp_SOURCE_DIR}/parameters into the run directory
+	file(COPY ${noah_mp_SOURCE_DIR}/parameters/NoahmpTable.TBL DESTINATION ${PROJECT_SOURCE_DIR}/run)
+	message(STATUS "Noah-MP library configured successfully")
+else()
+	message(STATUS "Using precompiled Noah-MP library specified by NOAHMP_LIBRARY environment variable: ${NOAHMP_LIBRARY}")
+endif()
+
+
+###########################################################
+
 
 list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
 add_library(hicar_lib STATIC ${SOURCE_FILES})
@@ -410,7 +499,8 @@ if (NETCDF_FOUND)
     # Check for parallel NetCDF support
     execute_process(COMMAND nc-config --has-parallel
                     OUTPUT_VARIABLE NETCDF_HAS_PARALLEL
-                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET)
     
     if(NETCDF_HAS_PARALLEL STREQUAL "yes")
         message(STATUS "NetCDF built with parallel support")
@@ -419,22 +509,29 @@ if (NETCDF_FOUND)
         message(STATUS "NetCDF built WITHOUT parallel support")
     endif()
     
-    # Get compiler and linker flags
-    execute_process(COMMAND nc-config --flibs 
-                    OUTPUT_VARIABLE NETCDF_FLAGS 
-                    OUTPUT_STRIP_TRAILING_WHITESPACE)
-    execute_process(COMMAND nc-config --fflags
-                    OUTPUT_VARIABLE NETCDF_FFLAGS
-                    OUTPUT_STRIP_TRAILING_WHITESPACE)
-    
-    # Use nf-config flags if available
-    # if(NETCDF_FLAGS MATCHES "-lnetcdff")
-    #     target_link_libraries(hicar_lib PUBLIC ${NETCDF_FLAGS})
-    #     # target_compile_options(hicar_lib PUBLIC ${NETCDF_FFLAGS})
-    # else()
-        # Fallback to FindNetCDF results
-        target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
-    # endif()
+	find_program(NF_CONFIG nf-config)
+	if(NF_CONFIG)
+		execute_process(COMMAND ${NF_CONFIG} --flibs 
+						OUTPUT_VARIABLE NETCDF_LIBRARIES 
+						OUTPUT_STRIP_TRAILING_WHITESPACE
+						ERROR_QUIET)
+		separate_arguments(NETCDF_LIBRARIES)
+
+		# Clean up any duplicate libraries and references to -lnetcdf
+		list(REMOVE_DUPLICATES NETCDF_LIBRARIES)
+		# clean references to base netcdf-c library
+		# list(REMOVE_ITEM NETCDF_LIBRARIES -lnetcdf)
+
+		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
+		message(STATUS "NetCDF libraries (with dependencies): ${NETCDF_LIBRARIES}")
+	else()
+		message(WARNING "nf-config not found, falling back to manual dependency resolution")
+		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
+		find_package(HDF5 COMPONENTS C HL)
+		if(HDF5_FOUND)
+			target_link_libraries(hicar_lib PUBLIC ${HDF5_LIBRARIES})
+		endif()
+	endif()
     
     target_include_directories(hicar_lib PUBLIC ${NETCDF_INCLUDES})
 endif()
@@ -462,6 +559,13 @@ target_include_directories(hicar_lib PUBLIC ${MPI_INCLUDE_DIR})
 # add include directory for the model itself
 target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
+# Link Noah-MP(Required) to hicar_lib 
+if(NOT DEFINED NOAHMP_LIBRARY)
+	target_link_libraries(hicar_lib PUBLIC noahmp)
+else()
+	target_link_libraries(hicar_lib PUBLIC ${NOAHMP_LIBRARY})
+	target_include_directories(hicar_lib PUBLIC $ENV{NOAHMP_INCLUDES})
+endif()
 
 # link the hicar_lib library to the HICAR executable
 target_link_libraries(HICAR PUBLIC hicar_lib)
@@ -469,72 +573,23 @@ target_link_libraries(HICAR PUBLIC hicar_lib)
 
 ##########################################################
 ############## Set up the compiler options ###############
-# Print default flags for different build types
-message(STATUS "CMAKE_Fortran_FLAGS_DEBUG: ${CMAKE_Fortran_FLAGS_DEBUG}")
-message(STATUS "CMAKE_Fortran_FLAGS_RELEASE: ${CMAKE_Fortran_FLAGS_RELEASE}")
-message(STATUS "CMAKE_Fortran_FLAGS_RELWITHDEBINFO: ${CMAKE_Fortran_FLAGS_RELWITHDEBINFO}")
-message(STATUS "CMAKE_Fortran_FLAGS_MINSIZEREL: ${CMAKE_Fortran_FLAGS_MINSIZEREL}")
-message(STATUS "CMAKE_Fortran_FLAGS: ${CMAKE_Fortran_FLAGS}")
 
-if(MODE STREQUAL "debug")
-	set(CMAKE_BUILD_TYPE Debug)
+if(MODE STREQUAL "debug" OR MODE STREQUAL "debugslow")
 	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_debug")
-
-    if (COMPILER STREQUAL "gnu")
-	    target_compile_options(HICAR PUBLIC -c -O0 -g -fopenmp -fbounds-check -fcheck=all -Wall -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion)
-	elseif (COMPILER STREQUAL "intel")
-		target_compile_options(HICAR PUBLIC -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
-	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h noomp -c -eI -g -O0) #-R cpbs --cray-print-opts
-	elseif (COMPILER STREQUAL "nvfortran")
-		if(OPENACC)
-			target_compile_options(HICAR PUBLIC -O0 -g -traceback -Mnoopenmp -Mbounds -Minfo=accel -Mpreprocess -march=native -acc=gpu,multicore -gpu=mem:separate,ccnative)
-		else()
-			target_compile_options(HICAR PUBLIC -O0 -g -traceback -Mnoopenmp -Mbounds -Mpreprocess -march=native)
-		endif()
-	endif()
-elseif(MODE STREQUAL "debugslow")
-	set(CMAKE_BUILD_TYPE Debug)
-	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_debug")
-
-	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -c -g -ffree-line-length-none -Wconversion)
-	elseif (COMPILER STREQUAL "intel")
-		target_compile_options(HICAR PUBLIC -debug -debug-parameters all -traceback -ftrapuv -g -fpe0 -c -u -check all -check noarg_temp_created -CB)
-	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -c -h noomp -eI -m 2 -O0 -g -R bcs)
-	endif()
 elseif(MODE STREQUAL "profile")
-	set(CMAKE_BUILD_TYPE Profile)
-
-	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -g -O3 -fopenmp -fbounds-check -fbacktrace -finit-real=nan -fopt-info-missed=opt_info.txt -c -ffast-math -ffree-line-length-none -floop-block -floop-strip-mine -ftree-vectorize -fimplicit-none -funroll-loops -floop-nest-optimize -march=native  -fno-protect-parens)
-		target_link_options(HICAR PUBLIC -pg)
-	elseif (COMPILER STREQUAL "intel")
-		target_compile_options(HICAR PUBLIC -pg -debug inline-debug-info -shared-intel)
-	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -c -h noomp -eI -hfp3 -O2 -g -R bcs)
-	endif()
+	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_profile")
 elseif(MODE STREQUAL "release")
-	set(CMAKE_BUILD_TYPE Release)
 	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR")
-
-	if (COMPILER STREQUAL "gnu")
-		target_compile_options(HICAR PUBLIC -O3 -fopenmp -c -ffast-math -ffree-line-length-none -funroll-loops -ftree-vectorize -fimplicit-none -march=native  -fno-protect-parens)  #-fcheck=all -Wall  # -ffast-math #-flto #
-	elseif (COMPILER STREQUAL "intel")
-		target_compile_options(HICAR PUBLIC -c -u -O3 -xHost -ftz -fpe0)# -check stack,bounds -fp-stack-check
-	elseif (COMPILER STREQUAL "cray")
-		target_compile_options(HICAR PUBLIC -h omp -hfp3 -O2 -e0 -c -eI -eZ)
+	if (COMPILER STREQUAL "cray")
 		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_cray")
-	elseif (COMPILER STREQUAL "nvfortran")
-		if(OPENACC)
-			set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_gpu")
-			target_compile_options(HICAR PUBLIC -O3 -Mnoopenmp -Minfo=accel -march=native -acc=gpu,multicore -gpu=mem:separate,ccnative)
-		else()
-			target_compile_options(HICAR PUBLIC -O3 -Mnoopenmp -march=native)
-		endif()
+	elseif (COMPILER STREQUAL "nvfortran" AND OPENACC)
+		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_gpu")
 	endif()
 endif()
+
+# Use the predefined HICAR compiler flags (already a list)
+target_compile_options(HICAR PUBLIC ${HICAR_Fortran_FLAGS})
+
 
 if (COMPILER STREQUAL "cray" AND FSM)
 	#Set compiler flags for FSM_interface files to be the same as those for target HICAR, with the addition of -e0
@@ -552,7 +607,6 @@ if(COMPILER_OPTIONS)
 	target_compile_options(hicar_lib PUBLIC ${COMPILER_OPTIONS})
 endif()
 
-#set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${FFLAGS}")
 #set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LFLAGS}")
 
 ##########################################################
@@ -560,13 +614,6 @@ endif()
 
 ###########################################################
 ############### Download supporting run files ##############
-
-# Fetch specific folders from icar_supporting_files repo
-FetchContent_Declare(
-	icar_supporting_files
-	GIT_REPOSITORY    https://github.com/NCAR/icar_supporting_files.git
-	GIT_TAG           main
-)
 
 # Download the repo but don't build it
 FetchContent_MakeAvailable(icar_supporting_files)
@@ -583,13 +630,6 @@ file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/icar_supporting_files-build")
 # if we are using RTE_RRTMGP, copy supporting files from the git repository: https://github.com/earth-system-radiation/rrtmgp-data
 if(OPENACC AND OpenACC_Fortran_FOUND)
 	message(STATUS "Fetching rte-rrtmgp data files...")
-	
-	FetchContent_Declare(
-		rrtmgp_data
-		GIT_REPOSITORY    https://github.com/earth-system-radiation/rrtmgp-data.git
-		GIT_TAG           main
-		GIT_SHALLOW       TRUE
-	)
 	
 	# Download the repo but don't build it
 	FetchContent_MakeAvailable(rrtmgp_data)
@@ -672,8 +712,11 @@ message(STATUS "")
 # get_target_property(hicar_lib HICAR LINK_LIBRARIES)
 # message(STATUS "Libraries linked against HICAR target: ${HICAR_LIBS}")
 
-# Set the location for library installation -- i.e., /usr/lib in this case
-# not really necessary in this example. Use "sudo make install" to apply 
+# Set the install prefix to the project source directory so that
+# "make install" works without root permissions
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX ${PROJECT_SOURCE_DIR} CACHE PATH "Install path prefix" FORCE)
+endif()
 set(CMAKE_INSTALL_EXEDIR ${PROJECT_SOURCE_DIR}/bin)
 set(CMAKE_Fortran_MODULE_DIRECTORY  ${CMAKE_BINARY_DIR})
 
@@ -740,6 +783,24 @@ else()
 	WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
 	COMMENT "Running test case suite"
 	VERBATIM
-	)  
+	)
 
 endif()
+
+add_custom_target(test_cli
+    COMMAND ${CMAKE_COMMAND} -E echo "Running CLI option tests..."
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_cli_options.sh ${PROJECT_SOURCE_DIR}
+    DEPENDS HICAR
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests
+    COMMENT "Running CLI options test suite"
+    VERBATIM
+)
+
+add_custom_target(test_reproducibility
+    COMMAND ${CMAKE_COMMAND} -E echo "Running reproducibility tests..."
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_reproducibility.sh ${PROJECT_SOURCE_DIR}
+    DEPENDS HICAR download_test_data
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
+    COMMENT "Running MPI and restart reproducibility tests"
+    VERBATIM
+)

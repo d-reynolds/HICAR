@@ -27,7 +27,7 @@ program icar
     use initialization,     only : split_processes, init_options
     use icar_constants
     use namelist_utils,     only : get_nml_var_default
-    use output_metadata,    only : list_output_vars
+    use output_metadata,    only : list_output_vars, initialize_var_constants
     use flow_events,        only : component_init, component_loop, component_program_end
 #ifdef _OPENACC
     use openacc
@@ -124,6 +124,8 @@ contains
         !If we do any output from this subroutine
         STD_OUT_PE = .True.
 
+        call initialize_var_constants()
+
         cnt = command_argument_count()
 
         if (cnt > 0) then
@@ -145,7 +147,7 @@ contains
             write(*,*) "    Example to generate a namelist with default values:                ./HICAR --gen-nml namelist_file.nml"
             write(*,*) "    Example to check namelist:                                         ./HICAR --check-nml namelist_file.nml"
             write(*,*) "    Example to run model:                                              ./HICAR namelist_file.nml"
-            write(*,*) "    Example to list all output variables related to wind or snow:      ./HICAR --out-vars wind snow"
+            write(*,*) "    Example to list all output variables related to wind:              ./HICAR --out-vars wind"
             write(*,*) "    Example to learn about a namelist variable:                        ./HICAR -v mp"
             write(*,*) "    Example to generate namelist variable documentation:               ./HICAR -v --all > namelist_doc.txt"
             write(*,*)

@@ -8,6 +8,7 @@ docs/doxygen_sqlite3.db
 *.mod
 *.xmod
 *.smod
+*.TBL
 *.i
 *.stamp
 *.lst

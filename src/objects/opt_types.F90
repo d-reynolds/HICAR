@@ -24,7 +24,6 @@ module options_types
         integer::radiation
         integer::convection
         integer::windtype
-        integer::radiation_downScaling        
     end type physics_type
     
     
@@ -178,13 +177,18 @@ module options_types
         integer :: nmp_opt_crs
         integer :: nmp_opt_sfc
         integer :: nmp_opt_btr
-        integer :: nmp_opt_run
+        integer :: nmp_opt_runsrf
+        integer :: nmp_opt_runsub
         integer :: nmp_opt_infdv
         integer :: nmp_opt_frz
         integer :: nmp_opt_inf
         integer :: nmp_opt_rad
         integer :: nmp_opt_alb
+        integer :: nmp_opt_wet
         integer :: nmp_opt_snf
+        integer :: nmp_opt_tksno
+        integer :: nmp_opt_compact
+        integer :: nmp_opt_scf
         integer :: nmp_opt_tbot
         integer :: nmp_opt_stc
         integer :: nmp_opt_gla
@@ -230,12 +234,26 @@ module options_types
         logical :: fsm_alpert
         logical :: fsm_slpert
 
+        ! Options for SNICAR albedo model
+        integer :: snicar_snowoptics_opt
+        integer :: snicar_dustoptics_opt
+        integer :: snicar_solarspec_opt
+        integer :: snicar_bandnumber_opt
+        integer :: snicar_rtsolver_opt
+        integer :: snicar_snowshape_opt
+        logical :: snicar_use_aerosol
+        logical :: snicar_snowbc_intmix
+        logical :: snicar_snowdust_intmix
+        logical :: snicar_use_oc
+        logical :: snicar_aerosol_readtable
+
     end type sm_options_type
 
     ! ------------------------------------------------
     ! store Radiation options
     ! ------------------------------------------------
     type rad_options_type
+       logical :: terrain_shading                      ! whether to use terrain shading
        real    :: update_interval_rad                  ! how ofen to update the radiation in seconds.
                                                        ! RRTMG scheme is expensive. Default is 1800s (30 minutes)
        integer :: icloud                               ! How RRTMG interact with clouds

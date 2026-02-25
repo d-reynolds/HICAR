@@ -16,7 +16,8 @@ module adv_std
     implicit none
     private
 
-    integer :: ims, ime, jms, jme, kms, kme, its, ite, jts, jte, i_s, i_e, j_s, j_e, horder, vorder
+    integer :: ims, ime, jms, jme, kms, kme, its, ite, jts, jte
+    integer :: i_s_w, i_e_w, j_s_w, j_e_w, i_s, i_e, j_s, j_e, horder, vorder
     !type(timer_t) :: flux_time, flux_up_time, flux_corr_time, sum_time
     ! For use advecting a (convective?) wind field
     ! real,dimension(:,:,:),allocatable :: U_4cu_u, V_4cu_u, W_4cu_u
@@ -54,12 +55,24 @@ contains
         i_e = ite
         j_s = jts
         j_e = jte
-        
+
+        i_s_w = i_s 
+        i_e_w = i_e 
+        j_s_w = j_s 
+        j_e_w = j_e 
+
         if (options%adv%flux_corr==kFLUXCOR_MONO) then
             i_s = its - 1
             i_e = ite + 1
             j_s = jts - 1
             j_e = jte + 1
+            
+            ! wind arrays need to be extended by 1 in each direction for monotonic flux correction
+            ! this allows for 2 upwind advection steps to be computed without needing a halo exchange
+            i_s_w = i_s - 1
+            i_e_w = i_e + 1
+            j_s_w = j_s - 1
+            j_e_w = j_e + 1
         endif
         
     end subroutine
@@ -72,8 +85,6 @@ contains
         call options%alloc_vars( &
                         [kVARS%u,    kVARS%v,   kVARS%w,     kVARS%dz_interface, kVARS%water_vapor])
 
-        call options%advect_vars([kVARS%water_vapor, kVARS%potential_temperature])
-
         ! List the variables that are required for restarts with adv4 advection
         call options%restart_vars( &
                         [kVARS%u,    kVARS%v,   kVARS%w,     kVARS%dz_interface, kVARS%water_vapor])
@@ -83,9 +94,7 @@ contains
     subroutine flux3(q,U_m,V_m,W_m,flux_x,flux_z,flux_y,t_factor)
         implicit none
         real, dimension(ims:ime,  kms:kme,jms:jme),   intent(in)       :: q
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: U_m
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: V_m
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: W_m
+        real, dimension(i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1), intent(in)       :: U_m, V_m, W_m
         real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1),   intent(out)    :: flux_x
         real, dimension(i_s:i_e+1,  kms:kme,j_s:j_e+1), intent(out)    :: flux_y
         real, dimension(i_s:i_e+1,  kms:kme+1,j_s:j_e+1), intent(out)    :: flux_z
@@ -431,7 +440,7 @@ contains
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(out)      :: qfluxes
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)       :: qold
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)       :: dz, denom
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: U_m, V_m, W_m
+        real, dimension(i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1), intent(in)       :: U_m, V_m, W_m
         real, intent(in) :: t_factor
         integer, intent(in) :: q_id
         
@@ -442,9 +451,9 @@ contains
         real :: q0, qn1, qn2, qn3, q1, q2
         
         !$acc data present(qold,U_m,V_m,W_m,qfluxes,denom,dz)
-        
+        t_factor_compact = 0.5 * t_factor
+
         if (horder==1 .and. vorder==1) then
-            t_factor_compact = 0.5 * t_factor
             
             !$acc parallel loop gang vector tile(64,2,1) async(q_id) private(flux_x_i, flux_x_i1, flux_y_j, flux_y_j1, flux_z_k, flux_z_k1, u_val, v_val, w_val, abs_u_val, q0, qn1)
             do j = jts, jte
@@ -459,10 +468,10 @@ contains
                         flux_x_i = ((u_val + abs_u_val) * qn1 + (u_val - abs_u_val) * q0) * t_factor_compact
                         
                         ! Compute X-flux at i+1
-                        qn1 = qold(i+1,k,j)
+                        q1 = qold(i+1,k,j)
                         u_val = U_m(i+1,k,j)
                         abs_u_val = abs(u_val)
-                        flux_x_i1 = ((u_val + abs_u_val) * q0 + (u_val - abs_u_val) * qn1) * t_factor_compact
+                        flux_x_i1 = ((u_val + abs_u_val) * q0 + (u_val - abs_u_val) * q1) * t_factor_compact
                         
                         ! Compute Y-flux at j
                         qn1 = qold(i,k,j-1)
@@ -471,10 +480,10 @@ contains
                         flux_y_j = ((v_val + abs_u_val) * qn1 + (v_val - abs_u_val) * q0) * t_factor_compact
                         
                         ! Compute Y-flux at j+1
-                        qn1 = qold(i,k,j+1)
+                        q1 = qold(i,k,j+1)
                         v_val = V_m(i,k,j+1)
                         abs_u_val = abs(v_val)
-                        flux_y_j1 = ((v_val + abs_u_val) * q0 + (v_val - abs_u_val) * qn1) * t_factor_compact
+                        flux_y_j1 = ((v_val + abs_u_val) * q0 + (v_val - abs_u_val) * q1) * t_factor_compact
                         
                         ! Compute Z-flux at k
                         if (k == kms) then
@@ -491,10 +500,10 @@ contains
                             w_val = W_m(i,kme,j)
                             flux_z_k1 = q0 * w_val * t_factor
                         else
-                            qn1 = qold(i,k+1,j)
+                            q1 = qold(i,k+1,j)
                             w_val = W_m(i,k,j)
                             abs_u_val = abs(w_val)
-                            flux_z_k1 = ((w_val + abs_u_val) * q0 + (w_val - abs_u_val) * qn1) * t_factor_compact
+                            flux_z_k1 = ((w_val + abs_u_val) * q0 + (w_val - abs_u_val) * q1) * t_factor_compact
                         endif
                         
                         ! Apply flux divergence
@@ -562,24 +571,59 @@ contains
                         if (k == kms) then
                             flux_z_k = 0.0
                             
-                            ! k+1 uses upwind
+                            !Use upwind for upward interface
                             qn1 = q0
                             q1 = qold(i,k+1,j)
                             w_val = W_m(i,k,j)
                             abs_u_val = abs(w_val)
-                            flux_z_k1 = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q1) * 0.5 * t_factor
-                            
-                        else if (k == kme) then
-                            ! k uses upwind
+                            flux_z_k1 = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q1) * t_factor_compact
+                        
+                        else if (k == kms+1) then
+                            !Use upwind for downward interface
                             qn1 = qold(i,k-1,j)
                             w_val = W_m(i,k-1,j)
                             abs_u_val = abs(w_val)
-                            flux_z_k = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q0) * 0.5 * t_factor
+                            flux_z_k = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q0) * t_factor_compact
                             
-                            ! k+1 (top boundary)
+                            !Can already use 3rd order for upwind interface
+                            qn2 = qn1
+                            qn1 = q0
+                            q1 = qold(i,k+2,j)
+                            
+                            w_val = W_m(i,k,j)
+                            abs_u_val = abs(w_val)
+                            tmp = 7.0 * (qold(i,k+1,j) + q0) - (q1 + qn2)
+                            tmp = w_val * tmp - abs_u_val * (3.0 * (qold(i,k+1,j) - q0) - (q1 - qn2))
+                            flux_z_k1 = tmp * (1./12) * t_factor
+
+                        else if (k== kme-1) then
+                            !Use 3rd order for downward interface
+                            qn2 = qold(i,k-2,j)
+                            qn1 = qold(i,k-1,j)
+                            q1 = qold(i,k+1,j)
+                            
+                            w_val = W_m(i,k-1,j)
+                            abs_u_val = abs(w_val)
+                            tmp = 7.0 * (q0 + qn1) - (q1 + qn2)
+                            tmp = w_val * tmp - abs_u_val * (3.0 * (q0 - qn1) - (q1 - qn2))
+                            flux_z_k = tmp * (1./12) * t_factor
+                            
+                            !Use upwind for upward interface
+                            qn1 = q0
+                            q1 = qold(i,k+1,j)
+                            w_val = W_m(i,k,j)
+                            abs_u_val = abs(w_val)
+                            flux_z_k1 = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q1) * t_factor_compact
+
+                        else if (k == kme) then
+                            !Use upwind for downward interface
+                            qn1 = qold(i,k-1,j)
+                            w_val = W_m(i,k-1,j)
+                            abs_u_val = abs(w_val)
+                            flux_z_k = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q0) * t_factor_compact
+                            
                             w_val = W_m(i,kme,j)
                             flux_z_k1 = q0 * w_val * t_factor
-                            
                         else
                             ! Both k and k+1 use 3rd order
                             qn2 = qold(i,k-2,j)
@@ -670,20 +714,56 @@ contains
                 if (k == kms) then
                     flux_z_k = 0.0
                     
+                    !Use upwind for upward interface
                     qn1 = q0
                     q1 = qold(i,k+1,j)
                     w_val = W_m(i,k,j)
                     abs_u_val = abs(w_val)
-                    flux_z_k1 = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q1) * 0.5 * t_factor
-                    
-                else if (k == kme) then
-                    qn2 = qold(i,k-2,j)
+                    flux_z_k1 = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q1) * t_factor_compact
+                
+                else if (k == kms+1) then
+                    !Use upwind for downward interface
                     qn1 = qold(i,k-1,j)
                     w_val = W_m(i,k-1,j)
                     abs_u_val = abs(w_val)
-                    tmp = 7.0 * (q0 + qn1) - (qold(i,k+1,j) + qn2)
-                    tmp = w_val * tmp - abs_u_val * (3.0 * (q0 - qn1) - (qold(i,k+1,j) - qn2))
+                    flux_z_k = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q0) * t_factor_compact
+                    
+                    !Can already use 3rd order for upwind interface
+                    qn2 = qn1
+                    qn1 = q0
+                    q1 = qold(i,k+2,j)
+                    
+                    w_val = W_m(i,k,j)
+                    abs_u_val = abs(w_val)
+                    tmp = 7.0 * (qold(i,k+1,j) + q0) - (q1 + qn2)
+                    tmp = w_val * tmp - abs_u_val * (3.0 * (qold(i,k+1,j) - q0) - (q1 - qn2))
+                    flux_z_k1 = tmp * (1./12) * t_factor
+
+                else if (k== kme-1) then
+                    !Use 3rd order for downward interface
+                    qn2 = qold(i,k-2,j)
+                    qn1 = qold(i,k-1,j)
+                    q1 = qold(i,k+1,j)
+                    
+                    w_val = W_m(i,k-1,j)
+                    abs_u_val = abs(w_val)
+                    tmp = 7.0 * (q0 + qn1) - (q1 + qn2)
+                    tmp = w_val * tmp - abs_u_val * (3.0 * (q0 - qn1) - (q1 - qn2))
                     flux_z_k = tmp * (1./12) * t_factor
+                    
+                    !Use upwind for upward interface
+                    qn1 = q0
+                    q1 = qold(i,k+1,j)
+                    w_val = W_m(i,k,j)
+                    abs_u_val = abs(w_val)
+                    flux_z_k1 = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q1) * t_factor_compact
+
+                else if (k == kme) then
+                    !Use upwind for downward interface
+                    qn1 = qold(i,k-1,j)
+                    w_val = W_m(i,k-1,j)
+                    abs_u_val = abs(w_val)
+                    flux_z_k = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q0) * t_factor_compact
                     
                     w_val = W_m(i,kme,j)
                     flux_z_k1 = q0 * w_val * t_factor
@@ -776,54 +856,110 @@ contains
                 flux_y_j1 = tmp * coef
                 
                 ! Compute Z-fluxes (5th order or lower at boundaries)
-                if (k <= kms+2 .or. k >= kme-1) then
+                if (k <= kms+2 .or. k >= kme-2) then
                     ! Use upwind or 3rd order at boundaries
                     if (k == kms) then
-                    flux_z_k = 0.0
-                    qn1 = q0
-                    q1 = qold(i,k+1,j)
-                    w_val = W_m(i,k,j)
-                    abs_u_val = abs(w_val)
-                    flux_z_k1 = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q1) * 0.5 * t_factor
+                        flux_z_k = 0.0
+                        
+                        !Use upwind for upward interface
+                        qn1 = q0
+                        q1 = qold(i,k+1,j)
+                        w_val = W_m(i,k,j)
+                        abs_u_val = abs(w_val)
+                        flux_z_k1 = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q1) * t_factor_compact
+                    
                     else if (k == kms+1) then
-                    qn1 = qold(i,k-1,j)
-                    w_val = W_m(i,k-1,j)
-                    abs_u_val = abs(w_val)
-                    flux_z_k = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q0) * 0.5 * t_factor
-                    
-                    qn2 = qold(i,k-1,j)
-                    qn1 = q0
-                    q1 = qold(i,k+1,j)
-                    w_val = W_m(i,k,j)
-                    abs_u_val = abs(w_val)
-                    tmp = 7.0 * (q1 + q0) - (qold(i,k+2,j) + qn2)
-                    tmp = w_val * tmp - abs_u_val * (3.0 * (q1 - q0) - (qold(i,k+2,j) - qn2))
-                    flux_z_k1 = tmp * (1./12) * t_factor
-                    else if (k == kme-1) then
-                    qn2 = qold(i,k-2,j)
-                    qn1 = qold(i,k-1,j)
-                    q1 = qold(i,k+1,j)
-                    w_val = W_m(i,k-1,j)
-                    abs_u_val = abs(w_val)
-                    tmp = 7.0 * (q0 + qn1) - (q1 + qn2)
-                    tmp = w_val * tmp - abs_u_val * (3.0 * (q0 - qn1) - (q1 - qn2))
-                    flux_z_k = tmp * (1./12) * t_factor
-                    
-                    qn1 = q0
-                    w_val = W_m(i,k,j)
-                    abs_u_val = abs(w_val)
-                    flux_z_k1 = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q1) * 0.5 * t_factor
-                    else ! k == kme
-                    qn2 = qold(i,k-2,j)
-                    qn1 = qold(i,k-1,j)
-                    w_val = W_m(i,k-1,j)
-                    abs_u_val = abs(w_val)
-                    tmp = 7.0 * (q0 + qn1) - (qold(i,k+1,j) + qn2)
-                    tmp = w_val * tmp - abs_u_val * (3.0 * (q0 - qn1) - (qold(i,k+1,j) - qn2))
-                    flux_z_k = tmp * (1./12) * t_factor
-                    
-                    w_val = W_m(i,kme,j)
-                    flux_z_k1 = q0 * w_val * t_factor
+                        !Use upwind for downward interface
+                        qn1 = qold(i,k-1,j)
+                        w_val = W_m(i,k-1,j)
+                        abs_u_val = abs(w_val)
+                        flux_z_k = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q0) * t_factor_compact
+                        
+                        !Can already use 3rd order for upwind interface
+                        qn2 = qn1
+                        qn1 = q0
+                        q1 = qold(i,k+2,j)
+                        
+                        w_val = W_m(i,k,j)
+                        abs_u_val = abs(w_val)
+                        tmp = 7.0 * (qold(i,k+1,j) + q0) - (q1 + qn2)
+                        tmp = w_val * tmp - abs_u_val * (3.0 * (qold(i,k+1,j) - q0) - (q1 - qn2))
+                        flux_z_k1 = tmp * (1./12) * t_factor
+
+                    else if (k == kms+2) then
+                        !Use 3rd order for downward interface
+                        qn2 = qold(i,k-2,j)
+                        qn1 = qold(i,k-1,j)
+                        q1 = qold(i,k+1,j)
+
+                        w_val = W_m(i,k-1,j)
+                        abs_u_val = abs(w_val)
+                        tmp = 7.0 * (q0 + qn1) - (q1 + qn2)
+                        tmp = w_val * tmp - abs_u_val * (3.0 * (q0 - qn1) - (q1 - qn2))
+                        flux_z_k = tmp * (1./12) * t_factor
+
+                        !Use 5th order for upward interface
+                        qn3 = qn2
+                        qn2 = qn1
+                        qn1 = q0
+                        q1 = qold(i,k+2,j)
+                        q2 = qold(i,k+3,j)
+                        w_val = W_m(i,k,j)
+                        abs_u_val = abs(w_val)
+                        tmp = 37.0 * (qold(i,k+1,j) + q0) - 8.0 * (q1 + qn2) + (q2 + qn3)
+                        tmp = w_val * tmp - abs_u_val * (10.0 * (qold(i,k+1,j) - q0) - 5.0 * (q1 - qn2) + (q2 - qn3))
+                        flux_z_k1 = tmp * coef
+
+                    else if (k== kme-2) then
+                        !Use 5th order for downward interface
+                        qn3 = qold(i,k-3,j)
+                        qn2 = qold(i,k-2,j)
+                        qn1 = qold(i,k-1,j)
+                        q1 = qold(i,k+1,j)
+                        w_val = W_m(i,k-1,j)
+                        abs_u_val = abs(w_val)
+                        tmp = 37.0 * (q0 + qn1) - 8.0 * (q1 + qn2) + (qold(i,k+2,j) + qn3)
+                        tmp = w_val * tmp - abs_u_val * (10.0 * (q0 - qn1) - 5.0 * (q1 - qn2) + (qold(i,k+2,j) - qn3))
+                        flux_z_k = tmp * coef
+
+                        !Use 3rd order for upward interface
+                        qn2 = qn1
+                        qn1 = q0
+                        q1 = qold(i,k+2,j)
+                        w_val = W_m(i,k,j)
+                        abs_u_val = abs(w_val)
+                        tmp = 7.0 * (qold(i,k+1,j) + q0) - (q1 + qn2)
+                        tmp = w_val * tmp - abs_u_val * (3.0 * (qold(i,k+1,j) - q0) - (q1 - qn2))
+                        flux_z_k1 = tmp * (1./12) * t_factor
+                        
+                    else if (k== kme-1) then
+                        !Use 3rd order for downward interface
+                        qn2 = qold(i,k-2,j)
+                        qn1 = qold(i,k-1,j)
+                        q1 = qold(i,k+1,j)
+                        
+                        w_val = W_m(i,k-1,j)
+                        abs_u_val = abs(w_val)
+                        tmp = 7.0 * (q0 + qn1) - (q1 + qn2)
+                        tmp = w_val * tmp - abs_u_val * (3.0 * (q0 - qn1) - (q1 - qn2))
+                        flux_z_k = tmp * (1./12) * t_factor
+                        
+                        !Use upwind for upward interface
+                        qn1 = q0
+                        q1 = qold(i,k+1,j)
+                        w_val = W_m(i,k,j)
+                        abs_u_val = abs(w_val)
+                        flux_z_k1 = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q1) * t_factor_compact
+
+                    else if (k == kme) then
+                        !Use upwind for downward interface
+                        qn1 = qold(i,k-1,j)
+                        w_val = W_m(i,k-1,j)
+                        abs_u_val = abs(w_val)
+                        flux_z_k = ((w_val + abs_u_val) * qn1 + (w_val - abs_u_val) * q0) * t_factor_compact
+                        
+                        w_val = W_m(i,kme,j)
+                        flux_z_k1 = q0 * w_val * t_factor
                     endif
                 else
                     ! Use 5th order in interior
@@ -875,9 +1011,7 @@ contains
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(inout)   :: qfluxes
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: qold
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: dz, denom
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: U_m
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: V_m
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: W_m
+        real, dimension(i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1), intent(in)       :: U_m, V_m, W_m
         type(timer_t), intent(inout) :: flux_time, flux_corr_time, sum_time
         real, optional,                              intent(in)      :: t_factor_in
         integer, optional,                           intent(in)      :: flux_corr_in, q_id_in
@@ -898,15 +1032,15 @@ contains
 
         ! Choose optimized path based on whether flux correction is needed
         if (flux_corr == 0) then
-            if ((horder==vorder) .or. (horder==5 .and. vorder==3)) then
-                ! FUSED PATH: No flux correction needed
-                ! Compute fluxes and directly update qfluxes
+            ! if ((horder==vorder) .or. (horder==5 .and. vorder==3)) then
+            !     ! FUSED PATH: No flux correction needed
+            !     ! Compute fluxes and directly update qfluxes
 
-                call flux_time%start()
-                !$acc wait(q_id) !qold is needed for following function
-                call flux_and_advect_fused(qfluxes,qold,U_m,V_m,W_m,denom,dz,t_factor,q_id)
-                call flux_time%stop()
-            else
+            !     call flux_time%start()
+            !     !$acc wait(q_id) !qold is needed for following function
+            !     call flux_and_advect_fused(qfluxes,qold,U_m,V_m,W_m,denom,dz,t_factor,q_id)
+            !     call flux_time%stop()
+            ! else
                 call flux_time%start()
                 !$acc wait(q_id) !qold is needed for following function
                 call flux3(qfluxes,U_m,V_m,W_m,flux_x,flux_z,flux_y,t_factor)
@@ -915,7 +1049,7 @@ contains
                 call sum_time%start()
                 call sum_kernel(flux_x, flux_y, flux_z, qold, qfluxes, denom, dz, q_id)
                 call sum_time%stop()
-            endif
+            ! endif
             
         else
             ! STANDARD PATH: Flux correction enabled
@@ -1017,9 +1151,9 @@ contains
         if (allocated(flux_z)) deallocate(flux_z)
 
         ! allocate the arrays
-        allocate(U_m     (i_s:i_e+1,kms:kme,j_s:j_e+1))
-        allocate(V_m     (i_s:i_e+1,kms:kme,j_s:j_e+1))
-        allocate(W_m     (i_s:i_e+1,kms:kme,j_s:j_e+1))
+        allocate(U_m     (i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1))
+        allocate(V_m     (i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1))
+        allocate(W_m     (i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1))
         allocate(denom   (ims:ime,  kms:kme,jms:jme  ))
         allocate(flux_x(i_s:i_e+1,kms:kme,j_s:j_e+1))
         allocate(flux_y(i_s:i_e+1,  kms:kme,j_s:j_e+1))
@@ -1062,28 +1196,22 @@ contains
         enddo
 
         !$acc parallel loop gang vector tile(32,2,1) async(2)
-        do j = j_s,j_e+1
+        do j = j_s_w,j_e_w+1
             do k = kms,kme
-                do i = i_s,i_e+1
+                do i = i_s_w,i_e_w+1
                     U_m(i,k,j) = u(i,k,j) * dt * (rho(i,k,j)+rho(i-1,k,j))*0.5 * &
                         jaco_u(i,k,j) / dx
-                enddo
-            enddo
-        enddo
-        !$acc parallel loop gang vector tile(32,2,1) async(3)
-        do j = j_s,j_e+1
-            do k = kms,kme
-                do i = i_s,i_e+1
+                
                     V_m(i,k,j) = v(i,k,j) * dt * (rho(i,k,j)+rho(i,k,j-1))*0.5 * &
                         jaco_v(i,k,j) / dx
                 enddo
             enddo
         enddo
 
-        !$acc parallel loop gang vector tile(32,2,1) async(4)
-        do j = j_s,j_e+1
+        !$acc parallel loop gang vector tile(32,2,1) async(3)
+        do j = j_s_w,j_e_w+1
             do k = kms,kme-1
-                do i = i_s,i_e+1
+                do i = i_s_w,i_e_w+1
                     W_m(i,k,j) = w(i,k,j) * dt * jaco_w(i,k,j) * &
                         ( rho(i,k,j)*dz(i,k+1,j) + &
                         rho(i,k+1,j)*dz(i,k,j) ) / &
@@ -1092,15 +1220,15 @@ contains
             enddo
         enddo
         
-        !$acc parallel loop gang vector collapse(2) async(5)
-        do j = j_s,j_e+1
-            do i = i_s,i_e+1
+        !$acc parallel loop gang vector collapse(2) async(4)
+        do j = j_s_w,j_e_w+1
+            do i = i_s_w,i_e_w+1
                 W_m(i,kme,j) = w(i,kme,j) * dt * jaco_w(i,kme,j) * rho(i,kme,j)
             enddo
         enddo
         !$acc end data
 
-        !$acc wait(1,2,3,4,5)
+        !$acc wait(1,2,3,4)
     end subroutine adv_std_compute_wind
 
     subroutine adv_std_clean_wind_arrays(U_m,V_m,W_m,denom)

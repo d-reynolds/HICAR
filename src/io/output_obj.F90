@@ -257,7 +257,10 @@ contains
         type(MPI_Comm),   intent(in)     :: par_comms
         integer,          intent(in)  :: out_var_indices(:)
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 9c2a44bc8baa556286c91683ea129a36bbb32b2e
         !Check if we should change the file
         if (this%output_counter > this%output_count) then
             write(this%output_fn, '(A,A,".nc")')    &
@@ -280,6 +283,10 @@ contains
 
         if (.not.this%block_checked) call block_hunter(this)
         ! store output
+<<<<<<< HEAD
+=======
+
+>>>>>>> 9c2a44bc8baa556286c91683ea129a36bbb32b2e
         call save_data(this, this%output_counter, time, out_var_indices)
 
         !In case we had creating set to true, set to false
@@ -503,12 +510,15 @@ contains
         integer, dimension(:), intent(in):: vars_to_out
 
         integer :: i
+        type(meta_data_t) :: tmp_var
 
         !Loop through domain vars_to_out, get the var index for the given variable name, and add that var's meta data to local list
         do i = 1,kMAX_STORAGE_VARS
             if (vars_to_out(i)>0) then
                 !i should equal the kVARS index of the variable we want to output
-                call this%add_to_output(get_varmeta(i))
+                tmp_var = get_varmeta(i)
+                if (tmp_var%name == "") cycle
+                call this%add_to_output(tmp_var)
             endif
         enddo
     end subroutine

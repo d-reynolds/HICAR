@@ -19,7 +19,7 @@ submodule(reader_interface) reader_implementation
   use string,             only : as_string
   use time_io,            only : read_times, find_timestep_in_filelist, var_has_time_dim
   use array_utilities,    only : interpolate_in_z
-  use io_routines,        only : io_read, io_getdims, io_var_reversed, can_file_parallel
+  use io_routines,        only : io_getdims, io_var_reversed, can_file_parallel
   implicit none
 
 contains
@@ -35,7 +35,8 @@ contains
         type(dim_arrays_type), allocatable           :: var_dimensions(:)
         character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
         type(meta_data_t) :: var_meta
-        integer :: i, nx, ny, nz, dims(3)
+        integer :: i, nx, ny, nz
+        integer, allocatable :: qv_dims(:)
         real, dimension(:,:,:), allocatable :: tmp_read_var
         
 
@@ -59,10 +60,10 @@ contains
         this%jts = jts; this%jte = jte
 
         !get global input file dimensions
-        call io_read(this%file_list(this%curfile), options%forcing%qvvar,   tmp_read_var,   this%curstep)
+        call io_getdims(this%file_list(this%curfile), options%forcing%qvvar, qv_dims)
 
-        this%ids = 1; this%ide = ubound(tmp_read_var, 1)
-        this%jds = 1; this%jde = ubound(tmp_read_var, 2)
+        this%ids = 1; this%ide = qv_dims(1)
+        this%jds = 1; this%jde = qv_dims(2)
 
         ! the parameters option type can't contain allocatable arrays because it is a coarray
         ! so we need to allocate the vars_to_read and var_dimensions outside of the options type
@@ -123,9 +124,7 @@ contains
         character(len=kMAX_DIM_LENGTH) :: time_dim_name, attr_val
         logical :: has_time, flip_y, is_reversed, is_file_parallel
 
-        if (allocated(buffer)) deallocate(buffer)
-        allocate(buffer(this%n_vars,this%its:this%ite+1,this%kts:this%kte,this%jts:this%jte+1))
-
+        buffer = 0.0
         !See if we must open the file
 
         is_file_parallel = .True.!can_file_parallel(this%file_list(this%curfile))
@@ -400,8 +399,7 @@ contains
 
         if (steps_in_file < this%curstep) then
             ! close current file
-            call check_ncdf(nf90_close(this%ncfile_id), "Closing file "//trim(this%file_list(this%curfile)))
-            this%ncfile_id = -1
+            call this%close_file()
             
             ! if we have, use the next file
             this%curfile = this%curfile + 1
@@ -567,7 +565,7 @@ contains
         class(reader_t),   intent(inout)  :: this
 
         if (this%ncfile_id > 0) then
-            call check_ncdf(nf90_close(this%ncfile_id), "Closing file ")
+            call check_ncdf(nf90_close(this%ncfile_id), "Closing file: " // trim(this%file_list(this%curfile)))
             this%ncfile_id = -1
         endif
 

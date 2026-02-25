@@ -48,8 +48,6 @@ contains
                          kVARS%tend_qv, kVARS%tend_th, kVARS%tend_qc, kVARS%tend_qi, kVARS%tend_qs, kVARS%tend_qr,  &
                          kVARS%tend_u, kVARS%tend_v, kVARS%tend_qv_pbl, kVARS%tend_qv_adv, kVARS%QFX])
 
-             call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
-
              call options%restart_vars( &
                          [kVARS%water_vapor, kVARS%potential_temperature, kVARS%temperature, kVARS%QFX,             &
                          kVARS%cloud_water_mass, kVARS%ice_mass, kVARS%precipitation, kVARS%convective_precipitation,   &
@@ -64,8 +62,6 @@ contains
                          kVARS%tend_qv, kVARS%tend_th, kVARS%tend_qc, kVARS%tend_qi, kVARS%tend_qs, kVARS%tend_qr,  &
                          kVARS%tend_u, kVARS%tend_v, kVARS%hpbl])
 
-             call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
-
              call options%restart_vars( &
                          [kVARS%water_vapor, kVARS%potential_temperature, kVARS%temperature, kVARS%QFX,             &
                          kVARS%cloud_water_mass, kVARS%ice_mass, kVARS%precipitation, kVARS%convective_precipitation,   &
@@ -79,8 +75,6 @@ contains
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u, kVARS%v, kVARS%w, kVARS%land_mask,        &
                          kVARS%tend_qv, kVARS%tend_th, kVARS%tend_qc, kVARS%tend_qi, kVARS%tend_qs, kVARS%tend_qr,  &
                          kVARS%tend_u, kVARS%tend_v, kVARS%kpbl])
-
-             call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
 
              call options%restart_vars( &
                          [kVARS%water_vapor, kVARS%potential_temperature, kVARS%temperature,                        &

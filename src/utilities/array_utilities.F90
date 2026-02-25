@@ -1,9 +1,12 @@
 module array_utilities
 
+    use variable_interface, only : variable_t
+    use halo_interface,     only : halo_t
+
     implicit none
 
     interface smooth_array
-        module procedure smooth_array_2d, smooth_array_3d
+        module procedure smooth_array_2d, smooth_array_3d, smooth_array_var
     end interface
 
     interface array_offset_x
@@ -453,43 +456,54 @@ contains
     !!   > call smooth_array_2d(my_array, 1)
     !!     This will smooth the 2D array "my_array" using a 3x3 moving window.
     !!     The result will be stored in "my_array".
-    subroutine smooth_array_2d(input, windowsize)
+    subroutine smooth_array_2d(input, windowsize,nsmooths)
         implicit none
         real, intent(inout), dimension(:,:):: input
         integer, intent(in):: windowsize
+        integer, optional, intent(in) :: nsmooths
         real, dimension(:,:), allocatable:: temp
-        integer:: i, j, nx, ny, starti, endi, startj, endj
-        real:: runningsum, count
+        integer:: i, j, nx, ny, n, starti, endi, startj, endj, iters
+        real:: inv_count
     
+        iters = 1
+        if (present(nsmooths)) iters = nsmooths
+
         nx = size(input, 1)
         ny = size(input, 2)
         allocate(temp(nx, ny))
-    
-        temp = input
-    
-        !$omp parallel private(i, j, starti, endi, startj, endj, runningsum, count)
-        !$omp do schedule(static)
-        !$acc data present_or_copy(input) copyin(temp)
-        !$acc parallel loop gang vector collapse(2)
-        do j = 1, ny
-            do i = 1, nx
-                runningsum = 0.0
-                count = 0.0
-                starti = max(1, i - windowsize)
-                endi = min(nx, i + windowsize)
-                startj = max(1, j - windowsize)
-                endj = min(ny, j + windowsize)
-                runningsum = sum(temp(starti:endi, startj:endj)) / ((endi - starti + 1) * (endj - startj + 1))
-                input(i, j) = runningsum
+
+        !$acc data copy(input) create(temp)
+        do n = 1, iters
+            !$omp parallel do collapse(2) private(i, j, starti, endi, startj, endj, inv_count) schedule(static)
+            !$acc parallel loop gang vector collapse(2)
+            do j = 1, ny
+                do i = 1, nx
+                    starti = max(1, i - windowsize)
+                    endi = min(nx, i + windowsize)
+                    startj = max(1, j - windowsize)
+                    endj = min(ny, j + windowsize)
+                    
+                    inv_count = 1.0 / real((endi - starti + 1) * (endj - startj + 1))
+                    temp(i, j) = sum(input(starti:endi, startj:endj)) * inv_count
+                end do
             end do
+            !$omp end parallel do
+            !$acc end parallel loop
+            
+            !$omp parallel do collapse(2)
+            !$acc parallel loop gang vector collapse(2)
+            do j = 1, ny
+                do i = 1, nx
+                    input(i, j) = temp(i, j)
+                end do
+            end do
+            !$omp end parallel do
+            !$acc end parallel loop
         end do
-        !$omp end do
-        !$omp end parallel
-        !$acc update host(input)
-        !$acc end data 
-    
+        !$acc end data
+
         deallocate(temp)
-    
+        
     end subroutine smooth_array_2d
 
     ! subroutine smooth_array_2d(input,windowsize)
@@ -617,6 +631,86 @@ contains
         data=temporary_data
 
     end subroutine swap_y_z_dimensions
+
+
+    !>------------------------------------------------------------
+    !! Smooth a variable_t with optional halo exchange between iterations
+    !! for MPI-consistent results across domain decompositions.
+    !!
+    !! When a halo is supplied, an exchange is performed before the first
+    !! smoothing pass (to guarantee consistent halos after independent
+    !! per-process interpolation) and after every subsequent pass.
+    !!
+    !! IMPORTANT: windowsize must be <= var%grid%halo_size.  smooth_array_3d
+    !! uses edge-replication at the memory boundary.  On interior process
+    !! boundaries that edge is inside the halo region, so the replicated
+    !! values are overwritten by the post-pass halo exchange.  But if
+    !! windowsize exceeds the halo width, interior (tile) cells within
+    !! windowsize of the tile boundary will read edge-replicated values
+    !! that *cannot* be corrected by the exchange — producing results
+    !! that depend on the domain decomposition.  To apply a larger
+    !! effective smoothing radius, use multiple iterations of a small
+    !! windowsize (nsmooths > 1, windowsize <= halo_size) with halo
+    !! exchanges between passes.
+    !!
+    !! @param var          variable_t to be smoothed (data_3d/2d or dqdt_3d/2d)
+    !! @param windowsize   halfwidth of smoothing window in grid cells
+    !!                     (must be <= var%grid%halo_size when halo is present)
+    !! @param ydim         axis the y dimension is on (2 or 3) — only used for 3D
+    !! @param nsmooths     number of smoothing iterations (default 1)
+    !! @param halo         optional halo_t for MPI exchange between iterations
+    !! @param do_dqdt      if .true., smooth the dqdt field instead of data field
+    !!------------------------------------------------------------
+    subroutine smooth_array_var(var, windowsize, ydim, nsmooths, halo, do_dqdt)
+        implicit none
+        type(variable_t), intent(inout) :: var
+        integer,          intent(in)    :: windowsize
+        integer,          intent(in)    :: ydim
+        integer, optional, intent(in)   :: nsmooths
+        type(halo_t), intent(inout), optional :: halo
+        logical, optional, intent(in)   :: do_dqdt
+
+        integer :: iters, n
+        logical :: dqdt
+
+        iters = 1
+        if (present(nsmooths)) iters = nsmooths
+        dqdt = .false.
+        if (present(do_dqdt)) dqdt = do_dqdt
+
+        ! Guard: windowsize must fit within the halo so that every tile-
+        ! interior cell's smoothing window is backed by real neighbor data.
+        if (present(halo) .and. windowsize > var%grid%halo_size) then
+            write(*,*) "ERROR smooth_array_var: windowsize (", windowsize, &
+                       ") exceeds halo_size (", var%grid%halo_size, ")."
+            write(*,*) "  Use nsmooths > 1 with a smaller windowsize instead."
+            stop
+        endif
+
+        ! Ensure halos are consistent before the first smoothing pass.
+        ! Each process fills its memory extent (including halos) independently
+        ! via interpolation, so halo values may not exactly match the
+        ! neighbor's interior.  Exchanging up front guarantees the first
+        ! smooth pass reads correct neighbor data.
+        if (present(halo)) call halo%exch_var(var, do_dqdt=dqdt)
+
+        do n = 1, iters
+            if (var%three_d) then
+                if (dqdt) then
+                    call smooth_array_3d(var%dqdt_3d, windowsize, ydim)
+                else
+                    call smooth_array_3d(var%data_3d, windowsize, ydim)
+                endif
+            else if (var%two_d) then
+                if (dqdt) then
+                    call smooth_array_2d(var%dqdt_2d, windowsize)
+                else
+                    call smooth_array_2d(var%data_2d, windowsize)
+                endif
+            endif
+            if (present(halo)) call halo%exch_var(var, do_dqdt=dqdt)
+        enddo
+    end subroutine smooth_array_var
 
 
 end module array_utilities

@@ -2,9 +2,6 @@
 !!
 !!----------------------------------------------------------
 module module_sf_FSMdrv
-    use module_sf_noahdrv,   only : lsm_noah, lsm_noah_init
-    use module_water_simple, only : water_simple
-    use mod_atm_utilities,   only : sat_mr
     use time_object,         only : Time_type
     use mod_wrf_constants,   only : piconst, XLS
     use icar_constants
@@ -12,7 +9,6 @@ module module_sf_FSMdrv
     use options_interface,   only : options_t
     use variable_interface,  only : variable_t
     use domain_interface,    only : domain_t
-    use io_routines,         only : io_write, io_read, io_add_attribute
     use FSM_interface , only:  FSM_SETUP,FSM_DRIVE,FSM_PHYSICS, FSM_SNOWSLIDE, FSM_SNOWSLIDE_END, FSM_CUMULATE_SD, FSM_SNOWTRAN_SETUP, FSM_SNOWTRAN_SALT_START, FSM_SNOWTRAN_SALT, FSM_SNOWTRAN_SALT_END, FSM_SNOWTRAN_SUSP_START, FSM_SNOWTRAN_SUSP, FSM_SNOWTRAN_SUSP_END, FSM_SNOWTRAN_ACCUM
     use FSM_interface , only:  Nx_HICAR, Ny_HICAR, NNsmax_HICAR, NNsoil_HICAR, lat_HICAR, &
                                lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,shd_HICAR, LHN_ON, LFOR_HN, &

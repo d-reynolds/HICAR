@@ -169,6 +169,8 @@ contains
         real :: neg_z
         integer :: i, nx, ny, nz, PE_RANK_GLOBAL
         logical :: z_staggered, data_flipped
+        integer, allocatable :: z_dims(:), start_3d(:), count_3d(:)
+        integer :: full_nz
 
         ! figure out while file and timestep contains the requested start_time
         call set_firstfile_firststep(this, start_time, options%boundary_files, options%time_var)
@@ -207,12 +209,11 @@ contains
 
         ! read in the u and v lat and lon data if specified
         if (options%ulat /= "" .and. options%ulon /= "") then
-
-            call io_read(this%firstfile, options%uvar,   temp_3d,   this%firststep)
-            if (.not.(size(temp_3d,1) == this%ide+1 .and. size(temp_3d,2) == this%jde)) then
+            call io_getdims(this%firstfile, options%uvar, z_dims)
+            if (.not.(z_dims(1) == this%ide+1 .and. z_dims(2) == this%jde)) then
                 write(*,*) "ERROR: forcing variable uvar is not on the staggered u-grid, but lat/lon data for this grid (ulat and ulon) has been provided."
                 write(*,*) "ERROR: please make the dimensions of uvar and ulat/ulon consistent"
-                write(*,*) "       uvar size: ", size(temp_3d,1), " ", size(temp_3d,2)
+                write(*,*) "       uvar size: ", z_dims(1), " ", z_dims(2)
                 write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
                 stop
             endif
@@ -226,10 +227,10 @@ contains
         elseif(options%ulat == "" .and. options%ulon == "") then
             !ensure that uvar has the same dimensions at lat and lon
             !read in uvar
-            call io_read(this%firstfile, options%uvar,   temp_3d,   this%firststep)
-            if (.not.(size(temp_3d,1) == this%ide .and. size(temp_3d,2) == this%jde)) then
+            call io_getdims(this%firstfile, options%uvar, z_dims)
+            if (.not.(z_dims(1) == this%ide .and. z_dims(2) == this%jde)) then
                 write(*,*) "ERROR: forcing variable uvar is not on the mass-grid, and no lat/lon data for this grid (ulat and ulon) has been provided"
-                write(*,*) "       uvar size: ", size(temp_3d,1), " ", size(temp_3d,2)
+                write(*,*) "       uvar size: ", z_dims(1), " ", z_dims(2)
                 write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
                 stop
             endif
@@ -240,11 +241,11 @@ contains
 
         if (options%vlat /= "" .and. options%vlon /= "") then
 
-            call io_read(this%firstfile, options%vvar,   temp_3d,   this%firststep)
-            if (.not.(size(temp_3d,1) == this%ide .and. size(temp_3d,2) == this%jde+1)) then
+            call io_getdims(this%firstfile, options%vvar, z_dims)
+            if (.not.(z_dims(1) == this%ide .and. z_dims(2) == this%jde+1)) then
                 write(*,*) "ERROR: forcing variable vvar is not on the staggered v-grid, but lat/lon data for this grid (vlat and vlon) has been provided."
                 write(*,*) "ERROR: please make the dimensions of vvar and vlat/vlon consistent"
-                write(*,*) "       vvar size: ", size(temp_3d,1), " ", size(temp_3d,2)
+                write(*,*) "       vvar size: ", z_dims(1), " ", z_dims(2)
                 write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
                 stop
             endif
@@ -259,10 +260,10 @@ contains
         elseif(options%vlat == "" .and. options%vlon == "") then
             !ensure that vvar has the same dimensions at lat and lon
             !read in vvar
-            call io_read(this%firstfile, options%vvar,   temp_3d,   this%firststep)
-            if (.not.(size(temp_3d,1) == this%ide .and. size(temp_3d,2) == this%jde)) then
+            call io_getdims(this%firstfile, options%vvar, z_dims)
+            if (.not.(z_dims(1) == this%ide .and. z_dims(2) == this%jde)) then
                 write(*,*) "ERROR: forcing variable vvar is not on the mass-grid, and no lat/lon data for this grid (vlat and vlon) has been provided"
-                write(*,*) "       vvar size: ", size(temp_3d,1), " ", size(temp_3d,2)
+                write(*,*) "       vvar size: ", z_dims(1), " ", z_dims(2)
                 write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
                 stop
             endif
@@ -276,17 +277,15 @@ contains
 
         if (size(qv_dims) == 4 .or. size(qv_dims) == 3) then
             !qv is 3D, read normally...
-            call io_read(this%firstfile, options%qvvar,   temp_3d,   this%firststep)
-            nx = size(temp_3d,1)
-            ny = size(temp_3d,2)
-            nz = size(temp_3d,3)
+            nx = qv_dims(1)
+            ny = qv_dims(2)
+            nz = qv_dims(3)
         elseif (size(qv_dims) == 1 .or. size(qv_dims) == 2) then
             !qv is 1D, read and expand to 3D
             if (STD_OUT_PE) write(*,*) '    Using Z dimension from qv variable in forcing data to construct forcing height coordinate...'
             if (STD_OUT_PE) write(*,*) '    qv variable is 1D or 2D, assuming it is spatially 1D in the vertical...'
             
-            call io_read(this%firstfile, options%qvvar,   temp_1d,   this%firststep)
-            nz = size(temp_1d)
+            nz = qv_dims(1)
         else
             write(*,*) 'ERROR: qv dimension on forcing data is not spatially 1D or 3D'
             stop
@@ -309,27 +308,48 @@ contains
         if (.not. options%compute_z) then
             z_staggered = .False.
 
-            call io_read(this%firstfile, options%zvar,   temp_3d,   this%firststep)
-            nx = size(temp_3d,1)
-            ny = size(temp_3d,2)
-
-            ! handle case that height is staggered in z dimension
-            if (size(temp_3d,3) == nz+1) then
-                nz = size(temp_3d,3)
-                z_staggered = .True.
-            elseif(size(temp_3d,3) == nz) then
-                nz = size(temp_3d,3)
+            call io_getdims(this%firstfile, options%zvar, z_dims)
+            if (size(z_dims) >= 3) then
+                full_nz = z_dims(3)
+                if (size(z_dims)==4) then
+                    ! Set up start and count for reading subset
+                    start_3d = [this%its, this%jts, 1, this%firststep]
+                    count_3d = [(this%ite-this%its+1), (this%jte-this%jts+1), full_nz, 1]
+                elseif (size(z_dims)==3) then
+                    ! Set up start and count for reading subset
+                    start_3d = [this%its, this%jts, 1]
+                    count_3d = [(this%ite-this%its+1), (this%jte-this%jts+1), full_nz]
+                endif
             else
-                !error
-                write(*,*) "ERROR: Incompatible vertical dimension sizes on forcing variable: ",options%zvar
-                write(*,*) "  Expected: ", nz, " or ", nz+1, " Found: ", size(temp_3d,3)
+                write(*,*) "ERROR: zvar does not have at least 3 dimensions"
                 stop
             endif
 
+            ! handle case that height is staggered in z dimension
+            if (full_nz == nz+1) then
+                z_staggered = .True.
+            elseif(full_nz == nz) then
+                z_staggered = .False.
+            else
+                !error
+                write(*,*) "ERROR: Incompatible vertical dimension sizes on forcing variable: ",options%zvar
+                write(*,*) "  Expected: ", nz, " or ", nz+1, " Found: ", full_nz
+                stop
+            endif
+                                    
+            ! Read subset of data directly using netCDF Fortran API
+            
+            call io_read(this%firstfile, options%zvar,   temp_3d,   this%firststep, &
+                         starts=start_3d, counts=count_3d)
+            nx = size(temp_3d,1)
+            ny = size(temp_3d,2)
+            nz = size(temp_3d,3)
+            
             allocate(temp_z_trans(1:nx,1:nz,1:ny))
             
             temp_z_trans(1:nx,1:nz,1:ny) = reshape(temp_3d, shape=[nx,nz,ny], order=[1,3,2])
 
+            data_flipped = io_var_reversed(this%firstfile, options%zvar)
             if (data_flipped) then
                 temp_z_trans = temp_z_trans(:,:,size(temp_z_trans,3):1:-1)
             endif
@@ -337,7 +357,7 @@ contains
             if (z_staggered) call interpolate_in_z(temp_z_trans)
 
             zvar = this%variables%get_var(kVARS%z)
-            zvar%data_3d = temp_z_trans(this%its:this%ite,this%kts:this%kte,this%jts:this%jte)
+            zvar%data_3d = temp_z_trans
             call this%variables%add_var(kVARS%z, zvar)
         endif
 
@@ -700,9 +720,18 @@ contains
             this%mass_to_v%lat = this%geo%lat
             this%mass_to_v%lon = this%geo%lon
 
-            call geo_LUT(this%geo_u, this%mass_to_u)
-            call geo_LUT(this%geo_v, this%mass_to_v)
-
+            if (options%general%debug) then
+                ! These will likely always complain. The below function is intended to generate an interpolation table for moving
+                ! between a high-res and low-res grid. Here we use it to generate an interpolation table between the staggered and non-staggered grids.
+                ! since the staggered grid will always be offset by half a grid cell, this will likely always complain that the high-res data is not contained
+                ! in the low-res data.
+                call geo_LUT(this%geo_u, this%mass_to_u, err_msg='Hi-res: forcing%geo_u     Low-res: forcing%mass_to_u')
+                call geo_LUT(this%geo_v, this%mass_to_v, err_msg='Hi-res: forcing%geo_v     Low-res: forcing%mass_to_v')
+            else
+                call geo_LUT(this%geo_u, this%mass_to_u)
+                call geo_LUT(this%geo_v, this%mass_to_v)
+            endif
+            
             if (allocated(this%original_geo_u%z)) deallocate(this%original_geo_u%z)
             if (allocated(this%original_geo_v%z)) deallocate(this%original_geo_v%z)
             allocate(this%original_geo_u%z(lbound(this%geo_u%lon,1):ubound(this%geo_u%lon,1), this%kts:this%kte, lbound(this%geo_u%lon,2):ubound(this%geo_u%lon,2)))            

@@ -56,17 +56,17 @@ contains
         allocate(scale_out(its-1:ite+1,kms:kme,jts-1:jte+1))
         allocate(qmax(its-1:ite+1,kms:kme,jts-1:jte+1))
         allocate(qmin(its-1:ite+1,kms:kme,jts-1:jte+1))
-        allocate(flux_x_up(its-1:ite+2,kms:kme,jts-1:jte+2))
-        allocate(flux_y_up(its-1:ite+2,kms:kme,jts-1:jte+2))
-        allocate(flux_z_up(its-1:ite+2,kms:kme+1,jts-1:jte+2))
+        allocate(flux_x_up(ims:ime,kms:kme,jms:jme))
+        allocate(flux_y_up(ims:ime,kms:kme,jms:jme))
+        allocate(flux_z_up(ims:ime,kms:kme+1,jms:jme))
         allocate(dumb_q(ims:ime,kms:kme,jms:jme))
     end subroutine init_fluxcorr
 
     subroutine set_sign_arrays(u,v,w)
         implicit none
-        real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+2),  intent(in) :: w
-        real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+1),  intent(in) :: u
-        real, dimension(its-1:ite+1,  kms:kme,jts-1:jte+2),  intent(in) :: v
+        real, dimension(its-2:ite+3,  kms:kme,jts-2:jte+3),  intent(in) :: w
+        real, dimension(its-2:ite+3,  kms:kme,jts-2:jte+3),  intent(in) :: u
+        real, dimension(its-2:ite+3,  kms:kme,jts-2:jte+3),  intent(in) :: v
 
         integer :: i, j, k
 
@@ -424,7 +424,7 @@ contains
     subroutine compute_upwind_fluxes_async(q,u,v,w,dz,denom,async_id)
         implicit none
         real, dimension(ims:ime,  kms:kme,jms:jme),    intent(in) :: q, dz, denom
-        real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+2),  intent(in) :: w, u, v
+        real, dimension(its-2:ite+3,  kms:kme,jts-2:jte+3),  intent(in) :: w, u, v
         integer, intent(in) :: async_id
         
         real :: q0, u_val, v_val, w_val, abs_u, abs_v, abs_w
@@ -437,9 +437,9 @@ contains
         ! STEP 1: First half-step upwind fluxes
         ! ==========================================
         !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(async_id)
-        do j = jts-1, jte+2
+        do j = jts-2, jte+3
             do k = kms, kme+1
-                do i = its-1, ite+2
+                do i = its-2, ite+3
                     if (k <= kme) then
                         q0 = q(i,k,j)
                         
@@ -473,26 +473,22 @@ contains
         ! STEP 2: Compute intermediate concentration after first half-step
         ! ==========================================
         !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(async_id)
-        do j = jms, jme
+        do j = jts-2, jte+2
             do k = kms, kme
-                do i = ims, ime
-                    if (i > ite+1 .or. i < its-1 .or. j > jte+1 .or. j < jts-1) then
-                        dumb_q(i,k,j) = q(i,k,j)
+                do i = its-2, ite+2
+                    flux_diff_x = flux_x_up(i+1,k,j) - flux_x_up(i,k,j)
+                    flux_diff_y = flux_y_up(i,k,j+1) - flux_y_up(i,k,j)
+                    
+                    if (k == kms) then
+                        flux_diff_z = flux_z_up(i,k+1,j)
                     else
-                        flux_diff_x = flux_x_up(i+1,k,j) - flux_x_up(i,k,j)
-                        flux_diff_y = flux_y_up(i,k,j+1) - flux_y_up(i,k,j)
-                        
-                        if (k == kms) then
-                            flux_diff_z = flux_z_up(i,k+1,j)
-                        else
-                            flux_diff_z = flux_z_up(i,k+1,j) - flux_z_up(i,k,j)
-                        endif
-                        
-                        denom_val = denom(i,k,j)
-                        dz_val = dz(i,k,j)
-                        
-                        dumb_q(i,k,j) = q(i,k,j) - (flux_diff_x + flux_diff_y + flux_diff_z / dz_val) * denom_val
+                        flux_diff_z = flux_z_up(i,k+1,j) - flux_z_up(i,k,j)
                     endif
+                    
+                    denom_val = denom(i,k,j)
+                    dz_val = dz(i,k,j)
+                    
+                    dumb_q(i,k,j) = q(i,k,j) - (flux_diff_x + flux_diff_y + flux_diff_z / dz_val) * denom_val
                 enddo
             enddo
         enddo
@@ -547,7 +543,7 @@ contains
     subroutine WRF_flux_corr(q,u,v,w,flux_x,flux_z,flux_y,dz,denom,async_id)
         implicit none
         real, dimension(ims:ime,  kms:kme,jms:jme),    intent(in) :: q, dz, denom
-        real, dimension(its-1:ite+2,  kms:kme,jts-1:jte+2),  intent(in) :: w, u, v
+        real, dimension(its-2:ite+3,  kms:kme,jts-2:jte+3),  intent(in) :: w, u, v
         
         real, dimension(its-1:ite+2,kms:kme,  jts-1:jte+2),intent(inout) :: flux_x, flux_y
         real, dimension(its-1:ite+2,kms:kme+1,jts-1:jte+2),intent(inout) :: flux_z
@@ -602,8 +598,10 @@ contains
                     
                     if (k == kms) then
                         flux_z_up_0 = 0.0
+                        fz = 0.0
                     else
                         flux_z_up_0 = flux_z_up(i,k,j)
+                        fz = flux_z(i,k,j) - flux_z_up_0
                     endif
                     
                     ! ==========================================
@@ -613,7 +611,6 @@ contains
                     fx1 = flux_x(i+1,k,j) - flux_x_up_1
                     fy = flux_y(i,k,j) - flux_y_up_0
                     fy1 = flux_y(i,k,j+1) - flux_y_up_1
-                    fz = flux_z(i,k,j) - flux_z_up_0
                     fz1 = flux_z(i,k+1,j) - flux_z_up_1
                     
                     ! ==========================================

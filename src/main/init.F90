@@ -41,14 +41,6 @@ module initialization
     use openacc
 #endif
 
-    ! use io_routines,                only : io_read, &
-    !                                        io_write3d,io_write3di, io_write
-    ! use geo,                        only : geo_LUT, geo_interp, geo_interp2d, standardize_coordinates
-    ! use vertical_interpolation,     only : vLUT, vinterp
-    ! use wind,                       only : init_winds
-    ! use initialize_options,         only : init_options
-    ! use string,                     only : str
-
 
     implicit none
     private
@@ -305,8 +297,8 @@ contains
         type(ioclient_t),intent(inout) :: ioclient
         integer, intent(in) :: nest_indx
         
-        if (STD_OUT_PE .and. nest_indx == 1) write(*,*) "Initializing Domain"
-        if (STD_OUT_PE .and. nest_indx == 1) flush(output_unit)
+        if (STD_OUT_PE) write(*,*) "Initializing Domain ", nest_indx
+        if (STD_OUT_PE) flush(output_unit)
         call domain%init(options(nest_indx), nest_indx)
 
         if (options(nest_indx)%general%parent_nest == 0) then

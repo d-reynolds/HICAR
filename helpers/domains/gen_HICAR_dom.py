@@ -13,12 +13,12 @@ res = 250
 
 # The target domain, including lat and lon variables named as "lat" and "lon", and
 # a DEM labeled as "topo". Optionally, landuse and landmask variables should be specified here.
-target_domain_fn = '/capstor/store/cscs/userlab/s1308/dreynold/HIMA/domains/Tajiki_250m_filled_nested.nc'
+target_domain_fn = '/absolute/path/to/target_domain.nc'
 # A domain with extent ~20km beyond the borders of the above target domain.
 # Only lat,lon, and topo are required variables.
-large_domain_fn = '/capstor/store/cscs/userlab/s1308/dreynold/HIMA/domains/Tajiki_1km.nc'
+large_domain_fn = '/absolute/path/to/large_domain.nc'
 # Name of output file
-output_domain_fn = '/capstor/store/cscs/userlab/s1308/dreynold/HIMA/domains/Tajiki_250m_filled_nested_rad.nc'
+output_domain_fn = '/absolute/path/to/output_domain.nc'
 
 topo_var = 'HGT_M'
 lat_var = 'XLAT_M'

@@ -83,7 +83,7 @@ contains
                 stop
             endif
         else
-            if (.not.(gen_nml)) then
+            if (.not.(gen_nml .or. info_only)) then
                 if (STD_OUT_PE) write(*,*) 'ERROR: namelist file: ',trim(namelist_file),' does not exist'
                 stop
             endif
@@ -165,6 +165,12 @@ contains
             !see if we have any 3d variables requested, if so we will need to output z levels
             if (this%output%vars_for_output(i)+this%vars_for_restart(i) > 0) then
                 tmp_meta = get_varmeta(i)
+                ! Also clean entries that have no metadata defined (no output name) or are not 2d or 3d
+                if (tmp_meta%name == "" .or. .not.(tmp_meta%two_d .or. tmp_meta%three_d)) then
+                    this%output%vars_for_output(i) = 0
+                    this%vars_for_restart(i) = 0
+                    cycle
+                endif
                 if (tmp_meta%three_d) output_zvar = .True.
             endif
         enddo
@@ -206,7 +212,7 @@ contains
         if (this%physics%snowmodel==kSM_FSM) then
             kSNOW_GRID_Z = this%sm%fsm_nsnow_max
             kSNOWSOIL_GRID_Z = kSNOW_GRID_Z+kSOIL_GRID_Z
-    endif
+        endif
 
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
         if ((this%physics%landsurface>0).and.(this%physics%boundarylayer==0)) then
@@ -242,15 +248,21 @@ contains
         endif
         
         !! MJ added
-        if ((this%physics%radiation_downScaling==1).and.(this%physics%radiation==0)) then
+        if ((this%rad%terrain_shading).and.(this%physics%radiation==0)) then
             if (STD_OUT_PE) write(*,*) "  "
             if (STD_OUT_PE) write(*,*) "  STOP STOP STOP"
-            if (STD_OUT_PE) write(*,*) "  STOP, Running radiation_downScaling=1 cannot not be used with rad=0"
+            if (STD_OUT_PE) write(*,*) "  STOP, Running terrain_shading=.True. cannot not be used with rad=0"
             if (STD_OUT_PE) write(*,*) "  STOP STOP STOP"
             stop
         endif
         
         if (this%time%RK3) then
+            if (this%adv%h_order == 1) then
+                if (STD_OUT_PE) write(*,*) "  ----------------- WARNING -----------------"
+                if (STD_OUT_PE) write(*,*) "  RK3 time stepping is not supported with h_order=1"
+                if (STD_OUT_PE) write(*,*) "  ----------------- WARNING -----------------"
+                stop
+            endif
             if (max(this%adv%h_order,this%adv%v_order)==5 .and. this%time%cfl_reduction_factor > 1.4) then
                 if (STD_OUT_PE) write(*,*) "  CFL reduction factor should be less than 1.4 when horder or vorder = 5, limiting to 1.4"
                 this%time%cfl_reduction_factor = min(1.4,this%time%cfl_reduction_factor)
@@ -288,7 +300,8 @@ contains
             this%sfc%scm_force_flux = 1
         endif
         
-        !Allow for microphysics precipitation partitioning with NoahMP if using a snow model
+        ! we will want to allow splitting of snow and rainfall if we have a snowmodel active
+        ! so deactivate NoahMP's automatic partitioning
         if (this%physics%snowmodel>0) then
             this%lsm%nmp_opt_snf = 4
         endif
@@ -326,10 +339,7 @@ contains
         ! Check if supporting files exist, if they are needed by physics modules
         if (this%physics%landsurface==kLSM_NOAHMP) then
             if (STD_OUT_PE) write(*,*) '  NoahMP LSM turned on, checking for supporting files...'
-            call check_file_exists('GENPARM.TBL', message='GENPARM.TBL file does not exist. This should be in the same directory as the namelist.')
-            call check_file_exists('MPTABLE.TBL', message='MPTABLE.TBL file does not exist. This should be in the same directory as the namelist.')
-            call check_file_exists('SOILPARM.TBL', message='SOILPARM.TBL file does not exist. This should be in the same directory as the namelist.')
-            call check_file_exists('VEGPARM.TBL', message='VEGPARM.TBL file does not exist. This should be in the same directory as the namelist.')
+            call check_file_exists('NoahmpTable.TBL', message='NoahmpTable.TBL file does not exist. This should be in the same directory as the namelist.')
         endif
         if (this%physics%radiation==kRA_RRTMG) then
             if (STD_OUT_PE) write(*,*) '  RRTMG radiation turned on, checking for supporting files...'
@@ -385,10 +395,10 @@ contains
         logical, intent(in), optional  :: read_nml, info_only, gen_nml
         integer :: name_unit, rc
         !variables to be used in the namelist
-        integer, dimension(kMAX_NESTS) :: pbl, lsm, mp, sfc, sm, water, rad, conv, adv, wind, radiation_downscaling
+        character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: pbl, lsm, mp, sfc, sm, water, rad, conv, adv, wind
         logical :: print_info, gennml, read_namelist
         !define the namelist
-        namelist /physics/ pbl, lsm, sfc, sm, water, mp, rad, conv, adv, wind, radiation_downscaling
+        namelist /physics/ pbl, lsm, sfc, sm, water, mp, rad, conv, adv, wind
         CHARACTER(LEN=200) :: error_msg
 
         read_namelist = .True.
@@ -410,7 +420,6 @@ contains
         call set_nml_var_default(conv, 'conv', print_info, gennml)
         call set_nml_var_default(adv, 'adv', print_info, gennml)
         call set_nml_var_default(wind, 'wind', print_info, gennml)
-        call set_nml_var_default(radiation_downscaling, 'radiation_downscaling', print_info, gennml)
 
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
@@ -434,7 +443,6 @@ contains
         call set_nml_var(phys_options%convection, conv(n_indx), 'conv', conv(1))
         call set_nml_var(phys_options%advection, adv(n_indx), 'adv', adv(1))
         call set_nml_var(phys_options%windtype, wind(n_indx), 'wind', wind(1))
-        call set_nml_var(phys_options%radiation_downScaling, radiation_downscaling(n_indx), 'radiation_downscaling', radiation_downscaling(1))
 
     end subroutine physics_namelist
 
@@ -508,6 +516,10 @@ contains
             if (rc /= 0) call print_nml_error('output',msg=error_msg,iostat=rc)
         endif
         if (ALL(output_vars(:,n_indx)==kCHAR_NO_VAL)) then
+            if (.not.read_namelist) then
+                ! Test/mock mode: no namelist file, so skip output_vars requirement
+                return
+            endif
             if (STD_OUT_PE) write(*,*) "  WARNING: output_vars not specified in namelist for domain: ", n_indx
             if (n_indx == 1) then
                 stop 'output_vars must be specified in namelist for at least the first domain'
@@ -517,14 +529,18 @@ contains
             output_vars(:,n_indx) = output_vars(:,1)
         endif
 
-        do j=1, kMAX_STORAGE_VARS
-            if (trim(output_vars(j, n_indx)) /= "" .and. trim(output_vars(j, n_indx)) /= kCHAR_NO_VAL ) then
+        if (trim(output_vars(1, n_indx)) == 'all') then
+            output_options%vars_for_output(:) = 1
+        else
+            do j=1, kMAX_STORAGE_VARS
+                if (trim(output_vars(j, n_indx)) /= "" .and. trim(output_vars(j, n_indx)) /= kCHAR_NO_VAL ) then
 
-                !get the var index for this output variable name
-                var_indx = get_varindx(trim(output_vars(j, n_indx)))
-                if (var_indx <= kMAX_STORAGE_VARS) call add_to_varlist(output_options%vars_for_output, [var_indx])
-            endif
-        enddo        
+                    !get the var index for this output variable name
+                    var_indx = get_varindx(trim(output_vars(j, n_indx)))
+                    if (var_indx <= kMAX_STORAGE_VARS) call add_to_varlist(output_options%vars_for_output, [var_indx])
+                endif
+            enddo
+        endif        
 
         call set_nml_var(output_options%output_folder, output_folder(n_indx), 'output_folder', output_folder(1))
         call set_nml_var(output_options%outputinterval, outputinterval(n_indx), 'outputinterval', outputinterval(1))
@@ -1776,15 +1792,16 @@ contains
         integer :: sf_urban_phys(kMAX_NESTS)
         integer :: num_soil_layers(kMAX_NESTS)
         real    :: nmp_soiltstep(kMAX_NESTS)
-        integer, dimension(kMAX_NESTS) :: nmp_dveg, nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_run, nmp_opt_frz, nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot, nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo, nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, noahmp_output
-
+        integer, dimension(kMAX_NESTS) :: nmp_dveg, nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_frz, nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_wet, nmp_opt_snf, nmp_opt_tbot, nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo, nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, noahmp_output
+        integer, dimension(kMAX_NESTS) :: nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact
         integer :: lake_category(kMAX_NESTS)                    ! index that defines the lake category in (some) LU_Categories
 
         ! define the namelist
         namelist /lsm_parameters/ LU_Categories, update_interval_lsm, &
                                   urban_category, ice_category, water_category, lake_category, snow_den_const,&
                                   monthly_vegfrac, monthly_albedo, max_swe,  nmp_dveg,   &
-                                  nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_run, nmp_opt_frz, &
+                                  nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_frz, nmp_opt_wet, &
+                                  nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact, &
                                   nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot,           &
                                   nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo,          &
                                   nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, nmp_soiltstep,       &
@@ -1814,11 +1831,16 @@ contains
         call set_nml_var_default(nmp_opt_crs, 'nmp_opt_crs', print_info, gennml)
         call set_nml_var_default(nmp_opt_sfc, 'nmp_opt_sfc', print_info, gennml)
         call set_nml_var_default(nmp_opt_btr, 'nmp_opt_btr', print_info, gennml)
-        call set_nml_var_default(nmp_opt_run, 'nmp_opt_run', print_info, gennml)
+        call set_nml_var_default(nmp_opt_runsrf, 'nmp_opt_runsrf', print_info, gennml)
+        call set_nml_var_default(nmp_opt_runsub, 'nmp_opt_runsub', print_info, gennml)
+        call set_nml_var_default(nmp_opt_tksno, 'nmp_opt_tksno', print_info, gennml)
+        call set_nml_var_default(nmp_opt_scf, 'nmp_opt_scf', print_info, gennml)
+        call set_nml_var_default(nmp_opt_compact, 'nmp_opt_compact', print_info, gennml)
         call set_nml_var_default(nmp_opt_frz, 'nmp_opt_frz', print_info, gennml)
         call set_nml_var_default(nmp_opt_inf, 'nmp_opt_inf', print_info, gennml)
         call set_nml_var_default(nmp_opt_rad, 'nmp_opt_rad', print_info, gennml)
         call set_nml_var_default(nmp_opt_alb, 'nmp_opt_alb', print_info, gennml)
+        call set_nml_var_default(nmp_opt_wet, 'nmp_opt_wet', print_info, gennml)
         call set_nml_var_default(nmp_opt_snf, 'nmp_opt_snf', print_info, gennml)
         call set_nml_var_default(nmp_opt_tbot, 'nmp_opt_tbot', print_info, gennml)
         call set_nml_var_default(nmp_opt_stc, 'nmp_opt_stc', print_info, gennml)
@@ -1878,11 +1900,16 @@ contains
         call set_nml_var(lsm_options%nmp_opt_crs, nmp_opt_crs(n_indx), 'nmp_opt_crs', nmp_opt_crs(1))
         call set_nml_var(lsm_options%nmp_opt_sfc, nmp_opt_sfc(n_indx), 'nmp_opt_sfc', nmp_opt_sfc(1))
         call set_nml_var(lsm_options%nmp_opt_btr, nmp_opt_btr(n_indx), 'nmp_opt_btr', nmp_opt_btr(1))
-        call set_nml_var(lsm_options%nmp_opt_run, nmp_opt_run(n_indx), 'nmp_opt_run', nmp_opt_run(1))
+        call set_nml_var(lsm_options%nmp_opt_runsrf, nmp_opt_runsrf(n_indx), 'nmp_opt_runsrf', nmp_opt_runsrf(1))
+        call set_nml_var(lsm_options%nmp_opt_runsub, nmp_opt_runsub(n_indx), 'nmp_opt_runsub', nmp_opt_runsub(1))
+        call set_nml_var(lsm_options%nmp_opt_tksno, nmp_opt_tksno(n_indx), 'nmp_opt_tksno', nmp_opt_tksno(1))
+        call set_nml_var(lsm_options%nmp_opt_scf, nmp_opt_scf(n_indx), 'nmp_opt_scf', nmp_opt_scf(1))
+        call set_nml_var(lsm_options%nmp_opt_compact, nmp_opt_compact(n_indx), 'nmp_opt_compact', nmp_opt_compact(1))
         call set_nml_var(lsm_options%nmp_opt_frz, nmp_opt_frz(n_indx), 'nmp_opt_frz', nmp_opt_frz(1))
         call set_nml_var(lsm_options%nmp_opt_inf, nmp_opt_inf(n_indx), 'nmp_opt_inf', nmp_opt_inf(1))
         call set_nml_var(lsm_options%nmp_opt_rad, nmp_opt_rad(n_indx), 'nmp_opt_rad', nmp_opt_rad(1))
         call set_nml_var(lsm_options%nmp_opt_alb, nmp_opt_alb(n_indx), 'nmp_opt_alb', nmp_opt_alb(1))
+        call set_nml_var(lsm_options%nmp_opt_wet, nmp_opt_wet(n_indx), 'nmp_opt_wet', nmp_opt_wet(1))
         call set_nml_var(lsm_options%nmp_opt_snf, nmp_opt_snf(n_indx), 'nmp_opt_snf', nmp_opt_snf(1))
         call set_nml_var(lsm_options%nmp_opt_tbot, nmp_opt_tbot(n_indx), 'nmp_opt_tbot', nmp_opt_tbot(1))
         call set_nml_var(lsm_options%nmp_opt_stc, nmp_opt_stc(n_indx), 'nmp_opt_stc', nmp_opt_stc(1))
@@ -1917,10 +1944,15 @@ contains
         real, dimension(kMAX_NESTS)    :: fsm_ds_min, fsm_ds_surflay
         logical, dimension(kMAX_NESTS) :: fsm_hn_on, fsm_for_hn
 
+        integer, dimension(kMAX_NESTS) :: snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt
+        logical, dimension(kMAX_NESTS) :: snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable
         ! define the namelist
         namelist /sm_parameters/ fsm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
                                  fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst, &
-                                 fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn
+                                 fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn, &
+                                 snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt, &
+                                 snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable
+                                 
 
         CHARACTER(LEN=200) :: error_msg
 
@@ -1949,6 +1981,17 @@ contains
         
         call set_nml_var_default(fsm_hn_on, 'fsm_hn_on', print_info, gennml)
         call set_nml_var_default(fsm_for_hn, 'fsm_for_hn', print_info, gennml)
+        call set_nml_var_default(snicar_bandnumber_opt, 'snicar_bandnumber_opt', print_info, gennml)
+        call set_nml_var_default(snicar_snowoptics_opt, 'snicar_snowoptics_opt', print_info, gennml)
+        call set_nml_var_default(snicar_solarspec_opt, 'snicar_solarspec_opt', print_info, gennml)
+        call set_nml_var_default(snicar_dustoptics_opt, 'snicar_dustoptics_opt', print_info, gennml)
+        call set_nml_var_default(snicar_rtsolver_opt, 'snicar_rtsolver_opt', print_info, gennml)
+        call set_nml_var_default(snicar_snowshape_opt, 'snicar_snowshape_opt', print_info, gennml)
+        call set_nml_var_default(snicar_use_aerosol, 'snicar_use_aerosol', print_info, gennml)
+        call set_nml_var_default(snicar_snowbc_intmix, 'snicar_snowbc_intmix', print_info, gennml)
+        call set_nml_var_default(snicar_snowdust_intmix, 'snicar_snowdust_intmix', print_info, gennml)
+        call set_nml_var_default(snicar_use_oc, 'snicar_use_oc', print_info, gennml)
+        call set_nml_var_default(snicar_aerosol_readtable, 'snicar_aerosol_readtable', print_info, gennml)
 
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
@@ -1962,6 +2005,12 @@ contains
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             fsm_hn_on(n_indx) = fsm_hn_on(1)
             fsm_for_hn(n_indx) = fsm_for_hn(1)
+
+            snicar_use_aerosol(n_indx) = snicar_use_aerosol(1)
+            snicar_snowbc_intmix(n_indx) = snicar_snowbc_intmix(1)
+            snicar_snowdust_intmix(n_indx) = snicar_snowdust_intmix(1)
+            snicar_use_oc(n_indx) = snicar_use_oc(1)
+            snicar_aerosol_readtable(n_indx) = snicar_aerosol_readtable(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             ! read the namelist options
             open(io_newunit(name_unit), file=filename)
@@ -1993,6 +2042,18 @@ contains
 
         call set_nml_var(sm_options%fsm_hn_on, fsm_hn_on(n_indx), 'fsm_hn_on')
         call set_nml_var(sm_options%fsm_for_hn, fsm_for_hn(n_indx), 'fsm_for_hn')
+
+        call set_nml_var(sm_options%snicar_bandnumber_opt, snicar_bandnumber_opt(n_indx), 'snicar_bandnumber_opt', snicar_bandnumber_opt(1))
+        call set_nml_var(sm_options%snicar_snowoptics_opt, snicar_snowoptics_opt(n_indx), 'snicar_snowoptics_opt', snicar_snowoptics_opt(1))
+        call set_nml_var(sm_options%snicar_solarspec_opt, snicar_solarspec_opt(n_indx), 'snicar_solarspec_opt', snicar_solarspec_opt(1))
+        call set_nml_var(sm_options%snicar_dustoptics_opt, snicar_dustoptics_opt(n_indx), 'snicar_dustoptics_opt', snicar_dustoptics_opt(1))
+        call set_nml_var(sm_options%snicar_rtsolver_opt, snicar_rtsolver_opt(n_indx), 'snicar_rtsolver_opt', snicar_rtsolver_opt(1))
+        call set_nml_var(sm_options%snicar_snowshape_opt, snicar_snowshape_opt(n_indx), 'snicar_snowshape_opt', snicar_snowshape_opt(1))
+        call set_nml_var(sm_options%snicar_use_aerosol, snicar_use_aerosol(n_indx), 'snicar_use_aerosol')
+        call set_nml_var(sm_options%snicar_snowbc_intmix, snicar_snowbc_intmix(n_indx), 'snicar_snowbc_intmix')
+        call set_nml_var(sm_options%snicar_snowdust_intmix, snicar_snowdust_intmix(n_indx), 'snicar_snowdust_intmix')
+        call set_nml_var(sm_options%snicar_use_oc, snicar_use_oc(n_indx), 'snicar_use_oc')
+        call set_nml_var(sm_options%snicar_aerosol_readtable, snicar_aerosol_readtable(n_indx), 'snicar_aerosol_readtable')
         
     end subroutine sm_parameters_namelist
     !> -------------------------------
@@ -2014,10 +2075,11 @@ contains
         real    :: update_interval_rad(kMAX_NESTS)             ! minimum number of seconds between RRTMG updates
         integer :: icloud(kMAX_NESTS)                            ! how RRTMG interacts with clouds
         integer :: cldovrlp(kMAX_NESTS)                          ! how RRTMG considers cloud overlapping
-        logical :: read_ghg(kMAX_NESTS)
+        logical :: read_ghg(kMAX_NESTS)                            ! read GHG concentrations from file
+        logical :: terrain_shading(kMAX_NESTS)                     ! whether to use terrain shading
         real    :: tzone(kMAX_NESTS) !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
         ! define the namelist
-        namelist /rad_parameters/ update_interval_rad, icloud, read_ghg, cldovrlp, tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
+        namelist /rad_parameters/ terrain_shading, update_interval_rad, icloud, read_ghg, cldovrlp, tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
         CHARACTER(LEN=200) :: error_msg
 
         print_info = .False.
@@ -2026,6 +2088,7 @@ contains
         gennml = .False.
         if (present(gen_nml)) gennml = gen_nml
 
+        call set_nml_var_default(terrain_shading, 'terrain_shading', print_info, gennml)
         call set_nml_var_default(update_interval_rad, 'update_interval_rad', print_info, gennml)
         call set_nml_var_default(icloud, 'icloud', print_info, gennml)
         call set_nml_var_default(cldovrlp, 'cldovrlp', print_info, gennml)
@@ -2043,6 +2106,7 @@ contains
             if (rc /= 0) call print_nml_error('rad_parameters',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             read_ghg(n_indx) = read_ghg(1)
+            terrain_shading(n_indx) = terrain_shading(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             open(io_newunit(name_unit), file=filename)
             read(name_unit, iostat=rc, nml=rad_parameters)
@@ -2054,6 +2118,7 @@ contains
             ! endif
         endif
 
+        call set_nml_var(rad_options%terrain_shading, terrain_shading(n_indx), 'terrain_shading', terrain_shading(1))
         call set_nml_var(rad_options%update_interval_rad, update_interval_rad(n_indx), 'update_interval_rad', update_interval_rad(1))
         call set_nml_var(rad_options%icloud, icloud(n_indx), 'icloud', icloud(1))
         call set_nml_var(rad_options%cldovrlp, cldovrlp(n_indx), 'cldovrlp', cldovrlp(1))
@@ -2527,61 +2592,6 @@ contains
 
         if (present(input_vars)) then
             call add_to_varlist(this%vars_for_restart,input_vars, ierr)
-        endif
-
-        if (present(error)) error=ierr
-
-    end subroutine
-
-
-    !> -------------------------------
-    !! Add a set of variable(s) to the internal list of variables to be advected
-    !!
-    !! Sets error /= 0 if an error occurs in add_to_varlist
-    !!
-    !! -------------------------------
-    module subroutine advect_vars(this, input_vars, var_idx, error)
-        class(options_t),  intent(inout):: this
-        integer, optional, intent(in)  :: input_vars(:)
-        integer, optional, intent(in)  :: var_idx
-        integer, optional, intent(out) :: error
-
-        integer :: ierr
-
-        ierr=0
-        if (present(var_idx)) then
-            call add_to_varlist(this%vars_to_advect,[var_idx], ierr)
-        endif
-
-        if (present(input_vars)) then
-            call add_to_varlist(this%vars_to_advect,input_vars, ierr)
-        endif
-
-        if (present(error)) error=ierr
-
-    end subroutine
-
-    !> -------------------------------
-    !! Add a set of variable(s) to the internal list of variables to be exchanged-only
-    !!
-    !! Sets error /= 0 if an error occurs in add_to_varlist
-    !!
-    !! -------------------------------
-    module subroutine exch_vars(this, input_vars, var_idx, error)
-        class(options_t),  intent(inout):: this
-        integer, optional, intent(in)  :: input_vars(:)
-        integer, optional, intent(in)  :: var_idx
-        integer, optional, intent(out) :: error
-
-        integer :: ierr
-
-        ierr=0
-        if (present(var_idx)) then
-            call add_to_varlist(this%vars_to_exch,[var_idx], ierr)
-        endif
-
-        if (present(input_vars)) then
-            call add_to_varlist(this%vars_to_exch,input_vars, ierr)
         endif
 
         if (present(error)) error=ierr
