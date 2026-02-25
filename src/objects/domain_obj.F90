@@ -292,7 +292,7 @@ contains
         type(options_t), intent(in)    :: options
 
         type(meta_data_t) :: tmp_var
-        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(22), kEXCH_VARS(8)
+        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(22), kEXCH_VARS(9)
         
         kADV_VARS = (/kVARS%potential_temperature,&
                       kVARS%water_vapor,&
@@ -317,7 +317,8 @@ contains
                       kVARS%ice3_a,&
                       kVARS%ice3_c/)
 
-        kEXCH_VARS = (/kVARS%sensible_heat,&
+        kEXCH_VARS = (/kVARS%density,&
+                       kVARS%sensible_heat,&
                        kVARS%skin_temperature,&
                        kVARS%Ds,&
                        kVARS%fsnow,&
