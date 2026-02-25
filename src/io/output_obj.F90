@@ -257,10 +257,6 @@ contains
         type(MPI_Comm),   intent(in)     :: par_comms
         integer,          intent(in)  :: out_var_indices(:)
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 9c2a44bc8baa556286c91683ea129a36bbb32b2e
         !Check if we should change the file
         if (this%output_counter > this%output_count) then
             write(this%output_fn, '(A,A,".nc")')    &
@@ -283,10 +279,6 @@ contains
 
         if (.not.this%block_checked) call block_hunter(this)
         ! store output
-<<<<<<< HEAD
-=======
-
->>>>>>> 9c2a44bc8baa556286c91683ea129a36bbb32b2e
         call save_data(this, this%output_counter, time, out_var_indices)
 
         !In case we had creating set to true, set to false
