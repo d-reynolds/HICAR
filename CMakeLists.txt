@@ -520,7 +520,7 @@ if (NETCDF_FOUND)
 		# Clean up any duplicate libraries and references to -lnetcdf
 		list(REMOVE_DUPLICATES NETCDF_LIBRARIES)
 		# clean references to base netcdf-c library
-		list(REMOVE_ITEM NETCDF_LIBRARIES -lnetcdf)
+		# list(REMOVE_ITEM NETCDF_LIBRARIES -lnetcdf)
 
 		target_link_libraries(hicar_lib PUBLIC ${NETCDF_LIBRARIES})
 		message(STATUS "NetCDF libraries (with dependencies): ${NETCDF_LIBRARIES}")
