@@ -3,6 +3,8 @@
 !-----------------------------------------------------------------------
 subroutine DRIVE_interface()
 
+use, intrinsic :: IEEE_ARITHMETIC
+
 use STATE_VARIABLES, only: Tsrf
 
 use MODCONF, only: CANMOD,SNTRAN
@@ -68,7 +70,7 @@ do i = 1,Nx
   
   ! Fix for Udir: in WindNinja outputs, if Ua=0, then Udir=NaN, which creates an error in SNOWTRAN3D
   if (SNTRAN == 1) then
-    if (isnan(Udir(i,j))) then
+    if (ieee_is_nan(Udir(i,j))) then
       Udir(i,j) = 0.0
     end if
   end if

@@ -147,9 +147,11 @@ contains
 
         ! Save initial states for all advected variables
         do n = 1, n_adv
-            !$acc kernels present(domain%vars_3d(domain%adv_vars(n)%v)%data_3d, temp_all) async(n)
-            temp_all(:,:,:,n) = domain%vars_3d(domain%adv_vars(n)%v)%data_3d(:,:,:)
+            associate( curr_var_data3d => domain%vars_3d(domain%adv_vars(n)%v)%data_3d)
+            !$acc kernels present(curr_var_data3d, temp_all) async(n)
+            temp_all(:,:,:,n) = curr_var_data3d(:,:,:)
             !$acc end kernels
+            end associate
         enddo
         !$acc wait
 
@@ -191,7 +193,7 @@ contains
 
         enddo
 
-        !$acc exit data
+        !$acc end data
         deallocate(temp_all)
 
     end subroutine RK3_adv

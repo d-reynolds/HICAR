@@ -658,10 +658,10 @@ contains
             else
                 call calc_alpha(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%froude)%v)%data_3d)
 
-                !$acc update host(alpha)
+                !$acc update host(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d)
                 ! smooth alpha to avoid sharp transitions
                 call smooth_array(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v),windowsize=2,ydim=3,nsmooths=3,halo=domain%halo)
-                !$acc update device(alpha)
+                !$acc update device(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d)
             endif
 
             do i = 1, options%wind%wind_iterations
