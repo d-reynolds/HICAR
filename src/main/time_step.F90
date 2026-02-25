@@ -352,12 +352,6 @@ contains
             call domain%diagnostic_update()
             call domain%diagnostic_timer%stop()
 
-            ! if (options%adv%advect_density) then
-            ! if using advect_density winds need to be balanced at each update
-            call domain%wind_bal_timer%start()
-            call balance_uvw(domain,options%adv%advect_density)
-            call domain%wind_bal_timer%stop()
-            ! endif
 
             ! if an interactive run was requested than print status updates everytime at least 5% of the progress has been made
             if (options%general%interactive .and. (STD_OUT_PE)) then
@@ -377,7 +371,6 @@ contains
                 call domain%ret_timer%start()
                 call domain%halo_3d_retrieve()
                 call domain%halo_2d_retrieve()
-                !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
                 call domain%ret_timer%stop()
 #endif
 
@@ -401,15 +394,19 @@ contains
                 call domain%ret_timer%start()
                 call domain%halo_3d_retrieve()
                 call domain%halo_2d_retrieve()
-                !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
                 call domain%ret_timer%stop()
 #endif
-                call integrate_physics_tendencies(domain, options, real(dt%seconds()))
+
+                ! if (options%adv%advect_density) then
+                ! if using advect_density winds need to be balanced at each update
+                call domain%wind_bal_timer%start()
+                call balance_uvw(domain,options%adv%advect_density)
+                call domain%wind_bal_timer%stop()
+                ! endif
 
                 if (options%general%debug) call domain_check(domain, "pbl")
                 call convect(domain, options, real(dt%seconds()))!, halo=1)
                 if (options%general%debug) call domain_check(domain, "convect")
-
                 
 
                 call domain%adv_timer%start()
@@ -418,7 +415,8 @@ contains
                 if (options%general%debug) call domain_check(domain, "advect(domain")
                 call domain%adv_timer%stop()
 
-                
+                call integrate_physics_tendencies(domain, options, real(dt%seconds()))
+
                                 
                 call domain%mp_timer%start()
 
