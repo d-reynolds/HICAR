@@ -795,3 +795,12 @@ add_custom_target(test_cli
     COMMENT "Running CLI options test suite"
     VERBATIM
 )
+
+add_custom_target(test_reproducibility
+    COMMAND ${CMAKE_COMMAND} -E echo "Running reproducibility tests..."
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_reproducibility.sh ${PROJECT_SOURCE_DIR}
+    DEPENDS HICAR download_test_data
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
+    COMMENT "Running MPI and restart reproducibility tests"
+    VERBATIM
+)
