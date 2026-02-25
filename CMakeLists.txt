@@ -329,7 +329,7 @@ FetchContent_Declare(
 FetchContent_Declare(
 	noah_mp
 	GIT_REPOSITORY    https://github.com/d-reynolds/noahmp.git
-	GIT_TAG           92862dbfd431f94b408bd047f8a8aacd343c9f52
+	GIT_TAG           OpenACC
 )
 
 # Fetch specific folders from icar_supporting_files repo
@@ -792,5 +792,14 @@ add_custom_target(test_cli
     DEPENDS HICAR
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests
     COMMENT "Running CLI options test suite"
+    VERBATIM
+)
+
+add_custom_target(test_reproducibility
+    COMMAND ${CMAKE_COMMAND} -E echo "Running reproducibility tests..."
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_reproducibility.sh ${PROJECT_SOURCE_DIR}
+    DEPENDS HICAR download_test_data
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
+    COMMENT "Running MPI and restart reproducibility tests"
     VERBATIM
 )
