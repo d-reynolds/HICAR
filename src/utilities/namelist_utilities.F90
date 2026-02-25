@@ -802,9 +802,9 @@ contains
         integer :: i, mapped_val, default_val
 
         if (present(usr_default)) then
-            call set_char_nml_var(tmp_val, var_val, name, usr_default)
+            call set_char_nml_var(tmp_val, to_lower(trim(var_val)), name, to_lower(trim(usr_default)))
         else
-            call set_char_nml_var(tmp_val, var_val, name)
+            call set_char_nml_var(tmp_val, to_lower(trim(var_val)), name)
         endif
 
         !convert tmp_val to lowercase for case-insensitive matching
@@ -813,7 +813,7 @@ contains
         ! check that value conforms to the rules for the nml option type
         if (present(usr_default)) then
             if (trim(usr_default) /= kCHAR_NO_VAL) then
-                call check_var_entry_type(usr_default,tmp_val,name)
+                call check_var_entry_type(to_lower(usr_default),tmp_val,name)
             else
                 default = trim(get_nml_var_default(name))
 
@@ -842,7 +842,16 @@ contains
 
         if (mapped_val == -1) then
             if (STD_OUT_PE) write(*,*) "Error: '", trim(tmp_val), "' is not a valid option for '", trim(name), "'"
-            if (STD_OUT_PE) write(*,*) "Valid options are: ", mapping(1::2)
+            if (STD_OUT_PE) then
+                write(*,'(A)', advance='no') "Valid options are: "
+                do i = 1, size(mapping), 2
+                    if (i < size(mapping) - 1) then
+                        write(*,'(A)', advance='no') trim(mapping(i)) // ", "
+                    else
+                        write(*,'(A)') trim(mapping(i))
+                    endif
+                end do
+            endif
             error stop
         endif
 
@@ -1536,7 +1545,7 @@ contains
         if (STD_OUT_PE .and. is_minmax) write(*,*)        "    Maximum Allowed Value:..|", str(max)
         if (STD_OUT_PE .and. is_units) write(*,*)         "    Units:..................|", trim(units)
         if (STD_OUT_PE .and. is_dimensions) then
-            write(*,'(A$)', advance="no")      "     Dimensions:.............|["
+            write(*,'(A)', advance="no")      "     Dimensions:.............|["
             do i = 1, size(dimensions)
                 if (i==size(dimensions)) then
                     WRITE(*, '(A1, A)', ADVANCE='NO') dimensions(i), "]"
@@ -1547,7 +1556,7 @@ contains
             write(*,*)
         endif
         if (STD_OUT_PE .and. is_values) then
-            write(*,'(A$)', advance="no")                   "    Allowed Values:..........|"
+            write(*,'(A)', advance="no")                   "    Allowed Values:..........|"
             do i = 1, size(values)
                 if (i==size(values)) then
                     WRITE(*, '(I1)', ADVANCE='NO') values(i)
@@ -1561,7 +1570,7 @@ contains
     end subroutine write_nml_var_info
 
 
-    subroutine get_nml_var_metadata(name, group, description, default, min, max, type, values, units, dimensions, mapping)
+    subroutine get_nml_var_metadata(name, group, description, default, min, max, type, values, units, dimensions, val_keys)
         implicit none
         character(len=*), intent(in) :: name
         character(len=*), intent(out) :: group, description, default, units
@@ -1569,7 +1578,7 @@ contains
         real,    intent(out) :: min, max
         integer, intent(out) :: type
         integer, allocatable, intent(out) :: values(:)
-        character(len=*), allocatable, optional, intent(out) :: mapping(:)
+        character(len=*), allocatable, optional, intent(out) :: val_keys(:)
 
         group = ""
         description = ""
@@ -2403,8 +2412,8 @@ contains
                                                                        "'none' = no PBL,"//achar(10)//BLNK_CHR_N// &
                                                                        "'ysu'  = YSU PBL"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "ysu", trim(str(kPBL_YSU))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "ysu", trim(str(kPBL_YSU))]
                 endif
                 group = "Physics"
             case ("lsm")
@@ -2414,8 +2423,8 @@ contains
                                                         "'noahmp' = Noah MP"
 
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kLSM_BASIC)), "noahmp", trim(str(kLSM_NOAHMP))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kLSM_BASIC)), "noahmp", trim(str(kLSM_NOAHMP))]
                 endif
                 group = "Physics"
                 ! type = 1
@@ -2428,8 +2437,8 @@ contains
                                                        "'RRTMGP' = RRTMGP"
 
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kRA_BASIC)), "simple", trim(str(kRA_SIMPLE)), "RRTMG", trim(str(kRA_RRTMG)), "RRTMGP", trim(str(kRA_RRTMGP))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kRA_BASIC)), "simple", trim(str(kRA_SIMPLE)), "RRTMG", trim(str(kRA_RRTMG)), "RRTMGP", trim(str(kRA_RRTMGP))]
                 endif
                 group = "Physics"
             case ("conv")
@@ -2439,8 +2448,8 @@ contains
                                                      "'NSAS'   = NSAS scheme"//achar(10)//BLNK_CHR_N// &
                                                      "'BMJ'    = BMJ scheme"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "tiedke", trim(str(kCU_TIEDTKE)), "nsas", trim(str(kCU_NSAS)), "bmj", trim(str(kCU_BMJ))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "tiedke", trim(str(kCU_TIEDTKE)), "nsas", trim(str(kCU_NSAS)), "bmj", trim(str(kCU_BMJ))]
                 endif
                 group = "Physics"
             case ("mp")
@@ -2454,8 +2463,8 @@ contains
                                                           "'Thompson Aerosol' = Thompson Aerosol (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
                                                           "'WSM3'             = WSM3 (NOT SUPPORTED)"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "thompson", trim(str(kMP_THOMPSON)), "linear", trim(str(kMP_SB04)), "morrison", trim(str(kMP_MORRISON)), "wsm6", trim(str(kMP_WSM6)), "thompson_aerosol", trim(str(kMP_THOMP_AER)), "wsm3", trim(str(kMP_WSM3)), "ishmael", trim(str(kMP_ISHMAEL))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "thompson", trim(str(kMP_THOMPSON)), "linear", trim(str(kMP_SB04)), "morrison", trim(str(kMP_MORRISON)), "wsm6", trim(str(kMP_WSM6)), "thompson_aerosol", trim(str(kMP_THOMP_AER)), "wsm3", trim(str(kMP_WSM3)), "ishmael", trim(str(kMP_ISHMAEL))]
                 endif
                 group = "Physics"
                 type = 1
@@ -2465,8 +2474,8 @@ contains
                                                    "'simple' = Simple fluxes (uses SST in forcing data, otherwise SST=280°C)"//achar(10)//BLNK_CHR_N// &
                                                    "'lake'   = WRF's lake model (needs lake depth in hi-res data))"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "simple", trim(str(kWATER_SIMPLE)), "lake", trim(str(kWATER_LAKE))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "simple", trim(str(kWATER_SIMPLE)), "lake", trim(str(kWATER_LAKE))]
                 endif
                 group = "Physics"
             case ("wind")
@@ -2474,8 +2483,8 @@ contains
                                                    "'none'               = no wind solver,"//achar(10)//BLNK_CHR_N// &
                                                    "'variational solver' = Mass-conserving wind solver based on variational calculus technique, requires PETSc(cpu) or AMGX(gpu)"
                 default = "variational solver"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "variational solver", trim(str(kITERATIVE_WINDS))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "variational solver", trim(str(kITERATIVE_WINDS))]
                 endif
                 group = "Physics"
             case ("adv")
@@ -2484,8 +2493,8 @@ contains
                                                         "'standard' = standard advection scheme"//achar(10)//BLNK_CHR_N// &
                                                         "'MPDATA'   = MPDATA (NOT SUPPORTED)"
                 default = "standard"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "standard", trim(str(kADV_STD)), "MPDATA", trim(str(kADV_MPDATA))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "standard", trim(str(kADV_STD)), "MPDATA", trim(str(kADV_MPDATA))]
                 endif
                 group = "Physics"
             case ("sfc")
@@ -2493,8 +2502,8 @@ contains
                                                     "'none'   = no surface layer"//achar(10)//BLNK_CHR_N// &
                                                     "'RevMM5' = Revised MM5 Monin-Obukhov scheme"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "RevMM5", trim(str(kSFC_MM5REV))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "RevMM5", trim(str(kSFC_MM5REV))]
                 endif
                 group = "Physics"
             case ("sm")
@@ -2503,8 +2512,8 @@ contains
                                                  "'snowpack'  = SNOWPACK snow model"//achar(10)//BLNK_CHR_N// &
                                                  "'FSM2trans' = FSM2trans snow model (must be compiled, see docs/compiling.md)"
                 default = "none"
-                if (present(mapping)) then
-                    mapping = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "snowpack", trim(str(kSM_SNOWPACK)), "FSM2trans", trim(str(kSM_FSM))]
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "snowpack", trim(str(kSM_SNOWPACK)), "FSM2trans", trim(str(kSM_FSM))]
                 endif
                 group = "Physics"
             ! --------------------------------------
@@ -3214,9 +3223,9 @@ contains
                 group = "LSM_Parameters"
             case ("nmp_opt_pedo")
                 description = "Noah-MP options for pedotransfer functions (used when OPT_SOIL = 3; not implemented in code)"
-                allocate(values(1))
-                values = [1]
-                default = "1"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
                 group = "LSM_Parameters"
             case ("nmp_opt_crop")
                 description = "options for crop model"//achar(10)//BLNK_CHR_N// &
@@ -3626,7 +3635,7 @@ contains
                 min = 0
                 max = 10000
                 units = "m"
-                default = "-9999"
+                default = "0"
                 group = "Wind"
             case ("wind_iterations")
                 description = "Number of iterations to use for the iterative wind solver (wind=1)"
@@ -3650,7 +3659,9 @@ contains
                 group = "Wind"
             case ("alpha_const")
                 description = "Option for setting the alpha parameter in the wind=3 euqtions to a constant"//achar(10)//BLNK_CHR_N// &
-                              "(between 0.2 and 2). Default of -1.0 allows for dynamic alpha. For more information, see Reynolds et al., 2023."
+                              "(between 0.2 and 2). Default of -1.0 allows for dynamic alpha."//achar(10)//BLNK_CHR_N// &
+                              "larger values allow for more adjustment of vertical winds (less stable)"//achar(10)//BLNK_CHR_N// &
+                              "smaller values allow for less adjustment of vertical winds (more stable)"
                 min = 0.2
                 max = 2.0
                 default = "-1.0"

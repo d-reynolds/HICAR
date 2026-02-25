@@ -32,8 +32,8 @@ module wind
 
     integer :: ids, ide, jds, jde, kds, kde,  &
                ims, ime, jms, jme, kms, kme,  &
-               its, ite, jts, jte, kts, kte,  &
-               i_s, i_e, j_s, j_e
+               its, ite, jts, jte, kts, kte!,  &
+            !    i_s, i_e, j_s, j_e
 
     logical :: first_wind=.True.
     real, parameter::deg2rad=0.017453293 !2*pi/360
@@ -219,8 +219,8 @@ contains
         enddo
         
         !$acc parallel loop gang collapse(2) wait(1) async(10)
-        do j = j_s,j_e
-        do i = i_s,i_e
+        do j = jms,jme
+        do i = ims,ime
         !$acc loop seq
         do k = kms,kme
             if (adv_den) then
@@ -642,10 +642,11 @@ contains
             
         if (options%physics%windtype==kITERATIVE_WINDS) then
             allocate(div(ims:ime,kms:kme,jms:jme))
-            associate(wind_alpha => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d)
-            !$acc data present(wind_alpha) create(div)
+            associate(wind_alpha => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v))
+            !$acc data create(div)
             if (alpha_const_val>0) then
-                !$acc parallel loop gang vector collapse(3)
+                associate(wind_alpha => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d)
+                !$acc parallel loop gang vector collapse(3) present(wind_alpha)
                 do j = jms,jme
                     do k = kms,kme
                         do i = ims,ime
@@ -653,8 +654,14 @@ contains
                         enddo
                     enddo
                 enddo
+                end associate
             else
-                call calc_alpha(wind_alpha, domain%vars_3d(domain%var_indx(kVARS%froude)%v)%data_3d)
+                call calc_alpha(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%froude)%v)%data_3d)
+
+                !$acc update host(alpha)
+                ! smooth alpha to avoid sharp transitions
+                call smooth_array(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v),windowsize=2,ydim=3,nsmooths=3,halo=domain%halo)
+                !$acc update device(alpha)
             endif
 
             do i = 1, options%wind%wind_iterations
@@ -665,9 +672,9 @@ contains
                                 domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options%adv%advect_density,horz_only=.False.)
 
 #ifdef USE_AMGX                
-                call calc_iter_winds_amgx(domain,wind_alpha,div,options%adv%advect_density)
+                call calc_iter_winds_amgx(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
 #elif defined USE_PETSC
-                call calc_iter_winds_petsc(domain,wind_alpha,div,options%adv%advect_density)
+                call calc_iter_winds_petsc(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
 #endif                
                 !Exchange u and v, since the outer points are not updated in above function
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
@@ -864,7 +871,7 @@ contains
         !Following Moussiopoulos, et al. (1988). Bounding low Fr to avoid /0 error and negative Fr
 
         !$acc kernels
-        alpha = 1.0 - 0.5*max(froude**4,0.00001)*(sqrt(1.0+4.0/max(froude**4,0.00001)) - 1.0) 
+        alpha = 1.0 - 0.5*max((1.0/froude)**4,0.00001)*(sqrt(1.0+4.0/max((1.0/froude)**4,0.00001)) - 1.0) 
         alpha = sqrt(max(alpha,0.00001))
         alpha = min(max(alpha,alpha_min),alpha_max)
 
@@ -918,12 +925,6 @@ contains
 
         !$acc end data
 
-        !$acc update host(alpha)
-        !smooth alpha to avoid sharp transitions
-        do k = 1,3
-            call smooth_array(alpha,2,ydim=3)
-        enddo
-        !$acc update device(alpha)
 
     end subroutine calc_alpha
     
@@ -1149,15 +1150,15 @@ contains
         ims = domain%ims ; ime = domain%ime ; jms = domain%jms ; jme = domain%jme ; kms = domain%kms ; kme = domain%kme
         its = domain%its ; ite = domain%ite ; jts = domain%jts ; jte = domain%jte ; kts = domain%kts ; kte = domain%kte
 
-        i_s = its-1
-        i_e = ite+1
-        j_s = jts-1
-        j_e = jte+1
+        ! i_s = its-1
+        ! i_e = ite+1
+        ! j_s = jts-1
+        ! j_e = jte+1
         
-        if (ims==ids) i_s = ims
-        if (ime==ide) i_e = ime
-        if (jms==jds) j_s = jms
-        if (jme==jde) j_e = jme
+        ! if (ims==ids) i_s = ims
+        ! if (ime==ide) i_e = ime
+        ! if (jms==jds) j_s = jms
+        ! if (jme==jde) j_e = jme
 
     end subroutine set_module_indices
 
@@ -1187,21 +1188,16 @@ contains
 
         real, dimension(ims:ime,kms:kme,jms:jme) :: wind_speed, temp_froude, u_m, v_m, u_shear, v_shear, winddir, stability
         integer, dimension(ims:ime,kms:kme,jms:jme) :: dir_indices
-        
-        integer :: n, ob_k, Ri_k_max
+        integer, dimension(ims:ime,jms:jme) :: Ri_k_max
+
+        integer :: n, ob_k
         integer :: i, j, k
-        real :: z_top, z_bot, z_mean, th_top, th_bot, obstacle_height, RI_Z_MAX
+        real :: z_top, z_bot, th_top, th_bot, obstacle_height, RI_Z_MAX
         integer :: ymin, ymax, xmin, xmax, n_smoothing_passes, nsmooth_gridcells, ubound_terrain
         
         RI_Z_MAX = 100.0
-        Ri_k_max = 0
         n_smoothing_passes = 5
         nsmooth_gridcells = 20 !int(500 / domain%dx)
-        
-        do k = kms,kme
-            z_mean =SUM(domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(ims:ime,k,jms:jme))/SIZE(domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(ims:ime,k,jms:jme))
-            if (z_mean > RI_Z_MAX .and. Ri_k_max==0) Ri_k_max = max(2,k-1)
-        enddo
 
         associate(u => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
                   v => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
@@ -1209,7 +1205,21 @@ contains
                   blk_ri => domain%vars_3d(domain%var_indx(kVARS%blk_ri)%v)%data_3d, &
                   z => domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d, &
                   potential_temperature => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d)
-        !$acc data present(u, v, froude, blk_ri, z, potential_temperature) create(u_m,v_m,u_shear,v_shear,winddir,wind_speed,stability)
+        !$acc data present(u, v, froude, blk_ri, z, potential_temperature) create(u_m,v_m,u_shear,v_shear,winddir,wind_speed,stability,Ri_k_max)
+
+        ! Compute per-column Ri_k_max: find the vertical level ~RI_Z_MAX meters above ground
+        !$acc parallel loop gang vector collapse(2)
+        do j = jms, jme
+            do i = ims, ime
+                Ri_k_max(i,j) = kme
+                do k = kms+1, kme
+                    if (z(i,k,j) - z(i,kms,j) > RI_Z_MAX) then
+                        Ri_k_max(i,j) = max(2, k-1)
+                        exit
+                    endif
+                enddo
+            enddo
+        enddo
 
         !$acc kernels
         u_m(ims:ime,kms:kme,jms:jme) = (u(ims:ime,kms:kme,jms:jme) + &
@@ -1242,9 +1252,9 @@ contains
             do k=kms, kme-1
                 do i = ims, ime
                     th_bot = potential_temperature(i,kms,j)
-                    th_top = potential_temperature(i,Ri_k_max,j)
+                    th_top = potential_temperature(i,Ri_k_max(i,j),j)
                     z_bot  = z(i,kms,j)
-                    z_top  = z(i,Ri_k_max,j)
+                    z_top  = z(i,Ri_k_max(i,j),j)
                     stability(i,k,j) = calc_dry_stability(th_top, th_bot, z_top, z_bot) 
                     
                     blk_ri(i,k,j) =  calc_Ri(stability(i,k,j), u_shear(i,kms,j), v_shear(i,kms,j), (z_top-z_bot))
@@ -1305,8 +1315,6 @@ contains
                         !endif
                         stability(i,k,j) = calc_dry_stability(th_top, th_bot, z_top, z_bot, potential_temperature(i,kms,j)) 
 
-                        !Above function calculates N^2, but froude number wants just N
-                        stability(i,k,j) = sqrt(max(stability(i,k,j), 0.0))
                         froude(i,k,j) = calc_froude(stability(i,k,j), temp_froude(i,k,j), wind_speed(i,k,j))
                     enddo
                 enddo
@@ -1325,27 +1333,34 @@ contains
         implicit none
         type(domain_t), intent(inout) :: domain
         real, dimension(1:72,ims:ime,kms:kme,jms:jme)   :: temp_ft_array
-        integer           :: ang, is, js
+        integer           :: ang, is, js, is_min, is_max, js_min, js_max
         integer           :: i, j, k
         integer           :: rear_ang, fore_ang, test_ang, rear_ang_diff, fore_ang_diff, ang_diff, k_max, window_rear, window_fore, window_width
-        integer :: x, y, azm_index
+        integer :: x, y, azm_index, search_radius
         integer :: xs,xe, ys,ye, n, np
         real              :: pt_height, temp_ft, maxFTVal, azm
                 
         temp_ft_array = -100000.0
+        search_radius = domain%neighborhood_max
 
         ! then compute the range of terrain (max-min) in a given window
         do i=ims, ime
             do j=jms, jme
+                ! Per-cell symmetric search window, clamped to available neighbor data
+                is_min = max(i - search_radius, domain%ihs)
+                is_max = min(i + search_radius, domain%ihe)
+                js_min = max(j - search_radius, domain%jhs)
+                js_max = min(j + search_radius, domain%jhe)
+
                 do k=kms,kme
                     if (k == kms) then
                         pt_height = domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i,j)
                     else if (k > kms) then
                         pt_height = pt_height + domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,k,j)
                     end if
-                    
-                    do is = domain%ihs,domain%ihe
-                        do js = domain%jhs,domain%jhe
+
+                    do is = is_min, is_max
+                        do js = js_min, js_max
                         
                             !Compute azimuth ind of point
                             azm = atan2(1.0*(is-i),1.0*(js-j))*rad2deg

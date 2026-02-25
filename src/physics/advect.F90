@@ -16,7 +16,8 @@ module adv_std
     implicit none
     private
 
-    integer :: ims, ime, jms, jme, kms, kme, its, ite, jts, jte, i_s, i_e, j_s, j_e, horder, vorder
+    integer :: ims, ime, jms, jme, kms, kme, its, ite, jts, jte
+    integer :: i_s_w, i_e_w, j_s_w, j_e_w, i_s, i_e, j_s, j_e, horder, vorder
     !type(timer_t) :: flux_time, flux_up_time, flux_corr_time, sum_time
     ! For use advecting a (convective?) wind field
     ! real,dimension(:,:,:),allocatable :: U_4cu_u, V_4cu_u, W_4cu_u
@@ -54,12 +55,24 @@ contains
         i_e = ite
         j_s = jts
         j_e = jte
-        
+
+        i_s_w = i_s 
+        i_e_w = i_e 
+        j_s_w = j_s 
+        j_e_w = j_e 
+
         if (options%adv%flux_corr==kFLUXCOR_MONO) then
             i_s = its - 1
             i_e = ite + 1
             j_s = jts - 1
             j_e = jte + 1
+            
+            ! wind arrays need to be extended by 1 in each direction for monotonic flux correction
+            ! this allows for 2 upwind advection steps to be computed without needing a halo exchange
+            i_s_w = i_s - 1
+            i_e_w = i_e + 1
+            j_s_w = j_s - 1
+            j_e_w = j_e + 1
         endif
         
     end subroutine
@@ -81,9 +94,7 @@ contains
     subroutine flux3(q,U_m,V_m,W_m,flux_x,flux_z,flux_y,t_factor)
         implicit none
         real, dimension(ims:ime,  kms:kme,jms:jme),   intent(in)       :: q
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: U_m
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: V_m
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: W_m
+        real, dimension(i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1), intent(in)       :: U_m, V_m, W_m
         real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1),   intent(out)    :: flux_x
         real, dimension(i_s:i_e+1,  kms:kme,j_s:j_e+1), intent(out)    :: flux_y
         real, dimension(i_s:i_e+1,  kms:kme+1,j_s:j_e+1), intent(out)    :: flux_z
@@ -429,7 +440,7 @@ contains
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(out)      :: qfluxes
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)       :: qold
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)       :: dz, denom
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: U_m, V_m, W_m
+        real, dimension(i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1), intent(in)       :: U_m, V_m, W_m
         real, intent(in) :: t_factor
         integer, intent(in) :: q_id
         
@@ -1000,9 +1011,7 @@ contains
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(inout)   :: qfluxes
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: qold
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(in)      :: dz, denom
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: U_m
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: V_m
-        real, dimension(i_s:i_e+1,kms:kme,j_s:j_e+1), intent(in)       :: W_m
+        real, dimension(i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1), intent(in)       :: U_m, V_m, W_m
         type(timer_t), intent(inout) :: flux_time, flux_corr_time, sum_time
         real, optional,                              intent(in)      :: t_factor_in
         integer, optional,                           intent(in)      :: flux_corr_in, q_id_in
@@ -1142,9 +1151,9 @@ contains
         if (allocated(flux_z)) deallocate(flux_z)
 
         ! allocate the arrays
-        allocate(U_m     (i_s:i_e+1,kms:kme,j_s:j_e+1))
-        allocate(V_m     (i_s:i_e+1,kms:kme,j_s:j_e+1))
-        allocate(W_m     (i_s:i_e+1,kms:kme,j_s:j_e+1))
+        allocate(U_m     (i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1))
+        allocate(V_m     (i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1))
+        allocate(W_m     (i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1))
         allocate(denom   (ims:ime,  kms:kme,jms:jme  ))
         allocate(flux_x(i_s:i_e+1,kms:kme,j_s:j_e+1))
         allocate(flux_y(i_s:i_e+1,  kms:kme,j_s:j_e+1))
@@ -1187,28 +1196,22 @@ contains
         enddo
 
         !$acc parallel loop gang vector tile(32,2,1) async(2)
-        do j = j_s,j_e+1
+        do j = j_s_w,j_e_w+1
             do k = kms,kme
-                do i = i_s,i_e+1
+                do i = i_s_w,i_e_w+1
                     U_m(i,k,j) = u(i,k,j) * dt * (rho(i,k,j)+rho(i-1,k,j))*0.5 * &
                         jaco_u(i,k,j) / dx
-                enddo
-            enddo
-        enddo
-        !$acc parallel loop gang vector tile(32,2,1) async(3)
-        do j = j_s,j_e+1
-            do k = kms,kme
-                do i = i_s,i_e+1
+                
                     V_m(i,k,j) = v(i,k,j) * dt * (rho(i,k,j)+rho(i,k,j-1))*0.5 * &
                         jaco_v(i,k,j) / dx
                 enddo
             enddo
         enddo
 
-        !$acc parallel loop gang vector tile(32,2,1) async(4)
-        do j = j_s,j_e+1
+        !$acc parallel loop gang vector tile(32,2,1) async(3)
+        do j = j_s_w,j_e_w+1
             do k = kms,kme-1
-                do i = i_s,i_e+1
+                do i = i_s_w,i_e_w+1
                     W_m(i,k,j) = w(i,k,j) * dt * jaco_w(i,k,j) * &
                         ( rho(i,k,j)*dz(i,k+1,j) + &
                         rho(i,k+1,j)*dz(i,k,j) ) / &
@@ -1217,15 +1220,15 @@ contains
             enddo
         enddo
         
-        !$acc parallel loop gang vector collapse(2) async(5)
-        do j = j_s,j_e+1
-            do i = i_s,i_e+1
+        !$acc parallel loop gang vector collapse(2) async(4)
+        do j = j_s_w,j_e_w+1
+            do i = i_s_w,i_e_w+1
                 W_m(i,kme,j) = w(i,kme,j) * dt * jaco_w(i,kme,j) * rho(i,kme,j)
             enddo
         enddo
         !$acc end data
 
-        !$acc wait(1,2,3,4,5)
+        !$acc wait(1,2,3,4)
     end subroutine adv_std_compute_wind
 
     subroutine adv_std_clean_wind_arrays(U_m,V_m,W_m,denom)

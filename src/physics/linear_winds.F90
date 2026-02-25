@@ -909,7 +909,7 @@ contains
         real :: hydrometeors
 
         ! pointers to the u/v data to be updated so they can point to different places depending on the update flag
-        real, allocatable :: u3d(:,:,:), v3d(:,:,:), nsquared(:,:,:)
+        real, allocatable :: u3d(:,:,:), v3d(:,:,:)
 
         !very lazy GPU integration -- just move all data from gpu to host, continue with calculation on host as before, then copy relevant fields back to gpu at the end
         !$acc update host(domain)
@@ -920,7 +920,8 @@ contains
             allocate(u3d,source=domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d)
             allocate(v3d,source=domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d)
         endif
-        allocate(nsquared,source=domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d)
+
+        associate( nsquared => domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d )
 
         ims_u = lbound(u3d,1)
         ime_u = ubound(u3d,1)
@@ -954,17 +955,17 @@ contains
         endif
 
         ! if (reverse) print*, "WARNING using fixed nsq for linear wind removal: 3e-6"
-        !$omp parallel firstprivate(ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme, nx,nxu,ny,nyv,nz), &
-        !$omp firstprivate(reverse, vsmooth, winsz), default(none), &
-        !$omp private(i,j,k,step, kVARS, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
-        !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v), &
-        !$omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
-        !$omp shared(domain, u3d,v3d, nsquared, spd_values, dir_values, nsq_values, hi_u_LUT, hi_v_LUT), &
-        !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution, hydrometeors), &
-        !$omp shared(min_stability, max_stability, n_dir_values, n_spd_values, n_nsq_values, smooth_nsq)
+        ! !$omp parallel firstprivate(ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme, nx,nxu,ny,nyv,nz), &
+        ! !$omp firstprivate(reverse, vsmooth, winsz), default(none), &
+        ! !$omp private(i,j,k,step, kVARS, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
+        ! !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v), &
+        ! !$omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
+        ! !$omp shared(domain, u3d,v3d, nsquared, spd_values, dir_values, nsq_values, hi_u_LUT, hi_v_LUT), &
+        ! !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution, hydrometeors), &
+        ! !$omp shared(min_stability, max_stability, n_dir_values, n_spd_values, n_nsq_values, smooth_nsq)
 
         !
-        !$omp do
+        ! !$omp do
         do k=1,ny
 
             do j=1,nz
@@ -1027,8 +1028,8 @@ contains
                 end do
             endif
         end do
-        !$omp end do
-        !$omp end parallel
+        ! !$omp end do
+        ! !$omp end parallel
 
 
         ! smooth array has it's own parallelization, so this probably can't go in a critical section
@@ -1036,16 +1037,16 @@ contains
             call smooth_array(nsquared, winsz, ydim=3)
         endif
 
-        !$omp parallel firstprivate(ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme, nx,nxu,ny,nyv,nz), &
-        !$omp firstprivate(reverse, vsmooth, winsz), default(none), &
-        !$omp private(i,j,k,step, kVARS, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
-        !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v), &
-        !$omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
-        !$omp shared(domain, u3d,v3d, nsquared, spd_values, dir_values, nsq_values, hi_u_LUT, hi_v_LUT), &
-        !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution), &
-        !$omp shared(min_stability, max_stability, n_dir_values, n_spd_values, n_nsq_values, smooth_nsq)
+        ! !$omp parallel firstprivate(ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme, nx,nxu,ny,nyv,nz), &
+        ! !$omp firstprivate(reverse, vsmooth, winsz), default(none), &
+        ! !$omp private(i,j,k,step, kVARS, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
+        ! !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v), &
+        ! !$omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
+        ! !$omp shared(domain, u3d,v3d, nsquared, spd_values, dir_values, nsq_values, hi_u_LUT, hi_v_LUT), &
+        ! !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution), &
+        ! !$omp shared(min_stability, max_stability, n_dir_values, n_spd_values, n_nsq_values, smooth_nsq)
         allocate(u1d(nxu), v1d(nxu))
-        !$omp do
+        ! !$omp do
         do k=1, nyv
 
             uk = min(k,ny)
@@ -1163,9 +1164,9 @@ contains
                 end do
             end do
         end do
-        !$omp end do
+        ! !$omp end do
         deallocate(u1d, v1d)
-        !$omp end parallel
+        ! !$omp end parallel
 
         ! if (update) then
         !     do k=1, nyv
@@ -1190,8 +1191,10 @@ contains
         !     !$acc update device(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d)
         !     !$acc update device(domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d)
         ! endif
-        domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d = exp(nsquared)
-        !$acc update device(domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d)
+        nsquared = exp(nsquared)
+        !$acc update device(nsquared)
+
+        end associate
 
     end subroutine spatial_winds
 

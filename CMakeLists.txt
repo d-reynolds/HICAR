@@ -364,13 +364,13 @@ if(OPENACC)
 		# Fetch and build rte-rrtmgp when OpenACC is enabled
 		message(STATUS "Fetching rte-rrtmgp library for OpenACC support...")
 
-		FetchContent_MakeAvailable(rte-rrtmgp)
-
 		# Configure build options for rte-rrtmgp
 		set(BUILD_TESTING OFF)
 		set(BUILD_C_HEADERS OFF)
 		set(KERNEL_MODE "accel" CACHE STRING "Select the kernel mode for rte-rrtmgp" FORCE)
 		set(BUILD_SHARED_LIBS OFF)
+
+		FetchContent_MakeAvailable(rte-rrtmgp)
 			
 		# Use the predefined HICAR compiler flags			
 		message(STATUS "Using compiler flags for rte-rrtmgp: ${CMAKE_Fortran_FLAGS}")
@@ -592,11 +592,12 @@ target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
 # Link Noah-MP(Required) to hicar_lib 
 if(NOT DEFINED NOAHMP_LIBRARY)
-		target_link_libraries(hicar_lib PUBLIC noahmp)
+	target_link_libraries(hicar_lib PUBLIC noahmp)
 else()
-		target_link_libraries(hicar_lib PUBLIC ${NOAHMP_LIBRARY})
-		target_include_directories(hicar_lib PUBLIC $ENV{NOAHMP_INCLUDES})
+	target_link_libraries(hicar_lib PUBLIC ${NOAHMP_LIBRARY})
+	target_include_directories(hicar_lib PUBLIC $ENV{NOAHMP_INCLUDES})
 endif()
+
 # link the hicar_lib library to the HICAR executable
 target_link_libraries(HICAR PUBLIC hicar_lib)
 ###########################################################
@@ -747,8 +748,11 @@ message(STATUS "")
 # get_target_property(hicar_lib HICAR LINK_LIBRARIES)
 # message(STATUS "Libraries linked against HICAR target: ${HICAR_LIBS}")
 
-# Set the location for library installation -- i.e., /usr/lib in this case
-# not really necessary in this example. Use "sudo make install" to apply 
+# Set the install prefix to the project source directory so that
+# "make install" works without root permissions
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX ${PROJECT_SOURCE_DIR} CACHE PATH "Install path prefix" FORCE)
+endif()
 set(CMAKE_INSTALL_EXEDIR ${PROJECT_SOURCE_DIR}/bin)
 set(CMAKE_Fortran_MODULE_DIRECTORY  ${CMAKE_BINARY_DIR})
 
@@ -813,6 +817,24 @@ else()
 	WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
 	COMMENT "Running test case suite"
 	VERBATIM
-	)  
+	)
 
 endif()
+
+add_custom_target(test_cli
+    COMMAND ${CMAKE_COMMAND} -E echo "Running CLI option tests..."
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_cli_options.sh ${PROJECT_SOURCE_DIR}
+    DEPENDS HICAR
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests
+    COMMENT "Running CLI options test suite"
+    VERBATIM
+)
+
+add_custom_target(test_reproducibility
+    COMMAND ${CMAKE_COMMAND} -E echo "Running reproducibility tests..."
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_reproducibility.sh ${PROJECT_SOURCE_DIR}
+    DEPENDS HICAR download_test_data
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
+    COMMENT "Running MPI and restart reproducibility tests"
+    VERBATIM
+)

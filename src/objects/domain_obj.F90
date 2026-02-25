@@ -48,19 +48,20 @@ contains
         
         call create_variables(this, options)
         
+        call init_relax_filters(this,options)
+
+        call set_var_lists(this, options)
+
+        call init_batch_exch(this)
+
         call initialize_core_variables(this, options)  ! split into several subroutines?
 
         call read_land_variables(this, options)
 
-        call set_var_lists(this, options)
-
-        call init_relax_filters(this,options)
-
-        call init_batch_exch(this)
         
         !$acc enter data copyin(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
         !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
-        !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, &
+        !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, this%filter_width, &
         !$acc                   this%vars_2d, this%vars_3d, this%var_indx, this%forcing_var_indx, this%forcing_hi, &
         !$acc                   this%adv_vars, this%exch_vars, this%tend, this%halo)
         
@@ -291,7 +292,7 @@ contains
         type(options_t), intent(in)    :: options
 
         type(meta_data_t) :: tmp_var
-        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(22), kEXCH_VARS(8)
+        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(22), kEXCH_VARS(9)
         
         kADV_VARS = (/kVARS%potential_temperature,&
                       kVARS%water_vapor,&
@@ -316,7 +317,8 @@ contains
                       kVARS%ice3_a,&
                       kVARS%ice3_c/)
 
-        kEXCH_VARS = (/kVARS%sensible_heat,&
+        kEXCH_VARS = (/kVARS%density,&
+                       kVARS%sensible_heat,&
                        kVARS%skin_temperature,&
                        kVARS%Ds,&
                        kVARS%fsnow,&
@@ -1417,16 +1419,6 @@ contains
                 dzdy(:,i,jms)   = (-neighbor_z(ims:ime,i,jms+2) + 4*neighbor_z(ims:ime,i,jms+1) - 3*neighbor_z(ims:ime,i,jms) )/(2*this%dx)
                 dzdy(:,i,jme)   = (neighbor_z(ims:ime,i,jme-2) - 4*neighbor_z(ims:ime,i,jme-1) + 3*neighbor_z(ims:ime,i,jme) )/(2*this%dx)
                 
-                dzdx_u(ims+1:ime,i,:) = (b1_mass*(h1(ims+1:ime,jms:jme)-h1(ims:ime-1,jms:jme))   + b2_mass*(h2(ims+1:ime,jms:jme)-h2(ims:ime-1,jms:jme)))/(this%dx)
-                dzdy_v(:,i,jms+1:jme) = (b1_mass*(h1(ims:ime,jms+1:jme)-h1(ims:ime,jms:jme-1))   + b2_mass*(h2(ims:ime,jms+1:jme)-h2(ims:ime,jms:jme-1)))/(this%dx)
-
-                dzdx_u(ims+1:ime,i,:) = (dzdx(ims:ime-1,i,:)+dzdx(ims+1:ime,i,:))*0.5
-                dzdx_u(ims,i,:)   = dzdx(ims,i,:)*1.5 - dzdx(ims+1,i,:)*0.5
-                dzdx_u(ime+1,i,:)   = dzdx(ime,i,:)*1.5 - dzdx(ime-1,i,:)*0.5
-
-                dzdy_v(:,i,jms+1:jme) = (dzdy(:,i,jms:jme-1)+dzdy(:,i,jms+1:jme))*0.5
-                dzdy_v(:,i,jms)   = dzdy(:,i,jms)*1.5 - dzdy(:,i,jms+1)*0.5
-                dzdy_v(:,i,jme+1)   = dzdy(:,i,jme)*1.5 - dzdy(:,i,jme-1)*0.5
                 
             enddo
             
@@ -1444,6 +1436,14 @@ contains
             jacobian     = neighbor_jacobian(ims:ime,:,jms:jme)
 
         end associate
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdx)%v),corners=.True.)
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdy)%v),corners=.True.)
+
+        this%vars_3d(this%var_indx(kVARS%dzdx_u)%v)%data_3d(this%ims+1:this%ime,:,:) = (this%vars_3d(this%var_indx(kVARS%dzdx)%v)%data_3d(this%ims:this%ime-1,:,:)+this%vars_3d(this%var_indx(kVARS%dzdx)%v)%data_3d(this%ims+1:this%ime,:,:))*0.5
+        this%vars_3d(this%var_indx(kVARS%dzdy_v)%v)%data_3d(:,:,this%jms+1:this%jme) = (this%vars_3d(this%var_indx(kVARS%dzdy)%v)%data_3d(:,:,this%jms:this%jme-1)+this%vars_3d(this%var_indx(kVARS%dzdy)%v)%data_3d(:,:,this%jms+1:this%jme))*0.5
+
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdx_u)%v),corners=.True.)
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdy_v)%v),corners=.True.)
         ! call array_offset_x(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
         ! this%vars_3d(this%var_indx(kVARS%jacobian_u)%v)%data_3d(this%ims:this%ime+1,:,this%jms:this%jme) = temp
         ! call array_offset_y(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
@@ -1812,8 +1812,7 @@ contains
                   h1_u                  => this%vars_2d(this%var_indx(kVARS%h1_u)%v)%data_2d,                           &
                   h2_u                  => this%vars_2d(this%var_indx(kVARS%h2_u)%v)%data_2d,                           &
                   h1_v                  => this%vars_2d(this%var_indx(kVARS%h1_v)%v)%data_2d,                           &
-                  h2_v                  => this%vars_2d(this%var_indx(kVARS%h2_v)%v)%data_2d,                           &
-                  terrain               => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d)
+                  h2_v                  => this%vars_2d(this%var_indx(kVARS%h2_v)%v)%data_2d)
 
 
         if ((STD_OUT_PE)) then
@@ -2978,16 +2977,14 @@ contains
 
         do_boundary = (do_west .or. do_east .or. do_north .or. do_south)
 
-        !$acc data create(ims_b,ime_b,jms_b,jme_b)
-        associate( ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, halo_size => this%grid%halo_size )
-        !$acc parallel present(ims, ime, jms, jme, halo_size)
+        associate( ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, halo_size => this%grid%halo_size, filter_width => this%FILTER_WIDTH)
         ims_b = 0; ime_b = 0; jms_b = 0; jme_b = 0
 
         if (do_boundary) then
-            if (do_west) ims_b(1) = ims; ime_b(1) = ims+this%FILTER_WIDTH+halo_size; jms_b(1) = jms; jme_b(1) = jme;
-            if (do_east) ims_b(2) = ime-this%FILTER_WIDTH-halo_size; ime_b(2) = ime; jms_b(2) = jms; jme_b(2) = jme;
-            if (do_north) ims_b(3) = ims; ime_b(3) = ime; jms_b(3) = jme-this%FILTER_WIDTH-halo_size; jme_b(3) = jme;
-            if (do_south) ims_b(4) = ims; ime_b(4) = ime; jms_b(4) = jms; jme_b(4) = jms+this%FILTER_WIDTH+halo_size;
+            if (do_west) ims_b(1) = ims; ime_b(1) = ims+filter_width+halo_size; jms_b(1) = jms; jme_b(1) = jme;
+            if (do_east) ims_b(2) = ime-filter_width-halo_size; ime_b(2) = ime; jms_b(2) = jms; jme_b(2) = jme;
+            if (do_north) ims_b(3) = ims; ime_b(3) = ime; jms_b(3) = jme-filter_width-halo_size; jme_b(3) = jme;
+            if (do_south) ims_b(4) = ims; ime_b(4) = ime; jms_b(4) = jms; jme_b(4) = jms+filter_width+halo_size;
 
             ! limit vertical extent of west and east boundaries to the extent of the north/south indices
             ! this prevents double-calculating points in the corners
@@ -2997,8 +2994,8 @@ contains
             if (do_west .and. do_north) jme_b(1) = min(jme_b(1),jms_b(3)-1)
             if (do_east .and. do_north) jme_b(2) = min(jme_b(2),jms_b(3)-1)
         endif
-        !$acc end parallel
         end associate
+        !$acc data copyin(ims_b, ime_b, jms_b, jme_b)
 
         do n = 1,size(this%forcing_hi)
 
@@ -3023,7 +3020,7 @@ contains
                         enddo
                     enddo
                 else if (do_boundary) then
-                    !$acc parallel present(var%data_2d, var%dqdt_2d, forcing%data_2d, forcing%dqdt_2d, relax_filter, ims_b, ime_b, jms_b, jme_b)
+                    !$acc parallel present(var%data_2d, forcing%data_2d, forcing%dqdt_2d, relax_filter, ims_b, ime_b, jms_b, jme_b)
                     do p = 1,4
                         if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
@@ -3078,7 +3075,7 @@ contains
                         enddo
                     enddo
                 else if (do_boundary) then
-                    !$acc parallel present(var%data_3d, var%dqdt_3d, forcing%data_3d, forcing%dqdt_3d,relax_filter,ims_b,ime_b,jms_b,jme_b)
+                    !$acc parallel present(var%data_3d, forcing%data_3d, forcing%dqdt_3d,relax_filter,ims_b,ime_b,jms_b,jme_b)
                     do p = 1,4
                         if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
@@ -3195,6 +3192,11 @@ contains
                 if (update_only) then
                     call interpolate_variable(forcing_hi%dqdt_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
+                    ! Parallel-consistent post-interpolation smoothing of u/v wind tendencies
+                    if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
+                        call smooth_array(forcing_hi, windowsize=1, ydim=3, &
+                                          nsmooths=this%nsmooth, halo=this%halo, do_dqdt=.true.)
+                    endif
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
                     !$acc update device(forcing_hi%dqdt_3d)
                     if (.not.(force_boundaries).and..not.var_is_u.and..not.var_is_v) then
@@ -3205,6 +3207,11 @@ contains
                 else
                     call interpolate_variable(forcing_hi%data_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
+                    ! Parallel-consistent post-interpolation smoothing of u/v wind fields
+                    if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
+                        call smooth_array(forcing_hi, windowsize=1, ydim=3, &
+                                          nsmooths=this%nsmooth, halo=this%halo)
+                    endif
                     !If this is an initialization step, copy high res directly over to domain
                     !$acc update device(forcing_hi%data_3d)
                     !$acc kernels present(forcing_hi%data_3d, var%data_3d)
@@ -3429,8 +3436,6 @@ contains
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_u%geolut)
 
             call vinterp(var_data, temp_3d, forcing%geo_u%vert_lut)
-            ! temp_3d = pre_smooth(:,:nz,:) ! no vertical interpolation option
-            if (windowsize > 0) call smooth_array(var_data, windowsize=windowsize, ydim=3)
                         
         ! Interpolate to the v staggered grid
         else if (vvar) then
@@ -3440,8 +3445,6 @@ contains
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_v%geolut)
             
             call vinterp(var_data, temp_3d, forcing%geo_v%vert_lut)
-            ! temp_3d = pre_smooth(:,:nz,:) ! no vertical interpolation option
-            if (windowsize > 0) call smooth_array(var_data, windowsize=windowsize, ydim=3)
         endif
         
     end subroutine

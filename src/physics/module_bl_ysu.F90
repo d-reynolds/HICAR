@@ -153,14 +153,8 @@ contains
                                                                      rthraten
 
    real,     dimension( ims:ime, kms:kme+1, jms:jme )                          , &
-             intent(in   )   ::                                          z8w
-
-   real,     dimension( ims:ime, kms:kme, jms:jme )                          , &
-             intent(in   )   ::                                          p3di
+             intent(in   )   ::                                          z8w, p3di
 !
-   real,  optional,   dimension( ims:ime, kms:kme, jms:jme )                 , &
-             intent(inout)   ::                                       rublten, &
-                                                                      rvblten
 
    real,     dimension( ims:ime, kms:kme, jms:jme )                          , &
              intent(inout)   ::                                      rthblten, &
@@ -215,6 +209,8 @@ contains
 !
 !optional
 !
+   real,intent(in),dimension(ims:ime,kms:kme,jms:jme),optional:: rho
+
    real,     dimension( ims:ime, jms:jme )                                   , &
              optional                                                        , &
              intent(inout)   ::                                        regime
@@ -222,6 +218,10 @@ contains
    real,     dimension( ims:ime, kms:kme, jms:jme )                          , &
              optional                                                        , &
              intent(inout)   ::                                       rqiblten
+!
+   real,  optional,   dimension( ims:ime, kms:kme, jms:jme )                 , &
+             intent(inout)   ::                                       rublten, &
+                                                                      rvblten
 !
    real,     dimension( kms:kme )                                            , &
              optional                                                        , &
@@ -249,7 +249,6 @@ contains
                                                                         dvsfc, &
                                                                         dtsfc, &
                                                                         dqsfc
-   real,intent(in),dimension(ims:ime,kms:kme,jms:jme),optional:: rho
    real:: rho_d
 
    real,     dimension( ims:ime, jms:jme ) ::                                  hgamt, &

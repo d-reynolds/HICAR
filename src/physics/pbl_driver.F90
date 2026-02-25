@@ -271,13 +271,11 @@ contains
                     ,p3d=domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d                         & !-- p3d         3d pressure (pa)
                     ,p3di=domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d              & !-- p3di        3d pressure (pa) at interface level
                     ,pi3d=domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d                           & !-- pi3d        3d exner function (dimensionless)
-                    ,rho=domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d                           & !-- rho        3d density (kg/m^3)
                     ! ,rublten=domain%tend%u                               & ! i/o
                     ! ,rvblten=domain%tend%v                  & ! i/o
                     ,rthblten=domain%tend%th_pbl            & ! i/o
                     ,rqvblten=domain%tend%qv_pbl            & ! i/o
                     ,rqcblten=domain%tend%qc_pbl            & ! i/o
-                    ,rqiblten=domain%tend%qi_pbl            & ! i/o
                     ,flag_qi=.True.                         &
                     ,cp=cp                                  &
                     ,g=gravity                              &
@@ -320,37 +318,13 @@ contains
                     ,its=its, ite=ite, jts=jts, jte=jte     &
                     ,kts=kts, kte=kte-1                     &
                 !optional
+                    ,rho=domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d                           & !-- rho        3d density (kg/m^3)
+                    ,rqiblten=domain%tend%qi_pbl            & ! i/o
                     ,regime=regime                          )!  i/o -- regime	flag indicating pbl regime (stable, unstable, etc.) - not used?
 
 
                     ! if(STD_OUT_PE .and. options%general%debug) write(*,*) "  pbl height/lev is:", maxval(domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d ),"m/", maxval(domain%kpbl)  ! uncomment if you want to see the pbl height.
 
-
-
-
-            ! -------------------- omp loop   - how to deal with offset (v) grid??   ---------------
-            ! ! $omp parallel private(j) &
-            ! ! $omp default(shared)
-            ! ! $omp do schedule(static)
-            ! do j=jts,jte ! OMP  loop
-
-                ! domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(:,:,j)  =  domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(:,:,j) + tend_u_ugrid(:,:,j) * dt_in
-                ! ! domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(:,:,j)            =  domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(:,:,j)       + domain%tend%v(:,:,j) * dt_in
-
-                ! domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(:,:,j)  =  domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(:,:,j)  +  domain%tend%qv_pbl(:,:,j) * dt_in
-                ! domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d(:,:,j)      = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d(:,:,j)      + domain%tend%qc_pbl(:,:,j) * dt_in
-                ! domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(:,:,j) = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(:,:,j) + domain%tend%th_pbl(:,:,j) * dt_in
-                ! domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d(:,:,j)        = domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d(:,:,j)        + domain%tend%qi_pbl(:,:,j) * dt_in
-
-                ! ! Reset tendencies before the next pbl call. (necessary?)
-                ! domain%tend%qv_pbl(:,:,j)   = 0
-                ! domain%tend%th_pbl(:,:,j)   = 0
-                ! domain%tend%qc_pbl(:,:,j)   = 0
-                ! domain%tend%qi_pbl(:,:,j)   = 0
-
-            ! enddo
-            ! ! $omp end do
-            ! ! $omp end parallel
 
         endif ! End YSU call
 

@@ -16,6 +16,7 @@ program test_driver
 #endif
     use iso_fortran_env
     use icar_constants, only: STD_OUT_PE
+    use output_metadata, only: initialize_var_constants
     use string, only: to_lower
     implicit none
     integer :: stat, is, ierr, my_index, null_unit
@@ -62,6 +63,7 @@ program test_driver
     call MPI_Comm_Rank(MPI_COMM_WORLD,my_index,ierr)
     my_index = my_index + 1
 
+    call initialize_var_constants()
 
     ! -------------------------------------------------------------------------------------------------
     ! -------------------------------------------------------------------------------------------------

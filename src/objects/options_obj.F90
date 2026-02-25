@@ -83,7 +83,7 @@ contains
                 stop
             endif
         else
-            if (.not.(gen_nml)) then
+            if (.not.(gen_nml .or. info_only)) then
                 if (STD_OUT_PE) write(*,*) 'ERROR: namelist file: ',trim(namelist_file),' does not exist'
                 stop
             endif
@@ -165,6 +165,12 @@ contains
             !see if we have any 3d variables requested, if so we will need to output z levels
             if (this%output%vars_for_output(i)+this%vars_for_restart(i) > 0) then
                 tmp_meta = get_varmeta(i)
+                ! Also clean entries that have no metadata defined (no output name) or are not 2d or 3d
+                if (tmp_meta%name == "" .or. .not.(tmp_meta%two_d .or. tmp_meta%three_d)) then
+                    this%output%vars_for_output(i) = 0
+                    this%vars_for_restart(i) = 0
+                    cycle
+                endif
                 if (tmp_meta%three_d) output_zvar = .True.
             endif
         enddo
@@ -251,6 +257,12 @@ contains
         endif
         
         if (this%time%RK3) then
+            if (this%adv%h_order == 1) then
+                if (STD_OUT_PE) write(*,*) "  ----------------- WARNING -----------------"
+                if (STD_OUT_PE) write(*,*) "  RK3 time stepping is not supported with h_order=1"
+                if (STD_OUT_PE) write(*,*) "  ----------------- WARNING -----------------"
+                stop
+            endif
             if (max(this%adv%h_order,this%adv%v_order)==5 .and. this%time%cfl_reduction_factor > 1.4) then
                 if (STD_OUT_PE) write(*,*) "  CFL reduction factor should be less than 1.4 when horder or vorder = 5, limiting to 1.4"
                 this%time%cfl_reduction_factor = min(1.4,this%time%cfl_reduction_factor)
@@ -504,6 +516,10 @@ contains
             if (rc /= 0) call print_nml_error('output',msg=error_msg,iostat=rc)
         endif
         if (ALL(output_vars(:,n_indx)==kCHAR_NO_VAL)) then
+            if (.not.read_namelist) then
+                ! Test/mock mode: no namelist file, so skip output_vars requirement
+                return
+            endif
             if (STD_OUT_PE) write(*,*) "  WARNING: output_vars not specified in namelist for domain: ", n_indx
             if (n_indx == 1) then
                 stop 'output_vars must be specified in namelist for at least the first domain'
@@ -513,14 +529,18 @@ contains
             output_vars(:,n_indx) = output_vars(:,1)
         endif
 
-        do j=1, kMAX_STORAGE_VARS
-            if (trim(output_vars(j, n_indx)) /= "" .and. trim(output_vars(j, n_indx)) /= kCHAR_NO_VAL ) then
+        if (trim(output_vars(1, n_indx)) == 'all') then
+            output_options%vars_for_output(:) = 1
+        else
+            do j=1, kMAX_STORAGE_VARS
+                if (trim(output_vars(j, n_indx)) /= "" .and. trim(output_vars(j, n_indx)) /= kCHAR_NO_VAL ) then
 
-                !get the var index for this output variable name
-                var_indx = get_varindx(trim(output_vars(j, n_indx)))
-                if (var_indx <= kMAX_STORAGE_VARS) call add_to_varlist(output_options%vars_for_output, [var_indx])
-            endif
-        enddo        
+                    !get the var index for this output variable name
+                    var_indx = get_varindx(trim(output_vars(j, n_indx)))
+                    if (var_indx <= kMAX_STORAGE_VARS) call add_to_varlist(output_options%vars_for_output, [var_indx])
+                endif
+            enddo
+        endif        
 
         call set_nml_var(output_options%output_folder, output_folder(n_indx), 'output_folder', output_folder(1))
         call set_nml_var(output_options%outputinterval, outputinterval(n_indx), 'outputinterval', outputinterval(1))

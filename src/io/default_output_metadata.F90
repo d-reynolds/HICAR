@@ -288,9 +288,35 @@ contains
                                attribute_t("long_name",     "Pressure"),                        &
                                attribute_t("units",         "Pa"),                              &
                                attribute_t("coordinates",   "lat lon")]
-        
+
         !>------------------------------------------------------------
-        !!  Air Pressure on interfaces between mass levels
+        !!  Base Air Pressure (e.g. from WRF PB field)
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%pressure_base) then
+            var_meta%name        = "pressure_base"
+            var_meta%maxval      = 110000.0
+            var_meta%minval      = 0.0
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "base_state_air_pressure"),          &
+                               attribute_t("long_name",     "Base State Pressure"),              &
+                               attribute_t("units",         "Pa"),                              &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Base Geopotential Height (e.g. from WRF PHB field)
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%geopotential_base) then
+            var_meta%name        = "geopotential_base"
+            var_meta%maxval      = 1000000.0
+            var_meta%minval      = 0.0
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "base_state_geopotential"),          &
+                               attribute_t("long_name",     "Base State Geopotential"),          &
+                               attribute_t("units",         "m2 s-2"),                          &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Surface Air Pressure
         !!------------------------------------------------------------
         else if (var_idx==kVARS%surface_pressure) then
             var_meta%name        = "psfc"
@@ -301,13 +327,26 @@ contains
                                attribute_t("long_name",     "Surface Pressure"),                &
                                attribute_t("units",         "Pa"),                              &
                                attribute_t("coordinates",   "lat lon")]
-        
+
+        !>------------------------------------------------------------
+        !!  Sea-level Pressure
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%sea_surface_pressure) then
+            var_meta%name        = "psl"
+            var_meta%maxval      = 110000.0
+            var_meta%minval      = 0.0
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "air_pressure_at_mean_sea_level"),   &
+                               attribute_t("long_name",     "Sea-level Pressure"),              &
+                               attribute_t("units",         "Pa"),                              &
+                               attribute_t("coordinates",   "lat lon")]
+
         !>------------------------------------------------------------
         !!  Potential Air Temperature
         !!------------------------------------------------------------
         else if (var_idx==kVARS%potential_temperature) then
             var_meta%name        = "potential_temperature"
-            var_meta%maxval      = 350.0
+            var_meta%maxval      = 400.0
             var_meta%minval      = 150.0
             var_meta%dimensions  = three_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "air_potential_temperature"),       &
@@ -725,7 +764,7 @@ contains
             var_meta%dimensions  = three_d_u_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "dzdx of domain mesh on staggered u grid"),                 &
                                 attribute_t("units",         "-"),                                   &
-                                attribute_t("coordinates",   "lat lon")]
+                                attribute_t("coordinates",   "u_lat u_lon")]
         
         !>------------------------------------------------------------
         !!  Change in height in y direction on the staggered v grid
@@ -735,7 +774,7 @@ contains
             var_meta%dimensions  = three_d_v_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "dzdy of domain mesh on staggered v grid"),                 &
                                 attribute_t("units",         "-"),                                   &
-                                attribute_t("coordinates",   "lat lon")]
+                                attribute_t("coordinates",   "v_lat v_lon")]
         !>------------------------------------------------------------
         !!  High-frequency terrain component
         !!------------------------------------------------------------
@@ -762,7 +801,7 @@ contains
             var_meta%dimensions  = two_d_u_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "High-frequency terrain component on staggered u grid"),                 &
                                 attribute_t("units",         "m"),                                   &
-                                attribute_t("coordinates",   "lat lon")]
+                                attribute_t("coordinates",   "u_lat u_lon")]
         !>------------------------------------------------------------
         !!  Low-frequency terrain component on the staggered u grid
         !!------------------------------------------------------------
@@ -771,7 +810,7 @@ contains
             var_meta%dimensions  = two_d_u_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "Low-frequency terrain component on staggered u grid"),                 &
                                 attribute_t("units",         "m"),                                   &
-                                attribute_t("coordinates",   "lat lon")]
+                                attribute_t("coordinates",   "u_lat u_lon")]
         !>------------------------------------------------------------
         !!  High-frequency terrain component on staggered v grid
         !!------------------------------------------------------------
@@ -780,7 +819,7 @@ contains
             var_meta%dimensions  = two_d_v_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "High-frequency terrain component on staggered v grid"),                 &
                                 attribute_t("units",         "m"),                                   &
-                                attribute_t("coordinates",   "lat lon")]
+                                attribute_t("coordinates",   "v_lat v_lon")]
         !>------------------------------------------------------------
         !!  Low-frequency terrain component on staggered v grid
         !!------------------------------------------------------------
@@ -789,7 +828,7 @@ contains
             var_meta%dimensions  = two_d_v_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "Low-frequency terrain component on staggered v grid"),                 &
                                 attribute_t("units",         "m"),                                   &
-                                attribute_t("coordinates",   "lat lon")]
+                                attribute_t("coordinates",   "v_lat v_lon")]
         !>------------------------------------------------------------
         !!  The Jacobian of the z-coordinate transform
         !!------------------------------------------------------------
@@ -807,7 +846,7 @@ contains
             var_meta%dimensions  = three_d_u_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on staggered u grid"),                 &
                                 attribute_t("units",         "-"),                                   &
-                                attribute_t("coordinates",   "lat lon")]
+                                attribute_t("coordinates",   "u_lat u_lon")]
         !>------------------------------------------------------------
         !!  The Jacobian of the z-coordinate transform on staggered v grid
         !!------------------------------------------------------------
@@ -816,7 +855,7 @@ contains
             var_meta%dimensions  = three_d_v_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "Jacobian of the z-coordinate transform on staggered v grid"),                 &
                                 attribute_t("units",         "-"),                                   &
-                                attribute_t("coordinates",   "lat lon")]
+                                attribute_t("coordinates",   "v_lat v_lon")]
         !>------------------------------------------------------------
         !!  The Jacobian of the z-coordinate transform on k half-levels
         !!------------------------------------------------------------
@@ -932,6 +971,7 @@ contains
         else if (var_idx==kVARS%hlm) then
             var_meta%name        = "hlm"
             var_meta%dimensions  = three_d_hlm_dimensions
+            var_meta%dim_len(2)  = 90
             var_meta%attributes  = [attribute_t("non_standard_name", "Horizon line matrix"),                 &
                                 attribute_t("units",         "degrees"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -1194,17 +1234,156 @@ contains
                                attribute_t("coordinates",   "lat lon")]
         
 
-        !>------------------------------------------------------------
-        !!  Tendency from short wave radiation
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%tend_swrad) then
-            var_meta%name        = "tend_swrad"
-            var_meta%dimensions  = three_d_t_dimensions
-            var_meta%attributes  = [attribute_t("non_standard_name", "sw_rad_tend"), &
-                               attribute_t("units",         " "),               &
-                               attribute_t("coordinates",   "lat lon")]
-        
 
+        !>------------------------------------------------------------
+        !!  Water vapor tendency from advection
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_qv_adv) then
+            var_meta%name        = "tend_qv_adv"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_specific_humidity_due_to_advection"), &
+                               attribute_t("units",         "kg kg-1 s-1"),    &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Water vapor tendency from PBL
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_qv_pbl) then
+            var_meta%name        = "tend_qv_pbl"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_specific_humidity_due_to_boundary_layer_mixing"), &
+                               attribute_t("units",         "kg kg-1 s-1"),    &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Total water vapor tendency
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_qv) then
+            var_meta%name        = "tend_qv"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_specific_humidity"), &
+                               attribute_t("units",         "kg kg-1 s-1"),    &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Potential temperature tendency
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_th) then
+            var_meta%name        = "tend_th"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_air_potential_temperature"), &
+                               attribute_t("units",         "K s-1"),          &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Potential temperature tendency from PBL
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_th_pbl) then
+            var_meta%name        = "tend_th_pbl"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_air_potential_temperature_due_to_boundary_layer_mixing"), &
+                               attribute_t("units",         "K s-1"),          &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Cloud water tendency
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_qc) then
+            var_meta%name        = "tend_qc"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_cloud_liquid_water_mixing_ratio"), &
+                               attribute_t("units",         "kg kg-1 s-1"),    &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Cloud water tendency from PBL
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_qc_pbl) then
+            var_meta%name        = "tend_qc_pbl"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_cloud_liquid_water_mixing_ratio_due_to_boundary_layer_mixing"), &
+                               attribute_t("units",         "kg kg-1 s-1"),    &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Cloud ice tendency
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_qi) then
+            var_meta%name        = "tend_qi"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_cloud_ice_mixing_ratio"), &
+                               attribute_t("units",         "kg kg-1 s-1"),    &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Cloud ice tendency from PBL
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_qi_pbl) then
+            var_meta%name        = "tend_qi_pbl"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_cloud_ice_mixing_ratio_due_to_boundary_layer_mixing"), &
+                               attribute_t("units",         "kg kg-1 s-1"),    &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Snow mixing ratio tendency
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_qs) then
+            var_meta%name        = "tend_qs"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_snow_mixing_ratio"), &
+                               attribute_t("units",         "kg kg-1 s-1"),    &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Rain mixing ratio tendency
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_qr) then
+            var_meta%name        = "tend_qr"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_rain_mixing_ratio"), &
+                               attribute_t("units",         "kg kg-1 s-1"),    &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  U-wind tendency
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_u) then
+            var_meta%name        = "tend_u"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_eastward_wind"),    &
+                               attribute_t("units",         "m s-2"),          &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  V-wind tendency
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_v) then
+            var_meta%name        = "tend_v"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_northward_wind"),   &
+                               attribute_t("units",         "m s-2"),          &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Potential temperature tendency from longwave radiation
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_th_lwrad) then
+            var_meta%name        = "tend_th_lwrad"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_air_potential_temperature_due_to_longwave_heating"), &
+                               attribute_t("units",         "K s-1"),          &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Potential temperature tendency from shortwave radiation
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%tend_th_swrad) then
+            var_meta%name        = "tend_th_swrad"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("non_standard_name", "tendency_of_air_potential_temperature_due_to_shortwave_heating"), &
+                               attribute_t("units",         "K s-1"),          &
+                               attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
         !!  Surface emissivity
