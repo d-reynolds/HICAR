@@ -67,7 +67,7 @@ module land_surface
                                            nmp_snow, nmp_snowh, land_mask
     real, allocatable, dimension(:,:,:)  :: nmp_snow_t
     real,allocatable, dimension(:)      :: DZs
-    real :: XICE_THRESHOLD
+    real, parameter :: XICE_THRESHOLD = 1.0
     integer :: ITIMESTEP, update_interval, cur_vegmonth
     real :: lsm_dt, julian_day
 
@@ -608,10 +608,21 @@ contains
                                 num_soil_layers, num_snow_layers,                       &
                                 restart,             &    !restart
                                 .True.,                                 &    !allowed_to_read
-                                IOPT_RUNSUB,  IOPT_CROP, IOPT_IRR, IOPT_IRRM, &
-                                SF_URBAN_PHYSICS, IOPT_SOIL, IOPT_ALB, IOPT_WETLAND,                          &  ! urban scheme
-                                SNICAR_SNOWOPTICS_OPT, SNICAR_DUSTOPTICS_OPT, SNICAR_SOLARSPEC_OPT,  & ! optional SNICAR option
-                                SNICAR_BANDNUMBER_OPT,                    &
+                                XICE_THRESHOLD, domain%dx,                           &
+                                IDVEG, IOPT_CRS,  IOPT_BTR, IOPT_RUNSUB,     &
+                                IOPT_SFC, IOPT_FRZ, IOPT_INF, IOPT_RAD,   &
+                                IOPT_ALB, IOPT_SNF, IOPT_TBOT, IOPT_STC,  &
+                                IOPT_GLA, IOPT_RSF, IOPT_SOIL,IOPT_PEDO,  &
+                                IOPT_CROP, IOPT_IRR, IOPT_IRRM, IOPT_INFDV, &
+                                IOPT_TDRN, NMP_SOILTSTEP, IOPT_RUNSRF, IOPT_TKSNO, &
+                                IOPT_COMPACT, IOPT_SCF, IOPT_WETLAND, IZ0TLND,  &
+                                SF_URBAN_PHYSICS,                         &
+                                SNICAR_BANDNUMBER_OPT, SNICAR_SOLARSPEC_OPT,                  & ! SNICAR variable
+                                SNICAR_SNOWOPTICS_OPT, SNICAR_DUSTOPTICS_OPT,                 & ! SNICAR variable
+                                SNICAR_RTSOLVER_OPT, SNICAR_SNOWSHAPE_OPT,                    & ! SNICAR variable
+                                SNICAR_USE_AEROSOL, SNICAR_SNOWBC_INTMIX,                     & ! SNICAR variable
+                                SNICAR_SNOWDUST_INTMIX, SNICAR_USE_OC,                        & ! SNICAR variable
+                                SNICAR_AEROSOL_READTABLE,                                     & ! SNICAR variable 
                                 ids,ide, jds,jde, kds,kde,                &
                                 ims,ime, jms,jme, kms,kme,                &
                                 its,ite, jts,jte, kts,kte)
@@ -659,10 +670,6 @@ contains
             ISWATER = options%lsm%water_category
             ISLAKE  = options%lsm%lake_category
 
-            ! allocate_noah_data already sets xice_threshold, so if we are using noah (mp/lsm) leave as is.
-            if(.not.(options%physics%landsurface==kLSM_NOAHMP)) then
-                xice_threshold = 1.0  ! allocate_noah_data sets it to 1., BUT WRF's module_physics_init.F sets xice_threshold to 0.5 .... so?
-            endif
 
             if(ISLAKE==-1) then
                 if(STD_OUT_PE .and. .not.context_change) write(*,*)  "   WARNING: no lake category in LU data: The model will try to guess lake-gridpoints. This option has not been properly tested!"
@@ -957,7 +964,6 @@ contains
                             lsm_dt,                                   &
                             DZS,                                      &
                             num_soil_layers,                          &
-                            domain%dx,                                &
                             domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di,                          &
                             domain%vars_2d(domain%var_indx(kVARS%soil_type)%v)%data_2di,                         &
                             VEGFRAC,                                  &
@@ -965,19 +971,10 @@ contains
                             domain%vars_2d(domain%var_indx(kVARS%soil_deep_temperature)%v)%data_2d,     &
                             land_mask,                   &
                             domain%vars_2d(domain%var_indx(kVARS%xice)%v)%data_2d,                              &
-                            XICE_THRESHOLD,                           &
                             domain%vars_2d(domain%var_indx(kVARS%crop_category)%v)%data_2di,                     &  !only used if iopt_crop>0; not currently set up
                             domain%vars_2d(domain%var_indx(kVARS%date_planting)%v)%data_2d,             &  !only used if iopt_crop>0; not currently set up
                             domain%vars_2d(domain%var_indx(kVARS%date_harvest)%v)%data_2d,              &  !only used if iopt_crop>0; not currently set up
                             domain%vars_2d(domain%var_indx(kVARS%growing_season_gdd)%v)%data_2d,        &  !only used if iopt_crop>0; not currently set up
-                            IDVEG, IOPT_CRS,  IOPT_BTR, IOPT_RUNSUB,     &
-                            IOPT_SFC, IOPT_FRZ, IOPT_INF, IOPT_RAD,   &
-                            IOPT_ALB, IOPT_SNF, IOPT_TBOT, IOPT_STC,  &
-                            IOPT_GLA, IOPT_RSF, IOPT_SOIL,IOPT_PEDO,  &
-                            IOPT_CROP, IOPT_IRR, IOPT_IRRM, IOPT_INFDV, &
-                            IOPT_TDRN, NMP_SOILTSTEP, IOPT_RUNSRF, IOPT_TKSNO, &
-                            IOPT_COMPACT, IOPT_SCF, IOPT_WETLAND, IZ0TLND,  &
-                            SF_URBAN_PHYSICS,                         &
                             domain%vars_3d(domain%var_indx(kVARS%soil_sand_and_clay)%v)%data_3d,        &  ! only used if iopt_soil = 3
                             domain%vars_2d(domain%var_indx(kVARS%soil_texture_1)%v)%data_2d,            &  ! only used if iopt_soil = 2
                             domain%vars_2d(domain%var_indx(kVARS%soil_texture_2)%v)%data_2d,            &  ! only used if iopt_soil = 2
@@ -1117,12 +1114,6 @@ contains
                             domain%vars_2d(domain%var_indx(kVARS%stomatal_resist_total)%v)%data_2d,     &
                             domain%vars_2d(domain%var_indx(kVARS%wetland_sat_frac)%v)%data_2d,            & ! saturation fraction of a grid cell for wetland scheme
                             domain%vars_2d(domain%var_indx(kVARS%wetland_h20_store)%v)%data_2d,           & ! water storage of a grid cell for wetland scheme (mm)
-                            SNICAR_BANDNUMBER_OPT, SNICAR_SOLARSPEC_OPT,                  & ! SNICAR variable
-                            SNICAR_SNOWOPTICS_OPT, SNICAR_DUSTOPTICS_OPT,                 & ! SNICAR variable
-                            SNICAR_RTSOLVER_OPT, SNICAR_SNOWSHAPE_OPT,                    & ! SNICAR variable
-                            SNICAR_USE_AEROSOL, SNICAR_SNOWBC_INTMIX,                     & ! SNICAR variable
-                            SNICAR_SNOWDUST_INTMIX, SNICAR_USE_OC,                        & ! SNICAR variable
-                            SNICAR_AEROSOL_READTABLE,                                     & ! SNICAR variable 
                             domain%vars_3d(domain%var_indx(kVARS%snicar_sn_rad)%v)%data_3d,      & ! SNICAR snow radius
                             domain%vars_3d(domain%var_indx(kVARS%snicar_sn_fr)%v)%data_3d,       & ! SNICAR snow freezing rate
                             domain%vars_3d(domain%var_indx(kVARS%snicar_bcphi)%v)%data_3d,       & ! SNICAR BCPHI mass in snow
@@ -1320,7 +1311,6 @@ contains
         allocate(DZs(num_soil_layers))
 
         DZs = [0.1,0.2,0.4,0.8]
-        XICE_THRESHOLD = 1
 
 
         !$acc enter data copyin(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, ALBEDO, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_snow_t)
