@@ -366,6 +366,7 @@ module icar_constants
         integer :: slope_angle
         integer :: aspect_angle
         integer :: svf
+        integer :: shortwave_terrain
         integer :: shd
         integer :: hlm
         integer :: h1

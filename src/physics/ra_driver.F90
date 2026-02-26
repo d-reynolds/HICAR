@@ -122,7 +122,11 @@ module radiation
     !! MJ added to aggregate radiation over output interval
     real, allocatable, dimension(:,:) :: shortwave_cached, cos_project_angle, solar_elevation_store, solar_azimuth_store
     real*8 :: counter
-    real*8  :: Delta_t !! MJ added to detect the time for outputting 
+    real*8  :: Delta_t !! MJ added to detect the time for outputting
+
+    ! Terrain reflected shortwave precomputed lookup tables
+    real, allocatable, dimension(:,:) :: azimuth_offset, inv_dist2_offset, inv_dist_offset
+    integer :: R_cells = 0
     integer :: ims, ime, jms, jme, kms, kme
     integer :: its, ite, jts, jte, kts, kte
     integer :: ids, ide, jds, jde, kds, kde
@@ -220,7 +224,12 @@ contains
 
             !$acc enter data create(cos_project_angle, solar_elevation_store, solar_azimuth_store, shortwave_cached)
         ! endif
-        
+
+        ! Initialize terrain reflected shortwave lookup tables
+        if (options%rad%terrain_shading .and. options%rad%terrain_refl_radius > 0) then
+            call init_terrain_refl_tables(domain%dx, options%rad%terrain_refl_radius)
+        endif
+
         ! If we are just changing nest contexts, we don't need to reinitialize the radiation modules
         ! if (context_change) return
 
@@ -313,6 +322,54 @@ contains
     end subroutine radiation_init
 
 
+    subroutine init_terrain_refl_tables(dx, radius)
+        implicit none
+        real, intent(in) :: dx, radius
+
+        integer :: di, dj, R
+        real    :: dist_cells, az
+
+        ! Compute radius in grid cells, cap to reasonable size
+        R = nint(radius / dx)
+        R = max(R, 1)
+        R = min(R, 15)
+        R_cells = R
+
+        ! Deallocate if previously allocated (nest context change)
+        if (allocated(azimuth_offset)) then
+            !$acc exit data delete(azimuth_offset, inv_dist2_offset, inv_dist_offset)
+            deallocate(azimuth_offset, inv_dist2_offset, inv_dist_offset)
+        endif
+
+        allocate(azimuth_offset(-R:R, -R:R))
+        allocate(inv_dist2_offset(-R:R, -R:R))
+        allocate(inv_dist_offset(-R:R, -R:R))
+
+        azimuth_offset    = 0.0
+        inv_dist2_offset  = 0.0
+        inv_dist_offset   = 0.0
+
+        do dj = -R, R
+            do di = -R, R
+                if (di == 0 .and. dj == 0) cycle
+                dist_cells = sqrt(real(di*di + dj*dj))
+                if (dist_cells > real(R)) cycle
+                ! Azimuth from neighbor (di,dj) back toward the target (0,0)
+                ! atan2(-dj, -di) gives the angle from neighbor pointing to center
+                az = atan2(real(-dj), real(-di))
+                azimuth_offset(di,dj) = az
+                inv_dist2_offset(di,dj) = 1.0 / (dist_cells * dist_cells)
+                inv_dist_offset(di,dj)  = 1.0 / dist_cells
+            end do
+        end do
+
+        !$acc enter data copyin(azimuth_offset, inv_dist2_offset, inv_dist_offset)
+
+        if (STD_OUT_PE) write(*,*) "  Terrain reflected SW: R_cells =", R_cells, " (radius =", radius, "m)"
+
+    end subroutine init_terrain_refl_tables
+
+
     subroutine ra_var_request(options)
         implicit none
         type(options_t), intent(inout) :: options
@@ -325,10 +382,11 @@ contains
             call ra_rrtmg_var_request(options)
         endif
         
-        !! MJ added: the vars requested if we have terrain shading  
-        if (options%rad%terrain_shading) then        
+        !! MJ added: the vars requested if we have terrain shading
+        if (options%rad%terrain_shading) then
             call options%alloc_vars( [kVARS%slope, kVARS%slope_angle, kVARS%aspect_angle, kVARS%svf, kVARS%hlm, kVARS%shortwave_direct, &
-                                      kVARS%shortwave_diffuse, kVARS%shortwave_direct_above]) 
+                                      kVARS%shortwave_diffuse, kVARS%shortwave_direct_above, &
+                                      kVARS%shortwave_terrain, kVARS%terrain, kVARS%albedo])
         endif
 
     end subroutine ra_var_request
@@ -462,6 +520,11 @@ contains
         real :: trans_atm, trans_atm_dir, max_dir_1, max_dir_2, max_dir, elev_th, ratio_dif, tzone
         integer :: zdx, zdx_max
         real(real64) :: sun_declin_deg, eq_of_time_minutes
+
+        ! Terrain reflected SW local variables
+        real :: local_albedo, nbr_albedo, albedo_sum, weight_sum
+        real :: dz_refl, facing, w_refl, albedo_terrain, terrain_vf, refl_correction
+        integer :: di, dj, ii, jj, alb_month
 
         if (options%physics%radiation == 0) return
         
@@ -1319,6 +1382,90 @@ contains
                 enddo
             enddo  
             end associate
+
+            ! --- Terrain reflected shortwave radiation ---
+            ! Based on Dozier (1980), Helbig et al. (2009), Chu et al. (2021)
+            ! Simple method with multi-reflection correction and elevation-aware neighborhood albedo
+            if (R_cells > 0 .and. domain%var_indx(kVARS%svf)%v > 0 &
+                .and. domain%var_indx(kVARS%shortwave_terrain)%v > 0) then
+
+                ! Select albedo month index (1 if not using monthly albedo)
+                if (options%lsm%monthly_albedo) then
+                    alb_month = sim_month
+                else
+                    alb_month = 1
+                endif
+
+                associate(svf           => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d,           &
+                          elevation     => domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d,       &
+                          slope_ang     => domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d,   &
+                          aspect_ang    => domain%vars_2d(domain%var_indx(kVARS%aspect_angle)%v)%data_2d,  &
+                          albedo_3d     => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d,        &
+                          shortwave     => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d,     &
+                          sw_terrain    => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d)
+
+                !$acc parallel loop gang vector collapse(2) &
+                !$acc& present(svf, elevation, slope_ang, aspect_ang, albedo_3d, shortwave, sw_terrain, &
+                !$acc&         shortwave_cached, azimuth_offset, inv_dist2_offset, inv_dist_offset) &
+                !$acc& private(local_albedo, nbr_albedo, albedo_sum, weight_sum, dz_refl, facing, &
+                !$acc&         w_refl, albedo_terrain, terrain_vf, refl_correction, di, dj, ii, jj)
+                do j = jts, jte
+                    do i = its, ite
+                        ! Compute elevation-aware weighted average albedo of neighbors
+                        albedo_sum = 0.0
+                        weight_sum = 0.0
+                        do dj = -R_cells, R_cells
+                            do di = -R_cells, R_cells
+                                if (di == 0 .and. dj == 0) cycle
+                                if (inv_dist2_offset(di,dj) == 0.0) cycle  ! outside circular radius
+                                ii = i + di
+                                jj = j + dj
+                                if (ii < its .or. ii > ite .or. jj < jts .or. jj > jte) cycle
+
+                                ! Neighbor albedo
+                                nbr_albedo = albedo_3d(ii, alb_month, jj)
+
+                                ! Elevation difference: terrain above target is more visible
+                                dz_refl = elevation(ii,jj) - elevation(i,j)
+
+                                ! Facing angle: does neighbor slope face toward target?
+                                facing = max(cos(aspect_ang(ii,jj) - azimuth_offset(di,dj)), 0.0) &
+                                       * sin(slope_ang(ii,jj)) + cos(slope_ang(ii,jj))
+
+                                ! Combined weight: 1/dist^2 * elevation_bias * facing
+                                w_refl = inv_dist2_offset(di,dj) &
+                                  * (max(dz_refl, 0.0) * inv_dist_offset(di,dj) + 1.0) &
+                                  * max(facing, 0.0)
+
+                                albedo_sum = albedo_sum + w_refl * nbr_albedo
+                                weight_sum = weight_sum + w_refl
+                            end do
+                        end do
+
+                        ! Local albedo as fallback
+                        local_albedo = albedo_3d(i, alb_month, j)
+
+                        ! Weighted average albedo (fallback to local if no valid neighbors)
+                        if (weight_sum > 1.0e-10) then
+                            albedo_terrain = albedo_sum / weight_sum
+                        else
+                            albedo_terrain = local_albedo
+                        endif
+
+                        ! Terrain view factor = fraction of hemisphere occupied by terrain
+                        terrain_vf = 1.0 - svf(i,j)
+
+                        ! Terrain reflected SW with multi-reflection correction (Dozier 1980, Chu et al. 2021)
+                        ! Geometric series: 1/(1 - alpha*Ct) accounts for infinite bounces
+                        refl_correction = 1.0 / max(1.0 - albedo_terrain * terrain_vf, 0.05)
+                        sw_terrain(i,j) = terrain_vf * albedo_terrain * shortwave_cached(i,j) * refl_correction
+
+                        ! Add terrain reflected component to total shortwave
+                        shortwave(i,j) = shortwave(i,j) + sw_terrain(i,j)
+                    end do
+                end do
+                end associate
+            endif
         endif
     end subroutine rad
     

@@ -1443,6 +1443,17 @@ contains
                                attribute_t("long_name",     "diffuse shortwave radiation"), &
                                attribute_t("units",         "W m-2"),                                             &
                                attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Terrain reflected shortwave radiation
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%shortwave_terrain) then
+            var_meta%name        = "swtr"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "surface_terrain_reflected_shortwave_flux"), &
+                               attribute_t("long_name",     "terrain reflected shortwave radiation"), &
+                               attribute_t("units",         "W m-2"),                                          &
+                               attribute_t("coordinates",   "lat lon")]
         
         !>------------------------------------------------------------
         !!  MJ: in OSHD as 'sdrd' referring to 'direct shortwave radiation, per horizontal surface area' only accounted for shading but not the slope effects. Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval

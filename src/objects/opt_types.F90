@@ -260,6 +260,7 @@ module options_types
        integer :: cldovrlp                             ! how RRTMG considers cloud overlapping (1 = random, 2 = maximum-random, 3 = maximum, 4 = exponential, 5 = exponential-random)
        logical :: read_ghg                             ! Eihter use default green house gas mixing ratio, or read the in from file
        real    :: tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
+       real    :: terrain_refl_radius                  ! Radius for terrain reflected SW neighborhood (m), default 1500
     end type rad_options_type
 
     ! ------------------------------------------------

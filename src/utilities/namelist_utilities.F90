@@ -3546,6 +3546,14 @@ contains
                 max = 12
                 default = "0"
                 group = "RAD_Parameters"
+            case ("terrain_refl_radius")
+                description = "Radius for terrain reflected shortwave neighborhood averaging."//achar(10)//BLNK_CHR_N// &
+                              "Only used when terrain_shading=.True. Set to 0 to disable terrain reflected SW."
+                min = 0
+                max = 10000
+                units = "meters"
+                default = "1500.0"
+                group = "RAD_Parameters"
             ! --------------------------------------
             ! --------------------------------------
             ! Wind parameters namelist variables
