@@ -764,14 +764,12 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
 end subroutine setup_batch_exch
 
 
-module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_var_only)
+module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
     implicit none
     class(halo_t), intent(inout) :: this
-    type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+    type(index_type), intent(inout) :: vars_to_send(:)
     type(variable_t), intent(inout) :: var_data(:)
-    logical, optional, intent(in) :: exch_var_only
     
-    logical :: exch_v_only
     integer :: n, p, k_max, msg_size, indx, i, j, k, n_vars
     integer :: kms, kme, its, ite, jts, jte, halo_size
     integer :: i_start, j_start
@@ -786,9 +784,6 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     kms = this%kms; kme = this%kme
     its = this%its; ite = this%ite
     jts = this%jts; jte = this%jte
-
-    exch_v_only = .False.
-    if (present(exch_var_only)) exch_v_only=exch_var_only
 
     n = 1
     n_vars = size(var_data)
@@ -805,161 +800,16 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     ! Now iterate through the dictionary as long as there are more elements present. If two processors are on shared memory
     ! this step will directly copy the data to the other PE
 
-    if (.not.(exch_v_only)) then
-        do p = 1, size(adv_vars)
-            if (adv_vars(p)%v <= n_vars) then
-                !check that the variable indexed matches the name
-                if (var_data(adv_vars(p)%v)%id == adv_vars(p)%id) then
-                    associate(var => var_data(adv_vars(p)%v)%data_3d)
-
-                    if (.not.(this%north_boundary)) then
-                        associate(buff => this%north_buffer_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = its,ite
-                            buff(n,i-its+1,k,j) = var(i,k,(jte-halo_size+j))
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%south_boundary)) then
-                        associate(buff => this%south_buffer_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = its,ite
-                            buff(n,i-its+1,k,j) = var(i,k,jts+j-1)
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%east_boundary)) then
-                        associate(buff => this%east_buffer_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = jts,jte
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            buff(n,i,k,j-jts+1) = var((ite-halo_size+i),k,j)
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%west_boundary)) then
-                        associate(buff => this%west_buffer_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = jts,jte
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            buff(n,i,k,j-jts+1) = var(its+i-1,k,j)
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-
-                    if (.not.(this%northwest_boundary)) then
-                        j_start = jte-halo_size
-                        i_start = its-1 
-                        if (this%north_boundary) then
-                            j_start = j_start + halo_size
-                        elseif (this%west_boundary) then
-                            i_start = i_start - halo_size
-                        endif
-                        associate(buff => this%northwest_buffer_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-
-                    if (.not.(this%southeast_boundary)) then
-                        j_start = jts-1
-                        i_start = ite-halo_size
-                        if (this%south_boundary) then
-                            j_start = j_start - halo_size
-                        elseif (this%east_boundary) then
-                            i_start = i_start + halo_size
-                        endif
-                        associate(buff => this%southeast_buffer_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    
-                    if (.not.(this%southwest_boundary)) then
-                        j_start = jts-1
-                        i_start = its-1
-                        if (this%south_boundary) then
-                            j_start = j_start - halo_size
-                        elseif (this%west_boundary) then
-                            i_start = i_start - halo_size
-                        endif
-                        associate(buff => this%southwest_buffer_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-
-                    if (.not.(this%northeast_boundary)) then
-                        j_start = jte-halo_size
-                        i_start = ite-halo_size
-                        if (this%north_boundary) then
-                            j_start = j_start + halo_size
-                        elseif (this%east_boundary) then
-                            i_start = i_start + halo_size
-                        endif
-                        associate(buff => this%northeast_buffer_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    end associate
-                    n = n+1
-                endif
-            endif
-        enddo
-    endif
-
-    ! Now iterate through the exchange-only objects as long as there are more elements present
-     do p = 1, size(exch_vars)
-        !check that the variable indexed matches the name
-        if (exch_vars(p)%v <= n_vars) then
-            if (var_data(exch_vars(p)%v)%id == exch_vars(p)%id) then
-                associate(var => var_data(exch_vars(p)%v)%data_3d)
-                k_max = ubound(var,2)
-
+    do p = 1, size(vars_to_send)
+        if (vars_to_send(p)%v <= n_vars) then
+            !check that the variable indexed matches the name
+            if (var_data(vars_to_send(p)%v)%id == vars_to_send(p)%id) then
+                associate(var => var_data(vars_to_send(p)%v)%data_3d)
                 if (.not.(this%north_boundary)) then
                     associate(buff => this%north_buffer_3d)
                     !$acc parallel loop gang vector collapse(3) present(var, buff)
                     do j = 1,halo_size
-                    do k = 1,k_max
+                    do k = kms,kme
                     do i = its,ite
                         buff(n,i-its+1,k,j) = var(i,k,(jte-halo_size+j))
                     enddo
@@ -967,12 +817,11 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
                     enddo
                     end associate
                 endif
-
                 if (.not.(this%south_boundary)) then
                     associate(buff => this%south_buffer_3d)
                     !$acc parallel loop gang vector collapse(3) present(var, buff)
                     do j = 1,halo_size
-                    do k = 1,k_max
+                    do k = kms,kme
                     do i = its,ite
                         buff(n,i-its+1,k,j) = var(i,k,jts+j-1)
                     enddo
@@ -980,12 +829,11 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
                     enddo
                     end associate
                 endif
-
                 if (.not.(this%east_boundary)) then
                     associate(buff => this%east_buffer_3d)
                     !$acc parallel loop gang vector collapse(3) present(var, buff)
                     do j = jts,jte
-                    do k = 1,k_max
+                    do k = kms,kme
                     do i = 1,halo_size
                         buff(n,i,k,j-jts+1) = var((ite-halo_size+i),k,j)
                     enddo
@@ -993,14 +841,93 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
                     enddo
                     end associate
                 endif
-
                 if (.not.(this%west_boundary)) then
                     associate(buff => this%west_buffer_3d)
                     !$acc parallel loop gang vector collapse(3) present(var, buff)
                     do j = jts,jte
-                    do k = 1,k_max
+                    do k = kms,kme
                     do i = 1,halo_size
                         buff(n,i,k,j-jts+1) = var(its+i-1,k,j)
+                    enddo
+                    enddo
+                    enddo
+                    end associate
+                endif
+
+                if (.not.(this%northwest_boundary)) then
+                    j_start = jte-halo_size
+                    i_start = its-1 
+                    if (this%north_boundary) then
+                        j_start = j_start + halo_size
+                    elseif (this%west_boundary) then
+                        i_start = i_start - halo_size
+                    endif
+                    associate(buff => this%northwest_buffer_3d)
+                    !$acc parallel loop gang vector collapse(3) present(var, buff)
+                    do j = 1,halo_size
+                    do k = kms,kme
+                    do i = 1,halo_size
+                        buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
+                    enddo
+                    enddo
+                    enddo
+                    end associate
+                endif
+
+                if (.not.(this%southeast_boundary)) then
+                    j_start = jts-1
+                    i_start = ite-halo_size
+                    if (this%south_boundary) then
+                        j_start = j_start - halo_size
+                    elseif (this%east_boundary) then
+                        i_start = i_start + halo_size
+                    endif
+                    associate(buff => this%southeast_buffer_3d)
+                    !$acc parallel loop gang vector collapse(3) present(var, buff)
+                    do j = 1,halo_size
+                    do k = kms,kme
+                    do i = 1,halo_size
+                        buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
+                    enddo
+                    enddo
+                    enddo
+                    end associate
+                endif
+                
+                if (.not.(this%southwest_boundary)) then
+                    j_start = jts-1
+                    i_start = its-1
+                    if (this%south_boundary) then
+                        j_start = j_start - halo_size
+                    elseif (this%west_boundary) then
+                        i_start = i_start - halo_size
+                    endif
+                    associate(buff => this%southwest_buffer_3d)
+                    !$acc parallel loop gang vector collapse(3) present(var, buff)
+                    do j = 1,halo_size
+                    do k = kms,kme
+                    do i = 1,halo_size
+                        buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
+                    enddo
+                    enddo
+                    enddo
+                    end associate
+                endif
+
+                if (.not.(this%northeast_boundary)) then
+                    j_start = jte-halo_size
+                    i_start = ite-halo_size
+                    if (this%north_boundary) then
+                        j_start = j_start + halo_size
+                    elseif (this%east_boundary) then
+                        i_start = i_start + halo_size
+                    endif
+                    associate(buff => this%northeast_buffer_3d)
+                    !$acc parallel loop gang vector collapse(3) present(var, buff)
+                    do j = 1,halo_size
+                    do k = kms,kme
+                    do i = 1,halo_size
+                        buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
                     enddo
                     enddo
                     enddo
@@ -1013,7 +940,6 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
     enddo
 
     !$acc data present(this)
-
 
     !$acc host_data use_device(this%south_buffer_3d, this%north_buffer_3d, &
     !$acc this%east_buffer_3d, this%west_buffer_3d, &
@@ -1105,17 +1031,15 @@ module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_v
 
 end subroutine halo_3d_send_batch
 
-module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exch_var_only, wait_timer)
+module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer)
     implicit none
     class(halo_t), intent(inout) :: this
-    type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+    type(index_type), intent(inout) :: vars_to_ret(:)
     type(variable_t), intent(inout) :: var_data(:)
-    logical, optional, intent(in) :: exch_var_only
     type(timer_t), optional,     intent(inout)   :: wait_timer
 
     integer :: n, p, k_max, i, j, k, n_vars
     integer :: halo_size, kms, kme, ims, jms, its, ite, jts, jte
-    logical :: exch_v_only
 
     if (this%n_3d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
@@ -1124,9 +1048,6 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     ims = this%ims; jms = this%jms
     its = this%its; ite = this%ite
     jts = this%jts; jte = this%jte
-
-    exch_v_only = .False.
-    if (present(exch_var_only)) exch_v_only=exch_var_only
 
     if (.not.(this%north_boundary)) call MPI_Win_Wait(this%north_3d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_3d_win)
@@ -1142,132 +1063,16 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
     if (present(wait_timer)) call wait_timer%start()
 
     ! Now iterate through the dictionary as long as there are more elements present
-    if (.not.(exch_v_only)) then
-        do p = 1, size(adv_vars)
-            if (adv_vars(p)%v <= n_vars) then
-                !check that the variable indexed matches the name
-                if (var_data(adv_vars(p)%v)%id == adv_vars(p)%id) then
-                    associate(var => var_data(adv_vars(p)%v)%data_3d)
-
-                    if (.not.(this%north_boundary)) then
-                        associate(buff => this%north_batch_in_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = its,ite
-                            var(i,k,(jte+j)) = buff(n,i-its+1,k,j)
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%south_boundary)) then
-                        associate(buff => this%south_batch_in_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = its,ite
-                            var(i,k,jms+j-1) = buff(n,i-its+1,k,j)
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%east_boundary)) then
-                        associate(buff => this%east_batch_in_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = jts,jte
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            var((ite+i),k,j) = buff(n,i,k,j-jts+1)
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%west_boundary)) then
-                        associate(buff => this%west_batch_in_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = jts,jte
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            var(ims+i-1,k,j) = buff(n,i,k,j-jts+1)
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    
-                    if (.not.(this%northwest_boundary)) then
-                        associate(buff => this%northwest_batch_in_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            var(ims+i-1,k,(jte+j)) = buff(n,i,k,j)
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-
-                    if (.not.(this%southeast_boundary)) then
-                        associate(buff => this%southeast_batch_in_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            var((ite+i),k,jms+j-1) = buff(n,i,k,j)
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-
-                    if (.not.(this%southwest_boundary)) then
-                        associate(buff => this%southwest_batch_in_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            var(ims+i-1,k,jms+j-1) = buff(n,i,k,j)
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-
-                    if (.not.(this%northeast_boundary)) then
-                        associate(buff => this%northeast_batch_in_3d)
-                        !$acc parallel loop gang vector collapse(3) present(var, buff)
-                        do j = 1,halo_size
-                        do k = kms,kme
-                        do i = 1,halo_size
-                            var((ite+i),k,(jte+j)) = buff(n,i,k,j)
-                        enddo
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    n = n+1
-                    end associate
-                endif
-            endif
-        enddo
-    endif
-    ! Now iterate through the exchange-only objects as long as there are more elements present
-    do p = 1, size(exch_vars)
-        if (exch_vars(p)%v <= n_vars) then
+    do p = 1, size(vars_to_ret)
+        if (vars_to_ret(p)%v <= n_vars) then
             !check that the variable indexed matches the name
-            if (var_data(exch_vars(p)%v)%id == exch_vars(p)%id) then
-                associate(var => var_data(exch_vars(p)%v)%data_3d)
-                k_max = ubound(var,2)
-
+            if (var_data(vars_to_ret(p)%v)%id == vars_to_ret(p)%id) then
+                associate(var => var_data(vars_to_ret(p)%v)%data_3d)
                 if (.not.(this%north_boundary)) then
                     associate(buff => this%north_batch_in_3d)
                     !$acc parallel loop gang vector collapse(3) present(var, buff)
                     do j = 1,halo_size
-                    do k = 1,k_max
+                    do k = kms,kme
                     do i = its,ite
                         var(i,k,(jte+j)) = buff(n,i-its+1,k,j)
                     enddo
@@ -1279,7 +1084,7 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
                     associate(buff => this%south_batch_in_3d)
                     !$acc parallel loop gang vector collapse(3) present(var, buff)
                     do j = 1,halo_size
-                    do k = 1,k_max
+                    do k = kms,kme
                     do i = its,ite
                         var(i,k,jms+j-1) = buff(n,i-its+1,k,j)
                     enddo
@@ -1291,7 +1096,7 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
                     associate(buff => this%east_batch_in_3d)
                     !$acc parallel loop gang vector collapse(3) present(var, buff)
                     do j = jts,jte
-                    do k = 1,k_max
+                    do k = kms,kme
                     do i = 1,halo_size
                         var((ite+i),k,j) = buff(n,i,k,j-jts+1)
                     enddo
@@ -1303,9 +1108,61 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
                     associate(buff => this%west_batch_in_3d)
                     !$acc parallel loop gang vector collapse(3) present(var, buff)
                     do j = jts,jte
-                    do k = 1,k_max
+                    do k = kms,kme
                     do i = 1,halo_size
                         var(ims+i-1,k,j) = buff(n,i,k,j-jts+1)
+                    enddo
+                    enddo
+                    enddo
+                    end associate
+                endif
+                
+                if (.not.(this%northwest_boundary)) then
+                    associate(buff => this%northwest_batch_in_3d)
+                    !$acc parallel loop gang vector collapse(3) present(var, buff)
+                    do j = 1,halo_size
+                    do k = kms,kme
+                    do i = 1,halo_size
+                        var(ims+i-1,k,(jte+j)) = buff(n,i,k,j)
+                    enddo
+                    enddo
+                    enddo
+                    end associate
+                endif
+
+                if (.not.(this%southeast_boundary)) then
+                    associate(buff => this%southeast_batch_in_3d)
+                    !$acc parallel loop gang vector collapse(3) present(var, buff)
+                    do j = 1,halo_size
+                    do k = kms,kme
+                    do i = 1,halo_size
+                        var((ite+i),k,jms+j-1) = buff(n,i,k,j)
+                    enddo
+                    enddo
+                    enddo
+                    end associate
+                endif
+
+                if (.not.(this%southwest_boundary)) then
+                    associate(buff => this%southwest_batch_in_3d)
+                    !$acc parallel loop gang vector collapse(3) present(var, buff)
+                    do j = 1,halo_size
+                    do k = kms,kme
+                    do i = 1,halo_size
+                        var(ims+i-1,k,jms+j-1) = buff(n,i,k,j)
+                    enddo
+                    enddo
+                    enddo
+                    end associate
+                endif
+
+                if (.not.(this%northeast_boundary)) then
+                    associate(buff => this%northeast_batch_in_3d)
+                    !$acc parallel loop gang vector collapse(3) present(var, buff)
+                    do j = 1,halo_size
+                    do k = kms,kme
+                    do i = 1,halo_size
+                        var((ite+i),k,(jte+j)) = buff(n,i,k,j)
                     enddo
                     enddo
                     enddo
@@ -1330,10 +1187,10 @@ module subroutine halo_3d_retrieve_batch(this,exch_vars, adv_vars, var_data, exc
 
 end subroutine halo_3d_retrieve_batch
 
-module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
+module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
     implicit none
     class(halo_t), intent(inout) :: this
-    type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+    type(index_type), intent(inout) :: vars_to_send(:)
     type(variable_t), intent(inout) :: var_data(:)
     integer :: n, p, msg_size, i, j, k, n_vars
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
@@ -1342,8 +1199,6 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
 
     msg_size = 1
     disp = 0
-
-    ! call exch_vars%reset_iterator()
 
 
     if (.not.(this%north_boundary)) call MPI_Win_Start(this%north_neighbor_grp, 0, this%north_2d_win)
@@ -1354,19 +1209,19 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
     n = 1
     n_vars = size(var_data)
 
-    !$acc data present(this, exch_vars, adv_vars, var_data)
+    !$acc data present(this, vars_to_send, var_data)
 
     ! Now iterate through the exchange-only objects as long as there are more elements present
-    do p = 1, size(exch_vars)
-        if (exch_vars(p)%v <= n_vars) then
+    do p = 1, size(vars_to_send)
+        if (vars_to_send(p)%v <= n_vars) then
             !check that the variable indexed matches the name
-            if (var_data(exch_vars(p)%v)%id == exch_vars(p)%id) then
+            if (var_data(vars_to_send(p)%v)%id == vars_to_send(p)%id) then
                     if (.not.(this%north_boundary)) then
                         !$acc parallel loop gang vector collapse(2)
                         do j = 1,this%halo_size
                         do i = this%its,this%ite
                         this%north_buffer_2d(n,i-this%its+1,j) = &
-                            var_data(exch_vars(p)%v)%data_2d(i,(this%jte-this%halo_size+j))
+                            var_data(vars_to_send(p)%v)%data_2d(i,(this%jte-this%halo_size+j))
                         enddo
                         enddo
                     endif
@@ -1375,7 +1230,7 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
                         do j = 1,this%halo_size
                         do i = this%its,this%ite
                         this%south_buffer_2d(n,i-this%its+1,j) = &
-                                var_data(exch_vars(p)%v)%data_2d(i,this%jts+j-1)
+                                var_data(vars_to_send(p)%v)%data_2d(i,this%jts+j-1)
                         enddo
                         enddo
                     endif
@@ -1384,7 +1239,7 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
                         do j = this%jts,this%jte
                         do i = 1,this%halo_size
                         this%east_buffer_2d(n,i,j-this%jts+1) = &
-                            var_data(exch_vars(p)%v)%data_2d((this%ite-this%halo_size+i),j)
+                            var_data(vars_to_send(p)%v)%data_2d((this%ite-this%halo_size+i),j)
                         enddo
                         enddo
                     endif
@@ -1393,7 +1248,7 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
                         do j = this%jts,this%jte
                         do i = 1,this%halo_size
                         this%west_buffer_2d(n,i,j-this%jts+1) = &
-                            var_data(exch_vars(p)%v)%data_2d(this%its+i-1,j)
+                            var_data(vars_to_send(p)%v)%data_2d(this%its+i-1,j)
                         enddo
                         enddo
                     endif
@@ -1440,10 +1295,10 @@ module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
 
 end subroutine halo_2d_send_batch
 
-module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
+module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
     implicit none
     class(halo_t), intent(inout) :: this
-    type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+    type(index_type), intent(inout) :: vars_to_ret(:)
     type(variable_t), intent(inout) :: var_data(:)
     integer :: n, p, i, j, k, n_vars
 
@@ -1457,18 +1312,18 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
     n = 1    
     n_vars = size(var_data)
 
-    !$acc data present(this, exch_vars, adv_vars, var_data)
+    !$acc data present(this, vars_to_ret, var_data)
 
     ! Now iterate through the exchange-only objects as long as there are more elements present
-    do p = 1, size(exch_vars)
-        if (exch_vars(p)%v <= n_vars) then
+    do p = 1, size(vars_to_ret)
+        if (vars_to_ret(p)%v <= n_vars) then
             !check that the variable indexed matches the name
-            if (var_data(exch_vars(p)%v)%id == exch_vars(p)%id) then
+            if (var_data(vars_to_ret(p)%v)%id == vars_to_ret(p)%id) then
                     if (.not.(this%north_boundary)) then
                         !$acc parallel loop gang vector collapse(2)
                         do j = 1,this%halo_size
                         do i = this%its,this%ite
-                        var_data(exch_vars(p)%v)%data_2d(i,(this%jte+j)) = &
+                        var_data(vars_to_ret(p)%v)%data_2d(i,(this%jte+j)) = &
                                 this%north_batch_in_2d(n,i-this%its+1,j)
                         enddo
                         enddo
@@ -1477,7 +1332,7 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
                         !$acc parallel loop gang vector collapse(2)
                         do j = 1,this%halo_size
                         do i = this%its,this%ite
-                        var_data(exch_vars(p)%v)%data_2d(i,this%jms+j-1) = &
+                        var_data(vars_to_ret(p)%v)%data_2d(i,this%jms+j-1) = &
                                 this%south_batch_in_2d(n,i-this%its+1,j)
                         enddo
                         enddo
@@ -1486,7 +1341,7 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
                         !$acc parallel loop gang vector collapse(2)
                         do j = this%jts,this%jte
                         do i = 1,this%halo_size
-                        var_data(exch_vars(p)%v)%data_2d((this%ite+i),j) = &
+                        var_data(vars_to_ret(p)%v)%data_2d((this%ite+i),j) = &
                                 this%east_batch_in_2d(n,i,j-this%jts+1)
                         enddo
                         enddo
@@ -1495,7 +1350,7 @@ module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
                         !$acc parallel loop gang vector collapse(2)
                         do j = this%jts,this%jte
                         do i = 1,this%halo_size
-                        var_data(exch_vars(p)%v)%data_2d(this%ims+i-1,j) = &
+                        var_data(vars_to_ret(p)%v)%data_2d(this%ims+i-1,j) = &
                                 this%west_batch_in_2d(n,i,j-this%jts+1)
                         enddo
                         enddo

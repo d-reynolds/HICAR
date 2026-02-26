@@ -181,11 +181,22 @@ contains
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: exch_only
 
-        if (present(exch_only)) then
-            call this%halo%halo_3d_send_batch(this%exch_vars, this%adv_vars, this%vars_3d, exch_var_only=exch_only)
+        logical :: exch_v_only = .False.
+        type(index_type), allocatable :: vars_to_send(:)
+
+        if (present(exch_only)) exch_v_only = exch_only
+
+        if (exch_v_only) then
+            allocate(vars_to_send(size(this%exch_vars)))
+            vars_to_send = this%exch_vars
         else
-            call this%halo%halo_3d_send_batch(this%exch_vars, this%adv_vars, this%vars_3d)
-        end if
+            allocate(vars_to_send(size(this%adv_vars)+size(this%exch_vars)))
+            vars_to_send(1:size(this%exch_vars)) = this%exch_vars
+            vars_to_send(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
+        endif
+
+        call this%halo%halo_3d_send_batch(vars_to_send, this%vars_3d)
+
     end subroutine halo_3d_send
 
     module subroutine halo_3d_retrieve(this, exch_only)
@@ -193,29 +204,52 @@ contains
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: exch_only
 
-        if (present(exch_only)) then
-            call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_3d, wait_timer=this%wait_timer, exch_var_only=exch_only)
+        logical :: exch_v_only = .False.
+        type(index_type), allocatable :: vars_to_ret(:)
+
+        if (present(exch_only)) exch_v_only = exch_only
+
+        if (exch_v_only) then
+            allocate(vars_to_ret(size(this%exch_vars)))
+            vars_to_ret = this%exch_vars
         else
-            call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_3d, wait_timer=this%wait_timer)
-        end if
+            allocate(vars_to_ret(size(this%adv_vars)+size(this%exch_vars)))
+            vars_to_ret(1:size(this%exch_vars)) = this%exch_vars
+            vars_to_ret(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
+        endif
+
+        call this%halo%halo_3d_retrieve_batch(vars_to_ret, this%vars_3d, wait_timer=this%wait_timer)
+
     end subroutine halo_3d_retrieve
 
     module subroutine halo_2d_send(this)
         implicit none
         class(domain_t), intent(inout) :: this
 
+        type(index_type), allocatable :: vars_to_send(:)
+
         if (this%n_exch_2d + this%n_adv_2d == 0) return
 
-        call this%halo%halo_2d_send_batch(this%exch_vars, this%adv_vars, this%vars_2d)
+        allocate(vars_to_send(size(this%adv_vars)+size(this%exch_vars)))
+        vars_to_send(1:size(this%exch_vars)) = this%exch_vars
+        vars_to_send(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
+
+        call this%halo%halo_2d_send_batch(vars_to_send, this%vars_2d)
     end subroutine halo_2d_send
 
     module subroutine halo_2d_retrieve(this)
         implicit none
         class(domain_t), intent(inout) :: this
 
+        type(index_type), allocatable :: vars_to_ret(:)
+
         if (this%n_exch_2d + this%n_adv_2d == 0) return
 
-        call this%halo%halo_2d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_2d)
+        allocate(vars_to_ret(size(this%adv_vars)+size(this%exch_vars)))
+        vars_to_ret(1:size(this%exch_vars)) = this%exch_vars
+        vars_to_ret(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
+
+        call this%halo%halo_2d_retrieve_batch(vars_to_ret, this%vars_2d)
     end subroutine halo_2d_retrieve
 
     !> -------------------------------

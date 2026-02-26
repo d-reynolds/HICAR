@@ -188,35 +188,33 @@ interface
     !     logical, optional, intent(in) :: two_d,three_d,exch_var_only
     ! end subroutine
 
-    module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_var_only)
+    module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
         implicit none
         class(halo_t), intent(inout) :: this
-        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(index_type), intent(inout) :: vars_to_send(:)
         type(variable_t), intent(inout) :: var_data(:)
-            logical, optional, intent(in) :: exch_var_only
     end subroutine halo_3d_send_batch
 
-    module subroutine halo_3d_retrieve_batch(this, exch_vars, adv_vars, var_data, exch_var_only, wait_timer)
+    module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer)
         implicit none
         class(halo_t), intent(inout) :: this
-        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(index_type), intent(inout) :: vars_to_ret(:)
         type(variable_t), intent(inout) :: var_data(:)
-            logical, optional, intent(in) :: exch_var_only
         type(timer_t), optional,     intent(inout)   :: wait_timer
 
     end subroutine halo_3d_retrieve_batch
 
-    module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
+    module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
         implicit none
         class(halo_t), intent(inout) :: this
-        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(index_type), intent(inout) :: vars_to_send(:)
         type(variable_t), intent(inout) :: var_data(:)
         end subroutine halo_2d_send_batch
 
-    module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
+    module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
         implicit none
         class(halo_t), intent(inout) :: this
-        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(index_type), intent(inout) :: vars_to_ret(:)
         type(variable_t), intent(inout) :: var_data(:)
         end subroutine halo_2d_retrieve_batch
 

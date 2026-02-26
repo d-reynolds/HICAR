@@ -313,6 +313,7 @@ contains
             !Determine dt
             if (last_wind_update >= options%wind%update_dt%seconds() .or. options%wind%wind_only) then
                 call domain%wind_timer%start()
+                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%density)%v),corners=.True.)
                 call update_winds(domain, options)
                 call domain%wind_timer%stop()
 
@@ -419,7 +420,6 @@ contains
 
                                 
                 call domain%mp_timer%start()
-
                 call mp(domain, options, real(dt%seconds()))
                 if (options%general%debug) call domain_check(domain, "mp_halo")
                 call domain%mp_timer%stop()
