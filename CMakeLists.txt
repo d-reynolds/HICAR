@@ -796,11 +796,53 @@ add_custom_target(test_cli
     VERBATIM
 )
 
-add_custom_target(test_reproducibility
-    COMMAND ${CMAKE_COMMAND} -E echo "Running reproducibility tests..."
-    COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_reproducibility.sh ${PROJECT_SOURCE_DIR}
-    DEPENDS HICAR download_test_data
+# HICAR_debug target: build debug executable for reproducibility testing.
+# If already in debug mode, just depend on the main HICAR target.
+# Otherwise, spawn a separate debug sub-build that installs HICAR_debug to bin/.
+if(MODE STREQUAL "debug" OR MODE STREQUAL "debugslow")
+    add_custom_target(HICAR_debug DEPENDS HICAR)
+else()
+    set(_DEBUG_BUILD_DIR "${CMAKE_BINARY_DIR}/debug_build")
+    add_custom_target(HICAR_debug
+        COMMAND ${CMAKE_COMMAND} -S ${PROJECT_SOURCE_DIR} -B ${_DEBUG_BUILD_DIR}
+            -DMODE=debug
+            -DFC=${FC}
+            -DPETSC_DIR=${PETSC_DIR}
+            -DPETSC_ARCH=${PETSC_ARCH}
+            -DAMGX_DIR=${AMGX_DIR}
+            -DFFTW_DIR=${FFTW_DIR}
+            -DNETCDF_DIR=${NETCDF_DIR}
+            -DMPI_DIR=${MPI_DIR}
+            -DFSM_DIR=${FSM_DIR}
+            -DFSM=${FSM}
+            -DASSERTIONS=${ASSERTIONS}
+            -DOPENACC=${OPENACC}
+        COMMAND ${CMAKE_COMMAND} --build ${_DEBUG_BUILD_DIR} --parallel
+        COMMAND ${CMAKE_COMMAND} --install ${_DEBUG_BUILD_DIR}
+        COMMENT "Building HICAR_debug executable for reproducibility testing"
+    )
+endif()
+
+add_custom_target(test_decomposition
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_reproducibility.sh ${PROJECT_SOURCE_DIR} decomposition
+    DEPENDS HICAR_debug download_test_data
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
-    COMMENT "Running MPI and restart reproducibility tests"
+    COMMENT "Running MPI domain decomposition reproducibility test (5 vs 10 ranks)"
+    VERBATIM
+)
+
+add_custom_target(test_restart
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_reproducibility.sh ${PROJECT_SOURCE_DIR} restart
+    DEPENDS HICAR_debug download_test_data
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
+    COMMENT "Running restart reproducibility test"
+    VERBATIM
+)
+
+add_custom_target(test_reproducibility
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_reproducibility.sh ${PROJECT_SOURCE_DIR} all
+    DEPENDS HICAR_debug download_test_data
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
+    COMMENT "Running all reproducibility tests"
     VERBATIM
 )
