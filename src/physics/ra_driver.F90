@@ -354,7 +354,7 @@ contains
                 ! Azimuth from neighbor (di,dj) back toward the target (0,0)
                 ! atan2(-dj, -di) gives the angle from neighbor pointing to center
                 az = atan2(real(-dj), real(-di))
-                azimuth_offset(di,dj) = az * 180.0/piconst
+                azimuth_offset(di,dj) = az
                 inv_dist2_offset(di,dj) = 1.0 / (dist_cells * dist_cells)
             end do
         end do
@@ -1627,8 +1627,11 @@ contains
                                 nbr_albedo = nbr_albedo_2d(ii, jj)
 
                                 ! Facing: neighbor faces target * neighbor is illuminated by sun
-                                facing = max(cos(aspect_ang(ii,jj) - azimuth_offset(di,dj)), 0.0) &
-                                       * sin(slope_ang(ii,jj))
+                                facing = max(cos( (aspect_ang(ii,jj) - azimuth_offset(di,dj))), 0.0) & ! if the neighbor slope faces the location of the target slope
+                                        * max(cos( aspect_ang(ii,jj) - aspect_ang(i,j) + 180.0), 0.01) & ! if the neighbor slope and target slope are facing each other
+                                                                                                         ! the max is taken with 0.01 so that a large flat plane, with no
+                                                                                                         ! opposing slopes, does not get zero weight
+                                        * sin(slope_ang(ii,jj)) ! how much the neighbor slope is tilted towards the target slope
 
                                 ! Combined weight: 1/dist^2 * elevation_bias * facing
                                 w_refl = inv_dist2_offset(di,dj) &
@@ -1643,7 +1646,7 @@ contains
                         local_albedo = albedo_3d(i, alb_month, j)
 
                         ! Weighted average albedo (fallback to local if no valid neighbors)
-                        if (weight_sum > 1.0e-10) then
+                        if (weight_sum > 1.0e-8) then
                             albedo_terrain = albedo_sum / weight_sum
                         else
                             albedo_terrain = local_albedo

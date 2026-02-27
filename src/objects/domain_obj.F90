@@ -18,7 +18,7 @@ submodule(domain_interface) domain_implementation
     use array_utilities,      only : array_offset_x, array_offset_y, smooth_array, smooth_array_2d, make_2d_x, make_2d_y
     use vertical_interpolation,only : vinterp, vLUT
     use output_metadata,            only : get_varname, get_varmeta, get_varindx
-    use mod_wrf_constants,    only : gravity, R_d, KARMAN, cp
+    use mod_wrf_constants,    only : gravity, R_d, KARMAN, cp, DEGRAD
     use iso_fortran_env
     use debug_module,       only : domain_check
 
@@ -2285,6 +2285,13 @@ contains
                 call io_read(options%domain%init_conditions_file,   &
                                options%domain%aspect_angle_var,         &
                                temporary_data)
+                if (maxval(temporary_data) > 10.0) then
+                    if (STD_OUT_PE) write(*,*) "WARNING: detected aspect angles > 10 degrees in domain input data."
+                    if (STD_OUT_PE) write(*,*) "         Check units of aspect angle variable in ", trim(options%domain%init_conditions_file), " ", trim(options%domain%aspect_angle_var)
+                    if (STD_OUT_PE) write(*,*) "         and ensure they are in radians (not degrees or percent slope)"
+                    if (STD_OUT_PE) write(*,*) "         Auto-converting aspect angle to radians assuming input was in degrees."
+                    temporary_data = temporary_data * DEGRAD
+                endif
                 if (this%var_indx(kVARS%aspect_angle)%v > 0) then
                     this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
                 endif

@@ -954,7 +954,7 @@ contains
             var_meta%name        = "aspect_angle"
             var_meta%dimensions  = two_d_dimensions
             var_meta%attributes  = [attribute_t("non_standard_name", "Aspect of the terrain"),                 &
-                                attribute_t("units",         "degrees"),                                   &
+                                attribute_t("units",         "radians"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Neighbor slope angle (internal, not for output)
@@ -974,7 +974,7 @@ contains
             var_meta%dimensions  = two_d_neighbor_dimensions
             var_meta%output      = .False.
             var_meta%attributes  = [attribute_t("non_standard_name", "Aspect angle in neighborhood"),            &
-                                attribute_t("units",         "degrees"),                                   &
+                                attribute_t("units",         "radians"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
         !!  Sky view fraction
