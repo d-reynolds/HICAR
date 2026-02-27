@@ -957,11 +957,32 @@ contains
                                 attribute_t("units",         "degrees"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
         !>------------------------------------------------------------
+        !!  Neighbor slope angle (internal, not for output)
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%neighbor_slope_angle) then
+            var_meta%name        = "neighbor_slope_angle"
+            var_meta%dimensions  = two_d_neighbor_dimensions
+            var_meta%output      = .False.
+            var_meta%attributes  = [attribute_t("non_standard_name", "Slope angle in neighborhood"),             &
+                                attribute_t("units",         "degrees"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Neighbor aspect angle (internal, not for output)
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%neighbor_aspect_angle) then
+            var_meta%name        = "neighbor_aspect_angle"
+            var_meta%dimensions  = two_d_neighbor_dimensions
+            var_meta%output      = .False.
+            var_meta%attributes  = [attribute_t("non_standard_name", "Aspect angle in neighborhood"),            &
+                                attribute_t("units",         "degrees"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
         !!  Sky view fraction
         !!------------------------------------------------------------
         else if (var_idx==kVARS%svf) then
             var_meta%name        = "svf"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%output      = .False.
             var_meta%attributes  = [attribute_t("non_standard_name", "sky view fraction"),                 &
                                 attribute_t("units",         "-"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -971,6 +992,7 @@ contains
         else if (var_idx==kVARS%hlm) then
             var_meta%name        = "hlm"
             var_meta%dimensions  = three_d_hlm_dimensions
+            var_meta%output      = .False.
             var_meta%dim_len(2)  = 90
             var_meta%attributes  = [attribute_t("non_standard_name", "Horizon line matrix"),                 &
                                 attribute_t("units",         "degrees"),                                   &
@@ -1176,6 +1198,7 @@ contains
         else if (var_idx==kVARS%Sx) then
             var_meta%name        = "Sx"
             var_meta%dimensions  = four_d_azim_dimensions
+            var_meta%output      = .False.
             var_meta%attributes  = [attribute_t("non_standard_name", "Maximum upwind slope"), &
                                 attribute_t("units",         "-"),                                                 &
                                 attribute_t("coordinates",   "lat lon")]

@@ -166,7 +166,8 @@ contains
             if (this%output%vars_for_output(i)+this%vars_for_restart(i) > 0) then
                 tmp_meta = get_varmeta(i)
                 ! Also clean entries that have no metadata defined (no output name) or are not 2d or 3d
-                if (tmp_meta%name == "" .or. .not.(tmp_meta%two_d .or. tmp_meta%three_d)) then
+                if (tmp_meta%name == "" .or. .not.(tmp_meta%two_d .or. tmp_meta%three_d) &
+                    .or. .not. tmp_meta%output) then
                     this%output%vars_for_output(i) = 0
                     this%vars_for_restart(i) = 0
                     cycle

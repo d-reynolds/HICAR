@@ -41,6 +41,7 @@ module meta_data_interface
 
         integer :: n_attrs = 0
         logical :: unlimited_dim = .False.
+        logical :: output = .True.   ! Whether this variable can appear in output files
 
         type(attribute_t), allocatable :: attributes(:)
     contains

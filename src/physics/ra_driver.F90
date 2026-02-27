@@ -125,7 +125,7 @@ module radiation
     real*8  :: Delta_t !! MJ added to detect the time for outputting
 
     ! Terrain reflected shortwave precomputed lookup tables
-    real, allocatable, dimension(:,:) :: azimuth_offset, inv_dist2_offset, inv_dist_offset
+    real, allocatable, dimension(:,:) :: azimuth_offset, inv_dist2_offset
     integer :: R_cells = 0
     integer :: ims, ime, jms, jme, kms, kme
     integer :: its, ite, jts, jte, kts, kte
@@ -329,25 +329,22 @@ contains
         integer :: di, dj, R
         real    :: dist_cells, az
 
-        ! Compute radius in grid cells, cap to reasonable size
+        ! Compute radius in grid cells
         R = nint(radius / dx)
         R = max(R, 1)
-        R = min(R, 15)
         R_cells = R
 
         ! Deallocate if previously allocated (nest context change)
         if (allocated(azimuth_offset)) then
-            !$acc exit data delete(azimuth_offset, inv_dist2_offset, inv_dist_offset)
-            deallocate(azimuth_offset, inv_dist2_offset, inv_dist_offset)
+            !$acc exit data delete(azimuth_offset, inv_dist2_offset)
+            deallocate(azimuth_offset, inv_dist2_offset)
         endif
 
         allocate(azimuth_offset(-R:R, -R:R))
         allocate(inv_dist2_offset(-R:R, -R:R))
-        allocate(inv_dist_offset(-R:R, -R:R))
 
         azimuth_offset    = 0.0
         inv_dist2_offset  = 0.0
-        inv_dist_offset   = 0.0
 
         do dj = -R, R
             do di = -R, R
@@ -357,17 +354,212 @@ contains
                 ! Azimuth from neighbor (di,dj) back toward the target (0,0)
                 ! atan2(-dj, -di) gives the angle from neighbor pointing to center
                 az = atan2(real(-dj), real(-di))
-                azimuth_offset(di,dj) = az
+                azimuth_offset(di,dj) = az * 180.0/piconst
                 inv_dist2_offset(di,dj) = 1.0 / (dist_cells * dist_cells)
-                inv_dist_offset(di,dj)  = 1.0 / dist_cells
             end do
         end do
 
-        !$acc enter data copyin(azimuth_offset, inv_dist2_offset, inv_dist_offset)
+        !$acc enter data copyin(azimuth_offset, inv_dist2_offset)
 
         if (STD_OUT_PE) write(*,*) "  Terrain reflected SW: R_cells =", R_cells, " (radius =", radius, "m)"
 
     end subroutine init_terrain_refl_tables
+
+
+    !> Gather neighborhood albedo into nbr_albedo_2d(ihs:ihe, jhs:jhe)
+    !! Uses multi-phase MPI_Isend+MPI_Recv to handle R_cells potentially exceeding tile width.
+    !! Within each phase: NS exchanges first (extending j range), then EW exchanges
+    !! using the extended j range. This naturally fills corner regions without explicit
+    !! corner exchanges, because the EW strips include data received from NS exchanges.
+    !! (In a 2D grid decomposition, NS neighbors share the same x range and EW neighbors
+    !!  share the same y range, so strip lengths always match between sender and receiver.)
+    subroutine gather_neighborhood_albedo(domain, alb_month, nbr_albedo_2d)
+        implicit none
+        type(domain_t), intent(in) :: domain
+        integer, intent(in) :: alb_month
+        real, intent(inout) :: nbr_albedo_2d(domain%ihs:domain%ihe, domain%jhs:domain%jhe)
+
+        real, allocatable :: send_buf(:), recv_buf(:)
+        integer :: phase, n_phases, tile_w_i, tile_w_j, min_tile_w, width
+        integer :: i_lo, i_hi, j_lo, j_hi  ! current valid extent in nbr_albedo_2d
+        integer :: send_len, recv_width, max_recv_len, buf_size, ierr
+        integer :: i, j, idx
+        type(MPI_Status) :: stat
+        type(MPI_Request) :: send_req
+
+        ! Copy own tile albedo into the buffer
+        do j = jts, jte
+            do i = its, ite
+                nbr_albedo_2d(i,j) = domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(i, alb_month, j) * domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d(i,j)  ! zero out ocean points
+            end do
+        end do
+
+        tile_w_i = ite - its + 1
+        tile_w_j = jte - jts + 1
+        min_tile_w = min(tile_w_i, tile_w_j)
+        if (min_tile_w < 1) return
+
+        n_phases = ceiling(real(R_cells) / real(min_tile_w))
+
+        !Do an MPI max reduce on n_phases so that sync calls are always complete
+        call MPI_Allreduce(MPI_IN_PLACE, n_phases, 1, MPI_REAL, MPI_MAX, domain%compute_comms)
+
+        ! Track the extent of valid data in nbr_albedo_2d
+        i_lo = its; i_hi = ite
+        j_lo = jts; j_hi = jte
+
+        ! Allocate work buffers sized for the largest possible strip exchange
+        buf_size = max(ide - ids + 1, jde - jds + 1) * (min_tile_w + 2 * R_cells)
+        allocate(send_buf(buf_size), recv_buf(buf_size))
+
+        do phase = 1, n_phases
+            width = min(min_tile_w, R_cells - (phase - 1) * min_tile_w)
+            if (width <= 0) exit
+
+            ! === NS exchanges first: extend j range ===
+
+            ! --- South exchange ---
+            if (.not. domain%halo%south_boundary) then
+                recv_width = max(0, min(width, j_lo - domain%jhs))
+                send_len = (i_hi - i_lo + 1) * width
+                max_recv_len = send_len
+                ! Pack: send our southernmost `width` rows to south neighbor
+                idx = 0
+                do j = j_lo, j_lo + width - 1
+                    do i = i_lo, i_hi
+                        idx = idx + 1
+                        send_buf(idx) = nbr_albedo_2d(i, j)
+                    end do
+                end do
+                call MPI_Isend(send_buf, send_len, MPI_REAL, &
+                               domain%halo%south_neighbor, 100 + phase, &
+                               domain%compute_comms, send_req, ierr)
+                call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
+                              domain%halo%south_neighbor, 200 + phase, &
+                              domain%compute_comms, stat, ierr)
+                call MPI_Wait(send_req, stat, ierr)
+                ! Unpack only the rows we have space for (closest to our domain)
+                if (recv_width > 0) then
+                    idx = (width - recv_width) * (i_hi - i_lo + 1)
+                    do j = j_lo - recv_width, j_lo - 1
+                        do i = i_lo, i_hi
+                            idx = idx + 1
+                            nbr_albedo_2d(i, j) = recv_buf(idx)
+                        end do
+                    end do
+                    j_lo = j_lo - recv_width
+                endif
+            endif
+
+            ! --- North exchange ---
+            if (.not. domain%halo%north_boundary) then
+                recv_width = max(0, min(width, domain%jhe - j_hi))
+                send_len = (i_hi - i_lo + 1) * width
+                max_recv_len = send_len
+                idx = 0
+                do j = j_hi - width + 1, j_hi
+                    do i = i_lo, i_hi
+                        idx = idx + 1
+                        send_buf(idx) = nbr_albedo_2d(i, j)
+                    end do
+                end do
+                call MPI_Isend(send_buf, send_len, MPI_REAL, &
+                               domain%halo%north_neighbor, 200 + phase, &
+                               domain%compute_comms, send_req, ierr)
+                call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
+                              domain%halo%north_neighbor, 100 + phase, &
+                              domain%compute_comms, stat, ierr)
+                call MPI_Wait(send_req, stat, ierr)
+                ! Unpack only the rows we have space for (closest to our domain)
+                if (recv_width > 0) then
+                    idx = 0
+                    do j = j_hi + 1, j_hi + recv_width
+                        do i = i_lo, i_hi
+                            idx = idx + 1
+                            nbr_albedo_2d(i, j) = recv_buf(idx)
+                        end do
+                    end do
+                    j_hi = j_hi + recv_width
+                endif
+            endif
+
+            ! === EW exchanges: extend i range, using the now-extended j range ===
+            ! This automatically fills corner regions because the strips span j_lo:j_hi
+            ! which includes data received from the NS exchanges above.
+
+            ! --- West exchange ---
+            if (.not. domain%halo%west_boundary) then
+                recv_width = max(0, min(width, i_lo - domain%ihs))
+                send_len = width * (j_hi - j_lo + 1)
+                max_recv_len = send_len
+                idx = 0
+                do j = j_lo, j_hi
+                    do i = i_lo, i_lo + width - 1
+                        idx = idx + 1
+                        send_buf(idx) = nbr_albedo_2d(i, j)
+                    end do
+                end do
+                call MPI_Isend(send_buf, send_len, MPI_REAL, &
+                               domain%halo%west_neighbor, 300 + phase, &
+                               domain%compute_comms, send_req, ierr)
+                call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
+                              domain%halo%west_neighbor, 400 + phase, &
+                              domain%compute_comms, stat, ierr)
+                call MPI_Wait(send_req, stat, ierr)
+                ! Unpack only the columns we have space for (closest to our domain)
+                if (recv_width > 0) then
+                    idx = 0
+                    do j = j_lo, j_hi
+                        idx = idx + (width - recv_width)
+                        do i = i_lo - recv_width, i_lo - 1
+                            idx = idx + 1
+                            nbr_albedo_2d(i, j) = recv_buf(idx)
+                        end do
+                    end do
+                    i_lo = i_lo - recv_width
+                endif
+            endif
+
+            ! --- East exchange ---
+            if (.not. domain%halo%east_boundary) then
+                recv_width = max(0, min(width, domain%ihe - i_hi))
+                send_len = width * (j_hi - j_lo + 1)
+                max_recv_len = send_len
+                idx = 0
+                do j = j_lo, j_hi
+                    do i = i_hi - width + 1, i_hi
+                        idx = idx + 1
+                        send_buf(idx) = nbr_albedo_2d(i, j)
+                    end do
+                end do
+                call MPI_Isend(send_buf, send_len, MPI_REAL, &
+                               domain%halo%east_neighbor, 400 + phase, &
+                               domain%compute_comms, send_req, ierr)
+                call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
+                              domain%halo%east_neighbor, 300 + phase, &
+                              domain%compute_comms, stat, ierr)
+                call MPI_Wait(send_req, stat, ierr)
+                ! Unpack only the columns we have space for (closest to our domain)
+                if (recv_width > 0) then
+                    idx = 0
+                    do j = j_lo, j_hi
+                        do i = i_hi + 1, i_hi + recv_width
+                            idx = idx + 1
+                            nbr_albedo_2d(i, j) = recv_buf(idx)
+                        end do
+                        idx = idx + (width - recv_width)
+                    end do
+                    i_hi = i_hi + recv_width
+                endif
+            endif
+
+        end do
+
+        deallocate(send_buf, recv_buf)
+
+        !$acc update device(nbr_albedo_2d)
+
+    end subroutine gather_neighborhood_albedo
 
 
     subroutine ra_var_request(options)
@@ -386,7 +578,8 @@ contains
         if (options%rad%terrain_shading) then
             call options%alloc_vars( [kVARS%slope, kVARS%slope_angle, kVARS%aspect_angle, kVARS%svf, kVARS%hlm, kVARS%shortwave_direct, &
                                       kVARS%shortwave_diffuse, kVARS%shortwave_direct_above, &
-                                      kVARS%shortwave_terrain, kVARS%terrain, kVARS%albedo])
+                                      kVARS%shortwave_terrain, kVARS%terrain, kVARS%albedo, &
+                                      kVARS%neighbor_terrain, kVARS%neighbor_slope_angle, kVARS%neighbor_aspect_angle])
         endif
 
     end subroutine ra_var_request
@@ -456,7 +649,7 @@ contains
 
 
         real, dimension(:,:,:,:), pointer :: tauaer_sw=>null(), ssaaer_sw=>null(), asyaer_sw=>null()
-        real, allocatable:: albedo(:,:),gsw(:,:)
+        real, allocatable:: albedo(:,:), nbr_albedo_2d(:,:), gsw(:,:)
         real, allocatable:: t_1d(:), p_1d(:), Dz_1d(:), qv_1d(:), qc_1d(:), qi_1d(:), qs_1d(:), cf_1d(:)
         real, allocatable :: qi(:,:,:), qc(:,:,:), qs(:,:,:), cldfra(:,:,:), re_c(:,:,:), re_i(:,:,:), re_s(:,:,:)
 
@@ -523,14 +716,15 @@ contains
 
         ! Terrain reflected SW local variables
         real :: local_albedo, nbr_albedo, albedo_sum, weight_sum
-        real :: dz_refl, facing, w_refl, albedo_terrain, terrain_vf, refl_correction
+        real :: facing, w_refl, albedo_terrain, terrain_vf, refl_correction
         integer :: di, dj, ii, jj, alb_month
-
+        logical :: run_full_radiation = .False. ! Default to not running full radiation, but may be set to true below if we are over the update interval
         if (options%physics%radiation == 0) return
         
+        run_full_radiation = ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval)
+
         !We only need to calculate these variables if we are using terrain shading, otherwise only call on each radiation update
-        if (options%rad%terrain_shading .or. &
-            ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval)) then
+        if (options%rad%terrain_shading .or. run_full_radiation) then
             tzone = options%rad%tzone
             date_seconds = domain%sim_time%seconds()
             sim_month = domain%sim_time%month
@@ -577,7 +771,7 @@ contains
         endif
 
         !If we are not over the update interval, don't run any of this, since it contains allocations, etc...
-        if ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval) then
+        if (run_full_radiation) then
 
             associate(albedo_dom => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d, &
                       shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
@@ -1386,8 +1580,7 @@ contains
             ! --- Terrain reflected shortwave radiation ---
             ! Based on Dozier (1980), Helbig et al. (2009), Chu et al. (2021)
             ! Simple method with multi-reflection correction and elevation-aware neighborhood albedo
-            if (R_cells > 0 .and. domain%var_indx(kVARS%svf)%v > 0 &
-                .and. domain%var_indx(kVARS%shortwave_terrain)%v > 0) then
+            if (run_full_radiation .and. R_cells > 0) then
 
                 ! Select albedo month index (1 if not using monthly albedo)
                 if (options%lsm%monthly_albedo) then
@@ -1396,22 +1589,29 @@ contains
                     alb_month = 1
                 endif
 
-                associate(svf           => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d,           &
-                          elevation     => domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d,       &
-                          slope_ang     => domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d,   &
-                          aspect_ang    => domain%vars_2d(domain%var_indx(kVARS%aspect_angle)%v)%data_2d,  &
-                          albedo_3d     => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d,        &
-                          shortwave     => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d,     &
-                          sw_terrain    => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d)
+                allocate(nbr_albedo_2d(domain%ihs:domain%ihe, domain%jhs:domain%jhe))
+                nbr_albedo_2d = 0.0
+                !$acc data create(nbr_albedo_2d)
+
+                ! Gather neighborhood albedo from neighboring MPI processes
+                !$acc update host(domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d)
+                call gather_neighborhood_albedo(domain, alb_month, nbr_albedo_2d)
+
+                associate(svf        => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d,                    &
+                          slope_ang  => domain%vars_2d(domain%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d,   &
+                          aspect_ang => domain%vars_2d(domain%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d,  &
+                          albedo_3d  => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d,        &
+                          shortwave  => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d,     &
+                          sw_terrain => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d)
 
                 !$acc parallel loop gang vector collapse(2) &
-                !$acc& present(svf, elevation, slope_ang, aspect_ang, albedo_3d, shortwave, sw_terrain, &
-                !$acc&         shortwave_cached, azimuth_offset, inv_dist2_offset, inv_dist_offset) &
-                !$acc& private(local_albedo, nbr_albedo, albedo_sum, weight_sum, dz_refl, facing, &
+                !$acc& present(svf, slope_ang, aspect_ang, nbr_albedo_2d, shortwave, sw_terrain, &
+                !$acc&         azimuth_offset, inv_dist2_offset) &
+                !$acc& private(local_albedo, nbr_albedo, albedo_sum, weight_sum, facing, &
                 !$acc&         w_refl, albedo_terrain, terrain_vf, refl_correction, di, dj, ii, jj)
                 do j = jts, jte
                     do i = its, ite
-                        ! Compute elevation-aware weighted average albedo of neighbors
+                        ! Compute slope-aware weighted average albedo of neighbors
                         albedo_sum = 0.0
                         weight_sum = 0.0
                         do dj = -R_cells, R_cells
@@ -1420,21 +1620,18 @@ contains
                                 if (inv_dist2_offset(di,dj) == 0.0) cycle  ! outside circular radius
                                 ii = i + di
                                 jj = j + dj
-                                if (ii < its .or. ii > ite .or. jj < jts .or. jj > jte) cycle
+                                ! Use neighborhood bounds instead of tile bounds
+                                if (ii < domain%ihs .or. ii > domain%ihe .or. jj < domain%jhs .or. jj > domain%jhe) cycle
 
-                                ! Neighbor albedo
-                                nbr_albedo = albedo_3d(ii, alb_month, jj)
+                                ! Neighbor albedo from gathered buffer
+                                nbr_albedo = nbr_albedo_2d(ii, jj)
 
-                                ! Elevation difference: terrain above target is more visible
-                                dz_refl = elevation(ii,jj) - elevation(i,j)
-
-                                ! Facing angle: does neighbor slope face toward target?
+                                ! Facing: neighbor faces target * neighbor is illuminated by sun
                                 facing = max(cos(aspect_ang(ii,jj) - azimuth_offset(di,dj)), 0.0) &
-                                       * sin(slope_ang(ii,jj)) + cos(slope_ang(ii,jj))
+                                       * sin(slope_ang(ii,jj))
 
                                 ! Combined weight: 1/dist^2 * elevation_bias * facing
                                 w_refl = inv_dist2_offset(di,dj) &
-                                  * (max(dz_refl, 0.0) * inv_dist_offset(di,dj) + 1.0) &
                                   * max(facing, 0.0)
 
                                 albedo_sum = albedo_sum + w_refl * nbr_albedo
@@ -1457,14 +1654,15 @@ contains
 
                         ! Terrain reflected SW with multi-reflection correction (Dozier 1980, Chu et al. 2021)
                         ! Geometric series: 1/(1 - alpha*Ct) accounts for infinite bounces
-                        refl_correction = 1.0 / max(1.0 - albedo_terrain * terrain_vf, 0.05)
-                        sw_terrain(i,j) = terrain_vf * albedo_terrain * shortwave_cached(i,j) * refl_correction
+                        refl_correction = 1.0 / max(1.0 - local_albedo * terrain_vf, 0.05)
+                        sw_terrain(i,j) = terrain_vf * albedo_terrain * refl_correction
 
                         ! Add terrain reflected component to total shortwave
                         shortwave(i,j) = shortwave(i,j) + sw_terrain(i,j)
                     end do
                 end do
                 end associate
+                !$acc end data
             endif
         endif
     end subroutine rad

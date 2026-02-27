@@ -2239,6 +2239,10 @@ contains
                 if (this%var_indx(kVARS%slope_angle)%v > 0) then
                     this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
                 endif
+                if (this%var_indx(kVARS%neighbor_slope_angle)%v > 0) then
+                    this%vars_2d(this%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d = &
+                        temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
+                endif
             else
                 stop "slope_angle_var not specified in domain file, but required for terrain shading"
             endif
@@ -2249,6 +2253,10 @@ contains
                                temporary_data)
                 if (this%var_indx(kVARS%aspect_angle)%v > 0) then
                     this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                endif
+                if (this%var_indx(kVARS%neighbor_aspect_angle)%v > 0) then
+                    this%vars_2d(this%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d = &
+                        temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
                 endif
             else
                 stop "aspect_angle_var not specified in domain file, but required for terrain shading"
@@ -2441,6 +2449,12 @@ contains
             this%neighborhood_max = max(this%neighborhood_max,floor(max(1.0,(options%wind%TPI_dmax+options%wind%Sx_dmax)/this%dx)))
         endif
         
+        !Considering terrain reflected shortwave radius...
+        if (options%rad%terrain_shading .and. options%rad%terrain_refl_radius > 0) then
+            this%neighborhood_max = max(this%neighborhood_max, &
+                nint(options%rad%terrain_refl_radius / this%dx))
+        endif
+
         this%ihs=max(this%grid%ims-this%neighborhood_max,this%grid%ids); this%ihe=min(this%grid%ime+this%neighborhood_max,this%grid%ide)
         this%jhs=max(this%grid%jms-this%neighborhood_max,this%grid%jds); this%jhe=min(this%grid%jme+this%neighborhood_max,this%grid%jde)
         this%khs=this%grid%kms;                                          this%khe=this%grid%kme
