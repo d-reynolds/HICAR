@@ -1343,7 +1343,7 @@ contains
             solar_elevation(i)=solar_elev_corr_atm_ref_deg*DEGRAD
             if(present(solar_azimuth)) solar_azimuth(i)=solar_azimuth_angle*DEGRAD
             if (solar_elevation(i)<0.0) solar_elevation(i)=0.0
-            if (solar_elevation(i)>90.0) solar_elevation(i)=90.0
+            if (solar_elevation(i)>2*piconst) solar_elevation(i)=2*piconst
         end do
 
     end subroutine calc_solar_elevation

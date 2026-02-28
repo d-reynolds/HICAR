@@ -1627,13 +1627,11 @@ contains
                                 nbr_albedo = nbr_albedo_2d(ii, jj)
 
                                 ! Facing: neighbor faces target * neighbor is illuminated by sun
-                                facing = max(cos( (aspect_ang(ii,jj) - azimuth_offset(di,dj))), 0.0) & ! if the neighbor slope faces the location of the target slope
-                                        * max(cos( aspect_ang(ii,jj) - aspect_ang(i,j) + 180.0), 0.01) & ! if the neighbor slope and target slope are facing each other
-                                                                                                         ! the max is taken with 0.01 so that a large flat plane, with no
-                                                                                                         ! opposing slopes, does not get zero weight
-                                        * sin(slope_ang(ii,jj)) ! how much the neighbor slope is tilted towards the target slope
+                                facing = max(cos(aspect_ang(ii,jj) - azimuth_offset(di,dj)), 0.0) &  ! if the neighbor slope faces the location of the target slope
+                                        * max(-sin(slope_ang(ii,jj)) * sin(slope_ang(i,j))  & ! How much do the horizontal slope normals oppose each other? 
+                                        * cos(aspect_ang(ii,jj) - aspect_ang(i,j)), 0.01)     !(1 if they face each other, 0 if they are orthogonal, negative if they face away)
 
-                                ! Combined weight: 1/dist^2 * elevation_bias * facing
+                                ! Combined weight: 1/dist^2 * facing
                                 w_refl = inv_dist2_offset(di,dj) &
                                   * max(facing, 0.0)
 
