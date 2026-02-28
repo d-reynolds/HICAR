@@ -41,6 +41,13 @@ if (NOT DEFINED FSM_DIR OR FSM_DIR STREQUAL "")
 	set(FSM_DIR $ENV{FSM_DIR} CACHE PATH "Path to the compiled FSM installation (root directory of the lib and build directories)")
 endif()
 
+if (NOT DEFINED SNOWPACK_DIR OR SNOWPACK_DIR STREQUAL "")
+	set(SNOWPACK_DIR $ENV{SNOWPACK_DIR} CACHE PATH "Path to the compiled SNOWPACK installation (root directory of the lib and include directories)")
+endif()
+if (NOT DEFINED METEOIO_DIR OR METEOIO_DIR STREQUAL "")
+	set(METEOIO_DIR $ENV{METEOIO_DIR} CACHE PATH "Path to the compiled MeteoIO installation (root directory of the lib and include directories)")
+endif()
+
 if (NOT $ENV{NOAHMP_LIBRARY} STREQUAL "")
 	set(NOAHMP_LIBRARY $ENV{NOAHMP_LIBRARY} CACHE PATH "Path to the Noah-MP source directory")
 endif()
@@ -59,6 +66,7 @@ endif()
 
 option(ASSERTIONS "Check logical assertions at runtime" ON)
 option(FSM "Link to the FSM2 snow model, requires separate compilation of the FSM2 model" ON)
+option(SNOWPACK "Link to the SNOWPACK snow model, requires separate compilation of the SNOWPACK model" ON)
 option(OPENACC "Enable OpenACC support for GPU acceleration" OFF)
 option(SRUN_FLAGS "srun flags to use for running the test cases" "")
 #########################################
@@ -100,7 +108,6 @@ endif()
 #-DFSM -- controls compilation of FSM2 driver and linking to the FSM2 library
 IF (FSM AND IS_DIRECTORY ${FSM_DIR}/lib AND
 			IS_DIRECTORY ${FSM_DIR}/build)
-	add_definitions(-DFSM)
 elseif(FSM AND NOT (IS_DIRECTORY ${FSM_DIR}/lib AND
 					IS_DIRECTORY ${FSM_DIR}/build))
 	message(WARNING "FSM2 not found, disabling FSM2 support.\nTo enable, set the FSM_DIR variable to the root directory of the FSM2 install (i.e. the directory which contains the 'lib' and 'build' subdirectories).")
@@ -284,8 +291,8 @@ include(GNUInstallDirs)
 set(PETSC "${PETSC_DIR}/${PETSC_ARCH}")
 set(ENV{PKG_CONFIG_PATH} "$ENV{PKG_CONFIG_PATH}:${PETSC}/lib/pkgconfig")
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${PETSC} ${AMGX_DIR} ${FFTW_DIR} ${NETCDF_DIR}  ${MPI_DIR} ${FSM_DIR})
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${PETSC}/lib/pkgconfig/" ${AMGX_DIR} ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR})
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${PETSC} ${AMGX_DIR} ${FFTW_DIR} ${NETCDF_DIR}  ${MPI_DIR} ${FSM_DIR} ${SNOWPACK_DIR})
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${PETSC}/lib/pkgconfig/" ${AMGX_DIR} ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR} ${SNOWPACK_DIR})
 
 find_package(PkgConfig REQUIRED)
 include(FetchContent)
@@ -304,6 +311,9 @@ find_package(MPI REQUIRED)
 find_package(OpenMP)
 find_package(FFTW REQUIRED)
 find_package(NetCDF REQUIRED)
+if (SNOWPACK)
+	find_package(SNOWPACK REQUIRED)
+endif()
 
 #########################################################
 ############# Declare all content used ##################
@@ -541,8 +551,29 @@ if (FSM)
 	find_library(FSM2_LIB NAMES FSM2 REQUIRED)
 	target_include_directories(hicar_lib PUBLIC ${FSM_DIR}/build)
 	target_link_libraries(hicar_lib PUBLIC ${FSM2_LIB})
+	add_definitions(-DFSM)
 endif()
 
+if(SNOWPACK_FOUND)
+    # If SNOWPACK should be built from source, add dependency
+    if(BUILD_SNOWPACK_FROM_SOURCE)
+        add_dependencies(hicar_lib SNOWPACK)
+    endif()
+    
+	# Set RPATH to find SNOWPACK and MeteoIO libraries at runtime
+	# Use BUILD_WITH_INSTALL_RPATH to avoid install_name_tool errors on macOS
+	set_target_properties(HICAR PROPERTIES
+		INSTALL_RPATH "${SNOWPACK_DIR}/lib;${METEOIO_DIR}/lib"
+		BUILD_WITH_INSTALL_RPATH TRUE
+	)
+
+    # Link SNOWPACK and MeteoIO libraries
+    target_link_libraries(hicar_lib PUBLIC ${SNOWPACK_FORTRAN_LIBRARY} ${SNOWPACK_LIBRARY} ${METEOIO_LIBRARY})
+    target_include_directories(hicar_lib PUBLIC ${SNOWPACK_INCLUDE_DIR})
+    
+	add_definitions(-DSNOWPACK)
+    message(STATUS "SNOWPACK support enabled")
+endif()
 if (OpenACC_Fortran_FOUND AND OPENACC)
 	target_link_libraries(hicar_lib PUBLIC OpenACC::OpenACC_Fortran)
 	
@@ -687,6 +718,11 @@ if (FSM)
 else()
 	message(STATUS "  FSM:    Not Used")
 endif()
+if (SNOWPACK)
+	message(STATUS "  SNOWPACK:    ${SNOWPACK_DIR}")
+else()
+	message(STATUS "  SNOWPACK:    Not Used")
+endif()
 if (OPENACC AND OpenACC_Fortran_FOUND)
 	message(STATUS "  OpenACC: Enabled")
 	if(TARGET rte-rrtmgp::rte AND TARGET rte-rrtmgp::rrtmgp)
@@ -729,8 +765,6 @@ install(TARGETS HICAR  DESTINATION  ${CMAKE_INSTALL_EXEDIR})
 #install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/build DESTINATION ${CMAKE_Fortran_MODULE_DIRECTORY}) 
 #install(PROGRAMS ${modeFiles} DESTINATION ${CMAKE_Fortran_MODULE_DIRECTORY}/sec) # not working
     
-#add_executable(test_FSM_interface test/test_FSM_interface.f90)
-#target_link_libraries(test_FSM_interface FSM_interface ${PROJECT_LINK_LIBS})
 
 ADD_CUSTOM_TARGET( distclean make clean
 				   COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/CMakeFiles

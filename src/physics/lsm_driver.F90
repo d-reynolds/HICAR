@@ -43,9 +43,7 @@ module land_surface
     use NoahmpHICARmainMod
     use NoahmpHICARinitMod
     use NoahmpIOVarType, only : NoahmpIO_type
-#ifdef FSM
-    use module_sf_FSMdrv,   only : sm_FSM_init, sm_FSM
-#endif
+    use snow_model_driver, only : sm_var_request, sm_init, snow_model
 
     implicit none
 
@@ -62,10 +60,10 @@ module land_surface
     ! also avoids adding LOTS of LSM variables to the main domain datastrucurt
     real,allocatable, dimension(:,:)    :: SMSTAV,SFCRUNOFF,UDRUNOFF,                           &
                                            SNOWC, ACSNOW, ACSNOM,           &
-                                           ALBEDO, QSFC, SR,                   &
-                                           VEGFRAC, windspd,  &
+                                           QSFC, SR, VEGFRAC, windspd,  &
                                            nmp_snow, nmp_snowh, land_mask
     real, allocatable, dimension(:,:,:)  :: nmp_snow_t
+    integer, allocatable, dimension(:,:) :: nmp_snow_nlayers
     real,allocatable, dimension(:)      :: DZs
     real, parameter :: XICE_THRESHOLD = 1.0
     integer :: ITIMESTEP, update_interval, cur_vegmonth
@@ -74,7 +72,7 @@ module land_surface
     character(len=kMAX_NAME_LENGTH) :: MMINLU
     logical :: FNDSOILW,FNDSNOWH
     integer :: num_soil_layers, num_snow_layers, ISURBAN,ISICE,ISWATER, ISLAKE
-    real*8  :: last_model_time(kMAX_NESTS)
+    real*8  :: last_model_time(kMAX_NESTS), next_update_time(kMAX_NESTS)
 
     !Noah-MP specific
     real    :: NMP_SOILTSTEP
@@ -207,35 +205,6 @@ contains
         endif
 
 
-
-        if (options%physics%snowmodel == kSM_FSM) then
-            call options%alloc_vars( &
-                         [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
-                         kVARS%exner, kVARS%dz_interface, kVARS%density, kVARS%pressure_interface, kVARS%shortwave,     &
-                         kVARS%longwave, kVARS%vegetation_fraction, kVARS%canopy_water, kVARS%snow_water_equivalent,    &
-                         kVARS%skin_temperature, kVARS%soil_water_content, kVARS%soil_temperature, kVARS%terrain,       &
-                         kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
-                         kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
-                         kVARS%soil_totalmoisture, kVARS%soil_deep_temperature, kVARS%roughness_z0, kVARS%ustar,        &
-                         kVARS%snow_height, kVARS%lai, kVARS%temperature_2m_veg, kVARS%slope_angle, kVARS%lsm_last_snow,&
-                         kVARS%lsm_last_precip, kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%land_emissivity,    &
-                         kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%snowfall, kVARS%albedo,                &
-                         kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%Nsnow,   &
-                         kVARS%shd, kVARS%meltflux_out_tstep, kVARS%Sliq_out, &
-                         kVARS%windspd_10m, kVARS%dSWE_salt, kVARS%dSWE_susp, kVARS%dSWE_subl, kVARS%dSWE_slide])
-             
-             call options%restart_vars( &
-                         [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
-                         kVARS%density, kVARS%pressure_interface, kVARS%shortwave,                                      &
-                         kVARS%longwave, kVARS%canopy_water, kVARS%snow_water_equivalent,                               &
-                         kVARS%skin_temperature, kVARS%soil_water_content, kVARS%soil_temperature, kVARS%terrain,       &
-                         kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
-                         kVARS%snow_height,  kVARS%snowfall, kVARS%albedo, kVARS%QFX, kVARS%land_emissivity,            &
-                         kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
-                         kVARS%soil_totalmoisture, kVARS%roughness_z0, kVARS%lsm_last_snow, kVARS%lsm_last_precip,      &
-                         kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%Nsnow  ])
-        endif
-
        if (options%physics%watersurface > 0) then
             call options%alloc_vars( &
                          [kVARS%sst, kVARS%ustar, kVARS%surface_pressure, kVARS%water_vapor,            &
@@ -275,6 +244,8 @@ contains
         endif
 
 
+        ! request variables for any snow models
+        call sm_var_request(options)
 
     end subroutine lsm_var_request
 
@@ -285,15 +256,15 @@ contains
         type(options_t),intent(in)    :: options
         logical, optional, intent(in) :: context_chng
         integer :: i, j, k, dev_num
-        logical :: context_change, restart, monthly_albedo, monthly_vegfrac
+        logical :: context_change, restart, monthly_vegfrac
 
-        if (options%physics%landsurface == 0) return   !! So we cannot (currently) run without lsm but with water.
+        if (options%physics%landsurface > 0 .or. options%physics%watersurface > 0) then
 
         associate(temperature_2m => domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d, &
                   humidity_2m    => domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d,  &
                   temperature    => domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d,    &
                   water_vapor    => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,   &
-                  albedo_dom     => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d, &
+                  albedo_dom     => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
                   veg_frac      => domain%vars_3d(domain%var_indx(kVARS%vegetation_fraction)%v)%data_3d, &
                   canopy_water  => domain%vars_2d(domain%var_indx(kVARS%canopy_water)%v)%data_2d, &
                   cqs2_dom      => domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d, &
@@ -383,7 +354,7 @@ contains
             !$acc enter data copyin(current_snow, current_rain)
         endif
         
-        if (options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
+        if (options%physics%landsurface==kLSM_NOAHMP) then
             num_soil_layers=options%lsm%num_soil_layers
             num_snow_layers=3!options%sm%num_snow_layers
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    num_soil_layers=", num_soil_layers, " num_snow_layers=", num_snow_layers
@@ -416,22 +387,12 @@ contains
             MMINLU  = options%lsm%LU_Categories !"MODIFIED_IGBP_MODIS_NOAH"
             ISLAKE  = options%lsm%lake_category
 
-            monthly_albedo = options%lsm%monthly_albedo
             monthly_vegfrac = options%lsm%monthly_vegfrac
             cur_vegmonth = domain%sim_time%month
 
-            !$acc parallel loop gang vector collapse(2) present(albedo_dom, veg_frac, cqs2_dom, canopy_water, soil_temperature, soil_water_content, ALBEDO, VEGFRAC)
+            !$acc parallel loop gang vector collapse(2) present(veg_frac, cqs2_dom, canopy_water, soil_temperature, soil_water_content, VEGFRAC)
             do j = jms, jme
                 do i = ims, ime
-                    if (monthly_albedo) then
-                        if (.not.monthly_vegfrac) Then
-                            print*, "ERROR, monthly albedo requires monthly vegfrac"
-                            stop
-                        endif
-                        ALBEDO(i,j) = albedo_dom(i, cur_vegmonth, j)
-                    else
-                        ALBEDO(i,j) = albedo_dom(i, 1, j)
-                    endif
                     if (monthly_vegfrac) then
                         VEGFRAC(i,j) = veg_frac(i, cur_vegmonth, j)
                     else
@@ -503,6 +464,11 @@ contains
             SNICAR_SNOWDUST_INTMIX = options%sm%snicar_snowdust_intmix
             SNICAR_USE_OC = options%sm%snicar_use_oc
             SNICAR_AEROSOL_READTABLE = options%sm%snicar_aerosol_readtable
+
+            ! This will either override NoahMP's initialisation of snow to a small value,
+            ! or preserve any snow values read from an init file. Necesarry if we want to
+            ! "neuteralize" noahMP's snow state when running with a snow model.
+            if (options%physics%snowmodel>0) FNDSNOWH= .True.
 
 
             !$acc enter data copyin(landuse_name, XICE_THRESHOLD, &
@@ -743,27 +709,21 @@ contains
                 )
         endif ! WRF lake model
 
-        if (options%physics%snowmodel == kSM_FSM) then
-#ifdef FSM
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: FSM2"
-            call sm_FSM_init(domain,options,context_change)
-            !DZs already allocated in alloc_noah above
-#else
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    User asked to use FSM, but it is not compiled in this version of HICAR"
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Please de-select FSM in the namelist, or recompile HICAR with the FSM library linked"
-            stop "FSM2 not compiled in this version of HICAR"
-#endif
-        endif ! FSM snow model
+        end associate
 
+        endif ! end if physics%landsurface /=0
+
+        call sm_init(domain, options)
         update_interval=options%lsm%update_interval
         if (.not.(context_change)) then
             if (update_interval<=10) then
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-10
+                next_update_time(domain%nest_indx) = domain%sim_time%seconds()
             else
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
+                next_update_time(domain%nest_indx) = domain%sim_time%seconds()
             endif
         endif
-        end associate
 
     end subroutine lsm_init
 
@@ -775,14 +735,15 @@ contains
         type(options_t),intent(in)    :: options
         real, intent(in) :: dt
         integer :: i,j, k, month, dev_num
-        logical :: monthly_albedo, monthly_vegfrac
+        logical :: monthly_vegfrac
 
-        if (options%physics%landsurface == 0) return
-
-        if ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval) then
+        if ((domain%sim_time%seconds()) >= next_update_time(domain%nest_indx)) then
             lsm_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
-            last_model_time(domain%nest_indx) = domain%sim_time%seconds()
-            landuse_name = options%lsm%LU_Categories            !test whether this works or if we need something separate
+            last_model_time(domain%nest_indx) = domain%sim_time%seconds() 
+            next_update_time(domain%nest_indx) = next_update_time(domain%nest_indx) + update_interval
+            if (options%physics%landsurface > 0 .or. options%physics%watersurface > 0) then
+
+            landuse_name = options%lsm%LU_Categories
             julian_day = domain%sim_time%day_of_year()
 
             associate( &
@@ -796,10 +757,11 @@ contains
                 lsm_last_snow => domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d, &
                 skin_temperature => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
                 soil_totalmoisture => domain%vars_2d(domain%var_indx(kVARS%soil_totalmoisture)%v)%data_2d, &
-                albedo_dom => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d, &
+                albedo_dom => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
                 soil_water_content => domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d, &
                 snow_height => domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
                 snow_water_equivalent => domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+                snow_nlayers => domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
                 land_emissivity => domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d, &
                 snow_temperature => domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
                 vegetation_fraction_out => domain%vars_2d(domain%var_indx(kVARS%vegetation_fraction_out)%v)%data_2d &
@@ -813,27 +775,19 @@ contains
             current_precipitation = (precipitation - lsm_last_precip) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
             !$acc end kernels
 
-            if (options%physics%landsurface==kLSM_NOAHMP .or. options%physics%snowmodel==kSM_FSM) then
+            if (options%physics%landsurface==kLSM_NOAHMP) then
                 !$acc kernels
                 current_snow = (snowfall-lsm_last_snow) !+(domain%snowfall_bucket-snow_bucket)*kPRECIP_BUCKET_SIZE !! MJ: snowfall in kg m-2
                 current_rain = max(current_precipitation-current_snow,0.) !! MJ: rainfall in kg m-2
                 !$acc end kernels
-            endif
 
-            if (options%physics%landsurface == kLSM_NOAHMP) then
                 ! 2m saturated mixing ratio
-                monthly_albedo = options%lsm%monthly_albedo
                 monthly_vegfrac = options%lsm%monthly_vegfrac
                 cur_vegmonth = domain%sim_time%month
 
-                !$acc parallel loop gang vector collapse(2) present(albedo_dom, veg_frac, ALBEDO, VEGFRAC)
+                !$acc parallel loop gang vector collapse(2) present(veg_frac, VEGFRAC)
                 do j = jms, jme
                     do i = ims, ime
-                        if (monthly_albedo) then
-                            ALBEDO(i,j) = albedo_dom(i, cur_vegmonth, j)
-                        else
-                            ALBEDO(i,j) = albedo_dom(i, 1, j)
-                        endif
                         if (monthly_vegfrac) then
                             VEGFRAC(i,j) = veg_frac(i, cur_vegmonth, j)
                         else
@@ -842,21 +796,23 @@ contains
                     end do
                 end do
 
-                if (options%physics%snowmodel==kSM_FSM) then
+                if (options%physics%snowmodel>0) then
                     SR = 0.0 ! This, in combination with setting OPT_SNF to 4 in the LSM_init, will turn off snowfall partitioning in NoahMP
                     current_precipitation = current_precipitation-current_snow ! Now remove snowfall from precipitation, so we only have liquid precip going into NMP
                     
                     nmp_snowh = 0.0
                     nmp_snow = 0.0
                     nmp_snow_t = 273.15
+                    nmp_snow_nlayers = 0
                 else
-                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_snow_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
+                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_snow_nlayers, nmp_snow_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
                     do j = jms, jme
                         do i = ims, ime
                             SR(i,j) = current_snow(i,j)/(current_precipitation(i,j)+epsilon)
                             nmp_snowh(i,j) = snow_height(i,j)
                             nmp_snow(i,j) = snow_water_equivalent(i,j)
                             nmp_snow_t(i,1:3,j) = snow_temperature(i,1:3,j)
+                            nmp_snow_nlayers(i,j) = snow_nlayers(i,j)
                         end do
                     end do
                 endif
@@ -878,8 +834,9 @@ contains
                                       domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d,                   &
                                       domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,      &
                                       domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d,   &
-                                      domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di,                      &
-                                      ims, ime, kms, kme, jms, jme)
+                                      domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di,             &
+                                      ims, ime, kms, kme, jms, jme,                                           &
+                                      its, ite, jts, jte)
                                 !   ,domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d               & ! terrain height [m] if ht(i,j)>=lake_min_elev -> lake (in case no lake category is provided, but lake model is selected, we need to not run the simple water as well - left comment in for future reference)
             endif
 
@@ -902,7 +859,7 @@ contains
                     ,rainbl=current_precipitation                               & ! RAINBL in mm (Accumulation between PBL calls)
                     ,dtbl=lsm_dt                                                & !-- dtbl          timestep (s) or ITIMESTEP?
                     ,swdown=domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d  & !-- SWDOWN        downward short wave flux at ground surface (W/m^2)
-                    ,albedo=ALBEDO                                              & ! albedo? fixed at 0.17?
+                    ,albedo=albedo_dom                                            & ! albedo? fixed at 0.17?
                     ,xlat_urb2d=domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d                         & ! optional ?
                     ,z_lake3d=domain%vars_3d(domain%var_indx(kVARS%z_lake3d)%v)%data_3d                           &
                     ,dz_lake3d=domain%vars_3d(domain%var_indx(kVARS%dz_lake3d)%v)%data_3d                         &
@@ -1003,7 +960,7 @@ contains
                             SMSTAV,                                   &
                             domain%vars_2d(domain%var_indx(kVARS%soil_totalmoisture)%v)%data_2d,        &
                             SFCRUNOFF, UDRUNOFF,                      &
-                            ALBEDO, SNOWC,                            &
+                            albedo_dom, SNOWC,                            &
                             domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d,        &
                             domain%vars_3d(domain%var_indx(kVARS%soil_water_content_liq)%v)%data_3d,    &
                             domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d,          &
@@ -1026,7 +983,7 @@ contains
                             domain%vars_2d(domain%var_indx(kVARS%irr_amt_flood)%v)%data_2d,             &  ! only used if iopt_irr > 0
                             domain%vars_2d(domain%var_indx(kVARS%evap_heat_sprinkler)%v)%data_2d,       &  ! only used if iopt_irr > 0
                             landuse_name,                             &
-                            domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di,             &
+                            nmp_snow_nlayers,             &
                             domain%vars_2d(domain%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d,      &
                             domain%vars_2d(domain%var_indx(kVARS%ground_surf_temperature)%v)%data_2d,   &
                             domain%vars_2d(domain%var_indx(kVARS%canopy_water_ice)%v)%data_2d,          &
@@ -1141,9 +1098,8 @@ contains
                             its,ite,  jts,jte,  kts,kte)
 
                 month = domain%sim_time%month
-                monthly_albedo = options%lsm%monthly_albedo
 
-                !$acc parallel loop gang vector collapse(2) present(veg_frac, vegetation_fraction_out, albedo_dom, ALBEDO)
+                !$acc parallel loop gang vector collapse(2) present(veg_frac, vegetation_fraction_out)
                 do j = jts, jte
                     do i = its, ite
                         if (monthly_vegfrac) then
@@ -1151,20 +1107,16 @@ contains
                         else
                             veg_frac(i, 1, j) = vegetation_fraction_out(i, j)*100.0
                         endif
-                        if (monthly_albedo) then
-                            albedo_dom(i, month, j) = ALBEDO(i,j)
-                        else
-                            albedo_dom(i, 1, j) = ALBEDO(i,j)
-                        endif
                     end do
                 end do
 
-                if ( .not.(options%physics%snowmodel==kSM_FSM)) then
-                    !$acc parallel loop gang vector collapse(2) copyin(nmp_snow, nmp_snowh, nmp_snow_t, kVARS) present(snow_height, snow_water_equivalent, snow_temperature)
+                if ( .not.(options%physics%snowmodel>0)) then
+                    !$acc parallel loop gang vector collapse(2) copyin(nmp_snow, nmp_snowh, nmp_snow_nlayers, nmp_snow_t, kVARS) present(snow_height, snow_water_equivalent, snow_nlayers, snow_temperature)
                     do j = jts, jte
                         do i = its, ite
                             snow_height(i,j) = nmp_snowh(i,j)
                             snow_water_equivalent(i,j) = nmp_snow(i,j)
+                            snow_nlayers(i,j) = nmp_snow_nlayers(i,j)
                             !$acc loop
                             do k = 1, 3
                                 snow_temperature(i,k,j) = nmp_snow_t(i,k,j)
@@ -1176,46 +1128,42 @@ contains
                 ! where(domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d > options%lsm%max_swe) domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = options%lsm%max_swe
             endif !end if noahmp
 
-#ifdef FSM
-            !! MJ added: this block is for FSM as sm.
-            if (options%physics%snowmodel == kSM_FSM) then
-                !!
-                domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d(its:ite,jts:jte)=windspd(its:ite,jts:jte)
-                !!
-                call sm_FSM(domain,options,lsm_dt,current_rain,current_snow,windspd)
-                !!
-                
-                !do i = 1, num_soil_layers              ! soil
-                !   domain%vars_3d(domain%var_indx(kVARS%soil_water_content_liq)%v)%data_3d(its:ite,i,jts:jte) =  domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d(its:ite,i,jts:jte)    / (1000. * DZS(i))
-                !end do
-                
-            endif
-            !!
-#endif
 
-            if (options%physics%landsurface > kLSM_BASIC) then
+            if (options%physics%landsurface+options%physics%watersurface+options%physics%snowmodel > 0) then
             
-                !$acc parallel loop gang vector collapse(2) present(lsm_last_precip, precipitation, lsm_last_snow, snowfall, longwave_up, land_emissivity, skin_temperature, soil_totalmoisture, soil_water_content) copyin(kVARS, DZS)
+                !$acc parallel 
+                !$acc loop gang vector collapse(2) present(lsm_last_precip, precipitation, lsm_last_snow, snowfall) 
                 do j = jts, jte
                     do i = its, ite
                         lsm_last_precip(i,j) = precipitation(i,j)
                         lsm_last_snow(i,j) = snowfall(i,j)
-                        
-                        longwave_up(i,j) = STBOLT * land_emissivity(i,j) * skin_temperature(i,j)**4
-                        ! accumulate soil moisture over the entire column
-                        soil_totalmoisture(i,j) = 0.0
-
-                        do k = 1,num_soil_layers
-                            soil_totalmoisture(i,j) = soil_totalmoisture(i,j) + soil_water_content(i,k,j) * DZS(k) * 1000
-                        enddo
                     enddo
                 enddo
-                ITIMESTEP = ITIMESTEP + 1
 
+                if (options%physics%landsurface > kLSM_BASIC) then
+                    !$acc loop gang vector collapse(2) present(longwave_up, land_emissivity, skin_temperature, soil_totalmoisture, soil_water_content) copyin(DZS)
+                    do j = jts, jte
+                        do i = its, ite
+                            longwave_up(i,j) = STBOLT * land_emissivity(i,j) * skin_temperature(i,j)**4
+                            ! accumulate soil moisture over the entire column
+                            soil_totalmoisture(i,j) = 0.0
+
+                            do k = 1,num_soil_layers
+                                soil_totalmoisture(i,j) = soil_totalmoisture(i,j) + soil_water_content(i,k,j) * DZS(k) * 1000
+                            enddo
+                        enddo
+                    enddo
+                    ITIMESTEP = ITIMESTEP + 1
+                endif
+                !$acc end parallel
             endif
             !!
             end associate
-        endif
+            endif ! end if landsurface > 0 .or. watersurface > 0
+
+            call snow_model(domain, options, lsm_dt)
+
+        endif ! end if time to call lsm
 
     end subroutine lsm
 
@@ -1277,7 +1225,7 @@ contains
         ITIMESTEP=1
 
         if (allocated(SMSTAV)) then
-            !$acc exit data delete(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, ALBEDO, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_snow_t)
+            !$acc exit data delete(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_snow_nlayers, nmp_snow_t)
             deallocate(SMSTAV)
         endif
         if (allocated(SFCRUNOFF)) deallocate(SFCRUNOFF)
@@ -1285,11 +1233,11 @@ contains
         if (allocated(SNOWC)) deallocate(SNOWC)
         if (allocated(ACSNOW)) deallocate(ACSNOW)
         if (allocated(ACSNOM)) deallocate(ACSNOM)
-        if (allocated(ALBEDO)) deallocate(ALBEDO)
         if (allocated(SR)) deallocate(SR)
         if (allocated(VEGFRAC)) deallocate(VEGFRAC)
         if (allocated(nmp_snow)) deallocate(nmp_snow)
         if (allocated(nmp_snowh)) deallocate(nmp_snowh)
+        if (allocated(nmp_snow_nlayers)) deallocate(nmp_snow_nlayers)
         if (allocated(nmp_snow_t)) deallocate(nmp_snow_t)
         if (allocated(DZs)) deallocate(DZs)
 
@@ -1300,20 +1248,21 @@ contains
         allocate(ACSNOW(ims:ime,jms:jme), source=0.0)
         allocate(ACSNOM(ims:ime,jms:jme), source=0.0)
 
-        allocate(ALBEDO(ims:ime,jms:jme), source=0.17)
         allocate(SR(ims:ime,jms:jme), source=0.0)
         allocate(VEGFRAC(ims:ime,jms:jme), source=50.0)
 
 
         allocate(nmp_snow(ims:ime,jms:jme))
         allocate(nmp_snowh(ims:ime,jms:jme))
+        allocate(nmp_snow_nlayers(ims:ime,jms:jme))
         allocate(nmp_snow_t(ims:ime,1:num_snow_layers,jms:jme), source=273.15)
         allocate(DZs(num_soil_layers))
 
         DZs = [0.1,0.2,0.4,0.8]
 
 
-        !$acc enter data copyin(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, ALBEDO, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_snow_t)
+        !$acc enter data copyin(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_snow_nlayers, nmp_snow_t)
+
     end subroutine allocate_noah_data
 
 end module land_surface

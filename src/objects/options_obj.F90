@@ -1785,7 +1785,6 @@ contains
         real    :: snow_den_const(kMAX_NESTS)                    ! variable for converting snow height into SWE or visa versa when input data is incomplete 
 
         logical :: monthly_vegfrac(kMAX_NESTS)                   ! read in 12 months of vegfrac data
-        logical :: monthly_albedo(kMAX_NESTS)                    ! same for albedo (requires vegfrac be monthly)
         real :: update_interval_lsm(kMAX_NESTS)                  ! minimum number of seconds between LSM updates
         integer :: urban_category(kMAX_NESTS)                    ! index that defines the urban category in LU_Categories
         integer :: ice_category(kMAX_NESTS)                      ! index that defines the ice category in LU_Categories
@@ -1800,7 +1799,7 @@ contains
         ! define the namelist
         namelist /lsm_parameters/ LU_Categories, update_interval_lsm, &
                                   urban_category, ice_category, water_category, lake_category, snow_den_const,&
-                                  monthly_vegfrac, monthly_albedo, max_swe,  nmp_dveg,   &
+                                  monthly_vegfrac, max_swe,  nmp_dveg,   &
                                   nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_frz, nmp_opt_wet, &
                                   nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact, &
                                   nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot,           &
@@ -1820,7 +1819,6 @@ contains
         call set_nml_var_default(monthly_vegfrac, 'monthly_vegfrac', print_info, gennml)
         call set_nml_var_default(num_soil_layers, 'num_soil_layers', print_info, gennml)
 
-        call set_nml_var_default(monthly_albedo, 'monthly_albedo', print_info, gennml)
         call set_nml_var_default(urban_category, 'urban_category', print_info, gennml)
         call set_nml_var_default(ice_category, 'ice_category', print_info, gennml)
         call set_nml_var_default(water_category, 'water_category', print_info, gennml)
@@ -1867,7 +1865,6 @@ contains
             close(name_unit)
             if (rc /= 0) call print_nml_error('lsm_parameters',msg=error_msg,iostat=rc)
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
-            monthly_albedo(n_indx) = monthly_albedo(1)
             monthly_vegfrac(n_indx) = monthly_vegfrac(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             ! read the namelist options
@@ -1888,7 +1885,6 @@ contains
         call set_nml_var(lsm_options%monthly_vegfrac, monthly_vegfrac(n_indx), 'monthly_vegfrac', monthly_vegfrac(1))
         call set_nml_var(lsm_options%num_soil_layers, num_soil_layers(n_indx), 'num_soil_layers', num_soil_layers(1))
 
-        call set_nml_var(lsm_options%monthly_albedo, monthly_albedo(n_indx), 'monthly_albedo', monthly_albedo(1))
         call set_nml_var(lsm_options%urban_category, urban_category(n_indx), 'urban_category', urban_category(1))
         call set_nml_var(lsm_options%ice_category, ice_category(n_indx), 'ice_category', ice_category(1))
         call set_nml_var(lsm_options%water_category, water_category(n_indx), 'water_category', water_category(1))
@@ -1947,12 +1943,17 @@ contains
 
         integer, dimension(kMAX_NESTS) :: snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt
         logical, dimension(kMAX_NESTS) :: snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable
+
+        logical, dimension(kMAX_NESTS) :: snowpack_enable_vapour_transport
+        character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_variant
+        logical, dimension(kMAX_NESTS) :: snowpack_reduce_n_elements
         ! define the namelist
         namelist /sm_parameters/ fsm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
                                  fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst, &
                                  fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn, &
                                  snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt, &
-                                 snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable
+                                 snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable, &
+                                 snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_reduce_n_elements, snowpack_variant, snowpack_enable_vapour_transport
                                  
 
         CHARACTER(LEN=200) :: error_msg
@@ -1994,6 +1995,11 @@ contains
         call set_nml_var_default(snicar_use_oc, 'snicar_use_oc', print_info, gennml)
         call set_nml_var_default(snicar_aerosol_readtable, 'snicar_aerosol_readtable', print_info, gennml)
 
+        call set_nml_var_default(snowpack_albedo_parameterization, 'snowpack_albedo_parameterization', print_info, gennml)
+        call set_nml_var_default(snowpack_atmospheric_stability, 'snowpack_atmospheric_stability', print_info, gennml)
+        call set_nml_var_default(snowpack_reduce_n_elements, 'snowpack_reduce_n_elements', print_info, gennml)
+        call set_nml_var_default(snowpack_variant, 'snowpack_variant', print_info, gennml)
+        call set_nml_var_default(snowpack_enable_vapour_transport, 'snowpack_enable_vapour_transport', print_info, gennml)
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
 
@@ -2012,6 +2018,8 @@ contains
             snicar_snowdust_intmix(n_indx) = snicar_snowdust_intmix(1)
             snicar_use_oc(n_indx) = snicar_use_oc(1)
             snicar_aerosol_readtable(n_indx) = snicar_aerosol_readtable(1)
+            snowpack_enable_vapour_transport(n_indx) = snowpack_enable_vapour_transport(1)
+            snowpack_reduce_n_elements(n_indx) = snowpack_reduce_n_elements(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             ! read the namelist options
             open(io_newunit(name_unit), file=filename)
@@ -2055,6 +2063,12 @@ contains
         call set_nml_var(sm_options%snicar_snowdust_intmix, snicar_snowdust_intmix(n_indx), 'snicar_snowdust_intmix')
         call set_nml_var(sm_options%snicar_use_oc, snicar_use_oc(n_indx), 'snicar_use_oc')
         call set_nml_var(sm_options%snicar_aerosol_readtable, snicar_aerosol_readtable(n_indx), 'snicar_aerosol_readtable')
+
+        call set_nml_var(sm_options%snowpack_albedo_parameterization, snowpack_albedo_parameterization(n_indx), 'snowpack_albedo_parameterization', snowpack_albedo_parameterization(1))
+        call set_nml_var(sm_options%snowpack_atmospheric_stability, snowpack_atmospheric_stability(n_indx), 'snowpack_atmospheric_stability', snowpack_atmospheric_stability(1))
+        call set_nml_var(sm_options%snowpack_reduce_n_elements, snowpack_reduce_n_elements(n_indx), 'snowpack_reduce_n_elements', snowpack_reduce_n_elements(1))
+        call set_nml_var(sm_options%snowpack_variant, snowpack_variant(n_indx), 'snowpack_variant', snowpack_variant(1))
+        call set_nml_var(sm_options%snowpack_enable_vapour_transport, snowpack_enable_vapour_transport(n_indx), 'snowpack_enable_vapour_transport')
         
     end subroutine sm_parameters_namelist
     !> -------------------------------

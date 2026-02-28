@@ -169,7 +169,6 @@ module options_types
         ! integer :: snow_category ! = ice cat
         ! use monthly vegetation fraction data, not just a single value
         logical :: monthly_vegfrac
-        logical :: monthly_albedo
         integer :: sf_urban_phys
         integer :: num_soil_layers
         
@@ -246,6 +245,13 @@ module options_types
         logical :: snicar_snowdust_intmix
         logical :: snicar_use_oc
         logical :: snicar_aerosol_readtable
+
+        ! Options for SNOWPACK model
+        integer :: snowpack_atmospheric_stability  ! option to include atmospheric stability effects in SNOWPACK
+        integer :: snowpack_variant                     ! choice of SNOWPACK variant (standard, glacier, tundra, etc.)
+        integer :: snowpack_albedo_parameterization  ! choice of albedo parameterization in SNOWPACK
+        logical :: snowpack_reduce_n_elements      ! option to reduce number of snow layers for computational efficiency
+        logical :: snowpack_enable_vapour_transport  ! option to enable vapour transport between snow layers in SNOWPACK
 
     end type sm_options_type
 

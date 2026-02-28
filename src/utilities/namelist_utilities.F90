@@ -860,6 +860,42 @@ contains
 
     end subroutine set_decode_phys_nml_var
 
+    function translate_numeric_mapping(var_name, var_value) result(translated_value)
+        implicit none
+        character(len=*), intent(in) :: var_name
+        integer, intent(in) :: var_value
+        character(len=kMAX_NAME_LENGTH) :: translated_value
+
+        character(len=kMAX_NAME_LENGTH), allocatable :: mapping(:)
+        integer :: i, mapped_val
+
+        mapping = get_nml_var_mapping(trim(var_name))
+
+        ! check that mapping has an even number of entries
+        if (mod(size(mapping),2) /= 0) then
+            if (STD_OUT_PE) write(*,*) "DEVELOPER Error: mapping for namelist variable '", trim(var_name), "' does not have an even number of entries"
+            error stop
+        endif
+
+        translated_value = ""
+
+        ! get string value corresponding to var_value
+        do i = 2, size(mapping), 2
+            read(mapping(i), *) mapped_val
+            if (var_value == mapped_val) then
+                translated_value = mapping(i-1)
+                exit
+            endif
+        end do
+
+        if (translated_value == "") then
+            if (STD_OUT_PE) write(*,*) "Error: '", str(var_value), "' is not a valid mapped value for '", trim(var_name), "'"
+            error stop
+        endif
+
+    end function translate_numeric_mapping
+
+
     subroutine set_real_nml_var_default(var, name, info, gen_nml)
         implicit none
         real,    intent(inout) :: var
@@ -1296,7 +1332,7 @@ contains
         ! Three cases: description is formatted with newlines, description is too long for one line, or description is short enough for one line
 
         ! calculate the number of blank characters to write for the first comment 
-        num_blnks = NML_BLNK_LEN - len(trim(var_string))
+        num_blnks = max(1,NML_BLNK_LEN - len(trim(var_string)))
 
         ! see if is formatted with newlines
         indx = index(trim(description),achar(10))
@@ -2473,10 +2509,11 @@ contains
             case ("sm")
                 description = "Snow model to use: "//achar(10)//BLNK_CHR_N// &
                                                  "'none'      = no snow model"//achar(10)//BLNK_CHR_N// &
+                                                 "'snowpack'  = SNOWPACK snow model"//achar(10)//BLNK_CHR_N// &
                                                  "'FSM2trans' = FSM2trans snow model (must be compiled, see docs/compiling.md)"
                 default = "none"
                 if (present(val_keys)) then
-                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "FSM2trans", trim(str(kSM_FSM))]
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "snowpack", trim(str(kSM_SNOWPACK)), "FSM2trans", trim(str(kSM_FSM))]
                 endif
                 group = "Physics"
             ! --------------------------------------
@@ -2958,10 +2995,6 @@ contains
                 group = "LSM_Parameters"
             case ("monthly_vegfrac")
                 description = "Use monthly vegetation fraction data (T/F)"
-                default = ".False."
-                group = "LSM_Parameters"
-            case ("monthly_albedo")
-                description = "Use monthly albedo data (T/F)"
                 default = ".False."
                 group = "LSM_Parameters"
             case ("num_soil_layers")
@@ -3505,7 +3538,41 @@ contains
                 description = "option to read aerosol deposition fluxes from table (on) or NetCDF forcing file (off)"
                 default = ".True."
                 group = "SM_Parameters"
-
+            case("snowpack_atmospheric_stability")
+                description = "which atmospheric stability calculation method to use in SnowPack model"//achar(10)//BLNK_CHR_N// &
+                    "'MO_HOLTSLAG' = Holtslag and DeBruin (1988). Should be better than MO_MICHLMAYR during melt periods"//achar(10)//BLNK_CHR_N// &
+                    "'MO_MICHLMAYR' = Stearns and Weidner (1993) modified by Michlmayr (2008)"
+                default = "MO_HOLTSLAG"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "MO_HOLTSLAG", trim(str(kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG)), "MO_MICHLMAYR", trim(str(kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR))]
+                endif
+                group = "SM_Parameters"
+            case("snowpack_albedo_parameterization")
+                description = "which albedo parameterization to use in SnowPack model"//achar(10)//BLNK_CHR_N// &
+                    "'LEHNING_2' = default SnowPack albedo parameterization"//achar(10)//BLNK_CHR_N// &
+                    "'SCHMUCKI_OGS' = from SCHMUCKI_ALLX32 regression with optical grain size"
+                default = "LEHNING_2"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "LEHNING_2", trim(str(kSNOWPACK_ALBEDO_PARAM_LEHNING_2)), "SCHMUCKI_OGS", trim(str(kSNOWPACK_ALBEDO_PARAM_SCHMUCKI_OGS))]
+                endif
+                group = "SM_Parameters"
+            case("snowpack_enable_vapour_transport")
+                description = "Enable mass transport by vapour flow (default: FALSE). See https://doi.org/10.3389/feart.2020.00249 Jafari et al. (2020) for details"
+                default = ".False."
+                group = "SM_Parameters"
+            case("snowpack_variant")
+                description = "which SnowPack model variant to use"//achar(10)//BLNK_CHR_N// &
+                    "'antarctica' = SnowPack model suited for Antarctica simulations"//achar(10)//BLNK_CHR_N// &
+                    "'alps' = SnowPack model suited for Alps simulations"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "default", "0", "antarctica", trim(str(kSNOWPACK_VARIANT_ANTARCTICA)), "alps", trim(str(kSNOWPACK_VARIANT_ALPS))]
+                endif
+                default = "default"
+                group = "SM_Parameters"
+            case("snowpack_reduce_n_elements")
+                description = "Enable more 'aggressive' combining for layers deeper in the snowpack"
+                default = ".False."
+                group = "SM_Parameters"
             ! --------------------------------------
             ! --------------------------------------
             ! Radiation parameters namelist variables

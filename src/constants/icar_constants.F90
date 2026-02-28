@@ -219,16 +219,12 @@ module icar_constants
         integer :: storage_gw
         integer :: storage_lake
         integer :: roughness_z0
-        integer :: snow_water_equivalent
         integer :: snow_water_eq_prev
         integer :: snow_albedo_prev
-        integer :: snow_temperature
         integer :: snow_layer_depth
         integer :: snow_layer_ice
         integer :: snow_layer_liquid_water
         integer :: snow_age_factor
-        integer :: snow_height
-        integer :: snow_nlayers
         integer :: soil_water_content
         integer :: soil_water_content_liq
         integer :: eq_soil_moisture
@@ -280,19 +276,6 @@ module icar_constants
         integer :: temperature_interface
         integer :: runoff_tstep
 
-        !FSM2Trans Variables
-        integer :: Tsnow
-        integer :: Sice
-        integer :: Sliq
-        integer :: Ds
-        integer :: fsnow
-        integer :: Nsnow
-        integer :: dSWE_salt
-        integer :: dSWE_susp
-        integer :: dSWE_subl
-        integer :: dSWE_slide
-        integer :: meltflux_out_tstep
-        integer :: Sliq_out
 
         integer :: kpbl
         integer :: hpbl
@@ -388,6 +371,43 @@ module icar_constants
         integer :: snicar_bcphi_conc, snicar_bcpho_conc, snicar_ocphi_conc, snicar_ocpho_conc
         integer :: snicar_dust1_conc, snicar_dust2_conc, snicar_dust3_conc, snicar_dust4_conc, snicar_dust5_conc
 
+        !General Snow model Variables
+        integer :: Sice
+        integer :: Sliq
+        integer :: Ds
+        integer :: fsnow
+        integer :: snow_water_equivalent
+        integer :: snow_temperature
+        integer :: snow_height
+        integer :: snow_nlayers
+
+        ! FSM2trans variables
+        integer :: dSWE_salt
+        integer :: dSWE_susp
+        integer :: dSWE_subl
+        integer :: dSWE_blow_subl
+        integer :: dSWE_slide
+        integer :: meltflux_out_tstep
+        integer :: Sliq_out
+
+        !SNOWPACK variables
+        integer :: depositionDate
+        integer :: snow_temperature_i
+        integer :: Vol_Frac_I
+        integer :: Vol_Frac_W
+        integer :: Vol_Frac_A
+        integer :: Vol_Frac_S
+        integer :: Vol_Frac_WP
+        integer :: Rg
+        integer :: Rb
+        integer :: Dd
+        integer :: Sp
+        integer :: mk
+        integer :: mass_hoar
+        integer :: CDot
+        integer :: metamo
+
+
         integer :: last_var
     end type var_constants_type
 
@@ -418,6 +438,7 @@ module icar_constants
     character(len=18) :: three_d_hlm_dimensions(3)          = [character(len=18) :: "lon_x","azimuth","lat_y"]
     character(len=18) :: three_d_t_soil_dimensions(4)       = [character(len=18) :: "lon_x","nsoil","lat_y","time"]
     character(len=18) :: three_d_t_snow_dimensions(4)       = [character(len=18) :: "lon_x","nsnow","lat_y","time"]
+    character(len=18) :: three_d_t_snow_i_dimensions(4)     = [character(len=18) :: "lon_x","nsnow_i","lat_y","time"]
     character(len=18) :: three_d_t_snowsoil_dimensions(4)   = [character(len=18) :: "lon_x","nsnowsoil","lat_y","time"]
     character(len=18) :: three_d_soilcomp_dimensions(3)     = [character(len=18) :: "lon_x","nsoil_composition","lat_y"]
     character(len=18) :: three_d_crop_dimensions(3)         = [character(len=18) :: "lon_x","crop","lat_y"]
@@ -498,6 +519,7 @@ module icar_constants
     integer, parameter :: kLSM_NOAHMP    = 2
     
     integer, parameter :: kSM_FSM        = 1 !! MJ added
+    integer, parameter :: kSM_SNOWPACK   = 2
 
     integer, parameter :: kRA_BASIC      = 1
     integer, parameter :: kRA_SIMPLE     = 2
@@ -528,6 +550,16 @@ module icar_constants
     integer, parameter :: kLAKE_SOI_Z        = 4
     integer, parameter :: kLAKE_SOISNO_1_Z   = 10
 
+
+    ! SNOWPACK constants
+    integer, parameter :: kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG = 1
+    integer, parameter :: kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR = 2
+
+    integer, parameter :: kSNOWPACK_ALBEDO_PARAM_LEHNING_2 = 1
+    integer, parameter :: kSNOWPACK_ALBEDO_PARAM_SCHMUCKI_OGS = 2
+
+    integer, parameter :: kSNOWPACK_VARIANT_ANTARCTICA = 1
+    integer, parameter :: kSNOWPACK_VARIANT_ALPS      = 2
 
     ! mm of accumulated precip before "tipping" into the bucket
     ! only performed on output operations

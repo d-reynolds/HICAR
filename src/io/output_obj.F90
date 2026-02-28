@@ -119,8 +119,9 @@ contains
         call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
 
         temp_file = '.tmp_outfiles'//trim(str(PE_RANK_GLOBAL))//'.txt'
-        cmd_str = 'ls '//trim(this%base_out_file_name)//'*.nc > '//trim(temp_file)
-
+        
+        ! look for files with the format base_out_file_name + "YYYY-MM-DD_HH-MM-SS.nc" and store in a temporary file
+        cmd_str = 'ls '//trim(this%base_out_file_name)//'[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9]-[0-9][0-9]-[0-9][0-9].nc > '//trim(temp_file)
         call EXECUTE_COMMAND_LINE( cmd_str, EXITSTAT=error )
 
         if (error /= 0) then

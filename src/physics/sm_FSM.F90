@@ -1,7 +1,7 @@
 
 !!
 !!----------------------------------------------------------
-module module_sf_FSMdrv
+module module_sm_FSMdrv
     use time_object,         only : Time_type
     use mod_wrf_constants,   only : piconst, XLS
     use icar_constants
@@ -261,14 +261,10 @@ contains
 
             !! giving feedback to HICAR
             Tsrf = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d(its:ite,jts:jte))
-            if (options%lsm%monthly_albedo) then
-                albs = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(its:ite, domain%sim_time%month, jts:jte))
-            else
-                albs = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(its:ite, 1, jts:jte))
-            endif
+            albs = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d(its:ite, jts:jte))
             
             fsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(its:ite,jts:jte))
-            Nsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%Nsnow)%v)%data_2d(its:ite,jts:jte))                        
+            Nsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(its:ite,jts:jte))                        
             !!
             do i=1,NNsmax_HICAR
                 Tsnow(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(its:ite,i,jts:jte))
@@ -308,7 +304,7 @@ contains
 
                         Nsnow(j,i)     = 1 
                         fsnow(j,i)     = 0.95
-                        domain%vars_2d(domain%var_indx(kVARS%Nsnow)%v)%data_2d(hi,hj) = Nsnow(j,i)
+                        domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(hi,hj) = Nsnow(j,i)
                         domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(hi,hj) = fsnow(j,i)
 
                         Ds(1:k,j,i)      = domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(hi,hj)/k  
@@ -435,7 +431,7 @@ contains
             domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d = 0.
             domain%vars_2d(domain%var_indx(kVARS%dSWE_salt)%v)%data_2d  = 0.
             domain%vars_2d(domain%var_indx(kVARS%dSWE_susp)%v)%data_2d  = 0.
-            domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d  = 0.
+            domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d  = 0.
             last_output = domain%next_output
         endif
         
@@ -561,17 +557,13 @@ contains
                     domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d(hi,hj)=H_(j,i)
                     domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d(hi,hj)=LE_(j,i)
                     domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(hi,hj)=SWE_(j,i)
-                    if (options%lsm%monthly_albedo) then
-                        domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(hi, domain%sim_time%month, hj) = albs(j,i)
-                    else
-                        domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(hi, 1, hj) = albs(j,i)
-                    endif
+                    domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d(hi,hj) = albs(j,i)
                     !
                     domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d(hi,hj)=Tsrf(j,i)
                     domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(hi,hj)=snowdepth_(j,i)
                     domain%vars_2d(domain%var_indx(kVARS%Sliq_out)%v)%data_2d(hi,hj)=Sliq_out_(j,i)
                     domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(hi,hj)=fsnow(j,i)
-                    domain%vars_2d(domain%var_indx(kVARS%Nsnow)%v)%data_2d(hi,hj)=Nsnow(j,i)
+                    domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(hi,hj)=Nsnow(j,i)
                     !
                     domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d(hi,hj)=Esrf_(j,i)
                     domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d(hi,hj)=KH_(j,i)
@@ -592,7 +584,7 @@ contains
                         ! Convert to rate 1/s
                         domain%vars_2d(domain%var_indx(kVARS%dSWE_salt)%v)%data_2d(hi,hj)=domain%vars_2d(domain%var_indx(kVARS%dSWE_salt)%v)%data_2d(hi,hj) + dSWE_salt_(j,i)
                         domain%vars_2d(domain%var_indx(kVARS%dSWE_susp)%v)%data_2d(hi,hj)= domain%vars_2d(domain%var_indx(kVARS%dSWE_susp)%v)%data_2d(hi,hj) + dSWE_susp_(j,i)
-                        domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d(hi,hj)= domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d(hi,hj) + dSWE_subl_(j,i)
+                        domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d(hi,hj)= domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d(hi,hj) + dSWE_subl_(j,i)
                         !Add sublimated snow to latent heat flux. 
                         !Sometimes FSM returns NaN values for blowing snow sublimation, so mask those out here
                         if (abs(dSWE_subl_(j,i))>1) dSWE_subl_(j,i) = 0.0
@@ -613,7 +605,7 @@ contains
         if (firstit==1) firstit=0
         
         !These are FSM2 Diagnostic/output vars, so we can update them everywhere
-        !domain%vars_2d(domain%var_indx(kVARS%Nsnow)%v)%data_2d(its:ite,jts:jte)=Nsnow
+        !domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(its:ite,jts:jte)=Nsnow
         !!
         !snowfall_sum=snowfall_sum+Sf
         !rainfall_sum=rainfall_sum+Rf
@@ -654,7 +646,7 @@ contains
         if (present(corners_in)) corners=corners_in
         
         domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(fsnow(2:Nx_HICAR-1,2:Ny_HICAR-1))
-        domain%vars_2d(domain%var_indx(kVARS%Nsnow)%v)%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(Nsnow(2:Nx_HICAR-1,2:Ny_HICAR-1))                        
+        domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(Nsnow(2:Nx_HICAR-1,2:Ny_HICAR-1))                        
         !!
         do i=1,NNsmax_HICAR
             domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Tsnow(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
@@ -664,7 +656,7 @@ contains
         enddo
 
         call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v))
-        call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%Nsnow)%v))
+        call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v))
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v))
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Sice)%v))
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Sliq)%v))
@@ -677,7 +669,7 @@ contains
         if (corners) call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v),corners=corners)
 
         fsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(its:ite,jts:jte))
-        Nsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%Nsnow)%v)%data_2d(its:ite,jts:jte))                        
+        Nsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(its:ite,jts:jte))                        
         !!
         do i=1,NNsmax_HICAR
             Tsnow(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(its:ite,i,jts:jte))
@@ -732,4 +724,4 @@ contains
 
 
 !!
-end module module_sf_FSMdrv
+end module module_sm_FSMdrv

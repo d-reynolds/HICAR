@@ -115,7 +115,7 @@ module radiation
 #endif
 
     integer :: update_interval
-    real*8  :: last_model_time(kMAX_NESTS)
+    real*8  :: last_model_time(kMAX_NESTS), next_update_time(kMAX_NESTS)
     real    :: solar_constant
     real    :: p_top = 100000.0
     
@@ -186,8 +186,10 @@ contains
         if (.not.(context_change)) then
             if (update_interval<=10) then
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-10
+                next_update_time(domain%nest_indx) = domain%sim_time%seconds()
             else
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
+                next_update_time(domain%nest_indx) = domain%sim_time%seconds()
             endif
         endif
         
@@ -373,10 +375,9 @@ contains
     !! corner exchanges, because the EW strips include data received from NS exchanges.
     !! (In a 2D grid decomposition, NS neighbors share the same x range and EW neighbors
     !!  share the same y range, so strip lengths always match between sender and receiver.)
-    subroutine gather_neighborhood_albedo(domain, alb_month, nbr_albedo_2d)
+    subroutine gather_neighborhood_albedo(domain, nbr_albedo_2d)
         implicit none
         type(domain_t), intent(in) :: domain
-        integer, intent(in) :: alb_month
         real, intent(inout) :: nbr_albedo_2d(domain%ihs:domain%ihe, domain%jhs:domain%jhe)
 
         real, allocatable :: send_buf(:), recv_buf(:)
@@ -390,7 +391,7 @@ contains
         ! Copy own tile albedo into the buffer
         do j = jts, jte
             do i = its, ite
-                nbr_albedo_2d(i,j) = domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d(i, alb_month, j) * domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d(i,j)  ! zero out ocean points
+                nbr_albedo_2d(i,j) = domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d(i,j) * domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d(i,j)  ! zero out ocean points
             end do
         end do
 
@@ -649,7 +650,7 @@ contains
 
 
         real, dimension(:,:,:,:), pointer :: tauaer_sw=>null(), ssaaer_sw=>null(), asyaer_sw=>null()
-        real, allocatable:: albedo(:,:), nbr_albedo_2d(:,:), gsw(:,:)
+        real, allocatable:: nbr_albedo_2d(:,:), gsw(:,:)
         real, allocatable:: t_1d(:), p_1d(:), Dz_1d(:), qv_1d(:), qc_1d(:), qi_1d(:), qs_1d(:), cf_1d(:)
         real, allocatable :: qi(:,:,:), qc(:,:,:), qs(:,:,:), cldfra(:,:,:), re_c(:,:,:), re_i(:,:,:), re_s(:,:,:)
 
@@ -717,11 +718,11 @@ contains
         ! Terrain reflected SW local variables
         real :: local_albedo, nbr_albedo, albedo_sum, weight_sum
         real :: facing, w_refl, albedo_terrain, terrain_vf, refl_correction
-        integer :: di, dj, ii, jj, alb_month
+        integer :: di, dj, ii, jj
         logical :: run_full_radiation = .False. ! Default to not running full radiation, but may be set to true below if we are over the update interval
         if (options%physics%radiation == 0) return
         
-        run_full_radiation = ((domain%sim_time%seconds() - last_model_time(domain%nest_indx)) >= update_interval)
+        run_full_radiation = (domain%sim_time%seconds() >= next_update_time(domain%nest_indx))
 
         !We only need to calculate these variables if we are using terrain shading, otherwise only call on each radiation update
         if (options%rad%terrain_shading .or. run_full_radiation) then
@@ -773,7 +774,7 @@ contains
         !If we are not over the update interval, don't run any of this, since it contains allocations, etc...
         if (run_full_radiation) then
 
-            associate(albedo_dom => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d, &
+            associate(albedo_dom => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
                       shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
                       shortwave_diffuse => domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
                       shortwave_direct => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d, &
@@ -801,6 +802,7 @@ contains
                       qs_dom => domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d)
             ra_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
             last_model_time(domain%nest_indx) = domain%sim_time%seconds()
+            next_update_time(domain%nest_indx) = next_update_time(domain%nest_indx) + update_interval
 
             F_QI=.false.
             F_QI2 = .false.
@@ -848,10 +850,9 @@ contains
 
             allocate(cldfra(ims:ime,kms:kme,jms:jme))
 
-            allocate(albedo(ims:ime,jms:jme))
             allocate(gsw(ims:ime,jms:jme))
 
-            !$acc data create(t_1d, p_1d, Dz_1d, qv_1d, qc_1d, qi_1d, qs_1d, cf_1d, qi, qc, qs, re_c, re_i, re_s, cldfra, albedo, gsw)
+            !$acc data create(t_1d, p_1d, Dz_1d, qv_1d, qc_1d, qi_1d, qs_1d, cf_1d, qi, qc, qs, re_c, re_i, re_s, cldfra, gsw)
 
             !$acc kernels
             qi = 0
@@ -971,22 +972,6 @@ contains
                                its=its, ite=ite, jts=jts, jte=jte, kts=kts, kte=kte, F_runlw=.True.)
             else if (options%physics%radiation==kRA_RRTMG .or. options%physics%radiation==kRA_RRTMGP) then
 
-                if (options%lsm%monthly_albedo) then
-                    !$acc parallel loop gang vector collapse(2) present(albedo_dom, albedo)
-                    do j = jms,jme
-                        do i = ims,ime
-                            ALBEDO(i,j) = albedo_dom(i, sim_month, j)
-                        enddo
-                    enddo
-                else
-                    !$acc parallel loop gang vector collapse(2) present(albedo_dom, albedo)
-                    do j = jms,jme
-                        do i = ims,ime
-                            ALBEDO(i,j) = albedo_dom(i, 1, j)
-                        enddo
-                    enddo
-                endif
-
                 ! domain%tend%th_swrad = 0
                 ! domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d = 0
                 ! Calculate cloud fraction
@@ -1047,7 +1032,7 @@ contains
                         coszr = domain%vars_2d(domain%var_indx(kVARS%cosine_zenith_angle)%v)%data_2d,           &
                         julday = 0,                                           &  ! not used
                         solcon = solar_constant,                              &
-                        albedo = albedo,                                      &
+                        albedo = albedo_dom,                                      &
                         t3d = domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d,                     &
                         t8w = domain%vars_3d(domain%var_indx(kVARS%temperature_interface)%v)%data_3d,           &
                         tsk = domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,                &
@@ -1414,7 +1399,7 @@ contains
                     !$acc   create(snow_sw%tau, snow_sw%ssa, snow_sw%g)
                     ! !$acc data create(aerosols_sw, aerosols_sw%tau, aerosols_sw%ssa, aerosols_sw%g)
 
-                    !$acc parallel loop gang vector collapse(2) private(col_indx) present(cosine_zenith_angle, ALBEDO, sfc_alb_dir, sfc_alb_dif, mu0)
+                    !$acc parallel loop gang vector collapse(2) private(col_indx) present(cosine_zenith_angle, albedo_dom, sfc_alb_dir, sfc_alb_dif, mu0)
                     do j = jb_s, jb_e
                         do i = its, ite
                             col_indx = (i-its+1) + (j - jb_s)*(ite - its + 1)
@@ -1423,8 +1408,8 @@ contains
 
                             !$acc loop
                             do k = 1, nbnd
-                                sfc_alb_dir(k,col_indx) = ALBEDO(i,j)
-                                sfc_alb_dif(k,col_indx) = ALBEDO(i,j)
+                                sfc_alb_dir(k,col_indx) = albedo_dom(i,j)
+                                sfc_alb_dif(k,col_indx) = albedo_dom(i,j)
                             enddo
                         enddo
                     enddo
@@ -1582,25 +1567,18 @@ contains
             ! Simple method with multi-reflection correction and elevation-aware neighborhood albedo
             if (run_full_radiation .and. R_cells > 0) then
 
-                ! Select albedo month index (1 if not using monthly albedo)
-                if (options%lsm%monthly_albedo) then
-                    alb_month = sim_month
-                else
-                    alb_month = 1
-                endif
-
                 allocate(nbr_albedo_2d(domain%ihs:domain%ihe, domain%jhs:domain%jhe))
                 nbr_albedo_2d = 0.0
                 !$acc data create(nbr_albedo_2d)
 
                 ! Gather neighborhood albedo from neighboring MPI processes
-                !$acc update host(domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d)
-                call gather_neighborhood_albedo(domain, alb_month, nbr_albedo_2d)
+                !$acc update host(domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d)
+                call gather_neighborhood_albedo(domain, nbr_albedo_2d)
 
                 associate(svf        => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d,                    &
                           slope_ang  => domain%vars_2d(domain%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d,   &
                           aspect_ang => domain%vars_2d(domain%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d,  &
-                          albedo_3d  => domain%vars_3d(domain%var_indx(kVARS%albedo)%v)%data_3d,        &
+                          albedo_2d  => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d,        &
                           shortwave  => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d,     &
                           sw_terrain => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d)
 
@@ -1641,7 +1619,7 @@ contains
                         end do
 
                         ! Local albedo as fallback
-                        local_albedo = albedo_3d(i, alb_month, j)
+                        local_albedo = albedo_2d(i, j)
 
                         ! Weighted average albedo (fallback to local if no valid neighbors)
                         if (weight_sum > 1.0e-8) then
