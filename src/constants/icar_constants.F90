@@ -27,6 +27,7 @@ module icar_constants
     integer, parameter :: kMAX_NAME_LENGTH =   256
     integer, parameter :: kMAX_ATTR_LENGTH =   256
     integer, parameter :: kMAX_STRING_LENGTH = 256  ! maximum length of other strings (e.g. netcdf attributes)
+    integer, parameter :: kMAX_CONFIG_STRING_LENGTH = 100000  ! maximum length of serialized config string for restart validation
 
     ! calendar information
     character(len=20)          :: kDEFAULT_CALENDAR = "GREGORIAN"  ! default calendar type

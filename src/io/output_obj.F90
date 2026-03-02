@@ -157,42 +157,14 @@ contains
         class(output_t),  intent(inout)  :: this
         type(options_t), intent(in)    :: options
         character*60 :: a_string
+        character(len=kMAX_CONFIG_STRING_LENGTH) :: config_str
+        character(len=512) :: line
+        character(len=256) :: attr_name
+        integer :: i, line_start, str_len, eq_pos, slash_pos
 
         call this%add_attribute("comment",options%general%comment)
-        call this%add_attribute("source","ICAR version:"//trim(options%general%version))
+        call this%add_attribute("source","HICAR version:"//trim(options%general%version))
 
-        ! Add info on grid setting:
-        write(a_string,*) options%domain%sleve
-        call this%add_attribute("sleve",a_string)
-        if (options%domain%sleve) then
-          write(a_string,*) options%domain%terrain_smooth_windowsize
-          call this%add_attribute("terrain_smooth_windowsize",a_string )
-          write(a_string,*) options%domain%terrain_smooth_cycles
-          call this%add_attribute("terrain_smooth_cycles",a_string )
-          write(a_string,*) options%domain%decay_rate_L_topo
-          call this%add_attribute("decay_rate_L_topo",a_string )
-          write(a_string,*) options%domain%decay_rate_s_topo
-          call this%add_attribute("decay_rate_S_topo",a_string )
-          write(a_string,*) options%domain%sleve_n
-          call this%add_attribute("sleve_n",a_string )
-        endif
-        ! Add some more info on physics settings:
-        write(a_string,*) options%physics%boundarylayer
-        call this%add_attribute("pbl", a_string )
-        write(a_string,*) options%physics%landsurface
-        call this%add_attribute("lsm", a_string )
-        write(a_string,*) options%physics%watersurface
-        call this%add_attribute("water", a_string )
-        write(a_string,*) options%physics%microphysics
-        call this%add_attribute("mp", a_string )
-        write(a_string,*) options%physics%radiation
-        call this%add_attribute("rad", a_string )
-        write(a_string,*) options%physics%convection
-        call this%add_attribute("conv", a_string )
-        write(a_string,*) options%physics%advection
-        call this%add_attribute("adv", a_string )
-        write(a_string,*) options%physics%windtype
-        call this%add_attribute("wind", a_string )
 
 
         call this%add_attribute("ids",str(1))
@@ -202,19 +174,34 @@ contains
         call this%add_attribute("kds",str(1))
         call this%add_attribute("kde",str(this%file_dim_len(3)))
 
-        !call this%add_attribute("ims",str(this%grid%ims))
-        !call this%add_attribute("ime",str(this%grid%ime))
-        !call this%add_attribute("jms",str(this%grid%jms))
-        !call this%add_attribute("jme",str(this%grid%jme))
-        !call this%add_attribute("kms",str(this%grid%kms))
-        !call this%add_attribute("kme",str(this%grid%kme))
+        ! Store config as individual NetCDF attributes for restart validation
+        call options%generate_config_string(config_str)
 
-        !call this%add_attribute("its",str(this%grid%its))
-        !call this%add_attribute("ite",str(this%grid%ite))
-        !call this%add_attribute("jts",str(this%grid%jts))
-        !call this%add_attribute("jte",str(this%grid%jte))
-        !call this%add_attribute("kts",str(this%grid%kts))
-        !call this%add_attribute("kte",str(this%grid%kte))
+        ! Parse config string line by line (newline-delimited "group/key=value" lines)
+        line_start = 1
+        str_len = len_trim(config_str)
+        do i = 1, str_len
+            if (config_str(i:i) == char(10) .or. i == str_len) then
+                if (config_str(i:i) == char(10)) then
+                    line = config_str(line_start:i-1)
+                else
+                    line = config_str(line_start:i)
+                endif
+                line_start = i + 1
+
+                if (len_trim(line) == 0) cycle
+
+                eq_pos = index(line, '=')
+                if (eq_pos > 0) then
+                    attr_name = adjustl(line(1:eq_pos-1))
+                    ! Replace '/' with '.' for NetCDF-safe attribute names
+                    slash_pos = index(attr_name, '/')
+                    if (slash_pos > 0) attr_name(slash_pos:slash_pos) = '.'
+                    call this%add_attribute(trim(attr_name), &
+                                            trim(adjustl(line(eq_pos+1:))))
+                endif
+            endif
+        end do
 
     end subroutine
 
@@ -473,6 +460,8 @@ contains
             else
                 call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id), "Opening:"//trim(filename))
             endif
+            ! add global attributes such as the image number, domain dimension, creation time
+            call add_global_attributes(this)
         else
             ! in case we need to add a new variable when setting up variables
             call check_ncdf(nf90_redef(this%active_nc_id), "Setting redefine mode for: "//trim(filename))
@@ -484,12 +473,8 @@ contains
         ! define variables or find variable IDs (and dimensions)
         call setup_variables(this, time, var_indx_list)
 
-        if (this%creating) then
-            ! add global attributes such as the image number, domain dimension, creation time
-            call add_global_attributes(this)
-        endif
 
-        !Set creatint to true, so that we will output any static variables on the first pass.
+        !Set creating to true, so that we will output any static variables on the first pass.
         this%creating=.True.
 
         ! End define mode. This tells netCDF we are done defining metadata.
@@ -532,16 +517,16 @@ contains
 
         err="Creating global attributes"
         call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"Conventions","CF-1.6"), trim(err))
-        call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"title","Intermediate Complexity Atmospheric Research (ICAR) model output"), trim(err))
-        call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"institution","National Center for Atmospheric Research"), trim(err))
+        call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"title","High-Resolution Intermediate Complexity Atmospheric Research (HICAR) model output"), trim(err))
         call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"history","Created:"//todays_date_time//UTCoffset), trim(err))
         call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"references", &
-                    "Gutmann et al. 2016: The Intermediate Complexity Atmospheric Model (ICAR). J.Hydrometeor. doi:10.1175/JHM-D-15-0155.1, 2016."), trim(err))
-        call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"contact","Ethan Gutmann : gutmann@ucar.edu"), trim(err))
+                    "Gutmann et al. 2016: The Intermediate Complexity Atmospheric Model (ICAR). J.Hydrometeor. doi:10.1175/JHM-D-15-0155.1, 2016.\n"//&
+                    "Reynolds et al. 2023: The High-resolution Intermediate Complexity Atmospheric Research (HICAR v1.1) model enables fast dynamic downscaling to the hectometer scale. GMD. https://doi.org/10.5194/gmd-16-5049-2023, 2023"), trim(err))
         call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"git",VERSION), trim(err))
 
         if (this%n_attrs > 0) then
             do i=1,this%n_attrs
+                write(*,*) "adding attr: ", trim(this%attributes(i)%name)
                 call check_ncdf( nf90_put_att(   ncid,             &
                                             NF90_GLOBAL,                &
                                             trim(this%attributes(i)%name),    &
@@ -555,7 +540,6 @@ contains
         write(todays_date_time,date_format) date_time(1:3),date_time(5:7)
 
         call check_ncdf(nf90_put_att(ncid, NF90_GLOBAL,"history","Created:"//todays_date_time//UTCoffset), "global attr")
-        !call check_ncdf(nf90_put_att(ncid, NF90_GLOBAL, "image", this_image()))
 
     end subroutine add_global_attributes
 

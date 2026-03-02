@@ -8,7 +8,8 @@ submodule(options_interface) options_implementation
     use string,                     only : str
     use model_tracking,             only : print_model_diffs
     use output_metadata,            only : get_varname, get_varindx, get_varmeta
-    use namelist_utils,             only : set_nml_var, set_nml_var_default, set_namelist, write_nml_file_end
+    use namelist_utils,             only : set_nml_var, set_nml_var_default, set_namelist, write_nml_file_end, &
+                                           translate_numeric_mapping
     use iso_fortran_env
     use meta_data_interface,        only : meta_data_t
     implicit none
@@ -2679,5 +2680,373 @@ contains
         if (STD_OUT_PE) write(*,*) "  -----------------------------------------------------------------"
         if (STD_OUT_PE) write(*,*) 
 
-    end subroutine 
+    end subroutine
+
+
+    ! =========================================================================
+    ! Config string generation for restart validation
+    ! =========================================================================
+
+    subroutine append_kv_str(config_str, pos, group, key, val)
+        character(len=*), intent(inout) :: config_str
+        integer, intent(inout) :: pos
+        character(len=*), intent(in) :: group, key, val
+        character(len=10000) :: line
+        integer :: n
+
+        write(line, '(A,"/",A,"=",A)') trim(group), trim(key), trim(val)
+        n = len_trim(line)
+        config_str(pos:pos+n) = trim(line) // char(10)
+        pos = pos + n + 1
+    end subroutine
+
+    subroutine append_kv_int(config_str, pos, group, key, val)
+        character(len=*), intent(inout) :: config_str
+        integer, intent(inout) :: pos
+        character(len=*), intent(in) :: group, key
+        integer, intent(in) :: val
+        character(len=64) :: val_str
+
+        write(val_str, '(I0)') val
+        call append_kv_str(config_str, pos, group, key, trim(val_str))
+    end subroutine
+
+    subroutine append_kv_real(config_str, pos, group, key, val)
+        character(len=*), intent(inout) :: config_str
+        integer, intent(inout) :: pos
+        character(len=*), intent(in) :: group, key
+        real, intent(in) :: val
+        character(len=64) :: val_str
+
+        write(val_str, '(ES16.9)') val
+        call append_kv_str(config_str, pos, group, key, trim(adjustl(val_str)))
+    end subroutine
+
+    subroutine append_kv_logical(config_str, pos, group, key, val)
+        character(len=*), intent(inout) :: config_str
+        integer, intent(inout) :: pos
+        character(len=*), intent(in) :: group, key
+        logical, intent(in) :: val
+
+        if (val) then
+            call append_kv_str(config_str, pos, group, key, 'T')
+        else
+            call append_kv_str(config_str, pos, group, key, 'F')
+        endif
+    end subroutine
+
+    subroutine append_kv_real_array(config_str, pos, group, key, val)
+        character(len=*), intent(inout) :: config_str
+        integer, intent(inout) :: pos
+        character(len=*), intent(in) :: group, key
+        real, intent(in) :: val(:)
+        character(len=32) :: tmp
+        character(len=8192) :: arr_str
+        integer :: i
+
+        arr_str = ''
+        do i = 1, size(val)
+            write(tmp, '(ES16.9)') val(i)
+            if (i == 1) then
+                arr_str = trim(adjustl(tmp))
+            else
+                arr_str = trim(arr_str) // ',' // trim(adjustl(tmp))
+            endif
+        end do
+        call append_kv_str(config_str, pos, group, key, trim(arr_str))
+    end subroutine
+
+
+    module subroutine generate_config_string(this, config_str, exclude_restart_fields)
+        implicit none
+        class(options_t),            intent(in)  :: this
+        character(len=kMAX_CONFIG_STRING_LENGTH), intent(out) :: config_str
+        logical, optional,           intent(in)  :: exclude_restart_fields
+
+        logical :: exclude
+        integer :: pos
+
+        exclude = .false.
+        if (present(exclude_restart_fields)) exclude = exclude_restart_fields
+
+        config_str = ''
+        pos = 1
+
+        ! --- physics group ---
+        call append_kv_str(config_str, pos, 'physics', 'mp',   trim(translate_numeric_mapping('mp',   this%physics%microphysics)))
+        call append_kv_str(config_str, pos, 'physics', 'lsm',  trim(translate_numeric_mapping('lsm',  this%physics%landsurface)))
+        call append_kv_str(config_str, pos, 'physics', 'pbl',  trim(translate_numeric_mapping('pbl',  this%physics%boundarylayer)))
+        call append_kv_str(config_str, pos, 'physics', 'sfc',  trim(translate_numeric_mapping('sfc',  this%physics%surfacelayer)))
+        call append_kv_str(config_str, pos, 'physics', 'sm',   trim(translate_numeric_mapping('sm',   this%physics%snowmodel)))
+        call append_kv_str(config_str, pos, 'physics', 'water',trim(translate_numeric_mapping('water', this%physics%watersurface)))
+        call append_kv_str(config_str, pos, 'physics', 'rad',  trim(translate_numeric_mapping('rad',  this%physics%radiation)))
+        call append_kv_str(config_str, pos, 'physics', 'conv', trim(translate_numeric_mapping('conv', this%physics%convection)))
+        call append_kv_str(config_str, pos, 'physics', 'adv',  trim(translate_numeric_mapping('adv',  this%physics%advection)))
+        call append_kv_str(config_str, pos, 'physics', 'wind', trim(translate_numeric_mapping('wind', this%physics%windtype)))
+
+        ! --- wind group ---
+        call append_kv_logical(config_str, pos, 'wind', 'Sx',                   this%wind%Sx)
+        call append_kv_logical(config_str, pos, 'wind', 'thermal',              this%wind%thermal)
+        call append_kv_logical(config_str, pos, 'wind', 'linear_theory',        this%wind%linear_theory)
+        call append_kv_logical(config_str, pos, 'wind', 'wind_only',            this%wind%wind_only)
+        call append_kv_real   (config_str, pos, 'wind', 'TPI_scale',            this%wind%TPI_scale)
+        call append_kv_real   (config_str, pos, 'wind', 'TPI_dmax',             this%wind%TPI_dmax)
+        call append_kv_real   (config_str, pos, 'wind', 'Sx_dmax',              this%wind%Sx_dmax)
+        call append_kv_real   (config_str, pos, 'wind', 'Sx_scale_ang',         this%wind%Sx_scale_ang)
+        call append_kv_real   (config_str, pos, 'wind', 'alpha_const',          this%wind%alpha_const)
+        call append_kv_int    (config_str, pos, 'wind', 'wind_iterations',      this%wind%wind_iterations)
+        call append_kv_real   (config_str, pos, 'wind', 'smooth_wind_distance', this%wind%smooth_wind_distance)
+        call append_kv_real   (config_str, pos, 'wind', 'update_frequency',     real(this%wind%update_dt%seconds()))
+
+        ! --- time group ---
+        call append_kv_logical(config_str, pos, 'time', 'RK3',                  this%time%RK3)
+        call append_kv_real   (config_str, pos, 'time', 'cfl_reduction_factor', this%time%cfl_reduction_factor)
+
+        ! --- mp group ---
+        call append_kv_real   (config_str, pos, 'mp', 'Nt_c',            this%mp%Nt_c)
+        call append_kv_real   (config_str, pos, 'mp', 'TNO',             this%mp%TNO)
+        call append_kv_real   (config_str, pos, 'mp', 'am_s',            this%mp%am_s)
+        call append_kv_real   (config_str, pos, 'mp', 'rho_g',           this%mp%rho_g)
+        call append_kv_real   (config_str, pos, 'mp', 'av_s',            this%mp%av_s)
+        call append_kv_real   (config_str, pos, 'mp', 'bv_s',            this%mp%bv_s)
+        call append_kv_real   (config_str, pos, 'mp', 'fv_s',            this%mp%fv_s)
+        call append_kv_real   (config_str, pos, 'mp', 'av_i',            this%mp%av_i)
+        call append_kv_real   (config_str, pos, 'mp', 'av_g',            this%mp%av_g)
+        call append_kv_real   (config_str, pos, 'mp', 'bv_g',            this%mp%bv_g)
+        call append_kv_real   (config_str, pos, 'mp', 'Ef_si',           this%mp%Ef_si)
+        call append_kv_real   (config_str, pos, 'mp', 'Ef_rs',           this%mp%Ef_rs)
+        call append_kv_real   (config_str, pos, 'mp', 'Ef_rg',           this%mp%Ef_rg)
+        call append_kv_real   (config_str, pos, 'mp', 'Ef_ri',           this%mp%Ef_ri)
+        call append_kv_real   (config_str, pos, 'mp', 'C_cubes',         this%mp%C_cubes)
+        call append_kv_real   (config_str, pos, 'mp', 'C_sqrd',          this%mp%C_sqrd)
+        call append_kv_real   (config_str, pos, 'mp', 'mu_r',            this%mp%mu_r)
+        call append_kv_real   (config_str, pos, 'mp', 't_adjust',        this%mp%t_adjust)
+        call append_kv_logical(config_str, pos, 'mp', 'Ef_rw_l',         this%mp%Ef_rw_l)
+        call append_kv_logical(config_str, pos, 'mp', 'EF_sw_l',         this%mp%EF_sw_l)
+        call append_kv_real   (config_str, pos, 'mp', 'update_interval', this%mp%update_interval)
+        call append_kv_int    (config_str, pos, 'mp', 'top_mp_level',    this%mp%top_mp_level)
+
+        ! --- lt group ---
+        call append_kv_int    (config_str, pos, 'lt', 'buffer',                  this%lt%buffer)
+        call append_kv_int    (config_str, pos, 'lt', 'stability_window_size',   this%lt%stability_window_size)
+        call append_kv_real   (config_str, pos, 'lt', 'max_stability',           this%lt%max_stability)
+        call append_kv_real   (config_str, pos, 'lt', 'min_stability',           this%lt%min_stability)
+        call append_kv_logical(config_str, pos, 'lt', 'variable_N',              this%lt%variable_N)
+        call append_kv_logical(config_str, pos, 'lt', 'smooth_nsq',              this%lt%smooth_nsq)
+        call append_kv_int    (config_str, pos, 'lt', 'vert_smooth',             this%lt%vert_smooth)
+        call append_kv_real   (config_str, pos, 'lt', 'N_squared',               this%lt%N_squared)
+        call append_kv_real   (config_str, pos, 'lt', 'linear_contribution',     this%lt%linear_contribution)
+        call append_kv_logical(config_str, pos, 'lt', 'remove_lowres_linear',    this%lt%remove_lowres_linear)
+        call append_kv_real   (config_str, pos, 'lt', 'rm_N_squared',            this%lt%rm_N_squared)
+        call append_kv_real   (config_str, pos, 'lt', 'rm_linear_contribution',  this%lt%rm_linear_contribution)
+        call append_kv_real   (config_str, pos, 'lt', 'linear_update_fraction',  this%lt%linear_update_fraction)
+        call append_kv_real   (config_str, pos, 'lt', 'dirmax',                  this%lt%dirmax)
+        call append_kv_real   (config_str, pos, 'lt', 'dirmin',                  this%lt%dirmin)
+        call append_kv_real   (config_str, pos, 'lt', 'spdmax',                  this%lt%spdmax)
+        call append_kv_real   (config_str, pos, 'lt', 'spdmin',                  this%lt%spdmin)
+        call append_kv_real   (config_str, pos, 'lt', 'nsqmax',                  this%lt%nsqmax)
+        call append_kv_real   (config_str, pos, 'lt', 'nsqmin',                  this%lt%nsqmin)
+        call append_kv_int    (config_str, pos, 'lt', 'n_dir_values',            this%lt%n_dir_values)
+        call append_kv_int    (config_str, pos, 'lt', 'n_nsq_values',            this%lt%n_nsq_values)
+        call append_kv_int    (config_str, pos, 'lt', 'n_spd_values',            this%lt%n_spd_values)
+        call append_kv_real   (config_str, pos, 'lt', 'minimum_layer_size',      this%lt%minimum_layer_size)
+
+        ! --- adv group ---
+        call append_kv_logical(config_str, pos, 'adv', 'boundary_buffer', this%adv%boundary_buffer)
+        call append_kv_logical(config_str, pos, 'adv', 'MPDATA_FCT',     this%adv%MPDATA_FCT)
+        call append_kv_int    (config_str, pos, 'adv', 'mpdata_order',   this%adv%mpdata_order)
+        call append_kv_int    (config_str, pos, 'adv', 'flux_corr',      this%adv%flux_corr)
+        call append_kv_int    (config_str, pos, 'adv', 'h_order',        this%adv%h_order)
+        call append_kv_int    (config_str, pos, 'adv', 'v_order',        this%adv%v_order)
+        call append_kv_logical(config_str, pos, 'adv', 'advect_density', this%adv%advect_density)
+
+        ! --- cu group ---
+        call append_kv_real(config_str, pos, 'cu', 'stochastic_cu',     this%cu%stochastic_cu)
+        call append_kv_real(config_str, pos, 'cu', 'tendency_fraction',  this%cu%tendency_fraction)
+        call append_kv_real(config_str, pos, 'cu', 'tend_qv_fraction',   this%cu%tend_qv_fraction)
+        call append_kv_real(config_str, pos, 'cu', 'tend_qc_fraction',   this%cu%tend_qc_fraction)
+        call append_kv_real(config_str, pos, 'cu', 'tend_th_fraction',   this%cu%tend_th_fraction)
+        call append_kv_real(config_str, pos, 'cu', 'tend_qi_fraction',   this%cu%tend_qi_fraction)
+
+        ! --- pbl group ---
+        call append_kv_int(config_str, pos, 'pbl', 'ysu_topdown_pblmix', this%pbl%ysu_topdown_pblmix)
+
+        ! --- sfc group ---
+        call append_kv_int (config_str, pos, 'sfc', 'isfflx',         this%sfc%isfflx)
+        call append_kv_int (config_str, pos, 'sfc', 'scm_force_flux', this%sfc%scm_force_flux)
+        call append_kv_int (config_str, pos, 'sfc', 'iz0tlnd',        this%sfc%iz0tlnd)
+        call append_kv_int (config_str, pos, 'sfc', 'isftcflx',       this%sfc%isftcflx)
+        call append_kv_real(config_str, pos, 'sfc', 'sbrlim',         this%sfc%sbrlim)
+
+        ! --- lsm group ---
+        call append_kv_str    (config_str, pos, 'lsm', 'LU_Categories',    trim(this%lsm%LU_Categories))
+        call append_kv_real   (config_str, pos, 'lsm', 'max_swe',          this%lsm%max_swe)
+        call append_kv_real   (config_str, pos, 'lsm', 'snow_den_const',   this%lsm%snow_den_const)
+        call append_kv_real   (config_str, pos, 'lsm', 'update_interval',  this%lsm%update_interval)
+        call append_kv_int    (config_str, pos, 'lsm', 'urban_category',   this%lsm%urban_category)
+        call append_kv_int    (config_str, pos, 'lsm', 'ice_category',     this%lsm%ice_category)
+        call append_kv_int    (config_str, pos, 'lsm', 'water_category',   this%lsm%water_category)
+        call append_kv_int    (config_str, pos, 'lsm', 'lake_category',    this%lsm%lake_category)
+        call append_kv_logical(config_str, pos, 'lsm', 'monthly_vegfrac',  this%lsm%monthly_vegfrac)
+        call append_kv_int    (config_str, pos, 'lsm', 'sf_urban_phys',    this%lsm%sf_urban_phys)
+        call append_kv_int    (config_str, pos, 'lsm', 'num_soil_layers',  this%lsm%num_soil_layers)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_dveg',         this%lsm%nmp_dveg)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_crs',      this%lsm%nmp_opt_crs)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_sfc',      this%lsm%nmp_opt_sfc)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_btr',      this%lsm%nmp_opt_btr)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_runsrf',   this%lsm%nmp_opt_runsrf)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_runsub',   this%lsm%nmp_opt_runsub)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_infdv',    this%lsm%nmp_opt_infdv)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_frz',      this%lsm%nmp_opt_frz)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_inf',      this%lsm%nmp_opt_inf)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_rad',      this%lsm%nmp_opt_rad)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_alb',      this%lsm%nmp_opt_alb)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_wet',      this%lsm%nmp_opt_wet)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_snf',      this%lsm%nmp_opt_snf)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_tksno',    this%lsm%nmp_opt_tksno)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_compact',  this%lsm%nmp_opt_compact)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_scf',      this%lsm%nmp_opt_scf)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_tbot',     this%lsm%nmp_opt_tbot)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_stc',      this%lsm%nmp_opt_stc)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_gla',      this%lsm%nmp_opt_gla)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_rsf',      this%lsm%nmp_opt_rsf)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_soil',     this%lsm%nmp_opt_soil)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_pedo',     this%lsm%nmp_opt_pedo)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_crop',     this%lsm%nmp_opt_crop)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_irr',      this%lsm%nmp_opt_irr)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_irrm',     this%lsm%nmp_opt_irrm)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_tdrn',     this%lsm%nmp_opt_tdrn)
+        call append_kv_int    (config_str, pos, 'lsm', 'noahmp_output',    this%lsm%noahmp_output)
+        call append_kv_real   (config_str, pos, 'lsm', 'nmp_soiltstep',    this%lsm%nmp_soiltstep)
+
+        ! --- sm group ---
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_nsnow_max',    this%sm%fsm_nsnow_max)
+        call append_kv_real   (config_str, pos, 'sm', 'fsm_ds_min',       this%sm%fsm_ds_min)
+        call append_kv_real   (config_str, pos, 'sm', 'fsm_ds_surflay',   this%sm%fsm_ds_surflay)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_albedo',       this%sm%fsm_albedo)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_canmod',       this%sm%fsm_canmod)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_checks',       this%sm%fsm_checks)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_condct',       this%sm%fsm_condct)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_densty',       this%sm%fsm_densty)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_exchng',       this%sm%fsm_exchng)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_hydrol',       this%sm%fsm_hydrol)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_radsbg',       this%sm%fsm_radsbg)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_snfrac',       this%sm%fsm_snfrac)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_snolay',       this%sm%fsm_snolay)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_snslid',       this%sm%fsm_snslid)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_sntran',       this%sm%fsm_sntran)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_zoffst',       this%sm%fsm_zoffst)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_oshdtn',       this%sm%fsm_oshdtn)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_alradt',       this%sm%fsm_alradt)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_hn_on',        this%sm%fsm_hn_on)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_for_hn',       this%sm%fsm_for_hn)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_z0pert',       this%sm%fsm_z0pert)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_wcpert',       this%sm%fsm_wcpert)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_fspert',       this%sm%fsm_fspert)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_alpert',       this%sm%fsm_alpert)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_slpert',       this%sm%fsm_slpert)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_snowoptics_opt',   this%sm%snicar_snowoptics_opt)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_dustoptics_opt',   this%sm%snicar_dustoptics_opt)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_solarspec_opt',    this%sm%snicar_solarspec_opt)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_bandnumber_opt',   this%sm%snicar_bandnumber_opt)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_rtsolver_opt',     this%sm%snicar_rtsolver_opt)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_snowshape_opt',    this%sm%snicar_snowshape_opt)
+        call append_kv_logical(config_str, pos, 'sm', 'snicar_use_aerosol',      this%sm%snicar_use_aerosol)
+        call append_kv_logical(config_str, pos, 'sm', 'snicar_snowbc_intmix',    this%sm%snicar_snowbc_intmix)
+        call append_kv_logical(config_str, pos, 'sm', 'snicar_snowdust_intmix',  this%sm%snicar_snowdust_intmix)
+        call append_kv_logical(config_str, pos, 'sm', 'snicar_use_oc',           this%sm%snicar_use_oc)
+        call append_kv_logical(config_str, pos, 'sm', 'snicar_aerosol_readtable',this%sm%snicar_aerosol_readtable)
+        call append_kv_int    (config_str, pos, 'sm', 'snowpack_atmospheric_stability',   this%sm%snowpack_atmospheric_stability)
+        call append_kv_int    (config_str, pos, 'sm', 'snowpack_variant',                 this%sm%snowpack_variant)
+        call append_kv_int    (config_str, pos, 'sm', 'snowpack_albedo_parameterization', this%sm%snowpack_albedo_parameterization)
+        call append_kv_logical(config_str, pos, 'sm', 'snowpack_reduce_n_elements',       this%sm%snowpack_reduce_n_elements)
+        call append_kv_logical(config_str, pos, 'sm', 'snowpack_enable_vapour_transport', this%sm%snowpack_enable_vapour_transport)
+
+        ! --- rad group ---
+        call append_kv_logical(config_str, pos, 'rad', 'terrain_shading',      this%rad%terrain_shading)
+        call append_kv_real   (config_str, pos, 'rad', 'update_interval_rad',  this%rad%update_interval_rad)
+        call append_kv_int    (config_str, pos, 'rad', 'icloud',               this%rad%icloud)
+        call append_kv_int    (config_str, pos, 'rad', 'cldovrlp',             this%rad%cldovrlp)
+        call append_kv_logical(config_str, pos, 'rad', 'read_ghg',             this%rad%read_ghg)
+        call append_kv_real   (config_str, pos, 'rad', 'tzone',                this%rad%tzone)
+        call append_kv_real   (config_str, pos, 'rad', 'terrain_refl_radius',  this%rad%terrain_refl_radius)
+
+        ! --- domain group (behavior-affecting fields only) ---
+        call append_kv_real   (config_str, pos, 'domain', 'dx',                          this%domain%dx)
+        call append_kv_int    (config_str, pos, 'domain', 'nz',                          this%domain%nz)
+        if (allocated(this%domain%dz_levels)) then
+            call append_kv_real_array(config_str, pos, 'domain', 'dz_levels', this%domain%dz_levels)
+        endif
+        call append_kv_real   (config_str, pos, 'domain', 'flat_z_height',                this%domain%flat_z_height)
+        call append_kv_logical(config_str, pos, 'domain', 'sleve',                        this%domain%sleve)
+        call append_kv_int    (config_str, pos, 'domain', 'terrain_smooth_windowsize',    this%domain%terrain_smooth_windowsize)
+        call append_kv_int    (config_str, pos, 'domain', 'terrain_smooth_cycles',        this%domain%terrain_smooth_cycles)
+        call append_kv_real   (config_str, pos, 'domain', 'decay_rate_L_topo',            this%domain%decay_rate_L_topo)
+        call append_kv_real   (config_str, pos, 'domain', 'decay_rate_S_topo',            this%domain%decay_rate_S_topo)
+        call append_kv_real   (config_str, pos, 'domain', 'sleve_n',                      this%domain%sleve_n)
+        call append_kv_logical(config_str, pos, 'domain', 'use_agl_height',               this%domain%use_agl_height)
+        call append_kv_real   (config_str, pos, 'domain', 'agl_cap',                      this%domain%agl_cap)
+        call append_kv_int    (config_str, pos, 'domain', 'longitude_system',             this%domain%longitude_system)
+
+        ! --- forcing group (behavior-affecting fields only) ---
+        call append_kv_logical(config_str, pos, 'forcing', 'qv_is_relative_humidity', this%forcing%qv_is_relative_humidity)
+        call append_kv_logical(config_str, pos, 'forcing', 'qv_is_spec_humidity',     this%forcing%qv_is_spec_humidity)
+        call append_kv_logical(config_str, pos, 'forcing', 't_is_potential',           this%forcing%t_is_potential)
+        call append_kv_logical(config_str, pos, 'forcing', 'z_is_geopotential',        this%forcing%z_is_geopotential)
+        call append_kv_logical(config_str, pos, 'forcing', 'time_varying_z',           this%forcing%time_varying_z)
+        call append_kv_logical(config_str, pos, 'forcing', 'relax_filters',            this%forcing%relax_filters)
+        call append_kv_real   (config_str, pos, 'forcing', 't_offset',                 this%forcing%t_offset)
+        call append_kv_real   (config_str, pos, 'forcing', 'p_multiplier',             this%forcing%p_multiplier)
+        call append_kv_logical(config_str, pos, 'forcing', 'limit_rh',                 this%forcing%limit_rh)
+        call append_kv_real   (config_str, pos, 'forcing', 'inputinterval',            this%forcing%inputinterval)
+        call append_kv_int    (config_str, pos, 'forcing', 'forcing_longitude_system', this%forcing%forcing_longitude_system)
+
+        ! --- general group (behavior-affecting fields only) ---
+        call append_kv_str    (config_str, pos, 'general', 'calendar',         trim(this%general%calendar))
+        call append_kv_logical(config_str, pos, 'general', 'ideal',            this%general%ideal)
+        call append_kv_int    (config_str, pos, 'general', 'nests',            this%general%nests)
+        call append_kv_int    (config_str, pos, 'general', 'parent_nest',      this%general%parent_nest)
+        call append_kv_str    (config_str, pos, 'general', 'phys_suite',       trim(this%general%phys_suite))
+        call append_kv_logical(config_str, pos, 'general', 'use_mp_options',   this%general%use_mp_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_lt_options',   this%general%use_lt_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_adv_options',  this%general%use_adv_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_lsm_options',  this%general%use_lsm_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_sm_options',   this%general%use_sm_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_cu_options',   this%general%use_cu_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_rad_options',  this%general%use_rad_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_pbl_options',  this%general%use_pbl_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_sfc_options',  this%general%use_sfc_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_wind_options', this%general%use_wind_options)
+
+        ! Fields only included in full config string (not for restart comparison)
+        if (.not. exclude) then
+            ! --- general: session-specific fields ---
+            call append_kv_logical(config_str, pos, 'general', 'debug',       this%general%debug)
+            call append_kv_logical(config_str, pos, 'general', 'interactive', this%general%interactive)
+            call append_kv_str    (config_str, pos, 'general', 'version',     trim(this%general%version))
+            call append_kv_str    (config_str, pos, 'general', 'comment',     trim(this%general%comment))
+
+            ! --- restart ---
+            call append_kv_logical(config_str, pos, 'restart', 'restart_run',    this%restart%restart)
+            call append_kv_int    (config_str, pos, 'restart', 'restartinterval',this%restart%restart_count)
+            call append_kv_str    (config_str, pos, 'restart', 'restart_folder', trim(this%restart%restart_folder))
+
+            ! --- output ---
+            call append_kv_str (config_str, pos, 'output', 'output_folder',    trim(this%output%output_folder))
+            call append_kv_real(config_str, pos, 'output', 'outputinterval',   this%output%outputinterval)
+            call append_kv_int (config_str, pos, 'output', 'frames_per_outfile', this%output%frames_per_outfile)
+
+            ! --- domain: file/variable name fields ---
+            !call append_kv_str(config_str, pos, 'domain', 'init_conditions_file', trim(this%domain%init_conditions_file))
+
+            ! --- lt: LUT file fields ---
+            call append_kv_logical(config_str, pos, 'lt', 'read_LUT',         this%lt%read_LUT)
+            call append_kv_logical(config_str, pos, 'lt', 'write_LUT',        this%lt%write_LUT)
+            call append_kv_str    (config_str, pos, 'lt', 'u_LUT_Filename',   trim(this%lt%u_LUT_Filename))
+            call append_kv_str    (config_str, pos, 'lt', 'v_LUT_Filename',   trim(this%lt%v_LUT_Filename))
+            call append_kv_logical(config_str, pos, 'lt', 'overwrite_lt_lut', this%lt%overwrite_lt_lut)
+        endif
+
+    end subroutine generate_config_string
+
 end submodule

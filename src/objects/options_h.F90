@@ -1,6 +1,6 @@
 module options_interface
 
-    use icar_constants,             only : kMAX_STRING_LENGTH, kMAX_STORAGE_VARS
+    use icar_constants,             only : kMAX_STRING_LENGTH, kMAX_STORAGE_VARS, kMAX_CONFIG_STRING_LENGTH
     use options_types,              only : general_options_type, output_options_type, domain_options_type, &
                                            forcing_options_type, restart_options_type,                     &
                                            physics_type, mp_options_type, lt_options_type, sfc_options_type, &
@@ -70,6 +70,7 @@ module options_interface
         procedure, public  :: setup_synthetic_forcing
         procedure, public  :: alloc_vars
         procedure, public  :: restart_vars
+        procedure, public  :: generate_config_string
     end type
 
 interface
@@ -124,6 +125,13 @@ interface
     module subroutine setup_synthetic_forcing(this)
         implicit none
         class(options_t), intent(inout):: this
+    end subroutine
+
+    module subroutine generate_config_string(this, config_str, exclude_restart_fields)
+        implicit none
+        class(options_t),            intent(in)  :: this
+        character(len=kMAX_CONFIG_STRING_LENGTH), intent(out) :: config_str
+        logical, optional,           intent(in)  :: exclude_restart_fields
     end subroutine
 
 end interface

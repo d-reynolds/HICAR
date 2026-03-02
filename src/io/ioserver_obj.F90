@@ -989,7 +989,10 @@ contains
 
         call check_ncdf(nf90_open(restart_in_file, IOR(nf90_nowrite,NF90_NETCDF4), ncid, &
                 comm = this%IO_Comms%MPI_VAL, info = IO_Comms_info%MPI_VAL), " Opening file "//trim(restart_in_file))
-        
+
+        ! Validate that the restart file config matches the current config
+        call compare_restart_config(ncid, options)
+
         ! setup start/count arrays accordingly. k_s_w and k_e_w forseen to always cover the bounds of what k_s_re and k_e_re would be
         ! This is because the domain is only decomposed in 2D.
         start_3d = (/ this%i_s_re,this%j_s_re,this%k_s_w,restart_step /)
@@ -1064,6 +1067,116 @@ contains
         call this%reader%close_file()
         call this%outputer%close_output_files()
 
-    end subroutine 
-    
+    end subroutine
+
+
+    ! =========================================================================
+    ! Restart config validation
+    ! =========================================================================
+    subroutine compare_restart_config(ncid, options)
+        integer,         intent(in) :: ncid
+        type(options_t), intent(in) :: options
+
+        character(len=kMAX_CONFIG_STRING_LENGTH) :: config_str
+        character(len=512) :: line
+        character(len=256) :: key, current_val, attr_name
+        character(len=kMAX_ATTR_LENGTH) :: stored_val
+        character(len=512) :: diff_report(500)
+        integer :: i, line_start, str_len, eq_pos, n_diffs, slash_pos
+        integer :: status, attr_len
+        logical :: first_key
+        integer :: j
+
+        ! Generate current config (excluding restart-specific fields)
+        call options%generate_config_string(config_str, exclude_restart_fields=.true.)
+
+        ! Parse config string and compare each key against stored attributes
+        n_diffs = 0
+        line_start = 1
+        str_len = len_trim(config_str)
+        first_key = .true.
+
+        do i = 1, str_len
+            if (config_str(i:i) == char(10) .or. i == str_len) then
+                if (config_str(i:i) == char(10)) then
+                    line = config_str(line_start:i-1)
+                else
+                    line = config_str(line_start:i)
+                endif
+                line_start = i + 1
+
+                if (len_trim(line) == 0) cycle
+
+                eq_pos = index(line, '=')
+                if (eq_pos <= 0) cycle
+
+                key = adjustl(line(1:eq_pos-1))
+                current_val = adjustl(line(eq_pos+1:))
+
+                ! Build NetCDF-safe attribute name (replace '/' with '.')
+                attr_name = key
+                slash_pos = index(attr_name, '/')
+                if (slash_pos > 0) attr_name(slash_pos:slash_pos) = '.'
+
+                ! Check if this key should be excluded from comparison
+                ! do j = 1, N_EXCLUDE
+                !     if (index(trim(key), trim(exclude_prefixes(j))) == 1) cycle
+                ! end do
+
+                ! On the first key, check if cfg.* attributes exist at all (backward compat)
+                if (first_key) then
+                    first_key = .false.
+                    status = nf90_inquire_attribute(ncid, NF90_GLOBAL, trim(attr_name), len=attr_len)
+                    if (status == NF90_ENOTATT) then
+                        write(*,*) "  WARNING: Restart file does not contain config attributes."
+                        write(*,*) "           Unable to verify configuration consistency. Continuing..."
+                        return
+                    endif
+                endif
+
+                ! Read stored attribute value
+                status = nf90_inquire_attribute(ncid, NF90_GLOBAL, trim(attr_name), len=attr_len)
+                if (status /= NF90_NOERR) then
+                    ! Attribute missing from restart file
+                    n_diffs = n_diffs + 1
+                    if (n_diffs <= 500) then
+                        write(diff_report(n_diffs), '(A,A,A,A,A)') &
+                            "  ", trim(key), ": restart=<missing>, current='", &
+                            trim(current_val), "'"
+                    endif
+                    cycle
+                endif
+
+                stored_val = ''
+                call check_ncdf(nf90_get_att(ncid, NF90_GLOBAL, trim(attr_name), stored_val), &
+                        " Reading " // trim(attr_name) // " from restart file")
+
+                if (trim(stored_val) /= trim(current_val)) then
+                    n_diffs = n_diffs + 1
+                    if (n_diffs <= 500) then
+                        write(diff_report(n_diffs), '(A,A,A,A,A,A,A)') &
+                            "  ", trim(key), ": restart='", trim(stored_val), &
+                            "', current='", trim(current_val), "'"
+                    endif
+                endif
+            endif
+        end do
+
+        if (n_diffs > 0) then
+            write(*,*) ""
+            write(*,*) "ERROR: Configuration mismatch between restart file and current namelist"
+            write(*,*) "  Number of differences: ", n_diffs
+            do i = 1, min(n_diffs, 500)
+                write(*,*) trim(diff_report(i))
+            end do
+            if (n_diffs > 500) then
+                write(*,*) "  ... and ", n_diffs - 500, " more differences"
+            endif
+            write(*,*) ""
+            error stop "Configuration mismatch: restart file was generated with different options than current namelist"
+        endif
+
+    end subroutine compare_restart_config
+
+
 end submodule
