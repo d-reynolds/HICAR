@@ -1580,11 +1580,12 @@ contains
                           aspect_ang => domain%vars_2d(domain%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d,  &
                           albedo_2d  => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d,        &
                           shortwave  => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d,     &
-                          sw_terrain => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d)
+                          sw_terrain => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d, &
+                          ihs => domain%ihs, ihe => domain%ihe, jhs => domain%jhs, jhe => domain%jhe)
 
                 !$acc parallel loop gang vector collapse(2) &
                 !$acc& present(svf, slope_ang, aspect_ang, nbr_albedo_2d, shortwave, sw_terrain, &
-                !$acc&         azimuth_offset, inv_dist2_offset) &
+                !$acc&         azimuth_offset, inv_dist2_offset, ihs, ihe, jhs, jhe) &
                 !$acc& private(local_albedo, nbr_albedo, albedo_sum, weight_sum, facing, &
                 !$acc&         w_refl, albedo_terrain, terrain_vf, refl_correction, di, dj, ii, jj)
                 do j = jts, jte
@@ -1599,7 +1600,7 @@ contains
                                 ii = i + di
                                 jj = j + dj
                                 ! Use neighborhood bounds instead of tile bounds
-                                if (ii < domain%ihs .or. ii > domain%ihe .or. jj < domain%jhs .or. jj > domain%jhe) cycle
+                                if (ii < ihs .or. ii > ihe .or. jj < jhs .or. jj > jhe) cycle
 
                                 ! Neighbor albedo from gathered buffer
                                 nbr_albedo = nbr_albedo_2d(ii, jj)
