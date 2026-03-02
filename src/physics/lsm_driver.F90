@@ -187,7 +187,7 @@ contains
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
                          kVARS%snow_height, kVARS%canopy_water_ice, kVARS%canopy_vapor_pressure, kVARS%canopy_temperature,    &  ! BK 2020/10/26
                          kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
-                         kVARS%soil_totalmoisture, kVARS%roughness_z0,                                                  &
+                         kVARS%soil_totalmoisture, kVARS%roughness_z0, kVARS%crop_category,                             &
                          kVARS%ground_surf_temperature, kVARS%snow_nlayers, kVARS%veg_leaf_temperature,                 &
                          kVARS%canopy_water_liquid, kVARS%coeff_momentum_drag, kVARS%chs, kVARS%canopy_fwet,            &
                          kVARS%mass_leaf, kVARS%mass_root, kVARS%mass_stem, kVARS%mass_wood, kVARS%snow_water_eq_prev,  &
