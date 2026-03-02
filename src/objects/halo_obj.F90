@@ -1574,7 +1574,7 @@ module subroutine put_south(this,var,do_dqdt)
     msg_size = 1
     indx_end = var%grid%jts+offs+var%grid%halo_size-1
 
-    !$acc data present(var, this%south_in_buffer, this%south_in_buffer_2d)
+    !$acc data present(this%south_in_buffer, this%south_in_buffer_2d)
 
     if (var%two_d) then
         if (var%dtype==kINTEGER) then
@@ -1644,7 +1644,7 @@ module subroutine put_east(this,var,do_dqdt)
     msg_size = 1
     indx_start = var%grid%ite-offs-var%grid%halo_size+1
 
-    !$acc data present(var, this%east_in_buffer, this%east_in_buffer_2d)
+    !$acc data present(this%east_in_buffer, this%east_in_buffer_2d)
 
     if (var%two_d) then
         if (var%dtype==kINTEGER) then
@@ -1715,7 +1715,7 @@ module subroutine put_west(this,var,do_dqdt)
     msg_size = 1
     indx_end = var%grid%its+offs+var%grid%halo_size-1
 
-    !$acc data present(var, this%west_in_buffer, this%west_in_buffer_2d)
+    !$acc data present(this%west_in_buffer, this%west_in_buffer_2d)
 
     if (var%two_d) then
         if (var%dtype==kINTEGER) then
@@ -2040,18 +2040,17 @@ module subroutine put_northeast(this,var,do_dqdt)
 
     if (var%two_d) then
         if (var%dtype==kINTEGER) then
-            !$acc present(var%data_2di)
             !$acc host_data use_device(var%data_2di)
             call MPI_Put(var%data_2di(i_start,j_start), msg_size, &
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc end host_data
         else
-            !$acc present(var%data_2d)
             !$acc host_data use_device(var%data_2d)
             call MPI_Put(var%data_2d(i_start,j_start), msg_size, &
                 var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc end host_data
         endif
     else
-        !$acc data present(var%data_3d, var%dqdt_3d)
         !$acc host_data use_device(var%data_3d, var%dqdt_3d)
         if (dqdt) then
             call MPI_Put(var%dqdt_3d(i_start,var%grid%kts,j_start), msg_size, &
@@ -2060,9 +2059,8 @@ module subroutine put_northeast(this,var,do_dqdt)
             call MPI_Put(var%data_3d(i_start,var%grid%kts,j_start), msg_size, &
                 var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         endif
+        !$acc end host_data
     endif
-    !$acc end host_data
-    !$acc end data
 end subroutine
 
 module subroutine put_northwest(this,var,do_dqdt)    
@@ -2100,18 +2098,17 @@ module subroutine put_northwest(this,var,do_dqdt)
 
     if (var%two_d) then
         if (var%dtype==kINTEGER) then
-            !$acc present(var%data_2di)
             !$acc host_data use_device(var%data_2di)
             call MPI_Put(var%data_2di(i_start,j_start), msg_size, &
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc end host_data
         else
-            !$acc present(var%data_2d)
             !$acc host_data use_device(var%data_2d)
             call MPI_Put(var%data_2d(i_start,j_start), msg_size, &
                 var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc end host_data
         endif
     else
-        !$acc data present(var%data_3d, var%dqdt_3d)
         !$acc host_data use_device(var%data_3d, var%dqdt_3d)
         if (dqdt) then
             call MPI_Put(var%dqdt_3d(i_start,var%grid%kts,j_start), msg_size, &
@@ -2120,9 +2117,8 @@ module subroutine put_northwest(this,var,do_dqdt)
             call MPI_Put(var%data_3d(i_start,var%grid%kts,j_start), msg_size, &
                 var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         endif
+        !$acc end host_data
     endif
-    !$acc end host_data
-    !$acc end data
 end subroutine
 
 
@@ -2158,18 +2154,17 @@ module subroutine put_southwest(this,var,do_dqdt)
 
     if (var%two_d) then
         if (var%dtype==kINTEGER) then
-            !$acc present(var%data_2di)
             !$acc host_data use_device(var%data_2di)
             call MPI_Put(var%data_2di(i_start,j_start), msg_size, &
             var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc end host_data
         else
-            !$acc present(var%data_2d)
             !$acc host_data use_device(var%data_2d)
             call MPI_Put(var%data_2d(i_start,j_start), msg_size, &
                 var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc end host_data
         endif
     else
-        !$acc data present(var%data_3d, var%dqdt_3d)
         !$acc host_data use_device(var%data_3d, var%dqdt_3d)
         if (dqdt) then
             call MPI_Put(var%dqdt_3d(i_start,var%grid%kts,j_start), msg_size, &
@@ -2178,9 +2173,8 @@ module subroutine put_southwest(this,var,do_dqdt)
             call MPI_Put(var%data_3d(i_start,var%grid%kts,j_start), msg_size, &
                 var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         endif
+        !$acc end host_data
     endif
-    !$acc end host_data
-    !$acc end data
 end subroutine
 
 module subroutine put_southeast(this,var,do_dqdt)    
@@ -2217,18 +2211,17 @@ module subroutine put_southeast(this,var,do_dqdt)
 
     if (var%two_d) then
         if (var%dtype==kINTEGER) then
-            !$acc present(var%data_2di)
             !$acc host_data use_device(var%data_2di)
             call MPI_Put(var%data_2di(i_start,j_start), msg_size, &
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc end host_data
         else
-            !$acc present(var%data_2d)
             !$acc host_data use_device(var%data_2d)
             call MPI_Put(var%data_2d(i_start,j_start), msg_size, &
                 var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc end host_data
         endif
     else
-        !$acc data present(var%data_3d, var%dqdt_3d)
         !$acc host_data use_device(var%data_3d, var%dqdt_3d)
         if (dqdt) then
             call MPI_Put(var%dqdt_3d(i_start,var%grid%kts,j_start), msg_size, &
@@ -2237,9 +2230,8 @@ module subroutine put_southeast(this,var,do_dqdt)
             call MPI_Put(var%data_3d(i_start,var%grid%kts,j_start), msg_size, &
                 var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         endif
+        !$acc end host_data
     endif
-    !$acc end host_data
-    !$acc end data
 end subroutine
 
 

@@ -60,6 +60,7 @@ contains
         
         !$acc enter data copyin(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
         !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
+        !$acc                   this%ihs, this%ihe, this%jhs, this%jhe, &
         !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, this%filter_width, &
         !$acc                   this%vars_2d, this%vars_3d, this%var_indx, this%forcing_var_indx, this%forcing_hi, &
         !$acc                   this%adv_vars, this%exch_vars, this%tend, this%halo)
@@ -195,7 +196,7 @@ contains
             vars_to_send(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
         endif
 
-        call this%halo%halo_3d_send_batch(vars_to_send, this%vars_3d)
+        call this%halo%halo_3d_send_batch(this%exch_vars, this%vars_3d)
 
     end subroutine halo_3d_send
 
@@ -218,7 +219,7 @@ contains
             vars_to_ret(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
         endif
 
-        call this%halo%halo_3d_retrieve_batch(vars_to_ret, this%vars_3d, wait_timer=this%wait_timer)
+        call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%vars_3d, wait_timer=this%wait_timer)
 
     end subroutine halo_3d_retrieve
 
@@ -234,7 +235,7 @@ contains
         vars_to_send(1:size(this%exch_vars)) = this%exch_vars
         vars_to_send(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
 
-        call this%halo%halo_2d_send_batch(vars_to_send, this%vars_2d)
+        call this%halo%halo_2d_send_batch(this%exch_vars, this%vars_2d)
     end subroutine halo_2d_send
 
     module subroutine halo_2d_retrieve(this)
@@ -249,7 +250,7 @@ contains
         vars_to_ret(1:size(this%exch_vars)) = this%exch_vars
         vars_to_ret(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
 
-        call this%halo%halo_2d_retrieve_batch(vars_to_ret, this%vars_2d)
+        call this%halo%halo_2d_retrieve_batch(this%exch_vars, this%vars_2d)
     end subroutine halo_2d_retrieve
 
     !> -------------------------------
@@ -389,11 +390,28 @@ contains
                 if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
             endif
         enddo
+        do i = 1, size(kADV_VARS)
+            var_indx = kADV_VARS(i)
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
+            endif
+        enddo
+
         allocate(this%exch_vars(n_vars))
         n_vars = 0
 
         do i = 1, size(kEXCH_VARS)
             var_indx = kEXCH_VARS(i)
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) then
+                    n_vars = n_vars + 1
+                    this%exch_vars(n_vars)%id = this%var_indx(var_indx)%id
+                    this%exch_vars(n_vars)%v = this%var_indx(var_indx)%v
+                endif
+            endif
+        enddo
+        do i = 1, size(kADV_VARS)
+            var_indx = kADV_VARS(i)
             if (var_indx > 0) then
                 if (this%var_indx(var_indx)%v > 0) then
                     n_vars = n_vars + 1

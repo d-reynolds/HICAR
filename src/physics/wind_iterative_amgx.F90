@@ -338,9 +338,9 @@ contains
             "main:monitor_residual=1, " // &
             "main:store_res_history=1, " // &
             "main:obtain_timings=1, " // &
-            "main:norm=L2, " // &
-            "main:abs_tolerance=1e-5, " // &
-            "main:divergence_threshold=1000.0" // c_null_char
+            "main:norm=L2" // c_null_char!&
+            ! "main:abs_tolerance=1e-5, " // &
+            ! "main:divergence_threshold=1000.0" // c_null_char
         
         !check if the solver configuration file exists
         inquire(file=solver_file,exist=file_exists)

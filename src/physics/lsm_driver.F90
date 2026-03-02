@@ -1131,8 +1131,7 @@ contains
 
             if (options%physics%landsurface+options%physics%watersurface+options%physics%snowmodel > 0) then
             
-                !$acc parallel 
-                !$acc loop gang vector collapse(2) present(lsm_last_precip, precipitation, lsm_last_snow, snowfall) 
+                !$acc parallel loop gang vector collapse(2) present(lsm_last_precip, precipitation, lsm_last_snow, snowfall) 
                 do j = jts, jte
                     do i = its, ite
                         lsm_last_precip(i,j) = precipitation(i,j)
@@ -1141,7 +1140,7 @@ contains
                 enddo
 
                 if (options%physics%landsurface > kLSM_BASIC) then
-                    !$acc loop gang vector collapse(2) present(longwave_up, land_emissivity, skin_temperature, soil_totalmoisture, soil_water_content) copyin(DZS)
+                    !$acc parallel loop gang vector collapse(2) present(longwave_up, land_emissivity, skin_temperature, soil_totalmoisture, soil_water_content) copyin(DZS)
                     do j = jts, jte
                         do i = its, ite
                             longwave_up(i,j) = STBOLT * land_emissivity(i,j) * skin_temperature(i,j)**4
@@ -1155,7 +1154,6 @@ contains
                     enddo
                     ITIMESTEP = ITIMESTEP + 1
                 endif
-                !$acc end parallel
             endif
             !!
             end associate

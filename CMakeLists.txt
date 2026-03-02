@@ -93,8 +93,8 @@ list(REMOVE_ITEM SOURCE_FILES ${ra_mo_files})
 
 macro(Disable_FSM)
 	set(FSM OFF)
-	list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/lsm_FSMdrv.F90)
 	FILE(GLOB_RECURSE FSM2_INTERFACE  ${PROJECT_SOURCE_DIR}/src/physics/FSM2_interface/*)
+	list(REMOVE_ITEM SOURCE_FILES  ${PROJECT_SOURCE_DIR}/src/physics/sm_SNOWPACK.F90)
 	list(REMOVE_ITEM SOURCE_FILES ${FSM2_INTERFACE})
 endmacro()
 
@@ -313,6 +313,10 @@ find_package(FFTW REQUIRED)
 find_package(NetCDF REQUIRED)
 if (SNOWPACK)
 	find_package(SNOWPACK REQUIRED)
+else()
+	# remove sm_SNOWPACK.F90, which contains the SNOWPACK driver, from the source files if SNOWPACK support is disabled
+	FILE(GLOB_RECURSE SNOWPACK_INTERFACE  ${PROJECT_SOURCE_DIR}/src/physics/sm_SNOWPACK.F90)
+	list(REMOVE_ITEM SOURCE_FILES ${SNOWPACK_INTERFACE})
 endif()
 
 #########################################################
