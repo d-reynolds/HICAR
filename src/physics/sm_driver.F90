@@ -189,7 +189,16 @@ contains
             lsm_last_precip => domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
             lsm_last_snow => domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d &
             )
-        
+
+        ! --- Update host: common snow model inputs ---
+        !$acc update host( &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d, &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d, &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d)
+
         windspd = sqrt(u_10m**2 + v_10m**2)
         where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
         current_precipitation = (precipitation - lsm_last_precip) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
@@ -200,15 +209,63 @@ contains
 
         if (options%physics%snowmodel==kSM_FSM) then
 #ifdef FSM
-            !!
+            ! --- Update host: FSM-specific inputs ---
+            !$acc update host( &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d)
+
             domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d(its:ite,jts:jte)=windspd(its:ite,jts:jte)
-            !!
+
             call sm_FSM(domain,options,lsm_dt,current_rain,current_snow,windspd)
-            !!
-            
-            !do i = 1, num_soil_layers              ! soil
-            !   domain%vars_3d(domain%var_indx(kVARS%soil_water_content_liq)%v)%data_3d(its:ite,i,jts:jte) =  domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d(its:ite,i,jts:jte)    / (1000. * DZS(i))
-            !end do
+
+            ! --- Update device: FSM outputs ---
+            !$acc update device( &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_salt)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_susp)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%Sliq_out)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%QFX)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%ground_surf_temperature)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%runoff_tstep)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d)
 #endif
 
         else if (options%physics%snowmodel==kSM_SNOWPACK) then
@@ -232,7 +289,69 @@ contains
             !!! - hs;       ///< The measured height of snow (m)
             ! - geo_heat; ///< Geo heat flux (W/m^2), for the neumann lower boundary condition in the heat equation
 
+            ! --- Update host: SNOWPACK-specific inputs ---
+            !$acc update host( &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rg)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rb)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Dd)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sp)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d)
+
             call sm_SNOWPACK(domain,options,lsm_dt,current_rain,current_snow,windspd)
+
+            ! --- Update device: SNOWPACK outputs ---
+            !$acc update device( &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rg)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rb)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Dd)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sp)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d)
 #endif
         endif
 
