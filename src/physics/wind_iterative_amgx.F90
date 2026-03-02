@@ -333,14 +333,12 @@ contains
             "prec:max_iters=1, " // &
             "main:use_scalar_norm=1, " // &
             "main:max_iters=1000, " // &
-            "main:convergence=RELATIVE_INI_CORE, " // &
+            "main:convergence=RELATIVE_INI, " // &
             "main:tolerance=1e-10, " // &
             "main:monitor_residual=1, " // &
             "main:store_res_history=1, " // &
             "main:obtain_timings=1, " // &
-            "main:norm=L2" // c_null_char!&
-            ! "main:abs_tolerance=1e-5, " // &
-            ! "main:divergence_threshold=1000.0" // c_null_char
+            "main:norm=L2" // c_null_char
         
         !check if the solver configuration file exists
         inquire(file=solver_file,exist=file_exists)
@@ -587,8 +585,41 @@ contains
                 enddo
             enddo
         enddo
-                
+
+        ! Sort column indices within each row (required for AMG preconditioner)
+        call sort_csr_rows()
+
     end subroutine build_csr_matrix
+
+    !>------------------------------------------------------------
+    !! Sort CSR column indices within each row (insertion sort)
+    !! AMG requires sorted column indices to build coarse grids.
+    !!------------------------------------------------------------
+    subroutine sort_csr_rows()
+        implicit none
+        integer :: r, s_idx, e_idx, ii, jj
+        integer(c_int) :: tmp_col
+        real(c_double) :: tmp_val
+
+        do r = 1, n_rows
+            ! row_ptrs is 0-based; Fortran arrays are 1-based
+            s_idx = row_ptrs(r) + 1
+            e_idx = row_ptrs(r + 1)
+            ! Insertion sort (at most 15 entries per row)
+            do ii = s_idx + 1, e_idx
+                tmp_col = col_indices(ii)
+                tmp_val = values(ii)
+                jj = ii - 1
+                do while (jj >= s_idx .and. col_indices(jj) > tmp_col)
+                    col_indices(jj + 1) = col_indices(jj)
+                    values(jj + 1) = values(jj)
+                    jj = jj - 1
+                end do
+                col_indices(jj + 1) = tmp_col
+                values(jj + 1) = tmp_val
+            end do
+        end do
+    end subroutine sort_csr_rows
     
     !>------------------------------------------------------------
     !! Helper to add matrix entry
@@ -665,7 +696,7 @@ contains
             print*, "  ----------------------------------------"
             rc = AMGX_matrix_upload_all_global(amgx_matrix, n_rows_global, n_rows, nnz, 1, 1, &
                                                 row_ptrs, col_indices, &
-                                                values, c_null_ptr, 1, 1, partition_vec)
+                                                values, c_null_ptr, 0, 2, partition_vec)
 
             if (rc /= 0) then
                 if (STD_OUT_PE) print*, "ERROR: AMGX_matrix_upload_all_global failed with rc=", rc
@@ -720,14 +751,18 @@ contains
 
 
         if (first_solve) then
-            ! call MPI_Barrier(domain%compute_comms, rc)
-            ! Setup solver
+            ! Setup solver (builds preconditioner from the matrix)
             rc = AMGX_solver_setup(amgx_solver, amgx_matrix)
             if (rc /= 0) then
                 if (STD_OUT_PE) print*, "ERROR: AMGX_solver_setup failed with rc=", rc
             endif
-            ! call MPI_Barrier(domain%compute_comms, rc)
             first_solve = .False.
+        else if (varying_alpha) then
+            ! Matrix changed due to varying alpha - rebuild preconditioner
+            rc = AMGX_solver_resetup(amgx_solver, amgx_matrix)
+            if (rc /= 0) then
+                if (STD_OUT_PE) print*, "ERROR: AMGX_solver_resetup failed with rc=", rc
+            endif
         endif
         
         ! Solve
