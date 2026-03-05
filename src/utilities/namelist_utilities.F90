@@ -3573,6 +3573,24 @@ contains
                 description = "Enable more 'aggressive' combining for layers deeper in the snowpack"
                 default = ".False."
                 group = "SM_Parameters"
+            case("suspension_layer")
+                description = "Blowing snow drift model selection"//achar(10)//BLNK_CHR_N// &
+                    "(0 = OFF, 1 = CRYOWRF-style)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
+                group = "SM_Parameters"
+            case("suspension_fine_mesh_levels")
+                description = "Number of fine mesh levels for near-surface suspension (CRYOWRF-style drift)"
+                default = "15"
+                min = 0
+                max = 30
+                group = "SM_Parameters"
+            case("bs_atm_feedback")
+                description = "Enable atmospheric feedback from blowing snow sublimation"//achar(10)//BLNK_CHR_N// &
+                    "(.False. = OFF, .True. = ON)"
+                default = ".True."
+                group = "SM_Parameters"
             ! --------------------------------------
             ! --------------------------------------
             ! Radiation parameters namelist variables

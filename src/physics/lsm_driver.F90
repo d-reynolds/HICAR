@@ -797,13 +797,18 @@ contains
                 end do
 
                 if (options%physics%snowmodel>0) then
-                    SR = 0.0 ! This, in combination with setting OPT_SNF to 4 in the LSM_init, will turn off snowfall partitioning in NoahMP
-                    current_precipitation = current_precipitation-current_snow ! Now remove snowfall from precipitation, so we only have liquid precip going into NMP
-                    
-                    nmp_snowh = 0.0
-                    nmp_snow = 0.0
-                    nmp_snow_t = 273.15
-                    nmp_snow_nlayers = 0
+                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_snow_nlayers, nmp_snow_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
+                    do j = jms, jme
+                        do i = ims, ime
+                            SR(i,j) = 0.0 ! This, in combination with setting OPT_SNF to 4 in the LSM_init, will turn off snowfall partitioning in NoahMP
+                            current_precipitation(i,j) = current_precipitation(i,j)-current_snow(i,j) ! Now remove snowfall from precipitation, so we only have liquid precip going into NMP
+                            
+                            nmp_snowh(i,j) = 0.0
+                            nmp_snow(i,j) = 0.0
+                            nmp_snow_t(i,j) = 273.15
+                            nmp_snow_nlayers(i,j) = 0
+                        enddo
+                    enddo
                 else
                     !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_snow_nlayers, nmp_snow_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
                     do j = jms, jme
@@ -1158,10 +1163,9 @@ contains
             !!
             end associate
             endif ! end if landsurface > 0 .or. watersurface > 0
-
-            call snow_model(domain, options, lsm_dt)
-
         endif ! end if time to call lsm
+        
+        call snow_model(domain, options, dt)
 
     end subroutine lsm
 

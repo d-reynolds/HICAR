@@ -9,7 +9,7 @@ module advection
     use icar_constants
     use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, adv_std_clean_wind_arrays
     use adv_mpdata,                 only : mpdata_init, mpdata_advect3d, mpdata_compute_wind
-    use adv_fluxcorr,               only : init_fluxcorr, set_sign_arrays, clear_flux_sign_arrays, compute_upwind_fluxes_async
+    use adv_fluxcorr,               only : init_fluxcorr, set_sign_arrays, compute_upwind_fluxes_async
     ! use debug_module,               only : domain_fix
     use options_interface,          only: options_t
     use domain_interface,           only: domain_t
@@ -125,7 +125,7 @@ contains
         endif
 
         call adv_std_clean_wind_arrays(U_m, V_m, W_m, denom)
-        if (options%adv%flux_corr==kFLUXCOR_MONO) call clear_flux_sign_arrays()
+        ! if (options%adv%flux_corr==kFLUXCOR_MONO) call clear_flux_sign_arrays()
     end subroutine advect
 
     subroutine RK3_adv(domain, options, U_m, V_m, W_m, denom, flux_time, flux_corr_time, sum_time, adv_wind_time)

@@ -253,6 +253,11 @@ module options_types
         logical :: snowpack_reduce_n_elements      ! option to reduce number of snow layers for computational efficiency
         logical :: snowpack_enable_vapour_transport  ! option to enable vapour transport between snow layers in SNOWPACK
 
+        ! Options for CRYOWRF-style blowing snow drift
+        integer :: suspension_layer    ! 0=off, 1=CRYOWRF-style
+        integer :: suspension_fine_mesh_levels               ! Fine mesh levels for near-surface suspension (default 15)
+        logical :: bs_atm_feedback     ! Atmospheric feedback from blowing snow sublimation
+
     end type sm_options_type
 
     ! ------------------------------------------------

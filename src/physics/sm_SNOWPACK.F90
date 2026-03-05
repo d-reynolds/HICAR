@@ -465,7 +465,8 @@ module module_sm_SNOWPACKdrv
                     mk => domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d,                               &
                     mass_hoar => domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d,                 &
                     CDot => domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d,                           &
-                    metamo => domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d                        &
+                    metamo => domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d,                      &
+                    N3 => domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d                        &
                  )
 
         do j = jts, jte
@@ -492,6 +493,7 @@ module module_sm_SNOWPACKdrv
                 ! call snowpack_set_all_element_ne(stations_in(i,j)%cxxmem%addr, ne_arr(1:n_elem), n_elem)
                 call snowpack_set_all_element_CDot(stations_in(i,j)%cxxmem%addr, real(CDot(i,1:n_elem,j), kind=8), n_elem)
                 call snowpack_set_all_element_metamo(stations_in(i,j)%cxxmem%addr, real(metamo(i,1:n_elem,j), kind=8), n_elem)
+                call snowpack_set_all_element_N3(stations_in(i,j)%cxxmem%addr, real(N3(i,1:n_elem,j), kind=8), n_elem)
 
                 call stations_in(i,j)%set_c_h(real(snow_height(i,j), kind=8))
                 ! ! call stations_in(i,j)%set_swe(real(snow_water_equivalent(i,j), kind=8))
@@ -537,7 +539,8 @@ module module_sm_SNOWPACKdrv
                     mk => domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d,                               &
                     mass_hoar => domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d,                 &
                     CDot => domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d,                           &
-                    metamo => domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d                        &
+                    metamo => domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d,                      &
+                    N3 => domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d                               &
             )
         do j = jts, jte
             do i = its, ite
@@ -627,6 +630,10 @@ module module_sm_SNOWPACKdrv
                     call snowpack_get_all_element_metamo(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
                     metamo(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
                     metamo(i,n_elem+1:,j) = 0.0
+
+                    call snowpack_get_all_element_N3(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
+                    N3(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
+                    N3(i,n_elem+1:,j) = 0.0
 
                 endif
             enddo

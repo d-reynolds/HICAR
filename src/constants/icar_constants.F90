@@ -383,8 +383,6 @@ module icar_constants
         integer :: snow_nlayers
 
         ! FSM2trans variables
-        integer :: dSWE_salt
-        integer :: dSWE_susp
         integer :: dSWE_subl
         integer :: dSWE_blow_subl
         integer :: dSWE_slide
@@ -407,7 +405,19 @@ module icar_constants
         integer :: mass_hoar
         integer :: CDot
         integer :: metamo
+        integer :: N3              ! Coordination number (dimensionless)
 
+        ! Blowing snow drift variables (CRYOWRF-style)
+        integer :: bs_threshold_ustar     ! 2D: threshold friction velocity (m/s)
+        integer :: bs_saltation_flux      ! 2D: saltation layer mass (kg/m^2)
+        integer :: bs_suspension_flux     ! 2D: suspension layer mass (kg/m^2)
+        integer :: bs_sublimation_flux    ! 2D: sublimation flux from blowing snow (W/m^2)
+        integer :: bs_susp_ice_mass       ! 3D: blowing snow ice mixing ratio (kg/kg)
+        integer :: bs_susp_ice_number     ! 3D: blowing snow number concentration (#/kg)
+        integer :: bs_drift_swe_salt      ! 2D: accumulated saltation SWE change
+        integer :: bs_drift_swe_susp      ! 2D: accumulated suspension SWE change
+        integer :: bs_drift_swe_subl      ! 2D: accumulated sublimation SWE change
+        integer :: bs_swe_exchange       ! 2D: mass exchanged with snowpack (kg/m^2)
 
         integer :: last_var
     end type var_constants_type
