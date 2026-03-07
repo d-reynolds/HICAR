@@ -368,12 +368,12 @@ contains
                 call domain%halo_3d_send()
                 call domain%halo_2d_send()
                 call domain%send_timer%stop()
-#ifdef _OPENACC
-                call domain%ret_timer%start()
-                call domain%halo_3d_retrieve()
-                call domain%halo_2d_retrieve()
-                call domain%ret_timer%stop()
-#endif
+! #ifdef _OPENACC
+!                 call domain%ret_timer%start()
+!                 call domain%halo_3d_retrieve()
+!                 call domain%halo_2d_retrieve()
+!                 call domain%ret_timer%stop()
+! #endif
 
                 call domain%rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
@@ -391,19 +391,19 @@ contains
                 call pbl(domain, options, real(dt%seconds()))!, halo=1)
                 call domain%pbl_timer%stop()
 
-#ifndef _OPENACC
+!#ifndef _OPENACC
                 call domain%ret_timer%start()
                 call domain%halo_3d_retrieve()
                 call domain%halo_2d_retrieve()
                 call domain%ret_timer%stop()
-#endif
+!#endif
 
-                ! if (options%adv%advect_density) then
+                if (options%adv%advect_density) then
                 ! if using advect_density winds need to be balanced at each update
                 call domain%wind_bal_timer%start()
                 call balance_uvw(domain,options%adv%advect_density)
                 call domain%wind_bal_timer%stop()
-                ! endif
+                endif
 
                 if (options%general%debug) call domain_check(domain, "pbl")
                 call convect(domain, options, real(dt%seconds()))!, halo=1)

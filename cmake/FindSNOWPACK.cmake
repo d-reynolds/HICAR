@@ -115,7 +115,7 @@ else()
         LOG_INSTALL       ON
     )
     
-    set(METEOIO_LIBRARY ${METEOIO_DIR}/lib/libmeteoio.dylib CACHE FILEPATH "MeteoIO library" FORCE) 
+    set(METEOIO_LIBRARY ${METEOIO_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}meteoio${CMAKE_SHARED_LIBRARY_SUFFIX} CACHE FILEPATH "MeteoIO library" FORCE) 
     set(METEOIO_INCLUDE_DIR ${METEOIO_DIR}/include CACHE PATH "MeteoIO include directory" FORCE)
 
 
@@ -151,8 +151,8 @@ else()
     )
     
     # Set the paths where SNOWPACK will be installed
-    set(SNOWPACK_LIBRARY "${SNOWPACK_DIR}/lib/libsnowpack.dylib" CACHE FILEPATH "SNOWPACK library" FORCE)
-    set(SNOWPACK_FORTRAN_LIBRARY "${SNOWPACK_DIR}/lib/libsnowpack_fortran.a" CACHE FILEPATH "SNOWPACK Fortran bindings library" FORCE)
+    set(SNOWPACK_LIBRARY "${SNOWPACK_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}snowpack${CMAKE_SHARED_LIBRARY_SUFFIX}" CACHE FILEPATH "SNOWPACK library" FORCE)
+    set(SNOWPACK_FORTRAN_LIBRARY "${SNOWPACK_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}snowpack_fortran${CMAKE_STATIC_LIBRARY_SUFFIX}" CACHE FILEPATH "SNOWPACK Fortran bindings library" FORCE)
     set(SNOWPACK_INCLUDE_DIR "${SNOWPACK_DIR}/include/snowpack" CACHE PATH "SNOWPACK include directory" FORCE)
     
     message(STATUS "SNOWPACK will be built and installed to: ${SNOWPACK_DIR}")

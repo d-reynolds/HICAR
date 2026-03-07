@@ -94,7 +94,7 @@ list(REMOVE_ITEM SOURCE_FILES ${ra_mo_files})
 macro(Disable_FSM)
 	set(FSM OFF)
 	FILE(GLOB_RECURSE FSM2_INTERFACE  ${PROJECT_SOURCE_DIR}/src/physics/FSM2_interface/*)
-	list(REMOVE_ITEM SOURCE_FILES  ${PROJECT_SOURCE_DIR}/src/physics/sm_SNOWPACK.F90)
+	list(REMOVE_ITEM SOURCE_FILES  ${PROJECT_SOURCE_DIR}/src/physics/sm_FSM.F90)
 	list(REMOVE_ITEM SOURCE_FILES ${FSM2_INTERFACE})
 endmacro()
 
@@ -112,7 +112,7 @@ elseif(FSM AND NOT (IS_DIRECTORY ${FSM_DIR}/lib AND
 					IS_DIRECTORY ${FSM_DIR}/build))
 	message(WARNING "FSM2 not found, disabling FSM2 support.\nTo enable, set the FSM_DIR variable to the root directory of the FSM2 install (i.e. the directory which contains the 'lib' and 'build' subdirectories).")
 	Disable_FSM()
-elseif(NOT IS_DIRECTORY FSM_DIR AND NOT FSM)
+else()
 	Disable_FSM()
 endif()
 

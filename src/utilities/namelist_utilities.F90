@@ -3303,7 +3303,7 @@ contains
             ! --------------------------------------
             case ("fsm_nsnow_max")
                 description = "Maximum number of snow layers to allow for a FSM simulation"
-                min = 4
+                min = 3
                 max = 20
                 default = "6"
                 group = "SM_Parameters"

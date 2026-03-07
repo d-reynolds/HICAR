@@ -1486,15 +1486,22 @@ contains
             z            = neighbor_z(ims:ime,:,jms:jme)
             jacobian     = neighbor_jacobian(ims:ime,:,jms:jme)
 
-        end associate
+
+        !$acc update device(dzdx, dzdy)
         call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdx)%v),corners=.True.)
         call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdy)%v),corners=.True.)
+        !$acc update host(dzdx, dzdy)
 
-        this%vars_3d(this%var_indx(kVARS%dzdx_u)%v)%data_3d(this%ims+1:this%ime,:,:) = (this%vars_3d(this%var_indx(kVARS%dzdx)%v)%data_3d(this%ims:this%ime-1,:,:)+this%vars_3d(this%var_indx(kVARS%dzdx)%v)%data_3d(this%ims+1:this%ime,:,:))*0.5
-        this%vars_3d(this%var_indx(kVARS%dzdy_v)%v)%data_3d(:,:,this%jms+1:this%jme) = (this%vars_3d(this%var_indx(kVARS%dzdy)%v)%data_3d(:,:,this%jms:this%jme-1)+this%vars_3d(this%var_indx(kVARS%dzdy)%v)%data_3d(:,:,this%jms+1:this%jme))*0.5
+        dzdx_u(this%ims+1:this%ime,:,:) = (dzdx(this%ims:this%ime-1,:,:)+dzdx(this%ims+1:this%ime,:,:))*0.5
+        dzdy_v(:,:,this%jms+1:this%jme) = (dzdy(:,:,this%jms:this%jme-1)+dzdy(:,:,this%jms+1:this%jme))*0.5
 
+        !$acc update device(dzdx_u, dzdy_v)
         call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdx_u)%v),corners=.True.)
         call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdy_v)%v),corners=.True.)
+        !$acc update host(dzdx_u, dzdy_v)
+
+        end associate
+
         ! call array_offset_x(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
         ! this%vars_3d(this%var_indx(kVARS%jacobian_u)%v)%data_3d(this%ims:this%ime+1,:,this%jms:this%jme) = temp
         ! call array_offset_y(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
@@ -3272,12 +3279,12 @@ contains
                     call interpolate_variable(forcing_hi%dqdt_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind tendencies
+                    !$acc update device(forcing_hi%dqdt_3d)
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
                         call smooth_array(forcing_hi, windowsize=1, ydim=3, &
                                           nsmooths=this%nsmooth, halo=this%halo, do_dqdt=.true.)
                     endif
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    !$acc update device(forcing_hi%dqdt_3d)
                     if (.not.(force_boundaries).and..not.var_is_u.and..not.var_is_v) then
                         !$acc kernels present(forcing_hi%dqdt_3d, var%dqdt_3d)
                         var%dqdt_3d = forcing_hi%dqdt_3d
@@ -3286,13 +3293,13 @@ contains
                 else
                     call interpolate_variable(forcing_hi%data_3d, input_data, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
+                    !$acc update device(forcing_hi%data_3d)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind fields
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
                         call smooth_array(forcing_hi, windowsize=1, ydim=3, &
                                           nsmooths=this%nsmooth, halo=this%halo)
                     endif
                     !If this is an initialization step, copy high res directly over to domain
-                    !$acc update device(forcing_hi%data_3d)
                     !$acc kernels present(forcing_hi%data_3d, var%data_3d)
                     var%data_3d = forcing_hi%data_3d
                     !$acc end kernels

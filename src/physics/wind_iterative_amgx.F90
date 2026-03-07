@@ -696,7 +696,7 @@ contains
             print*, "  ----------------------------------------"
             rc = AMGX_matrix_upload_all_global(amgx_matrix, n_rows_global, n_rows, nnz, 1, 1, &
                                                 row_ptrs, col_indices, &
-                                                values, c_null_ptr, 0, 2, partition_vec)
+                                                values, c_null_ptr, 1, 1, partition_vec)
 
             if (rc /= 0) then
                 if (STD_OUT_PE) print*, "ERROR: AMGX_matrix_upload_all_global failed with rc=", rc

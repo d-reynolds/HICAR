@@ -374,8 +374,8 @@ contains
         ncols = windowsize * 2 + 1
 
         !$omp do schedule(static)
-        ! !$acc data present_or_copy(wind) copyin(inputwind) create(rowsums,rowmeans)
-        ! !$acc parallel loop gang 
+        !$acc data present_or_copy(wind) copyin(inputwind) create(rowsums,rowmeans)
+        !$acc kernels 
         do j=1,ny
 
             ! so we pre-compute the sum over rows for each column in the current window
@@ -438,8 +438,8 @@ contains
         enddo
         !$omp end do
         !$omp end parallel
-        ! !$acc update host(wind)
-        ! !$acc end data 
+        !$acc end kernels
+        !$acc end data 
 
     end subroutine smooth_array_3d
 
