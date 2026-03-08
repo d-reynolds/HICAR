@@ -135,6 +135,25 @@ module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
         call MPI_Group_Incl(comp_proc, 1, [this%northeast_neighbor], this%northeast_neighbor_grp)
     endif
 
+#ifdef USE_NCCL
+    block
+        use nccl_interface
+        integer :: nccl_nranks, nccl_ierr
+        call MPI_Comm_size(comms, nccl_nranks)
+        nccl_ierr = nccl_comm_init(this%nccl_comm, nccl_nranks, this%halo_rank, comms%MPI_VAL)
+        if (nccl_ierr /= 0) then
+            write(*,*) "ERROR: NCCL communicator init failed on rank ", this%halo_rank
+            call MPI_Abort(comms, nccl_ierr)
+        endif
+        nccl_ierr = nccl_stream_create(this%nccl_stream)
+        if (nccl_ierr /= 0) then
+            write(*,*) "ERROR: NCCL stream creation failed on rank ", this%halo_rank
+            call MPI_Abort(comms, nccl_ierr)
+        endif
+        if (STD_OUT_PE) write(*,*) "NCCL communicator initialized for halo exchange"
+    end block
+#endif
+
     ! Detect if neighbors are on shared memory hardware
     call detect_shared_memory(this, comms)
 
@@ -291,7 +310,14 @@ module subroutine finalize(this)
     class(halo_t), intent(inout) :: this
 
     integer :: ierr
-    
+
+#ifdef USE_NCCL
+    block
+        use nccl_interface
+        call nccl_stream_destroy(this%nccl_stream)
+        call nccl_comm_destroy(this%nccl_comm)
+    end block
+#else
     if (this%n_2d > 0) then
         if (.not.(this%north_boundary)) call MPI_Win_Start(this%north_neighbor_grp, 0, this%north_2d_win)
         if (.not.(this%south_boundary)) call MPI_Win_Start(this%south_neighbor_grp, 0, this%south_2d_win)
@@ -334,6 +360,16 @@ module subroutine finalize(this)
     if (.not.(this%east_boundary)) call MPI_WIN_FREE(this%east_3d_win, ierr)
     if (.not.(this%west_boundary)) call MPI_WIN_FREE(this%west_3d_win, ierr)
 
+    if (.not.(this%northwest_boundary)) call MPI_WIN_FREE(this%northwest_3d_win, ierr)
+    if (.not.(this%southeast_boundary)) call MPI_WIN_FREE(this%southeast_3d_win, ierr)
+    if (.not.(this%southwest_boundary)) call MPI_WIN_FREE(this%southwest_3d_win, ierr)
+    if (.not.(this%northeast_boundary)) call MPI_WIN_FREE(this%northeast_3d_win, ierr)
+
+    call MPI_Type_free(this%NS_3d_win_halo_type, ierr)
+    call MPI_Type_free(this%EW_3d_win_halo_type, ierr)
+    call MPI_Type_free(this%corner_3d_win_halo_type, ierr)
+#endif
+
     call MPI_WIN_FREE(this%north_in_win, ierr)
     call MPI_WIN_FREE(this%south_in_win, ierr)
     call MPI_WIN_FREE(this%east_in_win, ierr)
@@ -342,9 +378,6 @@ module subroutine finalize(this)
     call MPI_WIN_FREE(this%northwest_in_win, ierr)
     call MPI_WIN_FREE(this%northeast_in_win, ierr)
     call MPI_WIN_FREE(this%southeast_in_win, ierr)
-    call MPI_Type_free(this%NS_3d_win_halo_type, ierr)
-    call MPI_Type_free(this%EW_3d_win_halo_type, ierr)
-    call MPI_Type_free(this%corner_3d_win_halo_type, ierr)
 
     !$acc exit data finalize delete(this%north_in_3d, this%south_in_3d, this%east_in_3d, this%west_in_3d, &
     !$acc                      this%north_in_buffer, this%south_in_buffer, this%east_in_buffer, this%west_in_buffer, &
@@ -495,11 +528,13 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
         win_size = nx*nz*ny*this%n_3d
         win_size_2d = nx*ny*this%n_2d
 
+#ifndef USE_NCCL
         call MPI_Type_contiguous(nx*ny*this%n_2d, MPI_REAL, this%NS_2d_win_halo_type)
         call MPI_Type_commit(this%NS_2d_win_halo_type)
 
         call MPI_Type_contiguous(nx*nz*ny*this%n_3d, MPI_REAL, this%NS_3d_win_halo_type)
         call MPI_Type_commit(this%NS_3d_win_halo_type)
+#endif
 
         ! Group processes for creation of communication halos. 
         ! First create MPI communicator for each pair of north-south processes that will exchange data
@@ -520,7 +555,8 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
     
             this%south_batch_in_3d = 1
             if (this%n_2d > 0) this%south_batch_in_2d = 1
-    
+
+#ifndef USE_NCCL
             if (this%south_shared) then
                 call MPI_WIN_SHARED_QUERY(this%south_3d_win, 0, win_size, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%south_buffer_3d, [this%n_3d, nx, nz, ny])
@@ -530,9 +566,12 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                     call C_F_POINTER(tmp_ptr, this%south_buffer_2d, [this%n_2d, nx, ny])
                 endif
             else
+#endif
                 allocate(this%south_buffer_3d(this%n_3d,1:this%grid%ns_halo_nx,this%kms:this%kme,1:this%halo_size))
                 if (this%n_2d > 0) allocate(this%south_buffer_2d(this%n_2d,1:this%grid%ns_halo_nx,1:this%halo_size))
+#ifndef USE_NCCL
             endif
+#endif
             !$acc enter data copyin(this%south_buffer_3d)
             if (this%n_2d > 0) then
                 !$acc enter data copyin(this%south_buffer_2d)
@@ -542,6 +581,7 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             this%north_batch_in_3d = 1
             if (this%n_2d > 0) this%north_batch_in_2d = 1
 
+#ifndef USE_NCCL
             if (this%north_shared) then
                 call MPI_WIN_SHARED_QUERY(this%north_3d_win, 1, win_size, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%north_buffer_3d, [this%n_3d, nx, nz, ny])
@@ -551,9 +591,12 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                     call C_F_POINTER(tmp_ptr, this%north_buffer_2d, [this%n_2d, nx, ny])
                 endif
             else
+#endif
                 allocate(this%north_buffer_3d(this%n_3d,1:this%grid%ns_halo_nx,this%kms:this%kme,1:this%halo_size))
                 if (this%n_2d > 0) allocate(this%north_buffer_2d(this%n_2d,1:this%grid%ns_halo_nx,1:this%halo_size))
+#ifndef USE_NCCL
             endif
+#endif
             !$acc enter data copyin(this%north_buffer_3d)
             if (this%n_2d > 0) then
                 !$acc enter data copyin(this%north_buffer_2d)
@@ -567,11 +610,13 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
         win_size = nx*nz*ny*this%n_3d
         win_size_2d = nx*ny*this%n_2d
 
+#ifndef USE_NCCL
         call MPI_Type_contiguous(nx*ny*this%n_2d, MPI_REAL, this%EW_2d_win_halo_type)
         call MPI_Type_commit(this%EW_2d_win_halo_type)
 
         call MPI_Type_contiguous(nx*nz*ny*this%n_3d, MPI_REAL, this%EW_3d_win_halo_type)
         call MPI_Type_commit(this%EW_3d_win_halo_type)
+#endif
 
         ! Group processes for creation of communication halos. 
         ! First create MPI communicator for each pair of north-south processes that will exchange data
@@ -592,6 +637,7 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             this%east_batch_in_3d = 1
             if (this%n_2d > 0) this%east_batch_in_2d = 1
 
+#ifndef USE_NCCL
             if (this%east_shared) then
 
                 call MPI_WIN_SHARED_QUERY(this%east_3d_win, 1, win_size, size_out, tmp_ptr)
@@ -602,9 +648,12 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                     call C_F_POINTER(tmp_ptr, this%east_buffer_2d, [this%n_2d, nx, ny])
                 endif
             else
+#endif
                 allocate(this%east_buffer_3d(this%n_3d,1:this%halo_size,this%kms:this%kme,1:this%grid%ew_halo_ny))
                 if (this%n_2d > 0) allocate(this%east_buffer_2d(this%n_2d,1:this%halo_size,1:this%grid%ew_halo_ny))
+#ifndef USE_NCCL
             endif
+#endif
             !$acc enter data copyin(this%east_buffer_3d)
             if (this%n_2d > 0) then
                 !$acc enter data copyin(this%east_buffer_2d)
@@ -614,6 +663,7 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             this%west_batch_in_3d = 1
             if (this%n_2d > 0) this%west_batch_in_2d = 1
 
+#ifndef USE_NCCL
             if (this%west_shared) then
                 call MPI_WIN_SHARED_QUERY(this%west_3d_win, 0, win_size, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%west_buffer_3d, [this%n_3d, nx, nz, ny])
@@ -623,9 +673,12 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
                     call C_F_POINTER(tmp_ptr, this%west_buffer_2d, [this%n_2d, nx, ny])
                 endif
             else
+#endif
                 allocate(this%west_buffer_3d(this%n_3d,1:this%halo_size,this%kms:this%kme,1:this%grid%ew_halo_ny))
                 if (this%n_2d > 0) allocate(this%west_buffer_2d(this%n_2d,1:this%halo_size,1:this%grid%ew_halo_ny))
+#ifndef USE_NCCL
             endif
+#endif
             !$acc enter data copyin(this%west_buffer_3d)
             if (this%n_2d > 0) then
                 !$acc enter data copyin(this%west_buffer_2d)
@@ -636,8 +689,10 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
         !Then do corners
         win_size_corner = this%halo_size*nz*this%halo_size*this%n_3d
 
+#ifndef USE_NCCL
         call MPI_Type_contiguous(this%halo_size*nz*this%halo_size*this%n_3d, MPI_REAL, this%corner_3d_win_halo_type)
         call MPI_Type_commit(this%corner_3d_win_halo_type)
+#endif
 
         ! Setup for corner exchanges. This will exclude edge processes which have a corner neighbor
         ! off-grid
@@ -698,50 +753,63 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
         endif
 
         if (.not.(this%northwest_boundary)) then
-
+#ifndef USE_NCCL
             if (this%northwest_shared) then
                 call MPI_WIN_SHARED_QUERY(this%northwest_3d_win, merge(0, 1, this%halo_rank > this%northwest_neighbor), win_size_corner, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%northwest_buffer_3d, [this%n_3d, this%halo_size, nz, this%halo_size])
             else
+#endif
                 allocate(this%northwest_buffer_3d(this%n_3d,1:this%halo_size,this%kms:this%kme,1:this%halo_size))
+#ifndef USE_NCCL
             endif
+#endif
             this%northwest_batch_in_3d = 1
             !$acc enter data copyin(this%northwest_buffer_3d)
         endif
         if (.not.(this%southeast_boundary)) then
-
+#ifndef USE_NCCL
             if (this%southeast_shared) then
                 call MPI_WIN_SHARED_QUERY(this%southeast_3d_win, merge(0, 1, this%halo_rank > this%southeast_neighbor), win_size_corner, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%southeast_buffer_3d, [this%n_3d, this%halo_size, nz, this%halo_size])
             else
+#endif
                 allocate(this%southeast_buffer_3d(this%n_3d,1:this%halo_size,this%kms:this%kme,1:this%halo_size))
+#ifndef USE_NCCL
             endif
+#endif
             this%southeast_batch_in_3d = 1
             !$acc enter data copyin(this%southeast_buffer_3d)
         endif
         if (.not.(this%southwest_boundary)) then
-
+#ifndef USE_NCCL
             if (this%southwest_shared) then
                 call MPI_WIN_SHARED_QUERY(this%southwest_3d_win, merge(0, 1, this%halo_rank > this%southwest_neighbor), win_size_corner, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%southwest_buffer_3d, [this%n_3d, this%halo_size, nz, this%halo_size])
             else
+#endif
                 allocate(this%southwest_buffer_3d(this%n_3d,1:this%halo_size,this%kms:this%kme,1:this%halo_size))
+#ifndef USE_NCCL
             endif
+#endif
             this%southwest_batch_in_3d = 1
             !$acc enter data copyin(this%southwest_buffer_3d)
         endif
         if (.not.(this%northeast_boundary)) then
-
+#ifndef USE_NCCL
             if (this%northeast_shared) then
                 call MPI_WIN_SHARED_QUERY(this%northeast_3d_win, merge(0, 1, this%halo_rank > this%northeast_neighbor), win_size_corner, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%northeast_buffer_3d, [this%n_3d, this%halo_size, nz, this%halo_size])
             else
+#endif
                 allocate(this%northeast_buffer_3d(this%n_3d,1:this%halo_size,this%kms:this%kme,1:this%halo_size))
+#ifndef USE_NCCL
             endif
+#endif
             this%northeast_batch_in_3d = 1
             !$acc enter data copyin(this%northeast_buffer_3d)
         endif
 
+#ifndef USE_NCCL
         if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp, 0, this%north_3d_win)
         if (.not.(this%south_boundary)) call MPI_Win_Post(this%south_neighbor_grp, 0, this%south_3d_win)
         if (.not.(this%east_boundary)) call MPI_Win_Post(this%east_neighbor_grp, 0, this%east_3d_win)
@@ -759,6 +827,7 @@ subroutine setup_batch_exch(this, exch_vars, adv_vars, comms)
             if (.not.(this%west_boundary)) call MPI_Win_Post(this%west_neighbor_grp, 0, this%west_2d_win)
         
         endif
+#endif
     endif
 
 end subroutine setup_batch_exch
@@ -788,6 +857,7 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
     n = 1
     n_vars = size(var_data)
 
+#ifndef USE_NCCL
     if (.not.(this%north_boundary)) call MPI_Win_Start(this%north_neighbor_grp, 0, this%north_3d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Start(this%south_neighbor_grp, 0, this%south_3d_win)
     if (.not.(this%east_boundary)) call MPI_Win_Start(this%east_neighbor_grp, 0, this%east_3d_win)
@@ -796,6 +866,7 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
     if (.not.(this%southeast_boundary)) call MPI_Win_Start(this%southeast_neighbor_grp, 0, this%southeast_3d_win)
     if (.not.(this%southwest_boundary)) call MPI_Win_Start(this%southwest_neighbor_grp, 0, this%southwest_3d_win)
     if (.not.(this%northeast_boundary)) call MPI_Win_Start(this%northeast_neighbor_grp, 0, this%northeast_3d_win)
+#endif
 
     ! Now iterate through the dictionary as long as there are more elements present. If two processors are on shared memory
     ! this step will directly copy the data to the other PE
@@ -942,6 +1013,89 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
         endif
     enddo
 
+#ifdef USE_NCCL
+    block
+        use nccl_interface
+        integer :: ierr, ns_msg_size, ew_msg_size, corner_msg_size
+
+        ns_msg_size = this%n_3d * this%grid%ns_halo_nx * this%grid%halo_nz * this%halo_size
+        ew_msg_size = this%n_3d * this%halo_size * this%grid%halo_nz * this%grid%ew_halo_ny
+        corner_msg_size = this%n_3d * this%halo_size * this%grid%halo_nz * this%halo_size
+
+        !$acc wait  ! ensure pack kernels complete before NCCL reads buffers
+
+        !$acc host_data use_device(this%south_buffer_3d, this%north_buffer_3d, &
+        !$acc   this%east_buffer_3d, this%west_buffer_3d, &
+        !$acc   this%northwest_buffer_3d, this%southeast_buffer_3d, &
+        !$acc   this%southwest_buffer_3d, this%northeast_buffer_3d, &
+        !$acc   this%south_batch_in_3d, this%north_batch_in_3d, &
+        !$acc   this%east_batch_in_3d, this%west_batch_in_3d, &
+        !$acc   this%northwest_batch_in_3d, this%southeast_batch_in_3d, &
+        !$acc   this%southwest_batch_in_3d, this%northeast_batch_in_3d)
+
+        call nccl_group_start()
+
+        if (.not. this%north_boundary) then
+            ierr = nccl_send_float(c_loc(this%north_buffer_3d), ns_msg_size, &
+                this%north_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%north_batch_in_3d), ns_msg_size, &
+                this%north_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        if (.not. this%south_boundary) then
+            ierr = nccl_send_float(c_loc(this%south_buffer_3d), ns_msg_size, &
+                this%south_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%south_batch_in_3d), ns_msg_size, &
+                this%south_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        if (.not. this%east_boundary) then
+            ierr = nccl_send_float(c_loc(this%east_buffer_3d), ew_msg_size, &
+                this%east_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%east_batch_in_3d), ew_msg_size, &
+                this%east_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        if (.not. this%west_boundary) then
+            ierr = nccl_send_float(c_loc(this%west_buffer_3d), ew_msg_size, &
+                this%west_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%west_batch_in_3d), ew_msg_size, &
+                this%west_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        if (.not. this%northwest_boundary) then
+            ierr = nccl_send_float(c_loc(this%northwest_buffer_3d), corner_msg_size, &
+                this%northwest_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%northwest_batch_in_3d), corner_msg_size, &
+                this%northwest_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        if (.not. this%southeast_boundary) then
+            ierr = nccl_send_float(c_loc(this%southeast_buffer_3d), corner_msg_size, &
+                this%southeast_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%southeast_batch_in_3d), corner_msg_size, &
+                this%southeast_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        if (.not. this%southwest_boundary) then
+            ierr = nccl_send_float(c_loc(this%southwest_buffer_3d), corner_msg_size, &
+                this%southwest_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%southwest_batch_in_3d), corner_msg_size, &
+                this%southwest_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        if (.not. this%northeast_boundary) then
+            ierr = nccl_send_float(c_loc(this%northeast_buffer_3d), corner_msg_size, &
+                this%northeast_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%northeast_batch_in_3d), corner_msg_size, &
+                this%northeast_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        call nccl_group_end()
+
+        !$acc end host_data
+    end block
+#else
     !$acc data present(this)
 
     !$acc host_data use_device(this%south_buffer_3d, this%north_buffer_3d, &
@@ -950,7 +1104,6 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
     !$acc this%southwest_buffer_3d, this%northeast_buffer_3d)
     if (.not.(this%south_boundary)) then
         if (.not.(this%south_shared)) then
-            ! Use post-start-complete-wait for distributed memory
             call MPI_Put(this%south_buffer_3d, msg_size, &
                 this%NS_3d_win_halo_type, 0, disp, msg_size, &
                 this%NS_3d_win_halo_type, this%south_3d_win)
@@ -959,7 +1112,6 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
 
     if (.not.(this%north_boundary)) then
         if (.not.(this%north_shared)) then
-            ! Use post-start-complete-wait for distributed memory
             call MPI_Put(this%north_buffer_3d, msg_size, &
                 this%NS_3d_win_halo_type, 1, disp, msg_size, &
                 this%NS_3d_win_halo_type, this%north_3d_win)
@@ -968,7 +1120,6 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
 
     if (.not.(this%east_boundary)) then
         if (.not.(this%east_shared)) then
-            ! Use post-start-complete-wait for distributed memory
             call MPI_Put(this%east_buffer_3d, msg_size, &
                 this%EW_3d_win_halo_type, 1, disp, msg_size, &
                 this%EW_3d_win_halo_type, this%east_3d_win)
@@ -977,7 +1128,6 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
 
     if (.not.(this%west_boundary)) then
         if (.not.(this%west_shared)) then
-            ! Use post-start-complete-wait for distributed memory
             call MPI_Put(this%west_buffer_3d, msg_size, &
                 this%EW_3d_win_halo_type, 0, disp, msg_size, &
                 this%EW_3d_win_halo_type, this%west_3d_win)
@@ -986,7 +1136,6 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
 
     if (.not.(this%northwest_boundary)) then
         if (.not.(this%northwest_shared)) then
-            ! Use post-start-complete-wait for distributed memory
             call MPI_Put(this%northwest_buffer_3d, msg_size, &
                 this%corner_3d_win_halo_type, &
                 merge(0, 1, this%halo_rank > this%northwest_neighbor), &
@@ -995,7 +1144,6 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
     endif
     if (.not.(this%southeast_boundary)) then
         if (.not.(this%southeast_shared)) then
-            ! Use post-start-complete-wait for distributed memory
             call MPI_Put(this%southeast_buffer_3d, msg_size, &
                 this%corner_3d_win_halo_type, &
                 merge(0, 1, this%halo_rank > this%southeast_neighbor), &
@@ -1004,7 +1152,6 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
     endif
     if (.not.(this%southwest_boundary)) then
         if (.not.(this%southwest_shared)) then
-            ! Use post-start-complete-wait for distributed memory
             call MPI_Put(this%southwest_buffer_3d, msg_size, &
                 this%corner_3d_win_halo_type, &
                 merge(0, 1, this%halo_rank > this%southwest_neighbor), &
@@ -1013,7 +1160,6 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
     endif
     if (.not.(this%northeast_boundary)) then
         if (.not.(this%northeast_shared)) then
-            ! Use post-start-complete-wait for distributed memory
             call MPI_Put(this%northeast_buffer_3d, msg_size, &
                 this%corner_3d_win_halo_type, &
                 merge(0, 1, this%halo_rank > this%northeast_neighbor), &
@@ -1031,6 +1177,7 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
     if (.not.(this%southeast_boundary)) call MPI_Win_Complete(this%southeast_3d_win)
     if (.not.(this%southwest_boundary)) call MPI_Win_Complete(this%southwest_3d_win)
     if (.not.(this%northeast_boundary)) call MPI_Win_Complete(this%northeast_3d_win)
+#endif
 
 end subroutine halo_3d_send_batch
 
@@ -1053,6 +1200,14 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
     its = this%its; ite = this%ite
     jts = this%jts; jte = this%jte
 
+#ifdef USE_NCCL
+    block
+        use nccl_interface
+        integer :: nccl_ierr
+        ! Single stream sync replaces 8 MPI_Win_Wait calls
+        nccl_ierr = nccl_stream_synchronize(this%nccl_stream)
+    end block
+#else
     if (.not.(this%north_boundary)) call MPI_Win_Wait(this%north_3d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_3d_win)
     if (.not.(this%east_boundary)) call MPI_Win_Wait(this%east_3d_win)
@@ -1061,6 +1216,7 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
     if (.not.(this%southeast_boundary)) call MPI_Win_Wait(this%southeast_3d_win)
     if (.not.(this%southwest_boundary)) call MPI_Win_Wait(this%southwest_3d_win)
     if (.not.(this%northeast_boundary)) call MPI_Win_Wait(this%northeast_3d_win)
+#endif
 
     n = 1
     n_vars = size(var_data)
@@ -1182,6 +1338,7 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
 
     if (present(wait_timer)) call wait_timer%stop()
 
+#ifndef USE_NCCL
     if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp, 0, this%north_3d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Post(this%south_neighbor_grp, 0, this%south_3d_win)
     if (.not.(this%east_boundary)) call MPI_Win_Post(this%east_neighbor_grp, 0, this%east_3d_win)
@@ -1190,6 +1347,7 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
     if (.not.(this%southeast_boundary)) call MPI_Win_Post(this%southeast_neighbor_grp, 0, this%southeast_3d_win)
     if (.not.(this%southwest_boundary)) call MPI_Win_Post(this%southwest_neighbor_grp, 0, this%southwest_3d_win)
     if (.not.(this%northeast_boundary)) call MPI_Win_Post(this%northeast_neighbor_grp, 0, this%northeast_3d_win)
+#endif
 
 end subroutine halo_3d_retrieve_batch
 
@@ -1207,10 +1365,12 @@ module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
     disp = 0
 
 
+#ifndef USE_NCCL
     if (.not.(this%north_boundary)) call MPI_Win_Start(this%north_neighbor_grp, 0, this%north_2d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Start(this%south_neighbor_grp, 0, this%south_2d_win)
     if (.not.(this%east_boundary)) call MPI_Win_Start(this%east_neighbor_grp, 0, this%east_2d_win)
     if (.not.(this%west_boundary)) call MPI_Win_Start(this%west_neighbor_grp, 0, this%west_2d_win)
+#endif
 
     n = 1
     n_vars = size(var_data)
@@ -1302,6 +1462,57 @@ module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
         endif
     enddo
 
+#ifdef USE_NCCL
+    block
+        use nccl_interface
+        integer :: ierr, ns_msg_size, ew_msg_size
+
+        ns_msg_size = this%n_2d * this%grid%ns_halo_nx * this%halo_size
+        ew_msg_size = this%n_2d * this%halo_size * this%grid%ew_halo_ny
+
+        !$acc wait  ! ensure pack kernels complete before NCCL reads buffers
+
+        !$acc host_data use_device(this%south_buffer_2d, this%north_buffer_2d, &
+        !$acc   this%east_buffer_2d, this%west_buffer_2d, &
+        !$acc   this%south_batch_in_2d, this%north_batch_in_2d, &
+        !$acc   this%east_batch_in_2d, this%west_batch_in_2d)
+
+        call nccl_group_start()
+
+        if (.not. this%north_boundary) then
+            ierr = nccl_send_float(c_loc(this%north_buffer_2d), ns_msg_size, &
+                this%north_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%north_batch_in_2d), ns_msg_size, &
+                this%north_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        if (.not. this%south_boundary) then
+            ierr = nccl_send_float(c_loc(this%south_buffer_2d), ns_msg_size, &
+                this%south_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%south_batch_in_2d), ns_msg_size, &
+                this%south_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        if (.not. this%east_boundary) then
+            ierr = nccl_send_float(c_loc(this%east_buffer_2d), ew_msg_size, &
+                this%east_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%east_batch_in_2d), ew_msg_size, &
+                this%east_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        if (.not. this%west_boundary) then
+            ierr = nccl_send_float(c_loc(this%west_buffer_2d), ew_msg_size, &
+                this%west_neighbor, this%nccl_comm, this%nccl_stream)
+            ierr = nccl_recv_float(c_loc(this%west_batch_in_2d), ew_msg_size, &
+                this%west_neighbor, this%nccl_comm, this%nccl_stream)
+        endif
+
+        call nccl_group_end()
+
+        !$acc end host_data
+    end block
+    !$acc end data
+#else
     !$acc host_data use_device(this%south_buffer_2d, this%north_buffer_2d, &
     !$acc this%east_buffer_2d, this%west_buffer_2d)
     if (.not.(this%north_boundary)) then
@@ -1337,6 +1548,7 @@ module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
     if (.not.(this%south_boundary)) call MPI_Win_Complete(this%south_2d_win)
     if (.not.(this%east_boundary)) call MPI_Win_Complete(this%east_2d_win)
     if (.not.(this%west_boundary)) call MPI_Win_Complete(this%west_2d_win)
+#endif
 
 end subroutine halo_2d_send_batch
 
@@ -1349,10 +1561,19 @@ module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
 
     if (this%n_2d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
+#ifdef USE_NCCL
+    block
+        use nccl_interface
+        integer :: nccl_ierr
+        ! Single stream sync replaces 4 MPI_Win_Wait calls
+        nccl_ierr = nccl_stream_synchronize(this%nccl_stream)
+    end block
+#else
     if (.not.(this%north_boundary)) call MPI_Win_Wait(this%north_2d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_2d_win)
     if (.not.(this%east_boundary)) call MPI_Win_Wait(this%east_2d_win)
     if (.not.(this%west_boundary)) call MPI_Win_Wait(this%west_2d_win)
+#endif
 
     n = 1    
     n_vars = size(var_data)
@@ -1445,10 +1666,12 @@ module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
     enddo
     !$acc end data
 
+#ifndef USE_NCCL
     if (.not.(this%north_boundary)) call MPI_Win_Post(this%north_neighbor_grp, 0, this%north_2d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Post(this%south_neighbor_grp, 0, this%south_2d_win)
     if (.not.(this%east_boundary)) call MPI_Win_Post(this%east_neighbor_grp, 0, this%east_2d_win)
     if (.not.(this%west_boundary)) call MPI_Win_Post(this%west_neighbor_grp, 0, this%west_2d_win)
+#endif
 
 end subroutine halo_2d_retrieve_batch
 
@@ -2582,25 +2805,31 @@ subroutine setup_batch_exch_north_wins(this, comms, info_in)
         write(*,*) "ERROR in setup batch_exch: north win, nz: ",nz
         write(*,*) "ERROR in setup batch_exch: north win, n_3d: ",this%n_3d
     endif
+#ifndef USE_NCCL
     ! Create a group for the north-south exchange
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%north_neighbor/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
+#endif
 
 #ifdef _OPENACC
 
     allocate(this%north_batch_in_3d(this%n_3d, nx, nz, ny))
     !$acc enter data copyin(this%north_batch_in_3d)
+#ifndef USE_NCCL
     !$acc host_data use_device(this%north_batch_in_3d)
     call MPI_WIN_CREATE(this%north_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%north_3d_win, ierr)
     !$acc end host_data
+#endif
 
     if (this%n_2d > 0) then
         allocate(this%north_batch_in_2d(this%n_2d, nx, ny))
         !$acc enter data copyin(this%north_batch_in_2d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%north_batch_in_2d)
         call MPI_WIN_CREATE(this%north_batch_in_2d, win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, this%north_2d_win, ierr)
         !$acc end host_data
+#endif
     endif
 
 #else
@@ -2644,25 +2873,31 @@ subroutine setup_batch_exch_south_wins(this, comms, info_in)
         write(*,*) "ERROR in setup batch_exch: south win, nz: ",nz
         write(*,*) "ERROR in setup batch_exch: south win, n_3d: ",this%n_3d
     endif
+#ifndef USE_NCCL
     ! Create a group for the north-south exchange
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/this%south_neighbor, this%halo_rank/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
+#endif
 
 #ifdef _OPENACC
 
     allocate(this%south_batch_in_3d(this%n_3d, nx, nz, ny))
     !$acc enter data copyin(this%south_batch_in_3d)
+#ifndef USE_NCCL
     !$acc host_data use_device(this%south_batch_in_3d)
     call MPI_WIN_CREATE(this%south_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%south_3d_win, ierr)
     !$acc end host_data
+#endif
 
     if (this%n_2d > 0) then
         allocate(this%south_batch_in_2d(this%n_2d, nx, ny))
         !$acc enter data copyin(this%south_batch_in_2d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%south_batch_in_2d)
         call MPI_WIN_CREATE(this%south_batch_in_2d, win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, this%south_2d_win, ierr)
         !$acc end host_data
+#endif
     endif
 
 #else
@@ -2706,24 +2941,30 @@ subroutine setup_batch_exch_east_wins(this, comms, info_in)
         write(*,*) "ERROR in setup batch_exch: east win, nz: ",nz
         write(*,*) "ERROR in setup batch_exch: east win, n_3d: ",this%n_3d
     endif 
+#ifndef USE_NCCL
     ! Create a group for the east-west exchange
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/this%halo_rank, this%east_neighbor/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
+#endif
 
 #ifdef _OPENACC
     allocate(this%east_batch_in_3d(this%n_3d, nx, nz, ny))
     !$acc enter data copyin(this%east_batch_in_3d)
+#ifndef USE_NCCL
     !$acc host_data use_device(this%east_batch_in_3d)
     call MPI_WIN_CREATE(this%east_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%east_3d_win, ierr)
     !$acc end host_data
+#endif
 
     if (this%n_2d > 0) then
         allocate(this%east_batch_in_2d(this%n_2d, nx, ny))
         !$acc enter data copyin(this%east_batch_in_2d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%east_batch_in_2d)
         call MPI_WIN_CREATE(this%east_batch_in_2d, win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, this%east_2d_win, ierr)
         !$acc end host_data
+#endif
     endif
 #else
     if (this%east_shared) then
@@ -2766,24 +3007,30 @@ subroutine setup_batch_exch_west_wins(this, comms, info_in)
         write(*,*) "ERROR in setup batch_exch: west win, nz: ",nz
         write(*,*) "ERROR in setup batch_exch: west win, n_3d: ",this%n_3d
     endif
+#ifndef USE_NCCL
     ! Create a group for the east-west exchange
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/this%west_neighbor, this%halo_rank/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
+#endif
 
 #ifdef _OPENACC
     allocate(this%west_batch_in_3d(this%n_3d, nx, nz, ny))
     !$acc enter data copyin(this%west_batch_in_3d)
+#ifndef USE_NCCL
     !$acc host_data use_device(this%west_batch_in_3d)
     call MPI_WIN_CREATE(this%west_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%west_3d_win, ierr)
     !$acc end host_data
+#endif
 
     if (this%n_2d > 0) then
         allocate(this%west_batch_in_2d(this%n_2d, nx, ny))
         !$acc enter data copyin(this%west_batch_in_2d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%west_batch_in_2d)
         call MPI_WIN_CREATE(this%west_batch_in_2d, win_size_2d*real_size, real_size, info_in, tmp_MPI_comm, this%west_2d_win, ierr)
         !$acc end host_data
+#endif
     endif
 #else
     if (this%west_shared) then
@@ -2822,6 +3069,7 @@ subroutine setup_batch_exch_northwest_wins(this, comms, info_in)
         write(*,*) "ERROR in setup batch_exch: northwest win, n_3d: ",this%n_3d
     endif
 
+#ifndef USE_NCCL
     ! Create a group for the northwest-southwest exchange
     ! corner neighbor rank could be the direct corner neighbor,
     ! or an adjacent process, so we need to find min/max ranks
@@ -2830,13 +3078,16 @@ subroutine setup_batch_exch_northwest_wins(this, comms, info_in)
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/rank1, rank2/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
+#endif
 
 #ifdef _OPENACC
     allocate(this%northwest_batch_in_3d(this%n_3d, this%halo_size, nz, this%halo_size))
     !$acc enter data copyin(this%northwest_batch_in_3d)
+#ifndef USE_NCCL
     !$acc host_data use_device(this%northwest_batch_in_3d)
     call MPI_WIN_CREATE(this%northwest_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%northwest_3d_win, ierr)
     !$acc end host_data
+#endif
 #else
     if (this%northwest_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%northwest_3d_win)
@@ -2871,6 +3122,7 @@ subroutine setup_batch_exch_northeast_wins(this, comms, info_in)
         write(*,*) "ERROR in setup batch_exch: northeast win, n_3d: ",this%n_3d
     endif
 
+#ifndef USE_NCCL
     ! Create a group for the northeast-southeast exchange
     ! corner neighbor rank could be the direct corner neighbor,
     ! or an adjacent process, so we need to find min/max ranks
@@ -2879,13 +3131,16 @@ subroutine setup_batch_exch_northeast_wins(this, comms, info_in)
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/rank1, rank2/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
+#endif
 
 #ifdef _OPENACC
     allocate(this%northeast_batch_in_3d(this%n_3d, this%halo_size, nz, this%halo_size))
     !$acc enter data copyin(this%northeast_batch_in_3d)
+#ifndef USE_NCCL
     !$acc host_data use_device(this%northeast_batch_in_3d)
     call MPI_WIN_CREATE(this%northeast_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%northeast_3d_win, ierr)
     !$acc end host_data
+#endif
 #else
     if (this%northeast_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%northeast_3d_win)
@@ -2920,6 +3175,7 @@ subroutine setup_batch_exch_southwest_wins(this, comms, info_in)
         write(*,*) "ERROR in setup batch_exch: southwest win, n_3d: ",this%n_3d
     endif
 
+#ifndef USE_NCCL
     ! Create a group for the southwest-southeast exchange
     ! corner neighbor rank could be the direct corner neighbor,
     ! or an adjacent process, so we need to find min/max ranks
@@ -2928,13 +3184,16 @@ subroutine setup_batch_exch_southwest_wins(this, comms, info_in)
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/rank1, rank2/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
+#endif
 
 #ifdef _OPENACC
     allocate(this%southwest_batch_in_3d(this%n_3d, this%halo_size, nz, this%halo_size))
     !$acc enter data copyin(this%southwest_batch_in_3d)
+#ifndef USE_NCCL
     !$acc host_data use_device(this%southwest_batch_in_3d)
     call MPI_WIN_CREATE(this%southwest_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%southwest_3d_win, ierr)
     !$acc end host_data
+#endif
 #else
     if (this%southwest_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%southwest_3d_win)
@@ -2969,6 +3228,7 @@ subroutine setup_batch_exch_southeast_wins(this, comms, info_in)
         write(*,*) "ERROR in setup batch_exch: southeast win, n_3d: ",this%n_3d
     endif
 
+#ifndef USE_NCCL
     ! Create a group for the southeast-southwest exchange
     rank1 = min(this%southeast_neighbor, this%halo_rank)
     rank2 = max(this%southeast_neighbor, this%halo_rank)
@@ -2977,13 +3237,16 @@ subroutine setup_batch_exch_southeast_wins(this, comms, info_in)
     call MPI_Comm_group(comms, comp_proc)
     call MPI_Group_incl(comp_proc, 2, (/rank1, rank2/), tmp_MPI_grp, ierr)
     call MPI_Comm_create_group(comms, tmp_MPI_grp, 0, tmp_MPI_comm, ierr)
+#endif
 
 #ifdef _OPENACC
     allocate(this%southeast_batch_in_3d(this%n_3d, this%halo_size, nz, this%halo_size))
     !$acc enter data copyin(this%southeast_batch_in_3d)
+#ifndef USE_NCCL
     !$acc host_data use_device(this%southeast_batch_in_3d)
     call MPI_WIN_CREATE(this%southeast_batch_in_3d, win_size*real_size, real_size, info_in, tmp_MPI_comm, this%southeast_3d_win, ierr)
     !$acc end host_data
+#endif
 #else
     if (this%southeast_shared) then
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, info_in, tmp_MPI_comm, tmp_ptr, this%southeast_3d_win)

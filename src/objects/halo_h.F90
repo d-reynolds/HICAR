@@ -4,6 +4,9 @@ module halo_interface
     use variable_interface,       only : variable_t
     use timer_interface,          only : timer_t
     use data_structures,          only : index_type
+#ifdef USE_NCCL
+    use iso_c_binding, only: c_ptr, c_null_ptr
+#endif
 
     use mpi_f08
     implicit none
@@ -126,6 +129,11 @@ module halo_interface
         logical :: northeast_shared = .false.
         logical :: southeast_shared = .false.
         logical :: use_shared_windows = .false.
+
+#ifdef USE_NCCL
+        type(c_ptr) :: nccl_comm = c_null_ptr
+        type(c_ptr) :: nccl_stream = c_null_ptr
+#endif
 
     contains
         procedure, public :: init => init_halo 

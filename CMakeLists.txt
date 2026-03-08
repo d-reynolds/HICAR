@@ -586,6 +586,27 @@ if (OpenACC_Fortran_FOUND AND OPENACC)
 		target_link_libraries(hicar_lib PUBLIC rte-rrtmgp::rte rte-rrtmgp::rrtmgp)
 		message(STATUS "Linked rte-rrtmgp libraries to HICAR")
 	endif()
+
+	# Search for NCCL for GPU halo exchange acceleration
+	find_path(NCCL_INCLUDE_DIR nccl.h
+		HINTS $ENV{NVHPC_ROOT}/comm_libs/nccl/include
+		      $ENV{NCCL_DIR}/include
+		      $ENV{NCCL_ROOT}/include)
+	find_library(NCCL_LIBRARY nccl
+		HINTS $ENV{NVHPC_ROOT}/comm_libs/nccl/lib
+		      $ENV{NCCL_DIR}/lib
+		      $ENV{NCCL_ROOT}/lib)
+	if(NCCL_INCLUDE_DIR AND NCCL_LIBRARY)
+		message(STATUS "Found NCCL: ${NCCL_LIBRARY}")
+		add_definitions(-DUSE_NCCL)
+		target_include_directories(hicar_lib PRIVATE ${NCCL_INCLUDE_DIR})
+		target_link_libraries(hicar_lib PUBLIC ${NCCL_LIBRARY})
+		target_sources(hicar_lib PRIVATE
+			${PROJECT_SOURCE_DIR}/src/utilities/nccl_wrapper.c
+			${PROJECT_SOURCE_DIR}/src/utilities/nccl_interface.F90)
+	else()
+		message(STATUS "NCCL not found -- using GPU-aware MPI for halo exchange")
+	endif()
 endif()
 
 target_link_libraries(hicar_lib PUBLIC MPI::MPI_Fortran)
