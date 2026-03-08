@@ -335,7 +335,7 @@ contains
         integer,intent(in)::ydim                        !> the dimension to use for the y coordinate
                                                         ! It can be 2, or 3 (but not 1)
         real,allocatable,dimension(:,:,:)::inputwind    !> temporary array to store the input data in
-        integer::i,j,k,nx,ny,nz,startx,endx,starty,endy ! various array indices/bounds
+        integer::i,j,k,nx,ny,nz,startx,endx,starty,endy,ii,jj ! various array indices/bounds
 
         ! Intermediate sums to speed up the computation
         ! Because these are accumulating values over the domain, use double precision
@@ -365,7 +365,7 @@ contains
         !parallelize over a slower dimension (not the slowest because it is MUCH easier this way)
         ! as long as the inner loops (the array operations) are over the fastest dimension we are mostly OK
         !$omp parallel firstprivate(windowsize,nx,ny,nz,ydim), &
-        !$omp private(i,j,k,startx,endx,starty,endy, rowsums,rowmeans,nrows,ncols,cursum), &
+        !$omp private(i,j,k,ii,jj,startx,endx,starty,endy, rowsums,rowmeans,nrows,ncols,cursum), &
         !$omp shared(wind,inputwind)
 
         allocate(rowsums(nx)) !this is only used when ydim=3, so nz is really ny
@@ -375,7 +375,7 @@ contains
 
         !$omp do schedule(static)
         !$acc data present_or_copy(wind) copyin(inputwind) create(rowsums,rowmeans)
-        !$acc kernels 
+        !$acc parallel loop gang private(rowsums, rowmeans, cursum, starty, endy, startx, endx)
         do j=1,ny
 
             ! so we pre-compute the sum over rows for each column in the current window
@@ -383,63 +383,88 @@ contains
                 ! start by adding the outer row n+2 times
                 ! effectively assumes it was set up for the grid cell before the first grid cell
                 ! the first time through the loop will remove one iteration of outer row grid cells
-                rowsums = inputwind(1:nx,j,1) * (windowsize+2)
-                ! !$acc loop
-                do i=2, min(windowsize,nz)
-                    rowsums = rowsums + inputwind(1:nx, j, i)
+                !$acc loop vector
+                do i=1,nx
+                    rowsums(i) = inputwind(i,j,1) * (windowsize+2)
+                enddo
+                !$acc loop seq
+                do ii=2, min(windowsize,nz)
+                    !$acc loop vector
+                    do i=1,nx
+                        rowsums(i) = rowsums(i) + inputwind(i, j, ii)
+                    enddo
                 enddo
                 if (windowsize > nz) then
-                    rowsums = rowsums + inputwind(1:nx,j,nz) * (windowsize-nz)
+                    !$acc loop vector
+                    do i=1,nx
+                        rowsums(i) = rowsums(i) + inputwind(i,j,nz) * (windowsize-nz)
+                    enddo
                 endif
             endif
 
             ! don't parallelize over this loop because it is much more efficient to be able to assume
             ! that you ran the previous row in serial for the slow (ydim=3) case
-            ! !$acc loop gang
+            !$acc loop seq
             do k=1,nz ! note this is y for ydim=3
                 ! ydim=3 for the main model grid which is large and takes a long time
                 if (ydim==3) then
                     starty  = max(2, k - windowsize)
                     endy    = min(nz, k + windowsize)
-                    rowsums = rowsums - inputwind(1:nx, j, starty-1) + inputwind(1:nx, j, endy)
+                    !$acc loop vector
+                    do i=1,nx
+                        rowsums(i) = rowsums(i) - inputwind(i, j, starty-1) + inputwind(i, j, endy)
+                    enddo
 
                     ! start by adding the outer row n+2 times
                     ! effectively assumes it was set up for the grid cell before the first grid cell
                     ! the first time through the loop will remove one iteration of outer row grid cells
-                    rowmeans = rowsums / nrows
-                    cursum = sum(rowmeans(2:windowsize)) + rowmeans(1) * (windowsize+2)
+                    !$acc loop vector
+                    do i=1,nx
+                        rowmeans(i) = rowsums(i) / nrows
+                    enddo
+                    cursum = rowmeans(1) * (windowsize+2)
+                    !$acc loop seq
+                    do i=2,windowsize
+                        cursum = cursum + rowmeans(i)
+                    enddo
                 endif
 
-                ! !$acc loop vector
-                do i=1,nx
-                    if (ydim==3) then
+                if (ydim==3) then
+                    !$acc loop seq
+                    do i=1,nx
                         startx = max(2, i - windowsize)
                         endx   = min(nx, i + windowsize)
                         cursum = cursum - rowmeans(startx-1) + rowmeans(endx)
 
                         wind(i,j,k) = cursum / ncols
+                    enddo
 
-                    else ! ydim==2
-                        ! ydim=2 for the input data which is a small grid, thus cheap so we still use the slow method
+                else ! ydim==2
+                    ! ydim=2 for the input data which is a small grid, thus cheap so we still use the slow method
+                    !$acc loop vector private(startx, endx, starty, endy, cursum)
+                    do i=1,nx
                         !first find the current window bounds
                         startx=max(1, i - windowsize)
                         endx  =min(nx,i + windowsize)
                         starty=max(1, j - windowsize)
                         endy  =min(ny,j + windowsize)
                         ! then compute the mean within that window (sum/n)
-                        ! note, artifacts near the borders (mentioned in ydim==3) don't affect this
-                        ! because the borders *should* be well away from the domain
-                        ! if the forcing data are not much larger than the model domain this *could* create issues
-                        wind(i,j,k) = sum(inputwind(startx:endx,starty:endy,k)) &
-                                       / ((endx-startx+1)*(endy-starty+1))
-                    endif
-                enddo
+                        cursum = 0.0d0
+                        !$acc loop seq
+                        do jj=starty,endy
+                            !$acc loop seq
+                            do ii=startx,endx
+                                cursum = cursum + inputwind(ii,jj,k)
+                            enddo
+                        enddo
+                        wind(i,j,k) = cursum / ((endx-startx+1)*(endy-starty+1))
+                    enddo
+                endif
             enddo
         enddo
         !$omp end do
         !$omp end parallel
-        !$acc end kernels
-        !$acc end data 
+        !$acc end data
 
     end subroutine smooth_array_3d
 
