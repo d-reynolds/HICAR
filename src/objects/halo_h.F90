@@ -53,51 +53,51 @@ module halo_interface
         type(MPI_Group)    :: north_neighbor_grp, south_neighbor_grp, east_neighbor_grp, west_neighbor_grp
         type(MPI_Group)    :: northwest_neighbor_grp, southwest_neighbor_grp, northeast_neighbor_grp, southeast_neighbor_grp
 
-        real, contiguous, pointer :: south_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: north_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: west_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: east_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: northwest_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: southwest_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: northeast_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: southeast_batch_in_3d(:,:,:,:)
+        real, contiguous, pointer :: south_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: north_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: west_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: east_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northwest_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southwest_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northeast_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southeast_batch_in_3d(:,:,:,:) => null()
 
-        real, contiguous, pointer :: north_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: south_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: east_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: west_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: northwest_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: southwest_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: northeast_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: southeast_buffer_3d(:,:,:,:)
+        real, contiguous, pointer :: north_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: south_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: east_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: west_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northwest_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southwest_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northeast_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southeast_buffer_3d(:,:,:,:) => null()
 
-        real, pointer     :: south_in_3d(:,:,:)
-        real, pointer     :: north_in_3d(:,:,:)
-        real, pointer     :: west_in_3d(:,:,:)
-        real, pointer     :: east_in_3d(:,:,:)
-        real, pointer     :: southwest_in_3d(:,:,:)
-        real, pointer     :: northwest_in_3d(:,:,:)
-        real, pointer     :: southeast_in_3d(:,:,:)
-        real, pointer     :: northeast_in_3d(:,:,:)
+        real, pointer     :: south_in_3d(:,:,:) => null()
+        real, pointer     :: north_in_3d(:,:,:) => null()
+        real, pointer     :: west_in_3d(:,:,:) => null()
+        real, pointer     :: east_in_3d(:,:,:) => null()
+        real, pointer     :: southwest_in_3d(:,:,:) => null()
+        real, pointer     :: northwest_in_3d(:,:,:) => null()
+        real, pointer     :: southeast_in_3d(:,:,:) => null()
+        real, pointer     :: northeast_in_3d(:,:,:) => null()
 
-        real, contiguous, pointer :: south_batch_in_2d(:,:,:)
-        real, contiguous, pointer :: north_batch_in_2d(:,:,:)
-        real, contiguous, pointer :: west_batch_in_2d(:,:,:)
-        real, contiguous, pointer :: east_batch_in_2d(:,:,:)
+        real, contiguous, pointer :: south_batch_in_2d(:,:,:) => null()
+        real, contiguous, pointer :: north_batch_in_2d(:,:,:) => null()
+        real, contiguous, pointer :: west_batch_in_2d(:,:,:) => null()
+        real, contiguous, pointer :: east_batch_in_2d(:,:,:) => null()
 
-        real, contiguous, pointer :: north_buffer_2d(:,:,:)
-        real, contiguous, pointer :: south_buffer_2d(:,:,:)
-        real, contiguous, pointer :: east_buffer_2d(:,:,:)
-        real, contiguous, pointer :: west_buffer_2d(:,:,:)
+        real, contiguous, pointer :: north_buffer_2d(:,:,:) => null()
+        real, contiguous, pointer :: south_buffer_2d(:,:,:) => null()
+        real, contiguous, pointer :: east_buffer_2d(:,:,:) => null()
+        real, contiguous, pointer :: west_buffer_2d(:,:,:) => null()
 
-        real, contiguous, pointer :: north_in_buffer(:,:,:)
-        real, contiguous, pointer :: south_in_buffer(:,:,:)
-        real, contiguous, pointer :: east_in_buffer(:,:,:)
-        real, contiguous, pointer :: west_in_buffer(:,:,:)
-        real, contiguous, pointer :: north_in_buffer_2d(:,:)
-        real, contiguous, pointer :: south_in_buffer_2d(:,:)
-        real, contiguous, pointer :: east_in_buffer_2d(:,:)
-        real, contiguous, pointer :: west_in_buffer_2d(:,:)
+        real, contiguous, pointer :: north_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: south_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: east_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: west_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: north_in_buffer_2d(:,:) => null()
+        real, contiguous, pointer :: south_in_buffer_2d(:,:) => null()
+        real, contiguous, pointer :: east_in_buffer_2d(:,:) => null()
+        real, contiguous, pointer :: west_in_buffer_2d(:,:) => null()
 
         integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor, halo_rank
         integer :: northwest_neighbor, southwest_neighbor, northeast_neighbor, southeast_neighbor
@@ -168,10 +168,10 @@ module halo_interface
 
 interface
 
-    module subroutine init_halo(this, exch_vars, adv_vars, grid, comms)
+    module subroutine init_halo(this, exch_vars, grid, comms)
         implicit none
         class(halo_t), intent(inout) :: this
-        type(index_type), intent(in) :: adv_vars(:), exch_vars(:)
+        type(index_type), intent(in) :: exch_vars(:)
         type(grid_t), intent(in) :: grid
         type(MPI_comm), intent(inout) :: comms
     end subroutine init_halo

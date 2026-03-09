@@ -55,6 +55,9 @@ module test_halo_exch
 
         call halo_exch_standard(grid,error,batch_in=.True.,test_str_in="batch exchange")
 
+        call grid%set_grid_dimensions( 171, 517, 0, image=my_index, comms=comms, adv_order=3)
+        call halo_exch_standard(grid,error,batch_in=.True.,test_str_in="batch exchange 2d")
+
     end subroutine test_batch_exch
 
     subroutine test_var_exch(error)
@@ -94,7 +97,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 171, 517, 20, image=my_index, global_nz=20, comms=comms, adv_order=3)
+        call grid%set_grid_dimensions( 171, 517, 0, image=my_index, global_nz=20, comms=comms, adv_order=3)
 
         call halo_exch_standard(grid,error,test_str_in="var exchange")
         if (allocated(error)) return
@@ -157,7 +160,7 @@ module test_halo_exch
         character(len=*), optional, intent(in) :: test_str_in
 
         type(halo_t) :: halo
-        type(index_type), allocatable :: exch_vars(:), adv_vars(:)
+        type(index_type), allocatable :: exch_vars(:)
         type(variable_t) :: var, var_data(1), exch_var
         integer :: my_index
         integer :: ierr
@@ -193,12 +196,19 @@ module test_halo_exch
             call var%initialize(kVARS%water_vapor,grid_3d,forcing_var=.True.)
             call exch_var%initialize(kVARS%snow_height,grid,forcing_var=.True.)
 
-            allocate(exch_vars(1), adv_vars(1))
+            allocate(exch_vars(2))
 
             exch_var%id = kVARS%snow_height
             exch_vars(1)%v = 1
-            exch_vars%id = kVARS%snow_height
-    
+            exch_vars(1)%id = kVARS%snow_height
+            exch_vars(2)%v = 2
+            exch_vars(2)%id = kVARS%water_vapor
+
+            if (batch) then
+                !initialize variables to exchange
+                call var_data(1)%initialize(kVARS%snow_height,grid,forcing_var=dqdt)
+            endif
+
         else
 
             !in case input grid has staggered dimensions, create a clean grid here with no stagger. This will be used to initialize the halo object
@@ -207,26 +217,25 @@ module test_halo_exch
             !initialize variables to exchange
             call var%initialize(kVARS%water_vapor,grid,forcing_var=dqdt)
 
-            allocate(exch_vars(0), adv_vars(1))
+            allocate(exch_vars(1))
+            exch_vars(1)%v = 1
+            exch_vars(1)%id = kVARS%water_vapor
+
+            if (batch) then
+                !initialize variables to exchange
+                call var_data(1)%initialize(kVARS%water_vapor,grid,forcing_var=dqdt)
+            endif
         endif
 
-        var%id = kVARS%water_vapor
-        var_data(1) = var
 
-        adv_vars(1)%v = 1
-        adv_vars(1)%id = kVARS%water_vapor
-        call halo%init(exch_vars, adv_vars, grid_3d, comms)
+        call halo%init(exch_vars, grid_3d, comms)
 
-        !$acc data copy(halo, var_data, exch_var, var, exch_vars, adv_vars)
-        !$acc parallel loop collapse(3)
         do i = grid%its, grid%ite
             do j = grid%jts, grid%jte
                 do k = 1, max(1,grid%kte)
                     ! Set tile cells to global index values
                     if (grid%is3d) then
-                        var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                        if (.not.(batch)) var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                        if (dqdt) var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                        var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
                     else
                         exch_var%data_2d(i,j) = i+(j-1)*grid%nx_global
                     endif
@@ -236,14 +245,11 @@ module test_halo_exch
         ! Initialize boundary halo cells to their global index on sides where
         ! no neighbor exists to exchange with (global domain boundaries only).
         if (grid%ximg == 1) then
-            !$acc parallel loop collapse(3)
             do i = grid%ims, grid%its-1
                 do j = grid%jts, grid%jte
                     do k = 1, max(1,grid%kte)
                         if (grid%is3d) then
-                            var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (.not.(batch)) var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (dqdt) var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                            var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
                         else
                             exch_var%data_2d(i,j) = i+(j-1)*grid%nx_global
                         endif
@@ -252,14 +258,11 @@ module test_halo_exch
             end do
         endif
         if (grid%ximg == grid%ximages) then
-            !$acc parallel loop collapse(3)
             do i = grid%ite+1, grid%ime
                 do j = grid%jts, grid%jte
                     do k = 1, max(1,grid%kte)
                         if (grid%is3d) then
-                            var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (.not.(batch)) var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (dqdt) var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                            var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
                         else
                             exch_var%data_2d(i,j) = i+(j-1)*grid%nx_global
                         endif
@@ -268,14 +271,11 @@ module test_halo_exch
             end do
         endif
         if (grid%yimg == 1) then
-            !$acc parallel loop collapse(3)
             do i = grid%its, grid%ite
                 do j = grid%jms, grid%jts-1
                     do k = 1, max(1,grid%kte)
                         if (grid%is3d) then
-                            var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (.not.(batch)) var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (dqdt) var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                            var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
                         else
                             exch_var%data_2d(i,j) = i+(j-1)*grid%nx_global
                         endif
@@ -284,14 +284,11 @@ module test_halo_exch
             end do
         endif
         if (grid%yimg == grid%yimages) then
-            !$acc parallel loop collapse(3)
             do i = grid%its, grid%ite
                 do j = grid%jte+1, grid%jme
                     do k = 1, max(1,grid%kte)
                         if (grid%is3d) then
-                            var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (.not.(batch)) var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (dqdt) var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                            var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
                         else
                             exch_var%data_2d(i,j) = i+(j-1)*grid%nx_global
                         endif
@@ -302,14 +299,11 @@ module test_halo_exch
         ! Initialize corner halo cells on processes at two domain boundaries
         ! (southwest corner: ximg==1, yimg==1, etc.)
         if (grid%ximg == 1 .and. grid%yimg == 1) then
-            !$acc parallel loop collapse(3)
             do i = grid%ims, grid%its-1
                 do j = grid%jms, grid%jts-1
                     do k = 1, max(1,grid%kte)
                         if (grid%is3d) then
-                            var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (.not.(batch)) var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (dqdt) var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                            var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
                         else
                             exch_var%data_2d(i,j) = i+(j-1)*grid%nx_global
                         endif
@@ -318,14 +312,11 @@ module test_halo_exch
             end do
         endif
         if (grid%ximg == 1 .and. grid%yimg == grid%yimages) then
-            !$acc parallel loop collapse(3)
             do i = grid%ims, grid%its-1
                 do j = grid%jte+1, grid%jme
                     do k = 1, max(1,grid%kte)
                         if (grid%is3d) then
-                            var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (.not.(batch)) var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (dqdt) var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                            var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
                         else
                             exch_var%data_2d(i,j) = i+(j-1)*grid%nx_global
                         endif
@@ -334,14 +325,11 @@ module test_halo_exch
             end do
         endif
         if (grid%ximg == grid%ximages .and. grid%yimg == 1) then
-            !$acc parallel loop collapse(3)
             do i = grid%ite+1, grid%ime
                 do j = grid%jms, grid%jts-1
                     do k = 1, max(1,grid%kte)
                         if (grid%is3d) then
-                            var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (.not.(batch)) var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (dqdt) var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                            var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
                         else
                             exch_var%data_2d(i,j) = i+(j-1)*grid%nx_global
                         endif
@@ -350,14 +338,11 @@ module test_halo_exch
             end do
         endif
         if (grid%ximg == grid%ximages .and. grid%yimg == grid%yimages) then
-            !$acc parallel loop collapse(3)
             do i = grid%ite+1, grid%ime
                 do j = grid%jte+1, grid%jme
                     do k = 1, max(1,grid%kte)
                         if (grid%is3d) then
-                            var_data(1)%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (.not.(batch)) var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
-                            if (dqdt) var%dqdt_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
+                            var%data_3d(i,k,j) = i+(j-1)*grid%nx_global+(k-1)*grid%nx_global*grid%ny_global
                         else
                             exch_var%data_2d(i,j) = i+(j-1)*grid%nx_global
                         endif
@@ -365,20 +350,46 @@ module test_halo_exch
                 end do
             end do
         endif
+        if (batch .and. grid%is2d) var_data(1) = exch_var
+        if (batch .and. grid%is3d) var_data(1) = var
+        if (dqdt) var%dqdt_3d = var%data_3d
+
+        !$acc data copy(halo, exch_vars)
+
         if (batch) then
-            call halo%halo_3d_send_batch(exch_vars, adv_vars, var_data)
-            call halo%halo_3d_retrieve_batch(exch_vars, adv_vars, var_data)
+            if (grid%is3d) then
+                !$acc update device(var_data(1)%data_3d)
+                call halo%halo_3d_send_batch(exch_vars, var_data)
+                call halo%halo_3d_retrieve_batch(exch_vars, var_data)
+                !$acc update host(var_data(1)%data_3d)
+            else
+                !$acc update device(var_data(1)%data_2d)
+                call halo%halo_2d_send_batch(exch_vars, var_data)
+                call halo%halo_2d_retrieve_batch(exch_vars, var_data)
+                !$acc update host(var_data(1)%data_2d)
+            endif
         else
             if (grid%is3d) then
+                if (dqdt) then
+                    !$acc update device(var%dqdt_3d)
+                endif
+                !$acc update device(var%data_3d)
                 call halo%exch_var(var, do_dqdt=dqdt, corners=corners)
+                !$acc update host(var%data_3d)
+                if (dqdt) then
+                    !$acc update host(var%dqdt_3d)
+                endif
             else
+                !$acc update device(exch_var%data_2d)
                 call halo%exch_var(exch_var, corners=corners)
+                !$acc update host(exch_var%data_2d)
             endif
         endif
         !$acc end data
 
-        if (batch) var = var_data(1)
-
+        if (batch .and. grid%is3d) var = var_data(1)
+        if (batch .and. grid%is2d) exch_var = var_data(1)
+        
         ! now loop through all memory indices and check that the value in var%data_3d
         ! is equal to the expected value. If the value is not equal to the expected value
         ! check where we are (if we are in the middle, edge, or corner) and set the appropriate
@@ -428,6 +439,8 @@ module test_halo_exch
                 end do
             end do
         end do
+
+        call halo%finalize()
 
         ! Verify exchange worked
         ! All cells should match the global index formula:

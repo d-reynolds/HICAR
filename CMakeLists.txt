@@ -599,8 +599,14 @@ if (OpenACC_Fortran_FOUND AND OPENACC)
 	if(NCCL_INCLUDE_DIR AND NCCL_LIBRARY)
 		message(STATUS "Found NCCL: ${NCCL_LIBRARY}")
 		add_definitions(-DUSE_NCCL)
+		# NCCL requires CUDA runtime (cudaSetDevice, cudaFree, cudaStream*, etc.)
+		# This may already be available if AMGX is linked, but we need it regardless.
+		if(NOT TARGET CUDA::cudart)
+			enable_language(CUDA)
+			find_package(CUDAToolkit REQUIRED)
+		endif()
 		target_include_directories(hicar_lib PRIVATE ${NCCL_INCLUDE_DIR})
-		target_link_libraries(hicar_lib PUBLIC ${NCCL_LIBRARY})
+		target_link_libraries(hicar_lib PUBLIC ${NCCL_LIBRARY} CUDA::cudart)
 		target_sources(hicar_lib PRIVATE
 			${PROJECT_SOURCE_DIR}/src/utilities/nccl_wrapper.c
 			${PROJECT_SOURCE_DIR}/src/utilities/nccl_interface.F90)

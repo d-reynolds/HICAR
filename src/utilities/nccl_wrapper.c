@@ -34,15 +34,50 @@
 
 /*
  * Initialize NCCL communicator using MPI for unique ID broadcast.
- * comm  [out] - pointer to ncclComm_t handle
- * nranks [in] - total number of ranks in the communicator
- * rank   [in] - this rank's index (0-based)
- * f_comm [in] - Fortran MPI communicator handle (integer)
+ * comm      [out] - pointer to ncclComm_t handle
+ * nranks    [in]  - total number of ranks in the communicator
+ * rank      [in]  - this rank's index (0-based)
+ * f_comm    [in]  - Fortran MPI communicator handle (integer)
+ * device_id [in]  - CUDA device index to bind this rank to
  * Returns 0 on success, non-zero on error.
  */
-int nccl_comm_init(ncclComm_t *comm, int nranks, int rank, MPI_Fint f_comm) {
+int nccl_comm_init(ncclComm_t *comm, int nranks, int rank, MPI_Fint f_comm, int device_id) {
     MPI_Comm c_comm = MPI_Comm_f2c(f_comm);
     ncclUniqueId id;
+
+    /* Ensure the correct CUDA device is set for this rank */
+    CUDA_CHECK(cudaSetDevice(device_id));
+
+    /* Force creation of the CUDA primary context.
+     * OpenACC's acc_init() uses the CUDA driver API, which is invisible to
+     * the runtime API that NCCL uses internally. cudaFree(0) is the standard
+     * NVIDIA idiom to establish the runtime primary context. */
+    CUDA_CHECK(cudaFree(0));
+
+    /* Detect if all NCCL ranks share the same physical node.
+     * If so, disable the external network plugin (libnccl-net.so) which can
+     * segfault due to ABI incompatibilities on Cray/HPE systems with the
+     * NVHPC-bundled NCCL. P2P/SHM transports suffice for intra-node comm.
+     * overwrite=0 allows users to override via NCCL_NET_DISABLE=0. */
+    MPI_Comm shm_comm;
+    MPI_Comm_split_type(c_comm, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &shm_comm);
+    int shm_size;
+    MPI_Comm_size(shm_comm, &shm_size);
+    MPI_Comm_free(&shm_comm);
+
+    if (shm_size == nranks) {
+        /* Empty string tells NCCL to skip loading any external net plugin.
+         * Also disable InfiniBand as a belt-and-suspenders measure.
+         * overwrite=0: user can override by setting these vars themselves. */
+        setenv("NCCL_NET_PLUGIN", "", 0);
+        setenv("NCCL_IB_DISABLE", "1", 0);
+        if (rank == 0)
+            fprintf(stderr, "[NCCL init] All %d ranks on same node, disabled network plugin\n", nranks);
+    } else {
+        if (rank == 0)
+            fprintf(stderr, "[NCCL init] Multi-node detected (%d/%d local), network plugin enabled\n",
+                    shm_size, nranks);
+    }
 
     if (rank == 0) {
         ncclResult_t r = ncclGetUniqueId(&id);

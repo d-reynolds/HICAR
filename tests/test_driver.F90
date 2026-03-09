@@ -53,7 +53,8 @@ program test_driver
      devtype = acc_get_device_type()
      devNum = acc_get_num_devices(devtype)
      dev = mod(local_rank,devNum)
-     if ((local_rank + 1) < comm_size) then
+     ! Initialize device for all local ranks
+     if (local_rank < comm_size) then
         call acc_set_device_num(dev, devtype)
         call acc_init(devtype)
      endif

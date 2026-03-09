@@ -151,7 +151,7 @@ contains
         end do
         this%n_exch_2d = n - this%n_exch_3d
 
-        call this%halo%init(this%exch_vars, this%adv_vars, this%grid, this%compute_comms)
+        call this%halo%init(this%exch_vars, this%grid, this%compute_comms)
 
     end subroutine init_batch_exch
 
@@ -187,15 +187,6 @@ contains
 
         if (present(exch_only)) exch_v_only = exch_only
 
-        if (exch_v_only) then
-            allocate(vars_to_send(size(this%exch_vars)))
-            vars_to_send = this%exch_vars
-        else
-            allocate(vars_to_send(size(this%adv_vars)+size(this%exch_vars)))
-            vars_to_send(1:size(this%exch_vars)) = this%exch_vars
-            vars_to_send(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
-        endif
-
         call this%halo%halo_3d_send_batch(this%exch_vars, this%vars_3d)
 
     end subroutine halo_3d_send
@@ -210,15 +201,6 @@ contains
 
         if (present(exch_only)) exch_v_only = exch_only
 
-        if (exch_v_only) then
-            allocate(vars_to_ret(size(this%exch_vars)))
-            vars_to_ret = this%exch_vars
-        else
-            allocate(vars_to_ret(size(this%adv_vars)+size(this%exch_vars)))
-            vars_to_ret(1:size(this%exch_vars)) = this%exch_vars
-            vars_to_ret(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
-        endif
-
         call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%vars_3d, wait_timer=this%wait_timer)
 
     end subroutine halo_3d_retrieve
@@ -231,10 +213,6 @@ contains
 
         if (this%n_exch_2d + this%n_adv_2d == 0) return
 
-        allocate(vars_to_send(size(this%adv_vars)+size(this%exch_vars)))
-        vars_to_send(1:size(this%exch_vars)) = this%exch_vars
-        vars_to_send(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
-
         call this%halo%halo_2d_send_batch(this%exch_vars, this%vars_2d)
     end subroutine halo_2d_send
 
@@ -245,10 +223,6 @@ contains
         type(index_type), allocatable :: vars_to_ret(:)
 
         if (this%n_exch_2d + this%n_adv_2d == 0) return
-
-        allocate(vars_to_ret(size(this%adv_vars)+size(this%exch_vars)))
-        vars_to_ret(1:size(this%exch_vars)) = this%exch_vars
-        vars_to_ret(size(this%exch_vars)+1:size(this%adv_vars)+size(this%exch_vars)) = this%adv_vars
 
         call this%halo%halo_2d_retrieve_batch(this%exch_vars, this%vars_2d)
     end subroutine halo_2d_retrieve

@@ -14,10 +14,10 @@ module nccl_interface
 
     interface
 
-        integer(c_int) function nccl_comm_init(comm, nranks, rank, f_comm) bind(C, name='nccl_comm_init')
+        integer(c_int) function nccl_comm_init(comm, nranks, rank, f_comm, device_id) bind(C, name='nccl_comm_init')
             import :: c_ptr, c_int
             type(c_ptr), intent(out) :: comm
-            integer(c_int), value :: nranks, rank, f_comm
+            integer(c_int), value :: nranks, rank, f_comm, device_id
         end function
 
         subroutine nccl_comm_destroy(comm) bind(C, name='nccl_comm_destroy')
