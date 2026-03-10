@@ -88,7 +88,24 @@ else()
     else()
         set(CXX_STDLIB "stdc++")
     endif()
-    
+
+    # Determine the correct Fortran free-form flag for SNOWPACK bindings
+    # Shroud-generated .f files are free-form despite the .f extension
+    if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+        set(SNOWPACK_FORTRAN_FREEFORM_FLAG "-ffree-form -ffree-line-length-none")
+    elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+        set(SNOWPACK_FORTRAN_FREEFORM_FLAG "-Mfreeform")
+    elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel" OR CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+        set(SNOWPACK_FORTRAN_FREEFORM_FLAG "-free")
+    elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
+        set(SNOWPACK_FORTRAN_FREEFORM_FLAG "-f free")
+    else()
+        message(WARNING "Unknown Fortran compiler '${CMAKE_Fortran_COMPILER_ID}' for SNOWPACK bindings, assuming GNU-style free-form flag")
+        set(SNOWPACK_FORTRAN_FREEFORM_FLAG "-ffree-form")
+    endif()
+
+    set(SNOWPACK_FORTRAN_FFLAGS "${SNOWPACK_FORTRAN_FREEFORM_FLAG} -fPIC")
+
     set(METEOIO_DIR "${CMAKE_BINARY_DIR}/external/meteoio" CACHE PATH "MeteoIO source directory" FORCE)
     set(METEOIO_BUILD "${CMAKE_BINARY_DIR}/external/METEOIO-build" CACHE PATH "MeteoIO build directory" FORCE)
     set(METEOIO_STAMPS "${CMAKE_BINARY_DIR}/external/METEOIO-stamps" CACHE PATH "MeteoIO build directory" FORCE)
@@ -107,8 +124,14 @@ else()
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
             -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        BUILD_COMMAND     ${CMAKE_COMMAND} --build . --parallel 
-        INSTALL_COMMAND   ${CMAKE_COMMAND} --install . --prefix ${METEOIO_DIR}
+            -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${METEOIO_DIR}/lib
+            -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=${METEOIO_DIR}/lib
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${METEOIO_DIR}/lib
+        BUILD_COMMAND     ${CMAKE_COMMAND} --build . --parallel
+        INSTALL_COMMAND   ${CMAKE_COMMAND} --install . --prefix ${METEOIO_DIR} --component headers
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${METEOIO_DIR}/lib
+            COMMAND sh -c "cp -P ${METEOIO_BUILD}/meteoio/${CMAKE_SHARED_LIBRARY_PREFIX}meteoio${CMAKE_SHARED_LIBRARY_SUFFIX}* ${METEOIO_DIR}/lib/ 2>/dev/null || true"
+            COMMAND sh -c "cp -P ${METEOIO_BUILD}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}meteoio${CMAKE_SHARED_LIBRARY_SUFFIX}* ${METEOIO_DIR}/lib/ 2>/dev/null || true"
         LOG_DOWNLOAD      ON
         LOG_CONFIGURE     ON
         LOG_BUILD         ON
@@ -122,6 +145,8 @@ else()
     set(SNOWPACK_DIR "${CMAKE_BINARY_DIR}/external/SNOWPACK" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
     set(SNOWPACK_BUILD "${CMAKE_BINARY_DIR}/external/SNOWPACK-build" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
     set(SNOWPACK_STAMPS "${CMAKE_BINARY_DIR}/external/SNOWPACK-stamps" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
+
+    set(SNOWPACK_FORTRAN_CXXFLAGS "-fPIC -I${SNOWPACK_DIR} -I${METEOIO_DIR}")
 
     # Build SNOWPACK (depends on MeteoIO)
     ExternalProject_Add(SNOWPACK
@@ -140,9 +165,21 @@ else()
             -DMETEOIO_LIBRARY=${METEOIO_LIBRARY}
             -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
             -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+            -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${SNOWPACK_DIR}/lib
+            -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=${SNOWPACK_DIR}/lib
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${SNOWPACK_DIR}/lib
         BUILD_COMMAND     ${CMAKE_COMMAND} --build . --parallel
-        INSTALL_COMMAND   ${CMAKE_COMMAND} --install . --prefix ${SNOWPACK_DIR}
-            COMMAND ${CMAKE_COMMAND} -E chdir ${SNOWPACK_DIR}/fortran make "LDFLAGS=-L../lib -lsnowpack -L../../meteoio/lib -lmeteoio -l${CXX_STDLIB} -Wl,-rpath,../lib -Wl,-rpath,../../meteoio/lib"
+        INSTALL_COMMAND   ${CMAKE_COMMAND} --install . --prefix ${SNOWPACK_DIR} --component headers
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${SNOWPACK_DIR}/lib
+            COMMAND sh -c "cp -P ${SNOWPACK_BUILD}/snowpack/${CMAKE_SHARED_LIBRARY_PREFIX}snowpack${CMAKE_SHARED_LIBRARY_SUFFIX}* ${SNOWPACK_DIR}/lib/ 2>/dev/null || true"
+            COMMAND sh -c "cp -P ${SNOWPACK_BUILD}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}snowpack${CMAKE_SHARED_LIBRARY_SUFFIX}* ${SNOWPACK_DIR}/lib/ 2>/dev/null || true"
+            COMMAND sh -c "python3 -m pip install llnl-shroud 2>/dev/null || pip install llnl-shroud"
+            COMMAND ${CMAKE_COMMAND} -E chdir ${SNOWPACK_DIR}/fortran make
+                "FC=${CMAKE_Fortran_COMPILER}"
+                "CXX=${CMAKE_CXX_COMPILER}"
+                "FFLAGS=${SNOWPACK_FORTRAN_FFLAGS}"
+                "CXXFLAGS=${SNOWPACK_FORTRAN_CXXFLAGS}"
+                "LDFLAGS=-L../lib -lsnowpack -L../../meteoio/lib -lmeteoio -l${CXX_STDLIB} -Wl,-rpath,../lib -Wl,-rpath,../../meteoio/lib"
             COMMAND ${CMAKE_COMMAND} -E chdir ${SNOWPACK_DIR}/fortran make install
         LOG_DOWNLOAD      ON
         LOG_CONFIGURE     ON
