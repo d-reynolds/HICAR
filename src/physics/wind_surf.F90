@@ -332,8 +332,7 @@ contains
         
         deallocate(Sx_array_temp)
         
-        !Sync images befoer exiting so that we don't try to read Sx while it is being written
-        !sync images ([DOM_IMG_INDX])
+        !$acc update device(domain%vars_2d(domain%var_indx(kVARS%TPI)%v)%data_2d)
 
     end subroutine calc_Sx
     
@@ -394,7 +393,7 @@ contains
         Sx_curr = 0
 
         !$acc data present(TPI, u, v, Ri, dzdx, dzdy) &
-        !$acc create(x_norm, y_norm, max_spd, thresh_ang, Sx_corr, TPI_corr, Sx_U_corr, Sx_V_corr)
+        !$acc create(x_norm, y_norm, max_spd, thresh_ang, Sx_curr, Sx_corr, TPI_corr, Sx_U_corr, Sx_V_corr)
 
         !Initialize Sx_curr. This will keep the border values from being updated
         !$acc kernels
@@ -406,6 +405,7 @@ contains
         Sx_V_corr = 0.0
         x_norm = 0.0
         y_norm = 0.0
+        Sx_curr = 0.0
         !$acc end kernels
 
         !Calculate horizontal normal vector components of terrain
@@ -422,10 +422,11 @@ contains
 
         !Pick appropriate Sx for wind direction
         call pick_Sx(Sx, Sx_curr, u, v,ims,ime,kms,kme,jms,jme)
-        
+        !$acc update device(Sx_curr)
+
 
         !Loop through i,j
-        !$acc parallel loop gang vector collapse(3) copyin(Sx_curr)
+        !$acc parallel loop gang vector collapse(3)
         do j = jms, jme
             !Loop through vertical column
             do k = kms, Sx_k_max

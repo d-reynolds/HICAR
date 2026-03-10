@@ -255,7 +255,23 @@ contains
             call Sice_0_var%initialize(kVARS%density,domain%grid2d)
         endif
 
-        !!        
+        !!
+        !! Ensure domain state is current on CPU before reading into FSM arrays
+        !$acc update host( &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d, &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
+        !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+        !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+        !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+        !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+        !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+        !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d)
+
         !! MJ added this block to read in while we use restart file:
         if (options%restart%restart .or. context_change) then
 
@@ -655,18 +671,22 @@ contains
             domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d(domain%its:domain%ite,i,domain%jts:domain%jte) = TRANSPOSE(Ds(i,2:Nx_HICAR-1,2:Ny_HICAR-1))
         enddo
 
-        call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v))
+        !$acc update device(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d, domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+        !$acc& domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+        !$acc& domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+        !$acc& domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d)
+
+        if (corners) call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v),corners=corners)
         call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v))
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v))
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Sice)%v))
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Sliq)%v))
-        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Ds)%v))
-
-        !call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.True.)
-        !call domain%halo%batch_exch(domain%exch_vars, domain%adv_vars, two_d=.False.,exch_var_only=.True.)      
-
         if (corners) call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%Ds)%v),corners=corners)
-        if (corners) call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v),corners=corners)
+
+        !$acc update host(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d, domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+        !$acc& domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+        !$acc& domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+        !$acc& domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d)
 
         fsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(its:ite,jts:jte))
         Nsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(its:ite,jts:jte))                        
@@ -693,8 +713,12 @@ contains
         Qs_u_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(Qs_u(2:Nx_HICAR-1,2:Ny_HICAR-1))
         Qs_v_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(Qs_v(2:Nx_HICAR-1,2:Ny_HICAR-1))
         
+        !$acc update device(Qs_u_var%data_2d, Qs_v_var%data_2d)
+
         call domain%halo%exch_var(Qs_u_var)
         call domain%halo%exch_var(Qs_v_var)
+
+        !$acc update host(Qs_u_var%data_2d, Qs_v_var%data_2d)
 
         Qs_u = TRANSPOSE(Qs_u_var%data_2d(its:ite,jts:jte))
         Qs_v = TRANSPOSE(Qs_v_var%data_2d(its:ite,jts:jte))
@@ -711,10 +735,12 @@ contains
         SD_0_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(SD_0(2:Nx_HICAR-1,2:Ny_HICAR-1))
         Sice_0_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(Sice_0(2:Nx_HICAR-1,2:Ny_HICAR-1))
         
-        call domain%halo%exch_var(SD_0_var)
-        call domain%halo%exch_var(Sice_0_var)
+        !$acc update device(SD_0_var%data_2d, Sice_0_var%data_2d)
+
         call domain%halo%exch_var(SD_0_var, corners=.True.)
         call domain%halo%exch_var(Sice_0_var, corners=.True.)
+
+        !$acc update host(SD_0_var%data_2d, Sice_0_var%data_2d)
 
         SD_0 = TRANSPOSE(SD_0_var%data_2d(its:ite,jts:jte))
         Sice_0 = TRANSPOSE(Sice_0_var%data_2d(its:ite,jts:jte))

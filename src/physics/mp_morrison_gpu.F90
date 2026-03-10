@@ -3653,7 +3653,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
    do j=jts,jte      ! j loop (north-south)
    do k=kts,kte
    do i=its,ite      ! i loop (east-west)
-        if (LTRUE(I,K,J).EQ.0) CYCLE !NO HYDROMETEORS CALCULATED FOR THIS CELL
+        if (LTRUE_COL(I,K,J).EQ.0) CYCLE !NO HYDROMETEORS CALCULATED FOR THIS CELL
 
 ! ADD ON SEDIMENTATION TENDENCIES FOR MIXING RATIO TO REST OF TENDENCIES
 

@@ -69,7 +69,8 @@ contains
                          kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%snowfall, kVARS%albedo,                &
                          kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%snow_nlayers,   &
                          kVARS%shd, kVARS%meltflux_out_tstep, kVARS%Sliq_out, &
-                         kVARS%windspd_10m, kVARS%dSWE_salt, kVARS%dSWE_susp, kVARS%dSWE_blow_subl, kVARS%dSWE_subl, kVARS%dSWE_slide])
+                         kVARS%windspd_10m, kVARS%dSWE_salt, kVARS%dSWE_susp, kVARS%dSWE_blow_subl, kVARS%dSWE_subl, kVARS%dSWE_slide, &
+                         kVARS%shortwave_direct, kVARS%shortwave_diffuse, kVARS%ground_surf_temperature])
              
              call options%restart_vars( &
                          [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &

@@ -1019,6 +1019,8 @@ contains
                 END IF
 
                 if (options%physics%radiation==kRA_RRTMG) then
+                    call domain%update_host()
+                    !$acc update host(qi, qc, qs, cldfra)
                     call RRTMG_SWRAD(rthratensw=domain%tend%th_swrad,         &
     !                swupt, swuptc, swuptcln, swdnt, swdntc, swdntcln, &
     !                swupb, swupbc, swupbcln, swdnb, swdnbc, swdnbcln, &
@@ -1181,7 +1183,8 @@ contains
                                 read_ghg=options%rad%read_ghg                  &
                                 )
                                                     
-                    !$acc update device(domain%vars_3d, domain%vars_2d, domain%tend)
+                    call domain%update_device()
+                    !$acc update device(domain%tend%th_lwrad, domain%tend%th_swrad)
 
                 else if (options%physics%radiation==kRA_RRTMGP) then
 #ifdef USE_RTE_RRTMGP

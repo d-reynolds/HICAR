@@ -374,7 +374,12 @@ contains
         ncols = windowsize * 2 + 1
 
         !$omp do schedule(static)
-        !$acc data present_or_copy(wind) copyin(inputwind) create(rowsums,rowmeans)
+        !$acc data present_or_copy(wind) create(rowsums,rowmeans, inputwind)
+        
+        !$acc kernels
+        inputwind = wind !make a copy so we always use the unsmoothed data when computing the smoothed data
+        !$acc end kernels
+
         !$acc parallel loop gang private(rowsums, rowmeans, cursum, starty, endy, startx, endx)
         do j=1,ny
 

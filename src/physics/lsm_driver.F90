@@ -710,7 +710,7 @@ contains
 
         endif ! end if physics%landsurface /=0
 
-        call sm_init(domain, options)
+        call sm_init(domain, options, context_chng=context_change)
         update_interval=options%lsm%update_interval
         if (.not.(context_change)) then
             if (update_interval<=10) then
@@ -738,7 +738,6 @@ contains
             lsm_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
             last_model_time(domain%nest_indx) = domain%sim_time%seconds() 
             next_update_time(domain%nest_indx) = next_update_time(domain%nest_indx) + update_interval
-            if (options%physics%landsurface > 0 .or. options%physics%watersurface > 0) then
 
             landuse_name = options%lsm%LU_Categories
             julian_day = domain%sim_time%day_of_year()
@@ -763,6 +762,8 @@ contains
                 snow_temperature => domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
                 vegetation_fraction_out => domain%vars_2d(domain%var_indx(kVARS%vegetation_fraction_out)%v)%data_2d &
             )
+            
+            if (options%physics%landsurface > 0 .or. options%physics%watersurface > 0) then
 
             !$acc kernels
             windspd = sqrt(u_10m**2 + v_10m**2)
@@ -1137,28 +1138,29 @@ contains
 
                 ! where(domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d > options%lsm%max_swe) domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = options%lsm%max_swe
             endif !end if noahmp
+            !!
+            endif ! end if landsurface > 0 .or. watersurface > 0
 
+            call snow_model(domain, options, lsm_dt)
 
-            if (options%physics%landsurface == kLSM_NOAHMP .or. options%physics%watersurface == kWATER_LAKE) then
+            if (options%physics%landsurface == kLSM_NOAHMP .or. options%physics%watersurface == kWATER_LAKE .or. options%physics%snowmodel > 0) then
                 !$acc parallel loop gang vector collapse(2) present(lsm_last_precip, precipitation) 
                 do j = jts, jte
                     do i = its, ite
                         lsm_last_precip(i,j) = precipitation(i,j)
-                        lsm_last_snow(i,j) = snowfall(i,j)
                     enddo
                 enddo
             endif
 
-            if (options%physics%landsurface == kLSM_NOAHMP) then
+            if (options%physics%landsurface == kLSM_NOAHMP .or. options%physics%snowmodel > 0) then
                 !$acc parallel loop gang vector collapse(2) present(lsm_last_snow, snowfall) 
                 do j = jts, jte
                     do i = its, ite
-                        lsm_last_precip(i,j) = precipitation(i,j)
                         lsm_last_snow(i,j) = snowfall(i,j)
                     enddo
                 enddo
             endif
-            if (options%physics%landsurface > kLSM_BASIC) then
+            if (options%physics%landsurface > kLSM_BASIC .or. options%physics%snowmodel > 0) then
                 !$acc parallel loop gang vector collapse(2) present(longwave_up, land_emissivity, skin_temperature, soil_totalmoisture, soil_water_content) copyin(DZS)
                 do j = jts, jte
                     do i = its, ite
@@ -1175,9 +1177,6 @@ contains
             endif
             !!
             end associate
-            endif ! end if landsurface > 0 .or. watersurface > 0
-
-            call snow_model(domain, options, lsm_dt)
 
         endif ! end if time to call lsm
 
