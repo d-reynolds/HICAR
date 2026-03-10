@@ -388,7 +388,7 @@ CONTAINS
     !$acc     HFX,QFX,LH,TSK,FLHC,FLQC,QGH,QSFC,RMOL, &
     !$acc     U10,V10,TH2,T2,Q2,                            &
     !$acc     GZ1OZ0,WSPD,BR,                     &
-    !$acc     ustm,ck,cka,cd,cda, xland)          &
+    !$acc     xland)          &
     !$acc create(water_depth,THX,QX, &
     !$acc        DENOMQ,DENOMQ2,DENOMT2, &
     !$acc        RHOX)
@@ -978,6 +978,7 @@ CONTAINS
       !$acc parallel loop gang vector collapse(2)
       DO J=jts,jte                                              
       DO I=its,ite
+        THGB=TSK(I,J)*(P1000mb/PSFCPA(I,J))**ROVCP
         IF((XLAND(I,J)-1.5).GE.0)THEN                                            
 !         ZNT(I,J)=CZO*UST(I,J)*UST(I,J)/G+OZO                                   
           ! PSH - formulation for depth-dependent roughness from
@@ -1279,6 +1280,7 @@ CONTAINS
       end function
 
       function psih_stable_full(zolf)
+      !$acc routine seq
       real   :: psih_stable_full
       real, intent(in)    :: zolf
 

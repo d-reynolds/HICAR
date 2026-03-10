@@ -1,9 +1,13 @@
 #!/bin/bash
 
 # Reproducibility tests for HICAR:
-#   decomposition: MPI Reproducibility — run with 5 vs 10 ranks, compare output (must be identical)
+#   decomposition: MPI Reproducibility — run with different rank counts, compare output (must be identical)
 #   restart:       Restart Reproducibility — continuous run vs restart run, compare final timestep
 #   all:           Run both tests
+#
+# GPU mode: If HICAR_debug_gpu is found, uses all available GPUs (N) and half (N/2) for decomposition.
+#           Requires at least 2 GPUs for the decomposition test.
+# CPU mode: Falls back to HICAR_debug with 5 vs 10 ranks.
 #
 # Usage: test_reproducibility.sh <hicar_repo> [decomposition|restart|all]
 
@@ -27,13 +31,33 @@ case "$test_mode" in
         ;;
 esac
 
-# Get the location of a HICAR executable (debug build required for reproducibility)
-if [ -f "$hicar_repo/bin/HICAR_debug" ]; then
+# Get the location of a HICAR executable
+# Prefer HICAR_debug_gpu (OpenACC release build) if available, else fall back to HICAR_debug
+use_gpu=false
+if [ -f "$hicar_repo/bin/HICAR_debug_gpu" ]; then
+    hicar_exe="$hicar_repo/bin/HICAR_debug_gpu"
+    use_gpu=true
+    echo -e "${GREEN}Found HICAR_debug_gpu — running tests in GPU mode${NC}"
+elif [ -f "$hicar_repo/bin/HICAR_debug" ]; then
     hicar_exe="$hicar_repo/bin/HICAR_debug"
+    echo -e "${GREEN}Found HICAR_debug — running tests in CPU mode${NC}"
 else
-    echo -e "${RED}HICAR_debug executable not found in bin directory.${NC}"
-    echo -e "${RED}Build with MODE=debug and run 'make install' from the build directory.${NC}"
+    echo -e "${RED}No HICAR executable found in bin directory.${NC}"
+    echo -e "${RED}Build with MODE=debug (CPU) or MODE=release with OpenACC (GPU) and run 'make install'.${NC}"
     exit 1
+fi
+
+# Detect GPU count if running in GPU mode
+num_gpus=0
+if [ "$use_gpu" = true ]; then
+    if command -v nvidia-smi &> /dev/null; then
+        num_gpus=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l | tr -d ' ')
+    fi
+    if [ "$num_gpus" -lt 1 ]; then
+        echo -e "${RED}GPU mode selected but no GPUs detected via nvidia-smi.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Detected ${num_gpus} GPU(s)${NC}"
 fi
 
 # Path to the compare script and figures output directory
@@ -143,8 +167,12 @@ generate_standard_nml() {
     sed -i'.bak' 's/Sx = .True./Sx = .False./g' "$out_nml"
     sed -i'.bak' "s/output_vars = .*$/output_vars = 'all'/g" "$out_nml"
 
+    if [ $use_gpu = true ]; then
+        # GPU mode: use all available GPUs and half for decomposition test, so set end time to 10 min for both runs
+        sed -i'.bak' "s/rad = 'rrtmg'/rad = 'rrtmgp'/g" "$out_nml"
+    fi
     # Shorten run: 10 min instead of 20, output every 5 min for restart checkpoints
-    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 00:10:00'/g" "$out_nml"
+    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 01:10:00'/g" "$out_nml"
     sed -i'.bak' 's/outputinterval = 600/outputinterval = 300/g' "$out_nml"
 
     # Override output and restart folders
@@ -174,10 +202,15 @@ generate_restart_nml() {
     sed -i'.bak' 's/Sx = .True./Sx = .False./g' "$out_nml"
     sed -i'.bak' "s/output_vars = .*$/output_vars = 'all'/g" "$out_nml"
 
+    if [ $use_gpu = true ]; then
+        # GPU mode: use all available GPUs and half for decomposition test, so set end time to 10 min for both runs
+        sed -i'.bak' "s/rad = 'rrtmg'/rad = 'rrtmgp'/g" "$out_nml"
+    fi
+
     # Shorten run: end at 10 min, restart from 5 min checkpoint, output every 5 min
-    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 00:10:00'/g" "$out_nml"
-    sed -i'.bak' "s/restart_date = '2017-02-14 00:10:00'/restart_date = '2017-02-14 00:05:00'/g" "$out_nml"
-    sed -i'.bak' 's/outputinterval = 600/outputinterval = 300/g' "$out_nml"
+    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 01:10:00'/g" "$out_nml"
+    sed -i'.bak' "s/restart_date = '2017-02-14 00:10:00'/restart_date = '2017-02-14 01:00:00'/g" "$out_nml"
+    #sed -i'.bak' 's/outputinterval = 600/outputinterval = 300/g' "$out_nml"
 
     # Override output and restart folders
     sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '${output_dir}'|g" "$out_nml"
@@ -266,8 +299,8 @@ run_hicar() {
 # ===============================================================
 # Test Results Tracking
 # ===============================================================
-test_decomp_result="SKIP"
-test_restart_result="SKIP"
+test_decomp_result=""
+test_restart_result=""
 
 echo
 echo "======================================================="
@@ -278,48 +311,70 @@ echo "======================================================="
 # Test: MPI Domain Decomposition (5 ranks vs 10 ranks)
 # ===============================================================
 if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
+
+    # Determine rank counts for decomposition test
+    if [ "$use_gpu" = true ]; then
+        if [ "$num_gpus" -lt 2 ]; then
+            echo
+            echo "-------------------------------------------------------"
+            echo -e "  ${BLUE}Domain Decomposition Test${NC}"
+            echo "-------------------------------------------------------"
+            echo -e "${RED}Only ${num_gpus} GPU detected. The decomposition test requires at least 2 GPUs.${NC}"
+            echo -e "${RED}Skipping decomposition test.${NC}"
+            test_decomp_result="SKIP"
+        else
+            decomp_np_full=$((num_gpus + 1))
+            decomp_np_half=$(( (num_gpus / 2) + 1 ))
+        fi
+    else
+        decomp_np_full=10
+        decomp_np_half=5
+    fi
+
+    if [ "$test_decomp_result" != "SKIP" ]; then
+
     echo
     echo "-------------------------------------------------------"
-    echo -e "  ${BLUE}Domain Decomposition Test (5 vs 10 ranks)${NC}"
+    echo -e "  ${BLUE}Domain Decomposition Test (${decomp_np_half} vs ${decomp_np_full} ranks)${NC}"
     echo "-------------------------------------------------------"
 
     # Clear previous figures for this test
     rm -rf "${figures_dir}/decomposition"
 
     # Create output/restart directories
-    for suffix in Repro_MPI_5 Repro_MPI_10; do
+    for suffix in Repro_MPI_${decomp_np_half} Repro_MPI_${decomp_np_full}; do
         rm -rf "output/${suffix}" "restart/${suffix}"
         mkdir -p "output/${suffix}" "restart/${suffix}"
     done
 
-    # Generate and run with 5 ranks
-    generate_standard_nml "input/Repro_MPI_5.nml" "../output/Repro_MPI_5/" "../restart/Repro_MPI_5/"
+    # Generate and run with half ranks
+    generate_standard_nml "input/Repro_MPI_${decomp_np_half}.nml" "../output/Repro_MPI_${decomp_np_half}/" "../restart/Repro_MPI_${decomp_np_half}/"
     cd input
-    run_hicar "Repro_MPI_5.nml" 5 "MPI_5ranks"
-    mpi5_status=$?
+    run_hicar "Repro_MPI_${decomp_np_half}.nml" "$decomp_np_half" "MPI_${decomp_np_half}ranks"
+    mpi_half_status=$?
     cd ..
 
-    if [ $mpi5_status -ne 0 ]; then
-        echo -e "${RED}Domain Decomposition: FAILED (5-rank run failed)${NC}"
+    if [ $mpi_half_status -ne 0 ]; then
+        echo -e "${RED}Domain Decomposition: FAILED (${decomp_np_half}-rank run failed)${NC}"
         test_decomp_result="FAIL"
     else
-        # Generate and run with 10 ranks
-        generate_standard_nml "input/Repro_MPI_10.nml" "../output/Repro_MPI_10/" "../restart/Repro_MPI_10/"
+        # Generate and run with full ranks
+        generate_standard_nml "input/Repro_MPI_${decomp_np_full}.nml" "../output/Repro_MPI_${decomp_np_full}/" "../restart/Repro_MPI_${decomp_np_full}/"
         cd input
-        run_hicar "Repro_MPI_10.nml" 10 "MPI_10ranks"
-        mpi10_status=$?
+        run_hicar "Repro_MPI_${decomp_np_full}.nml" "$decomp_np_full" "MPI_${decomp_np_full}ranks"
+        mpi_full_status=$?
         cd ..
 
-        if [ $mpi10_status -ne 0 ]; then
-            echo -e "${RED}Domain Decomposition: FAILED (10-rank run failed)${NC}"
+        if [ $mpi_full_status -ne 0 ]; then
+            echo -e "${RED}Domain Decomposition: FAILED (${decomp_np_full}-rank run failed)${NC}"
             test_decomp_result="FAIL"
         else
             # Compare outputs
             echo
             echo "Comparing MPI outputs..."
             $python_exe "$compare_script" \
-                "output/Repro_MPI_5/${OUTPUT_FILENAME}" \
-                "output/Repro_MPI_10/${OUTPUT_FILENAME}" \
+                "output/Repro_MPI_${decomp_np_half}/${OUTPUT_FILENAME}" \
+                "output/Repro_MPI_${decomp_np_full}/${OUTPUT_FILENAME}" \
                 --tolerance 0.0 \
                 --figures-dir "${figures_dir}/decomposition"
             if [ $? -eq 0 ]; then
@@ -329,6 +384,8 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
             fi
         fi
     fi
+
+    fi # end skip check
 fi
 
 # ===============================================================
@@ -343,15 +400,20 @@ if [ "$test_mode" == "restart" ] || [ "$test_mode" == "all" ]; then
     # Clear previous figures for this test
     rm -rf "${figures_dir}/restart"
 
-    # Determine np for restart test (same logic as test_case_runner.sh)
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        total_np=$(sysctl -n hw.logicalcpu)
+    # Determine np for restart test
+    if [ "$use_gpu" = true ]; then
+        restart_np=$num_gpus
     else
-        total_np=$(nproc --all)
+        # CPU mode: use half of available cores (same logic as test_case_runner.sh)
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            total_np=$(sysctl -n hw.logicalcpu)
+        else
+            total_np=$(nproc --all)
+        fi
+        restart_np=$((total_np / 2))
+        restart_np=$((restart_np > 2 ? restart_np : 2))
+        restart_np=$((restart_np < 21 ? restart_np : 21))
     fi
-    restart_np=$((total_np / 2))
-    restart_np=$((restart_np > 2 ? restart_np : 2))
-    restart_np=$((restart_np < 21 ? restart_np : 21))
 
     echo -e "Using ${restart_np} MPI ranks for restart test"
 
@@ -417,9 +479,11 @@ any_fail=0
 
 if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
     if [ "$test_decomp_result" == "PASS" ]; then
-        echo -e "  Domain Decomposition (5 vs 10):   ${GREEN}PASS${NC}"
+        echo -e "  Domain Decomposition (${decomp_np_half} vs ${decomp_np_full}):   ${GREEN}PASS${NC}"
+    elif [ "$test_decomp_result" == "SKIP" ]; then
+        echo -e "  Domain Decomposition:              ${BLUE}SKIP (insufficient GPUs)${NC}"
     else
-        echo -e "  Domain Decomposition (5 vs 10):   ${RED}${test_decomp_result}${NC}"
+        echo -e "  Domain Decomposition (${decomp_np_half} vs ${decomp_np_full}):   ${RED}${test_decomp_result}${NC}"
         any_fail=1
     fi
 fi

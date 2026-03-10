@@ -852,7 +852,7 @@ contains
 
             allocate(gsw(ims:ime,jms:jme))
 
-            !$acc data create(t_1d, p_1d, Dz_1d, qv_1d, qc_1d, qi_1d, qs_1d, cf_1d, qi, qc, qs, re_c, re_i, re_s, cldfra, gsw)
+            !$acc data create(qi, qc, qs, re_c, re_i, re_s, cldfra, gsw)
 
             !$acc kernels
             qi = 0
@@ -984,8 +984,9 @@ contains
                                 cloud_fraction(i,j) = 0
                             enddo
                         enddo
-                        !$acc parallel loop gang(static: 1) vector collapse(2) present(qv_dom, pressure, temperature, &
-                        !$acc                    dz_interface, land_mask, cloud_fraction, qi, qc, qs, cldfra, p_1d, t_1d, qv_1d, qc_1d, qi_1d, qs_1d, Dz_1d, cf_1d) async(1)
+                        !$acc parallel loop gang collapse(2) present(qv_dom, pressure, temperature, &
+                        !$acc                    dz_interface, land_mask, cloud_fraction, qi, qc, qs, cldfra) &
+                        !$acc                    private(p_1d, t_1d, Dz_1d, qv_1d, qc_1d, qi_1d, qs_1d, cf_1d)
                         DO j = jts,jte
                             DO i = its,ite
                                 !$acc loop
@@ -1448,7 +1449,7 @@ contains
                                             sfc_alb_dir, sfc_alb_dif, &
                                             fluxes_sw))
                     
-                    !$acc parallel loop gang vector collapse(2) present(shortwave, shortwave_direct, shortwave_diffuse, flx_up, flx_dn, flx_dnsw_dir) copyin(kVARS) 
+                    !$acc parallel loop gang vector collapse(2) present(shortwave, shortwave_direct, shortwave_diffuse, flx_up, flx_dn, flx_dnsw_dir)
                     do j = jb_s,jb_e
                         do i = its,ite
                             shortwave(i,j) = flx_dn((i - its + 1) + (j - jb_s)*(ite-its + 1), 1)

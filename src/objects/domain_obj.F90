@@ -485,7 +485,7 @@ contains
                   v_mass                => this%vars_3d(this%var_indx(kVARS%v_mass)%v)%data_3d,                 &
                   potential_temperature => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d )
         ! !$acc data present(exner, pressure, future_pressure, pressure_i, dz_i, dz_mass, psfc, density, temperature, temperature_i, qv, u, v, u_mass, v_mass, potential_temperature) create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3)
-
+        !$acc data create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3)
         !Calculation of density
 
         if (forcing_update_only) then
@@ -762,7 +762,7 @@ contains
             endif
         endif
 
-        ! !$acc end data
+        !$acc end data
         end associate
 
     end subroutine diagnostic_update
