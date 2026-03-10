@@ -3492,7 +3492,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
       enddo
 
       MAXN = 0
-      !$acc parallel loop gang vector collapse(3) copy(MAXN)
+      !$acc parallel loop gang vector collapse(3) reduction(max:MAXN)
       do j = jts,jte
       do k = kts,kte
       do i = its,ite

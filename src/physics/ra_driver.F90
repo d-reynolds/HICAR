@@ -1359,7 +1359,7 @@ contains
                                             emis_sfc,   &
                                             fluxes_lw))
 
-                    !$acc parallel loop gang vector collapse(2) present(out_longwave_rad, longwave, flx_up, flx_dn) copyin(kVARS) 
+                    !$acc parallel loop gang vector collapse(2) present(out_longwave_rad, longwave, flx_up, flx_dn)
                     do j = jb_s,jb_e 
                         do i = its,ite
                             out_longwave_rad(i,j) = flx_up((i - its + 1) + (j - jb_s)*(ite-its + 1), 1)
@@ -1535,7 +1535,7 @@ contains
                       shortwave_direct_above => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct_above)%v)%data_2d, &
                       hlm => domain%vars_3d(domain%var_indx(kVARS%hlm)%v)%data_3d)
             
-            !$acc parallel loop gang vector collapse(2) present(shortwave_cached, shortwave_diffuse, shortwave_direct, shortwave, shortwave_direct_above, solar_elevation_store, solar_azimuth_store, cos_project_angle) copyin(kVARS) wait(1)
+            !$acc parallel loop gang vector collapse(2) present(shortwave_cached, shortwave_diffuse, shortwave_direct, shortwave, shortwave_direct_above, solar_elevation_store, solar_azimuth_store, cos_project_angle) wait(1)
             do j = jts,jte
                 do i = its,ite
                     shortwave_direct(i,j) = max( shortwave_cached(i,j) - shortwave_diffuse(i,j),0.0)

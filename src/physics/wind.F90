@@ -1203,7 +1203,7 @@ contains
                   blk_ri => domain%vars_3d(domain%var_indx(kVARS%blk_ri)%v)%data_3d, &
                   z => domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d, &
                   potential_temperature => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d)
-        !$acc data present(u, v, froude, blk_ri, z, potential_temperature) create(u_m,v_m,u_shear,v_shear,winddir,wind_speed,stability,Ri_k_max)
+        !$acc data present(u, v, froude, blk_ri, z, potential_temperature) create(u_m,v_m,u_shear,v_shear,winddir,wind_speed,stability,Ri_k_max,dir_indices,temp_froude)
 
         ! Compute per-column Ri_k_max: find the vertical level ~RI_Z_MAX meters above ground
         !$acc parallel loop gang vector collapse(2)
@@ -1266,7 +1266,7 @@ contains
             associate(froude_terrain => domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d)
             ubound_terrain = ubound(froude_terrain,4)
             !Compute wind direction for each cell on mass grid
-            !$acc parallel loop gang vector collapse(3) copyout(dir_indices)
+            !$acc parallel loop gang vector collapse(3)
             do j = jms, jme
                 do k=kms, kme
                     do i = ims, ime
@@ -1277,7 +1277,8 @@ contains
                     enddo
                 end do
             end do
-            
+            !$acc update self(dir_indices)
+
             !Build grid of Sx values based on wind direction at that cell
             do j = jms, jme
                 do k = kms, kme
@@ -1287,7 +1288,8 @@ contains
                 end do
             end do
 
-            !$acc parallel loop gang vector collapse(3) copyin(temp_froude)
+            !$acc update device(temp_froude)
+            !$acc parallel loop gang vector collapse(3)
             do j = jms, jme
                 do k=kms, kme-1
                     do i = ims, ime

@@ -1122,7 +1122,7 @@ contains
                 end do
 
                 if ( .not.(options%physics%snowmodel>0)) then
-                    !$acc parallel loop gang vector collapse(2) copyin(nmp_snow, nmp_snowh, nmp_snow_nlayers, nmp_snow_t, kVARS) present(snow_height, snow_water_equivalent, snow_nlayers, snow_temperature)
+                    !$acc parallel loop gang vector collapse(2) present(nmp_snow, nmp_snowh, nmp_snow_nlayers, nmp_snow_t, snow_height, snow_water_equivalent, snow_nlayers, snow_temperature)
                     do j = jts, jte
                         do i = its, ite
                             snow_height(i,j) = nmp_snowh(i,j)
@@ -1161,7 +1161,7 @@ contains
                 enddo
             endif
             if (options%physics%landsurface > kLSM_BASIC .or. options%physics%snowmodel > 0) then
-                !$acc parallel loop gang vector collapse(2) present(longwave_up, land_emissivity, skin_temperature, soil_totalmoisture, soil_water_content) copyin(DZS)
+                !$acc parallel loop gang vector collapse(2) present(longwave_up, land_emissivity, skin_temperature, soil_totalmoisture, soil_water_content, DZS)
                 do j = jts, jte
                     do i = its, ite
                         longwave_up(i,j) = STBOLT * land_emissivity(i,j) * skin_temperature(i,j)**4
