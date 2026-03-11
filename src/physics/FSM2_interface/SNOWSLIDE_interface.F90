@@ -461,6 +461,7 @@ end subroutine CHECK_SORTED_DEM
 subroutine SORT_DEM()
 
 ! This subroutine sorts the grid points by decreasing elevation in a one-dimension vector.
+! Uses quicksort for O(N log N) performance instead of insertion sort.
 
 use GRID, only: &
   Nx,Ny                 ! Grid dimensions
@@ -473,82 +474,124 @@ use LANDUSE, only: &
 
 implicit none
 
-! real, intent(in) :: &
-!   snowdepth(Nx,Ny)      ! Snow depth before slides (m)
-
 integer :: &
-  iter,                &! Number of iterations
-  index_first,         &! First boundary index of the bisection range
-  index_last,          &! Last boundary index of the bisection range
-  index_mid,           &! Middle index of the bisection range
   i,j,                 &! Grid point counters
-  n                     ! Vector point counter
+  k,                   &! Linear index counter
+  ntotal                ! Total number of grid points
 
-real :: &
-  dem_with_snow_loc,   &! Local elevation accounting for snow depth at point i,j (m)
-  snowdepth_loc         ! Local snow depth at point i,j (m)
+real, allocatable :: &
+  dem_vals(:)           ! 1D array of DEM values for sorting
 
-real :: &
-  dem_sorted(Nx*Ny)     ! Elevation with snow depth of grid points sorted by decreasing elevation (m)
+integer, allocatable :: &
+  idx_i(:),            &! Corresponding i indices
+  idx_j(:)              ! Corresponding j indices
 
-dem_sorted(:) = 0.0
-iter = 0
+ntotal = Nx * Ny
 
-! Fill sorted vectors
+allocate(dem_vals(ntotal))
+allocate(idx_i(ntotal))
+allocate(idx_j(ntotal))
+
+! Flatten 2D DEM into 1D arrays
+k = 0
 do j = 1, Ny
   do i = 1, Nx
-
-    iter = iter + 1
-    ! snowdepth_loc = snowdepth(i,j)
-    dem_with_snow_loc = dem(i,j) !+ snowdepth_loc
-    if (iter == 1) then
-      dem_sorted(1) = dem_with_snow_loc
-      index_sorted_dem(1,1) = i
-      index_sorted_dem(1,2) = j
-    else if (iter == 2) then
-      if (dem_sorted(1) < dem_with_snow_loc) then
-        dem_sorted(2) = dem_sorted(1)
-        dem_sorted(1) = dem_with_snow_loc
-        index_sorted_dem(2,:) = index_sorted_dem(1,:)
-        index_sorted_dem(1,1) = i
-        index_sorted_dem(1,2) = j
-      else
-        dem_sorted(2) = dem_with_snow_loc
-        index_sorted_dem(2,1) = i
-        index_sorted_dem(2,2) = j
-      end if
-    else
-      ! Bisection method
-      index_first = 1
-      index_last = iter - 1
-      do while (index_first < index_last)
-        if (MODULO(index_last - index_first + 1,2) == 0) then ! even
-          index_mid = index_first + ((index_last - index_first + 1) / 2) - 1
-        else ! odd
-          index_mid = index_first + ((index_last - index_first + 2) / 2) - 1
-        end if
-        if (dem_sorted(index_mid) < dem_with_snow_loc) then
-          index_last = index_mid
-        else
-          index_first = index_mid + 1
-        end if
-      end do
-      if (index_first == iter - 1 .and. dem_sorted(iter-1) > dem_with_snow_loc)  then
-        dem_sorted(iter) = dem_with_snow_loc
-        index_sorted_dem(iter,1) = i
-        index_sorted_dem(iter,2) = j
-      else
-        do n = iter, index_first + 1, -1
-          dem_sorted(n) = dem_sorted(n-1)
-          index_sorted_dem(n,:) = index_sorted_dem(n-1,:)
-        end do
-        dem_sorted(index_first) = dem_with_snow_loc
-        index_sorted_dem(index_first,1) = i
-        index_sorted_dem(index_first,2) = j
-      end if
-    end if
-
+    k = k + 1
+    dem_vals(k) = dem(i,j)
+    idx_i(k) = i
+    idx_j(k) = j
   end do
 end do
+
+! Sort by descending DEM elevation
+call quicksort_dem(dem_vals, idx_i, idx_j, 1, ntotal)
+
+! Copy results to index_sorted_dem
+do k = 1, ntotal
+  index_sorted_dem(k,1) = idx_i(k)
+  index_sorted_dem(k,2) = idx_j(k)
+end do
+
+deallocate(dem_vals)
+deallocate(idx_i)
+deallocate(idx_j)
+
+contains
+
+subroutine quicksort_dem(vals, ii, jj, lo_in, hi_in)
+
+! Iterative quicksort in descending order, carrying index arrays along.
+! Uses an explicit stack to avoid stack overflow on large arrays.
+
+real, intent(inout)    :: vals(:)
+integer, intent(inout) :: ii(:), jj(:)
+integer, intent(in)    :: lo_in, hi_in
+
+integer :: iq, jq, lo, hi, ti, sp
+real    :: pivot, tv
+
+! Stack size of 64 supports arrays up to 2^64 elements
+integer :: stack_lo(64), stack_hi(64)
+
+if (lo_in >= hi_in) return
+
+sp = 1
+stack_lo(1) = lo_in
+stack_hi(1) = hi_in
+
+do while (sp > 0)
+  lo = stack_lo(sp)
+  hi = stack_hi(sp)
+  sp = sp - 1
+
+  ! Hoare partition (descending order)
+  pivot = vals((lo + hi) / 2)
+  iq = lo
+  jq = hi
+
+  do while (iq <= jq)
+    do while (vals(iq) > pivot)
+      iq = iq + 1
+    end do
+    do while (vals(jq) < pivot)
+      jq = jq - 1
+    end do
+    if (iq <= jq) then
+      tv = vals(iq); vals(iq) = vals(jq); vals(jq) = tv
+      ti = ii(iq); ii(iq) = ii(jq); ii(jq) = ti
+      ti = jj(iq); jj(iq) = jj(jq); jj(jq) = ti
+      iq = iq + 1
+      jq = jq - 1
+    end if
+  end do
+
+  ! Push larger partition first (limits stack depth to O(log N))
+  if (jq - lo > hi - iq) then
+    if (lo < jq) then
+      sp = sp + 1
+      stack_lo(sp) = lo
+      stack_hi(sp) = jq
+    end if
+    if (iq < hi) then
+      sp = sp + 1
+      stack_lo(sp) = iq
+      stack_hi(sp) = hi
+    end if
+  else
+    if (iq < hi) then
+      sp = sp + 1
+      stack_lo(sp) = iq
+      stack_hi(sp) = hi
+    end if
+    if (lo < jq) then
+      sp = sp + 1
+      stack_lo(sp) = lo
+      stack_hi(sp) = jq
+    end if
+  end if
+
+end do
+
+end subroutine quicksort_dem
 
 end subroutine SORT_DEM
