@@ -99,6 +99,11 @@ module halo_interface
         real, contiguous, pointer :: east_in_buffer_2d(:,:) => null()
         real, contiguous, pointer :: west_in_buffer_2d(:,:) => null()
 
+        real, contiguous, pointer :: ne_corner_send(:,:,:) => null()
+        real, contiguous, pointer :: nw_corner_send(:,:,:) => null()
+        real, contiguous, pointer :: se_corner_send(:,:,:) => null()
+        real, contiguous, pointer :: sw_corner_send(:,:,:) => null()
+
         integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor, halo_rank
         integer :: northwest_neighbor, southwest_neighbor, northeast_neighbor, southeast_neighbor
 

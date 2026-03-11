@@ -41,7 +41,7 @@ module test_halo_exch
         type(error_type), allocatable, intent(out) :: error
 
         integer :: my_index, ierr
-        type(grid_t) :: grid, grid_2d
+        type(grid_t) :: grid, grid_2d, snow_grid
         type(MPI_Comm) :: comms
 
         call MPI_Comm_Rank(MPI_COMM_WORLD,my_index,ierr)
@@ -52,12 +52,13 @@ module test_halo_exch
 
         !initialize grids
         call grid%set_grid_dimensions( 171, 517, 20, image=my_index, comms=comms, adv_order=3)
-
         call halo_exch_standard(grid,error,batch_in=.True.,test_str_in="batch exchange")
 
         call grid_2d%set_grid_dimensions( 171, 517, 0, image=my_index, global_nz=20, comms=comms, adv_order=3)
-
         call halo_exch_standard(grid_2d,error,batch_in=.True.,test_str_in="batch exchange 2d")
+
+        call snow_grid%set_grid_dimensions( 171, 517, kSNOW_GRID_Z, global_nz=20, image=my_index, comms=comms, adv_order=3)
+        call halo_exch_standard(snow_grid,error,batch_in=.True.,test_str_in="batch exchange snow grid")
 
     end subroutine test_batch_exch
 
@@ -65,7 +66,7 @@ module test_halo_exch
         type(error_type), allocatable, intent(out) :: error
 
         integer :: my_index, ierr
-        type(grid_t) :: grid
+        type(grid_t) :: grid, snow_grid
         type(MPI_Comm) :: comms
 
         call MPI_Comm_Rank(MPI_COMM_WORLD,my_index,ierr)
@@ -76,11 +77,16 @@ module test_halo_exch
 
         !initialize grids
         call grid%set_grid_dimensions( 171, 517, 20, image=my_index, comms=comms, adv_order=3)
+        call snow_grid%set_grid_dimensions( 171, 517, kSNOW_GRID_Z, global_nz=20, image=my_index, comms=comms, adv_order=3)
 
         call halo_exch_standard(grid,error,test_str_in="var exchange")
         if (allocated(error)) return
         call halo_exch_standard(grid,error,corners_in=.True.,test_str_in="var exchange, corners")
         call halo_exch_standard(grid,error,corners_in=.True.,do_dqdt=.True.,test_str_in="var exchange, corners, dqdt")
+
+        call halo_exch_standard(snow_grid,error,test_str_in="var exchange, snow grid")
+        call halo_exch_standard(snow_grid,error,corners_in=.True.,test_str_in="var exchange, snow grid, corners")
+        call halo_exch_standard(snow_grid,error,corners_in=.True.,do_dqdt=.True.,test_str_in="var exchange, snow grid, corners, dqdt")
 
     end subroutine test_var_exch
 
@@ -170,7 +176,7 @@ module test_halo_exch
         logical :: batch, corners, interior, dqdt
         logical :: north, south, east, west
         logical :: northeast, northwest, southeast, southwest
-        integer :: i, j, k
+        integer :: i, j, k, var_id
         real    :: val
         character(len=100) :: test_str
     
@@ -208,14 +214,22 @@ module test_halo_exch
         else
 
             !in case input grid has staggered dimensions, create a clean grid here with no stagger. This will be used to initialize the halo object
-            call grid_3d%set_grid_dimensions( grid%nx_global-grid%nx_e, grid%ny_global-grid%ny_e, 20, image=my_index, comms=comms, adv_order=3)
-
-            !initialize variables to exchange
-            call var%initialize(kVARS%water_vapor,grid,forcing_var=dqdt)
+            call grid_3d%set_grid_dimensions( grid%nx_global-grid%nx_e, grid%ny_global-grid%ny_e, grid%nz_global, image=my_index, comms=comms, adv_order=3)
 
             allocate(exch_vars(1))
             exch_vars(1)%v = 1
-            exch_vars(1)%id = kVARS%water_vapor
+
+
+            !initialize variables to exchange
+            if (grid%nz == grid%nz_global) then
+                var_id = kVARS%water_vapor
+            elseif (grid%nz == kSNOW_GRID_Z) then
+                var_id = kVARS%snow_temperature
+            endif
+
+            call var%initialize(var_id,grid,forcing_var=dqdt)
+
+            exch_vars(1)%id = var_id
 
         endif
 

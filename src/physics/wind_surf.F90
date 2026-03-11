@@ -527,14 +527,14 @@ contains
         allocate(dir_indices(ims:ime,kms:Sx_k_max,jms:jme))
 
         !$acc data present(u, v) &
-        !$acc create(u_m, v_m)
+        !$acc create(u_m, v_m, dir_indices)
         !$acc kernels
         u_m = (u(ims:ime,1:Sx_k_max,:) + u(ims+1:ime+1,1:Sx_k_max,:))/2
         v_m = (v(:,1:Sx_k_max,jms:jme) + v(:,1:Sx_k_max,jms+1:jme+1))/2
         !$acc end kernels
 
         !Compute wind direction for each cell on mass grid
-        !$acc parallel loop gang vector collapse(3) copyout(dir_indices)
+        !$acc parallel loop gang vector collapse(3)
         do j = jms, jme
             do k = kms, Sx_k_max
                 do i = ims, ime
@@ -545,6 +545,7 @@ contains
                 enddo
             enddo
         enddo
+        !$acc update self(dir_indices)
 
         !Build grid of Sx values based on wind direction at that cell
         ! !$acc parallel loop gang vector collapse(3) 

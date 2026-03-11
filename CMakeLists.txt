@@ -701,7 +701,7 @@ if(OPENACC AND OpenACC_Fortran_FOUND)
 	FetchContent_MakeAvailable(rrtmgp_data)
 	
 	# Copy rrtmgp data files to the run directory
-	file(COPY "${rrtmgp_data_SOURCE_DIR}" DESTINATION "${PROJECT_SOURCE_DIR}/run/rrtmgp_support")
+	file(COPY "${rrtmgp_data_SOURCE_DIR}/" DESTINATION "${PROJECT_SOURCE_DIR}/run/rrtmgp_support")
 		
 	# Clean up downloaded repo to save space
 	file(REMOVE_RECURSE "${rrtmgp_data_SOURCE_DIR}")

@@ -84,6 +84,11 @@ if [ ! -d ./input/mp_support ]; then
     cp -r "$hicar_repo/run/mp_support" ./input
 fi
 
+if [ "$use_gpu" = true ]; then
+    if [ ! -d ./input/rrtmgp_support ]; then
+        cp -r "$hicar_repo/run/rrtmgp_support" ./input
+    fi
+fi
 # Generate default namelist
 default_file=input/default_hicar_options.nml
 if [ -f "$default_file" ]; then

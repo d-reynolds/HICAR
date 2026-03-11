@@ -297,6 +297,15 @@ module subroutine init_halo(this, exch_vars, grid, comms)
         this%northeast_in_3d = 1
         this%southeast_in_3d = 1
 
+        allocate(this%ne_corner_send(nx, nz, ny))
+        allocate(this%nw_corner_send(nx, nz, ny))
+        allocate(this%se_corner_send(nx, nz, ny))
+        allocate(this%sw_corner_send(nx, nz, ny))
+        this%ne_corner_send = 0
+        this%nw_corner_send = 0
+        this%se_corner_send = 0
+        this%sw_corner_send = 0
+        !$acc enter data copyin(this%ne_corner_send, this%nw_corner_send, this%se_corner_send, this%sw_corner_send)
 
     endif
 
@@ -393,6 +402,7 @@ module subroutine finalize(this)
     !$acc                      this%south_buffer_2d, this%north_buffer_2d, this%east_buffer_2d, this%west_buffer_2d, &
     !$acc                      this%south_buffer_3d, this%north_buffer_3d, this%east_buffer_3d, this%west_buffer_3d, &
     !$acc                      this%northwest_buffer_3d, this%southwest_buffer_3d, this%northeast_buffer_3d, this%southeast_buffer_3d, &
+    !$acc                      this%ne_corner_send, this%nw_corner_send, this%se_corner_send, this%sw_corner_send, &
     !$acc                      this%southwest_batch_in_3d, this%northwest_batch_in_3d, this%southeast_batch_in_3d, this%northeast_batch_in_3d, &
     !$acc                      this%south_batch_in_3d, this%north_batch_in_3d, this%east_batch_in_3d, this%west_batch_in_3d, &
     !$acc                      this%south_batch_in_2d, this%north_batch_in_2d, this%east_batch_in_2d, this%west_batch_in_2d)
@@ -2281,19 +2291,19 @@ end subroutine
 
 
 
-module subroutine put_northeast(this,var,do_dqdt)    
+module subroutine put_northeast(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(inout) :: this
     class(variable_t), intent(in) :: var
     logical, optional, intent(in) :: do_dqdt
     logical :: dqdt
-    integer :: msg_size, offs_x, offs_y, i_start, j_start
+    integer :: msg_size, offs_x, offs_y, i_start, j_start, i, j, k
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
     type(MPI_Win) :: dst_win
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
-    
+
     offs_x=var%xstag
     offs_y=var%ystag
     i_start = var%grid%ite - this%halo_size + 1 - offs_x
@@ -2313,44 +2323,64 @@ module subroutine put_northeast(this,var,do_dqdt)
         dst_win = this%southwest_in_win
     end if
 
+    associate(data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d)
     if (var%two_d) then
         if (var%dtype==kINTEGER) then
-            !$acc host_data use_device(var%data_2di)
-            call MPI_Put(var%data_2di(i_start,j_start), msg_size, &
+            !$acc host_data use_device(data_2di)
+            call MPI_Put(data_2di(i_start,j_start), msg_size, &
             var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         else
-            !$acc host_data use_device(var%data_2d)
-            call MPI_Put(var%data_2d(i_start,j_start), msg_size, &
+            !$acc host_data use_device(data_2d)
+            call MPI_Put(data_2d(i_start,j_start), msg_size, &
                 var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         endif
     else
-        !$acc host_data use_device(var%data_3d, var%dqdt_3d)
+        associate(kts => var%grid%kts, kte => var%grid%kte, buf => this%ne_corner_send)
+        !$acc data present(buf)
         if (dqdt) then
-            call MPI_Put(var%dqdt_3d(i_start,var%grid%kts,j_start), msg_size, &
-                var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc parallel loop gang vector collapse(3) present(dqdt_3d)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do k = kts, kte
+                    do i = i_start, i_start + this%halo_size + offs_x - 1
+                        buf(i-i_start+1, k-kts+1, j-j_start+1) = dqdt_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
         else
-            call MPI_Put(var%data_3d(i_start,var%grid%kts,j_start), msg_size, &
-                var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc parallel loop gang vector collapse(3) present(data_3d)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do k = kts, kte
+                    do i = i_start, i_start + this%halo_size + offs_x - 1
+                        buf(i-i_start+1, k-kts+1, j-j_start+1) = data_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
         endif
+        !$acc host_data use_device(buf)
+        call MPI_Put(buf, msg_size, &
+            var%grid%corner_win_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         !$acc end host_data
+        !$acc end data
+        end associate
     endif
+    end associate
 end subroutine
 
-module subroutine put_northwest(this,var,do_dqdt)    
+module subroutine put_northwest(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(inout) :: this
     class(variable_t), intent(in) :: var
     logical, optional, intent(in) :: do_dqdt
     logical :: dqdt
-    integer :: msg_size, offs_x, offs_y, i_start, j_start
+    integer :: msg_size, offs_x, offs_y, i_start, j_start, i, j, k
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
     type(MPI_Win) :: dst_win
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
-    
+
     offs_x=var%xstag
     offs_y=var%ystag
     i_start = var%grid%its
@@ -2371,45 +2401,65 @@ module subroutine put_northwest(this,var,do_dqdt)
         dst_win = this%southeast_in_win
     end if
 
+    associate(data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d)
     if (var%two_d) then
         if (var%dtype==kINTEGER) then
-            !$acc host_data use_device(var%data_2di)
-            call MPI_Put(var%data_2di(i_start,j_start), msg_size, &
+            !$acc host_data use_device(data_2di)
+            call MPI_Put(data_2di(i_start,j_start), msg_size, &
             var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         else
-            !$acc host_data use_device(var%data_2d)
-            call MPI_Put(var%data_2d(i_start,j_start), msg_size, &
+            !$acc host_data use_device(data_2d)
+            call MPI_Put(data_2d(i_start,j_start), msg_size, &
                 var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         endif
     else
-        !$acc host_data use_device(var%data_3d, var%dqdt_3d)
+        associate(kts => var%grid%kts, kte => var%grid%kte, buf => this%nw_corner_send)
+        !$acc data present(buf)
         if (dqdt) then
-            call MPI_Put(var%dqdt_3d(i_start,var%grid%kts,j_start), msg_size, &
-                var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc parallel loop gang vector collapse(3) present(dqdt_3d)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do k = kts, kte
+                    do i = i_start, i_start + this%halo_size + offs_x - 1
+                        buf(i-i_start+1, k-kts+1, j-j_start+1) = dqdt_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
         else
-            call MPI_Put(var%data_3d(i_start,var%grid%kts,j_start), msg_size, &
-                var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc parallel loop gang vector collapse(3) present(data_3d)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do k = kts, kte
+                    do i = i_start, i_start + this%halo_size + offs_x - 1
+                        buf(i-i_start+1, k-kts+1, j-j_start+1) = data_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
         endif
+        !$acc host_data use_device(buf)
+        call MPI_Put(buf, msg_size, &
+            var%grid%corner_win_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         !$acc end host_data
+        !$acc end data
+        end associate
     endif
+    end associate
 end subroutine
 
 
-module subroutine put_southwest(this,var,do_dqdt)    
+module subroutine put_southwest(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(inout) :: this
     class(variable_t), intent(in) :: var
     logical, optional, intent(in) :: do_dqdt
     logical :: dqdt
-    integer :: msg_size, i_start, j_start
+    integer :: msg_size, i_start, j_start, i, j, k
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
     type(MPI_Win) :: dst_win
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
-    
+
     disp = 0
     msg_size = 1
     i_start = var%grid%its
@@ -2427,44 +2477,64 @@ module subroutine put_southwest(this,var,do_dqdt)
         dst_win = this%northeast_in_win
     end if
 
+    associate(data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d)
     if (var%two_d) then
         if (var%dtype==kINTEGER) then
-            !$acc host_data use_device(var%data_2di)
-            call MPI_Put(var%data_2di(i_start,j_start), msg_size, &
+            !$acc host_data use_device(data_2di)
+            call MPI_Put(data_2di(i_start,j_start), msg_size, &
             var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         else
-            !$acc host_data use_device(var%data_2d)
-            call MPI_Put(var%data_2d(i_start,j_start), msg_size, &
+            !$acc host_data use_device(data_2d)
+            call MPI_Put(data_2d(i_start,j_start), msg_size, &
                 var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         endif
     else
-        !$acc host_data use_device(var%data_3d, var%dqdt_3d)
+        associate(kts => var%grid%kts, kte => var%grid%kte, buf => this%sw_corner_send)
+        !$acc data present(buf)
         if (dqdt) then
-            call MPI_Put(var%dqdt_3d(i_start,var%grid%kts,j_start), msg_size, &
-                var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc parallel loop gang vector collapse(3) present(dqdt_3d)
+            do j = j_start, j_start + this%halo_size - 1
+                do k = kts, kte
+                    do i = i_start, i_start + this%halo_size - 1
+                        buf(i-i_start+1, k-kts+1, j-j_start+1) = dqdt_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
         else
-            call MPI_Put(var%data_3d(i_start,var%grid%kts,j_start), msg_size, &
-                var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc parallel loop gang vector collapse(3) present(data_3d)
+            do j = j_start, j_start + this%halo_size - 1
+                do k = kts, kte
+                    do i = i_start, i_start + this%halo_size - 1
+                        buf(i-i_start+1, k-kts+1, j-j_start+1) = data_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
         endif
+        !$acc host_data use_device(buf)
+        call MPI_Put(buf, msg_size, &
+            var%grid%corner_win_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         !$acc end host_data
+        !$acc end data
+        end associate
     endif
+    end associate
 end subroutine
 
-module subroutine put_southeast(this,var,do_dqdt)    
+module subroutine put_southeast(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(inout) :: this
     class(variable_t), intent(in) :: var
     logical, optional, intent(in) :: do_dqdt
     logical :: dqdt
-    integer :: msg_size, offs_x, offs_y, i_start, j_start
+    integer :: msg_size, offs_x, offs_y, i_start, j_start, i, j, k
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
     type(MPI_Win) :: dst_win
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
-    
+
     offs_x=var%xstag
     offs_y=var%ystag
     i_start = var%grid%ite - this%halo_size + 1 - offs_x
@@ -2484,29 +2554,49 @@ module subroutine put_southeast(this,var,do_dqdt)
         dst_win = this%northwest_in_win
     end if
 
+    associate(data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d)
     if (var%two_d) then
         if (var%dtype==kINTEGER) then
-            !$acc host_data use_device(var%data_2di)
-            call MPI_Put(var%data_2di(i_start,j_start), msg_size, &
+            !$acc host_data use_device(data_2di)
+            call MPI_Put(data_2di(i_start,j_start), msg_size, &
             var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         else
-            !$acc host_data use_device(var%data_2d)
-            call MPI_Put(var%data_2d(i_start,j_start), msg_size, &
+            !$acc host_data use_device(data_2d)
+            call MPI_Put(data_2d(i_start,j_start), msg_size, &
                 var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         endif
     else
-        !$acc host_data use_device(var%data_3d, var%dqdt_3d)
+        associate(kts => var%grid%kts, kte => var%grid%kte, buf => this%se_corner_send)
+        !$acc data present(buf)
         if (dqdt) then
-            call MPI_Put(var%dqdt_3d(i_start,var%grid%kts,j_start), msg_size, &
-                var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc parallel loop gang vector collapse(3) present(dqdt_3d)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do k = kts, kte
+                    do i = i_start, i_start + this%halo_size + offs_x - 1
+                        buf(i-i_start+1, k-kts+1, j-j_start+1) = dqdt_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
         else
-            call MPI_Put(var%data_3d(i_start,var%grid%kts,j_start), msg_size, &
-                var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
+            !$acc parallel loop gang vector collapse(3) present(data_3d)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do k = kts, kte
+                    do i = i_start, i_start + this%halo_size + offs_x - 1
+                        buf(i-i_start+1, k-kts+1, j-j_start+1) = data_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
         endif
+        !$acc host_data use_device(buf)
+        call MPI_Put(buf, msg_size, &
+            var%grid%corner_win_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         !$acc end host_data
+        !$acc end data
+        end associate
     endif
+    end associate
 end subroutine
 
 

@@ -6,6 +6,7 @@ module module_sm_FSMdrv
     use mod_wrf_constants,   only : piconst, XLS
     use icar_constants
     use iso_fortran_env,       only : output_unit
+    use ieee_arithmetic,       only : ieee_is_nan
     use options_interface,   only : options_t
     use variable_interface,  only : variable_t
     use domain_interface,    only : domain_t
@@ -566,6 +567,11 @@ contains
                 hj = j-j_s+domain%jts
                 hi = i-i_s+domain%its
                 if ( SWE_(j,i)+SWE_pre(hi,hj) > 0 .and. .not.(options%physics%watersurface==kWATER_SIMPLE .and. domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(hi,hj)==kLC_WATER)) then
+                    ! ! Guard: if FSM produced NaN in critical outputs, skip this cell
+                    ! if (ieee_is_nan(H_(j,i)) .or. ieee_is_nan(LE_(j,i)) .or. ieee_is_nan(Tsrf(j,i))) then
+                    !     cycle
+                    ! endif
+                    ! cycle
                     !If we are covering pixel for the first time, save current (bare) roughness length for later
                     if (domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(hi,hj)==0) then
                         z0_bare(hi,hj) = domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d(hi,hj)
@@ -676,12 +682,12 @@ contains
         !$acc& domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
         !$acc& domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d)
 
-        if (corners) call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v),corners=corners)
+        call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v),corners=corners)
         call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v))
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v))
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Sice)%v))
         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Sliq)%v))
-        if (corners) call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%Ds)%v),corners=corners)
+        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Ds)%v),corners=corners)
 
         !$acc update host(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d, domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
         !$acc& domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
