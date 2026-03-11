@@ -235,7 +235,7 @@ contains
         allocate(Roff_(Nx_HICAR,Ny_HICAR)); Roff_=0.
         allocate(snowdepth_(Nx_HICAR,Ny_HICAR)); snowdepth_=0.
         allocate(SWE_(Nx_HICAR,Ny_HICAR)); SWE_=0.0
-        allocate(KH_(Nx_HICAR,Ny_HICAR)); KH_=0.0
+        allocate(KH_(Nx_HICAR,Ny_HICAR)); KH_=0.001
         allocate(meltflux_out_(Nx_HICAR,Ny_HICAR)); meltflux_out_=0.
         allocate(Sliq_out_(Nx_HICAR,Ny_HICAR)); Sliq_out_=0.
         allocate(dSWE_salt_(Nx_HICAR,Ny_HICAR)); dSWE_salt_=0.
@@ -567,11 +567,10 @@ contains
                 hj = j-j_s+domain%jts
                 hi = i-i_s+domain%its
                 if ( SWE_(j,i)+SWE_pre(hi,hj) > 0 .and. .not.(options%physics%watersurface==kWATER_SIMPLE .and. domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(hi,hj)==kLC_WATER)) then
-                    ! ! Guard: if FSM produced NaN in critical outputs, skip this cell
-                    ! if (ieee_is_nan(H_(j,i)) .or. ieee_is_nan(LE_(j,i)) .or. ieee_is_nan(Tsrf(j,i))) then
-                    !     cycle
-                    ! endif
-                    ! cycle
+                    if (ieee_is_nan(H_(j,i)) .or. ieee_is_nan(LE_(j,i)) .or. ieee_is_nan(Tsrf(j,i)) .or. ieee_is_nan(KH_(j,i))) then
+                        write(*,*) 'WARNING: FSM NaN at (j,i)=', j, i, ' H=', H_(j,i), ' LE=', LE_(j,i), ' Tsrf=', Tsrf(j,i), ' KH=', KH_(j,i)
+                        stop
+                    endif
                     !If we are covering pixel for the first time, save current (bare) roughness length for later
                     if (domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(hi,hj)==0) then
                         z0_bare(hi,hj) = domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d(hi,hj)
