@@ -297,10 +297,10 @@ module subroutine init_halo(this, exch_vars, grid, comms)
         this%northeast_in_3d = 1
         this%southeast_in_3d = 1
 
-        allocate(this%ne_corner_send(nx, nz, ny))
-        allocate(this%nw_corner_send(nx, nz, ny))
-        allocate(this%se_corner_send(nx, nz, ny))
-        allocate(this%sw_corner_send(nx, nz, ny))
+        allocate(this%ne_corner_send(this%halo_size+1, nz, this%halo_size+1))
+        allocate(this%nw_corner_send(this%halo_size+1, nz, this%halo_size+1))
+        allocate(this%se_corner_send(this%halo_size+1, nz, this%halo_size+1))
+        allocate(this%sw_corner_send(this%halo_size+1, nz, this%halo_size+1))
         this%ne_corner_send = 0
         this%nw_corner_send = 0
         this%se_corner_send = 0
@@ -2453,13 +2453,15 @@ module subroutine put_southwest(this,var,do_dqdt)
     class(variable_t), intent(in) :: var
     logical, optional, intent(in) :: do_dqdt
     logical :: dqdt
-    integer :: msg_size, i_start, j_start, i, j, k
+    integer :: msg_size, offs_x, offs_y, i_start, j_start, i, j, k
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
     type(MPI_Win) :: dst_win
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
 
+    offs_x=var%xstag
+    offs_y=var%ystag
     disp = 0
     msg_size = 1
     i_start = var%grid%its
@@ -2495,18 +2497,18 @@ module subroutine put_southwest(this,var,do_dqdt)
         !$acc data present(buf)
         if (dqdt) then
             !$acc parallel loop gang vector collapse(3) present(dqdt_3d)
-            do j = j_start, j_start + this%halo_size - 1
+            do j = j_start, j_start + this%halo_size + offs_y - 1
                 do k = kts, kte
-                    do i = i_start, i_start + this%halo_size - 1
+                    do i = i_start, i_start + this%halo_size + offs_x - 1
                         buf(i-i_start+1, k-kts+1, j-j_start+1) = dqdt_3d(i,k,j)
                     enddo
                 enddo
             enddo
         else
             !$acc parallel loop gang vector collapse(3) present(data_3d)
-            do j = j_start, j_start + this%halo_size - 1
+            do j = j_start, j_start + this%halo_size + offs_y - 1
                 do k = kts, kte
-                    do i = i_start, i_start + this%halo_size - 1
+                    do i = i_start, i_start + this%halo_size + offs_x - 1
                         buf(i-i_start+1, k-kts+1, j-j_start+1) = data_3d(i,k,j)
                     enddo
                 enddo

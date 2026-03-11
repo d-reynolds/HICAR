@@ -15,6 +15,8 @@ module test_halo_exch
 
     implicit none
     private
+
+    integer, parameter :: DOMAIN_NZ = 20    
     
     public :: collect_halo_exch_suite
     
@@ -51,13 +53,13 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 171, 517, 20, image=my_index, comms=comms, adv_order=3)
+        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, image=my_index, comms=comms, adv_order=3)
         call halo_exch_standard(grid,error,batch_in=.True.,test_str_in="batch exchange")
 
-        call grid_2d%set_grid_dimensions( 171, 517, 0, image=my_index, global_nz=20, comms=comms, adv_order=3)
+        call grid_2d%set_grid_dimensions( 171, 517, 0, image=my_index, global_nz=DOMAIN_NZ, comms=comms, adv_order=3)
         call halo_exch_standard(grid_2d,error,batch_in=.True.,test_str_in="batch exchange 2d")
 
-        call snow_grid%set_grid_dimensions( 171, 517, kSNOW_GRID_Z, global_nz=20, image=my_index, comms=comms, adv_order=3)
+        call snow_grid%set_grid_dimensions( 171, 517, kSNOW_GRID_Z, global_nz=DOMAIN_NZ, image=my_index, comms=comms, adv_order=3)
         call halo_exch_standard(snow_grid,error,batch_in=.True.,test_str_in="batch exchange snow grid")
 
     end subroutine test_batch_exch
@@ -76,8 +78,8 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 171, 517, 20, image=my_index, comms=comms, adv_order=3)
-        call snow_grid%set_grid_dimensions( 171, 517, kSNOW_GRID_Z, global_nz=20, image=my_index, comms=comms, adv_order=3)
+        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, image=my_index, comms=comms, adv_order=3)
+        call snow_grid%set_grid_dimensions( 171, 517, kSNOW_GRID_Z, global_nz=DOMAIN_NZ, image=my_index, comms=comms, adv_order=3)
 
         call halo_exch_standard(grid,error,test_str_in="var exchange")
         if (allocated(error)) return
@@ -104,7 +106,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 171, 517, 0, image=my_index, global_nz=20, comms=comms, adv_order=3)
+        call grid%set_grid_dimensions( 171, 517, 0, image=my_index, global_nz=DOMAIN_NZ, comms=comms, adv_order=3)
 
         call halo_exch_standard(grid,error,test_str_in="var exchange")
         if (allocated(error)) return
@@ -127,7 +129,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 171, 517, 20, image=my_index, comms=comms, adv_order=3, nx_extra = 1)
+        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, image=my_index, comms=comms, adv_order=3, nx_extra = 1)
 
         call halo_exch_standard(grid,error,test_str_in="var staggered on u grid")
         if (allocated(error)) return
@@ -150,7 +152,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 171, 517, 20, image=my_index, comms=comms, adv_order=3, ny_extra = 1)
+        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, image=my_index, comms=comms, adv_order=3, ny_extra = 1)
 
         call halo_exch_standard(grid,error,test_str_in="var staggered on v grid")
         if (allocated(error)) return
@@ -197,7 +199,7 @@ module test_halo_exch
 
         if (grid%is2d) then
 
-            call grid_3d%set_grid_dimensions( grid%nx_global, grid%ny_global, 20, image=my_index, comms=comms, adv_order=3)
+            call grid_3d%set_grid_dimensions( grid%nx_global, grid%ny_global, DOMAIN_NZ, image=my_index, comms=comms, adv_order=3)
 
             !initialize variables to exchange
             call var%initialize(kVARS%water_vapor,grid_3d,forcing_var=.True.)
@@ -214,14 +216,14 @@ module test_halo_exch
         else
 
             !in case input grid has staggered dimensions, create a clean grid here with no stagger. This will be used to initialize the halo object
-            call grid_3d%set_grid_dimensions( grid%nx_global-grid%nx_e, grid%ny_global-grid%ny_e, grid%nz_global, image=my_index, comms=comms, adv_order=3)
+            call grid_3d%set_grid_dimensions( grid%nx_global-grid%nx_e, grid%ny_global-grid%ny_e, DOMAIN_NZ, image=my_index, comms=comms, adv_order=3)
 
             allocate(exch_vars(1))
             exch_vars(1)%v = 1
 
 
             !initialize variables to exchange
-            if (grid%nz == grid%nz_global) then
+            if (grid%nz == DOMAIN_NZ) then
                 var_id = kVARS%water_vapor
             elseif (grid%nz == kSNOW_GRID_Z) then
                 var_id = kVARS%snow_temperature

@@ -30,3 +30,4 @@ FSM2trans/build/*
 FSM2trans/lib/*
 tests/Test_Cases*
 tests/figures/
+lib/*
