@@ -98,6 +98,12 @@ module ioserver_interface
         !the names of the restart vars, indexed the same as the above array
         character(len=kMAX_NAME_LENGTH), public, allocatable :: rst_var_names(:)
 
+        ! Change 2: classification counts for two-pass buffer packing
+        integer :: n_out_3d = 0, n_out_2d = 0
+        integer :: n_rst_only_3d = 0, n_rst_only_2d = 0
+        integer, allocatable :: out_ordered_indices(:)
+        integer, allocatable :: rst_only_ordered_indices(:)
+
         ! The filename of the netcdf file to write
         character(len=kMAX_FILE_LENGTH) :: output_file_name, restart_file_name
 

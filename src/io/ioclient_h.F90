@@ -51,6 +51,13 @@ module ioclient_interface
       integer :: output_counter = 0
       integer :: frames_per_outfile, restart_count
 
+      ! Change 2: restart variable classification counts
+      integer :: n_out_3d = 0, n_out_2d = 0
+      integer :: n_rst_only_3d = 0, n_rst_only_2d = 0
+      logical :: first_push = .true.
+      integer :: vars_for_output(kMAX_STORAGE_VARS) = 0
+      integer :: vars_for_restart(kMAX_STORAGE_VARS) = 0
+
       logical :: written = .False.
       logical :: nest_updated = .False.
 
