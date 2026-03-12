@@ -279,7 +279,7 @@ contains
 
             !determine number of blocks to use for RRTMGP. This is done to reduce
             ! the GPU memory requirements. A good base is 200x200 horizontal points per block
-            nblocks = MAX(1, ((ite - its + 1)*(jte - jts + 1)) / 40000)
+            nblocks = MAX(1, ((ite - its + 1)*(jte - jts + 1)) / max((options%rad%rrtmgp_block_N**2), (jte - jts + 1)*(kte - kts + 1)))
 
             ! if (k_dist_sw%is_loaded() .or. k_dist_lw%is_loaded()) then
                 ! call k_dist_sw%finalize()
@@ -363,7 +363,7 @@ contains
 
         !$acc enter data copyin(azimuth_offset, inv_dist2_offset)
 
-        if (STD_OUT_PE) write(*,*) "  Terrain reflected SW: R_cells =", R_cells, " (radius =", radius, "m)"
+        !if (STD_OUT_PE) write(*,*) "  Terrain reflected SW: R_cells =", R_cells, " (radius =", radius, "m)"
 
     end subroutine init_terrain_refl_tables
 

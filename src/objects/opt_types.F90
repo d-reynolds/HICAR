@@ -267,6 +267,7 @@ module options_types
        logical :: read_ghg                             ! Eihter use default green house gas mixing ratio, or read the in from file
        real    :: tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
        real    :: terrain_refl_radius                  ! Radius for terrain reflected SW neighborhood (m), default 1500
+       integer :: rrtmgp_block_N                       ! minimum block size (N) for batching rrtmgp calculations, espressed as NxN grid cells. Smaller blocks will be slower but use less GPU memory. This setting can allow for less memory usage for large domains on few GPUs.
     end type rad_options_type
 
     ! ------------------------------------------------

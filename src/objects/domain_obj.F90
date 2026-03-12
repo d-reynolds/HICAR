@@ -731,7 +731,7 @@ contains
             enddo
 
             if (this%var_indx(kVARS%surface_pressure)%v > 0) then
-                !$acc parallel loop gang vector collapse(2) async(10)
+                !$acc parallel loop gang vector collapse(2) wait(9)
                 do j = jms,jme
                     do i = ims,ime
                         psfc(i,j) = pressure_i(i, kms, j)

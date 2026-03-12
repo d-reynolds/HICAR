@@ -3621,6 +3621,14 @@ contains
                 units = "meters"
                 default = "1500.0"
                 group = "RAD_Parameters"
+            case ("rrtmgp_block_N")
+                description = "minimum block size (N) for batching rrtmgp calculations, espressed as NxN grid cells."//achar(10)//BLNK_CHR_N// &
+                              "Smaller blocks will be slower but use less GPU memory. This setting can allow for less memory usage for large domains on few GPUs."
+                min = 10
+                max = 2000
+                default = "150"
+                group = "RAD_Parameters"
+
             ! --------------------------------------
             ! --------------------------------------
             ! Wind parameters namelist variables

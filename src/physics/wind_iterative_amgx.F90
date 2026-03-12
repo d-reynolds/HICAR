@@ -332,9 +332,10 @@ contains
             "prec:relaxation_factor=1, " // &
             "prec:max_iters=1, " // &
             "main:use_scalar_norm=1, " // &
-            "main:max_iters=1000, " // &
-            "main:convergence=RELATIVE_INI, " // &
-            "main:tolerance=1e-10, " // &
+            "main:max_iters=1500, " // &
+            "main:convergence=COMBINED_REL_INI_ABS, " // &
+            "main:tolerance=1e-5, " // &
+            "main:alt_rel_tolerance=1e-10, " // &
             "main:monitor_residual=1, " // &
             "main:store_res_history=1, " // &
             "main:obtain_timings=1, " // &
@@ -392,11 +393,6 @@ contains
         
         ! Calculate total number of rows globally
         n_rows_global = mx * my * mz
-                
-        if (STD_OUT_PE) then
-            print*, "AmgX initialization: rank", rank, "local_n =", local_n, &
-                    "local_offset =", local_offset, "global_n =", global_n
-        endif
         
         ! Initialize AmgX with the compute communicator (only compute ranks participate)
         call init_amgx(domain%compute_comms)
@@ -454,7 +450,6 @@ contains
         integer(c_int) :: rc
         real :: denom
         integer :: ierr, rank
-        integer, allocatable :: partition_vec_fint(:)
 
         ! Get MPI rank for partition vector
         call MPI_Comm_rank(domain%compute_comms, rank, ierr)
@@ -473,7 +468,6 @@ contains
         allocate(col_indices(nnz))
         allocate(values(nnz))
         allocate(partition_vec(n_rows_global))
-        allocate(partition_vec_fint(n_rows_global))
 
         ! NOTE: Do NOT use AMGX_pin_memory on these arrays!
         ! AMGX uses Thrust internally for H->D transfers during matrix upload,
@@ -488,28 +482,24 @@ contains
         ! where each rank owns a contiguous block of global rows
         
         ! Initialize entire partition vector (will be gathered later)
-        partition_vec_fint = 0
-        
+        partition_vec = 0_c_int
+
         ! Each rank marks which global rows it owns with its rank number
         do j = ys, ys+ym-1
             do k = zs, zs+zm-1
                 do i = xs, xs+xm-1
                     ! Calculate global row index using same formula as column indices
                     global_row = j * mx * mz + k * mx + i + 1
-                    ! if (global_row >= 1 .and. global_row <= n_rows_global) then
-                        partition_vec_fint(global_row) = rank
-                    ! endif
+                    partition_vec(global_row) = int(rank, c_int)
                 enddo
             enddo
         enddo
-        
+
         ! Gather partition vector across all ranks using MPI_Allreduce with MAX
         ! (each rank sets its owned rows, others are 0, so MAX gives the owner)
-        call MPI_Allreduce(MPI_IN_PLACE, partition_vec_fint, n_rows_global, MPI_INTEGER, &
+        ! Use MPI_INTEGER4 to match c_int (4-byte integer)
+        call MPI_Allreduce(MPI_IN_PLACE, partition_vec, n_rows_global, MPI_INTEGER4, &
                           MPI_MAX, domain%compute_comms, ierr)
-
-        !convert partition_vec to c_int
-        partition_vec = int(partition_vec_fint, c_int)
         
         ! Build CSR matrix with proper boundary conditions
         cnt = 0
@@ -693,39 +683,46 @@ contains
             ! (arrays may be over-allocated from initial estimate)
             ! Use the partition_vec we built in build_csr_matrix
 
-            print*, "  ----------------------------------------"
+            if (STD_OUT_PE) print*, "  ----------------------------------------"
             rc = AMGX_matrix_upload_all_global(amgx_matrix, n_rows_global, n_rows, nnz, 1, 1, &
                                                 row_ptrs, col_indices, &
                                                 values, c_null_ptr, 1, 1, partition_vec)
 
+            ! Free partition_vec and CSR arrays immediately after upload
+            if (allocated(partition_vec)) deallocate(partition_vec)
+            if (allocated(row_ptrs)) deallocate(row_ptrs)
+            if (allocated(col_indices)) deallocate(col_indices)
+            if (allocated(values)) deallocate(values)
+
             if (rc /= 0) then
-                if (STD_OUT_PE) print*, "ERROR: AMGX_matrix_upload_all_global failed with rc=", rc
+                if (STD_OUT_PE) print*, "ERROR: AMGX_matrix_upload_all_global failed. Grid: ", &
+                    n_rows_global, " global rows, ", n_rows, " local rows, ", nnz, " local nnz"
+                return
             endif
 
-            
             ! Bind vectors to matrix (required for distributed mode to set up halo exchange)
             rc = AMGX_vector_bind(amgx_vector_rhs, amgx_matrix)
             if (rc /= 0) then
                 if (STD_OUT_PE) print*, "ERROR: AMGX_vector_bind(rhs) failed with rc=", rc
+                return
             endif
-            
+
             rc = AMGX_vector_bind(amgx_vector_solution, amgx_matrix)
             if (rc /= 0) then
                 if (STD_OUT_PE) print*, "ERROR: AMGX_vector_bind(solution) failed with rc=", rc
+                return
             endif
-            
+
             ! Allocate work arrays with local size
             if (.not. allocated(rhs)) then
                 allocate(rhs(n_rows))
-                ! NOTE: Not using AMGX_pin_memory - see note above in build_csr_matrix
             endif
-            
+
             if (.not. allocated(solution)) then
                 allocate(solution(n_rows))
                 solution = 0.0_c_double
-                ! NOTE: Not using AMGX_pin_memory - see note above in build_csr_matrix
             endif
-                                                            
+
         endif
 
         ! Zero out the work arrays
@@ -742,11 +739,13 @@ contains
         rc = AMGX_vector_upload(amgx_vector_rhs, n_rows, 1, rhs)
         if (rc /= 0) then
             if (STD_OUT_PE) print*, "ERROR: AMGX_vector_upload(rhs) failed with rc=", rc
+            return
         endif
 
         rc = AMGX_vector_upload(amgx_vector_solution, n_rows, 1, solution)
         if (rc /= 0) then
             if (STD_OUT_PE) print*, "ERROR: AMGX_vector_upload(solution) failed with rc=", rc
+            return
         endif
 
 
@@ -755,6 +754,7 @@ contains
             rc = AMGX_solver_setup(amgx_solver, amgx_matrix)
             if (rc /= 0) then
                 if (STD_OUT_PE) print*, "ERROR: AMGX_solver_setup failed with rc=", rc
+                return
             endif
             first_solve = .False.
         else if (varying_alpha) then
@@ -762,20 +762,23 @@ contains
             rc = AMGX_solver_resetup(amgx_solver, amgx_matrix)
             if (rc /= 0) then
                 if (STD_OUT_PE) print*, "ERROR: AMGX_solver_resetup failed with rc=", rc
+                return
             endif
         endif
-        
+
         ! Solve
         if (STD_OUT_PE) print*, "Solving with AmgX..."
         rc = AMGX_solver_solve(amgx_solver, amgx_vector_rhs, amgx_vector_solution)
         if (rc /= 0) then
             if (STD_OUT_PE) print*, "ERROR: AMGX_solver_solve failed with rc=", rc
+            return
         endif
-        
+
         ! Download solution
         rc = AMGX_vector_download(amgx_vector_solution, solution)
         if (rc /= 0) then
             if (STD_OUT_PE) print*, "ERROR: AMGX_vector_download failed with rc=", rc
+            return
         endif
                 
         ! Update wind field
@@ -1429,20 +1432,29 @@ contains
     subroutine finalize_iter_winds_amgx()
         implicit none
         integer(c_int) :: rc
-        
-        
-        ! Destroy AmgX objects
-        
-        
-        ! Unpin and deallocate arrays
-        ! Deallocate arrays (no unpinning needed since we don't pin them)
-        if (allocated(row_ptrs)) then
-            deallocate(row_ptrs)
+
+        ! Destroy AmgX objects based on their own pointer state,
+        ! not on Fortran array allocation (which happens later in calc_iter_winds).
+        ! This prevents GPU memory leaks when re-initializing without an intervening solve.
+        if (c_associated(amgx_solver)) then
             rc = AMGX_solver_destroy(amgx_solver)
-            rc = AMGX_vector_destroy(amgx_vector_solution)
-            rc = AMGX_vector_destroy(amgx_vector_rhs)
-            rc = AMGX_matrix_destroy(amgx_matrix)
+            amgx_solver = c_null_ptr
         endif
+        if (c_associated(amgx_vector_solution)) then
+            rc = AMGX_vector_destroy(amgx_vector_solution)
+            amgx_vector_solution = c_null_ptr
+        endif
+        if (c_associated(amgx_vector_rhs)) then
+            rc = AMGX_vector_destroy(amgx_vector_rhs)
+            amgx_vector_rhs = c_null_ptr
+        endif
+        if (c_associated(amgx_matrix)) then
+            rc = AMGX_matrix_destroy(amgx_matrix)
+            amgx_matrix = c_null_ptr
+        endif
+
+        ! Deallocate Fortran arrays
+        if (allocated(row_ptrs)) deallocate(row_ptrs)
         if (allocated(col_indices)) deallocate(col_indices)
         if (allocated(values)) deallocate(values)
         if (allocated(rhs)) deallocate(rhs)
@@ -1487,9 +1499,14 @@ contains
 
         if (initialized_amgx) then
             call finalize_iter_winds_amgx()
-            rc = AMGX_resources_destroy(amgx_resources)
-            rc = AMGX_config_destroy(amgx_config)
-            ! ! Finalize library
+            if (c_associated(amgx_resources)) then
+                rc = AMGX_resources_destroy(amgx_resources)
+                amgx_resources = c_null_ptr
+            endif
+            if (c_associated(amgx_config)) then
+                rc = AMGX_config_destroy(amgx_config)
+                amgx_config = c_null_ptr
+            endif
             call AMGX_finalize()
             initialized_amgx = .False.
         endif

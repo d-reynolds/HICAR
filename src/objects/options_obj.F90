@@ -2089,14 +2089,14 @@ contains
         logical :: print_info, gennml
 
         real    :: update_interval_rad(kMAX_NESTS)             ! minimum number of seconds between RRTMG updates
-        integer :: icloud(kMAX_NESTS)                            ! how RRTMG interacts with clouds
+        integer :: icloud(kMAX_NESTS), rrtmgp_block_N(kMAX_NESTS) ! how RRTMG interacts with clouds
         integer :: cldovrlp(kMAX_NESTS)                          ! how RRTMG considers cloud overlapping
         logical :: read_ghg(kMAX_NESTS)                            ! read GHG concentrations from file
         logical :: terrain_shading(kMAX_NESTS)                     ! whether to use terrain shading
         real    :: tzone(kMAX_NESTS) !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
         real    :: terrain_refl_radius(kMAX_NESTS)                  ! Radius for terrain reflected SW neighborhood (m)
         ! define the namelist
-        namelist /rad_parameters/ terrain_shading, update_interval_rad, icloud, read_ghg, cldovrlp, tzone, terrain_refl_radius
+        namelist /rad_parameters/ terrain_shading, update_interval_rad, icloud, read_ghg, cldovrlp, tzone, terrain_refl_radius, rrtmgp_block_N
         CHARACTER(LEN=200) :: error_msg
 
         print_info = .False.
@@ -2112,6 +2112,7 @@ contains
         call set_nml_var_default(read_ghg, 'read_ghg', print_info, gennml)
         call set_nml_var_default(tzone, 'tzone', print_info, gennml)
         call set_nml_var_default(terrain_refl_radius, 'terrain_refl_radius', print_info, gennml)
+        call set_nml_var_default(rrtmgp_block_N, 'rrtmgp_block_N', print_info, gennml)
 
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
@@ -2143,6 +2144,7 @@ contains
         call set_nml_var(rad_options%read_ghg, read_ghg(n_indx), 'read_ghg', read_ghg(1))
         call set_nml_var(rad_options%tzone, tzone(n_indx), 'tzone', tzone(1))
         call set_nml_var(rad_options%terrain_refl_radius, terrain_refl_radius(n_indx), 'terrain_refl_radius', terrain_refl_radius(1))
+        call set_nml_var(rad_options%rrtmgp_block_N, rrtmgp_block_N(n_indx), 'rrtmgp_block_N', rrtmgp_block_N(1))
 
     end subroutine rad_parameters_namelist
     

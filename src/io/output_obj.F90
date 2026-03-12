@@ -526,7 +526,6 @@ contains
 
         if (this%n_attrs > 0) then
             do i=1,this%n_attrs
-                write(*,*) "adding attr: ", trim(this%attributes(i)%name)
                 call check_ncdf( nf90_put_att(   ncid,             &
                                             NF90_GLOBAL,                &
                                             trim(this%attributes(i)%name),    &
