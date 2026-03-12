@@ -98,7 +98,7 @@ module ioserver_interface
         !the names of the restart vars, indexed the same as the above array
         character(len=kMAX_NAME_LENGTH), public, allocatable :: rst_var_names(:)
 
-        ! Change 2: classification counts for two-pass buffer packing
+        ! Classification counts for two-pass buffer packing
         integer :: n_out_3d = 0, n_out_2d = 0
         integer :: n_rst_only_3d = 0, n_rst_only_2d = 0
         integer, allocatable :: out_ordered_indices(:)

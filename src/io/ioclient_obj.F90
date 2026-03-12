@@ -33,12 +33,10 @@ contains
         integer,            intent(in)     :: n_indx
 
         type(variable_t) :: var
-        type(meta_data_t) :: tmp_var
         type(MPI_Group) :: family_group
 
-        integer :: my_rank, comm_size, some_child_id, i, idx
-        logical :: is_output, is_rst_only
-
+        integer :: my_rank, comm_size, some_child_id
+        
         this%i_s_r = forcing%its; this%i_e_r = forcing%ite
         this%k_s_r = forcing%kts; this%k_e_r = forcing%kte
         this%j_s_r = forcing%jts; this%j_e_r = forcing%jte
@@ -75,23 +73,6 @@ contains
         this%restart_count = options(n_indx)%restart%restart_count
         this%restart_counter = 1
         if (options(n_indx)%restart%restart) this%restart_counter = 2
-
-        this%n_out_3d = 0; this%n_out_2d = 0
-        this%n_rst_only_3d = 0; this%n_rst_only_2d = 0
-        do i = 1, kMAX_STORAGE_VARS
-            if (domain%vars_to_out(i)%v <= 0) cycle
-            tmp_var = get_varmeta(i)
-            if (tmp_var%name == "") cycle
-            is_output = (this%vars_for_output(i) > 0)
-            is_rst_only = (.not. is_output) .and. (this%vars_for_restart(i) > 0)
-            if (tmp_var%three_d) then
-                if (is_output) this%n_out_3d = this%n_out_3d + 1
-                if (is_rst_only) this%n_rst_only_3d = this%n_rst_only_3d + 1
-            else if (tmp_var%two_d) then
-                if (is_output) this%n_out_2d = this%n_out_2d + 1
-                if (is_rst_only) this%n_rst_only_2d = this%n_rst_only_2d + 1
-            endif
-        enddo
 
         call init_with_server(this)
 
@@ -166,9 +147,6 @@ contains
         integer(KIND=MPI_ADDRESS_KIND) :: win_size
         integer :: nx_w, nz_w, ny_w, nx_re, ny_re, n_w_2d, n_f, n_w_3d, ierr
         integer :: nx_r, nz_r, ny_r, n_r, real_size
-#ifdef _OPENACC
-        type(MPI_Info) :: info_gpu
-#endif
 
         CALL MPI_Type_size(MPI_REAL, real_size)
 
@@ -204,84 +182,32 @@ contains
 
         call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
-#ifdef _OPENACC
-        ! GPU path: allocate on host, create device copy, expose device ptr to MPI
-        call MPI_Info_create(info_gpu, ierr)
-        call MPI_Info_set(info_gpu, "alloc_shm", ".true.", ierr)
-        call MPI_Info_set(info_gpu, "alloc_mem", "device", ierr)
-        call MPI_Info_set(info_gpu, "mpi_assert_memory_alloc_kinds", "gpu:device", ierr)
-        call MPI_Info_set(info_gpu, "cuda_aware", ".true.", ierr)
-
-        ! 3D write buffer
-        win_size = n_w_3d*nx_re*nz_w*ny_re
-        allocate(this%write_buffer_3d(n_w_3d, nx_re, nz_w, ny_re))
-        this%write_buffer_3d = kEMPT_BUFF
-        !$acc enter data copyin(this%write_buffer_3d)
-        !$acc host_data use_device(this%write_buffer_3d)
-        call MPI_WIN_CREATE(this%write_buffer_3d, win_size*real_size, real_size, &
-                            info_gpu, this%parent_comms, this%write_win_3d, ierr)
-        !$acc end host_data
-
-        ! 2D write buffer
-        win_size = n_w_2d*nx_re*ny_re
-        allocate(this%write_buffer_2d(n_w_2d, nx_re, ny_re))
-        this%write_buffer_2d = kEMPT_BUFF
-        !$acc enter data copyin(this%write_buffer_2d)
-        !$acc host_data use_device(this%write_buffer_2d)
-        call MPI_WIN_CREATE(this%write_buffer_2d, win_size*real_size, real_size, &
-                            info_gpu, this%parent_comms, this%write_win_2d, ierr)
-        !$acc end host_data
-
-        ! Forcing buffer (nest data, client->server)
-        if (n_f > 0) then
-            win_size = n_f*nx_w*nz_w*ny_w
-            allocate(this%forcing_buffer(n_f, nx_w, nz_w, ny_w))
-            this%forcing_buffer = kEMPT_BUFF
-            !$acc enter data copyin(this%forcing_buffer)
-            !$acc host_data use_device(this%forcing_buffer)
-            call MPI_WIN_CREATE(this%forcing_buffer, win_size*real_size, real_size, &
-                                info_gpu, this%parent_comms, this%forcing_win, ierr)
-            !$acc end host_data
-        endif
-
-        ! Read buffer (server->client forcing data)
-        win_size = n_r*nx_r*nz_r*ny_r
-        allocate(this%read_buffer(n_r, nx_r, nz_r, ny_r))
-        this%read_buffer = kEMPT_BUFF
-        !$acc enter data copyin(this%read_buffer)
-        !$acc host_data use_device(this%read_buffer)
-        call MPI_WIN_CREATE(this%read_buffer, win_size*real_size, real_size, &
-                            info_gpu, this%parent_comms, this%read_win, ierr)
-        !$acc end host_data
-
-        call MPI_Info_free(info_gpu, ierr)
-#else
-        ! CPU path: shared memory windows (unchanged)
+        ! Shared memory windows for all builds; GPU builds get device copies for kernel packing
         win_size = n_w_3d*nx_re*nz_w*ny_re
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_3d)
         call C_F_POINTER(tmp_ptr, this%write_buffer_3d, [n_w_3d, nx_re, nz_w, ny_re])
         this%write_buffer_3d = kEMPT_BUFF
+        !$acc enter data copyin(this%write_buffer_3d)
 
-        ! +1 added to handle variables on staggered grids
         win_size = n_w_2d*nx_re*ny_re
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_2d)
         call C_F_POINTER(tmp_ptr, this%write_buffer_2d, [n_w_2d, nx_re, ny_re])
         this%write_buffer_2d = kEMPT_BUFF
+        !$acc enter data copyin(this%write_buffer_2d)
 
-        ! This is the buffer for the forcing data. Necesarry so that output data can sit around in its own buffer while the ioserver
-        ! is busy distributing the forcing data to the child nests 
         if (n_f > 0) then
             win_size = n_f*nx_w*ny_w*nz_w
             call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%forcing_win)
             call C_F_POINTER(tmp_ptr, this%forcing_buffer, [n_f, nx_w, nz_w, ny_w])
             this%forcing_buffer = kEMPT_BUFF
+            !$acc enter data copyin(this%forcing_buffer)
         endif
 
         win_size = n_r*nx_r*nz_r*ny_r
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%read_win)
         call C_F_POINTER(tmp_ptr, this%read_buffer, [n_r, nx_r, nz_r, ny_r])
         this%read_buffer = kEMPT_BUFF
-#endif
+        !$acc enter data copyin(this%read_buffer)
 
     end subroutine setup_MPI_windows
 
@@ -297,9 +223,7 @@ contains
         type(meta_data_t) :: tmp_var
         integer :: i, n_3d, n_2d, nx, ny, nz_v, i_s_w, i_e_w, j_s_w, j_e_w, idx
         logical :: should_do_restart
-#ifdef _OPENACC
         integer :: ii, jj, kk
-#endif
 
         n_3d = 1
         n_2d = 1
@@ -325,83 +249,50 @@ contains
 
             i_s_w = this%i_s_w; i_e_w = this%i_e_w
             j_s_w = this%j_s_w; j_e_w = this%j_e_w
+            if (domain%ime == domain%ide) i_e_w = i_e_w+tmp_var%xstag
+            if (domain%jme == domain%jde) j_e_w = j_e_w+tmp_var%ystag
+            nx = i_e_w - i_s_w + 1
+            ny = j_e_w - j_s_w + 1
 
-#ifdef _OPENACC
             ! GPU path: pack on device, no GPU->CPU transfer
             if (tmp_var%three_d) then
-                if (domain%ime == domain%ide) i_e_w = i_e_w+domain%vars_3d(idx)%xstag
-                if (domain%jme == domain%jde) j_e_w = j_e_w+domain%vars_3d(idx)%ystag
-                nx = i_e_w - i_s_w + 1
-                ny = j_e_w - j_s_w + 1
                 nz_v = domain%vars_3d(idx)%dim_len(2)
-                !$acc parallel loop gang vector collapse(3) present(this%write_buffer_3d, domain%vars_3d(idx)%data_3d)
+                associate(src => domain%vars_3d(idx)%data_3d, dst => this%write_buffer_3d)
+                !$acc parallel loop gang vector collapse(3) present(dst, src)
                 do jj = 1, ny
                   do kk = 1, nz_v
                     do ii = 1, nx
-                      this%write_buffer_3d(n_3d, ii, kk, jj) = domain%vars_3d(idx)%data_3d(i_s_w+ii-1, kk, j_s_w+jj-1)
+                      dst(n_3d, ii, kk, jj) = src(i_s_w+ii-1, kk, j_s_w+jj-1)
                     enddo
                   enddo
                 enddo
+                end associate
                 n_3d = n_3d + 1
             else if (tmp_var%two_d) then
-                if (domain%ime == domain%ide) i_e_w = i_e_w+domain%vars_2d(idx)%xstag
-                if (domain%jme == domain%jde) j_e_w = j_e_w+domain%vars_2d(idx)%ystag
-                nx = i_e_w - i_s_w + 1
-                ny = j_e_w - j_s_w + 1
                 if (domain%vars_2d(idx)%dtype == kREAL) then
-                    !$acc parallel loop gang vector collapse(2) present(this%write_buffer_2d, domain%vars_2d(idx)%data_2d)
+                    associate(src => domain%vars_2d(idx)%data_2d, dst => this%write_buffer_2d)
+                    !$acc parallel loop gang vector collapse(2) present(dst, src)
                     do jj = 1, ny
                       do ii = 1, nx
-                        this%write_buffer_2d(n_2d, ii, jj) = domain%vars_2d(idx)%data_2d(i_s_w+ii-1, j_s_w+jj-1)
+                        dst(n_2d, ii, jj) = src(i_s_w+ii-1, j_s_w+jj-1)
                       enddo
                     enddo
+                    end associate
                 elseif (domain%vars_2d(idx)%dtype == kINTEGER) then
-                    !$acc parallel loop gang vector collapse(2) present(this%write_buffer_2d, domain%vars_2d(idx)%data_2di)
+                    associate(src => domain%vars_2d(idx)%data_2di, dst => this%write_buffer_2d)
+                    !$acc parallel loop gang vector collapse(2) present(dst, src)
                     do jj = 1, ny
                       do ii = 1, nx
-                        this%write_buffer_2d(n_2d, ii, jj) = real(domain%vars_2d(idx)%data_2di(i_s_w+ii-1, j_s_w+jj-1))
+                        dst(n_2d, ii, jj) = real(src(i_s_w+ii-1, j_s_w+jj-1))
                       enddo
                     enddo
+                    end associate
                 endif
                 n_2d = n_2d + 1
             else
                 write(*,*) 'Error: Variable ', tmp_var%name, ' not found in parent domain: ', domain%nest_indx
                 stop
             endif
-#else
-            ! CPU path: update host then copy (unchanged logic)
-            if (tmp_var%two_d) then
-                !$acc update host(domain%vars_2d(idx)%data_2d)
-                var = domain%vars_2d(idx)
-            else if (tmp_var%three_d) then
-                !$acc update host(domain%vars_3d(idx)%data_3d)
-                var = domain%vars_3d(idx)
-            else
-                write(*,*) 'Error: Variable ', tmp_var%name, ' not found in parent domain: ', domain%nest_indx
-                stop
-            endif
-
-            if (domain%ime == domain%ide) i_e_w = i_e_w+var%xstag
-            if (domain%jme == domain%jde) j_e_w = j_e_w+var%ystag
-            nx = i_e_w - i_s_w + 1
-            ny = j_e_w - j_s_w + 1
-            if (var%two_d) then
-
-                if (var%dtype == kREAL) then
-                    this%write_buffer_2d(n_2d,1:nx,1:ny) = &
-                        var%data_2d(i_s_w:i_e_w,j_s_w:j_e_w)
-                elseif (var%dtype == kINTEGER) then
-                    this%write_buffer_2d(n_2d,1:nx,1:ny) = &
-                        real(var%data_2di(i_s_w:i_e_w,j_s_w:j_e_w))
-                endif
-                n_2d = n_2d+1
-
-            else
-                this%write_buffer_3d(n_3d,1:nx,1:var%dim_len(2),1:ny) = &
-                        var%data_3d(i_s_w:i_e_w,1:var%dim_len(2),j_s_w:j_e_w)
-                n_3d = n_3d+1
-            endif
-#endif
         enddo
 
         ! Pass 2: restart-only variables (only on restart steps or first push)
@@ -415,79 +306,51 @@ contains
 
                 i_s_w = this%i_s_w; i_e_w = this%i_e_w
                 j_s_w = this%j_s_w; j_e_w = this%j_e_w
+                if (domain%ime == domain%ide) i_e_w = i_e_w+tmp_var%xstag
+                if (domain%jme == domain%jde) j_e_w = j_e_w+tmp_var%ystag
+                nx = i_e_w - i_s_w + 1
+                ny = j_e_w - j_s_w + 1
 
-#ifdef _OPENACC
                 if (tmp_var%three_d) then
-                    if (domain%ime == domain%ide) i_e_w = i_e_w+domain%vars_3d(idx)%xstag
-                    if (domain%jme == domain%jde) j_e_w = j_e_w+domain%vars_3d(idx)%ystag
-                    nx = i_e_w - i_s_w + 1
-                    ny = j_e_w - j_s_w + 1
                     nz_v = domain%vars_3d(idx)%dim_len(2)
-                    !$acc parallel loop gang vector collapse(3) present(this%write_buffer_3d, domain%vars_3d(idx)%data_3d)
+                    associate(src => domain%vars_3d(idx)%data_3d, dst => this%write_buffer_3d)
+                    !$acc parallel loop gang vector collapse(3) present(dst, src)
                     do jj = 1, ny
                       do kk = 1, nz_v
                         do ii = 1, nx
-                          this%write_buffer_3d(n_3d, ii, kk, jj) = domain%vars_3d(idx)%data_3d(i_s_w+ii-1, kk, j_s_w+jj-1)
+                          dst(n_3d, ii, kk, jj) = src(i_s_w+ii-1, kk, j_s_w+jj-1)
                         enddo
                       enddo
                     enddo
+                    end associate
                     n_3d = n_3d + 1
                 else if (tmp_var%two_d) then
-                    if (domain%ime == domain%ide) i_e_w = i_e_w+domain%vars_2d(idx)%xstag
-                    if (domain%jme == domain%jde) j_e_w = j_e_w+domain%vars_2d(idx)%ystag
-                    nx = i_e_w - i_s_w + 1
-                    ny = j_e_w - j_s_w + 1
                     if (domain%vars_2d(idx)%dtype == kREAL) then
-                        !$acc parallel loop gang vector collapse(2) present(this%write_buffer_2d, domain%vars_2d(idx)%data_2d)
+                        associate(src => domain%vars_2d(idx)%data_2d, dst => this%write_buffer_2d)
+                        !$acc parallel loop gang vector collapse(2) present(dst, src)
                         do jj = 1, ny
                           do ii = 1, nx
-                            this%write_buffer_2d(n_2d, ii, jj) = domain%vars_2d(idx)%data_2d(i_s_w+ii-1, j_s_w+jj-1)
+                            dst(n_2d, ii, jj) = src(i_s_w+ii-1, j_s_w+jj-1)
                           enddo
                         enddo
+                        end associate
                     elseif (domain%vars_2d(idx)%dtype == kINTEGER) then
-                        !$acc parallel loop gang vector collapse(2) present(this%write_buffer_2d, domain%vars_2d(idx)%data_2di)
+                        associate(src => domain%vars_2d(idx)%data_2di, dst => this%write_buffer_2d)
+                        !$acc parallel loop gang vector collapse(2) present(dst, src)
                         do jj = 1, ny
                           do ii = 1, nx
-                            this%write_buffer_2d(n_2d, ii, jj) = real(domain%vars_2d(idx)%data_2di(i_s_w+ii-1, j_s_w+jj-1))
+                            dst(n_2d, ii, jj) = real(src(i_s_w+ii-1, j_s_w+jj-1))
                           enddo
                         enddo
+                        end associate
                     endif
                     n_2d = n_2d + 1
                 endif
-#else
-                if (tmp_var%two_d) then
-                    !$acc update host(domain%vars_2d(idx)%data_2d)
-                    var = domain%vars_2d(idx)
-                else if (tmp_var%three_d) then
-                    !$acc update host(domain%vars_3d(idx)%data_3d)
-                    var = domain%vars_3d(idx)
-                endif
-
-                if (domain%ime == domain%ide) i_e_w = i_e_w+var%xstag
-                if (domain%jme == domain%jde) j_e_w = j_e_w+var%ystag
-                nx = i_e_w - i_s_w + 1
-                ny = j_e_w - j_s_w + 1
-                if (var%two_d) then
-                    if (var%dtype == kREAL) then
-                        this%write_buffer_2d(n_2d,1:nx,1:ny) = &
-                            var%data_2d(i_s_w:i_e_w,j_s_w:j_e_w)
-                    elseif (var%dtype == kINTEGER) then
-                        this%write_buffer_2d(n_2d,1:nx,1:ny) = &
-                            real(var%data_2di(i_s_w:i_e_w,j_s_w:j_e_w))
-                    endif
-                    n_2d = n_2d+1
-                else
-                    this%write_buffer_3d(n_3d,1:nx,1:var%dim_len(2),1:ny) = &
-                            var%data_3d(i_s_w:i_e_w,1:var%dim_len(2),j_s_w:j_e_w)
-                    n_3d = n_3d+1
-                endif
-#endif
             enddo
         endif
 
-#ifdef _OPENACC
-        !$acc wait  ! ensure all kernels complete before MPI_Win_Post
-#endif
+        !$acc wait
+        !$acc update host(this%write_buffer_3d, this%write_buffer_2d)
 
         this%written = .True.
         call domain%increment_output_time()
@@ -514,9 +377,7 @@ contains
         integer :: i, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, var_indx, idx
         logical :: var_val_check
         character(len=kMAX_NAME_LENGTH) :: err_msg
-#ifdef _OPENACC
         integer :: ii, jj, kk, nz_v
-#endif
 
         n_3d = 1
         ! Do MPI_Win_Wait on forcing_win. This is mostly unnecesarry, since the server process is what will be waiting on us, which is handeled by the MPI_Win_Start call
@@ -546,36 +407,24 @@ contains
 
             i_s_w = this%i_s_w; i_e_w = this%i_e_w
             j_s_w = this%j_s_w; j_e_w = this%j_e_w
-
-#ifdef _OPENACC
-            ! GPU path: pack on device
             var = domain%vars_3d(idx)
-            i_e_w = i_e_w+var%xstag
-            j_e_w = j_e_w+var%ystag
-            nx = i_e_w - i_s_w + 1
-            ny = j_e_w - j_s_w + 1
-            nz_v = var%dim_len(2)
-            !$acc parallel loop gang vector collapse(3) present(this%forcing_buffer, domain%vars_3d(idx)%data_3d)
-            do jj = 1, ny
-              do kk = 1, nz_v
-                do ii = 1, nx
-                  this%forcing_buffer(n_3d, ii, kk, jj) = domain%vars_3d(idx)%data_3d(i_s_w+ii-1, kk, j_s_w+jj-1)
-                enddo
-              enddo
-            enddo
-#else
-            ! CPU path: update host then copy (unchanged)
-            !$acc update host(domain%vars_3d(idx)%data_3d)
-            var = domain%vars_3d(idx)
-
             i_e_w = i_e_w+var%xstag !Add extra to accomodate staggered vars
             j_e_w = j_e_w+var%ystag !Add extra to accomodate staggered vars
             nx = i_e_w - i_s_w + 1
             ny = j_e_w - j_s_w + 1
 
-            this%forcing_buffer(n_3d,1:nx,1:var%dim_len(2),1:ny) = &
-                var%data_3d(i_s_w:i_e_w,1:var%dim_len(2),j_s_w:j_e_w)
-#endif
+            nz_v = var%dim_len(2)
+            associate(src => domain%vars_3d(idx)%data_3d, dst => this%forcing_buffer)
+            !$acc parallel loop gang vector collapse(3) present(dst, src)
+            do jj = 1, ny
+              do kk = 1, nz_v
+                do ii = 1, nx
+                  dst(n_3d, ii, kk, jj) = src(i_s_w+ii-1, kk, j_s_w+jj-1)
+                enddo
+              enddo
+            enddo
+            end associate
+
             if (var_val_check) then
                 err_msg = 'Warning on ioclient_obj::update_nest: Nest level: '// str(domain%nest_indx)
                 call check_var(var, trim(err_msg))
@@ -584,9 +433,8 @@ contains
             n_3d = n_3d+1
         enddo
 
-#ifdef _OPENACC
         !$acc wait
-#endif
+        !$acc update host(this%forcing_buffer)
 
         this%nest_updated = .True.
         ! Do MPI_Win_Post on forcing_win to inform that server process can begin gathering of nest data
@@ -611,11 +459,6 @@ contains
         n = 1
         ! Do MPI_Win_Wait on read_buffer to make sure that server process has completed data transfer
         call smart_wait(this%read_win, 'Waiting for read_win completion')
-
-#ifdef _OPENACC
-        ! GPU path: data arrived on device via MPI_Put; transfer to host for forcing processing
-        !$acc update host(this%read_buffer)
-#endif
 
         ! loop through the list of variables that need to be read in
         call forcing%variables%reset_iterator()
@@ -680,11 +523,6 @@ contains
         call MPI_Win_fence(0,this%write_win_3d)
         call MPI_Win_fence(0,this%write_win_2d)
 
-#ifdef _OPENACC
-        ! GPU path: data arrived on device write_buffer, transfer to host for processing
-        !$acc update host(this%write_buffer_3d, this%write_buffer_2d)
-#endif
-
         n_3d = 1
         n_2d = 1
         
@@ -742,9 +580,8 @@ contains
         ! to find the "blocks" which are needed to output
         this%write_buffer_2d = kEMPT_BUFF
         this%write_buffer_3d = kEMPT_BUFF
-#ifdef _OPENACC
+
         !$acc update device(this%write_buffer_2d, this%write_buffer_3d)
-#endif
 
     end subroutine 
 
@@ -761,31 +598,24 @@ contains
         type(MPI_Win), intent(in) :: window
         character(len=*), intent(in) :: err_msg
 
-        integer :: wait_count, ierr, global_rank
+        integer :: ierr
         logical :: flag
-        
-        wait_count = 0
+        double precision :: t_start, t_elapsed
+
         flag = .False.
+        t_start = MPI_Wtime()
 
         call MPI_Win_Test(window, flag, ierr)
         do while (.not.(flag))
-            
-            ! Check if we've waited too long
-            wait_count = wait_count + 1
 
-            if (wait_count > 600.0) then
-                ! write_flag = .True.
+            t_elapsed = MPI_Wtime() - t_start
+            if (t_elapsed > 600.0d0) then
                 if (STD_OUT_PE) write(*,*) err_msg
                 if (STD_OUT_PE) flush(output_unit)
-
                 stop
             endif
-            
-            ! Small sleep to avoid busy waiting
-            call sleep(1)
 
             call MPI_Win_Test(window, flag, ierr)
-
             if (ierr /= 0) write(*,*) "MPI_Win_Test returned error: ",ierr
         end do
     end subroutine

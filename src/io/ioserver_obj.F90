@@ -16,7 +16,7 @@ submodule(ioserver_interface) ioserver_implementation
   use debug_module,             only : check_ncdf
   use iso_fortran_env
   use iso_c_binding
-  use output_metadata,          only : get_varindx, get_varmeta
+  use output_metadata,          only : get_varindx
   use meta_data_interface,      only : meta_data_t
   use time_object,              only : Time_type
   use string,                   only : split_str, as_string
@@ -543,9 +543,6 @@ contains
         type(c_ptr) :: tmp_ptr
         integer(KIND=MPI_ADDRESS_KIND) :: win_size
         integer :: ierr, real_size, n, size_out
-#ifdef _OPENACC
-        type(MPI_Info) :: info_gpu
-#endif
 
         CALL MPI_Type_size(MPI_REAL, real_size)
 
@@ -584,45 +581,7 @@ contains
         allocate(this%read_buffer(this%n_children))
         allocate(this%child_gather_buffers(this%n_children))
 
-#ifdef _OPENACC
-        ! GPU path: server exposes no memory, uses MPI_Get/Put to access client device buffers
-        call MPI_Info_create(info_gpu, ierr)
-        call MPI_Info_set(info_gpu, "alloc_shm", ".true.", ierr)
-        call MPI_Info_set(info_gpu, "alloc_mem", "device", ierr)
-        call MPI_Info_set(info_gpu, "mpi_assert_memory_alloc_kinds", "gpu:device", ierr)
-        call MPI_Info_set(info_gpu, "cuda_aware", ".true.", ierr)
-
-        ! write_win_3d, write_win_2d: server fetches FROM clients
-        call MPI_WIN_CREATE(MPI_BOTTOM, 0_MPI_ADDRESS_KIND, real_size, &
-                            info_gpu, this%client_comms, this%write_win_3d, ierr)
-        call MPI_WIN_CREATE(MPI_BOTTOM, 0_MPI_ADDRESS_KIND, real_size, &
-                            info_gpu, this%client_comms, this%write_win_2d, ierr)
-        ! Allocate local host receive buffers per child
-        do n = 1, this%n_children
-            allocate(this%write_buffer_3d(n)%buff(this%n_w_3d, this%nx_re, this%nz_w, this%ny_re))
-            allocate(this%write_buffer_2d(n)%buff(this%n_w_2d, this%nx_re, this%ny_re))
-        enddo
-
-        ! read_win: server puts TO clients
-        call MPI_WIN_CREATE(MPI_BOTTOM, 0_MPI_ADDRESS_KIND, real_size, &
-                            info_gpu, this%client_comms, this%read_win, ierr)
-        ! Allocate local host staging buffers per child
-        do n = 1, this%n_children
-            allocate(this%read_buffer(n)%buff(this%n_r, this%nx_r, this%nz_r, this%ny_r))
-        enddo
-
-        ! nest_win: server fetches FROM clients (nest forcing)
-        if (this%n_f > 0) then
-            call MPI_WIN_CREATE(MPI_BOTTOM, 0_MPI_ADDRESS_KIND, real_size, &
-                                info_gpu, this%client_comms, this%nest_win, ierr)
-            do n = 1, this%n_children
-                allocate(this%child_gather_buffers(n)%buff(this%n_f, this%nx_w, this%nz_w, this%ny_w))
-            enddo
-        endif
-
-        call MPI_Info_free(info_gpu, ierr)
-#else
-        ! CPU path: shared memory windows (unchanged)
+        ! Shared memory windows — server reads client buffers directly
         win_size = this%n_w_3d*this%nx_re*this%nz_w*this%ny_re
         call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_3d)
         do n = 1,this%n_children
@@ -652,7 +611,6 @@ contains
             call MPI_WIN_SHARED_QUERY(this%read_win, (n-1), win_size, size_out, tmp_ptr)
             call C_F_POINTER(tmp_ptr, this%read_buffer(n)%buff, [this%n_r, this%nx_r, this%nz_r, this%ny_r])
         enddo
-#endif
     
     end subroutine setup_MPI_windows
 
@@ -800,9 +758,6 @@ contains
         integer :: n, n_3d, n_2d, x_stag, y_stag, oi
         logical :: should_write_restart
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-#ifdef _OPENACC
-        integer :: buf_size_3d, buf_size_2d, get_n_3d, get_n_2d
-#endif
         msg_size = 1
         disp = 0
 
@@ -818,70 +773,7 @@ contains
         call MPI_Win_Start(this%children_group,0,this%write_win_3d)
         call MPI_Win_Start(this%children_group,0,this%write_win_2d)
 
-#ifdef _OPENACC
-        ! GPU path: explicit MPI_Get from client device buffers
-        ! Change 2: partial Get on non-restart steps
-        if (should_write_restart .or. this%first_write) then
-            get_n_3d = this%n_w_3d
-            get_n_2d = this%n_w_2d
-        else
-            get_n_3d = this%n_out_3d
-            get_n_2d = this%n_out_2d
-        endif
-
-        buf_size_3d = get_n_3d * this%nx_re * this%nz_w * this%ny_re
-        buf_size_2d = get_n_2d * this%nx_re * this%ny_re
-        do i = 1, this%n_children
-            call MPI_Get(this%write_buffer_3d(i)%buff, buf_size_3d, MPI_REAL, &
-                         this%children_ranks(i), 0_MPI_ADDRESS_KIND, &
-                         buf_size_3d, MPI_REAL, this%write_win_3d, ierr)
-            call MPI_Get(this%write_buffer_2d(i)%buff, buf_size_2d, MPI_REAL, &
-                         this%children_ranks(i), 0_MPI_ADDRESS_KIND, &
-                         buf_size_2d, MPI_REAL, this%write_win_2d, ierr)
-        enddo
-
-        call MPI_Win_Complete(this%write_win_3d)
-        call MPI_Win_Complete(this%write_win_2d)
-
-        ! Two-pass unpack from recv buffers into outputer
-        ! Pass 1: output variables (buffer positions 1..n_out_3d / 1..n_out_2d)
-        do i = 1, this%n_children
-            n_3d = 0; n_2d = 0
-            do oi = 1, size(this%out_ordered_indices)
-                n = this%out_ordered_indices(oi)
-                x_stag = this%outputer%var_meta(n)%xstag
-                y_stag = this%outputer%var_meta(n)%ystag
-                if (this%outputer%var_meta(n)%three_d) then
-                    n_3d = n_3d + 1
-                    this%outputer%variables(n)%data_3d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),:,(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
-                        this%write_buffer_3d(i)%buff(n_3d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:this%outputer%var_meta(n)%dim_len(2),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
-                else if (this%outputer%var_meta(n)%two_d) then
-                    n_2d = n_2d + 1
-                    this%outputer%variables(n)%data_2d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
-                        this%write_buffer_2d(i)%buff(n_2d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
-                endif
-            enddo
-
-            ! Pass 2: restart-only variables (only if restart step or first write)
-            if (should_write_restart .or. this%first_write) then
-                do oi = 1, size(this%rst_only_ordered_indices)
-                    n = this%rst_only_ordered_indices(oi)
-                    x_stag = this%outputer%var_meta(n)%xstag
-                    y_stag = this%outputer%var_meta(n)%ystag
-                    if (this%outputer%var_meta(n)%three_d) then
-                        n_3d = n_3d + 1
-                        this%outputer%variables(n)%data_3d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),:,(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
-                            this%write_buffer_3d(i)%buff(n_3d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:this%outputer%var_meta(n)%dim_len(2),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
-                    else if (this%outputer%var_meta(n)%two_d) then
-                        n_2d = n_2d + 1
-                        this%outputer%variables(n)%data_2d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
-                            this%write_buffer_2d(i)%buff(n_2d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
-                    endif
-                enddo
-            endif
-        enddo
-#else
-        ! CPU path: direct shared-memory reads with two-pass unpack
+        ! Direct shared-memory reads with two-pass unpack
         ! Pass 1: output variables
         do i=1,this%n_children
             n_3d = 0; n_2d = 0
@@ -921,7 +813,6 @@ contains
         ! Do MPI_Win_Complete on write_win to end get
         call MPI_Win_Complete(this%write_win_3d)
         call MPI_Win_Complete(this%write_win_2d)
-#endif
         if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",this%nest_indx," --------------"
         if (STD_OUT_PE_IO) write(*,*) "Done data from child images for output"
         if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",this%nest_indx," --------------"
@@ -978,11 +869,8 @@ contains
     module subroutine gather_forcing(this)
         class(ioserver_t), intent(inout) :: this
 
-        integer :: i, msg_size, ierr
+        integer :: i, msg_size
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-#ifdef _OPENACC
-        integer :: buf_size
-#endif
 
         msg_size = 1
         disp = 0
@@ -995,24 +883,7 @@ contains
         ! Do MPI_Win_Start on nest_win to initiate get
         call MPI_Win_Start(this%children_group,0,this%nest_win)
 
-#ifdef _OPENACC
-        ! GPU path: MPI_Get from clients' device forcing_buffers
-        buf_size = this%n_f * this%nx_w * this%nz_w * this%ny_w
-        do i = 1, this%n_children
-            call MPI_Get(this%child_gather_buffers(i)%buff, buf_size, MPI_REAL, &
-                         this%children_ranks(i), 0_MPI_ADDRESS_KIND, &
-                         buf_size, MPI_REAL, this%nest_win, ierr)
-        enddo
-        call MPI_Win_Complete(this%nest_win)
-
-        ! Copy from local child_gather_buffers into gather_buffer
-        do i = 1, this%n_children
-            this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,this%k_s_w:this%k_e_f,this%jswc(i):this%jewc(i)+1) = &
-                this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+2),this%k_s_w:this%k_e_f,1:(this%jewc(i)-this%jswc(i)+2))
-        enddo
-#else
-        ! CPU path: direct shared-memory reads (unchanged)
-        ! Loop through child images and get chunks of buffer array from each one
+        ! Direct shared-memory reads from child forcing buffers
         do i=1,this%n_children
             this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,this%k_s_w:this%k_e_f,this%jswc(i):this%jewc(i)+1) = &
                 this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+2),this%k_s_w:this%k_e_f,1:(this%jewc(i)-this%jswc(i)+2))
@@ -1020,7 +891,6 @@ contains
 
         ! Do MPI_Win_Complete on nest_win to end get
         call MPI_Win_Complete(this%nest_win)
-#endif
 
     end subroutine gather_forcing
 
@@ -1081,12 +951,9 @@ contains
     module subroutine scatter_forcing(this)
         class(ioserver_t), intent(inout) :: this
 
-        integer :: i, msg_size, p, ierr, nx, ny
+        integer :: i, msg_size, p
         real :: vmax, vmin
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-#ifdef _OPENACC
-        integer :: buf_size
-#endif
 
         msg_size = 1
         disp = 0
@@ -1094,26 +961,11 @@ contains
         ! Do MPI_Win_Start on read_win to initiate put
         call MPI_Win_Start(this%children_group,0,this%read_win)
 
-#ifdef _OPENACC
-        ! GPU path: pack into local staging buffer, then MPI_Put to client's device read_buffer
-        do i = 1, this%n_children
-            nx = (this%ierc(i)-this%isrc(i)+1)+1
-            ny = (this%jerc(i)-this%jsrc(i)+1)+1
-            this%read_buffer(i)%buff(:, 1:nx, :, 1:ny) = &
-                this%forcing_buffer(:, this%isrc(i):this%ierc(i)+1, :, this%jsrc(i):this%jerc(i)+1)
-            buf_size = this%n_r * this%nx_r * this%nz_r * this%ny_r
-            call MPI_Put(this%read_buffer(i)%buff, buf_size, MPI_REAL, &
-                         this%children_ranks(i), 0_MPI_ADDRESS_KIND, &
-                         buf_size, MPI_REAL, this%read_win, ierr)
-        enddo
-#else
-        ! CPU path: direct shared-memory copy (unchanged)
-        ! Loop through child images and send chunks of buffer array to each one
+        ! Direct shared-memory copy to child read buffers
         do i=1,this%n_children
             this%read_buffer(i)%buff(:,1:(this%ierc(i)-this%isrc(i)+1)+1,:,1:(this%jerc(i)-this%jsrc(i)+1)+1) = &
                 this%forcing_buffer(:,this%isrc(i):this%ierc(i)+1,:,this%jsrc(i):this%jerc(i)+1)
         enddo
-#endif
 
         ! Do MPI_Win_Complete on read_win to end put
         call MPI_Win_Complete(this%read_win)
