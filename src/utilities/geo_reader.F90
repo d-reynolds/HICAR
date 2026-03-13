@@ -1030,6 +1030,8 @@ contains
         ! use the geographic lookup table generated earlier to
         ! compute a bilinear interpolation from lo to hi
         ! if we are doing the interior too, just iterate over all x and y
+            !$acc data present_or_copyin(fieldin, geolut%x, geolut%y, geolut%w) present_or_copy(fieldout)
+            !$acc parallel loop gang vector collapse(3) private(l, localx, localy, localw, local_center)
             do k=kms,kme
                 do j=jms,jme
                     do i=ims,ime
@@ -1062,6 +1064,7 @@ contains
                     enddo
                 enddo
             enddo
+            !$acc end data
         endif
     end subroutine geo_interp
 
@@ -1090,6 +1093,8 @@ contains
 
         ! use the geographic lookup table generated earlier to
         ! compute a bilinear interpolation from lo to hi
+        !$acc data present_or_copyin(fieldin, geolut%x, geolut%y, geolut%w) present_or_copy(fieldout)
+        !$acc parallel loop gang vector collapse(2) private(l, localx, localy, localw, local_center)
         do k = jms, jme
             do i = ims, ime
                 fieldout(i,k)=0
@@ -1119,6 +1124,7 @@ contains
                 ! enddo
             enddo
         enddo
+        !$acc end data
 
     end subroutine
 

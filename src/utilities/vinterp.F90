@@ -301,6 +301,8 @@ contains
             ny=size(hi,3)
             ims = lbound(vlut%z,2)-1
             jms = lbound(vlut%z,4)-1
+            !$acc data present_or_copyin(lo, vlut%z, vlut%w) present_or_copy(hi)
+            !$acc parallel loop gang vector collapse(3)
             do j=1,ny
                 do k=1,nz
                     do i=1,nx
@@ -308,6 +310,7 @@ contains
                     enddo
                 enddo
             enddo
+            !$acc end data
 
         elseif (zaxis==3) then
             ! Wind arrays often have different x and y dimensions from the mass grid
@@ -319,6 +322,8 @@ contains
             ims = lbound(vlut%z,2)-1
             jms = lbound(vlut%z,4)-1
             
+            !$acc data present_or_copyin(lo, vlut%z, vlut%w) present_or_copy(hi)
+            !$acc parallel loop gang vector collapse(3)
             do j=1,nz
                 do k=1,ny
                     do i=1,nx
@@ -326,6 +331,7 @@ contains
                     enddo
                 enddo
             enddo
+            !$acc end data
         else
             write(*,*) "Vertical interpolation over the first axis not supported yet"
             write(*,*) "  if needed, update vinterp.f90"

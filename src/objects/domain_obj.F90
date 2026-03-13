@@ -2796,7 +2796,18 @@ contains
             call vLUT(this%geo_agl,   forcing%geo_agl)
             call vLUT(this%geo_u, forcing%geo_u)
             call vLUT(this%geo_v, forcing%geo_v)
-                        
+
+            ! Enter LUT and z data on device for GPU-accelerated forcing interpolation
+            !$acc enter data copyin(forcing%geo%geolut%x, forcing%geo%geolut%y, forcing%geo%geolut%w)
+            !$acc enter data copyin(forcing%geo_u%geolut%x, forcing%geo_u%geolut%y, forcing%geo_u%geolut%w)
+            !$acc enter data copyin(forcing%geo_v%geolut%x, forcing%geo_v%geolut%y, forcing%geo_v%geolut%w)
+            !$acc enter data copyin(forcing%geo%vert_lut%z, forcing%geo%vert_lut%w)
+            !$acc enter data copyin(forcing%geo_agl%vert_lut%z, forcing%geo_agl%vert_lut%w)
+            !$acc enter data copyin(forcing%geo_u%vert_lut%z, forcing%geo_u%vert_lut%w)
+            !$acc enter data copyin(forcing%geo_v%vert_lut%z, forcing%geo_v%vert_lut%w)
+            !$acc enter data copyin(forcing%geo%z)
+            !$acc enter data copyin(this%geo%z)
+
             ! check that the forcing z is higher than the domain z
             ! if ( maxval(forcing%z) < maxval(this%geo%z) ) then
             !     write(*,*) "ERROR: Forcing or parent-nest z is lower than domain z."
@@ -3198,7 +3209,7 @@ contains
         type(variable_t) :: input_data
 
         ! number of layers has to be used when subsetting for update_pressure (for now)
-        integer :: nz, p, var_indx, pressure_indx, pot_temp_indx, i, j, k
+        integer :: nz, p, var_indx, pressure_indx, pot_temp_indx, i, j, k, dict_indx
         logical :: var_is_u, var_is_v, var_is_pressure, var_is_potential_temp, agl_interp, force_boundaries
 
         update_only = .False.
@@ -3213,24 +3224,21 @@ contains
             var_to_interpolate = get_varmeta(var_indx, force_boundaries=force_boundaries)
 
             ! get the associated forcing data
-            input_data = forcing%variables%get_var(var_indx)
+            input_data = forcing%variables%get_var(var_indx, indx=dict_indx)
             ! interpolate
             if (input_data%two_d) then
                 associate(var     => this%vars_2d(this%var_indx(var_indx)%v), forcing_hi => this%forcing_hi(p) )
                 if (update_only) then
-                    call geo_interp2d(forcing_hi%dqdt_2d, input_data%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(forcing_hi%dqdt_2d, forcing%variables%var_list(dict_indx)%var%data_2d, forcing%geo%geolut)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    !$acc update device(forcing_hi%dqdt_2d)
                      if (.not.(force_boundaries)) then
                     !$acc kernels present(forcing_hi%dqdt_2d, var%dqdt_2d)
                     var%dqdt_2d = forcing_hi%dqdt_2d
                     !$acc end kernels
                     endif
                 else
-                    call geo_interp2d(forcing_hi%data_2d, input_data%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(forcing_hi%data_2d, forcing%variables%var_list(dict_indx)%var%data_2d, forcing%geo%geolut)
                     !If this is an initialization step, copy high res directly over to domain
-
-                    !$acc update device(forcing_hi%data_2d)
                     !$acc kernels present(forcing_hi%data_2d, var%data_2d)
                     var%data_2d = forcing_hi%data_2d
                     !$acc end kernels
@@ -3250,10 +3258,9 @@ contains
 
                 ! if just updating, use the dqdt variable otherwise use the 3D variable
                 if (update_only) then
-                    call interpolate_variable(forcing_hi%dqdt_3d, input_data, forcing, this, &
+                    call interpolate_variable(forcing_hi%dqdt_3d, forcing%variables%var_list(dict_indx)%var, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind tendencies
-                    !$acc update device(forcing_hi%dqdt_3d)
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
                         call smooth_array(forcing_hi, windowsize=1, ydim=3, &
                                           nsmooths=this%nsmooth, halo=this%halo, do_dqdt=.true.)
@@ -3265,9 +3272,8 @@ contains
                         !$acc end kernels
                     endif
                 else
-                    call interpolate_variable(forcing_hi%data_3d, input_data, forcing, this, &
+                    call interpolate_variable(forcing_hi%data_3d, forcing%variables%var_list(dict_indx)%var, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
-                    !$acc update device(forcing_hi%data_3d)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind fields
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
                         call smooth_array(forcing_hi, windowsize=1, ydim=3, &
@@ -3282,7 +3288,6 @@ contains
                 if (var_is_pressure) pressure_indx = p
                 if (var_is_potential_temp) pot_temp_indx = p
             endif
-            call forcing%variables%add_var(var_indx, input_data)
         enddo
 
         !Adjust potential temperature (first) and pressure (second) to account for points below forcing grid
@@ -3295,7 +3300,6 @@ contains
                    ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, kms => this%kms, kme => this%kme )
         if (update_only) then
             call adjust_pressure_temp(forcing_pressure%dqdt_3d,forcing_pot_temp%dqdt_3d, forcing%geo%z, this%geo%z)
-            !$acc update device(forcing_pressure%dqdt_3d,forcing_pot_temp%dqdt_3d)
             !$acc parallel loop gang vector collapse(3) &
             !$acc present(forcing_pressure%dqdt_3d, forcing_pot_temp%dqdt_3d, pressure%dqdt_3d, pot_temp%dqdt_3d, &
             !$acc          jms, jme, kms, kme, ims, ime)
@@ -3309,7 +3313,6 @@ contains
             enddo
         else
             call adjust_pressure_temp(forcing_pressure%data_3d,forcing_pot_temp%data_3d, forcing%geo%z, this%geo%z)
-            !$acc update device(forcing_pressure%data_3d,forcing_pot_temp%data_3d)
             !$acc parallel loop gang vector collapse(3) &
             !$acc present(forcing_pressure%data_3d, forcing_pot_temp%data_3d, pressure%data_3d, pot_temp%data_3d, &
             !$acc          jms, jme, kms, kme, ims, ime)
@@ -3348,6 +3351,8 @@ contains
         nz = size(potential_temp, 2)
         ny = size(potential_temp, 3)
 
+        !$acc data present_or_copy(pressure, potential_temp) present_or_copyin(input_z, output_z)
+        !$acc parallel loop gang vector collapse(3) private(dz, p_guess)
         do j = 1, ny
             do i = 1, nx
                 do k = 1, nz
@@ -3366,12 +3371,11 @@ contains
                         !estimate pressure difference 1100 Pa for each 100m difference for exner function
                         pressure(i,k,j) = pressure(i,k,j) * exp( ((gravity/R_d) * dz) / &
                                                     (potential_temp(i,k,j) * exner_function(p_guess)))
-                    else
-                        exit
                     endif
                 end do
             enddo
         enddo
+        !$acc end data
 
 
     end subroutine adjust_pressure_temp
@@ -3442,7 +3446,7 @@ contains
     !! -------------------------------
     subroutine interpolate_variable(var_data, input_data, forcing, dom, interpolate_agl_in, var_is_u, var_is_v, nsmooth)
         implicit none
-        real,  allocatable, intent(inout) :: var_data(:,:,:)
+        real,  allocatable, intent(in) :: var_data(:,:,:)
         type(variable_t),   intent(inout) :: input_data
         type(boundary_t),   intent(in)    :: forcing
         type(domain_t),     intent(in)    :: dom
@@ -3473,6 +3477,7 @@ contains
 
         ! allocate a temporary variable to hold the horizontally interpolated data before vertical interpolation
         allocate(temp_3d(ims:ime, size(input_data%data_3d,2), jms:jme ))
+        !$acc enter data create(temp_3d)
 
         ! Sequence of if statements to test if this variable needs to be interpolated onto the staggared grids
         ! This could all be combined by passing in the geo data to use, along with a smoothing flag.
@@ -3506,7 +3511,10 @@ contains
             
             call vinterp(var_data, temp_3d, forcing%geo_v%vert_lut)
         endif
-        
+
+        !$acc exit data delete(temp_3d)
+        deallocate(temp_3d)
+
     end subroutine
 
 

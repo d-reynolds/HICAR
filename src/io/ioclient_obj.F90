@@ -451,6 +451,7 @@ contains
         type(boundary_t), intent(inout)  :: forcing
         type(domain_t),   intent(inout)  :: domain
 
+        integer :: ii, jj, kk, nz_v
         type(variable_t)     :: var
         integer :: i, n, nx, ny, var_id
         logical :: var_val_check
@@ -460,45 +461,56 @@ contains
         ! Do MPI_Win_Wait on read_buffer to make sure that server process has completed data transfer
         call smart_wait(this%read_win, 'Waiting for read_win completion')
 
-        ! loop through the list of variables that need to be read in
-        call forcing%variables%reset_iterator()
-        
-        !If the parent I/O server has not yet written all of our input vars, wait
+        !$acc update device(this%read_buffer)
 
-        do while (forcing%variables%has_more_elements())
-            ! get the next variable in the structure
-            var = forcing%variables%next(var_id)
-            var_val_check = (var%maxval /= kUNSET_REAL .and. var%minval /= kUNSET_REAL)
-            if (var%computed) then
-                cycle
-            else
-                if (var%two_d) then
-                    nx = size(var%data_2d,1)
-                    ny = size(var%data_2d,2)
-                    if (var%dtype == kREAL) then
-                        var%data_2d = this%read_buffer(n,1:nx,1,1:ny)
-                    ! elseif (var%dtype == kDOUBLE) then
-                    !     var%data_2dd = dble(this%read_buffer(n,1:nx,1,1:ny))
-                    endif
-                else
-                    nx = size(var%data_3d,1)
-                    ny = size(var%data_3d,3)
+        do i = 1, forcing%variables%n_vars
+            write(*,*) "for forcing variable: ",forcing%variables%var_list(i)%var%id
+            if (forcing%variables%var_list(i)%var%computed) cycle
+            var_val_check = (forcing%variables%var_list(i)%var%maxval /= kUNSET_REAL .and. forcing%variables%var_list(i)%var%minval /= kUNSET_REAL)
+            if (forcing%variables%var_list(i)%var%two_d .and. &
+                forcing%variables%var_list(i)%var%dtype == kREAL) then
+                nx = size(forcing%variables%var_list(i)%var%data_2d, 1)
+                ny = size(forcing%variables%var_list(i)%var%data_2d, 2)
+                write(*,*) "updating forcing variable: ",forcing%variables%var_list(i)%var%id
 
-                    var%data_3d(:,1:var%dim_len(2),:) = this%read_buffer(n,1:nx,1:var%dim_len(2),1:ny)
-                endif
+                associate(dst => forcing%variables%var_list(i)%var%data_2d, &
+                          src => this%read_buffer)
+                !$acc parallel loop gang vector collapse(2) present(dst, src)
+                do jj = 1, ny
+                    do ii = 1, nx
+                        dst(ii, jj) = src(n, ii, 1, jj)
+                    enddo
+                enddo
+                end associate
+            else if (forcing%variables%var_list(i)%var%three_d) then
+                nx = size(forcing%variables%var_list(i)%var%data_3d, 1)
+                ny = size(forcing%variables%var_list(i)%var%data_3d, 3)
+                nz_v = forcing%variables%var_list(i)%var%dim_len(2)
 
-                if (var_val_check) then
-                    err_msg = 'Warning on ioclient_obj::receive: Nest level: '// str(domain%nest_indx)
-                    call check_var(var, trim(err_msg))
-                endif
-                n = n+1
+                write(*,*) "updating forcing variable: ",forcing%variables%var_list(i)%var%id
+
+                associate(dst => forcing%variables%var_list(i)%var%data_3d, &
+                          src => this%read_buffer)
+                !$acc parallel loop gang vector collapse(3) present(dst, src)
+                do jj = 1, ny
+                    do kk = 1, nz_v
+                        do ii = 1, nx
+                            dst(ii, kk, jj) = src(n, ii, kk, jj)
+                        enddo
+                    enddo
+                enddo
+                end associate
             endif
-            call forcing%variables%add_var(var_id, var)
+            if (var_val_check) then
+                err_msg = 'Warning on ioclient_obj::receive: Nest level: '// str(domain%nest_indx)
+                call check_var(forcing%variables%var_list(i)%var, trim(err_msg))
+            endif
+
+            n = n + 1
         enddo
-    
+        !$acc wait
         ! Do MPI_Win_Post on read_buffer to indicate that we are open for delivery of new input data
         call MPI_Win_Post(this%parent_group,0,this%read_win)
-        ! call domain%increment_input_time()
 
 
     end subroutine 

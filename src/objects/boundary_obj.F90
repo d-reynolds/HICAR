@@ -807,12 +807,22 @@ contains
         integer           :: err
         type(variable_t)  :: var, pvar, tvar, pbvar, input_z
 
-        integer :: nx,ny,nz, var_id
+        integer :: nx,ny,nz, var_id, i
         real, allocatable :: temp_z(:,:,:)
         real :: neg_z
         logical :: z_is_computed = .False.
 
         associate(list => this%variables)
+
+        ! Sync forcing data from device to host.
+        ! After receive(), device data is current but host copies are stale.
+        do i = 1, this%variables%n_vars
+            if (this%variables%var_list(i)%var%two_d) then
+                !$acc update self(this%variables%var_list(i)%var%data_2d)
+            else if (this%variables%var_list(i)%var%three_d) then
+                !$acc update self(this%variables%var_list(i)%var%data_3d)
+            endif
+        enddo
 
         !Add base pressure to pressure, if provided
         pbvar = list%get_var(kVARS%pressure_base, err)
