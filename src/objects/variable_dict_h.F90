@@ -51,6 +51,7 @@ module variable_dict_interface
         procedure :: has_more_elements  ! test if there are more elements to iterate over still
         procedure :: next               ! continue iterating through array elements
         procedure :: get_var            ! get a variable for a given key
+        procedure :: get_var_idx       ! get index of a variable for direct in-place access
         procedure :: add_var            ! store a variable with a given key
         procedure :: sort_by_kVARS
 
@@ -107,6 +108,14 @@ interface
         integer,             intent(in) :: in_id
         integer,             intent(out),   optional :: err, indx
         type(variable_t)                :: var_data
+    end function
+
+    module function get_var_idx(this, in_id, err) result(idx)
+        implicit none
+        class(var_dict_t), intent(in) :: this
+        integer,           intent(in) :: in_id
+        integer,           intent(out), optional :: err
+        integer :: idx
     end function
 
     module subroutine add_var(this, in_id, var_data, save_state, err)

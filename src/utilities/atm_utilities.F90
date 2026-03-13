@@ -122,21 +122,33 @@ contains
         real, intent(in),            dimension(:,:,:)   :: qv  ! water vapor mixing ratio
         real, intent(in),  optional, dimension(:,:)     :: zs  ! if present, this is the height above z that the first level is computed for.
 
-        integer :: i
+        integer :: i, j, k, nx, nz, ny
 
-        i=1
-        call compute_z_offset(z(:,i,:), p(:,i,:) / ps, t(:,i,:), qv(:,i,:))
+        nx = size(z,1); nz = size(z,2); ny = size(z,3)
 
         if (present(zs)) then
-            z(:,i,:) = zs - z(:,i,:)
+            !$acc parallel loop gang vector collapse(2) present(p, ps, z, t, qv, zs)
+            do j = 1, ny
+                do i = 1, nx
+                    z(i,1,j) = zs(i,j) - R_d/gravity * (t(i,1,j)*(1+0.608*qv(i,1,j))) * LOG(p(i,1,j)/ps(i,j))
+                    do k = 2, nz
+                        z(i,k,j) = z(i,k-1,j) - R_d/gravity * ((t(i,k,j)+t(i,k-1,j))/2 * (1+0.608*(qv(i,k,j)+qv(i,k-1,j))/2)) * LOG(p(i,k,j)/p(i,k-1,j))
+                    enddo
+                enddo
+            enddo
+            !$acc end parallel loop
         else
-            z(:,i,:) = 0 - z(:,i,:)
+            !$acc parallel loop gang vector collapse(2) present(p, ps, z, t, qv)
+            do j = 1, ny
+                do i = 1, nx
+                    z(i,1,j) = 0 - R_d/gravity * (t(i,1,j)*(1+0.608*qv(i,1,j))) * LOG(p(i,1,j)/ps(i,j))
+                    do k = 2, nz
+                        z(i,k,j) = z(i,k-1,j) - R_d/gravity * ((t(i,k,j)+t(i,k-1,j))/2 * (1+0.608*(qv(i,k,j)+qv(i,k-1,j))/2)) * LOG(p(i,k,j)/p(i,k-1,j))
+                    enddo
+                enddo
+            enddo
+            !$acc end parallel loop
         endif
-
-        do i=2, size(z, 2)
-            call compute_z_offset(z(:,i,:), p(:,i,:) / p(:,i-1,:), (t(:,i,:)+t(:,i-1,:))/2, (qv(:,i,:)+qv(:,i-1,:))/2)
-            z(:,i,:) = z(:,i-1,:) - z(:,i,:)
-        enddo
 
     end subroutine
 
@@ -192,18 +204,33 @@ contains
         real, intent(in)           , dimension(:,:,:)   :: qv  ! water vapor mixing ratio
         real, intent(in),  optional, dimension(:,:)     :: zs  ! if present, this is the height above z that the first level is computed for.
 
-        integer :: i
+        integer :: i, j, k, nx, nz, ny
 
-        i=1
+        nx = size(p,1); nz = size(p,2); ny = size(p,3)
+
         if (present(zs)) then
-            call compute_p_offset(p(:,i,:), ps, z(:,i,:)-zs, t(:,i,:), qv(:,i,:))
+            !$acc parallel loop gang vector collapse(2) present(p, ps, z, t, qv, zs)
+            do j = 1, ny
+                do i = 1, nx
+                    p(i,1,j) = ps(i,j) * exp(-(z(i,1,j)-zs(i,j)) / (R_d/gravity * (t(i,1,j)*(1+0.608*qv(i,1,j)))))
+                    do k = 2, nz
+                        p(i,k,j) = p(i,k-1,j) * exp(-(z(i,k,j)-z(i,k-1,j)) / (R_d/gravity * ((t(i,k,j)+t(i,k-1,j))/2 * (1+0.608*(qv(i,k,j)+qv(i,k-1,j))/2))))
+                    enddo
+                enddo
+            enddo
+            !$acc end parallel loop
         else
-            call compute_p_offset(p(:,i,:), ps, z(:,i,:), t(:,i,:), qv(:,i,:))
+            !$acc parallel loop gang vector collapse(2) present(p, ps, z, t, qv)
+            do j = 1, ny
+                do i = 1, nx
+                    p(i,1,j) = ps(i,j) * exp(-z(i,1,j) / (R_d/gravity * (t(i,1,j)*(1+0.608*qv(i,1,j)))))
+                    do k = 2, nz
+                        p(i,k,j) = p(i,k-1,j) * exp(-(z(i,k,j)-z(i,k-1,j)) / (R_d/gravity * ((t(i,k,j)+t(i,k-1,j))/2 * (1+0.608*(qv(i,k,j)+qv(i,k-1,j))/2))))
+                    enddo
+                enddo
+            enddo
+            !$acc end parallel loop
         endif
-
-        do i=2, size(p,2)
-            call compute_p_offset(p(:,i,:), p(:,i-1,:), z(:,i,:)-z(:,i-1,:), (t(:,i,:)+t(:,i-1,:))/2, (qv(:,i,:)+qv(:,i-1,:))/2)
-        enddo
 
     end subroutine
 
@@ -276,6 +303,7 @@ contains
     !!
     !!----------------------------------------------------------
     pure elemental function rh_to_mr(input_rh, t, p) result(mr)
+        !$acc routine seq
         implicit none
         real, intent(in) :: input_rh, t, p
         real :: mr
@@ -305,6 +333,7 @@ contains
     !!
     !!----------------------------------------------------------
     pure elemental function relative_humidity(t,qv,p)
+        !$acc routine seq
         implicit none
         real               :: relative_humidity
         real,   intent(in) :: t

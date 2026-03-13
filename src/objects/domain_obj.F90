@@ -3205,8 +3205,8 @@ contains
         logical :: update_only
         ! temporary to hold the variable to be interpolated to
         type(meta_data_t) :: var_to_interpolate
-        ! temporary to hold the forcing variable to be interpolated from
-        type(variable_t) :: input_data
+        ! index into forcing variable list for the variable to be interpolated from
+        integer :: input_idx
 
         ! number of layers has to be used when subsetting for update_pressure (for now)
         integer :: nz, p, var_indx, pressure_indx, pot_temp_indx, i, j, k, dict_indx
@@ -3223,13 +3223,14 @@ contains
 
             var_to_interpolate = get_varmeta(var_indx, force_boundaries=force_boundaries)
 
-            ! get the associated forcing data
-            input_data = forcing%variables%get_var(var_indx, indx=dict_indx)
+            
+            ! get the index of the associated forcing data (zero-copy)
+            input_idx = forcing%variables%get_var_idx(var_indx)
             ! interpolate
-            if (input_data%two_d) then
+            if (forcing%variables%var_list(input_idx)%var%two_d) then
                 associate(var     => this%vars_2d(this%var_indx(var_indx)%v), forcing_hi => this%forcing_hi(p) )
                 if (update_only) then
-                    call geo_interp2d(forcing_hi%dqdt_2d, forcing%variables%var_list(dict_indx)%var%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(forcing_hi%dqdt_2d, forcing%variables%var_list(input_idx)%var%data_2d, forcing%geo%geolut)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
                      if (.not.(force_boundaries)) then
                     !$acc kernels present(forcing_hi%dqdt_2d, var%dqdt_2d)
@@ -3237,7 +3238,7 @@ contains
                     !$acc end kernels
                     endif
                 else
-                    call geo_interp2d(forcing_hi%data_2d, forcing%variables%var_list(dict_indx)%var%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(forcing_hi%data_2d, forcing%variables%var_list(input_idx)%var%data_2d, forcing%geo%geolut)
                     !If this is an initialization step, copy high res directly over to domain
                     !$acc kernels present(forcing_hi%data_2d, var%data_2d)
                     var%data_2d = forcing_hi%data_2d
@@ -3245,10 +3246,10 @@ contains
                 endif
                 end associate
             else
-                var_is_pressure = (input_data%id == kVARS%pressure)
-                var_is_potential_temp = (input_data%id == kVARS%potential_temperature)
-                var_is_u = (input_data%id == kVARS%u)
-                var_is_v = (input_data%id == kVARS%v)
+                var_is_pressure = (forcing%variables%var_list(input_idx)%var%id == kVARS%pressure)
+                var_is_potential_temp = (forcing%variables%var_list(input_idx)%var%id == kVARS%potential_temperature)
+                var_is_u = (forcing%variables%var_list(input_idx)%var%id == kVARS%u)
+                var_is_v = (forcing%variables%var_list(input_idx)%var%id == kVARS%v)
                 !If we are dealing with anything but pressure and temperature (basically mass/number species), consider height above ground
                 !for interpolation. If the user has not selected AGL interpolation in the namelist, this will result in standard z-interpolation
                 agl_interp = .not.(var_is_pressure .or. var_is_potential_temp)
@@ -3258,7 +3259,7 @@ contains
 
                 ! if just updating, use the dqdt variable otherwise use the 3D variable
                 if (update_only) then
-                    call interpolate_variable(forcing_hi%dqdt_3d, forcing%variables%var_list(dict_indx)%var, forcing, this, &
+                    call interpolate_variable(forcing_hi%dqdt_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind tendencies
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
@@ -3272,7 +3273,7 @@ contains
                         !$acc end kernels
                     endif
                 else
-                    call interpolate_variable(forcing_hi%data_3d, forcing%variables%var_list(dict_indx)%var, forcing, this, &
+                    call interpolate_variable(forcing_hi%data_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind fields
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
@@ -3365,8 +3366,6 @@ contains
                                                 
                         !estimate pressure difference 1100 Pa for each 100m difference for exner function
                         p_guess = pressure(i,k,j) + 1100*dz/100.0
-                        !Assume lapse rate of -6.5ºC/1km
-                        potential_temp(i,k,j) = potential_temp(i,k,j) + 6.5*dz/1000.0
                         
                         !estimate pressure difference 1100 Pa for each 100m difference for exner function
                         pressure(i,k,j) = pressure(i,k,j) * exp( ((gravity/R_d) * dz) / &

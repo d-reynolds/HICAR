@@ -290,8 +290,12 @@ contains
             write(*,*) 'ERROR: qv dimension on forcing data is not spatially 1D or 3D'
             stop
         endif
-        if (allocated(this%z)) deallocate(this%z)
+        if (allocated(this%z)) then
+            !$acc exit data delete(this%z)
+            deallocate(this%z)
+        endif
         allocate(this%z((this%ite-this%its+1),nz,(this%jte-this%jts+1)))
+        !$acc enter data create(this%z)
 
         this%kts = 1
         this%kte = nz
@@ -442,9 +446,13 @@ contains
         this%kts = 1
         this%kte = parent_options%domain%nz
 
-        if (allocated(this%z)) deallocate(this%z)
+        if (allocated(this%z)) then
+            !$acc exit data delete(this%z)
+            deallocate(this%z)
+        endif
         allocate(this%z((this%ite-this%its+1),this%kte,(this%jte-this%jts+1)))
         this%z = 0.0 !parent_nest_z(this%its:this%ite,1:this%kte,this%jts:this%jte)
+        !$acc enter data copyin(this%z)
 
         ! if (this%ite < this%its) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
         ! if (this%kte < this%kts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
@@ -705,8 +713,12 @@ contains
             !     call this%variables%add_var(kVARS%z, input_z)
             ! endif
 
-            if (allocated(this%z)) deallocate(this%z)
+            if (allocated(this%z)) then
+                !$acc exit data delete(this%z)
+                deallocate(this%z)
+            endif
             allocate(this%z,source=input_z%data_3d)
+            !$acc enter data copyin(this%z)
         endif
 
         if (.not.(allocated(this%original_geo%z)) )  then
@@ -748,12 +760,9 @@ contains
         class(boundary_t),   intent(inout)   :: this
         type(options_t),     intent(in)      :: options
 
-        type(variable_t)        :: input_z, var
         type(interpolable_type) :: input_geo, input_geo_u, input_geo_v
         real, allocatable :: temp_3d(:,:,:)
-        real :: neg_z
-        character(len=kMAX_NAME_LENGTH) :: name
-        integer :: id
+        integer :: i
 
         call this%setup_z(options)
 
@@ -772,28 +781,23 @@ contains
         associate(list => this%variables)
 
         ! loop through the list of variables that were read in and might need to be interpolated in 3D
-        call list%reset_iterator()
-        do while (list%has_more_elements())
-            ! get the next variable in the structure
-            var = list%next(id)
-
-            if (var%three_d) then
+        do i = 1, list%n_vars
+            if (list%var_list(i)%var%three_d) then
                 ! need to vinterp this dataset to the original vertical levels (if necessary)
 
-                temp_3d = var%data_3d
+                temp_3d = list%var_list(i)%var%data_3d
 
                 if (size(temp_3d,1) == (this%ite-this%its+2)) then
-                    call vinterp(var%data_3d, temp_3d, input_geo_u%vert_lut)
+                    call vinterp(list%var_list(i)%var%data_3d, temp_3d, input_geo_u%vert_lut)
                 elseif (size(temp_3d,3) == (this%jte-this%jts+2)) then
-                    call vinterp(var%data_3d, temp_3d, input_geo_v%vert_lut)
+                    call vinterp(list%var_list(i)%var%data_3d, temp_3d, input_geo_v%vert_lut)
                 else
-                    call vinterp(var%data_3d, temp_3d, input_geo%vert_lut)
+                    call vinterp(list%var_list(i)%var%data_3d, temp_3d, input_geo%vert_lut)
                 endif
 
+                !$acc update self(list%var_list(i)%var%data_3d)
             endif
-            call list%add_var(id, var)
-
-        end do
+        enddo
         end associate
 
     end subroutine
@@ -805,37 +809,29 @@ contains
         type(options_t),     intent(in)      :: options
 
         integer           :: err
-        type(variable_t)  :: var, pvar, tvar, pbvar, input_z
+        integer :: p_idx, t_idx, pb_idx, iz_idx
 
-        integer :: nx,ny,nz, var_id, i
+        integer :: nx,ny,nz, i
         real, allocatable :: temp_z(:,:,:)
-        real :: neg_z
         logical :: z_is_computed = .False.
 
         associate(list => this%variables)
 
-        ! Sync forcing data from device to host.
-        ! After receive(), device data is current but host copies are stale.
-        do i = 1, this%variables%n_vars
-            if (this%variables%var_list(i)%var%two_d) then
-                !$acc update self(this%variables%var_list(i)%var%data_2d)
-            else if (this%variables%var_list(i)%var%three_d) then
-                !$acc update self(this%variables%var_list(i)%var%data_3d)
-            endif
-        enddo
 
         !Add base pressure to pressure, if provided
-        pbvar = list%get_var(kVARS%pressure_base, err)
+        pb_idx = list%get_var_idx(kVARS%pressure_base, err)
         if (err == 0) then
-            pvar = list%get_var(kVARS%pressure)
-            pvar%data_3d = pvar%data_3d + pbvar%data_3d
-            call list%add_var(kVARS%pressure, pvar)
+            p_idx = list%get_var_idx(kVARS%pressure)
+            !$acc kernels present(list%var_list(p_idx)%var%data_3d, list%var_list(pb_idx)%var%data_3d)
+            list%var_list(p_idx)%var%data_3d = list%var_list(p_idx)%var%data_3d + list%var_list(pb_idx)%var%data_3d
+            !$acc end kernels
         endif
 
         if (options%forcing%p_multiplier /= 1.0) then
-            pvar = list%get_var(kVARS%pressure)
-            pvar%data_3d = pvar%data_3d * options%forcing%p_multiplier
-            call list%add_var(kVARS%pressure, pvar)
+            p_idx = list%get_var_idx(kVARS%pressure)
+            !$acc kernels present(list%var_list(p_idx)%var%data_3d)
+            list%var_list(p_idx)%var%data_3d = list%var_list(p_idx)%var%data_3d * options%forcing%p_multiplier
+            !$acc end kernels
         endif
 
         if (options%forcing%qv_is_relative_humidity) then
@@ -847,61 +843,77 @@ contains
         endif
 
         if (options%forcing%t_offset /= 0) then
-            tvar = list%get_var(kVARS%potential_temperature)
-            tvar%data_3d = tvar%data_3d + options%forcing%t_offset
-            call list%add_var(kVARS%potential_temperature, tvar)
+            t_idx = list%get_var_idx(kVARS%potential_temperature)
+            !$acc kernels present(list%var_list(t_idx)%var%data_3d)
+            list%var_list(t_idx)%var%data_3d = list%var_list(t_idx)%var%data_3d + options%forcing%t_offset
+            !$acc end kernels
         endif
 
-        ! loop through the list of variables that need to be read in
-        call list%reset_iterator()
-        do while (list%has_more_elements())
-
-            ! get the next variable in the structure
-            var = list%next(var_id)
-
-            if (var%computed) then
-
-                if (var_id == kVARS%z) then
+        ! loop through the list of variables checking for computed fields
+        do i = 1, list%n_vars
+            if (list%var_list(i)%var%computed) then
+                if (list%var_list(i)%id == kVARS%z) then
                     call compute_z_update(this, list, options)
                     z_is_computed = .True.
                 endif
 
-                if (var_id == kVARS%pressure) then
+                if (list%var_list(i)%id == kVARS%pressure) then
                     call compute_p_update(this, list, options)
                 endif
-
             endif
-        end do
+        enddo
 
         if (.not.options%forcing%t_is_potential) then
-            tvar = list%get_var(kVARS%potential_temperature)
-            pvar = list%get_var(kVARS%pressure)    
-            tvar%data_3d = tvar%data_3d / exner_function(pvar%data_3d)
-            call list%add_var(kVARS%potential_temperature, tvar)
+            t_idx = list%get_var_idx(kVARS%potential_temperature)
+            p_idx = list%get_var_idx(kVARS%pressure)
+            !$acc kernels present(list%var_list(t_idx)%var%data_3d, list%var_list(p_idx)%var%data_3d)
+            list%var_list(t_idx)%var%data_3d = list%var_list(t_idx)%var%data_3d / exner_function(list%var_list(p_idx)%var%data_3d)
+            !$acc end kernels
         endif
 
         if (options%forcing%limit_rh) call limit_rh(list, options)
         !limit sea surface temperature to be >= 273.15 (i.e. cannot freeze)
         call limit_2d_var(list, kVARS%sst, min_val=273.15)
 
-        input_z = this%variables%get_var(kVARS%z)
+        iz_idx = list%get_var_idx(kVARS%z)
 
-        if (.not.(input_z%computed)) then
+        if (.not.(list%var_list(iz_idx)%var%computed)) then
             if (options%forcing%z_is_geopotential) then
                 ! see if the user has provided a base geopotential height field
-                pbvar = this%variables%get_var(kVARS%geopotential_base,err)
-                if (err == 0) input_z%data_3d = input_z%data_3d + pbvar%data_3d
-
-                input_z%data_3d = input_z%data_3d / gravity
-                !neg_z = minval(input_z%data_3d)
-                ! if (neg_z < 0.0) input_z%data_3d = input_z%data_3d - neg_z
-                call this%variables%add_var(kVARS%z, input_z)
+                pb_idx = list%get_var_idx(kVARS%geopotential_base, err)
+                if (err == 0) then
+                    !$acc kernels present(list%var_list(iz_idx)%var%data_3d, list%var_list(pb_idx)%var%data_3d)
+                    list%var_list(iz_idx)%var%data_3d = list%var_list(iz_idx)%var%data_3d + list%var_list(pb_idx)%var%data_3d
+                    !$acc end kernels
+                endif
+                !$acc kernels present(list%var_list(iz_idx)%var%data_3d)
+                list%var_list(iz_idx)%var%data_3d = list%var_list(iz_idx)%var%data_3d / gravity
+                !$acc end kernels
             endif
         endif
 
-        ! if the vertical levels of the forcing data change over time, they need to be interpolated to the original levels here.
+        ! interpolate_original_levels is host-only (uses vinterp, geo_interp).
+        ! Only sync when needed.
         if (options%forcing%time_varying_z) then
+            ! Sync device->host for host-based vertical interpolation
+            do i = 1, this%variables%n_vars
+                if (this%variables%var_list(i)%var%two_d) then
+                    !$acc update self(this%variables%var_list(i)%var%data_2d)
+                else if (this%variables%var_list(i)%var%three_d) then
+                    !$acc update self(this%variables%var_list(i)%var%data_3d)
+                endif
+            enddo
+
             call this%interpolate_original_levels(options)
+
+            ! Sync host->device after host-based interpolation
+            do i = 1, this%variables%n_vars
+                if (this%variables%var_list(i)%var%two_d) then
+                    !$acc update device(this%variables%var_list(i)%var%data_2d)
+                else if (this%variables%var_list(i)%var%three_d) then
+                    !$acc update device(this%variables%var_list(i)%var%data_3d)
+                endif
+            enddo
         endif
 
         end associate
@@ -914,25 +926,47 @@ contains
         type(var_dict_t),   intent(inout)   :: list
         type(options_t),    intent(in)      :: options
 
-        integer           :: err
-        type(variable_t)  :: pvar, tvar, qvar
+        integer :: t_idx, p_idx, q_idx, i, j, k
+        real    :: maxq
 
-        tvar = list%get_var(kVARS%potential_temperature)
-        pvar = list%get_var(kVARS%pressure)
-        qvar = list%get_var(kVARS%water_vapor)
+        t_idx = list%get_var_idx(kVARS%potential_temperature)
+        p_idx = list%get_var_idx(kVARS%pressure)
+        q_idx = list%get_var_idx(kVARS%water_vapor)
+
+        associate(tvar => list%var_list(t_idx)%var, &
+                  pvar => list%var_list(p_idx)%var, &
+                  qvar => list%var_list(q_idx)%var)
 
         if (pvar%computed) stop "Need pressure as input to compute mixing ratio from relative humidity"
-        if (maxval(qvar%data_3d) > 2) then
-            qvar%data_3d = qvar%data_3d/100.0
+
+        ! GPU reduction to check if values are in percent
+        maxq = 0.0
+        !$acc parallel loop collapse(3) reduction(max:maxq) present(qvar%data_3d)
+        do j = lbound(qvar%data_3d,3), ubound(qvar%data_3d,3)
+            do k = lbound(qvar%data_3d,2), ubound(qvar%data_3d,2)
+                do i = lbound(qvar%data_3d,1), ubound(qvar%data_3d,1)
+                    maxq = max(maxq, qvar%data_3d(i,k,j))
+                enddo
+            enddo
+        enddo
+
+        if (maxq > 2) then
+            !$acc kernels present(qvar%data_3d)
+            qvar%data_3d = qvar%data_3d / 100.0
+            !$acc end kernels
         endif
 
         if (options%forcing%t_is_potential) then
+            !$acc kernels present(qvar%data_3d, tvar%data_3d, pvar%data_3d)
             qvar%data_3d = rh_to_mr(qvar%data_3d, tvar%data_3d * exner_function(pvar%data_3d), pvar%data_3d)
+            !$acc end kernels
         else
+            !$acc kernels present(qvar%data_3d, tvar%data_3d, pvar%data_3d)
             qvar%data_3d = rh_to_mr(qvar%data_3d, tvar%data_3d, pvar%data_3d)
+            !$acc end kernels
         endif
 
-        call list%add_var(kVARS%water_vapor, qvar)
+        end associate
 
     end subroutine compute_mixing_ratio_from_rh
 
@@ -942,15 +976,19 @@ contains
         type(var_dict_t),   intent(inout)   :: list
         type(options_t),    intent(in)      :: options
 
-        integer           :: err
-        type(variable_t)  :: pvar, tvar, qvar
+        integer :: t_idx, p_idx, q_idx
         real :: rh, t
         integer :: i,j,k
 
-        tvar = list%get_var(kVARS%potential_temperature)
-        pvar = list%get_var(kVARS%pressure)
-        qvar = list%get_var(kVARS%water_vapor)
+        t_idx = list%get_var_idx(kVARS%potential_temperature)
+        p_idx = list%get_var_idx(kVARS%pressure)
+        q_idx = list%get_var_idx(kVARS%water_vapor)
 
+        associate(tvar => list%var_list(t_idx)%var, &
+                  pvar => list%var_list(p_idx)%var, &
+                  qvar => list%var_list(q_idx)%var)
+
+        !$acc parallel loop gang vector collapse(3) present(tvar%data_3d, pvar%data_3d, qvar%data_3d)
         do j = lbound(tvar%data_3d, 3), ubound(tvar%data_3d, 3)
             do k = lbound(tvar%data_3d, 2), ubound(tvar%data_3d, 2)
                 do i = lbound(tvar%data_3d, 1), ubound(tvar%data_3d, 1)
@@ -960,14 +998,15 @@ contains
                     rh = relative_humidity(t, qvar%data_3d(i,k,j), pvar%data_3d(i,k,j))
 
                     if (rh > 1.0) then
-                        qvar%data_3d = rh_to_mr(1.0, t, pvar%data_3d(i,k,j))
+                        qvar%data_3d(i,k,j) = rh_to_mr(1.0, t, pvar%data_3d(i,k,j))
                     endif
 
                 enddo
             enddo
         enddo
+        !$acc end parallel loop
 
-        call list%add_var(kVARS%water_vapor, qvar)
+        end associate
 
     end subroutine limit_rh
 
@@ -979,21 +1018,25 @@ contains
         real, optional,     intent(in)      :: min_val
         real, optional,     intent(in)      :: max_val
 
-        type(variable_t)  :: var
-        integer :: err
+        integer :: v_idx, err
 
-        var = list%get_var(var_id,err=err)
-        
+        v_idx = list%get_var_idx(var_id, err=err)
+
         if (err > 0) return
 
+        associate(var => list%var_list(v_idx)%var)
         if (present(min_val)) then
+            !$acc kernels present(var%data_2d)
             where(var%data_2d < min_val) var%data_2d = min_val
+            !$acc end kernels
         endif
 
         if (present(max_val)) then
+            !$acc kernels present(var%data_2d)
             where(var%data_2d > max_val) var%data_2d = max_val
+            !$acc end kernels
         endif
-        call list%add_var(var_id, var)
+        end associate
 
     end subroutine limit_2d_var
 
@@ -1002,14 +1045,13 @@ contains
         type(var_dict_t),   intent(inout)   :: list
         type(options_t),    intent(in)      :: options
 
-        integer           :: err
-        type(variable_t)  :: qvar
+        integer :: q_idx
 
-        qvar = list%get_var(kVARS%water_vapor)
+        q_idx = list%get_var_idx(kVARS%water_vapor)
 
-        qvar%data_3d = qvar%data_3d / (1 - qvar%data_3d)
-
-        call list%add_var(kVARS%water_vapor, qvar)
+        !$acc kernels present(list%var_list(q_idx)%var%data_3d)
+        list%var_list(q_idx)%var%data_3d = list%var_list(q_idx)%var%data_3d / (1 - list%var_list(q_idx)%var%data_3d)
+        !$acc end kernels
 
     end subroutine compute_mixing_ratio_from_sh
 
@@ -1020,41 +1062,53 @@ contains
         type(var_dict_t),   intent(inout)   :: list
         type(options_t),    intent(in)      :: options
 
-        integer           :: err
-        type(variable_t)  :: var, pvar, zvar, tvar, qvar
+        integer :: err, q_idx, t_idx, pr_idx, ps_idx, z_idx, hgt_idx
 
         real, allocatable :: t(:,:,:)
 
-        qvar = list%get_var(kVARS%water_vapor)
-        tvar = list%get_var(kVARS%potential_temperature)
-        var = list%get_var(kVARS%pressure, err)
+        q_idx  = list%get_var_idx(kVARS%water_vapor)
+        t_idx  = list%get_var_idx(kVARS%potential_temperature)
+        pr_idx = list%get_var_idx(kVARS%pressure)
 
-        pvar = list%get_var(kVARS%sea_surface_pressure, err)
+        ps_idx = list%get_var_idx(kVARS%sea_surface_pressure, err)
+
+        associate(qvar  => list%var_list(q_idx)%var,  &
+                  tvar  => list%var_list(t_idx)%var,  &
+                  prvar => list%var_list(pr_idx)%var)
 
         allocate(t, mold=tvar%data_3d)
+        !$acc enter data create(t)
+
         if (options%forcing%t_is_potential) then
-            ! stop "Need real air temperature to compute height"
-            t = exner_function(var%data_3d) * tvar%data_3d
+            !$acc kernels present(t, prvar%data_3d, tvar%data_3d)
+            t = exner_function(prvar%data_3d) * tvar%data_3d
+            !$acc end kernels
         else
+            !$acc kernels present(t, tvar%data_3d)
             t = tvar%data_3d
+            !$acc end kernels
         endif
 
         if (err == 0) then
-            call compute_3d_z(var%data_3d, pvar%data_2d, this%z, t, qvar%data_3d)
-
+            call compute_3d_z(prvar%data_3d, list%var_list(ps_idx)%var%data_2d, this%z, t, qvar%data_3d)
         else
-            pvar = list%get_var(kVARS%surface_pressure, err)
-            zvar = list%get_var(kVARS%terrain)
+            ps_idx  = list%get_var_idx(kVARS%surface_pressure, err)
+            hgt_idx = list%get_var_idx(kVARS%terrain)
             if (err == 0) then
-                call compute_3d_z(var%data_3d, pvar%data_2d, this%z, t, qvar%data_3d, zvar%data_2d)
+                call compute_3d_z(prvar%data_3d, list%var_list(ps_idx)%var%data_2d, this%z, t, qvar%data_3d, list%var_list(hgt_idx)%var%data_2d)
             else
                 write(*,*) "ERROR reading surface pressure or sea level pressure, variables not found"
                 error stop
             endif
         endif
-        zvar = list%get_var(kVARS%z)
-        zvar%data_3d = this%z
-        call list%add_var(kVARS%z, zvar)
+
+        !$acc exit data delete(t)
+        end associate
+
+        z_idx = list%get_var_idx(kVARS%z)
+        !$acc kernels present(list%var_list(z_idx)%var%data_3d, this%z)
+        list%var_list(z_idx)%var%data_3d = this%z
+        !$acc end kernels
 
     end subroutine compute_z_update
 
@@ -1064,33 +1118,33 @@ contains
         type(var_dict_t),   intent(inout)   :: list
         type(options_t),    intent(in)      :: options
 
-        integer           :: err, hgterr
-        type(variable_t)  :: pvar, zvar, tvar, qvar, psvar
+        integer :: err, hgterr, q_idx, t_idx, p_idx, ps_idx, hgt_idx
 
         if (options%forcing%t_is_potential) stop "Need real air temperature to compute pressure"
 
-        qvar = list%get_var(kVARS%water_vapor)
-        tvar = list%get_var(kVARS%potential_temperature)
-        pvar = list%get_var(kVARS%pressure)
+        q_idx   = list%get_var_idx(kVARS%water_vapor)
+        t_idx   = list%get_var_idx(kVARS%potential_temperature)
+        p_idx   = list%get_var_idx(kVARS%pressure)
 
-        psvar = list%get_var(kVARS%surface_pressure, err)
-        zvar = list%get_var(kVARS%terrain, hgterr)
+        ps_idx  = list%get_var_idx(kVARS%surface_pressure, err)
+        hgt_idx = list%get_var_idx(kVARS%terrain, hgterr)
 
         if ((err + hgterr) == 0) then
-            call compute_3d_p(pvar%data_3d, psvar%data_2d, this%z, tvar%data_3d, qvar%data_3d, zvar%data_2d)
+            call compute_3d_p(list%var_list(p_idx)%var%data_3d, list%var_list(ps_idx)%var%data_2d, &
+                              this%z, list%var_list(t_idx)%var%data_3d, list%var_list(q_idx)%var%data_3d, &
+                              list%var_list(hgt_idx)%var%data_2d)
         else
-            psvar = list%get_var(kVARS%sea_surface_pressure, err)
+            ps_idx = list%get_var_idx(kVARS%sea_surface_pressure, err)
 
             if (err == 0) then
-                call compute_3d_p(pvar%data_3d, psvar%data_2d, this%z, tvar%data_3d, qvar%data_3d)
+                call compute_3d_p(list%var_list(p_idx)%var%data_3d, list%var_list(ps_idx)%var%data_2d, &
+                                  this%z, list%var_list(t_idx)%var%data_3d, list%var_list(q_idx)%var%data_3d)
             else
                 write(*,*) "ERROR reading surface pressure or sea level pressure, variables not found"
                 write(*,*) "ERROR or forcing height not given if sea level pressure is given"
                 error stop
             endif
         endif
-        call list%add_var(kVARS%pressure, pvar)
-
 
     end subroutine compute_p_update
 

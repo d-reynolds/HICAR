@@ -103,6 +103,48 @@ contains
 
     end function
 
+
+    !>------------------------------------------------
+    !! Retrieve the index of a variable for a given key (zero-copy access)
+    !!
+    !! @param in_id   : The key to look for in the dictionary
+    !! @param err     : optional, if available this will be set to indicate if the key is not found
+    !!
+    !!------------------------------------------------
+    module function get_var_idx(this, in_id, err) result(idx)
+        implicit none
+        class(var_dict_t), intent(in) :: this
+        integer,           intent(in) :: in_id
+        integer,           intent(out), optional :: err
+        integer :: idx
+        integer :: i
+
+        idx = 0
+        if (present(err)) err = 0
+
+        if (.not.this%initialized) then
+            if (present(err)) then
+                err = 2
+                return
+            endif
+            stop "variable_dictionary read before being initialized"
+        endif
+
+        do i = 1, this%n_vars
+            if (this%var_list(i)%id == in_id) then
+                idx = i
+                return
+            endif
+        end do
+
+        if (present(err)) then
+            err = 1
+        else
+            write(*,*) "Searching for variable of id: ", in_id
+            stop "ERROR: var not found in dictionary"
+        endif
+    end function
+
     !>------------------------------------------------
     !! Add a supplied variable to the dictionary using the key supplied
     !!
@@ -155,17 +197,17 @@ contains
             ! if (STD_OUT_PE) write(*,*) "WARNING: Overwriting existing variable in var_dict: ", trim(var_data%name)
             if (this%var_list(indx)%var%two_d) then
                 this%var_list(indx)%var%data_2d(:,:)  = var_data%data_2d(:,:)
-                !$acc update device(this%var_list(indx)%var%data_2d)
+                ! !$acc update device(this%var_list(indx)%var%data_2d)
                 if (allocated(this%var_list(indx)%var%dqdt_2d)) then
                     this%var_list(indx)%var%dqdt_2d(:,:)  = var_data%dqdt_2d(:,:)
-                    !$acc update device(this%var_list(indx)%var%dqdt_2d)
+                    ! !$acc update device(this%var_list(indx)%var%dqdt_2d)
                 endif
             else if (this%var_list(indx)%var%three_d) then
                 this%var_list(indx)%var%data_3d(:,:,:)  = var_data%data_3d(:,:,:)
-                !$acc update device(this%var_list(indx)%var%data_3d)
+                ! !$acc update device(this%var_list(indx)%var%data_3d)
                 if (allocated(this%var_list(indx)%var%dqdt_3d)) then
                     this%var_list(indx)%var%dqdt_3d(:,:,:)  = var_data%dqdt_3d(:,:,:)
-                    !$acc update device(this%var_list(indx)%var%dqdt_3d)
+                    ! !$acc update device(this%var_list(indx)%var%dqdt_3d)
                 endif
             endif
         else

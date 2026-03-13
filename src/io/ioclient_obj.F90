@@ -464,14 +464,12 @@ contains
         !$acc update device(this%read_buffer)
 
         do i = 1, forcing%variables%n_vars
-            write(*,*) "for forcing variable: ",forcing%variables%var_list(i)%var%id
             if (forcing%variables%var_list(i)%var%computed) cycle
             var_val_check = (forcing%variables%var_list(i)%var%maxval /= kUNSET_REAL .and. forcing%variables%var_list(i)%var%minval /= kUNSET_REAL)
             if (forcing%variables%var_list(i)%var%two_d .and. &
                 forcing%variables%var_list(i)%var%dtype == kREAL) then
                 nx = size(forcing%variables%var_list(i)%var%data_2d, 1)
                 ny = size(forcing%variables%var_list(i)%var%data_2d, 2)
-                write(*,*) "updating forcing variable: ",forcing%variables%var_list(i)%var%id
 
                 associate(dst => forcing%variables%var_list(i)%var%data_2d, &
                           src => this%read_buffer)
@@ -486,8 +484,6 @@ contains
                 nx = size(forcing%variables%var_list(i)%var%data_3d, 1)
                 ny = size(forcing%variables%var_list(i)%var%data_3d, 3)
                 nz_v = forcing%variables%var_list(i)%var%dim_len(2)
-
-                write(*,*) "updating forcing variable: ",forcing%variables%var_list(i)%var%id
 
                 associate(dst => forcing%variables%var_list(i)%var%data_3d, &
                           src => this%read_buffer)
