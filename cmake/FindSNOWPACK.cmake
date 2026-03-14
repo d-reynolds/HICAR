@@ -85,6 +85,16 @@ else()
     # Determine the correct C++ standard library for the platform
     if(APPLE)
         set(CXX_STDLIB "c++")
+        # On macOS, the Makefile-based Fortran bindings build needs the SDK sysroot
+        # so that Apple Clang can find C++ standard library headers (e.g. <iostream>)
+        execute_process(
+            COMMAND xcrun --show-sdk-path
+            OUTPUT_VARIABLE MACOS_SDK_PATH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(MACOS_SDK_PATH)
+            set(SNOWPACK_SYSROOT_FLAG "-isysroot ${MACOS_SDK_PATH}")
+        endif()
     else()
         set(CXX_STDLIB "stdc++")
     endif()
@@ -146,7 +156,7 @@ else()
     set(SNOWPACK_BUILD "${CMAKE_BINARY_DIR}/external/SNOWPACK-build" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
     set(SNOWPACK_STAMPS "${CMAKE_BINARY_DIR}/external/SNOWPACK-stamps" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
 
-    set(SNOWPACK_FORTRAN_CXXFLAGS "-fPIC -I${SNOWPACK_DIR} -I${METEOIO_DIR}")
+    set(SNOWPACK_FORTRAN_CXXFLAGS "${SNOWPACK_SYSROOT_FLAG} -fPIC -I${SNOWPACK_DIR} -I${METEOIO_DIR}")
 
     # Build SNOWPACK (depends on MeteoIO)
     ExternalProject_Add(SNOWPACK
@@ -173,7 +183,7 @@ else()
             COMMAND ${CMAKE_COMMAND} -E make_directory ${SNOWPACK_DIR}/lib
             COMMAND sh -c "cp -P ${SNOWPACK_BUILD}/snowpack/${CMAKE_SHARED_LIBRARY_PREFIX}snowpack${CMAKE_SHARED_LIBRARY_SUFFIX}* ${SNOWPACK_DIR}/lib/ 2>/dev/null || true"
             COMMAND sh -c "cp -P ${SNOWPACK_BUILD}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}snowpack${CMAKE_SHARED_LIBRARY_SUFFIX}* ${SNOWPACK_DIR}/lib/ 2>/dev/null || true"
-            COMMAND sh -c "python3 -m pip install llnl-shroud 2>/dev/null || pip install llnl-shroud"
+            COMMAND sh -c "python -m pip install llnl-shroud 2>/dev/null || pip install llnl-shroud"
             COMMAND ${CMAKE_COMMAND} -E chdir ${SNOWPACK_DIR}/fortran make
                 "FC=${CMAKE_Fortran_COMPILER}"
                 "CXX=${CMAKE_CXX_COMPILER}"

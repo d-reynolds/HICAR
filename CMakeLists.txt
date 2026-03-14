@@ -65,8 +65,8 @@ else()
 endif()
 
 option(ASSERTIONS "Check logical assertions at runtime" ON)
-option(FSM "Link to the FSM2 snow model, requires separate compilation of the FSM2 model" ON)
-option(SNOWPACK "Link to the SNOWPACK snow model, requires separate compilation of the SNOWPACK model" ON)
+option(FSM "Link to the FSM2 snow model, requires separate compilation of the FSM2 model" OFF)
+option(SNOWPACK "Link to the SNOWPACK snow model, requires separate compilation of the SNOWPACK model" OFF)
 option(NCCL "Link to the NCCL library, if available" ON)
 option(OPENACC "Enable OpenACC support for GPU acceleration" OFF)
 option(SRUN_FLAGS "srun flags to use for running the test cases" "")
@@ -884,6 +884,8 @@ else()
             -DMPI_DIR=${MPI_DIR}
             -DFSM_DIR=${FSM_DIR}
             -DFSM=${FSM}
+			-DSNOWPACK_DIR=${SNOWPACK_DIR}
+			-DSNOWPACK=${SNOWPACK}
             -DASSERTIONS=${ASSERTIONS}
             -DOPENACC=${OPENACC}
         COMMAND ${CMAKE_COMMAND} --build ${_DEBUG_BUILD_DIR} --parallel
