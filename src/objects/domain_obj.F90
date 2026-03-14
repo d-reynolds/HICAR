@@ -88,6 +88,13 @@ contains
             endif
         end do
 
+        !$acc update device(this%tend%u)
+        !$acc update device(this%tend%v)
+        !$acc update device(this%tend%th_pbl)
+        !$acc update device(this%tend%qv_pbl)
+        !$acc update device(this%tend%qc_pbl)
+        !$acc update device(this%tend%qi_pbl)
+
     end subroutine update_device
 
     module subroutine update_host(this)
@@ -109,6 +116,14 @@ contains
                 !$acc update host(this%vars_3d(i)%data_3d)
             endif
         end do
+
+        !$acc update host(this%tend%u)
+        !$acc update host(this%tend%v)
+        !$acc update host(this%tend%th_pbl)
+        !$acc update host(this%tend%qv_pbl)
+        !$acc update host(this%tend%qc_pbl)
+        !$acc update host(this%tend%qi_pbl)
+
 
     end subroutine update_host
 
@@ -2964,44 +2979,50 @@ contains
             associate(forcing_hi => this%forcing_hi(n))
             !Update delta fields on the high-resolution forcing varaibles...
             if (this%forcing_hi(n)%two_d) then
-                !$acc kernels present(forcing_hi%dqdt_2d, forcing_hi%data_2d)
-                forcing_hi%dqdt_2d = (forcing_hi%dqdt_2d - forcing_hi%data_2d) / dt_seconds
+                associate(fh_dqdt => forcing_hi%dqdt_2d, fh_data => forcing_hi%data_2d)
+                !$acc kernels present(fh_dqdt, fh_data)
+                fh_dqdt = (fh_dqdt - fh_data) / dt_seconds
                 !$acc end kernels
+                end associate
             else if (this%forcing_hi(n)%three_d) then
-                !$acc kernels present(forcing_hi%dqdt_3d, forcing_hi%data_3d)
-                forcing_hi%dqdt_3d = (forcing_hi%dqdt_3d - forcing_hi%data_3d) / dt_seconds
+                associate(fh_dqdt => forcing_hi%dqdt_3d, fh_data => forcing_hi%data_3d)
+                !$acc kernels present(fh_dqdt, fh_data)
+                fh_dqdt = (fh_dqdt - fh_data) / dt_seconds
                 !$acc end kernels
+                end associate
             endif
 
             ! now update delta fields for domain variables
             var_indx = forcing_hi%id
             if (.not.(forcing_hi%force_boundaries)) then
                 if (forcing_hi%two_d) then
-                    associate(var_2d => this%vars_2d(this%var_indx(var_indx)%v), &
+                    associate(v2d_dqdt => this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d, &
+                              v2d_data => this%vars_2d(this%var_indx(var_indx)%v)%data_2d, &
                               ims => this%vars_2d(this%var_indx(var_indx)%v)%grid%ims, &
                               ime => this%vars_2d(this%var_indx(var_indx)%v)%grid%ime, &
                               jms => this%vars_2d(this%var_indx(var_indx)%v)%grid%jms, &
                               jme => this%vars_2d(this%var_indx(var_indx)%v)%grid%jme)
-                    !$acc parallel loop gang vector collapse(2) present(var_2d%dqdt_2d, var_2d%data_2d, ims, ime, jms, jme)
+                    !$acc parallel loop gang vector collapse(2) present(v2d_dqdt, v2d_data, ims, ime, jms, jme)
                     do j = jms, jme
                         do i = ims, ime
-                            var_2d%dqdt_2d(i,j) = (var_2d%dqdt_2d(i,j) - var_2d%data_2d(i,j)) / dt_seconds
+                            v2d_dqdt(i,j) = (v2d_dqdt(i,j) - v2d_data(i,j)) / dt_seconds
                         enddo
                     enddo
                     end associate
                 else if (this%forcing_hi(n)%three_d) then
-                    associate(var_3d => this%vars_3d(this%var_indx(var_indx)%v), &
+                    associate(v3d_dqdt => this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d, &
+                              v3d_data => this%vars_3d(this%var_indx(var_indx)%v)%data_3d, &
                               ims => this%vars_3d(this%var_indx(var_indx)%v)%grid%ims, &
                               ime => this%vars_3d(this%var_indx(var_indx)%v)%grid%ime, &
                               kms => this%kms, &
                               kme => this%kme, &
                               jms => this%vars_3d(this%var_indx(var_indx)%v)%grid%jms, &
                               jme => this%vars_3d(this%var_indx(var_indx)%v)%grid%jme)
-                    !$acc parallel loop gang vector collapse(3) present(var_3d%dqdt_3d, var_3d%data_3d, ims, ime, kms, kme, jms, jme)
+                    !$acc parallel loop gang vector collapse(3) present(v3d_dqdt, v3d_data, ims, ime, kms, kme, jms, jme)
                     do j = jms, jme
                         do k = kms, kme
                             do i = ims, ime
-                                var_3d%dqdt_3d(i,k,j) = (var_3d%dqdt_3d(i,k,j) - var_3d%data_3d(i,k,j)) / dt_seconds
+                                v3d_dqdt(i,k,j) = (v3d_dqdt(i,k,j) - v3d_data(i,k,j)) / dt_seconds
                             enddo
                         enddo
                     enddo
@@ -3079,19 +3100,23 @@ contains
                 jms = this%vars_2d(this%var_indx(var_indx)%v)%grid%jms
                 jme = this%vars_2d(this%var_indx(var_indx)%v)%grid%jme
     
-                associate( forcing => this%forcing_hi(n), var => this%vars_2d(this%var_indx(var_indx)%v), relax_filter => this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d)
+                associate( var_data => this%vars_2d(this%var_indx(var_indx)%v)%data_2d, &
+                           var_dqdt => this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d, &
+                           f_data => this%forcing_hi(n)%data_2d, &
+                           f_dqdt => this%forcing_hi(n)%dqdt_2d, &
+                           relax_filter => this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d)
 
                 ! apply forcing throughout the domain for 2D diagnosed variables (e.g. SST, SW)
-                if (.not.(forcing%force_boundaries)) then
-                    !$acc parallel loop gang vector collapse(2) present(var%data_2d, var%dqdt_2d, forcing%data_2d, forcing%dqdt_2d)
+                if (.not.(this%forcing_hi(n)%force_boundaries)) then
+                    !$acc parallel loop gang vector collapse(2) present(var_data, var_dqdt, f_data, f_dqdt)
                     do j = jms,jme
                         do i = ims,ime
-                            var%data_2d(i,j) = var%data_2d(i,j) + (var%dqdt_2d(i,j) * dt)
-                            var%data_2d(i,j) = max(var%data_2d(i,j),0.0)
+                            var_data(i,j) = var_data(i,j) + (var_dqdt(i,j) * dt)
+                            var_data(i,j) = max(var_data(i,j),0.0)
                         enddo
                     enddo
                 else if (do_boundary) then
-                    !$acc parallel present(var%data_2d, forcing%data_2d, forcing%dqdt_2d, relax_filter, ims_b, ime_b, jms_b, jme_b)
+                    !$acc parallel present(var_data, f_data, f_dqdt, relax_filter, ims_b, ime_b, jms_b, jme_b)
                     do p = 1,4
                         if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
@@ -3099,24 +3124,24 @@ contains
                         do j = jms_b(p),jme_b(p)
                             do i = ims_b(p),ime_b(p)
                                 if (relax_filter(i,j) > 0.0) then
-                                    forcing%data_2d(i,j) = forcing%data_2d(i,j) + (forcing%dqdt_2d(i,j) * dt)
-                                    forcing%data_2d(i,j) = max(forcing%data_2d(i,j),0.0)
+                                    f_data(i,j) = f_data(i,j) + (f_dqdt(i,j) * dt)
+                                    f_data(i,j) = max(f_data(i,j),0.0)
 
                                     if (relax_filter(i,j) == 1.0) then
-                                        var%data_2d(i,j) = forcing%data_2d(i,j)
+                                        var_data(i,j) = f_data(i,j)
                                     else
-                                        var%data_2d(i,j) = var%data_2d(i,j) + &
+                                        var_data(i,j) = var_data(i,j) + &
                                                         (relax_filter(i,j) * dt_h) * &
-                                                        (forcing%data_2d(i,j) - var%data_2d(i,j))
+                                                        (f_data(i,j) - var_data(i,j))
 
-                                        var%data_2d(i,j) = max(var%data_2d(i,j),0.0)
+                                        var_data(i,j) = max(var_data(i,j),0.0)
                                     endif
                                 endif
                             enddo
                         enddo
                     enddo
                     !$acc end parallel
-                endif 
+                endif
                 end associate
             else if (this%forcing_hi(n)%three_d) then
                 ims = this%vars_3d(this%var_indx(var_indx)%v)%grid%ims
@@ -3126,27 +3151,31 @@ contains
                 jms = this%vars_3d(this%var_indx(var_indx)%v)%grid%jms
                 jme = this%vars_3d(this%var_indx(var_indx)%v)%grid%jme
 
-                associate( forcing => this%forcing_hi(n), var => this%vars_3d(this%var_indx(var_indx)%v), relax_filter => this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d)
+                associate( var_data => this%vars_3d(this%var_indx(var_indx)%v)%data_3d, &
+                           var_dqdt => this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d, &
+                           f_data => this%forcing_hi(n)%data_3d, &
+                           f_dqdt => this%forcing_hi(n)%dqdt_3d, &
+                           relax_filter => this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d)
 
                 ! only apply forcing data on the boundaries for advected scalars (e.g. temperature, humidity)
                 ! applying forcing to the edges has already been handeled when updating dqdt using the relaxation filter
-                if (.not.(forcing%force_boundaries)) then
-                    !$acc parallel loop gang vector collapse(3) present(var%data_3d, var%dqdt_3d, forcing%data_3d, forcing%dqdt_3d)
+                if (.not.(this%forcing_hi(n)%force_boundaries)) then
+                    !$acc parallel loop gang vector collapse(3) present(var_data, var_dqdt, f_data, f_dqdt)
                     do j = jms,jme
                         do k = kms, kme
                             do i = ims,ime
-                                forcing%data_3d(i,k,j)    = forcing%data_3d(i,k,j) + (forcing%dqdt_3d(i,k,j) * dt)
-                                if (.not.(is_wind)) forcing%data_3d(i,k,j) = max(forcing%data_3d(i,k,j),0.0)
+                                f_data(i,k,j)    = f_data(i,k,j) + (f_dqdt(i,k,j) * dt)
+                                if (.not.(is_wind)) f_data(i,k,j) = max(f_data(i,k,j),0.0)
 
-                                if (.not.(is_w_real)) var%data_3d(i,k,j) = var%data_3d(i,k,j) + &
-                                                                (var%dqdt_3d(i,k,j) * dt)
-                                                                
-                                if (.not.(is_wind)) var%data_3d(i,k,j) = max(var%data_3d(i,k,j),0.0)
+                                if (.not.(is_w_real)) var_data(i,k,j) = var_data(i,k,j) + &
+                                                                (var_dqdt(i,k,j) * dt)
+
+                                if (.not.(is_wind)) var_data(i,k,j) = max(var_data(i,k,j),0.0)
                             enddo
                         enddo
                     enddo
                 else if (do_boundary) then
-                    !$acc parallel present(var%data_3d, forcing%data_3d, forcing%dqdt_3d,relax_filter,ims_b,ime_b,jms_b,jme_b)
+                    !$acc parallel present(var_data, f_data, f_dqdt, relax_filter, ims_b, ime_b, jms_b, jme_b)
                     do p = 1,4
                         if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
@@ -3155,17 +3184,17 @@ contains
                             do k = kms, kme
                                 do i = ims_b(p),ime_b(p)
                                     if (relax_filter(i,k,j) > 0.0) then
-                                        forcing%data_3d(i,k,j) = forcing%data_3d(i,k,j) + (forcing%dqdt_3d(i,k,j) * dt)
-                                        forcing%data_3d(i,k,j) = max(forcing%data_3d(i,k,j),0.0)
+                                        f_data(i,k,j) = f_data(i,k,j) + (f_dqdt(i,k,j) * dt)
+                                        f_data(i,k,j) = max(f_data(i,k,j),0.0)
 
                                         if (relax_filter(i,k,j) == 1.0) then
-                                            var%data_3d(i,k,j) = forcing%data_3d(i,k,j)
+                                            var_data(i,k,j) = f_data(i,k,j)
                                         else
-                                            var%data_3d(i,k,j) = var%data_3d(i,k,j) + &
+                                            var_data(i,k,j) = var_data(i,k,j) + &
                                                             (relax_filter(i,k,j) * dt_h) * &
-                                                            (forcing%data_3d(i,k,j) - var%data_3d(i,k,j))
+                                                            (f_data(i,k,j) - var_data(i,k,j))
 
-                                            var%data_3d(i,k,j) = max(var%data_3d(i,k,j),0.0)
+                                            var_data(i,k,j) = max(var_data(i,k,j),0.0)
                                         endif
                                     endif
                                 enddo
@@ -3228,20 +3257,23 @@ contains
             input_idx = forcing%variables%get_var_idx(var_indx)
             ! interpolate
             if (forcing%variables%var_list(input_idx)%var%two_d) then
-                associate(var     => this%vars_2d(this%var_indx(var_indx)%v), forcing_hi => this%forcing_hi(p) )
+                associate(var_data => this%vars_2d(this%var_indx(var_indx)%v)%data_2d, &
+                          var_dqdt => this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d, &
+                          fh_data => this%forcing_hi(p)%data_2d, &
+                          fh_dqdt => this%forcing_hi(p)%dqdt_2d)
                 if (update_only) then
-                    call geo_interp2d(forcing_hi%dqdt_2d, forcing%variables%var_list(input_idx)%var%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(this%forcing_hi(p)%dqdt_2d, forcing%variables%var_list(input_idx)%var%data_2d, forcing%geo%geolut)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
                      if (.not.(force_boundaries)) then
-                    !$acc kernels present(forcing_hi%dqdt_2d, var%dqdt_2d)
-                    var%dqdt_2d = forcing_hi%dqdt_2d
+                    !$acc kernels present(fh_dqdt, var_dqdt)
+                    var_dqdt = fh_dqdt
                     !$acc end kernels
                     endif
                 else
-                    call geo_interp2d(forcing_hi%data_2d, forcing%variables%var_list(input_idx)%var%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(this%forcing_hi(p)%data_2d, forcing%variables%var_list(input_idx)%var%data_2d, forcing%geo%geolut)
                     !If this is an initialization step, copy high res directly over to domain
-                    !$acc kernels present(forcing_hi%data_2d, var%data_2d)
-                    var%data_2d = forcing_hi%data_2d
+                    !$acc kernels present(fh_data, var_data)
+                    var_data = fh_data
                     !$acc end kernels
                 endif
                 end associate
@@ -3254,35 +3286,37 @@ contains
                 !for interpolation. If the user has not selected AGL interpolation in the namelist, this will result in standard z-interpolation
                 agl_interp = .not.(var_is_pressure .or. var_is_potential_temp)
 
-                associate(var     => this%vars_3d(this%var_indx(var_indx)%v), &
-                          forcing_hi => this%forcing_hi(p) )
+                associate(var_data => this%vars_3d(this%var_indx(var_indx)%v)%data_3d, &
+                          var_dqdt => this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d, &
+                          fh_data => this%forcing_hi(p)%data_3d, &
+                          fh_dqdt => this%forcing_hi(p)%dqdt_3d)
 
                 ! if just updating, use the dqdt variable otherwise use the 3D variable
                 if (update_only) then
-                    call interpolate_variable(forcing_hi%dqdt_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
+                    call interpolate_variable(this%forcing_hi(p)%dqdt_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind tendencies
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
-                        call smooth_array(forcing_hi, windowsize=1, ydim=3, &
+                        call smooth_array(this%forcing_hi(p), windowsize=1, ydim=3, &
                                           nsmooths=this%nsmooth, halo=this%halo, do_dqdt=.true.)
                     endif
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
                     if (.not.(force_boundaries).and..not.var_is_u.and..not.var_is_v) then
-                        !$acc kernels present(forcing_hi%dqdt_3d, var%dqdt_3d)
-                        var%dqdt_3d = forcing_hi%dqdt_3d
+                        !$acc kernels present(fh_dqdt, var_dqdt)
+                        var_dqdt = fh_dqdt
                         !$acc end kernels
                     endif
                 else
-                    call interpolate_variable(forcing_hi%data_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
+                    call interpolate_variable(this%forcing_hi(p)%data_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
                                     interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind fields
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
-                        call smooth_array(forcing_hi, windowsize=1, ydim=3, &
+                        call smooth_array(this%forcing_hi(p), windowsize=1, ydim=3, &
                                           nsmooths=this%nsmooth, halo=this%halo)
                     endif
                     !If this is an initialization step, copy high res directly over to domain
-                    !$acc kernels present(forcing_hi%data_3d, var%data_3d)
-                    var%data_3d = forcing_hi%data_3d
+                    !$acc kernels present(fh_data, var_data)
+                    var_data = fh_data
                     !$acc end kernels
                 endif
                 end associate
@@ -3294,34 +3328,38 @@ contains
         !Adjust potential temperature (first) and pressure (second) to account for points below forcing grid
         !Only domain-wide-forced variables are updated with the domain dqdt_3d
         
-        associate( forcing_pressure => this%forcing_hi(pressure_indx), &
-                   forcing_pot_temp => this%forcing_hi(pot_temp_indx), &
-                   pressure     => this%vars_3d(this%var_indx(kVARS%pressure)%v), &
-                   pot_temp     => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v), &
+        associate( fp_dqdt => this%forcing_hi(pressure_indx)%dqdt_3d, &
+                   fp_data => this%forcing_hi(pressure_indx)%data_3d, &
+                   ft_dqdt => this%forcing_hi(pot_temp_indx)%dqdt_3d, &
+                   ft_data => this%forcing_hi(pot_temp_indx)%data_3d, &
+                   p_dqdt  => this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d, &
+                   p_data  => this%vars_3d(this%var_indx(kVARS%pressure)%v)%data_3d, &
+                   t_dqdt  => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%dqdt_3d, &
+                   t_data  => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d, &
                    ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, kms => this%kms, kme => this%kme )
         if (update_only) then
-            call adjust_pressure_temp(forcing_pressure%dqdt_3d,forcing_pot_temp%dqdt_3d, forcing%geo%z, this%geo%z)
+            call adjust_pressure_temp(fp_dqdt, ft_dqdt, forcing%geo%z, this%geo%z)
             !$acc parallel loop gang vector collapse(3) &
-            !$acc present(forcing_pressure%dqdt_3d, forcing_pot_temp%dqdt_3d, pressure%dqdt_3d, pot_temp%dqdt_3d, &
+            !$acc present(fp_dqdt, ft_dqdt, p_dqdt, t_dqdt, &
             !$acc          jms, jme, kms, kme, ims, ime)
             do j = jms,jme
             do k = kms,kme
             do i = ims,ime
-                pressure%dqdt_3d(i,k,j) = forcing_pressure%dqdt_3d(i,k,j)
-                pot_temp%dqdt_3d(i,k,j) = forcing_pot_temp%dqdt_3d(i,k,j)
+                p_dqdt(i,k,j) = fp_dqdt(i,k,j)
+                t_dqdt(i,k,j) = ft_dqdt(i,k,j)
             enddo
             enddo
             enddo
         else
-            call adjust_pressure_temp(forcing_pressure%data_3d,forcing_pot_temp%data_3d, forcing%geo%z, this%geo%z)
+            call adjust_pressure_temp(fp_data, ft_data, forcing%geo%z, this%geo%z)
             !$acc parallel loop gang vector collapse(3) &
-            !$acc present(forcing_pressure%data_3d, forcing_pot_temp%data_3d, pressure%data_3d, pot_temp%data_3d, &
+            !$acc present(fp_data, ft_data, p_data, t_data, &
             !$acc          jms, jme, kms, kme, ims, ime)
             do j = jms,jme
             do k = kms,kme
             do i = ims,ime
-                pressure%data_3d(i,k,j) = forcing_pressure%data_3d(i,k,j)
-                pot_temp%data_3d(i,k,j) = forcing_pot_temp%data_3d(i,k,j)
+                p_data(i,k,j) = fp_data(i,k,j)
+                t_data(i,k,j) = ft_data(i,k,j)
             enddo
             enddo
             enddo
@@ -3445,7 +3483,7 @@ contains
     !! -------------------------------
     subroutine interpolate_variable(var_data, input_data, forcing, dom, interpolate_agl_in, var_is_u, var_is_v, nsmooth)
         implicit none
-        real,  allocatable, intent(in) :: var_data(:,:,:)
+        real,  allocatable, intent(inout) :: var_data(:,:,:)
         type(variable_t),   intent(inout) :: input_data
         type(boundary_t),   intent(in)    :: forcing
         type(domain_t),     intent(in)    :: dom

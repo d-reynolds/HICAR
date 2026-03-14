@@ -755,15 +755,17 @@ contains
 
         integer :: i, j, k
 
-        associate(u => domain%vars_3d(domain%var_indx(kVARS%u)%v), &
-                  v => domain%vars_3d(domain%var_indx(kVARS%v)%v))
+        associate(u_data => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+                  u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                  v_data => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+                  v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d)
 
-        !$acc parallel present(u%data_3d, u%dqdt_3d, v%data_3d, v%dqdt_3d)
+        !$acc parallel present(u_data, u_dqdt, v_data, v_dqdt)
         !$acc loop gang vector collapse(3)
         do j = jms, jme
             do k = kms, kme
                 do i = ims, ime+1
-                    u%dqdt_3d(i,k,j) = (u%dqdt_3d(i,k,j)-u%data_3d(i,k,j))/dt
+                    u_dqdt(i,k,j) = (u_dqdt(i,k,j)-u_data(i,k,j))/dt
                 enddo
             enddo
         enddo
@@ -772,7 +774,7 @@ contains
         do j = jms, jme+1
             do k = kms, kme
                 do i = ims, ime
-                    v%dqdt_3d(i,k,j) = (v%dqdt_3d(i,k,j)-v%data_3d(i,k,j))/dt
+                    v_dqdt(i,k,j) = (v_dqdt(i,k,j)-v_data(i,k,j))/dt
                 enddo
             enddo
         enddo

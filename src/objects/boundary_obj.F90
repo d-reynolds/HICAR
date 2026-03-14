@@ -692,32 +692,22 @@ contains
         class(boundary_t),   intent(inout)   :: this
         type(options_t),     intent(in)      :: options
 
-        type(variable_t)        :: input_z, phbase
         type(interpolable_type) :: input_geo
         real, allocatable :: temp_3d(:,:,:)
         real :: neg_z
-        integer :: id, err
+        integer :: id, err, z_idx
 
+        ! Device data is authoritative after receive() — sync to host before reading
+        z_idx = this%variables%get_var_idx(kVARS%z)
+        !$acc update self(this%variables%var_list(z_idx)%var%data_3d)
 
-        input_z = this%variables%get_var(kVARS%z)
-
-        if (.not.(input_z%computed)) then
-            ! if (options%forcing%z_is_geopotential) then
-            !     ! see if the user has provided a base geopotential height field
-            !     phbase = this%variables%get_var(kVARS%geopotential_base,err)
-            !     if (err == 0) input_z%data_3d = input_z%data_3d + phbase%data_3d
-
-            !     input_z%data_3d = input_z%data_3d / gravity
-            !     !neg_z = minval(input_z%data_3d)
-            !     ! if (neg_z < 0.0) input_z%data_3d = input_z%data_3d - neg_z
-            !     call this%variables%add_var(kVARS%z, input_z)
-            ! endif
+        if (.not.(this%variables%var_list(z_idx)%var%computed)) then
 
             if (allocated(this%z)) then
                 !$acc exit data delete(this%z)
                 deallocate(this%z)
             endif
-            allocate(this%z,source=input_z%data_3d)
+            allocate(this%z, source=this%variables%var_list(z_idx)%var%data_3d)
             !$acc enter data copyin(this%z)
         endif
 
@@ -822,16 +812,20 @@ contains
         pb_idx = list%get_var_idx(kVARS%pressure_base, err)
         if (err == 0) then
             p_idx = list%get_var_idx(kVARS%pressure)
-            !$acc kernels present(list%var_list(p_idx)%var%data_3d, list%var_list(pb_idx)%var%data_3d)
-            list%var_list(p_idx)%var%data_3d = list%var_list(p_idx)%var%data_3d + list%var_list(pb_idx)%var%data_3d
+            associate(p_data => list%var_list(p_idx)%var%data_3d, pb_data => list%var_list(pb_idx)%var%data_3d)
+            !$acc kernels present(p_data, pb_data)
+            p_data = p_data + pb_data
             !$acc end kernels
+            end associate
         endif
 
         if (options%forcing%p_multiplier /= 1.0) then
             p_idx = list%get_var_idx(kVARS%pressure)
-            !$acc kernels present(list%var_list(p_idx)%var%data_3d)
-            list%var_list(p_idx)%var%data_3d = list%var_list(p_idx)%var%data_3d * options%forcing%p_multiplier
+            associate(p_data => list%var_list(p_idx)%var%data_3d)
+            !$acc kernels present(p_data)
+            p_data = p_data * options%forcing%p_multiplier
             !$acc end kernels
+            end associate
         endif
 
         if (options%forcing%qv_is_relative_humidity) then
@@ -844,9 +838,11 @@ contains
 
         if (options%forcing%t_offset /= 0) then
             t_idx = list%get_var_idx(kVARS%potential_temperature)
-            !$acc kernels present(list%var_list(t_idx)%var%data_3d)
-            list%var_list(t_idx)%var%data_3d = list%var_list(t_idx)%var%data_3d + options%forcing%t_offset
+            associate(t_data => list%var_list(t_idx)%var%data_3d)
+            !$acc kernels present(t_data)
+            t_data = t_data + options%forcing%t_offset
             !$acc end kernels
+            end associate
         endif
 
         ! loop through the list of variables checking for computed fields
@@ -866,9 +862,11 @@ contains
         if (.not.options%forcing%t_is_potential) then
             t_idx = list%get_var_idx(kVARS%potential_temperature)
             p_idx = list%get_var_idx(kVARS%pressure)
-            !$acc kernels present(list%var_list(t_idx)%var%data_3d, list%var_list(p_idx)%var%data_3d)
-            list%var_list(t_idx)%var%data_3d = list%var_list(t_idx)%var%data_3d / exner_function(list%var_list(p_idx)%var%data_3d)
+            associate(t_data => list%var_list(t_idx)%var%data_3d, p_data => list%var_list(p_idx)%var%data_3d)
+            !$acc kernels present(t_data, p_data)
+            t_data = t_data / exner_function(p_data)
             !$acc end kernels
+            end associate
         endif
 
         if (options%forcing%limit_rh) call limit_rh(list, options)
@@ -879,16 +877,20 @@ contains
 
         if (.not.(list%var_list(iz_idx)%var%computed)) then
             if (options%forcing%z_is_geopotential) then
+                associate(z_data => list%var_list(iz_idx)%var%data_3d)
                 ! see if the user has provided a base geopotential height field
                 pb_idx = list%get_var_idx(kVARS%geopotential_base, err)
                 if (err == 0) then
-                    !$acc kernels present(list%var_list(iz_idx)%var%data_3d, list%var_list(pb_idx)%var%data_3d)
-                    list%var_list(iz_idx)%var%data_3d = list%var_list(iz_idx)%var%data_3d + list%var_list(pb_idx)%var%data_3d
+                    associate(pb_data => list%var_list(pb_idx)%var%data_3d)
+                    !$acc kernels present(z_data, pb_data)
+                    z_data = z_data + pb_data
                     !$acc end kernels
+                    end associate
                 endif
-                !$acc kernels present(list%var_list(iz_idx)%var%data_3d)
-                list%var_list(iz_idx)%var%data_3d = list%var_list(iz_idx)%var%data_3d / gravity
+                !$acc kernels present(z_data)
+                z_data = z_data / gravity
                 !$acc end kernels
+                end associate
             endif
         endif
 
@@ -933,36 +935,36 @@ contains
         p_idx = list%get_var_idx(kVARS%pressure)
         q_idx = list%get_var_idx(kVARS%water_vapor)
 
-        associate(tvar => list%var_list(t_idx)%var, &
-                  pvar => list%var_list(p_idx)%var, &
-                  qvar => list%var_list(q_idx)%var)
+        if (list%var_list(p_idx)%var%computed) stop "Need pressure as input to compute mixing ratio from relative humidity"
 
-        if (pvar%computed) stop "Need pressure as input to compute mixing ratio from relative humidity"
+        associate(tvar => list%var_list(t_idx)%var%data_3d, &
+                  pvar => list%var_list(p_idx)%var%data_3d, &
+                  qvar => list%var_list(q_idx)%var%data_3d)
 
         ! GPU reduction to check if values are in percent
         maxq = 0.0
-        !$acc parallel loop collapse(3) reduction(max:maxq) present(qvar%data_3d)
-        do j = lbound(qvar%data_3d,3), ubound(qvar%data_3d,3)
-            do k = lbound(qvar%data_3d,2), ubound(qvar%data_3d,2)
-                do i = lbound(qvar%data_3d,1), ubound(qvar%data_3d,1)
-                    maxq = max(maxq, qvar%data_3d(i,k,j))
+        !$acc parallel loop collapse(3) reduction(max:maxq) present(qvar)
+        do j = lbound(qvar,3), ubound(qvar,3)
+            do k = lbound(qvar,2), ubound(qvar,2)
+                do i = lbound(qvar,1), ubound(qvar,1)
+                    maxq = max(maxq, qvar(i,k,j))
                 enddo
             enddo
         enddo
 
         if (maxq > 2) then
-            !$acc kernels present(qvar%data_3d)
-            qvar%data_3d = qvar%data_3d / 100.0
+            !$acc kernels present(qvar)
+            qvar = qvar / 100.0
             !$acc end kernels
         endif
 
         if (options%forcing%t_is_potential) then
-            !$acc kernels present(qvar%data_3d, tvar%data_3d, pvar%data_3d)
-            qvar%data_3d = rh_to_mr(qvar%data_3d, tvar%data_3d * exner_function(pvar%data_3d), pvar%data_3d)
+            !$acc kernels present(qvar, tvar, pvar)
+            qvar = rh_to_mr(qvar, tvar * exner_function(pvar), pvar)
             !$acc end kernels
         else
-            !$acc kernels present(qvar%data_3d, tvar%data_3d, pvar%data_3d)
-            qvar%data_3d = rh_to_mr(qvar%data_3d, tvar%data_3d, pvar%data_3d)
+            !$acc kernels present(qvar, tvar, pvar)
+            qvar = rh_to_mr(qvar, tvar, pvar)
             !$acc end kernels
         endif
 
@@ -984,21 +986,21 @@ contains
         p_idx = list%get_var_idx(kVARS%pressure)
         q_idx = list%get_var_idx(kVARS%water_vapor)
 
-        associate(tvar => list%var_list(t_idx)%var, &
-                  pvar => list%var_list(p_idx)%var, &
-                  qvar => list%var_list(q_idx)%var)
+        associate(tvar => list%var_list(t_idx)%var%data_3d, &
+                  pvar => list%var_list(p_idx)%var%data_3d, &
+                  qvar => list%var_list(q_idx)%var%data_3d)
 
-        !$acc parallel loop gang vector collapse(3) present(tvar%data_3d, pvar%data_3d, qvar%data_3d)
-        do j = lbound(tvar%data_3d, 3), ubound(tvar%data_3d, 3)
-            do k = lbound(tvar%data_3d, 2), ubound(tvar%data_3d, 2)
-                do i = lbound(tvar%data_3d, 1), ubound(tvar%data_3d, 1)
+        !$acc parallel loop gang vector collapse(3) present(tvar, pvar, qvar)
+        do j = lbound(tvar, 3), ubound(tvar, 3)
+            do k = lbound(tvar, 2), ubound(tvar, 2)
+                do i = lbound(tvar, 1), ubound(tvar, 1)
 
-                    t = tvar%data_3d(i,k,j) * exner_function(pvar%data_3d(i,k,j))
+                    t = tvar(i,k,j) * exner_function(pvar(i,k,j))
 
-                    rh = relative_humidity(t, qvar%data_3d(i,k,j), pvar%data_3d(i,k,j))
+                    rh = relative_humidity(t, qvar(i,k,j), pvar(i,k,j))
 
                     if (rh > 1.0) then
-                        qvar%data_3d(i,k,j) = rh_to_mr(1.0, t, pvar%data_3d(i,k,j))
+                        qvar(i,k,j) = rh_to_mr(1.0, t, pvar(i,k,j))
                     endif
 
                 enddo
@@ -1024,16 +1026,16 @@ contains
 
         if (err > 0) return
 
-        associate(var => list%var_list(v_idx)%var)
+        associate(var => list%var_list(v_idx)%var%data_2d)
         if (present(min_val)) then
-            !$acc kernels present(var%data_2d)
-            where(var%data_2d < min_val) var%data_2d = min_val
+            !$acc kernels present(var)
+            where(var < min_val) var = min_val
             !$acc end kernels
         endif
 
         if (present(max_val)) then
-            !$acc kernels present(var%data_2d)
-            where(var%data_2d > max_val) var%data_2d = max_val
+            !$acc kernels present(var)
+            where(var > max_val) var = max_val
             !$acc end kernels
         endif
         end associate
@@ -1049,9 +1051,11 @@ contains
 
         q_idx = list%get_var_idx(kVARS%water_vapor)
 
-        !$acc kernels present(list%var_list(q_idx)%var%data_3d)
-        list%var_list(q_idx)%var%data_3d = list%var_list(q_idx)%var%data_3d / (1 - list%var_list(q_idx)%var%data_3d)
+        associate(q_data => list%var_list(q_idx)%var%data_3d)
+        !$acc kernels present(q_data)
+        q_data = q_data / (1 - q_data)
         !$acc end kernels
+        end associate
 
     end subroutine compute_mixing_ratio_from_sh
 
@@ -1072,30 +1076,30 @@ contains
 
         ps_idx = list%get_var_idx(kVARS%sea_surface_pressure, err)
 
-        associate(qvar  => list%var_list(q_idx)%var,  &
-                  tvar  => list%var_list(t_idx)%var,  &
-                  prvar => list%var_list(pr_idx)%var)
+        associate(qvar  => list%var_list(q_idx)%var%data_3d,  &
+                  tvar  => list%var_list(t_idx)%var%data_3d,  &
+                  prvar => list%var_list(pr_idx)%var%data_3d)
 
-        allocate(t, mold=tvar%data_3d)
+        allocate(t, mold=tvar)
         !$acc enter data create(t)
 
         if (options%forcing%t_is_potential) then
-            !$acc kernels present(t, prvar%data_3d, tvar%data_3d)
-            t = exner_function(prvar%data_3d) * tvar%data_3d
+            !$acc kernels present(t, prvar, tvar)
+            t = exner_function(prvar) * tvar
             !$acc end kernels
         else
-            !$acc kernels present(t, tvar%data_3d)
-            t = tvar%data_3d
+            !$acc kernels present(t, tvar)
+            t = tvar
             !$acc end kernels
         endif
 
         if (err == 0) then
-            call compute_3d_z(prvar%data_3d, list%var_list(ps_idx)%var%data_2d, this%z, t, qvar%data_3d)
+            call compute_3d_z(prvar, list%var_list(ps_idx)%var%data_2d, this%z, t, qvar)
         else
             ps_idx  = list%get_var_idx(kVARS%surface_pressure, err)
             hgt_idx = list%get_var_idx(kVARS%terrain)
             if (err == 0) then
-                call compute_3d_z(prvar%data_3d, list%var_list(ps_idx)%var%data_2d, this%z, t, qvar%data_3d, list%var_list(hgt_idx)%var%data_2d)
+                call compute_3d_z(prvar, list%var_list(ps_idx)%var%data_2d, this%z, t, qvar, list%var_list(hgt_idx)%var%data_2d)
             else
                 write(*,*) "ERROR reading surface pressure or sea level pressure, variables not found"
                 error stop
@@ -1106,9 +1110,11 @@ contains
         end associate
 
         z_idx = list%get_var_idx(kVARS%z)
-        !$acc kernels present(list%var_list(z_idx)%var%data_3d, this%z)
-        list%var_list(z_idx)%var%data_3d = this%z
+        associate(z_data => list%var_list(z_idx)%var%data_3d)
+        !$acc kernels present(z_data, this%z)
+        z_data = this%z
         !$acc end kernels
+        end associate
 
     end subroutine compute_z_update
 
