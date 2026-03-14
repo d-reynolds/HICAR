@@ -950,9 +950,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
 
 ! COUNTING/INDEX VARIABLES
 
-     INTEGER N, MAXN ! ,I
-     INTEGER, DIMENSION(ITS:ITE,KMS:KME,JTS:JTE) ::   NSTEP ! NUMBER OF CLOUD DROPLETS IN CELL
-     INTEGER, DIMENSION(ITS:ITE,JTS:JTE) ::   NSTEP_FLAT ! NUMBER OF CLOUD DROPLETS IN CELL
+     INTEGER N, NSTEP_COL, LTRUE_COL_VAL
 
 ! LTRUE IS ONLY USED TO SPEED UP THE CODE !!
 ! LTRUE, SWITCH = 0, NO HYDROMETEORS IN CELL,
@@ -1029,7 +1027,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
    !$acc             DZQ, RHO, &
    !$acc             QG3DTEN, NG3DTEN, QG3D, NG3D, &
    !$acc             qrcu1d, qscu1d, qicu1d, &
-   !$acc             QGSTEN, QRSTEN, QISTEN, QNISTEN, QCSTEN, LTRUE_COL, NSTEP, NSTEP_FLAT, &
+   !$acc             QGSTEN, QRSTEN, QISTEN, QNISTEN, QCSTEN, LTRUE_COL, &
    !$acc             nc1d, nc_tend1d, C2PREC,CSED,ISED,SSED,GSED,RSED, &
    !$acc             lamg,acn,arn,ain,agn,ltrue,n0s,pgam, &
    !$acc             cdist1,xlf,xxlv,xxls,nc3d,lams,asn, &
@@ -1175,7 +1173,6 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
 ! SET LTRUE INITIALLY TO 0
 
                LTRUE(I,K,J) = 0
-               NSTEP(I,K,J) = 1
 
 ! NC3DTEN LOCAL ARRAY INITIALIZED
                NC3DTEN(I,K,J) = 0.
@@ -3234,17 +3231,8 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
       END DO
       END DO
 
-      !calculate LTRUE_COL(I,K,J), where LTRUE_COL=1 if LTRUE=1 anywhere in the column
-      !$acc parallel loop gang vector collapse(3) wait(1) async(2)
-      do j=jts,jte
-         do k = kts, kte
-            do i=its,ite
-               LTRUE_COL(i,k,j)=maxval(LTRUE(i,:,j))
-            end do
-         end do
-      end do
-! IF THERE ARE NO HYDROMETEORS, THEN SKIP TO END OF SUBROUTINE
-
+      !calculate LTRUE_COL and perform sedimentation in a single kernel
+      ! Replaces 6+4*MAXN kernel launches with a single column-based kernel
 !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 !.......................................................................
 ! CALCULATE SEDIMENATION
@@ -3253,12 +3241,29 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
 ! STABILITY, I.E. COURANT# < 1
 
 !.......................................................................
-   !$acc parallel loop gang vector collapse(3) async(3) wait(2)
+   !$acc parallel loop gang collapse(2) wait(1) async(5)
    do j=jts,jte      ! j loop (north-south)
-      do k = kts, kte
-         do i=its,ite      ! i loop (east-west)
+   do i=its,ite      ! i loop (east-west)
 
-       IF (LTRUE_COL(I,K,J).EQ.0) CYCLE
+      ! --- Check if any level in this column has hydrometeors ---
+      LTRUE_COL_VAL = 0
+      !$acc loop seq
+      do k=kts,kte
+         if (LTRUE(i,k,j).eq.1) LTRUE_COL_VAL = 1
+      end do
+
+      ! Set LTRUE_COL for post-sedimentation use
+      !$acc loop vector
+      do k=kts,kte
+         LTRUE_COL(i,k,j) = LTRUE_COL_VAL
+      end do
+
+      if (LTRUE_COL_VAL.eq.0) cycle
+
+      ! --- Sedimentation setup: DUM arrays and fall speeds ---
+      !$acc loop vector
+      do k=kts,kte
+
         DUMI(I,K,J) = QI3D(I,K,J)+QI3DTEN(I,K,J)*DT
         DUMQS(I,K,J) = QNI3D(I,K,J)+QNI3DTEN(I,K,J)*DT
         DUMR(I,K,J) = QR3D(I,K,J)+QR3DTEN(I,K,J)*DT
@@ -3404,20 +3409,13 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
       FG(I,K,J) = UMG
       FNG(I,K,J) = UNG
 
-      ENDDO
-      ENDDO
-      ENDDO
+      end do  ! k (fall speed computation)
+
 ! V3.3 MODIFY FALLSPEED BELOW LEVEL OF PRECIP
 
-   !$acc parallel loop gang collapse(2) async(4) wait(3)
-   do j=jts,jte      ! j loop (north-south)
-   do i=its,ite      ! i loop (east-west)
-
-       IF (LTRUE_COL(I,KTS,J).EQ.0) CYCLE
       !$acc loop seq
       DO K = KTE-1,KTS,-1
 
-	! IF (K.LE.KTE-1) THEN
         IF (FR(I,K,J).LT.1.E-10) THEN
 	FR(I,K,J)=FR(I,K+1,J)
 	END IF
@@ -3448,24 +3446,18 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
         IF (FNG(I,K,J).LT.1.E-10) THEN
 	FNG(I,K,J)=FNG(I,K+1,J)
 	END IF
-	! END IF ! K LE KTE-1
 
       END DO
 
-      END DO
-      END DO
+! CALCULATE NUMBER OF SPLIT TIME STEPS AND MULTIPLY BY RHO
 
-! CALCULATE NUMBER OF SPLIT TIME STEPS
-   !$acc parallel loop gang vector collapse(3) async(5) wait(4)
-   do j=jts,jte      ! j loop (north-south)
-   DO K = KTS,KTE
-      do i=its,ite      ! i loop (east-west)
-
-       IF (LTRUE_COL(I,K,J).EQ.0) CYCLE
+      NSTEP_COL = 1
+      !$acc loop seq
+      DO K = KTS,KTE
 
       RGVM = MAX(FR(I,K,J),FI(I,K,J),FS(I,K,J),FC(I,K,J),FNI(I,K,J),FNR(I,K,J),FNS(I,K,J),FNC(I,K,J),FG(I,K,J),FNG(I,K,J))
 ! VVT CHANGED IFIX -> INT (GENERIC FUNCTION)
-      NSTEP(I,K,J) = MAX(INT(RGVM*DT/DZQ(I,K,J)+1.),1)
+      NSTEP_COL = MAX(INT(RGVM*DT/DZQ(I,K,J)+1.),NSTEP_COL)
 
 ! MULTIPLY VARIABLES BY RHO(I,K,J)
       DUM1 = RHO(I,K,J)
@@ -3481,38 +3473,13 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
       DUMFNG(I,K,J) = DUMFNG(I,K,J)*DUM1
 
       END DO
-      END DO
-      END DO
 
-      !$acc parallel loop gang vector collapse(2) wait(5)
-      do j = jts,jte
-      do i = its,ite
-            NSTEP_FLAT(i,j) = MAXVAL(NSTEP(i,:,j))
-      enddo
-      enddo
+      ! --- Sub-stepping loop (per-column, not global MAXN) ---
+  DO N = 1,NSTEP_COL
 
-      MAXN = 0
-      !$acc parallel loop gang vector collapse(3) reduction(max:MAXN)
-      do j = jts,jte
-      do k = kts,kte
-      do i = its,ite
-            NSTEP(i,k,j) = NSTEP_FLAT(i,j)
-            MAXN = max(MAXN, NSTEP(i,k,j))
-      enddo
-      enddo
-      enddo
-
-
-  DO N = 1,MAXN
-
-   !$acc parallel loop gang vector collapse(3)
-   do j=jts,jte      ! j loop (north-south)
-   DO K = KTS,KTE
-   do i=its,ite      ! i loop (east-west)
-
-      IF (LTRUE_COL(I,K,J).EQ.0 .or. N > NSTEP(I,K,J)) cycle
-
-      ! if (LTRUE(I,K,J).EQ.0) CYCLE  !NO HYDROMETEORS CALCULATED FOR THIS CELL
+      ! Compute fluxes
+      !$acc loop vector
+      DO K = KTS,KTE
       FALOUTR(I,K,J) = FR(I,K,J)*DUMR(I,K,J)
       FALOUTI(I,K,J) = FI(I,K,J)*DUMI(I,K,J)
       FALOUTNI(I,K,J) = FNI(I,K,J)*DUMFNI(I,K,J)
@@ -3524,16 +3491,14 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
       FALOUTG(I,K,J) = FG(I,K,J)*DUMG(I,K,J)
       FALOUTNG(I,K,J) = FNG(I,K,J)*DUMFNG(I,K,J)
       END DO
-      END DO
-      END DO
 
-      !$acc parallel loop gang vector collapse(2)
-      do j=jts,jte      ! j loop (north-south)
-      do i=its,ite      ! i loop (east-west)
+      ! Flux divergence, tendency and DUM updates
+      !$acc loop vector
+      DO K = KTS,KTE
 
-            IF (LTRUE_COL(I,KTE,J).EQ.0 .or. N > NSTEP(I,KTE,J)) cycle
-
-            DUM1 = 1/DZQ(I,KTE,J)
+      IF (K.EQ.KTE) THEN
+            ! Top of model: outflow only
+            DUM1 = 1.0/DZQ(I,KTE,J)
             FALTNDR = FALOUTR(I,KTE,J)*DUM1
             FALTNDI = FALOUTI(I,KTE,J)*DUM1
             FALTNDNI = FALOUTNI(I,KTE,J)*DUM1
@@ -3546,7 +3511,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
             FALTNDNG = FALOUTNG(I,KTE,J)*DUM1
       ! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
 
-            DUM2 = 1/NSTEP(I,KTE,J)/RHO(I,KTE,J)
+            DUM2 = 1.0/NSTEP_COL/RHO(I,KTE,J)
             QRSTEN(I,KTE,J) = QRSTEN(I,KTE,J)-FALTNDR*DUM2
             QISTEN(I,KTE,J) = QISTEN(I,KTE,J)-FALTNDI*DUM2
             NI3DTEN(I,KTE,J) = NI3DTEN(I,KTE,J)-FALTNDNI*DUM2
@@ -3558,7 +3523,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
             QGSTEN(I,KTE,J) = QGSTEN(I,KTE,J)-FALTNDG*DUM2
             NG3DTEN(I,KTE,J) = NG3DTEN(I,KTE,J)-FALTNDNG*DUM2
 
-            DUMT = DT/NSTEP(I,KTE,J)
+            DUMT = DT/NSTEP_COL
             DUMR(I,KTE,J) = DUMR(I,KTE,J)+FALTNDR*DUMT
             DUMI(I,KTE,J) = DUMI(I,KTE,J)+FALTNDI*DUMT
             DUMFNI(I,KTE,J) = DUMFNI(I,KTE,J)+FALTNDNI*DUMT
@@ -3570,17 +3535,9 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
             DUMG(I,KTE,J) = DUMG(I,KTE,J)+FALTNDG*DUMT
             DUMFNG(I,KTE,J) = DUMFNG(I,KTE,J)+FALTNDNG*DUMT
 
-      ENDDO
-      enddo
-
-      !$acc parallel loop gang vector collapse(3)
-      do j=jts,jte      ! j loop (north-south)
-      DO K = KTE-1,KTS,-1
-      do i=its,ite      ! i loop (east-west)
-
-            IF (LTRUE_COL(I,K,J).EQ.0 .or. N > NSTEP(I,K,J)) cycle
-
-            DUM1 = 1/DZQ(I,K,J)
+      ELSE
+            ! Interior levels: inflow from above minus outflow
+            DUM1 = 1.0/DZQ(I,K,J)
 
             FALTNDR = (FALOUTR(I,K+1,J)-FALOUTR(I,K,J))*DUM1
             FALTNDI = (FALOUTI(I,K+1,J)-FALOUTI(I,K,J))*DUM1
@@ -3594,7 +3551,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
             FALTNDNG = (FALOUTNG(I,K+1,J)-FALOUTNG(I,K,J))*DUM1
 
       ! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
-            DUM2 = 1/NSTEP(I,K,J)/RHO(I,K,J)
+            DUM2 = 1.0/NSTEP_COL/RHO(I,K,J)
 
             QRSTEN(I,K,J) = QRSTEN(I,K,J)+FALTNDR*DUM2
             QISTEN(I,K,J) = QISTEN(I,K,J)+FALTNDI*DUM2
@@ -3607,7 +3564,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
             QGSTEN(I,K,J) = QGSTEN(I,K,J)+FALTNDG*DUM2
             NG3DTEN(I,K,J) = NG3DTEN(I,K,J)+FALTNDNG*DUM2
 
-            DUMT = DT/NSTEP(I,K,J)
+            DUMT = DT/NSTEP_COL
             DUMR(I,K,J) = DUMR(I,K,J)+FALTNDR*DUMT
             DUMI(I,K,J) = DUMI(I,K,J)+FALTNDI*DUMT
             DUMFNI(I,K,J) = DUMFNI(I,K,J)+FALTNDNI*DUMT
@@ -3620,34 +3577,31 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
             DUMFNG(I,K,J) = DUMFNG(I,K,J)+FALTNDNG*DUMT
 
       ! FOR WRF-CHEM, NEED PRECIP RATES (UNITS OF KG/M^2/S)
-            CSED(I,K,J)=CSED(I,K,J)+FALOUTC(I,K,J)/NSTEP(I,K,J)
-            ISED(I,K,J)=ISED(I,K,J)+FALOUTI(I,K,J)/NSTEP(I,K,J)
-            SSED(I,K,J)=SSED(I,K,J)+FALOUTS(I,K,J)/NSTEP(I,K,J)
-            GSED(I,K,J)=GSED(I,K,J)+FALOUTG(I,K,J)/NSTEP(I,K,J)
-            RSED(I,K,J)=RSED(I,K,J)+FALOUTR(I,K,J)/NSTEP(I,K,J)
-      END DO
-      END DO
-      END DO
+            CSED(I,K,J)=CSED(I,K,J)+FALOUTC(I,K,J)/NSTEP_COL
+            ISED(I,K,J)=ISED(I,K,J)+FALOUTI(I,K,J)/NSTEP_COL
+            SSED(I,K,J)=SSED(I,K,J)+FALOUTS(I,K,J)/NSTEP_COL
+            GSED(I,K,J)=GSED(I,K,J)+FALOUTG(I,K,J)/NSTEP_COL
+            RSED(I,K,J)=RSED(I,K,J)+FALOUTR(I,K,J)/NSTEP_COL
+
+      END IF
+
+      END DO  ! K flux divergence
 
 ! GET PRECIPITATION AND SNOWFALL ACCUMULATION DURING THE TIME STEP
 ! FACTOR OF 1000 CONVERTS FROM M TO MM, BUT DIVISION BY DENSITY
 ! OF LIQUID WATER CANCELS THIS FACTOR OF 1000
-      
-      !$acc parallel loop gang vector collapse(2)
-      do j=jts,jte      ! j loop (north-south)
-      do i=its,ite      ! i loop (east-west)
-        IF (LTRUE_COL(I,KTS,J).EQ.0 .or. N > NSTEP(I,KTS,J)) cycle
 
         PRECPRT1D(I,J) = PRECPRT1D(I,J)+(FALOUTR(I,KTS,J)+FALOUTC(I,KTS,J)+FALOUTS(I,KTS,J)+FALOUTI(I,KTS,J)+FALOUTG(I,KTS,J))  &
-                     *DT/NSTEP_FLAT(I,J)
-        SNOWRT1D(I,J) = SNOWRT1D(I,J)+(FALOUTS(I,KTS,J)+FALOUTI(I,KTS,J)+FALOUTG(I,KTS,J))*DT/NSTEP_FLAT(I,J)
+                     *DT/NSTEP_COL
+        SNOWRT1D(I,J) = SNOWRT1D(I,J)+(FALOUTS(I,KTS,J)+FALOUTI(I,KTS,J)+FALOUTG(I,KTS,J))*DT/NSTEP_COL
 ! hm added 7/13/13
-        SNOWPRT1D(I,J) = SNOWPRT1D(I,J)+(FALOUTI(I,KTS,J)+FALOUTS(I,KTS,J))*DT/NSTEP_FLAT(I,J)
-        GRPLPRT1D(I,J) = GRPLPRT1D(I,J)+(FALOUTG(I,KTS,J))*DT/NSTEP_FLAT(I,J)
-      END DO
-      END DO
+        SNOWPRT1D(I,J) = SNOWPRT1D(I,J)+(FALOUTI(I,KTS,J)+FALOUTS(I,KTS,J))*DT/NSTEP_COL
+        GRPLPRT1D(I,J) = GRPLPRT1D(I,J)+(FALOUTG(I,KTS,J))*DT/NSTEP_COL
 
-      END DO
+      END DO  ! N sub-steps
+
+   end do  ! i
+   end do  ! j
 
    !$acc parallel loop gang vector collapse(3) async(6) wait(5)
    do j=jts,jte      ! j loop (north-south)

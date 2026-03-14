@@ -264,7 +264,8 @@ contains
                                                                           del, &
                                                                           dza, &
                                                                           dzq, &
-                                                                         xkzo, &
+                                                                        xkzom, &
+                                                                        xkzoh, &
                                                                            za
 !
    real,    dimension( its:ite, jts:jte )             ::                                &
@@ -355,7 +356,7 @@ contains
    real,intent(out),dimension(ims:ime,kms:kme,jms:jme),optional:: kzhout,kzmout,kzqout
 #endif
 
-!$acc data create(hol,zq,thx,thvx,thlix,qtnp,del,dza,dzq,xkzo,za, pdh, dpdh, pdhi, &
+!$acc data create(hol,zq,thx,thvx,thlix,qtnp,del,dza,dzq,xkzom,xkzoh,za, pdh, dpdh, pdhi, &
 !$acc hgamt,hgamq,entpbl,rhox,govrth,zl1,thermal,wscale,brdn,brup,phim,phih, &
 !$acc dusfc,dvsfc,dtsfc,dqsfc,prpbl,wspd1,thermalli,xkzm,xkzh,f1,f2, brup_precalc, &
 !$acc r1,r2,ad,au,cu,al,xkzq,zfac,rhox2,hgamt2,brcr,sflux,zol1,brcr_sbro, &
@@ -858,7 +859,8 @@ do j = jts,jte
 do j = jts,jte
    do k = kts,klpbl-1
      do i = its,ite
-       xkzo(i,k,j) = ckz*dza(i,k+1,j)
+       xkzom(i,k,j) = xkzminm
+       xkzoh(i,k,j) = xkzminh
      enddo
    enddo
 enddo
@@ -1230,9 +1232,9 @@ do j = jts,jte
          prnum0 = prnum0/(1.+prfac2*karman*sfcfrac)
          prnum =  1. + (prnum0-1.)*exp(prnumfac)
          xkzh(i,k,j) = xkzm(i,k,j)/prnum
-         xkzm(i,k,j) = max(xkzm(i,k,j),xkzo(i,k,j))
-         xkzh(i,k,j) = max(xkzh(i,k,j),xkzo(i,k,j))
-         xkzq(i,k,j) = max(xkzq(i,k,j),xkzo(i,k,j))
+         xkzm(i,k,j) = xkzm(i,k,j) + xkzom(i,k,j)
+         xkzh(i,k,j) = xkzh(i,k,j) + xkzoh(i,k,j)
+         xkzq(i,k,j) = xkzq(i,k,j) + xkzoh(i,k,j)
          xkzm(i,k,j) = min(xkzm(i,k,j),xkzmax)
          xkzh(i,k,j) = min(xkzh(i,k,j),xkzmax)
          xkzq(i,k,j) = min(xkzq(i,k,j),xkzmax)
@@ -1289,8 +1291,8 @@ do j = jts,jte
            xkzm(i,k,j) = xkzh(i,k,j)*prnum
          endif
 !
-         xkzm(i,k,j) = max(xkzm(i,k,j),xkzo(i,k,j))
-         xkzh(i,k,j) = max(xkzh(i,k,j),xkzo(i,k,j))
+         xkzm(i,k,j) = xkzm(i,k,j) + xkzom(i,k,j)
+         xkzh(i,k,j) = xkzh(i,k,j) + xkzoh(i,k,j)
          xkzm(i,k,j) = min(xkzm(i,k,j),xkzmax)
          xkzh(i,k,j) = min(xkzh(i,k,j),xkzmax)
          xkzml(i,k,j) = xkzm(i,k,j)
@@ -1300,20 +1302,20 @@ do j = jts,jte
          tke_pbl(i,k,j)=(xkzm(i,k,j)/max(1.,(zk*rlamdz/(rlamdz+zk))))**2
 
         if(pblflg(i,j).and.entfac(i,k,j).lt.4.6) then
-          xkzh(i,k,j) = -we(i,j)*dza(i,kpbl(i,j),j)*exp(-entfac(i,k,j))
-          xkzh(i,k,j) = sqrt(xkzh(i,k,j)*xkzhl(i,k,j))
-          xkzh(i,k,j) = max(xkzh(i,k,j),xkzo(i,k,j))
-          xkzh(i,k,j) = min(xkzh(i,k,j),xkzmax)
-          xkzq(i,k,j) = xkzh(i,k,j)
-          xkzq(i,k,j) = sqrt(xkzq(i,k,j)*xkzhl(i,k,j))
-          xkzq(i,k,j) = max(xkzq(i,k,j),xkzo(i,k,j))
-          xkzq(i,k,j) = min(xkzq(i,k,j),xkzmax)
+          ! xkzh(i,k,j) = -we(i,j)*dza(i,kpbl(i,j),j)*exp(-entfac(i,k,j))
+          ! xkzh(i,k,j) = sqrt(xkzh(i,k,j)*xkzhl(i,k,j))
+          ! xkzh(i,k,j) = max(xkzh(i,k,j),xkzoh(i,k,j))
+          ! xkzh(i,k,j) = min(xkzh(i,k,j),xkzmax)
+          ! xkzq(i,k,j) = -we(i,j)*dza(i,kpbl(i,j),j)*exp(-entfac(i,k,j))
+          ! xkzq(i,k,j) = sqrt(xkzq(i,k,j)*xkzhl(i,k,j))
+          ! xkzq(i,k,j) = max(xkzq(i,k,j),xkzoh(i,k,j))
+          ! xkzq(i,k,j) = min(xkzq(i,k,j),xkzmax)
           xkzm(i,k,j) = prpbl(i,j)*xkzh(i,k,j)
           xkzm(i,k,j) = sqrt(xkzm(i,k,j)*xkzml(i,k,j))
-          xkzm(i,k,j) = max(xkzm(i,k,j),xkzo(i,k,j))
+          xkzm(i,k,j) = max(xkzm(i,k,j),xkzom(i,k,j))
           xkzm(i,k,j) = min(xkzm(i,k,j),xkzmax)
-        else
-          xkzq(i,k,j) = xkzh(i,k,j)
+        ! else
+        !   xkzq(i,k,j) = xkzh(i,k,j)
         endif
 
        endif
@@ -1352,6 +1354,12 @@ do j = jts,jte
        dtodsu = dt2/del(i,k+1,j)
        rdz    = 1./dza(i,k+1,j)
        tem1   = dpdh(i,k,j)*xkzh(i,k,j)*rdz
+      if(pblflg(i,j).and.k.ge.kpbl(i,j).and.entfac(i,k,j).lt.4.6) then
+         xkzh(i,k,j) = -we(i,j)*dza(i,kpbl(i,j),j)*exp(-entfac(i,k,j))
+         xkzh(i,k,j) = sqrt(xkzh(i,k,j)*xkzhl(i,k,j))
+         xkzh(i,k,j) = max(xkzh(i,k,j),xkzoh(i,k,j))
+         xkzh(i,k,j) = min(xkzh(i,k,j),xkzmax)
+      endif
        dsdz2     = tem1*rdz
        exch_h(i,k+1,j) = xkzh(i,k,j)
        au(i,k,j)   = -dtodsd*dsdz2
@@ -1435,6 +1443,18 @@ do j = jts,jte
 
     enddo
   enddo
+
+  !$acc parallel loop gang vector collapse(3) async(16)
+  do j = jts,jte
+   do k = kts,kte-1
+     do i = its,ite
+       if(k.ge.kpbl(i,j)) then
+         xkzq(i,k,j) = xkzh(i,k,j)
+       endif
+     enddo
+   enddo
+  enddo
+
 !$acc parallel async(16)
 !$acc loop gang vector collapse(3) 
   do j = jts,jte
@@ -1444,6 +1464,12 @@ do j = jts,jte
        dtodsu = dt2/del(i,k+1,j)
        rdz    = 1./dza(i,k+1,j)
        tem1   = dpdh(i,k,j)*xkzq(i,k,j)*rdz
+      if(pblflg(i,j).and.k.ge.kpbl(i,j).and.entfac(i,k,j).lt.4.6) then
+         xkzq(i,k,j) = -we(i,j)*dza(i,kpbl(i,j),j)*exp(-entfac(i,k,j))
+         xkzq(i,k,j) = sqrt(xkzq(i,k,j)*xkzhl(i,k,j))
+         xkzq(i,k,j) = max(xkzq(i,k,j),xkzoh(i,k,j))
+         xkzq(i,k,j) = min(xkzq(i,k,j),xkzmax)
+      endif
        dsdz2     = tem1*rdz
        au(i,k,j)   = -dtodsd*dsdz2
        al(i,k,j)   = -dtodsu*dsdz2

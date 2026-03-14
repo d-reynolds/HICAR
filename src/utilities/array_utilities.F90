@@ -336,6 +336,7 @@ contains
                                                         ! It can be 2, or 3 (but not 1)
         real,allocatable,dimension(:,:,:)::inputwind    !> temporary array to store the input data in
         integer::i,j,k,nx,ny,nz,startx,endx,starty,endy,ii,jj ! various array indices/bounds
+        integer::di,dk,kk ! stencil loop indices for GPU direct-computation path
 
         ! Intermediate sums to speed up the computation
         ! Because these are accumulating values over the domain, use double precision
@@ -351,91 +352,107 @@ contains
 
         allocate(inputwind(nx,ny,nz)) ! Can't be module level because nx,ny,nz could change between calls,
 
-        inputwind = wind !make a copy so we always use the unsmoothed data when computing the smoothed data
-        ! if (( ( (windowsize*2+1)>nz) .or. ((windowsize*2+1)>nx) ) .and. (ydim==3)) then
-        !     write(*,*) "It is OK to ignore this warning for most idealized (e.g. maybe ~2D) simulations"
-        !     write(*,*) "WARNING smoothing windowsize*2+1 is larger than nx or ny."
-        !     write(*,*) "  This might lead to artifacts in the wind field especially near the borders."
-        !     write(*,*) "  NX         = ", nx
-        !     write(*,*) "  NY         = ", nz
-        !     write(*,*) "  windowsize = ", windowsize
-        !     print*, "Image = ",this_image()
-        ! endif
+        ! GPU path: O(w^2) direct computation — embarrassingly parallel, full GPU occupancy
+        ! CPU path: O(1) sliding window — efficient for large windowsize (e.g. linear_winds)
+#ifdef _OPENACC
+        !$acc data present_or_copy(wind) create(inputwind)
+        !$acc kernels
+        inputwind = wind
+        !$acc end kernels
 
-        !parallelize over a slower dimension (not the slowest because it is MUCH easier this way)
-        ! as long as the inner loops (the array operations) are over the fastest dimension we are mostly OK
+        if (ydim==3) then
+            !$acc parallel loop gang collapse(2) private(cursum, dk, di, kk, ii)
+            do k = 1, nz
+                do j = 1, ny
+                    !$acc loop vector private(cursum)
+                    do i = 1, nx
+                        cursum = 0.0d0
+                        !$acc loop seq
+                        do dk = -windowsize, windowsize
+                            kk = max(1, min(nz, k + dk))
+                            !$acc loop seq
+                            do di = -windowsize, windowsize
+                                ii = max(1, min(nx, i + di))
+                                cursum = cursum + inputwind(ii, j, kk)
+                            enddo
+                        enddo
+                        wind(i,j,k) = cursum / (ncols * ncols)
+                    enddo
+                enddo
+            enddo
+        else ! ydim==2
+            !$acc parallel loop gang collapse(2)
+            do j = 1, ny
+                do k = 1, nz
+                    !$acc loop vector private(startx, endx, starty, endy, cursum, ii, jj)
+                    do i = 1, nx
+                        startx = max(1, i - windowsize)
+                        endx   = min(nx, i + windowsize)
+                        starty = max(1, j - windowsize)
+                        endy   = min(ny, j + windowsize)
+                        cursum = 0.0d0
+                        !$acc loop seq
+                        do jj = starty, endy
+                            !$acc loop seq
+                            do ii = startx, endx
+                                cursum = cursum + inputwind(ii, jj, k)
+                            enddo
+                        enddo
+                        wind(i,j,k) = cursum / ((endx-startx+1)*(endy-starty+1))
+                    enddo
+                enddo
+            enddo
+        endif
+        !$acc end data
+#else
+        inputwind = wind
+
         !$omp parallel firstprivate(windowsize,nx,ny,nz,ydim), &
         !$omp private(i,j,k,ii,jj,startx,endx,starty,endy, rowsums,rowmeans,nrows,ncols,cursum), &
         !$omp shared(wind,inputwind)
 
-        allocate(rowsums(nx)) !this is only used when ydim=3, so nz is really ny
-        allocate(rowmeans(nx)) !this is only used when ydim=3, so nz is really ny
+        allocate(rowsums(nx))
+        allocate(rowmeans(nx))
         nrows = windowsize * 2 + 1
         ncols = windowsize * 2 + 1
 
-        !$acc data present_or_copy(wind) create(rowsums,rowmeans, inputwind)
-        
-        !$acc kernels
-        inputwind = wind !make a copy so we always use the unsmoothed data when computing the smoothed data
-        !$acc end kernels
-
         !$omp do schedule(static)
-        !$acc parallel loop gang private(rowsums, rowmeans, cursum, starty, endy, startx, endx)
         do j=1,ny
 
-            ! so we pre-compute the sum over rows for each column in the current window
             if (ydim==3) then
-                ! start by adding the outer row n+2 times
-                ! effectively assumes it was set up for the grid cell before the first grid cell
-                ! the first time through the loop will remove one iteration of outer row grid cells
-                !$acc loop vector
                 do i=1,nx
                     rowsums(i) = inputwind(i,j,1) * (windowsize+2)
                 enddo
-                !$acc loop seq
                 do ii=2, min(windowsize,nz)
-                    !$acc loop vector
                     do i=1,nx
                         rowsums(i) = rowsums(i) + inputwind(i, j, ii)
                     enddo
                 enddo
                 if (windowsize > nz) then
-                    !$acc loop vector
                     do i=1,nx
                         rowsums(i) = rowsums(i) + inputwind(i,j,nz) * (windowsize-nz)
                     enddo
                 endif
             endif
 
-            ! don't parallelize over this loop because it is much more efficient to be able to assume
-            ! that you ran the previous row in serial for the slow (ydim=3) case
-            !$acc loop seq
-            do k=1,nz ! note this is y for ydim=3
-                ! ydim=3 for the main model grid which is large and takes a long time
+            do k=1,nz
                 if (ydim==3) then
                     starty  = max(2, k - windowsize)
                     endy    = min(nz, k + windowsize)
-                    !$acc loop vector
                     do i=1,nx
                         rowsums(i) = rowsums(i) - inputwind(i, j, starty-1) + inputwind(i, j, endy)
                     enddo
 
-                    ! start by adding the outer row n+2 times
-                    ! effectively assumes it was set up for the grid cell before the first grid cell
-                    ! the first time through the loop will remove one iteration of outer row grid cells
-                    !$acc loop vector
                     do i=1,nx
                         rowmeans(i) = rowsums(i) / nrows
                     enddo
                     cursum = rowmeans(1) * (windowsize+2)
-                    !$acc loop seq
                     do i=2,windowsize
                         cursum = cursum + rowmeans(i)
                     enddo
                 endif
 
                 if (ydim==3) then
-                    !$acc loop seq
                     do i=1,nx
                         startx = max(2, i - windowsize)
                         endx   = min(nx, i + windowsize)
@@ -445,19 +462,13 @@ contains
                     enddo
 
                 else ! ydim==2
-                    ! ydim=2 for the input data which is a small grid, thus cheap so we still use the slow method
-                    !$acc loop vector private(startx, endx, starty, endy, cursum)
                     do i=1,nx
-                        !first find the current window bounds
                         startx=max(1, i - windowsize)
                         endx  =min(nx,i + windowsize)
                         starty=max(1, j - windowsize)
                         endy  =min(ny,j + windowsize)
-                        ! then compute the mean within that window (sum/n)
                         cursum = 0.0d0
-                        !$acc loop seq
                         do jj=starty,endy
-                            !$acc loop seq
                             do ii=startx,endx
                                 cursum = cursum + inputwind(ii,jj,k)
                             enddo
@@ -468,8 +479,11 @@ contains
             enddo
         enddo
         !$omp end do
+        deallocate(rowsums)
+        deallocate(rowmeans)
         !$omp end parallel
-        !$acc end data
+#endif
+        deallocate(inputwind)
 
     end subroutine smooth_array_3d
 

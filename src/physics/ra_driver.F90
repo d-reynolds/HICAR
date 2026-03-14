@@ -103,11 +103,12 @@ module radiation
     type(ty_aerosol_optics_rrtmgp_merra)   &
                                     :: aerosol_optics_lw, aerosol_optics_sw
     logical :: do_aerosols = .False.
-    integer, parameter :: ngas = 8
+    integer, parameter :: ngas = 10
     integer :: nblocks = 1
 
-    character(len=3), dimension(ngas), parameter :: &
-                gas_names = ['h2o', 'o3', 'co2', 'n2o', 'co ', 'ch4', 'o2 ', 'n2 ']
+    character(len=7), dimension(ngas), parameter :: &
+                gas_names = ['h2o    ', 'o3     ', 'co2    ', 'n2o    ', 'co     ', &
+                             'ch4    ', 'o2     ', 'n2     ', 'cfc11  ', 'cfc12  ']
     type(ty_gas_concs)           :: gas_concs
 
 #else
@@ -799,7 +800,10 @@ contains
                       qv_dom => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
                       qc_dom => domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d, &
                       qi_dom => domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d, &
-                      qs_dom => domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d)
+                      qs_dom => domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d, &
+                      skin_temperature => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                      th_lwrad => domain%tend%th_lwrad, &
+                      th_swrad => domain%tend%th_swrad)
             ra_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
             last_model_time(domain%nest_indx) = domain%sim_time%seconds()
             next_update_time(domain%nest_indx) = next_update_time(domain%nest_indx) + update_interval
@@ -972,7 +976,7 @@ contains
                                its=its, ite=ite, jts=jts, jte=jte, kts=kts, kte=kte, F_runlw=.True.)
             else if (options%physics%radiation==kRA_RRTMG .or. options%physics%radiation==kRA_RRTMGP) then
 
-                ! domain%tend%th_swrad = 0
+                ! th_swrad = 0
                 ! domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d = 0
                 ! Calculate cloud fraction
                 If (options%rad%icloud == 3) THEN
@@ -1021,7 +1025,7 @@ contains
                 if (options%physics%radiation==kRA_RRTMG) then
                     call domain%update_host()
                     !$acc update host(qi, qc, qs, cldfra)
-                    call RRTMG_SWRAD(rthratensw=domain%tend%th_swrad,         &
+                    call RRTMG_SWRAD(rthratensw=th_swrad,         &
     !                swupt, swuptc, swuptcln, swdnt, swdntc, swdntcln, &
     !                swupb, swupbc, swupbcln, swdnb, swdnbc, swdnbcln, &
     !                      swupflx, swupflxc, swdnflx, swdnflxc,      &
@@ -1120,7 +1124,7 @@ contains
                                     ims=ims, ime=ime, jms=jms, jme=jme, kms=kms, kme=kme, &
                                     its=its, ite=ite, jts=jts, jte=jte, kts=kts, kte=kte)
                     
-                    call RRTMG_LWRAD(rthratenlw=domain%tend%th_lwrad,                 &
+                    call RRTMG_LWRAD(rthratenlw=th_lwrad,                 &
     !                           lwupt, lwuptc, lwuptcln, lwdnt, lwdntc, lwdntcln,     &        !if lwupt defined, all MUST be defined
     !                           lwupb, lwupbc, lwupbcln, lwdnb, lwdnbc, lwdnbcln,     &
                                 glw = domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d,                        &
@@ -1184,10 +1188,16 @@ contains
                                 )
                                                     
                     call domain%update_device()
-                    !$acc update device(domain%tend%th_lwrad, domain%tend%th_swrad)
+                    !$acc update device(th_lwrad, th_swrad)
 
                 else if (options%physics%radiation==kRA_RRTMGP) then
 #ifdef USE_RTE_RRTMGP
+                    ! Zero heating rate tendencies before accumulating from blocks
+                    !$acc kernels present(th_lwrad, th_swrad)
+                    th_lwrad = 0.0
+                    th_swrad = 0.0
+                    !$acc end kernels
+
                     !cut RRTMGP up into blocks to reduce memory usage
                     do block = 1, nblocks
                     if (block == 1 .and. nblocks==1) then
@@ -1220,9 +1230,9 @@ contains
                     relmax = MIN(cloud_optics_lw%get_max_radius_liq(), cloud_optics_sw%get_max_radius_liq())
 
 
-                    allocate(p_lay(ncol, nlay), t_lay(ncol, nlay), p_lev(ncol, nlay+1), t_lev(ncol, nlay+1), q(ncol, nlay), &
+                    allocate(o3(ncol, nlay), p_lay(ncol, nlay), t_lay(ncol, nlay), p_lev(ncol, nlay+1), t_lev(ncol, nlay+1), q(ncol, nlay), &
                             rel(ncol, nlay), rei(ncol, nlay), lwp(ncol, nlay), zwp(ncol,nlay), iwp(ncol, nlay), swp(ncol, nlay), res(ncol, nlay))
-                    !$acc data create(p_lay, t_lay, p_lev, t_lev, q, rel, rei, lwp, zwp, iwp, swp, res)
+                    !$acc data create(o3, p_lay, t_lay, p_lev, t_lev, q, rel, rei, lwp, zwp, iwp, swp, res)
 
                     !$acc parallel loop gang vector collapse(2) private(col_indx) present(density, dz_interface, pressure, temperature, &
                     !$acc            qv_dom, re_c_dom, re_i_dom, re_s_dom, pressure_i, temperature_i, p_lay, t_lay, q, rel, rei, lwp, zwp, iwp, swp, res, p_lev, t_lev, qi) wait(1)
@@ -1246,9 +1256,11 @@ contains
                                     
                                     lwp(col_indx,k) = 1000.0*qc(i,k,j) * air_mass_lay / cld_frc
                                     iwp(col_indx,k) = 1000.0*qi(i,k,j) * air_mass_lay / cld_frc
-                                    rel(col_indx,k) = max(relmin, min(relmax, re_c_dom(i,k,j)))
-                                    rei(col_indx,k) = max(reimin, min(reimax, re_i_dom(i,k,j)))
-                                    res(col_indx,k) = max(reimin, min(reimax, re_s_dom(i,k,j)))
+                                    rel(col_indx,k) = max(relmin, min(relmax, re_c_dom(i,k,j) * 1.0e6_wp))
+                                    ! DR: 03.2026 : strangely, RRTMGP expects effective radius for cloud water and diameter for cloud ice and snow
+                                    ! could change in the future
+                                    rei(col_indx,k) = max(reimin, min(reimax, re_i_dom(i,k,j) * 1.0e6_wp * 2)) ! additional "*2" converts radius to diameter
+                                    res(col_indx,k) = max(reimin, min(reimax, re_s_dom(i,k,j) * 1.0e6_wp * 2)) ! additional "*2" converts radius to diameter
                                 else
                                     lwp(col_indx,k) = 0.0_wp
                                     iwp(col_indx,k) = 0.0_wp
@@ -1266,10 +1278,21 @@ contains
                         enddo
                     enddo
 
-                    !$acc update host(p_lay)
+                    !$acc update host(p_lay, p_lev)
+
+                    ! Compute ozone VMR using RRTMGP parametric formula (from rrtmgp_allsky.F90)
+                    !$acc parallel loop gang vector collapse(2) private(col_indx, k) present(p_lay, o3) wait(1)
+                    do col_indx = 1, ncol
+                        do k = kts, kte
+                            o3(col_indx, k) = max(1.e-13_wp, &
+                                3.6478_wp * (p_lay(col_indx, k) / 100._wp)**0.83209_wp &
+                                * exp(-(p_lay(col_indx, k) / 100._wp) / 11.3515_wp) * 1.e-6_wp)
+                        enddo
+                    enddo
 
                     call set_atmo_gas_conc(domain, block)
                     CALL stop_on_err(gas_concs%set_vmr('h2o',   q))
+                    CALL stop_on_err(gas_concs%set_vmr('o3 ',   o3))
 
                     ! ----------------------------------------------------------------------------
                     !  Boundary conditions depending on whether the k-distribution being supplied
@@ -1316,11 +1339,11 @@ contains
                     ! lw_sources is threadprivate
                     ! Surface temperature
 
-                    !$acc parallel loop gang vector collapse(2) present(t_sfc, emis_sfc, t_lay, land_emissivity)
+                    !$acc parallel loop gang vector collapse(2) present(t_sfc, emis_sfc, t_lay, land_emissivity, skin_temperature)
                     do j = jb_s, jb_e
                         do i = its, ite
                             col_indx = (i-its+1) + (j - jb_s)*(ite - its + 1)
-                            t_sfc(col_indx) = t_lay(col_indx,1)
+                            t_sfc(col_indx) = skin_temperature(i,j)
                             !$acc loop
                             do k = 1, nbnd
                                 emis_sfc(k,col_indx) = land_emissivity(i,j)
@@ -1366,7 +1389,24 @@ contains
                             longwave(i,j) = flx_dn((i - its + 1) + (j - jb_s)*(ite-its + 1), 1)
                         enddo
                     enddo
-                    ! Debug prints
+
+                    ! Compute LW heating rates on GPU and convert to theta tendency
+                    !$acc parallel loop gang vector collapse(2) private(col_indx) &
+                    !$acc   present(flx_up, flx_dn, p_lev, exner, th_lwrad)
+                    do j = jb_s, jb_e
+                        do i = its, ite
+                            col_indx = (i-its+1) + (j - jb_s)*(ite - its + 1)
+                            !$acc loop
+                            do k = kts, kte
+                                th_lwrad(i,k,j) = &
+                                    (gravity / (cp * (p_lev(col_indx,k+1) - p_lev(col_indx,k)))) &
+                                    * (flx_up(col_indx,k+1) - flx_up(col_indx,k) &
+                                     - flx_dn(col_indx,k+1) + flx_dn(col_indx,k)) &
+                                    / exner(i,k,j)
+                            enddo
+                        enddo
+                    enddo
+
                     !$acc        end data
                     call lw_sources%finalize()
                     call atmos_lw%finalize()
@@ -1460,6 +1500,24 @@ contains
                             shortwave_diffuse(i,j) = shortwave(i,j) - shortwave_direct(i,j)
                         enddo
                     enddo
+
+                    ! Compute SW heating rates on GPU and convert to theta tendency
+                    !$acc parallel loop gang vector collapse(2) private(col_indx) &
+                    !$acc   present(flx_up, flx_dn, p_lev, exner, th_swrad)
+                    do j = jb_s, jb_e
+                        do i = its, ite
+                            col_indx = (i-its+1) + (j - jb_s)*(ite - its + 1)
+                            !$acc loop
+                            do k = kts, kte
+                                th_swrad(i,k,j) = &
+                                    (gravity / (cp * (p_lev(col_indx,k+1) - p_lev(col_indx,k)))) &
+                                    * (flx_up(col_indx,k+1) - flx_up(col_indx,k) &
+                                     - flx_dn(col_indx,k+1) + flx_dn(col_indx,k)) &
+                                    / exner(i,k,j)
+                            enddo
+                        enddo
+                    enddo
+
                     !$acc end data
                     !$acc end data
                     call atmos_sw%finalize()
@@ -1467,7 +1525,7 @@ contains
                     call snow_sw%finalize()
 
                     deallocate(p_lay, t_lay, p_lev, t_lev, q, rel, rei, lwp, zwp, iwp, swp, res)
-                    deallocate(toa_flux, sfc_alb_dir, sfc_alb_dif, mu0, flx_up, flx_dn, flx_dnsw_dir, t_sfc, emis_sfc)
+                    deallocate(o3, toa_flux, sfc_alb_dir, sfc_alb_dif, mu0, flx_up, flx_dn, flx_dnsw_dir, t_sfc, emis_sfc)
 
                     enddo
 #endif ! end USE_RTE_RRTMGP
@@ -1475,8 +1533,6 @@ contains
 
                 ! If the user has provided sky view fraction, then apply this to the diffuse SW now, 
                 ! since svf is time-invariant
-
-                associate(tend_th_swrad => domain%tend%th_swrad)
 
                 if (domain%var_indx(kVARS%svf)%v > 0) then
                     associate(svf => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d)
@@ -1489,7 +1545,6 @@ contains
                     end associate
                 endif
 
-                end associate
             endif ! end if rrtmg or rrtmgp
             ! cache shortwave from RRTMG_SWRAD for downscaling.
             ! needed if we are to call the terrain shading routine more frequently than RRTMG_SWRAD
@@ -1705,11 +1760,13 @@ contains
         ! Set perscribed atmospheric composition. Water vapor will be set dynamically at each call. 
         ! This can be changed in the future to read from a file or from different climate change scenarios
         call stop_on_err(gas_concs%set_vmr("co2", 410.e-6_wp))
-        call stop_on_err(gas_concs%set_vmr("ch4", 1650.e-9_wp))
-        call stop_on_err(gas_concs%set_vmr("n2o", 306.e-9_wp))
+        call stop_on_err(gas_concs%set_vmr("ch4", 1750.e-9_wp))
+        call stop_on_err(gas_concs%set_vmr("n2o", 319.e-9_wp))
         call stop_on_err(gas_concs%set_vmr("n2 ",  0.7808_wp))
         call stop_on_err(gas_concs%set_vmr("o2 ",  0.2095_wp))
         call stop_on_err(gas_concs%set_vmr("co ",  0._wp))
+        call stop_on_err(gas_concs%set_vmr("cfc11", 230.e-12_wp))   ! ~230 ppt (2020 value)
+        call stop_on_err(gas_concs%set_vmr("cfc12", 490.e-12_wp))   ! ~490 ppt (2020 value)
 
     end subroutine set_atmo_gas_conc
 #endif

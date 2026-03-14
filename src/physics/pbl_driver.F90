@@ -225,7 +225,7 @@ contains
                       u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
                       v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d)
             !$acc parallel present(tend_u, tend_v, tend_th_pbl, tend_qv_pbl, tend_qc_pbl, tend_qi_pbl, &
-            !$acc &               tend_th_lwrad, tend_th_swrad, u_10m, v_10m, windspd,RTHRATEN,regime) copyin(kVARS)
+            !$acc &               tend_th_lwrad, tend_th_swrad, u_10m, v_10m, windspd,RTHRATEN,regime)
             !$acc loop gang vector collapse(3)
             do j = jms,jme
             do k = kms,kme
