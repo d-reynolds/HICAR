@@ -2349,6 +2349,11 @@ contains
                 default = '.False.'
                 group = "Restart"
                 type = 1
+            case ("override_check")
+                description = "Flag to override a stop on a failed comparison between a restart file and this namelist"
+                default = '.False.'
+                group = "Restart"
+                type = 1
             case ("restart_folder")
                 description = "Path to folder where restart files will be read from and output to"
                 default = "../restart/"

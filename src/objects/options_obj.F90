@@ -567,13 +567,13 @@ contains
         integer :: name_unit, rc
         integer    :: restartinterval(kMAX_NESTS)
 
-        logical :: file_exists, read_namelist, print_info, gennml, restart_run(kMAX_NESTS)
+        logical :: file_exists, read_namelist, print_info, gennml, override_check(kMAX_NESTS), restart_run(kMAX_NESTS)
 
         ! Local variables
         character(len=kMAX_FILE_LENGTH) :: restart_folder(kMAX_NESTS)
         character(len=kMAX_FILE_LENGTH) :: restart_date(kMAX_NESTS)    ! date to restart
 
-        namelist /restart/  restartinterval, restart_folder, restart_date, restart_run
+        namelist /restart/  restartinterval, restart_folder, restart_date, restart_run, override_check
         CHARACTER(LEN=200) :: error_msg
 
         read_namelist = .True.
@@ -589,6 +589,7 @@ contains
         call set_nml_var_default(restart_folder, 'restart_folder', print_info, gennml)
         call set_nml_var_default(restart_date, 'restart_date', print_info, gennml)
         call set_nml_var_default(restart_run, 'restart_run', print_info, gennml)
+        call set_nml_var_default(override_check, 'override_check', print_info, gennml)
 
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
@@ -604,7 +605,8 @@ contains
         call set_nml_var(options%restart%restart_count, restartinterval(n_indx), 'restartinterval', restartinterval(1))
         call set_nml_var(options%restart%restart_folder, restart_folder(n_indx), 'restart_folder', restart_folder(1))
         call set_nml_var(options%restart%restart, restart_run(n_indx), 'restart_run', restart_run(1))
-
+        call set_nml_var(options%restart%override_check, override_check(n_indx), 'override_check', override_check(1))
+        
         !If the user did not ask for a restart run, leave the function now
         if (.not.(options%restart%restart)) return
         

@@ -1210,7 +1210,7 @@ contains
             endif
         end do
 
-        if (n_diffs > 0) then
+        if ( (n_diffs > 0) .and. (options%restart%override_check .eqv. .False.)) then
             write(*,*) ""
             write(*,*) "ERROR: Configuration mismatch between restart file and current namelist"
             write(*,*) "  Number of differences: ", n_diffs
@@ -1221,6 +1221,9 @@ contains
                 write(*,*) "  ... and ", n_diffs - 500, " more differences"
             endif
             write(*,*) ""
+            write(*,*) "-------------------------------------------------------------------------------------------"
+            write(*,*) "To ignore and continue, set override_check = .True. in restart section of the namelist"
+            write(*,*) "-------------------------------------------------------------------------------------------"
             error stop "Configuration mismatch: restart file was generated with different options than current namelist"
         endif
 
