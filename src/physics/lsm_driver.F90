@@ -827,7 +827,6 @@ contains
                             SR(i,j) = current_snow(i,j)/(current_precipitation(i,j)+epsilon)
                             nmp_snowh(i,j) = snow_height(i,j)
                             nmp_snow(i,j) = snow_water_equivalent(i,j)
-                            nmp_snow_t(i,1:3,j) = snow_temperature(i,1:3,j)
                             nmp_snow_nlayers(i,j) = snow_nlayers(i,j)
                             !$acc loop seq
                             do k=1,num_snow_layers
@@ -1205,7 +1204,7 @@ contains
             !!
 
         endif ! end if time to call lsm
-
+        
     end subroutine lsm
 
     subroutine lsm_apply_fluxes(domain,options,dt)

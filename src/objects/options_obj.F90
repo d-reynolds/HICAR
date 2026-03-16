@@ -214,6 +214,13 @@ contains
         if (this%physics%snowmodel==kSM_FSM) then
             kSNOW_GRID_Z = this%sm%fsm_nsnow_max
             kSNOWSOIL_GRID_Z = kSNOW_GRID_Z+kSOIL_GRID_Z
+
+            if (this%sm%suspension_layer == 1 .and. this%sm%fsm_sntran > 0) then
+                if (STD_OUT_PE) write(*,*) " "
+                if (STD_OUT_PE) write(*,*) "WARNING: The CRYOWRF-style blowing snow drift model is not currently compatible with the FSM's SNOWTRAN scheme"
+                if (STD_OUT_PE) write(*,*) "WARNING: Assuming that you would prefer the suspension layer scheme, and setting sntran to 0"
+                this%sm%fsm_sntran = 0
+            endif
         endif
 
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
@@ -1950,13 +1957,18 @@ contains
         logical, dimension(kMAX_NESTS) :: snowpack_enable_vapour_transport
         character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_variant
         logical, dimension(kMAX_NESTS) :: snowpack_reduce_n_elements
+
+        integer, dimension(kMAX_NESTS) :: suspension_fine_mesh_levels, suspension_layer
+        logical, dimension(kMAX_NESTS) :: bs_atm_feedback
+
         ! define the namelist
         namelist /sm_parameters/ fsm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
                                  fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst, &
                                  fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn, &
                                  snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt, &
                                  snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable, &
-                                 snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_reduce_n_elements, snowpack_variant, snowpack_enable_vapour_transport
+                                 snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_reduce_n_elements, snowpack_variant, snowpack_enable_vapour_transport, &
+                                 suspension_fine_mesh_levels, suspension_layer, bs_atm_feedback
                                  
 
         CHARACTER(LEN=200) :: error_msg
@@ -2003,6 +2015,11 @@ contains
         call set_nml_var_default(snowpack_reduce_n_elements, 'snowpack_reduce_n_elements', print_info, gennml)
         call set_nml_var_default(snowpack_variant, 'snowpack_variant', print_info, gennml)
         call set_nml_var_default(snowpack_enable_vapour_transport, 'snowpack_enable_vapour_transport', print_info, gennml)
+
+        call set_nml_var_default(suspension_layer, 'suspension_layer', print_info, gennml)
+        call set_nml_var_default(suspension_fine_mesh_levels, 'suspension_fine_mesh_levels', print_info, gennml)
+        call set_nml_var_default(bs_atm_feedback, 'bs_atm_feedback', print_info, gennml)
+
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
 
@@ -2023,6 +2040,7 @@ contains
             snicar_aerosol_readtable(n_indx) = snicar_aerosol_readtable(1)
             snowpack_enable_vapour_transport(n_indx) = snowpack_enable_vapour_transport(1)
             snowpack_reduce_n_elements(n_indx) = snowpack_reduce_n_elements(1)
+            bs_atm_feedback(n_indx) = bs_atm_feedback(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             ! read the namelist options
             open(io_newunit(name_unit), file=filename)
@@ -2072,7 +2090,11 @@ contains
         call set_nml_var(sm_options%snowpack_reduce_n_elements, snowpack_reduce_n_elements(n_indx), 'snowpack_reduce_n_elements', snowpack_reduce_n_elements(1))
         call set_nml_var(sm_options%snowpack_variant, snowpack_variant(n_indx), 'snowpack_variant', snowpack_variant(1))
         call set_nml_var(sm_options%snowpack_enable_vapour_transport, snowpack_enable_vapour_transport(n_indx), 'snowpack_enable_vapour_transport')
-        
+
+        call set_nml_var(sm_options%suspension_layer, suspension_layer(n_indx), 'suspension_layer', suspension_layer(1))
+        call set_nml_var(sm_options%suspension_fine_mesh_levels, suspension_fine_mesh_levels(n_indx), 'suspension_fine_mesh_levels', suspension_fine_mesh_levels(1))
+        call set_nml_var(sm_options%bs_atm_feedback, bs_atm_feedback(n_indx), 'bs_atm_feedback')
+
     end subroutine sm_parameters_namelist
     !> -------------------------------
     !! Initialize the radiation model options
@@ -2969,6 +2991,9 @@ contains
         call append_kv_int    (config_str, pos, 'sm', 'snowpack_albedo_parameterization', this%sm%snowpack_albedo_parameterization)
         call append_kv_logical(config_str, pos, 'sm', 'snowpack_reduce_n_elements',       this%sm%snowpack_reduce_n_elements)
         call append_kv_logical(config_str, pos, 'sm', 'snowpack_enable_vapour_transport', this%sm%snowpack_enable_vapour_transport)
+        call append_kv_int    (config_str, pos, 'sm', 'suspension_layer',              this%sm%suspension_layer)
+        call append_kv_int    (config_str, pos, 'sm', 'suspension_fine_mesh_levels',   this%sm%suspension_fine_mesh_levels)
+        call append_kv_logical(config_str, pos, 'sm', 'bs_atm_feedback',               this%sm%bs_atm_feedback)
 
         ! --- rad group ---
         call append_kv_logical(config_str, pos, 'rad', 'terrain_shading',      this%rad%terrain_shading)

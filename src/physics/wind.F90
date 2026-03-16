@@ -28,7 +28,7 @@ module wind
 
     implicit none
     private
-    public:: balance_uvw, update_winds, init_winds, calc_w_real, wind_var_request, update_wind_dqdt
+    public:: balance_uvw, update_winds, init_winds, calc_w_real, wind_var_request, update_wind_dqdt, calc_divergence
 
     integer :: ids, ide, jds, jde, kds, kde,  &
                ims, ime, jms, jme, kms, kme,  &
@@ -158,14 +158,12 @@ contains
         
         ! If update is true, calculate the divergence and w component from the dqdt_3d arrays
         if (update) then
-            call calc_divergence(divergence, domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
-            domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, jaco_u, jaco_v, jaco_w, dz, dx, rho, adv_den, horz_only=.True.)
+            call calc_divergence(divergence,domain,horz_only=.True.,use_dqdt=.True.)
             call calc_w(domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, divergence, dz, jaco_w, rho, adv_den)
 
         ! If update is false, calculate the divergence and w component from the data_3d arrays
         else
-            call calc_divergence(divergence, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
-                    domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, jaco_u, jaco_v, jaco_w, dz, dx, rho, adv_den, horz_only=.True.)
+            call calc_divergence(divergence,domain,horz_only=.True.,use_dqdt=.False.)
             call calc_w(domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, divergence, dz, jaco_w, rho, adv_den)
         endif
         
@@ -247,25 +245,41 @@ contains
         !$acc end data
     end subroutine
 
-    subroutine calc_divergence(div, u, v, w, jaco, jaco_u, jaco_v, jaco_w, dz, dx, rho, advect_density, horz_only)
+    subroutine calc_divergence(div, domain, advect_density, horz_only, use_dqdt)
         implicit none
         real,           intent(inout) :: div(ims:ime,kms:kme,jms:jme)
-        real, dimension(ims:ime,kms:kme,jms:jme),   intent(in)    :: w, dz, jaco_w, rho, jaco
-        real, dimension(ims:ime+1,kms:kme,jms:jme), intent(in)    :: u, jaco_u
-        real, dimension(ims:ime,kms:kme,jms:jme+1), intent(in)    :: v, jaco_v
-        real,           intent(in)    :: dx
-        logical,intent(in)    :: advect_density
-        logical, optional, intent(in) :: horz_only
+        type(domain_t), intent(in)    :: domain
+        logical, optional, intent(in) :: horz_only, use_dqdt, advect_density
         
         real, dimension(ims:ime,kms:kme,jms:jme) :: w_met
         real, dimension(ims:ime+1,kms:kme,jms:jme) :: u_met
         real, dimension(ims:ime,kms:kme,jms:jme+1) :: v_met
         real, dimension(ims:ime,kms:kme-1,jms:jme) :: rho_i
-        logical :: horz
+        logical :: horz, dqdt, adv_den
         integer :: i, j, k
 
         horz = .False.
         if (present(horz_only)) horz=horz_only
+        dqdt = .False.
+        if (present(use_dqdt)) dqdt=use_dqdt
+        adv_den = .True.
+        if (present(advect_density)) adv_den=advect_density
+
+        associate( &
+            u => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+            v => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+            w => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+            u_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+            v_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+            w_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+            jaco => domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, &
+            jaco_u => domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, &
+            jaco_v => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
+            jaco_w => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
+            rho => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
+            dz => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+            dx => domain%dx &
+        )
 
         !$acc data present(div, u, v, w, dz, jaco, jaco_u, jaco_v, jaco_w, rho, dx) create(rho_i, u_met, v_met, w_met)
 
@@ -273,40 +287,74 @@ contains
         !Constant jacobian at edges
         
 
-        if (advect_density) then
-            !$acc parallel async(0)
-            !$acc loop gang vector collapse(3)
-            do j = jms, jme
+        if (adv_den) then
+            if (dqdt) then
+                 !$acc parallel async(0)
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme
+                    do i = ims+1, ime
+                        u_met(i,k,j) = u_dqdt_3d(i,k,j) * jaco_u(i,k,j) * (rho(i-1,k,j) + rho(i,k,j))/2
+                    enddo
+                    enddo
+                enddo
+                !$acc loop gang vector collapse(3)
+                do j = jms+1, jme
+                    do k = kms, kme
+                    do i = ims, ime
+                        v_met(i,k,j) = v_dqdt_3d(i,k,j) * jaco_v(i,k,j) * (rho(i,k,j-1) + rho(i,k,j))/2
+                    enddo
+                    enddo
+                enddo
+                !Handle edges assuming constant density gradient
+                !$acc loop gang vector collapse(2)
+                do j = jms, jme
                 do k = kms, kme
-                do i = ims+1, ime
-                    u_met(i,k,j) = u(i,k,j) * jaco_u(i,k,j) * (rho(i-1,k,j) + rho(i,k,j))/2
+                    u_met(ims,k,j) = u_dqdt_3d(ims,k,j) * jaco_u(ims,k,j) * (1.5*rho(ims,k,j) - 0.5*rho(ims+1,k,j))
+                    u_met(ime+1,k,j) = u_dqdt_3d(ime+1,k,j) * jaco_u(ime+1,k,j) * (1.5*rho(ime,k,j) - 0.5*rho(ime-1,k,j))
                 enddo
                 enddo
-            enddo
-            !$acc loop gang vector collapse(3)
-            do j = jms+1, jme
+                !$acc loop gang vector collapse(2)
                 do k = kms, kme
                 do i = ims, ime
-                    v_met(i,k,j) = v(i,k,j) * jaco_v(i,k,j) * (rho(i,k,j-1) + rho(i,k,j))/2
+                    v_met(i,k,jms) = v_dqdt_3d(i,k,jms) * jaco_v(i,k,jms) * (1.5*rho(i,k,jms) - 0.5*rho(i,k,jms+1))
+                    v_met(i,k,jme+1) = v_dqdt_3d(i,k,jme+1) * jaco_v(i,k,jme+1) * (1.5*rho(i,k,jme) - 0.5*rho(i,k,jme-1))
                 enddo
                 enddo
-            enddo
-            !Handle edges assuming constant density gradient
-            !$acc loop gang vector collapse(2)
-            do j = jms, jme
-            do k = kms, kme
-                u_met(ims,k,j) = u(ims,k,j) * jaco_u(ims,k,j) * (1.5*rho(ims,k,j) - 0.5*rho(ims+1,k,j))
-                u_met(ime+1,k,j) = u(ime+1,k,j) * jaco_u(ime+1,k,j) * (1.5*rho(ime,k,j) - 0.5*rho(ime-1,k,j))
-            enddo
-            enddo
-            !$acc loop gang vector collapse(2)
-            do k = kms, kme
-            do i = ims, ime
-                v_met(i,k,jms) = v(i,k,jms) * jaco_v(i,k,jms) * (1.5*rho(i,k,jms) - 0.5*rho(i,k,jms+1))
-                v_met(i,k,jme+1) = v(i,k,jme+1) * jaco_v(i,k,jme+1) * (1.5*rho(i,k,jme) - 0.5*rho(i,k,jme-1))
-            enddo
-            enddo
-
+            else ! else if not using dqdt, just apply metric terms to get face-staggered winds
+                !$acc parallel async(0)
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme
+                    do i = ims+1, ime
+                        u_met(i,k,j) = u(i,k,j) * jaco_u(i,k,j) * (rho(i-1,k,j) + rho(i,k,j))/2
+                    enddo
+                    enddo
+                enddo
+                !$acc loop gang vector collapse(3)
+                do j = jms+1, jme
+                    do k = kms, kme
+                    do i = ims, ime
+                        v_met(i,k,j) = v(i,k,j) * jaco_v(i,k,j) * (rho(i,k,j-1) + rho(i,k,j))/2
+                    enddo
+                    enddo
+                enddo
+                !Handle edges assuming constant density gradient
+                !$acc loop gang vector collapse(2)
+                do j = jms, jme
+                do k = kms, kme
+                    u_met(ims,k,j) = u(ims,k,j) * jaco_u(ims,k,j) * (1.5*rho(ims,k,j) - 0.5*rho(ims+1,k,j))
+                    u_met(ime+1,k,j) = u(ime+1,k,j) * jaco_u(ime+1,k,j) * (1.5*rho(ime,k,j) - 0.5*rho(ime-1,k,j))
+                enddo
+                enddo
+                !$acc loop gang vector collapse(2)
+                do k = kms, kme
+                do i = ims, ime
+                    v_met(i,k,jms) = v(i,k,jms) * jaco_v(i,k,jms) * (1.5*rho(i,k,jms) - 0.5*rho(i,k,jms+1))
+                    v_met(i,k,jme+1) = v(i,k,jme+1) * jaco_v(i,k,jme+1) * (1.5*rho(i,k,jme) - 0.5*rho(i,k,jme-1))
+                enddo
+                enddo
+            endif ! end if use_dqdt
             !$acc loop gang vector collapse(3)
             do j = jms, jme
                 do k = kms, kme-1
@@ -317,26 +365,48 @@ contains
                 enddo
             enddo
             !$acc end parallel
-        else
-            !$acc parallel async(0)
-            !$acc loop gang vector collapse(3)
-            do j = jms, jme
-                do k = kms, kme
-                do i = ims, ime+1
-                    u_met(i,k,j) = u(i,k,j) * jaco_u(i,k,j)
+        else ! else if not advecting density, just apply metric terms to get face-staggered winds
+            if (dqdt) then
+                !$acc parallel async(0)
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme
+                    do i = ims, ime+1
+                        u_met(i,k,j) = u_dqdt_3d(i,k,j)
+                    enddo
+                    enddo
                 enddo
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme+1
+                    do k = kms, kme
+                    do i = ims, ime
+                        v_met(i,k,j) = v_dqdt_3d(i,k,j)
+                    enddo
+                    enddo
                 enddo
-            enddo
-            !$acc loop gang vector collapse(3)
-            do j = jms, jme+1
-                do k = kms, kme
-                do i = ims, ime
-                    v_met(i,k,j) = v(i,k,j) * jaco_v(i,k,j)
+                !$acc end parallel
+            else
+                !$acc parallel async(0)
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme
+                    do i = ims, ime+1
+                        u_met(i,k,j) = u(i,k,j) * jaco_u(i,k,j)
+                    enddo
+                    enddo
                 enddo
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme+1
+                    do k = kms, kme
+                    do i = ims, ime
+                        v_met(i,k,j) = v(i,k,j) * jaco_v(i,k,j)
+                    enddo
+                    enddo
                 enddo
-            enddo
-            !$acc end parallel
-        end if
+                !$acc end parallel
+            endif ! end if use_dqdt
+        end if ! end if advect_density
+
 
         !$acc parallel loop gang vector collapse(3) async(1) wait(0)
         do j = jms, jme
@@ -350,33 +420,64 @@ contains
         enddo
 
         if (.NOT.(horz)) then
-            if (advect_density) then
-                !$acc parallel async(1)
-                !$acc loop gang vector collapse(3)
-                do j = jms, jme
-                    do k = kms, kme-1
-                    do i = ims, ime
-                        !Interpolate density to w grid
-                        w_met(i,k,j) = w(i,k,j) * jaco_w(i,k,j) * rho_i(i,k,j)
-                    enddo
-                    enddo
-                enddo
-                !$acc loop gang vector collapse(2)
-                do j = jms,jme
-                do i = ims,ime
-                    w_met(i,kme,j) = w(i,kme,j) * jaco_w(i,kme,j) * rho(i,kme,j)
-                enddo
-                enddo
-                !$acc end parallel
-            else
-                !$acc parallel loop gang vector collapse(3) async(1)
-                do j = jms, jme
-                    do k = kms, kme
+            if (adv_den) then
+                if (dqdt) then
+                    !$acc parallel async(1)
+                    !$acc loop gang vector collapse(3)
+                    do j = jms, jme
+                        do k = kms, kme-1
                         do i = ims, ime
-                            w_met(i,k,j) = w(i,k,j) * jaco_w(i,k,j)
+                            !Interpolate density to w grid
+                            w_met(i,k,j) = w_dqdt_3d(i,k,j) * jaco_w(i,k,j) * rho_i(i,k,j)
+                        enddo
                         enddo
                     enddo
-                enddo
+                    !$acc loop gang vector collapse(2)
+                    do j = jms,jme
+                    do i = ims,ime
+                        w_met(i,kme,j) = w_dqdt_3d(i,kme,j) * jaco_w(i,kme,j) * rho(i,kme,j)
+                    enddo
+                    enddo
+                    !$acc end parallel
+                else
+                    !$acc parallel async(1)
+                    !$acc loop gang vector collapse(3)
+                    do j = jms, jme
+                        do k = kms, kme-1
+                        do i = ims, ime
+                            !Interpolate density to w grid
+                            w_met(i,k,j) = w(i,k,j) * jaco_w(i,k,j) * rho_i(i,k,j)
+                        enddo
+                        enddo
+                    enddo
+                    !$acc loop gang vector collapse(2)
+                    do j = jms,jme
+                    do i = ims,ime
+                        w_met(i,kme,j) = w(i,kme,j) * jaco_w(i,kme,j) * rho(i,kme,j)
+                    enddo
+                    enddo
+                    !$acc end parallel
+                endif ! end if use_dqdt
+            else
+                if (dqdt) then
+                    !$acc parallel loop gang vector collapse(3) async(1)
+                    do j = jms, jme
+                        do k = kms, kme
+                            do i = ims, ime
+                                w_met(i,k,j) = w_dqdt_3d(i,k,j) * jaco_w(i,k,j)
+                            enddo
+                        enddo
+                    enddo
+                else
+                    !$acc parallel loop gang vector collapse(3) async(1)
+                    do j = jms, jme
+                        do k = kms, kme
+                            do i = ims, ime
+                                w_met(i,k,j) = w(i,k,j) * jaco_w(i,k,j)
+                            enddo
+                        enddo
+                    enddo
+                endif ! end if use_dqdt
             end if
 
             !$acc parallel loop gang vector collapse(3) async(1)
@@ -395,6 +496,7 @@ contains
             enddo
             enddo
         endif
+        end associate
 
         !$acc end data
         !$acc wait(1)
@@ -665,9 +767,7 @@ contains
             do i = 1, options%wind%wind_iterations
                 call calc_idealized_wgrid(domain)
 
-                call calc_divergence(div,domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
-                                domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,domain%dx, &
-                                domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,options%adv%advect_density,horz_only=.False.)
+                call calc_divergence(div,domain,horz_only=.False.,use_dqdt=.True.)
 
 #ifdef USE_AMGX                
                 call calc_iter_winds_amgx(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)

@@ -3549,26 +3549,6 @@ contains
                                attribute_t("coordinates",   "lat lon")]
           
         !>------------------------------------------------------------
-        !!  saltation flux from FSM
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%dSWE_salt) then
-            var_meta%name        = "salt"
-            var_meta%dimensions  = two_d_t_dimensions
-            var_meta%attributes  = [attribute_t("standard_name", "saltation flux"),   &
-                               attribute_t("units",         "kg m-2 t-1"),                        &
-                               attribute_t("coordinates",   "lat lon")]
-          
-        !>------------------------------------------------------------
-        !!  suspension flux from FSM
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%dSWE_susp) then
-            var_meta%name        = "susp"
-            var_meta%dimensions  = two_d_t_dimensions
-            var_meta%attributes  = [attribute_t("standard_name", "suspension flux"),   &
-                               attribute_t("units",         "kg m-2 t-1"),                        &
-                               attribute_t("coordinates",   "lat lon")]
-          
-        !>------------------------------------------------------------
         !!  blowing snow sublimation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dSWE_blow_subl) then
@@ -3986,8 +3966,119 @@ contains
                                attribute_t("units",         "-"),                        &
                                attribute_t("coordinates",   "lat lon")]
 
+        !>------------------------------------------------------------
+        !!  SNOWPACK: coordination number N3
+        !------------------------------------------------------------
+        else if (var_idx==kVARS%N3) then
+            var_meta%name        = "N3"
+            var_meta%dimensions  = three_d_t_snow_dimensions
+            var_meta%dim_len(2)  = kSNOW_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "coordination_number_N3"),   &
+                               attribute_t("description",   "Grain coordination number"),     &
+                               attribute_t("units",         "1"),                              &
+                               attribute_t("coordinates",   "lat lon")]
 
-        end if  
+        !>------------------------------------------------------------
+        !!  Blowing snow threshold friction velocity
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_threshold_ustar) then
+            var_meta%name        = "bs_ustar_t"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_threshold_friction_velocity"),   &
+                               attribute_t("units",         "m s-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Blowing snow saltation layer flux
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_saltation_flux) then
+            var_meta%name        = "bs_salt_flux"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_saltation_flux"),   &
+                               attribute_t("units",         "kg m-2 s-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Blowing snow suspension layer flux
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_suspension_flux) then
+            var_meta%name        = "bs_susp_flux"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_suspension_flux"),   &
+                               attribute_t("units",         "kg m-2 s-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Blowing snow mass exchange with snowpack
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_swe_exchange) then
+            var_meta%name        = "bs_swe_exch"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_swe_exchange"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Blowing snow sublimation flux
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_sublimation_flux) then
+            var_meta%name        = "bs_subl_flux"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_sublimation_flux"),   &
+                               attribute_t("units",         "W m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Blowing snow suspended ice mixing ratio (3D tracer)
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_susp_ice_mass) then
+            var_meta%name        = "bs_ice_mass"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_ice_mixing_ratio"),   &
+                               attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Blowing snow suspended ice number concentration (3D tracer)
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_susp_ice_number) then
+            var_meta%name        = "bs_ice_num"
+            var_meta%dimensions  = three_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_ice_number_concentration"),   &
+                               attribute_t("units",         "kg-1"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Blowing snow accumulated saltation SWE change
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_drift_swe_salt) then
+            var_meta%name        = "bs_swe_salt"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_saltation_swe_change"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Blowing snow accumulated suspension SWE change
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_drift_swe_susp) then
+            var_meta%name        = "bs_swe_susp"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_suspension_swe_change"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Blowing snow accumulated sublimation SWE change
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_drift_swe_subl) then
+            var_meta%name        = "bs_swe_subl"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_sublimation_swe_change"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        end if
 
         ! loop through entire array setting n_dimensions and n_attrs based on the data that were supplied
         if (var_meta%name == "") return

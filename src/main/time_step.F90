@@ -18,6 +18,7 @@ module time_step
     use surface_layer,              only : sfc
     use planetary_boundary_layer,   only : pbl, pbl_apply_tend
     use radiation,                  only : rad, rad_apply_dtheta
+    use snow_drift,                 only : snow_drift_apply_feedback
     use wind,                       only : balance_uvw, update_winds, update_wind_dqdt
     use domain_interface,           only : domain_t
     use options_interface,          only : options_t
@@ -457,6 +458,10 @@ contains
         call rad_apply_dtheta(domain, options, dt)
         call lsm_apply_fluxes(domain,options,dt)
         call pbl_apply_tend(domain,options,dt)
+
+        if (options%sm%suspension_layer == 1 .and. options%sm%bs_atm_feedback) then
+            call snow_drift_apply_feedback(domain, options, dt)
+        endif
 
     end subroutine integrate_physics_tendencies
 
