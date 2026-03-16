@@ -6,7 +6,7 @@
 !!
 !!------------------------------------------------------------
 submodule(boundary_interface) boundary_implementation
-    use array_utilities,        only : interpolate_in_z, array_offset_x, array_offset_y
+    use array_utilities,        only : interpolate_in_z, array_offset_x, array_offset_y, array_offset_y_2d, array_offset_x_2d
     use io_routines,            only : io_getdims, io_read, io_maxDims, io_variable_is_present, io_write, io_var_reversed
     use time_io,                only : read_times, find_timestep_in_filelist
     use string,                 only : str, as_string
@@ -424,8 +424,8 @@ contains
             this%ulat = parent_nest_lat(this%its:this%ite+1,this%jts:this%jte)
             this%ulon = parent_nest_lon(this%its:this%ite+1,this%jts:this%jte)
         else
-            call array_offset_x(this%lon, this%ulon)
-            call array_offset_x(this%lat, this%ulat)
+            call array_offset_x_2d(this%lon, this%ulon)
+            call array_offset_x_2d(this%lat, this%ulat)
         endif
 
         allocate(this%vlat((this%ite-this%its+1),(this%jte-this%jts+2)))
@@ -438,8 +438,8 @@ contains
             this%vlat = parent_nest_lat(this%its:this%ite,this%jts:this%jte+1)
             this%vlon = parent_nest_lon(this%its:this%ite,this%jts:this%jte+1)
         else
-            call array_offset_y(this%lon, this%vlon)
-            call array_offset_y(this%lat, this%vlat)
+            call array_offset_y_2d(this%lon, this%vlon)
+            call array_offset_y_2d(this%lat, this%vlat)
         endif
 
         ! Get the height coordinate of the parent nest

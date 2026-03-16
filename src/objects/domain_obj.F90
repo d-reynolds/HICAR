@@ -1011,15 +1011,6 @@ contains
             !$acc enter data copyin(this%tend%v)
         endif
 
-        if (0<opt%vars_to_allocate( kVARS%tend_th_lwrad) ) then
-            allocate(this%tend%th_lwrad(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
-            !$acc enter data copyin(this%tend%th_lwrad)
-        endif
-        if (0<opt%vars_to_allocate( kVARS%tend_th_swrad) ) then
-            allocate(this%tend%th_swrad(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
-            !$acc enter data copyin(this%tend%th_swrad)
-        endif
-
     end subroutine
 
 
@@ -2958,7 +2949,7 @@ contains
 
         ! temporary to hold the variable to be interpolated to
         integer :: i, k, j, n, var_indx
-        real :: dt_seconds, forcing_dt_seconds
+        real :: dt_seconds, forcing_dt_seconds, forcing_elapsed_local
 
         dt_seconds = this%next_input%seconds() - this%sim_time%seconds()
         forcing_dt_seconds = dt_seconds
@@ -2981,7 +2972,7 @@ contains
         endif
         
         ! Now iterate through the dictionary as long as there are more elements present
-
+        forcing_elapsed_local = this%forcing_elapsed
         do n = 1,size(this%forcing_hi)
             associate(forcing_hi => this%forcing_hi(n))
             !Update delta fields on the high-resolution forcing varaibles...
@@ -2992,9 +2983,9 @@ contains
                 !$acc kernels present(fh_dqdt, fh_data)
                 fh_dqdt = (fh_dqdt - fh_data) / forcing_dt_seconds
                 !$acc end kernels
-                if (this%forcing_elapsed > 0.0) then
+                if (forcing_elapsed_local > 0.0) then
                     !$acc kernels present(fh_data, fh_dqdt)
-                    fh_data = fh_data + fh_dqdt * this%forcing_elapsed
+                    fh_data = fh_data + fh_dqdt * forcing_elapsed_local
                     !$acc end kernels
                 endif
                 end associate
@@ -3003,9 +2994,9 @@ contains
                 !$acc kernels present(fh_dqdt, fh_data)
                 fh_dqdt = (fh_dqdt - fh_data) / forcing_dt_seconds
                 !$acc end kernels
-                if (this%forcing_elapsed > 0.0) then
+                if (forcing_elapsed_local > 0.0) then
                     !$acc kernels present(fh_data, fh_dqdt)
-                    fh_data = fh_data + fh_dqdt * this%forcing_elapsed
+                    fh_data = fh_data + fh_dqdt * forcing_elapsed_local
                     !$acc end kernels
                 endif
                 end associate

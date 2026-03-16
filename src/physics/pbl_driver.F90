@@ -221,7 +221,8 @@ contains
 
             associate(tend_u => domain%tend%u, tend_v => domain%tend%v, tend_th_pbl => domain%tend%th_pbl, &
                       tend_qv_pbl => domain%tend%qv_pbl, tend_qc_pbl => domain%tend%qc_pbl, tend_qi_pbl => domain%tend%qi_pbl, &
-                      tend_th_lwrad => domain%tend%th_lwrad, tend_th_swrad => domain%tend%th_swrad, &
+                      tend_th_lwrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_lwrad)%v)%data_3d, &
+                      tend_th_swrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_swrad)%v)%data_3d, &
                       u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
                       v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d)
             !$acc parallel present(tend_u, tend_v, tend_th_pbl, tend_qv_pbl, tend_qc_pbl, tend_qi_pbl, &

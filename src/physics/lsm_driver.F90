@@ -257,6 +257,8 @@ contains
         logical, optional, intent(in) :: context_chng
         integer :: i, j, k, dev_num
         logical :: context_change, restart, monthly_vegfrac
+        real*8 :: elapsed, eff_interval
+        integer :: n_calls
 
         if (options%physics%landsurface > 0 .or. options%physics%watersurface > 0) then
 
@@ -719,6 +721,16 @@ contains
             else
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
                 next_update_time(domain%nest_indx) = domain%sim_time%seconds()
+            endif
+            if (options%restart%restart) then
+                ! Determine when radiation was last called before the restart time,
+                ! based on the original simulation start time and the update interval
+                eff_interval = max(dble(update_interval), 10.0d0)
+                ! add a small fraction of a second in the case of roundoff errors restart time
+                elapsed = (options%restart%restart_time%seconds() - 0.01) - options%general%start_time%seconds()
+                n_calls = int(elapsed / eff_interval)
+                last_model_time(domain%nest_indx) = options%general%start_time%seconds() + n_calls * eff_interval
+                next_update_time(domain%nest_indx) = last_model_time(domain%nest_indx) + eff_interval - 0.01
             endif
         endif
 

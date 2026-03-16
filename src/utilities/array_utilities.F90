@@ -192,20 +192,12 @@ contains
         jme = ubound(input_array,2)
 
         if (allocated(output_array)) deallocate(output_array)
-        if (jme > 1) then
-            allocate(output_array(ims:ime,jms:jme+1))
+        allocate(output_array(ims:ime,jms:jme+1))
+        
+        output_array(ims:ime,jms)    = (1.5 * input_array(ims:ime,jms)  - 0.5 * input_array(ims:ime,jms+1))    ! extrapolate past the end
+        output_array(ims:ime,jms+1:jme) = (input_array(ims:ime,jms:jme-1) + input_array(ims:ime,jms+1:jme) ) * 0.5 ! interpolate between points
+        output_array(ims:ime,jme+1) = (1.5 * input_array(ims:ime,jme)  - 0.5 * input_array(ims:ime,jme-1))! extrapolate past the end
 
-            output_array(ims:ime,jms)    = (1.5 * input_array(ims:ime,jms)  - 0.5 * input_array(ims:ime,jms+1))    ! extrapolate past the end
-            output_array(ims:ime,jms+1:jme) = (input_array(ims:ime,jms:jme-1) + input_array(ims:ime,jms+1:jme) ) * 0.5 ! interpolate between points
-            output_array(ims:ime,jme+1) = (1.5 * input_array(ims:ime,jme)  - 0.5 * input_array(ims:ime,jme-1))! extrapolate past the end
-            
-        else ! this came in as essentially a 1D array with y really being in the x position as a result
-            allocate(output_array(ims:ime+1,jms:jme))
-
-        output_array(ims,jms:jme)    = (1.5 * input_array(ims,jms:jme)  - 0.5 * input_array(ims+1,jms:jme))    ! extrapolate past the end
-        output_array(ims+1:ime,jms:jme) = (input_array(ims:ime-1,jms:jme) + input_array(ims+1:ime,jms:jme) ) * 0.5    ! interpolate between points
-        output_array(ime+1,jms:jme) = (1.5 * input_array(ime,jms:jme)  - 0.5 * input_array(ime-1,jms:jme))! extrapolate past the end
-        endif
     end subroutine
 
     subroutine array_offset_y_3d(input_array, output_array)

@@ -20,6 +20,7 @@ module wind_iterative_amgx
     use iso_fortran_env
     use mpi_f08
     use openacc
+    use string, only : str
 
     implicit none
     private
@@ -402,7 +403,7 @@ contains
             "prec:relaxation_factor=1, " // &
             "prec:max_iters=1, " // &
             "main:use_scalar_norm=1, " // &
-            "main:max_iters=" // trim(adjustl(to_string(options%wind%wind_solver_iterations))) // ", " // &
+            "main:max_iters=" // trim(str(options%wind%wind_solver_iterations)) // ", " // &
             "main:convergence=COMBINED_REL_INI_ABS, " // &
             "main:tolerance=1e-5, " // &
             "main:alt_rel_tolerance=1e-10, " // &
@@ -877,9 +878,8 @@ contains
     !>------------------------------------------------------------
     !! Compute RHS vector (same as PETSc version)
     !!------------------------------------------------------------
-    subroutine compute_rhs(domain)
+    subroutine compute_rhs()
         implicit none
-        type(domain_t), intent(in) :: domain
         integer :: i, j, k, idx
         
         ! rhs is now pre-allocated with global size, we only fill first n_rows elements

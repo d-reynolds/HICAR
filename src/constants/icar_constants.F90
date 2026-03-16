@@ -273,6 +273,8 @@ module icar_constants
         integer :: out_longwave_rad
         integer :: longwave_cloud_forcing
         integer :: shortwave_cloud_forcing
+        integer :: th_lwrad
+        integer :: th_swrad
         integer :: land_emissivity
         integer :: temperature_interface
         integer :: runoff_tstep

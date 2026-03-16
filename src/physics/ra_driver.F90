@@ -152,6 +152,8 @@ contains
         character(len=512) :: cloud_optics_lw_file = 'rrtmgp_support/rrtmgp-clouds-lw-bnd.nc'
         character(len=512) :: aerosol_optics_sw_file = ''
         character(len=512) :: aerosol_optics_lw_file = ''
+        real*8 :: elapsed, eff_interval
+        integer :: n_calls
 
         if (present(context_chng)) then
             context_change = context_chng
@@ -191,6 +193,16 @@ contains
             else
                 last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
                 next_update_time(domain%nest_indx) = domain%sim_time%seconds()
+            endif
+            if (options%restart%restart) then
+                ! Determine when radiation was last called before the restart time,
+                ! based on the original simulation start time and the update interval
+                eff_interval = max(dble(update_interval), 10.0d0)
+                ! add a small fraction of a second in the case of roundoff errors restart time
+                elapsed = (options%restart%restart_time%seconds() - 0.01) - options%general%start_time%seconds()
+                n_calls = int(elapsed / eff_interval)
+                last_model_time(domain%nest_indx) = options%general%start_time%seconds() + n_calls * eff_interval
+                next_update_time(domain%nest_indx) = last_model_time(domain%nest_indx) + eff_interval - 0.01
             endif
         endif
         
@@ -269,8 +281,6 @@ contains
                 ids=domain%ids, ide=domain%ide, jds=domain%jds, jde=domain%jde, kds=domain%kds, kde=domain%kde,                &
                 ims=domain%ims, ime=domain%ime, jms=domain%jms, jme=domain%jme, kms=domain%kms, kme=domain%kme,                &
                 its=domain%its, ite=domain%ite, jts=domain%jts, jte=domain%jte, kts=domain%kts, kte=domain%kte                 )
-                domain%tend%th_swrad = 0
-                domain%tend%th_lwrad = 0
 
             rrtmg_init = .True.
 
@@ -636,7 +646,8 @@ contains
                       kVARS%snow_water_equivalent,                                                                            &
                       kVARS%dz_interface, kVARS%skin_temperature,      kVARS%temperature,             kVARS%density,          &
                       kVARS%longwave_cloud_forcing,                    kVARS%land_emissivity, kVARS%temperature_interface,    &
-                      kVARS%cosine_zenith_angle,                       kVARS%shortwave_cloud_forcing] )
+                      kVARS%cosine_zenith_angle,                       kVARS%shortwave_cloud_forcing,           &
+                      kVARS%tend_th_lwrad, kVARS%tend_th_swrad, kVARS%cloud_fraction, kVARS%albedo])
 
     end subroutine ra_rrtmg_var_request
 
@@ -802,8 +813,8 @@ contains
                       qi_dom => domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d, &
                       qs_dom => domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d, &
                       skin_temperature => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
-                      th_lwrad => domain%tend%th_lwrad, &
-                      th_swrad => domain%tend%th_swrad)
+                      th_lwrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_lwrad)%v)%data_3d, &
+                      th_swrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_swrad)%v)%data_3d)
             ra_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
             last_model_time(domain%nest_indx) = domain%sim_time%seconds()
             next_update_time(domain%nest_indx) = next_update_time(domain%nest_indx) + update_interval
@@ -976,8 +987,12 @@ contains
                                its=its, ite=ite, jts=jts, jte=jte, kts=kts, kte=kte, F_runlw=.True.)
             else if (options%physics%radiation==kRA_RRTMG .or. options%physics%radiation==kRA_RRTMGP) then
 
-                ! th_swrad = 0
-                ! domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d = 0
+                ! Zero heating rate tendencies
+                !$acc kernels present(th_lwrad, th_swrad)
+                th_lwrad = 0.0
+                th_swrad = 0.0
+                !$acc end kernels
+
                 ! Calculate cloud fraction
                 If (options%rad%icloud == 3) THEN
                     IF ( F_QC .AND. F_QI ) THEN
@@ -1192,11 +1207,6 @@ contains
 
                 else if (options%physics%radiation==kRA_RRTMGP) then
 #ifdef USE_RTE_RRTMGP
-                    ! Zero heating rate tendencies before accumulating from blocks
-                    !$acc kernels present(th_lwrad, th_swrad)
-                    th_lwrad = 0.0
-                    th_swrad = 0.0
-                    !$acc end kernels
 
                     !cut RRTMGP up into blocks to reduce memory usage
                     do block = 1, nblocks
@@ -1719,8 +1729,8 @@ contains
         !This is now outside of interval loop, so this will be called every phys timestep
         if (options%physics%radiation==kRA_RRTMG .or. options%physics%radiation==kRA_RRTMGP) then
             associate(pot_temp => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,  &
-                      tend_th_swrad => domain%tend%th_swrad, &
-                      tend_th_lwrad => domain%tend%th_lwrad  & 
+                      tend_th_swrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_swrad)%v)%data_3d, &
+                      tend_th_lwrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_lwrad)%v)%data_3d  & 
                       )
 
             !$acc parallel loop gang vector collapse(3) present(pot_temp, tend_th_lwrad, tend_th_swrad) async(1)
