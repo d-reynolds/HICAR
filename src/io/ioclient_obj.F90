@@ -224,6 +224,7 @@ contains
         integer :: i, n_3d, n_2d, nx, ny, nz_v, i_s_w, i_e_w, j_s_w, j_e_w, idx
         logical :: should_do_restart
         integer :: ii, jj, kk
+        integer :: comm_size, my_rank, ierr
 
         n_3d = 1
         n_2d = 1
@@ -297,6 +298,13 @@ contains
 
         ! Pass 2: restart-only variables (only on restart steps or first push)
         if (should_do_restart) then
+            ! Send dt to ioserver for restart file (rank 0 only; all compute ranks have same dt)
+            call MPI_Comm_Rank(this%parent_comms, my_rank)
+            if (my_rank == 0) then
+                call MPI_Comm_Size(this%parent_comms, comm_size)
+                call MPI_Send(domain%dt, 1, MPI_REAL, comm_size-1, 42, this%parent_comms, ierr)
+            endif
+
             do i = 1, kMAX_STORAGE_VARS
                 if (domain%vars_to_out(i)%v <= 0) cycle
                 if (this%vars_for_output(i) > 0) cycle      ! already packed in pass 1

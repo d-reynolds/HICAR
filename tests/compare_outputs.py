@@ -41,7 +41,7 @@ def plot_diff(a1, a2, var_name, label1, label2, figures_dir):
         # Could be (time, lat, lon) or (level, lat, lon)
         a1 = a1[-1, :, :]
         a2 = a2[-1, :, :]
-        diff = diff[-1, :, :]
+        diff = np.sum(diff[:, :, :],axis=0)
         slice_label = "t=-1"
     elif diff.ndim == 2:
         slice_label = "2D field"
@@ -136,9 +136,10 @@ def main():
 
         diff = np.abs(a1 - a2)
         max_diff = float(np.nanmax(diff)) if diff.size > 0 else 0.0
+        sum_diff = float(np.nansum(diff)) if diff.size > 0 else 0.0
 
         status = f"{bcolors.GREEN}OK{bcolors.NC}" if max_diff <= args.tolerance else f"{bcolors.RED}DIFF{bcolors.NC}"
-        print(f"  {var_name:20s}: max|diff| = {max_diff:.6e}  [{status}]")
+        print(f"  {var_name:20s}: max|diff| = {max_diff:.6e} sum|diff| = {sum_diff:.6e}  [{status}]")
 
         if max_diff > args.tolerance:
             error_flag = True

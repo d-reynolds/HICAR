@@ -172,12 +172,13 @@ module output_interface
       !! Save a new timestep (time) to the restart file 
       !!
       !!----------------------------------------------------------
-      module subroutine save_rst_file(this, time, par_comms, rst_var_indices)
+      module subroutine save_rst_file(this, time, par_comms, rst_var_indices, dt_seconds)
         implicit none
         class(output_t),  intent(inout) :: this
         type(Time_type),  intent(in)    :: time
         type(MPI_Comm),   intent(in)    :: par_comms
         integer,          intent(in)    :: rst_var_indices(:)
+        real,             intent(in), optional :: dt_seconds
     end subroutine
 
       module subroutine close_output_files(this)

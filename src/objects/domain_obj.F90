@@ -2958,16 +2958,23 @@ contains
 
         ! temporary to hold the variable to be interpolated to
         integer :: i, k, j, n, var_indx
-        real :: dt_seconds
+        real :: dt_seconds, forcing_dt_seconds
 
         dt_seconds = this%next_input%seconds() - this%sim_time%seconds()
+        forcing_dt_seconds = dt_seconds
+        this%forcing_elapsed = 0.0
 
         ! check if the difference between the simulation time and next_input is less than an input_dt
-        ! if so, this signals that we are in between two input times, so advance the state of the variables%data_3d
-        ! to the simulation time
+        ! if so, this signals that we are in between two input times (restart scenario).
+        ! Forcing rates use full input_dt (actual interval between the two forcing states).
+        ! Domain variable rates use dt_seconds (remaining time to reach the target state).
+        ! After computing forcing rates, we advance forcing_hi%data by the elapsed time.
 
         !include "-1" to accomodate rounding errors
-        if (dt_seconds < (this%input_dt%seconds()-1)) dt_seconds = this%input_dt%seconds() - dt_seconds
+        if (dt_seconds < (this%input_dt%seconds()-1)) then
+            forcing_dt_seconds = this%input_dt%seconds()
+            this%forcing_elapsed = forcing_dt_seconds - dt_seconds
+        endif
 
         if (dt_seconds <= 10.0) then
             write(*,*) "WARNING: In domain_obj::update_delta_fields, dt_seconds <= 10.0"
@@ -2978,17 +2985,29 @@ contains
         do n = 1,size(this%forcing_hi)
             associate(forcing_hi => this%forcing_hi(n))
             !Update delta fields on the high-resolution forcing varaibles...
+            ! Use forcing_dt_seconds (full input_dt) so rates are correct even on restart between forcing times.
+            ! Then advance data_*d by elapsed time so the base state matches the current sim_time.
             if (this%forcing_hi(n)%two_d) then
                 associate(fh_dqdt => forcing_hi%dqdt_2d, fh_data => forcing_hi%data_2d)
                 !$acc kernels present(fh_dqdt, fh_data)
-                fh_dqdt = (fh_dqdt - fh_data) / dt_seconds
+                fh_dqdt = (fh_dqdt - fh_data) / forcing_dt_seconds
                 !$acc end kernels
+                if (this%forcing_elapsed > 0.0) then
+                    !$acc kernels present(fh_data, fh_dqdt)
+                    fh_data = fh_data + fh_dqdt * this%forcing_elapsed
+                    !$acc end kernels
+                endif
                 end associate
             else if (this%forcing_hi(n)%three_d) then
                 associate(fh_dqdt => forcing_hi%dqdt_3d, fh_data => forcing_hi%data_3d)
                 !$acc kernels present(fh_dqdt, fh_data)
-                fh_dqdt = (fh_dqdt - fh_data) / dt_seconds
+                fh_dqdt = (fh_dqdt - fh_data) / forcing_dt_seconds
                 !$acc end kernels
+                if (this%forcing_elapsed > 0.0) then
+                    !$acc kernels present(fh_data, fh_dqdt)
+                    fh_data = fh_data + fh_dqdt * this%forcing_elapsed
+                    !$acc end kernels
+                endif
                 end associate
             endif
 

@@ -46,7 +46,7 @@ contains
         real, intent(in) :: zin
         real, intent(in),dimension(:) :: z
         integer, optional, intent(inout)::guess
-        real,dimension(2) :: find_match
+        integer,dimension(2) :: find_match
         integer::n,i,endpt
 
         n=size(z)

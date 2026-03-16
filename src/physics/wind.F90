@@ -575,7 +575,7 @@ contains
         real :: wind_dt_seconds, alpha_const_val
 
         w_var_given = (options%forcing%wvar/="")
-        wind_dt_seconds = options%wind%update_dt%seconds()
+        wind_dt_seconds = options%wind%update_dt%seconds() - domain%forcing_elapsed
         alpha_const_val = options%wind%alpha_const
         
         ! if this is a restart run, we have already read in the winds, so do not do anything

@@ -18,6 +18,9 @@ type flow_obj_t
     logical :: started = .false.
     logical :: ended = .false.
     integer :: nest_indx = 0
+    real :: forcing_elapsed = 0.0  ! Seconds from previous forcing base to sim_time (nonzero only on restart between forcing times)
+    real :: restart_dt = 0.0  ! Numerical timestep (seconds) saved for restart reproducibility
+    real :: dt = 0.0  ! Numerical timestep (seconds) saved for restart reproducibility
 
     type(time_delta_t), public :: small_time_delta
 

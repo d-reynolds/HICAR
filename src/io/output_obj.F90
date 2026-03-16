@@ -283,11 +283,12 @@ contains
 
     end subroutine
     
-    module subroutine save_rst_file(this, time, par_comms, rst_var_indices)
+    module subroutine save_rst_file(this, time, par_comms, rst_var_indices, dt_seconds)
         class(output_t),  intent(inout) :: this
         type(Time_type),  intent(in)  :: time
         type(MPI_Comm),   intent(in)     :: par_comms
         integer,          intent(in)  :: rst_var_indices(:)
+        real,             intent(in), optional :: dt_seconds
 
         this%active_nc_id = this%rst_ncfile_id
         
@@ -298,6 +299,14 @@ contains
 
             call open_file(this, this%restart_fn, time, par_comms,rst_var_indices)
             this%rst_ncfile_id = this%active_nc_id
+        endif
+
+        ! Write dt as a global attribute for restart reproducibility
+        if (present(dt_seconds)) then
+            call check_ncdf(nf90_redef(this%rst_ncfile_id), "Entering redef for dt_seconds attribute")
+            call check_ncdf(nf90_put_att(this%rst_ncfile_id, NF90_GLOBAL, "dt_seconds", dt_seconds), &
+                            "Writing dt_seconds global attribute")
+            call check_ncdf(nf90_enddef(this%rst_ncfile_id), "Leaving redef after dt_seconds attribute")
         endif
 
         ! store output

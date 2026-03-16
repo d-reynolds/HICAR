@@ -62,6 +62,8 @@ subroutine wake_component(comp_arr, options, boundary, ioclient)
     type(boundary_t), intent(inout) :: boundary
     type(ioclient_t), intent(inout) :: ioclient
 
+    integer :: ierr, comm_size
+
     ! check if the type of component is a domain or an ioserver
     associate (comp => comp_arr(options%nest_indx)%comp)
     select type (comp)
@@ -75,6 +77,11 @@ subroutine wake_component(comp_arr, options, boundary, ioclient)
             call wake_nest(comp)
             call init_model_state(options, comp, boundary, ioclient)
 
+            if (options%restart%restart) then
+                call MPI_Comm_Size(ioclient%parent_comms, comm_size)
+                call MPI_Bcast(comp%restart_dt, 1, MPI_REAL, comm_size-1, ioclient%parent_comms, ierr)
+            endif
+
             call comp%total_timer%stop()
             call comp%initialization_timer%stop() 
         type is (ioserver_t)
@@ -84,6 +91,8 @@ subroutine wake_component(comp_arr, options, boundary, ioclient)
 
             if (options%restart%restart) then
                 call comp%read_restart_file(options)
+                call MPI_Comm_Size(comp%client_comms, comm_size)
+                call MPI_Bcast(comp%restart_dt, 1, MPI_REAL, comm_size-1, comp%client_comms, ierr)
             else
                 call component_write(comp,ioclient)
             endif

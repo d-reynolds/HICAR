@@ -769,6 +769,11 @@ contains
         if (STD_OUT_PE_IO) write(*,*) "Fetching data from child images for output"
         if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",this%nest_indx," --------------"
 
+        ! Receive dt from compute rank 0 for restart file (must happen before Win_Start to avoid deadlock)
+        if (should_write_restart .or. this%first_write) then
+            call MPI_Recv(this%dt, 1, MPI_REAL, 0, 42, this%client_comms, MPI_STATUS_IGNORE, ierr)
+        endif
+
         ! Do MPI_Win_Start on write_win to initiate get
         call MPI_Win_Start(this%children_group,0,this%write_win_3d)
         call MPI_Win_Start(this%children_group,0,this%write_win_2d)
@@ -833,7 +838,7 @@ contains
 
 
         if (should_write_restart) then
-            call this%outputer%save_rst_file(this%sim_time,this%IO_Comms,this%rst_var_indices)
+            call this%outputer%save_rst_file(this%sim_time,this%IO_Comms,this%rst_var_indices,this%dt)
             this%restart_counter = 1
         endif
 
@@ -1031,6 +1036,10 @@ contains
 
         ! Validate that the restart file config matches the current config
         call compare_restart_config(ncid, options)
+
+        ! Read saved dt for restart reproducibility (graceful fallback for old restart files)
+        err = nf90_get_att(ncid, NF90_GLOBAL, "dt_seconds", this%restart_dt)
+        if (err /= NF90_NOERR) this%restart_dt = 0.0
 
         ! setup start/count arrays accordingly. k_s_w and k_e_w forseen to always cover the bounds of what k_s_re and k_e_re would be
         ! This is because the domain is only decomposed in 2D.

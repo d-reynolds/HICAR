@@ -2466,6 +2466,7 @@ contains
         call options%restart_vars(                                                  &
                      [kVARS%z,                                                      &
                       kVARS%terrain,                kVARS%potential_temperature,    &
+                      kVARS%pressure,                                               &
                       kVARS%latitude,               kVARS%longitude,                &
                       kVARS%u,                      kVARS%v,                        &
                       kVARS%w,                      kVARS%w_real,                   &
