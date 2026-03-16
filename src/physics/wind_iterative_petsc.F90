@@ -59,9 +59,10 @@ contains
     !! Starts by setting w out of the ground=0 then works through layers
     !!
     !!------------------------------------------------------------
-    subroutine calc_iter_winds_petsc(domain,alpha_in,div_in,adv_den,update_in)
+    subroutine calc_iter_winds_petsc(domain,options,alpha_in,div_in,adv_den,update_in)
         implicit none
         type(domain_t), intent(inout) :: domain
+        type(options_t), intent(in) :: options
         real, intent(in), dimension(domain%grid%ims:domain%grid%ime, &
                                     domain%grid%kms:domain%grid%kme, &
                                     domain%grid%jms:domain%grid%jme) :: alpha_in, div_in
@@ -102,7 +103,7 @@ contains
         rtol = 1e-10
         abstol = 1.0e-5
         dtol = 1000.0
-        maxits = 1000
+        maxits = options%wind%wind_solver_iterations
         call KSPSetTolerances(ksp(domain%nest_indx),rtol,abstol,dtol, maxits,ierr)
 
         varying_alpha = .not.( ALL(alpha==minval(alpha)) )

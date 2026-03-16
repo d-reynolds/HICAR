@@ -35,6 +35,7 @@ module wind_iterative_amgx
     
     logical :: initialized_amgx = .False.
     logical :: first_solve = .True.
+    logical :: structure_uploaded = .false.
     ! Grid parameters (same as PETSc version)
     real, parameter::deg2rad=0.017453293
     real, parameter :: rad2deg=57.2957779371
@@ -45,6 +46,10 @@ module wind_iterative_amgx
     real    :: dx
     real, allocatable, dimension(:,:,:)  :: div, dz_if, jaco, dzdx, dzdy, sigma, alpha
     real, allocatable, dimension(:,:)    :: dzdx_surf, dzdy_surf
+    real, allocatable, dimension(:,:,:)  :: jaco_w
+    real, allocatable, dimension(:,:,:)  :: dzdx_u_stag, jaco_u_stag
+    real, allocatable, dimension(:,:,:)  :: dzdy_v_stag, jaco_v_stag
+    real, allocatable, dimension(:)      :: adv_dz_col
     integer              :: hs, i_s, i_e, k_s, k_e, j_s, j_e
     integer              :: ims, ime, jms, jme, ids, ide, jds, jde
     integer              :: xs, ys, zs, xm, ym, zm, mx, my, mz  ! PETSc-style with boundary conditions layer
@@ -59,7 +64,44 @@ module wind_iterative_amgx
     integer(c_int) :: n_rows, nnz                   ! Matrix dimensions (local)
     integer(c_int) :: n_rows_global                 ! Global number of rows across all ranks
     integer :: local_offset, global_n               ! MPI partitioning
-    
+
+    ! Per-domain AMGX state cache for O(1) nest context switching
+    integer, parameter :: MAX_NESTS = 4
+
+    type :: amgx_cache_t
+        logical :: valid = .false.
+        ! AMGX handles
+        type(c_ptr) :: matrix = c_null_ptr
+        type(c_ptr) :: vector_rhs = c_null_ptr
+        type(c_ptr) :: vector_solution = c_null_ptr
+        type(c_ptr) :: solver = c_null_ptr
+        ! Flags
+        logical :: structure_uploaded = .false.
+        logical :: first_solve = .true.
+        ! Grid scalars
+        integer :: xs, ys, zs, xm, ym, zm, mx, my, mz
+        integer :: i_s, i_e, k_s, k_e, j_s, j_e
+        integer :: ims, ime, jms, jme, ids, ide, jds, jde, hs
+        real    :: dx
+        integer(c_int) :: n_rows, nnz, n_rows_global
+        ! Allocatable arrays (GPU-resident via OpenACC)
+        real, allocatable, dimension(:,:,:) :: A_coef, B_coef, C_coef, D_coef, E_coef
+        real, allocatable, dimension(:,:,:) :: F_coef, G_coef, H_coef, I_coef, J_coef
+        real, allocatable, dimension(:,:,:) :: K_coef, L_coef, M_coef, N_coef, O_coef
+        real, allocatable, dimension(:,:,:) :: div, dz_if, jaco, dzdx, dzdy, sigma, alpha
+        real, allocatable, dimension(:,:)   :: dzdx_surf, dzdy_surf
+        real, allocatable, dimension(:,:,:) :: jaco_w, dzdx_u_stag, jaco_u_stag
+        real, allocatable, dimension(:,:,:) :: dzdy_v_stag, jaco_v_stag
+        real, allocatable, dimension(:)     :: adv_dz_col
+        integer(c_int), allocatable :: row_ptrs(:)
+        real(c_double), allocatable :: values(:)
+        real(c_double), allocatable :: rhs(:)
+        real(c_double), allocatable :: solution(:)
+    end type
+
+    type(amgx_cache_t) :: domain_cache(MAX_NESTS)
+    integer :: active_nest_indx = -1
+
     ! AmgX C interface declarations
     interface
         ! Initialize AmgX library
@@ -278,6 +320,33 @@ module wind_iterative_amgx
             type(c_ptr), value :: ptr
             integer(c_int) :: rc
         end function
+
+        ! Device-pointer wrappers for D2D transfers with AMGX
+        function AMGX_vector_upload_device(vec, n, block_dim, data_ptr) &
+                bind(C, name="AMGX_vector_upload_device") result(rc)
+            import :: c_ptr, c_int
+            type(c_ptr), value :: vec
+            integer(c_int), value :: n, block_dim
+            type(c_ptr), value :: data_ptr
+            integer(c_int) :: rc
+        end function
+
+        function AMGX_vector_download_device(vec, data_ptr) &
+                bind(C, name="AMGX_vector_download_device") result(rc)
+            import :: c_ptr, c_int
+            type(c_ptr), value :: vec
+            type(c_ptr), value :: data_ptr
+            integer(c_int) :: rc
+        end function
+
+        function AMGX_matrix_replace_coefficients_device(mtx, n, nnz, values_ptr, diag_ptr) &
+                bind(C, name="AMGX_matrix_replace_coefficients_device") result(rc)
+            import :: c_ptr, c_int
+            type(c_ptr), value :: mtx
+            integer(c_int), value :: n, nnz
+            type(c_ptr), value :: values_ptr, diag_ptr
+            integer(c_int) :: rc
+        end function
     end interface
     
     ! AmgX modes
@@ -288,9 +357,10 @@ contains
     !>------------------------------------------------------------
     !! Initialize AmgX solver
     !!------------------------------------------------------------
-    subroutine init_amgx(compute_comm)
+    subroutine init_amgx(compute_comm,options)
         implicit none
         type(MPI_Comm), intent(in), optional :: compute_comm
+        type(options_t), intent(in) :: options
         integer(c_int) :: rc
         integer :: rank, ierr, num_devices, device_num
         integer(c_int), allocatable :: device_ids(:)
@@ -332,7 +402,7 @@ contains
             "prec:relaxation_factor=1, " // &
             "prec:max_iters=1, " // &
             "main:use_scalar_norm=1, " // &
-            "main:max_iters=1500, " // &
+            "main:max_iters=" // trim(adjustl(to_string(options%wind%wind_solver_iterations))) // ", " // &
             "main:convergence=COMBINED_REL_INI_ABS, " // &
             "main:tolerance=1e-5, " // &
             "main:alt_rel_tolerance=1e-10, " // &
@@ -372,30 +442,52 @@ contains
     !>------------------------------------------------------------
     !! Initialize AmgX solver
     !!------------------------------------------------------------
-    subroutine init_iter_winds_amgx(domain)
+    subroutine init_iter_winds_amgx(domain, options)
         implicit none
         type(domain_t), intent(in) :: domain
-        integer :: ierr, rank, nprocs
-        integer :: local_n
+        type(options_t), intent(in) :: options
+        integer :: ierr, rank
         integer(c_int) :: rc
+        integer :: target_nest
 
+        target_nest = domain%nest_indx
 
-        call finalize_iter_winds_amgx()  ! Clean up any previous AmgX state
+        ! Same domain — nothing to do
+        if (target_nest == active_nest_indx) return
+
+        ! Save current module state to its cache slot
+        if (active_nest_indx > 0 .and. active_nest_indx <= MAX_NESTS) then
+            call save_to_cache(active_nest_indx)
+        endif
+
+        ! Restore cached state for target domain (if available)
+        if (target_nest > 0 .and. target_nest <= MAX_NESTS .and. &
+            domain_cache(target_nest)%valid) then
+            call restore_from_cache(target_nest)
+            active_nest_indx = target_nest
+            return   ! O(1) context switch, no rebuild
+        endif
+
+        ! --- Fresh initialization for a domain seen for the first time ---
+        ! Null out module AMGX handles (don't destroy — they were saved to cache)
+        amgx_matrix = c_null_ptr
+        amgx_vector_rhs = c_null_ptr
+        amgx_vector_solution = c_null_ptr
+        amgx_solver = c_null_ptr
+        structure_uploaded = .false.
+        first_solve = .true.
 
         ! Initialize module variables
         call init_module_vars(domain)
-        
-        ! Calculate local number of rows (will be set properly later in build_csr_matrix)
-        local_n = xm * zm * ym
-        
+
         ! Get MPI information
         call MPI_Comm_rank(domain%compute_comms, rank, ierr)
-        
+
         ! Calculate total number of rows globally
         n_rows_global = mx * my * mz
-        
+
         ! Initialize AmgX with the compute communicator (only compute ranks participate)
-        call init_amgx(domain%compute_comms)
+        call init_amgx(domain%compute_comms, options)
 
         ! Create matrix, vectors, and solver
         rc = AMGX_matrix_create(amgx_matrix, amgx_resources, AMGX_mode_dDDI)
@@ -403,8 +495,10 @@ contains
         rc = AMGX_vector_create(amgx_vector_solution, amgx_resources, AMGX_mode_dDDI)
         rc = AMGX_solver_create(amgx_solver, amgx_resources, AMGX_mode_dDDI, amgx_config)
 
-        if (STD_OUT_PE) print*, "AmgX solver initialized successfully"
-        
+        active_nest_indx = target_nest
+
+        if (STD_OUT_PE) print*, "AmgX solver initialized for nest ", target_nest
+
     end subroutine init_iter_winds_amgx
 
 
@@ -449,11 +543,15 @@ contains
         integer :: i, j, k, row, cnt, global_row
         integer(c_int) :: rc
         real :: denom
-        integer :: ierr, rank
+        integer :: ierr, rank, nprocs, r
+        integer :: r_xs, r_xm, r_ys, r_ym
+        integer :: my_bounds(4)
+        integer, allocatable :: all_bounds(:,:)
 
         ! Get MPI rank for partition vector
         call MPI_Comm_rank(domain%compute_comms, rank, ierr)
-        
+        call MPI_Comm_size(domain%compute_comms, nprocs, ierr)
+
         ! Calculate number of rows INCLUDING boundary conditions layer
         n_rows = xm * zm * ym
         call calc_nnz()
@@ -463,43 +561,33 @@ contains
         if (allocated(col_indices)) deallocate(col_indices)
         if (allocated(values)) deallocate(values)
         if (allocated(partition_vec)) deallocate(partition_vec)
-        
+
         allocate(row_ptrs(n_rows + 1))
         allocate(col_indices(nnz))
         allocate(values(nnz))
         allocate(partition_vec(n_rows_global))
 
-        ! NOTE: Do NOT use AMGX_pin_memory on these arrays!
-        ! AMGX uses Thrust internally for H->D transfers during matrix upload,
-        ! and pinned memory registration conflicts with Thrust's expectations,
-        ! causing "cudaErrorInvalidValue" in trivial_device_copy.
-        ! AMGX handles memory transfers efficiently without manual pinning.
-        
-        ! Build partition vector: assign each global row to its owning rank
-        ! Each rank fills in only its portion of the global partition vector
-        ! Note: This needs to be gathered across all ranks to form the complete partition vector
-        ! For simplicity in distributed mode, we'll use a contiguous block partitioning
-        ! where each rank owns a contiguous block of global rows
-        
-        ! Initialize entire partition vector (will be gathered later)
-        partition_vec = 0_c_int
+        ! Build partition vector using MPI_Allgather of compact bounds
+        ! instead of MPI_Allreduce over the full n_rows_global vector.
+        ! Communicates ~4*nprocs integers instead of ~n_rows_global integers.
+        allocate(all_bounds(4, nprocs))
+        my_bounds = [xs, xm, ys, ym]
+        call MPI_Allgather(my_bounds, 4, MPI_INTEGER, all_bounds, 4, MPI_INTEGER, &
+                           domain%compute_comms, ierr)
 
-        ! Each rank marks which global rows it owns with its rank number
-        do j = ys, ys+ym-1
-            do k = zs, zs+zm-1
-                do i = xs, xs+xm-1
-                    ! Calculate global row index using same formula as column indices
-                    global_row = j * mx * mz + k * mx + i + 1
-                    partition_vec(global_row) = int(rank, c_int)
+        partition_vec = 0_c_int
+        do r = 1, nprocs
+            r_xs = all_bounds(1,r); r_xm = all_bounds(2,r)
+            r_ys = all_bounds(3,r); r_ym = all_bounds(4,r)
+            do j = r_ys, r_ys+r_ym-1
+                do k = zs, zs+zm-1
+                    do i = r_xs, r_xs+r_xm-1
+                        partition_vec(j*mx*mz + k*mx + i + 1) = int(r-1, c_int)
+                    enddo
                 enddo
             enddo
         enddo
-
-        ! Gather partition vector across all ranks using MPI_Allreduce with MAX
-        ! (each rank sets its owned rows, others are 0, so MAX gives the owner)
-        ! Use MPI_INTEGER4 to match c_int (4-byte integer)
-        call MPI_Allreduce(MPI_IN_PLACE, partition_vec, n_rows_global, MPI_INTEGER4, &
-                          MPI_MAX, domain%compute_comms, ierr)
+        deallocate(all_bounds)
         
         ! Build CSR matrix with proper boundary conditions
         cnt = 0
@@ -644,11 +732,11 @@ contains
         logical, intent(in) :: adv_den
         
         integer(c_int) :: rc
-        integer(c_int) :: n_rows_with_halo, block_dim
         logical :: varying_alpha
-        integer :: i, j, k, idx
+        integer :: i, j, k
+        real :: alpha_min, alpha_max
         
-        ! Copy input data (on host - AmgX will manage GPU transfers)
+        ! Copy input data on GPU
         !$acc parallel loop gang vector collapse(3) present(alpha,div,alpha_in,div_in)
         do j = j_s, j_e
             do k = k_s, k_e
@@ -659,97 +747,50 @@ contains
             enddo
         enddo
 
-        !$acc update host(div, alpha)
+        if (.not. structure_uploaded) then
+            ! First call: need alpha on host for CPU coefficient computation
+            !$acc update host(alpha)
 
-        ! Initialize or update coefficients
-        varying_alpha = .not.( ALL(alpha==minval(alpha)) )
-
-        ! Build RHS vector
-        ! call compute_rhs(domain)
-
-        if (.not. allocated(A_coef) .or. varying_alpha) then
-            if (.not. allocated(A_coef)) then
-                call initialize_coefs(domain)
-            else
-                call update_coefs(domain)
-            endif
-
+            call initialize_coefs(domain)
             call build_csr_matrix(domain)
-            
-            ! Upload matrix to AmgX
-            ! rc = AMGX_matrix_upload_all(amgx_matrix, n_rows, nnz, 1, 1, &
-            !                              row_ptrs, col_indices, values, c_null_ptr)
-            ! Upload matrix to AmgX - use array slicing to pass only valid data
-            ! (arrays may be over-allocated from initial estimate)
-            ! Use the partition_vec we built in build_csr_matrix
 
             if (STD_OUT_PE) print*, "  ----------------------------------------"
             rc = AMGX_matrix_upload_all_global(amgx_matrix, n_rows_global, n_rows, nnz, 1, 1, &
                                                 row_ptrs, col_indices, &
                                                 values, c_null_ptr, 1, 1, partition_vec)
-
-            ! Free partition_vec and CSR arrays immediately after upload
-            if (allocated(partition_vec)) deallocate(partition_vec)
-            if (allocated(row_ptrs)) deallocate(row_ptrs)
-            if (allocated(col_indices)) deallocate(col_indices)
-            if (allocated(values)) deallocate(values)
-
             if (rc /= 0) then
                 if (STD_OUT_PE) print*, "ERROR: AMGX_matrix_upload_all_global failed. Grid: ", &
                     n_rows_global, " global rows, ", n_rows, " local rows, ", nnz, " local nnz"
                 return
             endif
 
-            ! Bind vectors to matrix (required for distributed mode to set up halo exchange)
+            ! Free CPU-only arrays; keep row_ptrs and values for GPU use
+            if (allocated(partition_vec)) deallocate(partition_vec)
+            if (allocated(col_indices)) deallocate(col_indices)
+
+            ! Move row_ptrs to GPU (needed for fill_csr_values_gpu)
+            ! Create values on GPU (will be filled by GPU kernel on subsequent calls)
+            !$acc enter data copyin(row_ptrs, values)
+
+            ! Bind vectors to matrix (required for distributed mode halo exchange)
             rc = AMGX_vector_bind(amgx_vector_rhs, amgx_matrix)
-            if (rc /= 0) then
-                if (STD_OUT_PE) print*, "ERROR: AMGX_vector_bind(rhs) failed with rc=", rc
-                return
-            endif
-
             rc = AMGX_vector_bind(amgx_vector_solution, amgx_matrix)
-            if (rc /= 0) then
-                if (STD_OUT_PE) print*, "ERROR: AMGX_vector_bind(solution) failed with rc=", rc
-                return
-            endif
 
-            ! Allocate work arrays with local size
-            if (.not. allocated(rhs)) then
-                allocate(rhs(n_rows))
-            endif
+            ! Allocate work arrays on host and GPU
+            allocate(rhs(n_rows))
+            allocate(solution(n_rows))
+            solution = 0.0_c_double
+            !$acc enter data create(rhs, solution)
+            !$acc kernels present(solution)
+            solution = 0.0_c_double
+            !$acc end kernels
 
-            if (.not. allocated(solution)) then
-                allocate(solution(n_rows))
-                solution = 0.0_c_double
-            endif
+            ! Copyin coefficient arrays to GPU (for subsequent GPU updates)
+            !$acc enter data copyin(A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
+            !$acc                   H_coef, I_coef, J_coef, K_coef, L_coef, M_coef, N_coef, O_coef)
 
-        endif
+            structure_uploaded = .true.
 
-        ! Zero out the work arrays
-        rhs = 0.0_c_double
-        ! Don't zero solution - reuse from previous timestep as initial guess
-        ! solution = 0.0_c_double  ! Commented out for warm start
-        
-        ! Build RHS vector (fills only first n_rows elements)
-        call compute_rhs(domain)
-
-        ! Upload RHS and solution vectors
-        ! Upload only n_rows (local), AMGX handles halo exchange
-        ! Solution vector retains previous timestep values (warm start)
-        rc = AMGX_vector_upload(amgx_vector_rhs, n_rows, 1, rhs)
-        if (rc /= 0) then
-            if (STD_OUT_PE) print*, "ERROR: AMGX_vector_upload(rhs) failed with rc=", rc
-            return
-        endif
-
-        rc = AMGX_vector_upload(amgx_vector_solution, n_rows, 1, solution)
-        if (rc /= 0) then
-            if (STD_OUT_PE) print*, "ERROR: AMGX_vector_upload(solution) failed with rc=", rc
-            return
-        endif
-
-
-        if (first_solve) then
             ! Setup solver (builds preconditioner from the matrix)
             rc = AMGX_solver_setup(amgx_solver, amgx_matrix)
             if (rc /= 0) then
@@ -757,13 +798,56 @@ contains
                 return
             endif
             first_solve = .False.
-        else if (varying_alpha) then
-            ! Matrix changed due to varying alpha - rebuild preconditioner
-            rc = AMGX_solver_resetup(amgx_solver, amgx_matrix)
-            if (rc /= 0) then
-                if (STD_OUT_PE) print*, "ERROR: AMGX_solver_resetup failed with rc=", rc
-                return
+        else
+            ! Subsequent calls: GPU path
+            ! Check if alpha varies using GPU reduction (avoids D→H transfer)
+            alpha_min = HUGE(1.0)
+            alpha_max = -HUGE(1.0)
+            !$acc parallel loop gang vector collapse(3) reduction(min:alpha_min) reduction(max:alpha_max) present(alpha)
+            do j = j_s, j_e
+                do k = k_s, k_e
+                    do i = i_s, i_e
+                        alpha_min = min(alpha_min, alpha(i,k,j))
+                        alpha_max = max(alpha_max, alpha(i,k,j))
+                    enddo
+                enddo
+            enddo
+            varying_alpha = (alpha_max > alpha_min)
+
+            if (varying_alpha) then
+                ! Update coefficients on GPU
+                call update_coefs_gpu()
+                ! Fill CSR values on GPU in sorted column order
+                call fill_csr_values_gpu()
+                ! D2D replace coefficients (structure unchanged, only values)
+                !$acc host_data use_device(values)
+                rc = AMGX_matrix_replace_coefficients_device(amgx_matrix, n_rows, nnz, c_loc(values), c_null_ptr)
+                !$acc end host_data
+                if (rc /= 0) then
+                    if (STD_OUT_PE) print*, "ERROR: AMGX_matrix_replace_coefficients failed with rc=", rc
+                    return
+                endif
+                ! Rebuild preconditioner for new matrix values
+                rc = AMGX_solver_resetup(amgx_solver, amgx_matrix)
             endif
+        endif
+
+        call compute_rhs()
+
+        !$acc host_data use_device(rhs)
+        rc = AMGX_vector_upload_device(amgx_vector_rhs, n_rows, 1, c_loc(rhs))
+        !$acc end host_data
+        if (rc /= 0) then
+            if (STD_OUT_PE) print*, "ERROR: AMGX_vector_upload_device(rhs) failed with rc=", rc
+            return
+        endif
+
+        !$acc host_data use_device(solution)
+        rc = AMGX_vector_upload_device(amgx_vector_solution, n_rows, 1, c_loc(solution))
+        !$acc end host_data
+        if (rc /= 0) then
+            if (STD_OUT_PE) print*, "ERROR: AMGX_vector_upload_device(solution) failed with rc=", rc
+            return
         endif
 
         ! Solve
@@ -774,18 +858,20 @@ contains
             return
         endif
 
-        ! Download solution
-        rc = AMGX_vector_download(amgx_vector_solution, solution)
+        ! D2D download solution (stays on GPU)
+        !$acc host_data use_device(solution)
+        rc = AMGX_vector_download_device(amgx_vector_solution, c_loc(solution))
+        !$acc end host_data
         if (rc /= 0) then
-            if (STD_OUT_PE) print*, "ERROR: AMGX_vector_download failed with rc=", rc
+            if (STD_OUT_PE) print*, "ERROR: AMGX_vector_download_device failed with rc=", rc
             return
         endif
-                
-        ! Update wind field
-        call calc_updated_winds(domain, solution, adv_den)
-        
+
+        ! Update wind field (GPU reshape + MPI halo exchange + GPU wind update)
+        call calc_updated_winds(domain, adv_den)
+
         if (STD_OUT_PE) print*, "AmgX solve complete"
-        
+
     end subroutine calc_iter_winds_amgx
 
     !>------------------------------------------------------------
@@ -797,19 +883,17 @@ contains
         integer :: i, j, k, idx
         
         ! rhs is now pre-allocated with global size, we only fill first n_rows elements
-        
-        idx = 1
-        do j=ys,(ys+ym-1)
-        do k=zs,(zs+zm-1)
-            do i=xs,(xs+xm-1)
-                    !For global boundary conditions
-                    if (i.le.0 .or. j.le.0 .or. k.eq.0 .or. &
-                        i.ge.mx-1 .or. j.ge.my-1 .or. k.eq.mz-1) then
-                        rhs(idx) = 0.0
+        !$acc parallel loop gang vector collapse(3) present(rhs, div)
+        do j = ys, ys+ym-1
+            do k = zs, zs+zm-1
+                do i = xs, xs+xm-1
+                    idx = (j-ys)*zm*xm + (k-zs)*xm + (i-xs) + 1
+                    if (i <= 0 .or. j <= 0 .or. k == 0 .or. &
+                        i >= mx-1 .or. j >= my-1 .or. k == mz-1) then
+                        rhs(idx) = 0.0_c_double
                     else
-                        rhs(idx) = -2*div(i,k,j)
+                        rhs(idx) = real(-2.0*div(i,k,j), c_double)
                     endif
-                    idx = idx + 1
                 enddo
             enddo
         enddo
@@ -819,12 +903,11 @@ contains
     !>------------------------------------------------------------
     !! Update winds from solution (simplified version)
     !!------------------------------------------------------------
-    subroutine calc_updated_winds(domain, lambda, adv_den)
+    subroutine calc_updated_winds(domain, adv_den)
         implicit none
         type(domain_t), intent(inout) :: domain
-        real(c_double), intent(in) :: lambda(1:n_rows)
         logical, intent(in) :: adv_den
-        
+
         real, allocatable, dimension(:,:,:)    :: u_dlambdz, v_dlambdz, dlambdz, u_temp, v_temp, lambda_3d, rho, rho_u, rho_v, rho_w
         integer :: i, j, k, i_start, i_end, j_start, j_end, idx
 
@@ -846,31 +929,30 @@ contains
         allocate(rho_v(i_s:i_e,k_s:k_e,j_start:j_end))
         allocate(rho_w(i_s:i_e,k_s:k_e,j_s:j_e))
 
-        ! Initialize lambda_3d with zeros for extended bounds
+        !$acc enter data create(lambda_3d)
+
+        !$acc kernels present(lambda_3d)
         lambda_3d = 0.0
-        
-        ! Reshape 1D solution array to 3D (including boundary condition layer)
-        idx = 1
-        ! do j = j_s-1, j_e+1
-        !     do k = k_s-1, k_e+1
-        !         do i = i_s-1, i_e+1
-        !             lambda_3d(i,k,j) = real(lambda(idx))
-        !             idx = idx + 1
-        !         end do
-        !     end do
-        ! end do
+        !$acc end kernels
+
+        !$acc parallel loop gang vector collapse(3) present(solution, lambda_3d)
         do j = ys, (ys+ym-1)
             do k = zs, (zs+zm-1)
                 do i = xs, (xs+xm-1)
-                    lambda_3d(i,k,j) = real(lambda(idx))
-                    idx = idx + 1
+                    idx = (j-ys)*zm*xm + (k-zs)*xm + (i-xs) + 1
+                    lambda_3d(i,k,j) = real(solution(idx))
                 end do
             end do
         end do
-        
-        ! Exchange halos for lambda_3d using simple MPI communication
-        ! This fills the ghost cells (i_s-1, i_e+1, j_s-1, j_e+1) needed for stencil operations
+
+        ! D→H for MPI halo exchange (unavoidable)
+        !$acc update host(lambda_3d)
+
+        ! Exchange halos for lambda_3d using MPI communication
         call exchange_lambda_halos(lambda_3d, domain)
+
+        ! H→D after MPI (halo data now filled on host)
+        !$acc update device(lambda_3d)
 
         associate(density => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                     u       => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
@@ -886,7 +968,7 @@ contains
         ! Create GPU data for local arrays
 
         !$acc enter data create(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, rho_w)
-        !$acc data present(density, u, v, jaco_u_domain, jaco_v_domain, jaco_domain, dzdx_u, dzdy_v, u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, rho_w, alpha, dz_if) copyin(lambda_3d)
+        !$acc data present(density, u, v, jaco_u_domain, jaco_v_domain, jaco_domain, dzdx_u, dzdy_v, u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, rho_w, alpha, dz_if, lambda_3d)
 
         !$acc kernels
         rho = 1.0
@@ -1125,7 +1207,7 @@ contains
         end do
 
         !$acc end data
-        !$acc exit data delete(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, rho_w)
+        !$acc exit data delete(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, rho_w, lambda_3d)
         end associate     
     end subroutine calc_updated_winds
 
@@ -1252,10 +1334,28 @@ contains
             end do
             
             end associate
+
+            ! Allocate and fill geometry arrays for GPU update_coefs_gpu
+            allocate(jaco_w(i_s:i_e, k_s:k_e, j_s:j_e))
+            allocate(dzdx_u_stag(i_s:i_e+1, k_s:k_e, j_s:j_e))
+            allocate(jaco_u_stag(i_s:i_e+1, k_s:k_e, j_s:j_e))
+            allocate(dzdy_v_stag(i_s:i_e, k_s:k_e, j_s:j_e+1))
+            allocate(jaco_v_stag(i_s:i_e, k_s:k_e, j_s:j_e+1))
+            allocate(adv_dz_col(k_s:k_e))
+
+            jaco_w(:,:,:) = domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d(i_s:i_e, k_s:k_e, j_s:j_e)
+            dzdx_u_stag(:,:,:) = domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d(i_s:i_e+1, k_s:k_e, j_s:j_e)
+            jaco_u_stag(:,:,:) = domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d(i_s:i_e+1, k_s:k_e, j_s:j_e)
+            dzdy_v_stag(:,:,:) = domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d(i_s:i_e, k_s:k_e, j_s:j_e+1)
+            jaco_v_stag(:,:,:) = domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d(i_s:i_e, k_s:k_e, j_s:j_e+1)
+            do k = k_s, k_e
+                adv_dz_col(k) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s, k, j_s)
+            enddo
         endif
 
-        !$acc enter data copyin(dz_if, div, alpha)
-        
+        !$acc enter data copyin(dz_if, div, alpha, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma)
+        !$acc enter data copyin(jaco_w, dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag, adv_dz_col)
+
     end subroutine init_module_vars
 
     !>------------------------------------------------------------
@@ -1427,15 +1527,156 @@ contains
     end subroutine update_coefs
 
     !>------------------------------------------------------------
+    !! GPU version of update_coefs - updates B, C, A coefficients
+    !! on device using pre-extracted geometry arrays
+    !!------------------------------------------------------------
+    subroutine update_coefs_gpu()
+        implicit none
+        integer :: i, j, k
+        real :: M_up_val, M_dwn_val, X_coef_val, mixed_denom_val
+        real :: adv_dz_k, adv_dz_kp1, adv_dz_km1, sum_dz_up, sum_dz_dwn
+
+        !$acc parallel loop gang vector collapse(3) &
+        !$acc present(B_coef, C_coef, A_coef, dzdx, dzdy, jaco, alpha, dz_if, &
+        !$acc         dzdx_surf, dzdy_surf, jaco_w, adv_dz_col, &
+        !$acc         dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag)
+        do j = j_s, j_e
+            do k = k_s, k_e
+                do i = i_s, i_e
+                    adv_dz_k = adv_dz_col(k)
+
+                    ! --- Compute M_up ---
+                    if (k == k_e) then
+                        ! Top level: M_up = dzdx^2 + dzdy^2 + alpha^2 (no jaco_w)
+                        M_up_val = dzdx(i,k,j)**2 + dzdy(i,k,j)**2 + alpha(i,k,j)**2
+                    else
+                        adv_dz_kp1 = adv_dz_col(k+1)
+                        sum_dz_up = adv_dz_k + adv_dz_kp1
+                        M_up_val = dzdx(i,k,j) * (dzdx(i,k,j)*adv_dz_kp1 + dzdx(i,k+1,j)*adv_dz_k) / sum_dz_up / jaco_w(i,k,j) &
+                                 + dzdy(i,k,j) * (dzdy(i,k,j)*adv_dz_kp1 + dzdy(i,k+1,j)*adv_dz_k) / sum_dz_up / jaco_w(i,k,j) &
+                                 + (alpha(i,k,j)**2*adv_dz_kp1 + alpha(i,k+1,j)**2*adv_dz_k) / sum_dz_up / jaco_w(i,k,j)
+                    endif
+
+                    ! --- Compute M_dwn ---
+                    if (k == k_s) then
+                        ! Bottom level: M_dwn uses surface derivatives, no jaco_w
+                        M_dwn_val = dzdx(i,k,j)*dzdx_surf(i,j) + dzdy(i,k,j)*dzdy_surf(i,j) + alpha(i,k,j)**2
+                    else
+                        adv_dz_km1 = adv_dz_col(k-1)
+                        sum_dz_dwn = adv_dz_k + adv_dz_km1
+                        M_dwn_val = dzdx(i,k,j) * (dzdx(i,k,j)*adv_dz_km1 + dzdx(i,k-1,j)*adv_dz_k) / sum_dz_dwn / jaco_w(i,k-1,j) &
+                                  + dzdy(i,k,j) * (dzdy(i,k,j)*adv_dz_km1 + dzdy(i,k-1,j)*adv_dz_k) / sum_dz_dwn / jaco_w(i,k-1,j) &
+                                  + (alpha(i,k,j)**2*adv_dz_km1 + alpha(i,k-1,j)**2*adv_dz_k) / sum_dz_dwn / jaco_w(i,k-1,j)
+                    endif
+
+                    ! B and C before X_coef adjustment
+                    B_coef(i,k,j) = M_up_val / (jaco(i,k,j) * adv_dz_k * dz_if(i_s,k+1,j_s))
+                    C_coef(i,k,j) = M_dwn_val / (jaco(i,k,j) * adv_dz_k * dz_if(i_s,k,j_s))
+
+                    ! X_coef correction (advection of terrain-following coordinate)
+                    mixed_denom_val = (dz_if(i,k+1,j) + dz_if(i,k,j)) * 2.0 * dx
+                    X_coef_val = -((dzdx_u_stag(i+1,k,j)/jaco_u_stag(i+1,k,j) - dzdx_u_stag(i,k,j)/jaco_u_stag(i,k,j)) + &
+                                   (dzdy_v_stag(i,k,j+1)/jaco_v_stag(i,k,j+1) - dzdy_v_stag(i,k,j)/jaco_v_stag(i,k,j))) / mixed_denom_val
+
+                    B_coef(i,k,j) = B_coef(i,k,j) + X_coef_val
+                    C_coef(i,k,j) = C_coef(i,k,j) - X_coef_val
+                    A_coef(i,k,j) = -4.0/(dx**2) - B_coef(i,k,j) - C_coef(i,k,j)
+                enddo
+            enddo
+        enddo
+
+    end subroutine update_coefs_gpu
+
+    !>------------------------------------------------------------
+    !! GPU kernel to fill CSR values array in sorted column order.
+    !! Writes directly in the correct sorted position without sorting.
+    !!------------------------------------------------------------
+    subroutine fill_csr_values_gpu()
+        implicit none
+        integer :: i, j, k, row_idx, base
+        real :: denom, dzdx_s, dzdy_s, dz_kp1
+
+        !$acc parallel loop gang vector collapse(3) &
+        !$acc present(values, row_ptrs, A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
+        !$acc         H_coef, I_coef, J_coef, K_coef, L_coef, M_coef, N_coef, O_coef, &
+        !$acc         alpha, dz_if, dzdx_surf, dzdy_surf, jaco)
+        do j = ys, ys+ym-1
+            do k = zs, zs+zm-1
+                do i = xs, xs+xm-1
+                    row_idx = (j-ys)*zm*xm + (k-zs)*xm + (i-xs) + 1
+                    base = row_ptrs(row_idx)  ! 0-based
+
+                    ! Lateral boundary: identity row (1 entry)
+                    if (i <= 0 .or. j <= 0 .or. i >= mx-1 .or. j >= my-1) then
+                        values(base+1) = 1.0_c_double
+
+                    ! Top boundary k=mz-1: dλ/dz = 0 (2 entries, sorted: k-1 then k)
+                    else if (k >= mz-1) then
+                        values(base+1) = real(-1.0/dz_if(i,k,j), c_double)   ! (i, k-1, j)
+                        values(base+2) = real( 1.0/dz_if(i,k,j), c_double)   ! (i, k,   j)
+
+                    ! Bottom boundary k=0: terrain-following BC (10 entries, sorted)
+                    else if (k <= 0) then
+                        dzdx_s = dzdx_surf(i,j)
+                        dzdy_s = dzdy_surf(i,j)
+                        dz_kp1 = dz_if(i,k+1,j)
+                        denom = 2.0*(dzdx_s**2 + dzdy_s**2 + alpha(i,1,j)**2)/jaco(i,1,j)
+
+                        ! Sorted by global column index:
+                        ! 1: (i, 0, j-1)
+                        values(base+1)  = real( dzdy_s/(denom*2.0*dx), c_double)
+                        ! 2: (i, 1, j-1)
+                        values(base+2)  = real( dzdy_s/(denom*2.0*dx), c_double)
+                        ! 3: (i-1, 0, j)
+                        values(base+3)  = real( dzdx_s/(denom*2.0*dx), c_double)
+                        ! 4: (i, 0, j) = -1/dz_if(k+1)
+                        values(base+4)  = real(-1.0/dz_kp1, c_double)
+                        ! 5: (i+1, 0, j)
+                        values(base+5)  = real(-dzdx_s/(denom*2.0*dx), c_double)
+                        ! 6: (i-1, 1, j)
+                        values(base+6)  = real( dzdx_s/(denom*2.0*dx), c_double)
+                        ! 7: (i, 1, j) = 1/dz_if(k+1)
+                        values(base+7)  = real( 1.0/dz_kp1, c_double)
+                        ! 8: (i+1, 1, j)
+                        values(base+8)  = real(-dzdx_s/(denom*2.0*dx), c_double)
+                        ! 9: (i, 0, j+1)
+                        values(base+9)  = real(-dzdy_s/(denom*2.0*dx), c_double)
+                        ! 10: (i, 1, j+1)
+                        values(base+10) = real(-dzdy_s/(denom*2.0*dx), c_double)
+
+                    ! Interior: full 15-point stencil (sorted by global column index)
+                    else
+                        values(base+1)  = real(O_coef(i,k,j), c_double)   ! (i,   k-1, j-1)
+                        values(base+2)  = real(G_coef(i,k,j), c_double)   ! (i,   k,   j-1)
+                        values(base+3)  = real(M_coef(i,k,j), c_double)   ! (i,   k+1, j-1)
+                        values(base+4)  = real(K_coef(i,k,j), c_double)   ! (i-1, k-1, j)
+                        values(base+5)  = real(C_coef(i,k,j), c_double)   ! (i,   k-1, j)
+                        values(base+6)  = real(J_coef(i,k,j), c_double)   ! (i+1, k-1, j)
+                        values(base+7)  = real(E_coef(i,k,j), c_double)   ! (i-1, k,   j)
+                        values(base+8)  = real(A_coef(i,k,j), c_double)   ! (i,   k,   j) [diagonal]
+                        values(base+9)  = real(D_coef(i,k,j), c_double)   ! (i+1, k,   j)
+                        values(base+10) = real(I_coef(i,k,j), c_double)   ! (i-1, k+1, j)
+                        values(base+11) = real(B_coef(i,k,j), c_double)   ! (i,   k+1, j)
+                        values(base+12) = real(H_coef(i,k,j), c_double)   ! (i+1, k+1, j)
+                        values(base+13) = real(N_coef(i,k,j), c_double)   ! (i,   k-1, j+1)
+                        values(base+14) = real(F_coef(i,k,j), c_double)   ! (i,   k,   j+1)
+                        values(base+15) = real(L_coef(i,k,j), c_double)   ! (i,   k+1, j+1)
+                    endif
+                enddo
+            enddo
+        enddo
+
+    end subroutine fill_csr_values_gpu
+
+
+    !>------------------------------------------------------------
     !! Cleanup
     !!------------------------------------------------------------
     subroutine finalize_iter_winds_amgx()
         implicit none
         integer(c_int) :: rc
 
-        ! Destroy AmgX objects based on their own pointer state,
-        ! not on Fortran array allocation (which happens later in calc_iter_winds).
-        ! This prevents GPU memory leaks when re-initializing without an intervening solve.
+        ! Destroy AmgX objects
         if (c_associated(amgx_solver)) then
             rc = AMGX_solver_destroy(amgx_solver)
             amgx_solver = c_null_ptr
@@ -1451,6 +1692,20 @@ contains
         if (c_associated(amgx_matrix)) then
             rc = AMGX_matrix_destroy(amgx_matrix)
             amgx_matrix = c_null_ptr
+        endif
+
+        ! Clean up GPU data for CSR arrays, work vectors
+        if (structure_uploaded) then
+            if (allocated(row_ptrs)) then
+                !$acc exit data delete(row_ptrs, values)
+            endif
+            if (allocated(rhs)) then
+                !$acc exit data delete(rhs, solution)
+            endif
+            if (allocated(A_coef)) then
+                !$acc exit data delete(A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
+                !$acc                  H_coef, I_coef, J_coef, K_coef, L_coef, M_coef, N_coef, O_coef)
+            endif
         endif
 
         ! Deallocate Fortran arrays
@@ -1478,7 +1733,8 @@ contains
         if (allocated(O_coef)) deallocate(O_coef)
 
         if (allocated(dz_if)) then
-            !$acc exit data delete(dz_if, div, alpha)
+            !$acc exit data delete(dz_if, div, alpha, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma)
+            !$acc exit data delete(jaco_w, dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag, adv_dz_col)
             deallocate(dz_if)
         endif
         if (allocated(jaco)) deallocate(jaco)
@@ -1489,16 +1745,185 @@ contains
         if (allocated(sigma)) deallocate(sigma)
         if (allocated(alpha)) deallocate(alpha)
         if (allocated(div)) deallocate(div)
+        if (allocated(jaco_w)) deallocate(jaco_w)
+        if (allocated(dzdx_u_stag)) deallocate(dzdx_u_stag)
+        if (allocated(jaco_u_stag)) deallocate(jaco_u_stag)
+        if (allocated(dzdy_v_stag)) deallocate(dzdy_v_stag)
+        if (allocated(jaco_v_stag)) deallocate(jaco_v_stag)
+        if (allocated(adv_dz_col)) deallocate(adv_dz_col)
 
         first_solve = .True.
+        structure_uploaded = .false.
     end subroutine finalize_iter_winds_amgx
+
+    !>------------------------------------------------------------
+    !! Save current module-level AMGX state into a cache slot.
+    !! Uses MOVE_ALLOC to transfer array ownership without copies.
+    !! OpenACC present table tracks by host address, so device data
+    !! remains valid after the swap.
+    !!------------------------------------------------------------
+    subroutine save_to_cache(slot)
+        implicit none
+        integer, intent(in) :: slot
+
+        ! AMGX handles
+        domain_cache(slot)%matrix          = amgx_matrix
+        domain_cache(slot)%vector_rhs      = amgx_vector_rhs
+        domain_cache(slot)%vector_solution = amgx_vector_solution
+        domain_cache(slot)%solver          = amgx_solver
+
+        ! Flags
+        domain_cache(slot)%structure_uploaded = structure_uploaded
+        domain_cache(slot)%first_solve        = first_solve
+
+        ! Grid scalars
+        domain_cache(slot)%xs = xs; domain_cache(slot)%ys = ys; domain_cache(slot)%zs = zs
+        domain_cache(slot)%xm = xm; domain_cache(slot)%ym = ym; domain_cache(slot)%zm = zm
+        domain_cache(slot)%mx = mx; domain_cache(slot)%my = my; domain_cache(slot)%mz = mz
+        domain_cache(slot)%i_s = i_s; domain_cache(slot)%i_e = i_e
+        domain_cache(slot)%k_s = k_s; domain_cache(slot)%k_e = k_e
+        domain_cache(slot)%j_s = j_s; domain_cache(slot)%j_e = j_e
+        domain_cache(slot)%ims = ims; domain_cache(slot)%ime = ime
+        domain_cache(slot)%jms = jms; domain_cache(slot)%jme = jme
+        domain_cache(slot)%ids = ids; domain_cache(slot)%ide = ide
+        domain_cache(slot)%jds = jds; domain_cache(slot)%jde = jde
+        domain_cache(slot)%hs  = hs
+        domain_cache(slot)%dx  = dx
+        domain_cache(slot)%n_rows        = n_rows
+        domain_cache(slot)%nnz           = nnz
+        domain_cache(slot)%n_rows_global = n_rows_global
+
+        ! Move allocatable arrays (no data copy, just pointer transfer)
+        if (allocated(A_coef))       call move_alloc(A_coef,       domain_cache(slot)%A_coef)
+        if (allocated(B_coef))       call move_alloc(B_coef,       domain_cache(slot)%B_coef)
+        if (allocated(C_coef))       call move_alloc(C_coef,       domain_cache(slot)%C_coef)
+        if (allocated(D_coef))       call move_alloc(D_coef,       domain_cache(slot)%D_coef)
+        if (allocated(E_coef))       call move_alloc(E_coef,       domain_cache(slot)%E_coef)
+        if (allocated(F_coef))       call move_alloc(F_coef,       domain_cache(slot)%F_coef)
+        if (allocated(G_coef))       call move_alloc(G_coef,       domain_cache(slot)%G_coef)
+        if (allocated(H_coef))       call move_alloc(H_coef,       domain_cache(slot)%H_coef)
+        if (allocated(I_coef))       call move_alloc(I_coef,       domain_cache(slot)%I_coef)
+        if (allocated(J_coef))       call move_alloc(J_coef,       domain_cache(slot)%J_coef)
+        if (allocated(K_coef))       call move_alloc(K_coef,       domain_cache(slot)%K_coef)
+        if (allocated(L_coef))       call move_alloc(L_coef,       domain_cache(slot)%L_coef)
+        if (allocated(M_coef))       call move_alloc(M_coef,       domain_cache(slot)%M_coef)
+        if (allocated(N_coef))       call move_alloc(N_coef,       domain_cache(slot)%N_coef)
+        if (allocated(O_coef))       call move_alloc(O_coef,       domain_cache(slot)%O_coef)
+        if (allocated(div))          call move_alloc(div,          domain_cache(slot)%div)
+        if (allocated(dz_if))        call move_alloc(dz_if,        domain_cache(slot)%dz_if)
+        if (allocated(jaco))         call move_alloc(jaco,         domain_cache(slot)%jaco)
+        if (allocated(dzdx))         call move_alloc(dzdx,         domain_cache(slot)%dzdx)
+        if (allocated(dzdy))         call move_alloc(dzdy,         domain_cache(slot)%dzdy)
+        if (allocated(sigma))        call move_alloc(sigma,        domain_cache(slot)%sigma)
+        if (allocated(alpha))        call move_alloc(alpha,        domain_cache(slot)%alpha)
+        if (allocated(dzdx_surf))    call move_alloc(dzdx_surf,    domain_cache(slot)%dzdx_surf)
+        if (allocated(dzdy_surf))    call move_alloc(dzdy_surf,    domain_cache(slot)%dzdy_surf)
+        if (allocated(jaco_w))       call move_alloc(jaco_w,       domain_cache(slot)%jaco_w)
+        if (allocated(dzdx_u_stag))  call move_alloc(dzdx_u_stag,  domain_cache(slot)%dzdx_u_stag)
+        if (allocated(jaco_u_stag))  call move_alloc(jaco_u_stag,  domain_cache(slot)%jaco_u_stag)
+        if (allocated(dzdy_v_stag))  call move_alloc(dzdy_v_stag,  domain_cache(slot)%dzdy_v_stag)
+        if (allocated(jaco_v_stag))  call move_alloc(jaco_v_stag,  domain_cache(slot)%jaco_v_stag)
+        if (allocated(adv_dz_col))   call move_alloc(adv_dz_col,   domain_cache(slot)%adv_dz_col)
+        if (allocated(row_ptrs))     call move_alloc(row_ptrs,     domain_cache(slot)%row_ptrs)
+        if (allocated(values))       call move_alloc(values,       domain_cache(slot)%values)
+        if (allocated(rhs))          call move_alloc(rhs,          domain_cache(slot)%rhs)
+        if (allocated(solution))     call move_alloc(solution,     domain_cache(slot)%solution)
+
+        domain_cache(slot)%valid = .true.
+    end subroutine save_to_cache
+
+    !>------------------------------------------------------------
+    !! Restore AMGX state from a cache slot back to module level.
+    !! Uses MOVE_ALLOC — the cache slot becomes empty after this.
+    !!------------------------------------------------------------
+    subroutine restore_from_cache(slot)
+        implicit none
+        integer, intent(in) :: slot
+
+        ! AMGX handles
+        amgx_matrix          = domain_cache(slot)%matrix
+        amgx_vector_rhs      = domain_cache(slot)%vector_rhs
+        amgx_vector_solution = domain_cache(slot)%vector_solution
+        amgx_solver          = domain_cache(slot)%solver
+
+        ! Flags
+        structure_uploaded = domain_cache(slot)%structure_uploaded
+        first_solve        = domain_cache(slot)%first_solve
+
+        ! Grid scalars
+        xs = domain_cache(slot)%xs; ys = domain_cache(slot)%ys; zs = domain_cache(slot)%zs
+        xm = domain_cache(slot)%xm; ym = domain_cache(slot)%ym; zm = domain_cache(slot)%zm
+        mx = domain_cache(slot)%mx; my = domain_cache(slot)%my; mz = domain_cache(slot)%mz
+        i_s = domain_cache(slot)%i_s; i_e = domain_cache(slot)%i_e
+        k_s = domain_cache(slot)%k_s; k_e = domain_cache(slot)%k_e
+        j_s = domain_cache(slot)%j_s; j_e = domain_cache(slot)%j_e
+        ims = domain_cache(slot)%ims; ime = domain_cache(slot)%ime
+        jms = domain_cache(slot)%jms; jme = domain_cache(slot)%jme
+        ids = domain_cache(slot)%ids; ide = domain_cache(slot)%ide
+        jds = domain_cache(slot)%jds; jde = domain_cache(slot)%jde
+        hs  = domain_cache(slot)%hs
+        dx  = domain_cache(slot)%dx
+        n_rows        = domain_cache(slot)%n_rows
+        nnz           = domain_cache(slot)%nnz
+        n_rows_global = domain_cache(slot)%n_rows_global
+
+        ! Move allocatable arrays back from cache to module level
+        if (allocated(domain_cache(slot)%A_coef))       call move_alloc(domain_cache(slot)%A_coef,       A_coef)
+        if (allocated(domain_cache(slot)%B_coef))       call move_alloc(domain_cache(slot)%B_coef,       B_coef)
+        if (allocated(domain_cache(slot)%C_coef))       call move_alloc(domain_cache(slot)%C_coef,       C_coef)
+        if (allocated(domain_cache(slot)%D_coef))       call move_alloc(domain_cache(slot)%D_coef,       D_coef)
+        if (allocated(domain_cache(slot)%E_coef))       call move_alloc(domain_cache(slot)%E_coef,       E_coef)
+        if (allocated(domain_cache(slot)%F_coef))       call move_alloc(domain_cache(slot)%F_coef,       F_coef)
+        if (allocated(domain_cache(slot)%G_coef))       call move_alloc(domain_cache(slot)%G_coef,       G_coef)
+        if (allocated(domain_cache(slot)%H_coef))       call move_alloc(domain_cache(slot)%H_coef,       H_coef)
+        if (allocated(domain_cache(slot)%I_coef))       call move_alloc(domain_cache(slot)%I_coef,       I_coef)
+        if (allocated(domain_cache(slot)%J_coef))       call move_alloc(domain_cache(slot)%J_coef,       J_coef)
+        if (allocated(domain_cache(slot)%K_coef))       call move_alloc(domain_cache(slot)%K_coef,       K_coef)
+        if (allocated(domain_cache(slot)%L_coef))       call move_alloc(domain_cache(slot)%L_coef,       L_coef)
+        if (allocated(domain_cache(slot)%M_coef))       call move_alloc(domain_cache(slot)%M_coef,       M_coef)
+        if (allocated(domain_cache(slot)%N_coef))       call move_alloc(domain_cache(slot)%N_coef,       N_coef)
+        if (allocated(domain_cache(slot)%O_coef))       call move_alloc(domain_cache(slot)%O_coef,       O_coef)
+        if (allocated(domain_cache(slot)%div))          call move_alloc(domain_cache(slot)%div,          div)
+        if (allocated(domain_cache(slot)%dz_if))        call move_alloc(domain_cache(slot)%dz_if,        dz_if)
+        if (allocated(domain_cache(slot)%jaco))         call move_alloc(domain_cache(slot)%jaco,         jaco)
+        if (allocated(domain_cache(slot)%dzdx))         call move_alloc(domain_cache(slot)%dzdx,         dzdx)
+        if (allocated(domain_cache(slot)%dzdy))         call move_alloc(domain_cache(slot)%dzdy,         dzdy)
+        if (allocated(domain_cache(slot)%sigma))        call move_alloc(domain_cache(slot)%sigma,        sigma)
+        if (allocated(domain_cache(slot)%alpha))        call move_alloc(domain_cache(slot)%alpha,        alpha)
+        if (allocated(domain_cache(slot)%dzdx_surf))    call move_alloc(domain_cache(slot)%dzdx_surf,    dzdx_surf)
+        if (allocated(domain_cache(slot)%dzdy_surf))    call move_alloc(domain_cache(slot)%dzdy_surf,    dzdy_surf)
+        if (allocated(domain_cache(slot)%jaco_w))       call move_alloc(domain_cache(slot)%jaco_w,       jaco_w)
+        if (allocated(domain_cache(slot)%dzdx_u_stag))  call move_alloc(domain_cache(slot)%dzdx_u_stag,  dzdx_u_stag)
+        if (allocated(domain_cache(slot)%jaco_u_stag))  call move_alloc(domain_cache(slot)%jaco_u_stag,  jaco_u_stag)
+        if (allocated(domain_cache(slot)%dzdy_v_stag))  call move_alloc(domain_cache(slot)%dzdy_v_stag,  dzdy_v_stag)
+        if (allocated(domain_cache(slot)%jaco_v_stag))  call move_alloc(domain_cache(slot)%jaco_v_stag,  jaco_v_stag)
+        if (allocated(domain_cache(slot)%adv_dz_col))   call move_alloc(domain_cache(slot)%adv_dz_col,   adv_dz_col)
+        if (allocated(domain_cache(slot)%row_ptrs))     call move_alloc(domain_cache(slot)%row_ptrs,     row_ptrs)
+        if (allocated(domain_cache(slot)%values))       call move_alloc(domain_cache(slot)%values,       values)
+        if (allocated(domain_cache(slot)%rhs))          call move_alloc(domain_cache(slot)%rhs,          rhs)
+        if (allocated(domain_cache(slot)%solution))     call move_alloc(domain_cache(slot)%solution,     solution)
+
+        domain_cache(slot)%valid = .false.
+    end subroutine restore_from_cache
 
     subroutine finalize_amgx()
         implicit none
         integer(c_int) :: rc
+        integer :: n
 
         if (initialized_amgx) then
+            ! Finalize active module state
             call finalize_iter_winds_amgx()
+
+            ! Finalize all cached domain states
+            do n = 1, MAX_NESTS
+                if (domain_cache(n)%valid) then
+                    call restore_from_cache(n)
+                    call finalize_iter_winds_amgx()
+                endif
+            enddo
+
+            ! Destroy shared AMGX resources
             if (c_associated(amgx_resources)) then
                 rc = AMGX_resources_destroy(amgx_resources)
                 amgx_resources = c_null_ptr
@@ -1510,6 +1935,8 @@ contains
             call AMGX_finalize()
             initialized_amgx = .False.
         endif
+
+        active_nest_indx = -1
 
     end subroutine finalize_amgx
     

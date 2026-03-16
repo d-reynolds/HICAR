@@ -42,3 +42,22 @@ int AMGX_resources_create_wrapper(AMGX_resources_handle *resources,
         
     return rc;
 }
+
+/*
+ * Device-pointer wrappers for AMGX functions.
+ * When AMGX is configured in dDDI mode and passed device pointers
+ * (via OpenACC host_data use_device), cudaMemcpy with cudaMemcpyDefault
+ * performs D2D transfers automatically.
+ */
+int AMGX_vector_upload_device(AMGX_vector_handle vec, int n, int block_dim, const void* data) {
+    return AMGX_vector_upload(vec, n, block_dim, data);
+}
+
+int AMGX_vector_download_device(AMGX_vector_handle vec, void* data) {
+    return AMGX_vector_download(vec, data);
+}
+
+int AMGX_matrix_replace_coefficients_device(AMGX_matrix_handle mtx, int n, int nnz,
+                                             const void* values, const void* diag) {
+    return AMGX_matrix_replace_coefficients(mtx, n, nnz, values, diag);
+}

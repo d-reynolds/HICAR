@@ -3654,10 +3654,16 @@ contains
                 default = "0"
                 group = "Wind"
             case ("wind_iterations")
-                description = "Number of iterations to use for the iterative wind solver (wind=1)"
+                description = "Number of iterations to use for the iterative wind solver (wind='variational solver')"
                 min = 0
                 max = 10
                 default = "2"
+                group = "Wind"
+            case ("wind_solver_iterations")
+                description = "Number of iterations for the actual wind solver(AMGX/PETSc) to use (wind='variational solver')"
+                min = 100
+                max = 5000
+                default = "1500"
                 group = "Wind"
             case ("Sx_dmax")
                 description = "Maximum lateral distance over which to calculate the Sx parameter"

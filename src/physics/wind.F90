@@ -672,7 +672,7 @@ contains
 #ifdef USE_AMGX                
                 call calc_iter_winds_amgx(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
 #elif defined USE_PETSC
-                call calc_iter_winds_petsc(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
+                call calc_iter_winds_petsc(domain,options,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
 #endif                
                 !Exchange u and v, since the outer points are not updated in above function
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
@@ -1130,7 +1130,7 @@ contains
         endif
         if (options%physics%windtype==kITERATIVE_WINDS) then
 #ifdef USE_AMGX
-            call init_iter_winds_amgx(domain)
+            call init_iter_winds_amgx(domain,options)
 #elif defined USE_PETSC
             call init_iter_winds_petsc(domain,options)
 #else

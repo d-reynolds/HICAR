@@ -2160,13 +2160,13 @@ contains
         integer :: name_unit, rc, update_frequency_checked     ! logical unit number for namelist
         logical :: print_info, gennml
         !Define parameters
-        integer, dimension(kMAX_NESTS) :: wind_iterations, update_frequency
+        integer, dimension(kMAX_NESTS) :: wind_iterations, wind_solver_iterations, update_frequency
         logical, dimension(kMAX_NESTS) :: Sx, thermal, wind_only, linear_theory
         real, dimension(kMAX_NESTS)    :: Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, smooth_wind_distance
         
         !Make name-list
         namelist /wind/ Sx, thermal, wind_only, linear_theory, Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, &
-                        update_frequency, smooth_wind_distance, wind_iterations
+                        update_frequency, smooth_wind_distance, wind_iterations, wind_solver_iterations
         CHARACTER(LEN=200) :: error_msg
 
         print_info = .False.
@@ -2186,6 +2186,7 @@ contains
         call set_nml_var_default(alpha_const, 'alpha_const', print_info, gennml)
         call set_nml_var_default(smooth_wind_distance, 'smooth_wind_distance', print_info, gennml)
         call set_nml_var_default(wind_iterations, 'wind_iterations', print_info, gennml)
+        call set_nml_var_default(wind_solver_iterations, 'wind_solver_iterations', print_info, gennml)
         call set_nml_var_default(update_frequency, 'update_frequency', print_info, gennml)
         
         ! If this is just a verbose print run, exit here so we don't need a namelist
@@ -2223,6 +2224,7 @@ contains
         call set_nml_var(wind_options%Sx_scale_ang, Sx_scale_ang(n_indx), 'Sx_scale_ang', Sx_scale_ang(1))
         call set_nml_var(wind_options%alpha_const, alpha_const(n_indx), 'alpha_const', alpha_const(1))
         call set_nml_var(wind_options%wind_iterations, wind_iterations(n_indx), 'wind_iterations', wind_iterations(1))
+        call set_nml_var(wind_options%wind_solver_iterations, wind_solver_iterations(n_indx), 'wind_solver_iterations', wind_solver_iterations(1))
         call set_nml_var(wind_options%smooth_wind_distance, smooth_wind_distance(n_indx), 'smooth_wind_distance', smooth_wind_distance(1))
         call set_nml_var(update_frequency_checked, update_frequency(n_indx), 'update_frequency', update_frequency(1))
 
@@ -2797,6 +2799,7 @@ contains
         call append_kv_real   (config_str, pos, 'wind', 'Sx_scale_ang',         this%wind%Sx_scale_ang)
         call append_kv_real   (config_str, pos, 'wind', 'alpha_const',          this%wind%alpha_const)
         call append_kv_int    (config_str, pos, 'wind', 'wind_iterations',      this%wind%wind_iterations)
+        call append_kv_int    (config_str, pos, 'wind', 'wind_solver_iterations', this%wind%wind_solver_iterations)
         call append_kv_real   (config_str, pos, 'wind', 'smooth_wind_distance', this%wind%smooth_wind_distance)
         call append_kv_real   (config_str, pos, 'wind', 'update_frequency',     real(this%wind%update_dt%seconds()))
 
