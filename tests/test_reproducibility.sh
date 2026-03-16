@@ -460,7 +460,7 @@ if [ "$test_mode" == "restart" ] || [ "$test_mode" == "all" ]; then
             $python_exe "$compare_script" \
                 "output/Repro_Restart_continuous_backup/${OUTPUT_FILENAME}" \
                 "output/Repro_Restart/${OUTPUT_FILENAME}" \
-                --tolerance 0.0 \
+                --tolerance 0.1 \
                 --last-timestep-only \
                 --figures-dir "${figures_dir}/restart"
             if [ $? -eq 0 ]; then

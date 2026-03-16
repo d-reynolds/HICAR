@@ -917,3 +917,13 @@ add_custom_target(test_reproducibility
     COMMENT "Running all reproducibility tests"
     VERBATIM
 )
+
+add_custom_target(test_regression
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_regression.sh
+        ${PROJECT_SOURCE_DIR}
+        ${CMAKE_BINARY_DIR}
+    DEPENDS HICAR download_test_data
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
+    COMMENT "Running regression test against known-good commit"
+    VERBATIM
+)

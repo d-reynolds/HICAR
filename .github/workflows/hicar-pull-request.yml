@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Cache dependencies
         uses: actions/cache@v4
@@ -45,3 +47,28 @@ jobs:
         run: |
           cd tests/Test_Cases
           bash test_case_runner.sh $GITHUB_WORKSPACE Standard
+
+      - name: Validate regression hash
+        run: |
+          REF_HASH=$(head -n1 tests/regression_commit.txt | tr -d '[:space:]')
+          CURRENT_HEAD=$(git rev-parse HEAD)
+          if [ "$REF_HASH" = "$CURRENT_HEAD" ]; then
+            echo "::error::regression_commit.txt points to HEAD — test would trivially pass"
+            exit 1
+          fi
+          if ! git cat-file -t "$REF_HASH" &>/dev/null; then
+            echo "::error::Invalid hash in regression_commit.txt: $REF_HASH"
+            exit 1
+          fi
+          echo "Regression hash validated: $REF_HASH"
+
+      - name: Cache regression binary
+        uses: actions/cache@v4
+        with:
+          path: bin/HICAR_old_tester
+          key: regression-${{ hashFiles('tests/regression_commit.txt') }}
+
+      - name: Regression Test
+        run: |
+          cd tests/Test_Cases
+          bash $GITHUB_WORKSPACE/tests/test_regression.sh $GITHUB_WORKSPACE $GITHUB_WORKSPACE/build

@@ -280,12 +280,11 @@ contains
         real, save      :: last_wind_update
         logical         :: last_loop, force_update_winds
 
-        type(time_delta_t) :: time_step_size, dt_saver, max_dt
+        type(time_delta_t) :: time_step_size, max_dt
         type(Time_type) :: tmp_time
         type(time_delta_t), save      :: dt
 
         last_print_time = 0.0
-        call dt_saver%set(seconds=0.0)
         call max_dt%set(seconds=1.0)
 
         time_step_size = end_time - domain%sim_time
@@ -321,9 +320,19 @@ contains
                 ! Note that there will currently be some discrepancy between using the current density and whatever density will be at 
                 ! the next time step, but we assume that it is negligable
                 ! and that using a CFL criterion < 1.0 will cover this
-                call update_dt(dt, options, domain)
-                call update_wind_dqdt(domain, real(options%wind%update_dt%seconds()))
+                if (domain%restart_dt > 0.0) then
+                    call dt%set(seconds=domain%restart_dt)
+                    domain%restart_dt = 0.0
+                else
+                    call update_dt(dt, options, domain)
+                endif
+                domain%dt = real(dt%seconds())
 
+                call update_wind_dqdt(domain, real(options%wind%update_dt%seconds()) - domain%forcing_elapsed)
+
+                ! Reset forcing_elapsed after first wind update so subsequent wind updates
+                ! within the same step interval use the full wind_update_dt
+                domain%forcing_elapsed = 0.0
                 last_wind_update = 0.0
 
                 if (options%wind%wind_only) then
@@ -331,12 +340,11 @@ contains
                     exit
                 endif
             endif
-            !call update_dt(dt, options, domain, end_time)
+
             ! Make sure we don't over step the forcing or output period
             call tmp_time%set(domain%sim_time%mjd() + dt%days())
 
             if (tmp_time > end_time) then
-                dt_saver = dt
                 dt = end_time - domain%sim_time
 
                 ! Sometimes, due to very small time differences, in the inequality controling the loop,
@@ -435,7 +443,7 @@ contains
         call domain%cpu_gpu_timer%stop()
 
         !If we overwrote dt to edge up to the next output/input step, revert here
-        if (dt_saver%seconds()>0.0) dt = dt_saver
+        call dt%set(seconds=domain%dt)
         
     end subroutine step
 
