@@ -1156,23 +1156,6 @@ contains
     end subroutine snow_drift_apply_feedback
 
 
-    !>----------------------------------------------------------
-    !! Halo exchange for a 2D field stored in module arrays
-    !!----------------------------------------------------------
-    subroutine exch_2d_field(domain, field_2d)
-        implicit none
-        type(domain_t), intent(inout) :: domain
-        real, intent(inout)           :: field_2d(ims:ime, jms:jme)
-
-        exch_var_2d%data_2d = 0.0
-        exch_var_2d%data_2d(its:ite, jts:jte) = field_2d(its:ite, jts:jte)
-
-        call domain%halo%exch_var(exch_var_2d)
-
-        field_2d(ims:ime, jms:jme) = exch_var_2d%data_2d(ims:ime, jms:jme)
-
-    end subroutine exch_2d_field
-
 
     !>----------------------------------------------------------
     !! Halo exchange for a single fine mesh level
@@ -1182,20 +1165,28 @@ contains
         type(domain_t), intent(inout) :: domain
         integer,        intent(in)    :: k
 
-        exch_var_2d%data_2d = 0.0
-        exch_var_2d%data_2d(its:ite, jts:jte) = sn_qs(its:ite, k, jts:jte)
-
+        associate(exch_var_2d_data => exch_var_2d%data_2d)
+        !$acc data present(exch_var_2d_data, sn_qs, sn_qs)
+        !$acc kernels 
+        exch_var_2d_data = 0.0
+        exch_var_2d_data(its:ite, jts:jte) = sn_qs(its:ite, k, jts:jte)
+        !$acc end kernels
         call domain%halo%exch_var(exch_var_2d)
 
-        sn_qs(ims:ime, k, jms:jme) = exch_var_2d%data_2d(ims:ime, jms:jme)
+        !$acc kernels 
+        sn_qs(ims:ime, k, jms:jme) = exch_var_2d_data(ims:ime, jms:jme)
 
         ! Also exchange number concentration
-        exch_var_2d%data_2d = 0.0
-        exch_var_2d%data_2d(its:ite, jts:jte) = sn_ns(its:ite, k, jts:jte)
+        exch_var_2d_data = 0.0
+        exch_var_2d_data(its:ite, jts:jte) = sn_ns(its:ite, k, jts:jte)
+        !$acc end kernels
 
         call domain%halo%exch_var(exch_var_2d)
-
-        sn_ns(ims:ime, k, jms:jme) = exch_var_2d%data_2d(ims:ime, jms:jme)
+        !$acc kernels 
+        sn_ns(ims:ime, k, jms:jme) = exch_var_2d_data(ims:ime, jms:jme)
+        !$acc end kernels
+        !$acc end data
+        end associate
 
     end subroutine exch_fine_mesh_level
 
