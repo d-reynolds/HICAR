@@ -97,10 +97,10 @@ program icar
 
     call component_program_end(components(1:n_nests), options)
 
+    CALL MPI_Finalize()
 #ifdef _OPENACC
     call acc_shutdown(acc_device_nvidia)
 #endif
-    CALL MPI_Finalize()
 
 contains
     subroutine read_co(nml_file)

@@ -348,6 +348,29 @@ module wind_iterative_amgx
             type(c_ptr), value :: values_ptr, diag_ptr
             integer(c_int) :: rc
         end function
+
+        function AMGX_solver_get_status(solver, status) bind(C, name="AMGX_solver_get_status") result(rc)
+            import :: c_ptr, c_int
+            type(c_ptr), value :: solver
+            integer(c_int) :: status
+            integer(c_int) :: rc
+        end function
+
+        function AMGX_solver_get_iterations_number(solver, n) bind(C, name="AMGX_solver_get_iterations_number") result(rc)
+            import :: c_ptr, c_int
+            type(c_ptr), value :: solver
+            integer(c_int) :: n
+            integer(c_int) :: rc
+        end function
+
+        function AMGX_solver_get_iteration_residual(solver, iter, block_idx, residual) &
+                bind(C, name="AMGX_solver_get_iteration_residual") result(rc)
+            import :: c_ptr, c_int, c_double
+            type(c_ptr), value :: solver
+            integer(c_int), value :: iter, block_idx
+            real(c_double) :: residual
+            integer(c_int) :: rc
+        end function
     end interface
     
     ! AmgX modes
@@ -732,7 +755,8 @@ contains
         real, dimension(ims:ime,domain%kms:domain%kme,jms:jme), intent(in) :: alpha_in, div_in
         logical, intent(in) :: adv_den
         
-        integer(c_int) :: rc
+        integer(c_int) :: rc, solve_status, n_iters
+
         logical :: varying_alpha
         integer :: i, j, k
         real :: alpha_min, alpha_max
@@ -820,6 +844,7 @@ contains
                 call update_coefs_gpu()
                 ! Fill CSR values on GPU in sorted column order
                 call fill_csr_values_gpu()
+                !$acc wait  ! ensure fill_csr_values_gpu kernel completes before AMGX reads values
                 ! D2D replace coefficients (structure unchanged, only values)
                 !$acc host_data use_device(values)
                 rc = AMGX_matrix_replace_coefficients_device(amgx_matrix, n_rows, nnz, c_loc(values), c_null_ptr)
@@ -834,6 +859,7 @@ contains
         endif
 
         call compute_rhs()
+        !$acc wait  ! ensure compute_rhs kernel completes before AMGX reads rhs
 
         !$acc host_data use_device(rhs)
         rc = AMGX_vector_upload_device(amgx_vector_rhs, n_rows, 1, c_loc(rhs))
@@ -843,6 +869,7 @@ contains
             return
         endif
 
+        !$acc wait  ! ensure any async OpenACC operations complete before AMGX reads solution
         !$acc host_data use_device(solution)
         rc = AMGX_vector_upload_device(amgx_vector_solution, n_rows, 1, c_loc(solution))
         !$acc end host_data
@@ -866,6 +893,24 @@ contains
         if (rc /= 0) then
             if (STD_OUT_PE) print*, "ERROR: AMGX_vector_download_device failed with rc=", rc
             return
+        endif
+        !$acc wait  ! ensure AMGX download to solution completes before OpenACC kernels in calc_updated_winds
+
+        rc = AMGX_solver_get_status(amgx_solver, solve_status)
+        rc = AMGX_solver_get_iterations_number(amgx_solver, n_iters)
+        if (STD_OUT_PE) then
+            write(*,*) ' AMGX solver status=', solve_status, ' iterations=', n_iters
+            ! status: 0=success, 1=failed, 2=diverged
+            if (solve_status /= 0) write(*,*) ' WARNING: AMGX solver did NOT converge!'
+            if (n_iters > 0) then
+                block
+                real(c_double) :: res_val
+                rc = AMGX_solver_get_iteration_residual(amgx_solver, 0, 0, res_val)
+                write(*,*) '  Residual at iter 0:', res_val
+                rc = AMGX_solver_get_iteration_residual(amgx_solver, n_iters - 1, 0, res_val)
+                write(*,*) '  Residual at iter', n_iters, ':', res_val
+                end block
+            endif
         endif
 
         ! Update wind field (GPU reshape + MPI halo exchange + GPU wind update)

@@ -400,11 +400,16 @@ contains
         type(MPI_Request) :: send_req
 
         ! Copy own tile albedo into the buffer
+
+        associate(albedo => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+                  shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d)
+        !$acc parallel loop gang vector collapse(2) present(nbr_albedo_2d, albedo, shortwave)
         do j = jts, jte
             do i = its, ite
-                nbr_albedo_2d(i,j) = domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d(i,j) * domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d(i,j)  ! zero out ocean points
+                nbr_albedo_2d(i,j) = albedo(i,j) * shortwave(i,j)  ! zero out ocean points
             end do
         end do
+        end associate
 
         tile_w_i = ite - its + 1
         tile_w_j = jte - jts + 1
@@ -423,6 +428,8 @@ contains
         ! Allocate work buffers sized for the largest possible strip exchange
         buf_size = max(ide - ids + 1, jde - jds + 1) * (min_tile_w + 2 * R_cells)
         allocate(send_buf(buf_size), recv_buf(buf_size))
+
+        !$acc update host(nbr_albedo_2d)
 
         do phase = 1, n_phases
             width = min(min_tile_w, R_cells - (phase - 1) * min_tile_w)
@@ -1641,7 +1648,6 @@ contains
                 !$acc data create(nbr_albedo_2d)
 
                 ! Gather neighborhood albedo from neighboring MPI processes
-                !$acc update host(domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d)
                 call gather_neighborhood_albedo(domain, nbr_albedo_2d)
 
                 associate(svf        => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d,                    &
