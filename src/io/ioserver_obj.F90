@@ -1129,7 +1129,7 @@ contains
         character(len=512) :: line
         character(len=256) :: key, current_val, attr_name
         character(len=kMAX_ATTR_LENGTH) :: stored_val
-        character(len=512) :: diff_report(500)
+        character(len=2512) :: diff_report(500)
         integer :: i, line_start, str_len, eq_pos, n_diffs, slash_pos
         integer :: status, attr_len
         logical :: first_key

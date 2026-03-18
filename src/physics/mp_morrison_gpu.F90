@@ -1029,7 +1029,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
    !$acc             qrcu1d, qscu1d, qicu1d, &
    !$acc             QGSTEN, QRSTEN, QISTEN, QNISTEN, QCSTEN, LTRUE_COL, &
    !$acc             nc1d, nc_tend1d, C2PREC,CSED,ISED,SSED,GSED,RSED, &
-   !$acc             lamg,acn,arn,ain,agn,ltrue,n0s,pgam, &
+   !$acc             lamg,acn,arn,ain,agn,ltrue,n0s,n0i,pgam, &
    !$acc             cdist1,xlf,xxlv,xxls,nc3d,lams,asn, &
    !$acc             n0g,cpm,lamr,n0rr,lami,nc3dten,mu,lamc,dap, &
    !$acc             precprt1d,snowrt1d,snowprt1d,grplprt1d, &
@@ -3604,6 +3604,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
    end do  ! j
 
    !$acc parallel loop gang vector collapse(3) async(6) wait(5)
+
    do j=jts,jte      ! j loop (north-south)
    do k=kts,kte
    do i=its,ite      ! i loop (east-west)

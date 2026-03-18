@@ -197,8 +197,9 @@ contains
         type(Time_type) :: next_flow_event
 
         if (this%ended) then
-            if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but this nest has ended."
-            stop "CONTROL FLOW ERROR, EXITING 5"
+            next_flow_event = this%end_time
+            ! if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but this nest has ended."
+            ! stop "CONTROL FLOW ERROR, EXITING 5"
         end if
 
 
@@ -211,20 +212,20 @@ contains
             next_flow_event = this%end_time
         end if
 
-        if (next_flow_event < this%sim_time) then
-            write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but the next flow event is less than the sim time."
-            if (next_flow_event == this%next_output) then
-                write(*,*) "Next flow event was found to be an output, timestamp is: ", trim(as_string(this%next_output)), " and sim time is: ", trim(as_string(this%sim_time))
-            elseif (next_flow_event == this%next_input) then
-                write(*,*) "Next flow event was found to be an input, timestamp is: ", trim(as_string(this%next_input)), " and sim time is: ", trim(as_string(this%sim_time))
-            else
-                write(*,*) "Next flow event was found to be the end time, timestamp is: ", trim(as_string(this%end_time)), " and sim time is: ", trim(as_string(this%sim_time))
-            end if
-            stop "CONTROL FLOW ERROR, EXITING 7"
-        end if
+        ! if (next_flow_event < this%sim_time) then
+        !     write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but the next flow event is less than the sim time."
+        !     if (next_flow_event == this%next_output) then
+        !         write(*,*) "Next flow event was found to be an output, timestamp is: ", trim(as_string(this%next_output)), " and sim time is: ", trim(as_string(this%sim_time))
+        !     elseif (next_flow_event == this%next_input) then
+        !         write(*,*) "Next flow event was found to be an input, timestamp is: ", trim(as_string(this%next_input)), " and sim time is: ", trim(as_string(this%sim_time))
+        !     else
+        !         write(*,*) "Next flow event was found to be the end time, timestamp is: ", trim(as_string(this%end_time)), " and sim time is: ", trim(as_string(this%sim_time))
+        !     end if
+        !     stop "CONTROL FLOW ERROR, EXITING 7"
+        ! end if
         if (next_flow_event > this%end_time) then
             if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but the next flow event is greater than the end time."
-            stop "CONTROL FLOW ERROR, EXITING 8"
+            ! stop "CONTROL FLOW ERROR, EXITING 8"
         end if
     end function next_flow_event
 

@@ -347,7 +347,7 @@ subroutine component_main_loop(component, options)
             call step(component, component%next_flow_event(), options)
             call component%physics_timer%stop()
         type is (ioserver_t)
-            call component%set_sim_time(component%next_flow_event())
+            ! Currently no special logic for ioserver processes
         class default
             if (STD_OUT_PE) write(*,*) "  Model time = ", trim(as_string(component%sim_time))
             if (STD_OUT_PE) write(*,*) "   End  time = ", trim(as_string(component%end_time))
@@ -355,8 +355,9 @@ subroutine component_main_loop(component, options)
             if (STD_OUT_PE) write(*,*) "  Next Output= ", trim(as_string(component%next_output))
             if (STD_OUT_PE) flush(output_unit)
 
-            call component%set_sim_time(component%next_flow_event())
     end select
+    ! All components should have the same model time when leaving main_loop, namely whatever the next flow event is
+    call component%set_sim_time(component%next_flow_event())
 
 end subroutine component_main_loop
 

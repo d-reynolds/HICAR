@@ -388,6 +388,15 @@ module subroutine finalize(this)
     call MPI_Type_free(this%corner_3d_win_halo_type, ierr)
 #endif
 
+    call MPI_Win_fence(0, this%north_in_win)
+    call MPI_Win_fence(0, this%south_in_win)
+    call MPI_Win_fence(0, this%east_in_win)
+    call MPI_Win_fence(0, this%west_in_win)
+    call MPI_Win_fence(0, this%southwest_in_win)
+    call MPI_Win_fence(0, this%northwest_in_win)
+    call MPI_Win_fence(0, this%southeast_in_win)
+    call MPI_Win_fence(0, this%northeast_in_win)
+
     call MPI_WIN_FREE(this%north_in_win, ierr)
     call MPI_WIN_FREE(this%south_in_win, ierr)
     call MPI_WIN_FREE(this%east_in_win, ierr)

@@ -123,8 +123,6 @@ contains
         max_k = indx(2)
         max_j = indx(3)+jts-1
 
-        !$acc update host(u, v, w)
-
         dt = CFL / maxwind
 
         ! If we have too small a time step throw an error
@@ -133,6 +131,7 @@ contains
             if (STD_OUT_PE) then 
                 if (present(err_msg)) write(*,*) trim(err_msg)
                 write(*,*) "dt   = ", dt
+                !$acc update host(u, v, w)
                 write(*,*) "Umax = ", maxval(abs(u))
                 write(*,*) "Vmax = ", maxval(abs(v))
                 write(*,*) "Wmax = ", maxval(abs(w))
@@ -200,7 +199,6 @@ contains
         ! If this is the first step (future_dt_seconds has not yet been set)
         !if (future_dt_seconds == DT_BIG) then
 
-        !$acc data present(dt)
         present_dt_seconds = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
@@ -251,9 +249,6 @@ contains
         if (STD_OUT_PE) write(*,*) 'time_step: ',trim(as_string(dt))
         if (STD_OUT_PE) flush(output_unit)
 
-        !$acc update device(dt)
-        !$acc end data
-
     end subroutine update_dt
     
     !>------------------------------------------------------------
@@ -278,6 +273,7 @@ contains
 
         real            :: last_print_time
         real, save      :: last_wind_update
+        real            :: remaining_step_seconds
         logical         :: last_loop, force_update_winds
 
         type(time_delta_t) :: time_step_size, max_dt
@@ -295,22 +291,20 @@ contains
         call tmp_time%set(domain%next_input%mjd() - domain%input_dt%days())
 
         force_update_winds = (force_update_winds .or. domain%sim_time%equals(tmp_time, precision=max_dt) )
-        ! Initialize to just over update_dt to force an update on first loop after input ingestion
-        if  (force_update_winds) then
-            last_wind_update = options%wind%update_dt%seconds() + 1
-        endif
         
         last_loop = .False.
-
-        call domain%cpu_gpu_timer%start()
-        !$acc data copyin(end_time) copyout(dt) create(tmp_time)
-        call domain%cpu_gpu_timer%stop()
 
         ! now just loop over internal timesteps computing all physics in order (operator splitting...)
         do while (domain%sim_time < end_time .and. .not.(last_loop))
             
             !Determine dt
-            if (last_wind_update >= options%wind%update_dt%seconds() .or. options%wind%wind_only) then
+            remaining_step_seconds = real(end_time%seconds() - domain%sim_time%seconds())
+
+            if (force_update_winds .or. &
+                (last_wind_update >= options%wind%update_dt%seconds() .and. &
+                 remaining_step_seconds > domain%dt) .or. &
+                options%wind%wind_only) then
+
                 call domain%wind_timer%start()
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%density)%v),corners=.True.)
                 call update_winds(domain, options)
@@ -334,6 +328,7 @@ contains
                 ! within the same step interval use the full wind_update_dt
                 domain%forcing_elapsed = 0.0
                 last_wind_update = 0.0
+                force_update_winds = .False.
 
                 if (options%wind%wind_only) then
                     domain%sim_time = end_time
@@ -438,9 +433,6 @@ contains
             call domain%increment_sim_time(dt)
             last_wind_update = last_wind_update + dt%seconds()
         enddo
-        call domain%cpu_gpu_timer%start()
-        !$acc end data
-        call domain%cpu_gpu_timer%stop()
 
         !If we overwrote dt to edge up to the next output/input step, revert here
         call dt%set(seconds=domain%dt)
