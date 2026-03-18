@@ -315,7 +315,7 @@ contains
         type(options_t), intent(in)    :: options
 
         type(meta_data_t) :: tmp_var
-        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(24), kEXCH_VARS(9)
+        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(22), kEXCH_VARS(9)
 
         kADV_VARS = (/kVARS%potential_temperature,&
                       kVARS%water_vapor,&
@@ -338,9 +338,7 @@ contains
                       kVARS%ice3_mass,&
                       kVARS%ice3_number,&
                       kVARS%ice3_a,&
-                      kVARS%ice3_c,&
-                      kVARS%bs_susp_ice_mass,&
-                      kVARS%bs_susp_ice_number/)
+                      kVARS%ice3_c/)
 
         kEXCH_VARS = (/kVARS%density,&
                        kVARS%sensible_heat,&
@@ -2355,8 +2353,8 @@ contains
         if (this%var_indx(kVARS%Ds)%v > 0)                  this%vars_3d(this%var_indx(kVARS%Ds)%v)%data_3d=0.
         if (this%var_indx(kVARS%fsnow)%v > 0)               this%vars_2d(this%var_indx(kVARS%fsnow)%v)%data_2d=0.
         if (this%var_indx(kVARS%snow_nlayers)%v > 0)        this%vars_2d(this%var_indx(kVARS%snow_nlayers)%v)%data_2di=0
-        if (this%var_indx(kVARS%bs_saltation_flux)%v > 0)             this%vars_2d(this%var_indx(kVARS%bs_saltation_flux)%v)%data_2d=0.
-        if (this%var_indx(kVARS%bs_suspension_flux)%v > 0)             this%vars_2d(this%var_indx(kVARS%bs_suspension_flux)%v)%data_2d=0.
+        if (this%var_indx(kVARS%bs_saltation_flux)%v > 0)   this%vars_2d(this%var_indx(kVARS%bs_saltation_flux)%v)%data_2d=0.
+        if (this%var_indx(kVARS%bs_suspension_flux)%v > 0)  this%vars_2d(this%var_indx(kVARS%bs_suspension_flux)%v)%data_2d=0.
         if (this%var_indx(kVARS%dSWE_subl)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_subl)%v)%data_2d=0.
         if (this%var_indx(kVARS%dSWE_blow_subl)%v > 0)        this%vars_2d(this%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d=0.
         if (this%var_indx(kVARS%dSWE_slide)%v > 0)            this%vars_2d(this%var_indx(kVARS%dSWE_slide)%v)%data_2d=0.

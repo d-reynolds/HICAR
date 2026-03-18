@@ -187,10 +187,11 @@ contains
                     t_factor_in=t_fac, q_id_in=q_id, flux_corr_in=flux_corr)
             enddo
 
-            ! Single batch exchange for all advected variables after each RK3 step
-            call domain%halo_3d_send()
-            call domain%halo_3d_retrieve()
-
+            if (RK3_step < 3) then
+                ! Single batch exchange for all advected variables after each RK3 step
+                call domain%halo_3d_send()
+                call domain%halo_3d_retrieve()
+            endif
         enddo
 
         !$acc end data

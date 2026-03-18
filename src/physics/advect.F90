@@ -28,7 +28,7 @@ module adv_std
     real, dimension(:,:,:), allocatable   :: flux_x_fm, flux_y_fm, flux_z_fm
 
     public :: adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, adv_std_clean_wind_arrays
-    public :: adv_std_compute_wind_3d_fm, flux3_fm, sum_kernel_fm, adv_std_clean_wind_arrays_fm
+    public :: adv_std_compute_wind_2d_fm, flux_2d_fm, sum_kernel_2d_fm, adv_std_clean_wind_arrays_fm
     public :: flux_x_fm, flux_y_fm, flux_z_fm
 
 contains
@@ -568,14 +568,6 @@ contains
         real, dimension(ims:ime,kms:kme,jms:jme) :: rho
         logical :: advect_density
 
-        ! if arrays are already allocated for some reason, deallocate them first
-        if (allocated(U_m)) deallocate(U_m)
-        if (allocated(V_m)) deallocate(V_m)
-        if (allocated(W_m)) deallocate(W_m)
-        if (allocated(denom)) deallocate(denom)
-        if (allocated(flux_x)) deallocate(flux_x)
-        if (allocated(flux_y)) deallocate(flux_y)
-        if (allocated(flux_z)) deallocate(flux_z)
 
         ! allocate the arrays
         allocate(U_m     (i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1))
@@ -680,23 +672,21 @@ contains
     !! Extends adv_std_compute_wind_horiz with vertical wind + Jacobian.
     !! All bounds are explicit (no module-level state).
     !!------------------------------------------------------------
-    subroutine adv_std_compute_wind_3d_fm(u_cell, v_cell, w_cell, rho, &
-        jaco, jaco_u, jaco_v, dz, dx, dt, &
-        U_m, V_m, W_m, denom, &
+    subroutine adv_std_compute_wind_2d_fm(u_cell, v_cell, rho, &
+        jaco, jaco_u, jaco_v, dx, dt, &
+        U_m, V_m, denom, &
         ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
         implicit none
         integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
         integer, intent(in) :: its_l, ite_l, jts_l, jte_l
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: u_cell, v_cell, w_cell, rho
+        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: u_cell, v_cell, rho
         real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: jaco, jaco_u, jaco_v
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: dz
         real, intent(in) :: dx, dt
-        real, allocatable, intent(out) :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
+        real, allocatable, intent(out) :: U_m(:,:,:), V_m(:,:,:), denom(:,:,:)
 
         integer :: i, j, k
         integer :: i_s_w_l, i_e_w_l, j_s_w_l, j_e_w_l
         integer :: i_s_l, i_e_l, j_s_l, j_e_l
-        real :: dz_sum
 
         ! Extended bounds for flux correction:
         ! Flux computation range: its-1:ite+1  (extend interior by 1)
@@ -710,27 +700,19 @@ contains
         j_s_w_l = jts_l - 2
         j_e_w_l = jte_l + 2
 
-        ! Deallocate if already allocated
-        if (allocated(U_m)) deallocate(U_m)
-        if (allocated(V_m)) deallocate(V_m)
-        if (allocated(W_m)) deallocate(W_m)
-        if (allocated(denom)) deallocate(denom)
-        if (allocated(flux_x_fm)) deallocate(flux_x_fm)
-        if (allocated(flux_y_fm)) deallocate(flux_y_fm)
-        if (allocated(flux_z_fm)) deallocate(flux_z_fm)
 
         ! Allocate wind arrays (extended bounds for flux correction)
         allocate(U_m    (i_s_w_l:i_e_w_l+1, ks:ke, j_s_w_l:j_e_w_l+1))
         allocate(V_m    (i_s_w_l:i_e_w_l+1, ks:ke, j_s_w_l:j_e_w_l+1))
-        allocate(W_m    (i_s_w_l:i_e_w_l+1, ks:ke, j_s_w_l:j_e_w_l+1))
         allocate(denom  (ims_l:ime_l, ks:ke, jms_l:jme_l))
 
         ! Allocate module-level fine-mesh flux arrays
         allocate(flux_x_fm(i_s_l:i_e_l+1, ks:ke,   j_s_l:j_e_l+1))
         allocate(flux_y_fm(i_s_l:i_e_l+1, ks:ke,   j_s_l:j_e_l+1))
-        allocate(flux_z_fm(i_s_l:i_e_l+1, ks:ke+1, j_s_l:j_e_l+1))
+        !$acc enter data create(U_m, V_m, denom, flux_x_fm, flux_y_fm)
 
         ! Compute 1/(rho * jaco) denominator
+        !$acc parallel loop gang vector collapse(3)
         do j = jms_l, jme_l
             do k = ks, ke
                 do i = ims_l, ime_l
@@ -740,6 +722,7 @@ contains
         enddo
 
         ! U_m: face-staggered in x (mirrors adv_std_compute_wind line 1203)
+        !$acc parallel loop gang vector collapse(3)
         do j = j_s_w_l, j_e_w_l+1
             do k = ks, ke
                 do i = i_s_w_l, i_e_w_l+1
@@ -750,6 +733,7 @@ contains
         enddo
 
         ! V_m: face-staggered in y (mirrors line 1206)
+        !$acc parallel loop gang vector collapse(3)
         do j = j_s_w_l, j_e_w_l+1
             do k = ks, ke
                 do i = i_s_w_l, i_e_w_l+1
@@ -759,29 +743,8 @@ contains
             enddo
         enddo
 
-        ! W_m at interfaces: face-staggered in z
-        ! jaco_w = 1.0 for AGL coordinates, so omitted
-        do j = j_s_w_l, j_e_w_l+1
-            do k = ks, ke-1
-                do i = i_s_w_l, i_e_w_l+1
-                    dz_sum = dz(i,k,j) + dz(i,k+1,j)
-                    W_m(i,k,j) = w_cell(i,k,j) * dt * &
-                        ( rho(i,k,j)*dz(i,k+1,j) + &
-                        rho(i,k+1,j)*dz(i,k,j) ) / &
-                        dz_sum
 
-                enddo
-            enddo
-        enddo
-
-        ! Top interface: W_m(ke) represents interface above cell ke
-        do j = j_s_w_l, j_e_w_l+1
-            do i = i_s_w_l, i_e_w_l+1
-                W_m(i,ke,j) = w_cell(i,ke,j) * dt * rho(i,ke,j)
-            enddo
-        enddo
-
-    end subroutine adv_std_compute_wind_3d_fm
+    end subroutine adv_std_compute_wind_2d_fm
 
 
     !>------------------------------------------------------------
@@ -790,13 +753,13 @@ contains
     !! Mirrors flux3 h_order=3 / v_order=3 with explicit bounds
     !! and fine-mesh vertical BCs (zero flux bottom, zero-gradient top).
     !!------------------------------------------------------------
-    subroutine flux3_fm(q, U_m, V_m, W_m, t_factor, &
+    subroutine flux_2d_fm(q, U_m, V_m, t_factor, &
         ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
         implicit none
         integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
         integer, intent(in) :: its_l, ite_l, jts_l, jte_l
         real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: q
-        real, dimension(its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3), intent(in) :: U_m, V_m, W_m
+        real, dimension(its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3), intent(in) :: U_m, V_m
         real, intent(in) :: t_factor
 
         integer :: i, j, k
@@ -817,6 +780,7 @@ contains
         ! ==========================================
         ! Horizontal fluxes (3rd order)
         ! ==========================================
+        !$acc parallel loop gang vector collapse(3)
         do j = j_s_l, j_e_l+1
             do k = ks, ke
                 do i = i_s_l, i_e_l+1
@@ -843,104 +807,101 @@ contains
         ! Vertical fluxes (3rd order with fine-mesh BCs)
         ! ==========================================
 
-        do j = j_s_l, j_e_l
-            do i = i_s_l, i_e_l
-                ! k=ks: zero flux at bottom (ground)
-                flux_z_fm(i,ks,j) = 0.0
+        ! do j = j_s_l, j_e_l
+        !     do i = i_s_l, i_e_l
+        !         ! k=ks: zero flux at bottom (ground)
+        !         flux_z_fm(i,ks,j) = 0.0
 
-                ! k=ks+1: 1st-order upwind (insufficient stencil below)
-                w_val = W_m(i,ks,j)
-                abs_u_val = ABS(w_val)
-                flux_z_fm(i,ks+1,j) = ((w_val + abs_u_val) * q(i,ks,j) + &
-                    (w_val - abs_u_val) * q(i,ks+1,j)) * t_factor_up
-            enddo
-        enddo
+        !         ! k=ks+1: 1st-order upwind (insufficient stencil below)
+        !         w_val = W_m(i,ks,j)
+        !         abs_u_val = ABS(w_val)
+        !         flux_z_fm(i,ks+1,j) = ((w_val + abs_u_val) * q(i,ks,j) + &
+        !             (w_val - abs_u_val) * q(i,ks+1,j)) * t_factor_up
+        !     enddo
+        ! enddo
 
-        ! Interior vertical fluxes (3rd order): ks+2 to ke-1
-        if (ke >= ks+3) then
-            do j = j_s_l, j_e_l
-                do k = ks+2, ke-1
-                    do i = i_s_l, i_e_l
-                        w_val = W_m(i,k-1,j)
-                        abs_u_val = ABS(w_val)
-                        q0  = q(i,k,j)
-                        qn1 = q(i,k-1,j)
-                        q1  = q(i,k+1,j)
-                        qn2 = q(i,k-2,j)
-                        tmp = 7.0 * (q0 + qn1) - (q1 + qn2)
-                        tmp = w_val * tmp
-                        tmp = tmp - abs_u_val * (3.0 * (q0 - qn1) - (q1 - qn2))
-                        flux_z_fm(i,k,j) = tmp * coef
-                    enddo
-                enddo
-            enddo
-        endif
+        ! ! Interior vertical fluxes (3rd order): ks+2 to ke-1
+        ! if (ke >= ks+3) then
+        !     do j = j_s_l, j_e_l
+        !         do k = ks+2, ke-1
+        !             do i = i_s_l, i_e_l
+        !                 w_val = W_m(i,k-1,j)
+        !                 abs_u_val = ABS(w_val)
+        !                 q0  = q(i,k,j)
+        !                 qn1 = q(i,k-1,j)
+        !                 q1  = q(i,k+1,j)
+        !                 qn2 = q(i,k-2,j)
+        !                 tmp = 7.0 * (q0 + qn1) - (q1 + qn2)
+        !                 tmp = w_val * tmp
+        !                 tmp = tmp - abs_u_val * (3.0 * (q0 - qn1) - (q1 - qn2))
+        !                 flux_z_fm(i,k,j) = tmp * coef
+        !             enddo
+        !         enddo
+        !     enddo
+        ! endif
 
-        do j = j_s_l, j_e_l
-            do i = i_s_l, i_e_l
-                ! k=ke: 1st-order upwind (insufficient stencil above)
-                if (ke > ks+1) then
-                    w_val = W_m(i,ke-1,j)
-                    abs_u_val = ABS(w_val)
-                    flux_z_fm(i,ke,j) = ((w_val + abs_u_val) * q(i,ke-1,j) + &
-                        (w_val - abs_u_val) * q(i,ke,j)) * t_factor_up
-                else
-                    flux_z_fm(i,ke,j) = 0.0
-                endif
+        ! do j = j_s_l, j_e_l
+        !     do i = i_s_l, i_e_l
+        !         ! k=ke: 1st-order upwind (insufficient stencil above)
+        !         if (ke > ks+1) then
+        !             w_val = W_m(i,ke-1,j)
+        !             abs_u_val = ABS(w_val)
+        !             flux_z_fm(i,ke,j) = ((w_val + abs_u_val) * q(i,ke-1,j) + &
+        !                 (w_val - abs_u_val) * q(i,ke,j)) * t_factor_up
+        !         else
+        !             flux_z_fm(i,ke,j) = 0.0
+        !         endif
 
-                ! k=ke+1: zero-gradient outflow at top
-                ! Use W_m(ke) (top boundary interface)
-                flux_z_fm(i,ke+1,j) = q(i,ke,j) * W_m(i,ke,j) * t_factor
-            enddo
-        enddo
+        !         ! k=ke+1: zero-gradient outflow at top
+        !         ! Use W_m(ke) (top boundary interface)
+        !         flux_z_fm(i,ke+1,j) = q(i,ke,j) * W_m(i,ke,j) * t_factor
+        !     enddo
+        ! enddo
 
-    end subroutine flux3_fm
+    end subroutine flux_2d_fm
 
 
     !>------------------------------------------------------------
     !! Apply flux divergence for fine-mesh advection.
     !! Mirrors sum_kernel with explicit bounds and fine-mesh BCs.
     !!------------------------------------------------------------
-    subroutine sum_kernel_fm(qold, qfluxes, denom, dz, &
+    subroutine sum_kernel_2d_fm(qold, qfluxes, denom, &
         ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
         implicit none
         integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
         integer, intent(in) :: its_l, ite_l, jts_l, jte_l
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in)  :: qold, denom, dz
+        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in)  :: qold, denom
         real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(out) :: qfluxes
 
         integer :: i, j, k
-        real :: flux_diff_z
 
+        !$acc parallel loop gang vector collapse(3)
         do j = jts_l, jte_l
             do k = ks, ke
                 do i = its_l, ite_l
-                    flux_diff_z = flux_z_fm(i,k+1,j) - merge(0.0, flux_z_fm(i,k,j), k==ks)
                     qfluxes(i,k,j) = qold(i,k,j) - ((flux_x_fm(i+1,k,j) - flux_x_fm(i,k,j) + &
-                                        flux_y_fm(i,k,j+1) - flux_y_fm(i,k,j) + &
-                                        flux_diff_z / dz(i,k,j)) * denom(i,k,j))
+                                        flux_y_fm(i,k,j+1) - flux_y_fm(i,k,j)) * denom(i,k,j))
                 enddo
             enddo
         enddo
 
-    end subroutine sum_kernel_fm
+    end subroutine sum_kernel_2d_fm
 
 
     !>------------------------------------------------------------
     !! Deallocate fine-mesh wind and flux arrays.
     !! Mirrors adv_std_clean_wind_arrays for the fine mesh.
     !!------------------------------------------------------------
-    subroutine adv_std_clean_wind_arrays_fm(U_m, V_m, W_m, denom)
+    subroutine adv_std_clean_wind_arrays_fm(U_m, V_m, denom)
         implicit none
-        real, allocatable, dimension(:,:,:), intent(inout) :: U_m, V_m, W_m, denom
+        real, allocatable, dimension(:,:,:), intent(inout) :: U_m, V_m, denom
 
+        !$acc exit data delete(U_m, V_m, denom, flux_x_fm, flux_y_fm)
         if (allocated(U_m)) deallocate(U_m)
         if (allocated(V_m)) deallocate(V_m)
-        if (allocated(W_m)) deallocate(W_m)
         if (allocated(denom)) deallocate(denom)
         if (allocated(flux_x_fm)) deallocate(flux_x_fm)
         if (allocated(flux_y_fm)) deallocate(flux_y_fm)
-        if (allocated(flux_z_fm)) deallocate(flux_z_fm)
 
     end subroutine adv_std_clean_wind_arrays_fm
 

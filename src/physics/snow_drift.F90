@@ -31,8 +31,8 @@ module snow_drift
     ! -----------------------------------------------
     real, parameter :: PI_CONST     = 3.14159265358979323846
     real, parameter :: H_SALT       = 0.15        ! Saltation layer height (m)
-    real, parameter :: BS_QS_MIN    = 1.0E-12     ! Floor for mass mixing ratio (kg/kg)
-    real, parameter :: BS_NS_MIN    = 1.0E-6      ! Floor for number concentration (#/kg)
+    real, parameter :: BS_QS_MIN    = 0.0!1.0E-12     ! Floor for mass mixing ratio (kg/kg)
+    real, parameter :: BS_NS_MIN    = 0.0!1.0E-6      ! Floor for number concentration (#/kg)
     real, parameter :: RHO_ICE      = 917.0       ! Density of ice (kg/m^3)
     real, parameter :: D_MEAN_SALT  = 200.0E-6    ! Mean saltation particle diameter (m)
     real, parameter :: SIGMA_SALT   = 1.5         ! Log-normal std dev for saltation size dist
@@ -81,6 +81,8 @@ module snow_drift
     real, allocatable, save :: qv_fm(:,:,:)                     ! (ims:ime, snc_N, jms:jme) water vapor mixing ratio at fine mesh
     real, allocatable, save :: Kh_fm(:,:,:)                     ! (ims:ime, snc_N, jms:jme) eddy diffusivity
     real, allocatable, save :: subl_mass_2d(:,:)                ! (ims:ime, jms:jme) accumulated sublimation mass
+    real, allocatable, save :: qs_flux_cache(:,:)            ! (ims:ime, jms:jme) cached interface flux tendency to qs
+    real, allocatable, save :: ns_flux_cache(:,:)            ! (ims:ime, jms:jme) cached interface flux tendency to ns
 
     ! Halo exchange wrapper variables
     type(variable_t), save :: exch_var_2d
@@ -142,7 +144,24 @@ contains
         integer :: i, j, k
         real    :: z_top, dlog_z, z_bot, fm_top
 
-        if (module_initialized) return
+        if (module_initialized) then
+            !$acc exit data delete(snc_dz,snc_Z,subl_mass_2d,kH_fm,wind_fm,v_fm,u_fm,sn_ns,sn_qs, qv_fm,t_fm,w_fm,qs_flux_cache,ns_flux_cache)
+            deallocate(snc_Z)
+            deallocate(snc_dz)
+            deallocate(sn_qs)
+            deallocate(sn_ns)
+            deallocate(u_fm)
+            deallocate(v_fm)
+            deallocate(w_fm)
+            deallocate(wind_fm)
+            deallocate(t_fm)
+            deallocate(qv_fm)
+            deallocate(Kh_fm)
+            deallocate(subl_mass_2d)
+            deallocate(qs_flux_cache)
+            deallocate(ns_flux_cache)
+            module_initialized = .False.
+        endif
 
         ! Store domain indices
         ids = domain%ids ; ide = domain%ide ; jds = domain%jds ; jde = domain%jde
@@ -167,6 +186,8 @@ contains
         allocate(qv_fm(ims:ime, snc_N_loc, jms:jme))
         allocate(Kh_fm(ims:ime, snc_N_loc, jms:jme))
         allocate(subl_mass_2d(ims:ime, jms:jme))
+        allocate(qs_flux_cache(ims:ime, jms:jme))
+        allocate(ns_flux_cache(ims:ime, jms:jme))
 
         ! Initialize to zero
         sn_qs       = 0.0
@@ -194,6 +215,7 @@ contains
             enddo
         end do
 
+        !$acc enter data copyin(snc_dz,snc_Z,subl_mass_2d,kH_fm,wind_fm,v_fm,u_fm,sn_ns,sn_qs) create(qv_fm,t_fm,w_fm,qs_flux_cache,ns_flux_cache)
         ! Initialize halo exchange variable
         call exch_var_2d%initialize(kVARS%terrain, domain%grid2d)
 
@@ -205,7 +227,7 @@ contains
 
         module_initialized = .true.
 
-        if (STD_OUT_PE) write(*,*) "  Snow drift (CRYOWRF-style) initialized with", snc_N_loc, "fine mesh levels"
+        !if (STD_OUT_PE) write(*,*) "  Snow drift (CRYOWRF-style) initialized with", snc_N_loc, "fine mesh levels"
 
     end subroutine snow_drift_init
 
@@ -240,10 +262,7 @@ contains
         ! 4. Fine mesh suspension (horizontal advection + vertical diffusion/settling/sublimation)
         call snow_drift_integrate(domain, dt, dx)
 
-        ! 5. Couple fine mesh top to 3D atmospheric grid
-        call couple_to_3d_grid(domain, dt)
-
-        ! 6. Accumulate diagnostics
+        ! 5. Accumulate diagnostics
         call accumulate_diagnostics(domain)
 
     end subroutine snow_drift_step
@@ -275,6 +294,7 @@ contains
             n_layers    => domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di &
         )
 
+        !$acc parallel loop gang vector collapse(2)
         do j = jts, jte
             do i = its, ite
                 n_snow = n_layers(i,j)
@@ -335,6 +355,7 @@ contains
             land_mask   => domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di &
         )
 
+        !$acc parallel loop gang vector collapse(2)
         do j = jts, jte
             do i = its, ite
                 if (swe(i,j) < 1.0 .or. land_mask(i,j) == 2) then
@@ -380,10 +401,11 @@ contains
         z_ref = 10.0  ! Reference height for 10m wind
 
         ! Compute over full memory domain (including halo) for advection stencil access
+        !$acc parallel loop gang vector collapse(2)
         do j = jms, jme
             do i = ims, ime
                 z0_loc    = max(z0(i,j), 1.0E-5)
-
+                !$acc loop
                 do k = 1, snc_N_loc
                     ! vertical wind
                     w_fm(i,k,j) = w(i,1,j) * (snc_Z(i,k,j) / dz(i,1,j))
@@ -433,6 +455,7 @@ contains
         )
 
         ! Compute saltation mass flux (Qsalt in kg/m/s)
+        !$acc parallel loop gang vector collapse(2)
         do j = jts, jte
             do i = its, ite
                 ustar_loc = max(ustar_2d(i,j), 0.01)
@@ -467,7 +490,7 @@ contains
     !! Surface mass balance (Eq. 22)
     !!----------------------------------------------------------
     subroutine snow_drift_integrate(domain, dt, dx)
-        use adv_std,      only: adv_std_compute_wind_3d_fm, flux3_fm, sum_kernel_fm, adv_std_clean_wind_arrays_fm, &
+        use adv_std,      only: adv_std_compute_wind_2d_fm, flux_2d_fm, sum_kernel_2d_fm, adv_std_clean_wind_arrays_fm, &
                                 flux_x_fm, flux_y_fm, flux_z_fm
         use adv_fluxcorr, only: init_fluxcorr_fm, set_sign_arrays_fm, WRF_flux_corr_fm
         implicit none
@@ -477,7 +500,7 @@ contains
         integer :: i, j, k, iter
         real    :: rho_air, T_air, qv_air, e_sat, e_air, sigma_i
         real    :: D_m, V_coef
-        real    :: S_q, S_N, h_salt_loc, cos_a_e
+        real    :: S_q, S_N, h_salt_loc
         real    :: Kh_half, dep_mass_salt, dep_mass_susp, dep_num_susp
         real    :: dz_below, dz_above
         real    :: lambda, A_thermo, eta, phi_best, X_best
@@ -489,18 +512,17 @@ contains
         real    :: max_Cr_col, dt_sub   ! Per-column max CFL and subcycle timestep
         integer :: n_sub, iter_v        ! Subcycle count and iterator
         real, parameter :: CFL_MAX_V = 0.9  ! Max vertical Courant number per subcycle
+        real, parameter :: cos_a_e = 0.9063
 
         ! Thomas algorithm arrays (per column)
         real :: a(snc_N_loc), b(snc_N_loc), c(snc_N_loc), d_rhs(snc_N_loc)
-        real :: a_n(snc_N_loc), b_n(snc_N_loc), c_n(snc_N_loc), d_rhs_n(snc_N_loc)
         real :: Vq(snc_N_loc), Vn(snc_N_loc)
 
         ! Advection work arrays
         real, allocatable :: rho_fm(:,:,:), div(:,:,:)
-        real, allocatable :: U_m_fm(:,:,:), V_m_fm(:,:,:), W_m_fm(:,:,:), denom_fm(:,:,:)
+        real, allocatable :: U_m_fm(:,:,:), V_m_fm(:,:,:), denom_fm(:,:,:)
         real, allocatable :: sn_qs_old(:,:,:), sn_ns_old(:,:,:)
         real, allocatable :: jaco_fm(:,:,:), jaco_u_fm(:,:,:), jaco_v_fm(:,:,:)
-        real, allocatable :: w_zero_fm(:,:,:)
         real    :: t_fac
         integer :: flux_corr
 
@@ -520,10 +542,6 @@ contains
             bs_swe_subl => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d  &
         )
 
-        ! Zero sublimation accumulator for this step
-        subl_mass_2d = 0.0
-        bs_subl = 0.0
-        cos_a_e = 0.9063
 
         ! ===================================================================
         ! Operator A — 3D advection on fine mesh (Eq. 21c) via RK3
@@ -534,46 +552,53 @@ contains
         allocate(sn_qs_old(ims:ime, snc_N_loc, jms:jme))
         allocate(sn_ns_old(ims:ime, snc_N_loc, jms:jme))
         allocate(div(ims:ime, kms:kme, jms:jme))
-        allocate(w_zero_fm(ims:ime, 1:snc_N_loc, jms:jme))
-        w_zero_fm = 0.0
+        allocate(jaco_fm  (ims:ime, 1:snc_N_loc, jms:jme))
+        allocate(jaco_u_fm(ims:ime, 1:snc_N_loc, jms:jme))
+        allocate(jaco_v_fm(ims:ime, 1:snc_N_loc, jms:jme))
+
+        ! Halo exchange before saving initial state for RK3 advection
+        do k = 1, snc_N_loc
+            call exch_fine_mesh_level(domain, k)
+        enddo
+
+        !$acc enter data create(rho_fm, sn_qs_old, sn_ns_old, div, jaco_fm, jaco_u_fm, jaco_v_fm)
+
+        ! Zero sublimation accumulator for this step
+        !$acc parallel loop gang vector collapse(2)
+        do j = jms, jme
+            do i = ims, ime
+                subl_mass_2d(i,j) = 0.0
+                bs_subl(i,j) = 0.0
+            enddo
+        enddo
+        !$acc parallel loop gang vector collapse(3)
         do j = jms, jme
             do k = 1, snc_N_loc
                 do i = ims, ime
                     rho_fm(i,k,j) = density(i,kts,j)
-                enddo
-            enddo
-        enddo
-
-        ! Broadcast lowest atmospheric level Jacobians to all fine mesh levels
-        allocate(jaco_fm  (ims:ime, 1:snc_N_loc, jms:jme))
-        allocate(jaco_u_fm(ims:ime, 1:snc_N_loc, jms:jme))
-        allocate(jaco_v_fm(ims:ime, 1:snc_N_loc, jms:jme))
-        do j = jms, jme
-            do k = 1, snc_N_loc
-                do i = ims, ime
                     jaco_fm(i,k,j)   = jacobian(i,kts,j)
                     jaco_u_fm(i,k,j) = jacobian_u(i,kts,j)
                     jaco_v_fm(i,k,j) = jacobian_v(i,kts,j)
+                    ! Save initial states for RK3
+                    sn_qs_old(i,k,j) = sn_qs(i,k,j)
+                    sn_ns_old(i,k,j) = sn_ns(i,k,j)
                 enddo
             enddo
         enddo
 
         call calc_divergence(div, domain, horz_only=.True., use_dqdt=.False., advect_density=.False.)
 
-        ! Compute 3D fine-mesh wind Courant numbers (U_m_fm, V_m_fm, W_m_fm, denom_fm)
-        call adv_std_compute_wind_3d_fm(u_fm, v_fm, w_zero_fm, rho_fm, &
-            jaco_fm, jaco_u_fm, jaco_v_fm, snc_dz, dx, dt, &
-            U_m_fm, V_m_fm, W_m_fm, denom_fm, &
+        ! Compute 3D fine-mesh wind Courant numbers (U_m_fm, V_m_fm, denom_fm)
+        call adv_std_compute_wind_2d_fm(u_fm, v_fm, rho_fm, &
+            jaco_fm, jaco_u_fm, jaco_v_fm, dx, dt, &
+            U_m_fm, V_m_fm, denom_fm, &
             ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
 
         ! Initialize flux correction arrays and sign arrays (used on 3rd substep)
         call init_fluxcorr_fm(ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
-        call set_sign_arrays_fm(U_m_fm, V_m_fm, W_m_fm, &
+        call set_sign_arrays_fm(U_m_fm, V_m_fm, &
             ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
 
-        ! Save initial states for RK3
-        sn_qs_old = sn_qs
-        sn_ns_old = sn_ns
 
         ! RK3 advection loop
         do iter = 1, 3
@@ -589,65 +614,72 @@ contains
                 flux_corr = kFLUXCOR_MONO
             end select
 
-            ! --- Advect q_bs ---
-            call flux3_fm(sn_qs, U_m_fm, V_m_fm, W_m_fm, t_fac, &
-                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
-
-            if (flux_corr == kFLUXCOR_MONO) then
-                call WRF_flux_corr_fm(sn_qs_old, U_m_fm, V_m_fm, W_m_fm, &
-                    flux_x_fm, flux_z_fm, flux_y_fm, snc_dz, denom_fm, &
-                    ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
-            endif
-
-            call sum_kernel_fm(sn_qs_old, sn_qs, denom_fm, snc_dz, &
-                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
-
-            ! --- Advect N_bs ---
-            call flux3_fm(sn_ns, U_m_fm, V_m_fm, W_m_fm, t_fac, &
-                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
-
-            if (flux_corr == kFLUXCOR_MONO) then
-                call WRF_flux_corr_fm(sn_ns_old, U_m_fm, V_m_fm, W_m_fm, &
-                    flux_x_fm, flux_z_fm, flux_y_fm, snc_dz, denom_fm, &
-                    ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
-            endif
-
-            call sum_kernel_fm(sn_ns_old, sn_ns, denom_fm, snc_dz, &
-                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
-
-            ! Halo exchange after each substep
+            ! Halo exchange before each substep
             do k = 1, snc_N_loc
                 call exch_fine_mesh_level(domain, k)
             enddo
+
+            ! --- Advect q_bs ---
+            call flux_2d_fm(sn_qs, U_m_fm, V_m_fm, t_fac, &
+                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+
+            if (flux_corr == kFLUXCOR_MONO) then
+                call WRF_flux_corr_fm(sn_qs_old, U_m_fm, V_m_fm, &
+                    flux_x_fm, flux_y_fm, denom_fm, &
+                    ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+            endif
+
+            call sum_kernel_2d_fm(sn_qs_old, sn_qs, denom_fm, &
+                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+
+            ! --- Advect N_bs ---
+            call flux_2d_fm(sn_ns, U_m_fm, V_m_fm, t_fac, &
+                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+
+            if (flux_corr == kFLUXCOR_MONO) then
+                call WRF_flux_corr_fm(sn_ns_old, U_m_fm, V_m_fm, &
+                    flux_x_fm, flux_y_fm, denom_fm, &
+                    ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+            endif
+
+            call sum_kernel_2d_fm(sn_ns_old, sn_ns, denom_fm, &
+                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+
         enddo
 
         ! Cleanup advection arrays
-        call adv_std_clean_wind_arrays_fm(U_m_fm, V_m_fm, W_m_fm, denom_fm)
-        deallocate(rho_fm, sn_qs_old, sn_ns_old, jaco_fm, jaco_u_fm, jaco_v_fm, w_zero_fm)
+        call adv_std_clean_wind_arrays_fm(U_m_fm, V_m_fm, denom_fm)
+        deallocate(rho_fm, sn_qs_old, sn_ns_old, jaco_fm, jaco_u_fm, jaco_v_fm)
 
         ! ===================================================================
         ! Operator A2 — Subcycled explicit vertical advection (1st-order upwind)
+        ! Flux at interface with free atmosphere applied in couple_to_3d_grid
         ! ===================================================================
+        !$acc parallel loop gang vector collapse(2)
         do j = jts, jte
             do i = its, ite
                 ! Compute max vertical CFL for this column
                 max_Cr_col = 0.0
+                !$acc loop
                 do k = 1, snc_N_loc
                     max_Cr_col = max(max_Cr_col, abs(w_fm(i,k,j)) * dt / snc_dz(i,k,j))
                 enddo
                 n_sub = max(1, ceiling(max_Cr_col / CFL_MAX_V))
                 dt_sub = dt / real(n_sub)
 
+                !$acc loop seq
                 do iter_v = 1, n_sub
                     ! --- Vertical advection for q_bs ---
                     flux_v(0) = 0.0   ! No flux through ground
+                    !$acc loop
                     do k = 1, snc_N_loc - 1
                         w_iface = 0.5 * (w_fm(i,k,j) + w_fm(i,k+1,j))
                         flux_v(k) = max(w_iface, 0.0) * sn_qs(i,k,j) &
                                    + min(w_iface, 0.0) * sn_qs(i,k+1,j)
                     enddo
-                    flux_v(snc_N_loc) = max(w_fm(i,snc_N_loc,j), 0.0) * sn_qs(i,snc_N_loc,j)
+                    flux_v(snc_N_loc) = 0.0
 
+                    !$acc loop
                     do k = 1, snc_N_loc
                         sn_qs(i,k,j) = sn_qs(i,k,j) - dt_sub / snc_dz(i,k,j) * (flux_v(k) - flux_v(k-1))
                         sn_qs(i,k,j) = max(BS_QS_MIN, sn_qs(i,k,j))
@@ -655,13 +687,15 @@ contains
 
                     ! --- Vertical advection for N_bs ---
                     flux_v(0) = 0.0
+                    !$acc loop
                     do k = 1, snc_N_loc - 1
                         w_iface = 0.5 * (w_fm(i,k,j) + w_fm(i,k+1,j))
                         flux_v(k) = max(w_iface, 0.0) * sn_ns(i,k,j) &
                                    + min(w_iface, 0.0) * sn_ns(i,k+1,j)
                     enddo
-                    flux_v(snc_N_loc) = max(w_fm(i,snc_N_loc,j), 0.0) * sn_ns(i,snc_N_loc,j)
+                    flux_v(snc_N_loc) = 0.0
 
+                    !$acc loop
                     do k = 1, snc_N_loc
                         sn_ns(i,k,j) = sn_ns(i,k,j) - dt_sub / snc_dz(i,k,j) * (flux_v(k) - flux_v(k-1))
                         sn_ns(i,k,j) = max(BS_NS_MIN, sn_ns(i,k,j))
@@ -673,7 +707,7 @@ contains
         ! ===================================================================
         ! Operator B — Vertical mixing + sedimentation (Eq. 21a, Thomas)
         ! ===================================================================
-
+        !$acc parallel loop gang vector collapse(2) firstprivate(a, b, c, d_rhs, Vq, Vn)
         do j = jts, jte
             do i = its, ite
                 rho_air = density(i,kts,j)
@@ -692,6 +726,7 @@ contains
                 endif
 
                 ! --- Compute per-level terminal velocities (Vq and Vn) ---
+                !$acc loop
                 do k = 1, snc_N_loc
                     ! Lambda from mass and number           
                     lambda = ((sn_ns(i,k,j) * RHO_ICE * PI_CONST * gamma(alpha + 3.0)) / (max(sn_qs(i,k,j), BS_QS_MIN) * 6.0 * gamma(alpha)) )**(1.0/3.0)
@@ -730,6 +765,7 @@ contains
                 d_rhs(1) = sn_qs(i,1,j)
 
                 ! Interior levels
+                !$acc loop
                 do k = 2, snc_N_loc - 1
                     dz_below = 0.5 * (snc_dz(i,k-1,j) + snc_dz(i,k,j))
                     dz_above = 0.5 * (snc_dz(i,k,j)   + snc_dz(i,k+1,j))
@@ -761,53 +797,55 @@ contains
                 endif
 
                 call thomas_solve(snc_N_loc, a, b, c, d_rhs)
-
+                !$acc loop
                 do k = 1, snc_N_loc
                     sn_qs(i,k,j) = max(BS_QS_MIN, d_rhs(k))
                 enddo
 
                 ! --- Thomas solve for N_bs (same structure, using Vn) ---
-                a_n = 0.0; b_n = 0.0; c_n = 0.0; d_rhs_n = 0.0
+                a = 0.0; b = 0.0; c = 0.0; d_rhs = 0.0
 
                 ! k=1: Bottom boundary with implicit sedimentation
-                b_n(1)     = 1.0 + dt * Vn(1) / snc_dz(i,1,j)
-                if (snc_N_loc > 1) c_n(1) = -dt * Vn(2) / snc_dz(i,1,j)
-                d_rhs_n(1) = sn_ns(i,1,j)
+                b(1)     = 1.0 + dt * Vn(1) / snc_dz(i,1,j)
+                if (snc_N_loc > 1) c(1) = -dt * Vn(2) / snc_dz(i,1,j)
+                d_rhs(1) = sn_ns(i,1,j)
 
                 ! Interior levels
+                !$acc loop
                 do k = 2, snc_N_loc - 1
                     dz_below = 0.5 * (snc_dz(i,k-1,j) + snc_dz(i,k,j))
                     dz_above = 0.5 * (snc_dz(i,k,j)   + snc_dz(i,k+1,j))
 
                     Kh_half = 0.5 * (Kh_fm(i,k,j) + Kh_fm(i,k-1,j))
-                    a_n(k) = -dt * Kh_half / (dz_below * snc_dz(i,k,j))
+                    a(k) = -dt * Kh_half / (dz_below * snc_dz(i,k,j))
 
                     Kh_half = 0.5 * (Kh_fm(i,k+1,j) + Kh_fm(i,k,j))
-                    c_n(k) = -dt * Kh_half / (dz_above * snc_dz(i,k,j))
+                    c(k) = -dt * Kh_half / (dz_above * snc_dz(i,k,j))
 
-                    b_n(k) = 1.0 - a_n(k) - c_n(k)
+                    b(k) = 1.0 - a(k) - c(k)
 
                     ! Implicit sedimentation
-                    c_n(k) = c_n(k) - dt * Vn(k+1) / snc_dz(i,k,j)
-                    b_n(k) = b_n(k) + dt * Vn(k)   / snc_dz(i,k,j)
+                    c(k) = c(k) - dt * Vn(k+1) / snc_dz(i,k,j)
+                    b(k) = b(k) + dt * Vn(k)   / snc_dz(i,k,j)
 
-                    d_rhs_n(k) = sn_ns(i,k,j)
+                    d_rhs(k) = sn_ns(i,k,j)
                 enddo
 
                 ! k=N: Top boundary
                 if (snc_N_loc > 1) then
                     dz_below = 0.5 * (snc_dz(i,snc_N_loc-1,j) + snc_dz(i,snc_N_loc,j))
                     Kh_half = 0.5 * (Kh_fm(i,snc_N_loc,j) + Kh_fm(i,snc_N_loc-1,j))
-                    a_n(snc_N_loc) = -dt * Kh_half / (dz_below * snc_dz(i,snc_N_loc,j))
-                    c_n(snc_N_loc) = 0.0
-                    b_n(snc_N_loc) = 1.0 - a_n(snc_N_loc) + dt * Vn(snc_N_loc) / snc_dz(i,snc_N_loc,j)
-                    d_rhs_n(snc_N_loc) = sn_ns(i,snc_N_loc,j)
+                    a(snc_N_loc) = -dt * Kh_half / (dz_below * snc_dz(i,snc_N_loc,j))
+                    c(snc_N_loc) = 0.0
+                    b(snc_N_loc) = 1.0 - a(snc_N_loc) + dt * Vn(snc_N_loc) / snc_dz(i,snc_N_loc,j)
+                    d_rhs(snc_N_loc) = sn_ns(i,snc_N_loc,j)
                 endif
 
-                call thomas_solve(snc_N_loc, a_n, b_n, c_n, d_rhs_n)
+                call thomas_solve(snc_N_loc, a, b, c, d_rhs)
 
+                !$acc loop
                 do k = 1, snc_N_loc
-                    sn_ns(i,k,j) = max(BS_NS_MIN, d_rhs_n(k))
+                    sn_ns(i,k,j) = max(BS_NS_MIN, d_rhs(k))
                 enddo
 
                 ! ===================================================================
@@ -815,6 +853,7 @@ contains
                 ! Sharma et al. (2023) Eq. 13: integrated over gamma distribution
                 ! ===================================================================
 
+                !$acc loop
                 do k = 1, snc_N_loc
                     T_air  = t_fm(i,k,j)
                     qv_air = qv_fm(i,k,j)
@@ -887,13 +926,14 @@ contains
                 bs_swe_susp(i,j) = bs_swe_susp(i,j) + dep_mass_susp
                 bs_swe_salt(i,j) = bs_swe_salt(i,j) + dep_mass_salt
                 swe(i,j) = swe(i,j) + dep_mass_susp + dep_mass_salt 
-                domain%vars_3d(domain%var_indx(kVARS%bs_susp_ice_mass)%v)%data_3d(i,1:snc_N_loc,j) = sn_qs(i,1:snc_N_loc,j)
+
                 ! Sublimation diagnostics
                 bs_subl(i,j)     = subl_mass_2d(i,j) * XLS / dt  ! W/m^2
                 bs_swe_subl(i,j) = bs_swe_subl(i,j) + subl_mass_2d(i,j)
 
             enddo
         enddo
+        !$acc end data
 
         end associate
 
@@ -910,58 +950,110 @@ contains
         real,           intent(in)    :: dt
 
         integer :: i, j
-        real    :: rho_air, dz_atm, flux_up, flux_down, r_mean, vt_top
+        real    :: rho_air, dz_atm, dz_iface, Kh_iface
+        real    :: flux_up_q, flux_up_n, flux_down_q, flux_down_n
+        real    :: max_flux_q, max_flux_n
+        real    :: lambda, eta, phi_best, X_best
+        real    :: am_loc, bm_loc, V_coef, Vq_settle, Vn_settle
 
         associate( &
             density     => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
             dz          => domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d, &
-            bs_ice_mass => domain%vars_3d(domain%var_indx(kVARS%bs_susp_ice_mass)%v)%data_3d, &
-            bs_ice_num  => domain%vars_3d(domain%var_indx(kVARS%bs_susp_ice_number)%v)%data_3d &
+            qs => domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d, &
+            ns  => domain%vars_3d(domain%var_indx(kVARS%snow_number)%v)%data_3d &
         )
 
+        !$acc parallel loop gang vector collapse(2)
         do j = jts, jte
             do i = its, ite
                 rho_air = density(i,kts,j)
                 dz_atm  = dz(i,kts,j)
 
-                ! --- Upward flux: diffusion from fine mesh top into first atm level ---
-                ! if (sn_qs(i,snc_N_loc,j) > BS_QS_MIN) then
-                !     ! Diffusive flux = Kh * dC/dz at fine mesh top
-                !     flux_up = Kh_fm(i,snc_N_loc,j) * &
-                !               (sn_qs(i,snc_N_loc,j) - bs_ice_mass(i,kts,j)) / &
-                !               max(snc_dz(i,snc_N_loc,j), 1.0)
+                ! Interface distance: half fine mesh top cell + half atmospheric cell
+                dz_iface = 0.5 * snc_dz(i,snc_N_loc,j) + 0.5 * dz_atm
 
-                !     ! Only allow upward flux if fine mesh concentration > atm concentration
-                !     flux_up = max(flux_up, 0.0)
+                ! ============================================================
+                ! Upward flux: diffusion from fine mesh top → atmospheric kts
+                ! ============================================================
+                Kh_iface = Kh_fm(i,snc_N_loc,j)
 
-                !     ! Update 3D tracer
-                !     bs_ice_mass(i,kts,j) = bs_ice_mass(i,kts,j) + flux_up * dt / dz_atm
-                !     bs_ice_num(i,kts,j)  = bs_ice_num(i,kts,j)  + &
-                !         flux_up * dt / dz_atm * sn_ns(i,snc_N_loc,j) / max(sn_qs(i,snc_N_loc,j), BS_QS_MIN)
+                ! Diffusive flux (positive = upward, fine mesh → atmosphere)
+                flux_up_q = Kh_iface * (sn_qs(i,snc_N_loc,j) - qs(i,kts,j)) / dz_iface
+                flux_up_n = Kh_iface * (sn_ns(i,snc_N_loc,j) - ns(i,kts,j))  / dz_iface
 
-                !     ! Remove from fine mesh top
-                !     sn_qs(i,snc_N_loc,j) = max(BS_QS_MIN, sn_qs(i,snc_N_loc,j) - flux_up * dt / snc_dz(i,snc_N_loc,j))
-                ! endif
+                flux_up_q = flux_up_q + max(w_fm(i,snc_N_loc,j), 0.0) * sn_qs(i,snc_N_loc,j)
+                flux_up_n = flux_up_n + max(w_fm(i,snc_N_loc,j), 0.0) * sn_ns(i,snc_N_loc,j)
+                ! Only allow upward flux (downward diffusion handled by Thomas solver top BC)
+                flux_up_q = max(flux_up_q, 0.0)
+                flux_up_n = max(flux_up_n, 0.0)
 
-                ! --- Downward flux: settling from 3D grid into fine mesh top ---
-                ! if (bs_ice_mass(i,kts,j) > BS_QS_MIN) then
-                !     r_mean = max((bs_ice_mass(i,kts,j) * rho_air / max(bs_ice_num(i,kts,j), BS_NS_MIN) / &
-                !               (RHO_ICE * PI_CONST/6.0))**(1.0/3.0), 10.0E-6)
-                !     vt_top = max(SETTLE_MIN, RHO_ICE * gravity * (2.0*r_mean)**2 / (18.0 * rho_air * NU_AIR))
-                !     vt_top = min(vt_top, 2.0)
+                ! CFL stability limit
+                max_flux_q = sn_qs(i,snc_N_loc,j) * snc_dz(i,snc_N_loc,j) / dt
+                max_flux_n = sn_ns(i,snc_N_loc,j) * snc_dz(i,snc_N_loc,j) / dt
+                flux_up_q = min(flux_up_q, max_flux_q)
+                flux_up_n = min(flux_up_n, max_flux_n)
 
-                !     flux_down = bs_ice_mass(i,kts,j) * vt_top
+                ! ============================================================
+                ! Downward flux: settling from atmospheric kts → fine mesh top
+                ! ============================================================
+                Vq_settle = 0.0
+                Vn_settle = 0.0
 
-                !     ! Transfer into fine mesh top level
-                !     sn_qs(i,snc_N_loc,j) = sn_qs(i,snc_N_loc,j) + flux_down * dt / snc_dz(i,snc_N_loc,j)
-                !     sn_ns(i,snc_N_loc,j) = sn_ns(i,snc_N_loc,j) + &
-                !         flux_down * dt / snc_dz(i,snc_N_loc,j) * bs_ice_num(i,kts,j) / max(bs_ice_mass(i,kts,j), BS_QS_MIN)
+                if (qs(i,kts,j) > BS_QS_MIN) then
+                    ! Lambda from atmospheric mass and number (same as Operator B)
+                    lambda = ((ns(i,kts,j) * RHO_ICE * PI_CONST * gamma(alpha + 3.0)) / &
+                              (max(qs(i,kts,j), BS_QS_MIN) * 6.0 * gamma(alpha)))**(1.0/3.0)
 
-                !     ! Remove from 3D tracer
-                !     bs_ice_mass(i,kts,j) = max(0.0, bs_ice_mass(i,kts,j) - flux_down * dt / dz_atm)
-                !     bs_ice_num(i,kts,j)  = max(0.0, bs_ice_num(i,kts,j) - &
-                !         flux_down * dt / dz_atm * bs_ice_num(i,kts,j) / max(bs_ice_mass(i,kts,j) + flux_down*dt/dz_atm, BS_QS_MIN))
-                ! endif
+                    ! Best number parameter (Mitchell 1996)
+                    eta = rho_air * NU_AIR
+                    phi_best = (4.0/3.0) * rho_air * (RHO_ICE - rho_air) * gravity / (eta * eta)
+
+                    ! Mean Best number for regime selection
+                    X_best = phi_best * (alpha/lambda)**3
+
+                    ! Select Mitchell (1996) regime coefficients
+                    if (X_best <= MITCHELL_X1) then
+                        am_loc = MITCHELL_AM_S;  bm_loc = MITCHELL_BM_S
+                    else if (X_best <= MITCHELL_X2) then
+                        am_loc = MITCHELL_AM_I;  bm_loc = MITCHELL_BM_I
+                    else
+                        am_loc = MITCHELL_AM_T;  bm_loc = MITCHELL_BM_T
+                    endif
+
+                    V_coef = am_loc * eta * phi_best**(bm_loc) / rho_air
+
+                    Vq_settle = V_coef * gamma(3*bm_loc + 2 + alpha) / (gamma(alpha) * gamma(alpha + 3)) * lambda**(1-3*bm_loc)
+                    Vn_settle = V_coef * gamma(3*bm_loc - 1 + alpha) / (gamma(alpha)) * lambda**(1-3*bm_loc)
+                    Vq_settle = max(SETTLE_MIN, min(Vq_settle, 2.0))
+                    Vn_settle = max(SETTLE_MIN, min(Vn_settle, 2.0))
+                endif
+
+                ! Settling fluxes
+                flux_down_q = qs(i,kts,j)  * Vq_settle
+                flux_down_n = ns(i,kts,j)  * Vn_settle
+
+                !downward flux is positive down, so multiply negative wind velocities by -1
+                flux_down_q = flux_down_q + (-1.0 * min(w_fm(i,snc_N_loc,j), 0.0) * qs(i,kts,j))
+                flux_down_n = flux_down_n + (-1.0 * min(w_fm(i,snc_N_loc,j), 0.0) * ns(i,kts,j))
+
+                ! CFL stability limit
+                max_flux_q = qs(i,kts,j) * dz_atm / dt
+                max_flux_n = ns(i,kts,j)  * dz_atm / dt
+                flux_down_q = min(flux_down_q, max_flux_q)
+                flux_down_n = min(flux_down_n, max_flux_n)
+
+                ! ============================================================
+                ! Mass-conserving application
+                ! ============================================================
+                ! Upward flux: remove from fine mesh top, add to atmosphere
+                ! Downward flux: remove from atmosphere, add to fine mesh top
+
+                ! qs_flux_cache(i,j) = sn_qs(i,snc_N_loc,j) + max(0.0, (flux_down_q - flux_up_q) * dt)
+                ! ns_flux_cache(i,j) = sn_ns(i,snc_N_loc,j) + max(0.0, (flux_down_n - flux_up_n) * dt)
+
+                qs_flux_cache(i,j) = flux_up_q - flux_down_q
+                ns_flux_cache(i,j) = flux_up_n - flux_down_n
+
             enddo
         enddo
 
@@ -976,17 +1068,27 @@ contains
     subroutine accumulate_diagnostics(domain)
         implicit none
         type(domain_t), intent(inout) :: domain
+        integer :: i, j
 
         associate( &
-            bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d &
+            bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d, &
+            bs_drift_swe_salt => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d, &
+            bs_drift_swe_susp => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d, &
+            bs_drift_swe_subl => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d &
         )
 
-        ! Mass exchange = net of saltation + suspension + sublimation
-        bs_swe_exch(its:ite,jts:jte) = &
-            domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d(its:ite,jts:jte) + &
-            domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d(its:ite,jts:jte) + &
-            domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d(its:ite,jts:jte)
-
+        ! Sublimation adds moisture and cools the air
+        ! bs_subl is in W/m^2 (positive = sublimation occurring, energy consumed)
+        !$acc parallel loop gang vector collapse(2) present(bs_swe_exch, bs_drift_swe_salt, bs_drift_swe_susp, bs_drift_swe_subl)
+        do j = jts, jte
+            do i = its, ite
+                ! Mass exchange = net of saltation + suspension + sublimation
+                bs_swe_exch(i,j) = &
+                    bs_drift_swe_salt(i,j) + &
+                    bs_drift_swe_susp(i,j) + &
+                    bs_drift_swe_subl(i,j)
+            enddo
+        enddo
         end associate
 
     end subroutine accumulate_diagnostics
@@ -1015,7 +1117,9 @@ contains
             pii     => domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d, &
             th      => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d, &
             qv      => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
-            bs_subl => domain%vars_2d(domain%var_indx(kVARS%bs_sublimation_flux)%v)%data_2d &
+            bs_subl => domain%vars_2d(domain%var_indx(kVARS%bs_sublimation_flux)%v)%data_2d, &
+            qs      => domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d, &
+            ns      => domain%vars_3d(domain%var_indx(kVARS%snow_number)%v)%data_3d &
         )
 
         ! Sublimation adds moisture and cools the air
@@ -1032,11 +1136,22 @@ contains
                     ! Sublimation cools air: energy consumed by sublimation
                     dth = -(subl_flux * dt) / (cp * density(i,kts_l,j) * dz(i,kts_l,j) * pii(i,kts_l,j))
                     th(i,kts_l,j) = th(i,kts_l,j) + dth
+
+                    ! fluxes are positve upward
+                    sn_qs(i,snc_N_loc,j) = sn_qs(i,snc_N_loc,j) - qs_flux_cache(i,j) * dt / snc_dz(i,snc_N_loc,j)
+                    sn_ns(i,snc_N_loc,j) = sn_ns(i,snc_N_loc,j) - ns_flux_cache(i,j) * dt / snc_dz(i,snc_N_loc,j)
+
+                    qs(i,kts,j) = qs(i,kts,j) + qs_flux_cache(i,j) * dt / dz(i,kts,j)
+                    ns(i,kts,j) = ns(i,kts,j) + ns_flux_cache(i,j) * dt / dz(i,kts,j)
+
                 endif
             enddo
         enddo
 
         end associate
+
+        ! 5. Couple fine mesh top to 3D atmospheric grid
+        call couple_to_3d_grid(domain, dt)
 
     end subroutine snow_drift_apply_feedback
 
@@ -1098,6 +1213,7 @@ contains
         integer :: k
         real    :: w
 
+        !$acc kernels present(a,b,c,d)
         ! Forward sweep
         do k = 2, n
             w = a(k) / b(k-1)
@@ -1110,7 +1226,7 @@ contains
         do k = n-1, 1, -1
             d(k) = (d(k) - c(k) * d(k+1)) / b(k)
         enddo
-
+        !$acc end kernels
     end subroutine thomas_solve
 
 end module snow_drift

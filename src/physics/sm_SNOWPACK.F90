@@ -222,6 +222,7 @@ module module_sm_SNOWPACKdrv
         real, intent(in) :: lsm_dt
         real, allocatable, dimension(:,:), intent(in) :: current_rain, current_snow, windspd
 
+        integer :: i, j
         real(c_double) :: cumu_precip
         type(snowpack) :: snp
         type(bound_cond), allocatable :: bdata(:,:)
@@ -248,6 +249,8 @@ module module_sm_SNOWPACKdrv
         ! call SnowStationsIn(domain, stations)
 
         ! Loop over horizontal grid points
+        !$OMP PARALLEL DO COLLAPSE(2) DEFAULT(SHARED) PRIVATE(i, j, snp) &
+        !$OMP FIRSTPRIVATE(cumu_precip) SCHEDULE(DYNAMIC,1)
         do j = jts, jte
             do i = its, ite
             !! ------------------------------- Run snowpack step -------------------------------
@@ -258,6 +261,7 @@ module module_sm_SNOWPACKdrv
             endif
             end do
         end do
+        !$OMP END PARALLEL DO
 
         !! ------------------------------- copy out new snowpack state -------------------------------
         call SurfaceFluxesOut(domain, sdata)
@@ -656,7 +660,12 @@ module module_sm_SNOWPACKdrv
                     snow_water_equivalent => domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d,                 &
                     albedo => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d,                 &
                     n_snow_layers => domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di,                 &
-                    depositionDate => domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d       &
+                    depositionDate => domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d,       &
+                    Vol_Soil => domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d,       &
+                    Vol_Ice => domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d,       &
+                    Vol_Water => domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d,       &
+                    Vol_WP => domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d,       &
+                    Vol_Air => domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d       &
             )
 
             do j = jts, jte
@@ -678,7 +687,13 @@ module module_sm_SNOWPACKdrv
                     do k = 1, n_snow_layers(i,j)
                         elem_id = k
                         elem = element_data(elem_id)               
+                        call elem%set_theta([real(Vol_Soil(i,k,j),kind=8), &
+                                             real(Vol_Ice(i,k,j),kind=8), &
+                                             real(Vol_Water(i,k,j),kind=8), &
+                                             real(Vol_WP(i,k,j),kind=8), &
+                                             real(Vol_Air(i,k,j),kind=8)])
 
+                        call elem%set_deposition_date_julian(real(depositionDate(i,k,j),kind=8))
                         ! Add element to station using the new addElement method
                         call stations_in(i,j)%add_element(elem)
                     enddo
