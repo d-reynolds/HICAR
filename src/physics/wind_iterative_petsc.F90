@@ -323,7 +323,7 @@ contains
         endif
         !$acc end parallel
 
-        !$acc parallel loop gang vector tile(32,2,1) async(4)
+        !$acc parallel loop gang vector tile(32,2,1)
         do j = j_s, j_e
             do k = k_s, k_e-1
                 do i = i_s, i_e
@@ -334,7 +334,7 @@ contains
             enddo
         enddo
         
-        !$acc parallel loop gang vector collapse(2) async(5)
+        !$acc parallel loop gang vector collapse(2)
         do j = j_s, j_e
             do i = i_s, i_e
                 rho_w(i,k_e,j)= rho(i,k_e,j)

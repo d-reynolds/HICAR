@@ -21,6 +21,7 @@ module wind_iterative_amgx
     use mpi_f08
     use openacc
     use string, only : str
+    use debug_module,     only : domain_check_winds
 
     implicit none
     private
@@ -33,10 +34,14 @@ module wind_iterative_amgx
     type(c_ptr) :: amgx_vector_solution = c_null_ptr
     type(c_ptr) :: amgx_vector_rhs = c_null_ptr
     type(c_ptr) :: amgx_solver = c_null_ptr
-    
+    type(c_ptr) :: rebuild_config = c_null_ptr   ! Config kept alive for rebuilt solvers (resetup needs it)
+
     logical :: initialized_amgx = .False.
     logical :: first_solve = .True.
     logical :: structure_uploaded = .false.
+    ! Adaptive preconditioner retry state
+    integer, parameter :: MAX_PREC_ITERS = 4
+    integer :: wind_solver_max_iters = 1500
     ! Grid parameters (same as PETSc version)
     real, parameter::deg2rad=0.017453293
     real, parameter :: rad2deg=57.2957779371
@@ -71,11 +76,13 @@ module wind_iterative_amgx
 
     type :: amgx_cache_t
         logical :: valid = .false.
+        integer :: wind_solver_max_iters = 1500  ! cached from options for retry config
         ! AMGX handles
         type(c_ptr) :: matrix = c_null_ptr
         type(c_ptr) :: vector_rhs = c_null_ptr
         type(c_ptr) :: vector_solution = c_null_ptr
         type(c_ptr) :: solver = c_null_ptr
+        type(c_ptr) :: rebuild_config = c_null_ptr
         ! Flags
         logical :: structure_uploaded = .false.
         logical :: first_solve = .true.
@@ -423,13 +430,13 @@ contains
             "config_version=2, " // &
             "solver(main)=PBICGSTAB, " // &
             "main:preconditioner(prec)=BLOCK_JACOBI, " // &
-            "prec:relaxation_factor=1, " // &
-            "prec:max_iters=1, " // &
+            "prec:relaxation_factor=1.0, " // &
+            "prec:max_iters=2, " // &
             "main:use_scalar_norm=1, " // &
             "main:max_iters=" // trim(str(options%wind%wind_solver_iterations)) // ", " // &
             "main:convergence=COMBINED_REL_INI_ABS, " // &
-            "main:tolerance=1e-5, " // &
-            "main:alt_rel_tolerance=1e-10, " // &
+            "main:tolerance=1e-10, " // &
+            "main:alt_rel_tolerance=1e-5, " // &
             "main:monitor_residual=1, " // &
             "main:store_res_history=1, " // &
             "main:obtain_timings=1, " // &
@@ -473,6 +480,10 @@ contains
         integer :: ierr, rank
         integer(c_int) :: rc
         integer :: target_nest
+        character(len=1024) :: config_string
+
+        ! Initialize AmgX with the compute communicator (only compute ranks participate)
+        call init_amgx(domain%compute_comms, options)
 
         target_nest = domain%nest_indx
 
@@ -501,6 +512,34 @@ contains
         structure_uploaded = .false.
         first_solve = .true.
 
+        ! Set per-nest solver iterations from options
+        wind_solver_max_iters = options%wind%wind_solver_iterations
+
+        ! Build per-nest solver config (matches rebuild_solver_with_prec_iters layout)
+        config_string = &
+            "config_version=2, " // &
+            "solver(main)=PBICGSTAB, " // &
+            "main:preconditioner(prec)=BLOCK_JACOBI, " // &
+            "prec:relaxation_factor=1.0, " // &
+            "prec:max_iters=2, " // &
+            "main:use_scalar_norm=1, " // &
+            "main:max_iters=" // trim(str(wind_solver_max_iters)) // ", " // &
+            "main:convergence=COMBINED_REL_INI_ABS, " // &
+            "main:tolerance=1e-10, " // &
+            "main:alt_rel_tolerance=1e-5, " // &
+            "main:monitor_residual=1, " // &
+            "main:store_res_history=1, " // &
+            "main:obtain_timings=1, " // &
+            "main:norm=L2" // c_null_char
+
+        rc = AMGX_config_create(rebuild_config, trim(config_string), c_null_char)
+
+        ! Create matrix, vectors, and solver with per-nest config
+        rc = AMGX_matrix_create(amgx_matrix, amgx_resources, AMGX_mode_dDDI)
+        rc = AMGX_vector_create(amgx_vector_rhs, amgx_resources, AMGX_mode_dDDI)
+        rc = AMGX_vector_create(amgx_vector_solution, amgx_resources, AMGX_mode_dDDI)
+        rc = AMGX_solver_create(amgx_solver, amgx_resources, AMGX_mode_dDDI, rebuild_config)
+
         ! Initialize module variables
         call init_module_vars(domain)
 
@@ -510,14 +549,6 @@ contains
         ! Calculate total number of rows globally
         n_rows_global = mx * my * mz
 
-        ! Initialize AmgX with the compute communicator (only compute ranks participate)
-        call init_amgx(domain%compute_comms, options)
-
-        ! Create matrix, vectors, and solver
-        rc = AMGX_matrix_create(amgx_matrix, amgx_resources, AMGX_mode_dDDI)
-        rc = AMGX_vector_create(amgx_vector_rhs, amgx_resources, AMGX_mode_dDDI)
-        rc = AMGX_vector_create(amgx_vector_solution, amgx_resources, AMGX_mode_dDDI)
-        rc = AMGX_solver_create(amgx_solver, amgx_resources, AMGX_mode_dDDI, amgx_config)
 
         active_nest_indx = target_nest
 
@@ -760,7 +791,12 @@ contains
         logical :: varying_alpha
         integer :: i, j, k
         real :: alpha_min, alpha_max
-        
+        real(c_double) :: res_val1, res_val2
+        integer :: prec_max_iters
+
+        res_val1 = 0.0_c_double
+        res_val2 = 0.0_c_double
+
         ! Copy input data on GPU
         !$acc parallel loop gang vector collapse(3) present(alpha,div,alpha_in,div_in)
         do j = j_s, j_e
@@ -869,7 +905,11 @@ contains
             return
         endif
 
-        !$acc wait  ! ensure any async OpenACC operations complete before AMGX reads solution
+        ! Zero initial guess to avoid BiCGSTAB breakdown from stale solutions
+        !$acc kernels present(solution)
+        solution = 0.0_c_double
+        !$acc end kernels
+        !$acc wait  ! ensure zero-fill and any async OpenACC operations complete before AMGX reads solution
         !$acc host_data use_device(solution)
         rc = AMGX_vector_upload_device(amgx_vector_solution, n_rows, 1, c_loc(solution))
         !$acc end host_data
@@ -901,15 +941,93 @@ contains
         if (STD_OUT_PE) then
             write(*,*) ' AMGX solver status=', solve_status, ' iterations=', n_iters
             ! status: 0=success, 1=failed, 2=diverged
-            if (solve_status /= 0) write(*,*) ' WARNING: AMGX solver did NOT converge!'
-            if (n_iters > 0) then
-                block
-                real(c_double) :: res_val
-                rc = AMGX_solver_get_iteration_residual(amgx_solver, 0, 0, res_val)
-                write(*,*) '  Residual at iter 0:', res_val
-                rc = AMGX_solver_get_iteration_residual(amgx_solver, n_iters - 1, 0, res_val)
-                write(*,*) '  Residual at iter', n_iters, ':', res_val
-                end block
+        endif
+
+        if (n_iters > 0) then
+            rc = AMGX_solver_get_iteration_residual(amgx_solver, 0, 0, res_val1)
+            rc = AMGX_solver_get_iteration_residual(amgx_solver, n_iters - 1, 0, res_val2)
+            if (STD_OUT_PE) then
+                write(*,*) '  Residual at iter 0:', res_val1
+                write(*,*) '  Residual at iter', n_iters, ':', res_val2
+            endif
+        endif
+
+        ! Adaptive preconditioner retry: if solver diverged/stagnated, increase
+        ! BLOCK_JACOBI iterations and re-solve
+        if (solve_status /= 0 .and. n_iters > 0 .and. res_val2 > 0.01_c_double * res_val1) then
+            prec_max_iters = 2
+            do while (solve_status /= 0 .and. res_val2 > 0.01_c_double * res_val1 &
+                      .and. prec_max_iters < MAX_PREC_ITERS)
+                prec_max_iters = prec_max_iters + 1
+                if (STD_OUT_PE) write(*,*) ' Convergence unsatisfactory, retrying solve with prec:max_iters=', prec_max_iters
+
+                call rebuild_solver_with_prec_iters(prec_max_iters)
+
+                !$acc wait
+                ! if convergence was minimal, maybe we were on the wrong track. Retry from 0
+                if (res_val2 > 0.1_c_double * res_val1) then
+                    ! Zero solution and re-upload
+                    !$acc kernels present(solution)
+                    solution = 0.0_c_double
+                    !$acc end kernels
+
+                    !$acc host_data use_device(solution)
+                    rc = AMGX_vector_upload_device(amgx_vector_solution, n_rows, 1, c_loc(solution))
+                    !$acc end host_data
+                endif
+
+                ! Re-solve (RHS unchanged)
+                rc = AMGX_solver_solve(amgx_solver, amgx_vector_rhs, amgx_vector_solution)
+
+                ! Download solution
+                !$acc host_data use_device(solution)
+                rc = AMGX_vector_download_device(amgx_vector_solution, c_loc(solution))
+                !$acc end host_data
+                !$acc wait
+
+                ! Check new status
+                rc = AMGX_solver_get_status(amgx_solver, solve_status)
+                rc = AMGX_solver_get_iterations_number(amgx_solver, n_iters)
+                if (n_iters > 0) then
+                    rc = AMGX_solver_get_iteration_residual(amgx_solver, 0, 0, res_val1)
+                    rc = AMGX_solver_get_iteration_residual(amgx_solver, n_iters - 1, 0, res_val2)
+                endif
+                if (STD_OUT_PE) then
+                    write(*,*) '  Retry status=', solve_status, ' iterations=', n_iters
+                    write(*,*) '  Residual at iter 0:', res_val1, ' final:', res_val2
+                endif
+            end do
+
+            ! Retry succeeded — reset solver back to prec:max_iters=1 for next timestep
+            if (solve_status == 0 .or. res_val2 <= 0.01_c_double * res_val1) then
+                if (STD_OUT_PE) write(*,*) ' Retry converged, resetting prec:max_iters=2'
+                call rebuild_solver_with_prec_iters(2)
+            endif
+
+            ! If still diverged after max retries, print diagnostics and stop
+            if (solve_status /= 0 .and. res_val2 > res_val1) then
+                if (STD_OUT_PE) then
+                    associate(density => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
+                                u       => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                                v       => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                                w_grid       => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+                                w_real       => domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
+                                alpha_d  => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d, &
+                                dzdy_v => domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d)
+                    write(*,*) '---------------SOLVER DIVERGED (prec_max_iters=', prec_max_iters, ')-----------'
+                    !$acc update host(density, u, v, w_grid, w_real, alpha_d, div_in)
+                    write(*,*) "max abs val of density: ",maxval(abs(density))
+                    write(*,*) "max abs val of u: ",maxval(abs(u))
+                    write(*,*) "max abs val of v: ",maxval(abs(v))
+                    write(*,*) "max abs val of w_grid: ",maxval(abs(w_grid))
+                    write(*,*) "max abs val of w_real: ",maxval(abs(w_real))
+                    write(*,*) "max abs val of alpha: ",maxval(abs(alpha_d))
+                    write(*,*) "max abs val of div_in: ",maxval(abs(div))
+
+                    call domain_check_winds(domain, "Solver Diverged: ",dqdt=.True.)
+                    end associate
+                endif
+                stop
             endif
         endif
 
@@ -919,6 +1037,53 @@ contains
         if (STD_OUT_PE) print*, "AmgX solve complete"
 
     end subroutine calc_iter_winds_amgx
+
+    !>------------------------------------------------------------
+    !! Rebuild solver with a new preconditioner iteration count.
+    !! Destroys the current solver, creates a new config with
+    !! prec:max_iters=new_prec_iters, creates a new solver, and
+    !! sets it up with the existing matrix.
+    !!------------------------------------------------------------
+    subroutine rebuild_solver_with_prec_iters(new_prec_iters)
+        implicit none
+        integer, intent(in) :: new_prec_iters
+        integer(c_int) :: rc
+        character(len=1024) :: config_string
+
+        config_string = &
+            "config_version=2, " // &
+            "solver(main)=PBICGSTAB, " // &
+            "main:preconditioner(prec)=BLOCK_JACOBI, " // &
+            "prec:relaxation_factor=1.0, " // &
+            "prec:max_iters=" // trim(str(new_prec_iters)) // ", " // &
+            "main:use_scalar_norm=1, " // &
+            "main:max_iters=" // trim(str(wind_solver_max_iters)) // ", " // &
+            "main:convergence=COMBINED_REL_INI_ABS, " // &
+            "main:tolerance=1e-10, " // &
+            "main:alt_rel_tolerance=1e-5, " // &
+            "main:monitor_residual=1, " // &
+            "main:store_res_history=1, " // &
+            "main:obtain_timings=1, " // &
+            "main:norm=L2" // c_null_char
+
+        ! Destroy old solver
+        rc = AMGX_solver_destroy(amgx_solver)
+
+        ! Destroy previous rebuild config if it exists
+        if (c_associated(rebuild_config)) then
+            rc = AMGX_config_destroy(rebuild_config)
+            rebuild_config = c_null_ptr
+        endif
+
+        ! Create new config, solver, and set up with existing matrix.
+        ! Keep rebuild_config alive — AMGX_solver_resetup on subsequent
+        ! timesteps needs to read config parameters for the preconditioner.
+        ! Cannot reuse amgx_config because amgx_resources may reference it.
+        rc = AMGX_config_create(rebuild_config, trim(config_string), c_null_char)
+        rc = AMGX_solver_create(amgx_solver, amgx_resources, AMGX_mode_dDDI, rebuild_config)
+        rc = AMGX_solver_setup(amgx_solver, amgx_matrix)
+
+    end subroutine rebuild_solver_with_prec_iters
 
     !>------------------------------------------------------------
     !! Compute RHS vector (same as PETSc version)
@@ -1152,7 +1317,7 @@ contains
         endif
         !$acc end parallel
         
-        !$acc parallel loop gang vector tile(32,2,1) async(4)
+        !$acc parallel loop gang vector tile(32,2,1)
         do j = j_s, j_e
             do k = k_s, k_e-1
                 do i = i_s, i_e
@@ -1163,7 +1328,7 @@ contains
             enddo
         enddo
         
-        !$acc parallel loop gang vector collapse(2) async(5)
+        !$acc parallel loop gang vector collapse(2)
         do j = j_s, j_e
             do i = i_s, i_e
                 rho_w(i,k_e,j)= rho(i,k_e,j)
@@ -1726,6 +1891,10 @@ contains
             rc = AMGX_solver_destroy(amgx_solver)
             amgx_solver = c_null_ptr
         endif
+        if (c_associated(rebuild_config)) then
+            rc = AMGX_config_destroy(rebuild_config)
+            rebuild_config = c_null_ptr
+        endif
         if (c_associated(amgx_vector_solution)) then
             rc = AMGX_vector_destroy(amgx_vector_solution)
             amgx_vector_solution = c_null_ptr
@@ -1804,8 +1973,8 @@ contains
     !>------------------------------------------------------------
     !! Save current module-level AMGX state into a cache slot.
     !! Uses MOVE_ALLOC to transfer array ownership without copies.
-    !! OpenACC present table tracks by host address, so device data
-    !! remains valid after the swap.
+    !! Device data must be explicitly removed before move_alloc and
+    !! re-registered after restore, since OpenACC tracks by host address.
     !!------------------------------------------------------------
     subroutine save_to_cache(slot)
         implicit none
@@ -1816,10 +1985,12 @@ contains
         domain_cache(slot)%vector_rhs      = amgx_vector_rhs
         domain_cache(slot)%vector_solution = amgx_vector_solution
         domain_cache(slot)%solver          = amgx_solver
+        domain_cache(slot)%rebuild_config  = rebuild_config
 
         ! Flags
         domain_cache(slot)%structure_uploaded = structure_uploaded
         domain_cache(slot)%first_solve        = first_solve
+        domain_cache(slot)%wind_solver_max_iters = wind_solver_max_iters
 
         ! Grid scalars
         domain_cache(slot)%xs = xs; domain_cache(slot)%ys = ys; domain_cache(slot)%zs = zs
@@ -1838,7 +2009,24 @@ contains
         domain_cache(slot)%nnz           = nnz
         domain_cache(slot)%n_rows_global = n_rows_global
 
-        ! Move allocatable arrays (no data copy, just pointer transfer)
+        ! Remove device data before move_alloc orphans the host pointers.
+        ! GPU-modified arrays must be synced to host first.
+        !$acc wait
+        if (structure_uploaded) then
+            !$acc update host(row_ptrs, values, rhs, solution)
+            !$acc update host(A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
+            !$acc            H_coef, I_coef, J_coef, K_coef, L_coef, M_coef, N_coef, O_coef)
+            !$acc exit data delete(row_ptrs, values)
+            !$acc exit data delete(rhs, solution)
+            !$acc exit data delete(A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
+            !$acc                  H_coef, I_coef, J_coef, K_coef, L_coef, M_coef, N_coef, O_coef)
+        endif
+        if (allocated(dz_if)) then
+            !$acc exit data delete(dz_if, div, alpha, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma)
+            !$acc exit data delete(jaco_w, dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag, adv_dz_col)
+        endif
+
+        ! Move allocatable arrays (host pointer transfer only; device data was removed above)
         if (allocated(A_coef))       call move_alloc(A_coef,       domain_cache(slot)%A_coef)
         if (allocated(B_coef))       call move_alloc(B_coef,       domain_cache(slot)%B_coef)
         if (allocated(C_coef))       call move_alloc(C_coef,       domain_cache(slot)%C_coef)
@@ -1880,6 +2068,7 @@ contains
     !>------------------------------------------------------------
     !! Restore AMGX state from a cache slot back to module level.
     !! Uses MOVE_ALLOC — the cache slot becomes empty after this.
+    !! Device data is re-registered after restoring host arrays.
     !!------------------------------------------------------------
     subroutine restore_from_cache(slot)
         implicit none
@@ -1890,10 +2079,12 @@ contains
         amgx_vector_rhs      = domain_cache(slot)%vector_rhs
         amgx_vector_solution = domain_cache(slot)%vector_solution
         amgx_solver          = domain_cache(slot)%solver
+        rebuild_config       = domain_cache(slot)%rebuild_config
 
         ! Flags
         structure_uploaded = domain_cache(slot)%structure_uploaded
         first_solve        = domain_cache(slot)%first_solve
+        wind_solver_max_iters = domain_cache(slot)%wind_solver_max_iters
 
         ! Grid scalars
         xs = domain_cache(slot)%xs; ys = domain_cache(slot)%ys; zs = domain_cache(slot)%zs
@@ -1947,6 +2138,18 @@ contains
         if (allocated(domain_cache(slot)%values))       call move_alloc(domain_cache(slot)%values,       values)
         if (allocated(domain_cache(slot)%rhs))          call move_alloc(domain_cache(slot)%rhs,          rhs)
         if (allocated(domain_cache(slot)%solution))     call move_alloc(domain_cache(slot)%solution,     solution)
+
+        ! Re-register restored arrays on the device
+        if (allocated(dz_if)) then
+            !$acc enter data copyin(dz_if, div, alpha, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma)
+            !$acc enter data copyin(jaco_w, dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag, adv_dz_col)
+        endif
+        if (structure_uploaded) then
+            !$acc enter data copyin(row_ptrs, values)
+            !$acc enter data copyin(rhs, solution)
+            !$acc enter data copyin(A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
+            !$acc                   H_coef, I_coef, J_coef, K_coef, L_coef, M_coef, N_coef, O_coef)
+        endif
 
         domain_cache(slot)%valid = .false.
     end subroutine restore_from_cache
