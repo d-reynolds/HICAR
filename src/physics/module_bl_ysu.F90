@@ -1189,7 +1189,7 @@ do j = jts,jte
   enddo
 !$acc end parallel
 !
-!$acc parallel wait(11) async(10)
+!$acc parallel wait(11,12) async(10)
 !$acc loop gang vector collapse(3)
 do j = jts,jte
    do k = kts,kte

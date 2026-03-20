@@ -255,6 +255,14 @@ contains
                 ! --- Update host: FSM-specific inputs ---
                 !$acc update host( &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_salt)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_susp)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
@@ -265,10 +273,16 @@ contains
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%QFX)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%ground_surf_temperature)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%runoff_tstep)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%Sliq_out)%v)%data_2d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
@@ -338,6 +352,8 @@ contains
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &

@@ -395,18 +395,22 @@ contains
         integer :: phase, n_phases, tile_w_i, tile_w_j, min_tile_w, width
         integer :: i_lo, i_hi, j_lo, j_hi  ! current valid extent in nbr_albedo_2d
         integer :: send_len, recv_width, max_recv_len, buf_size, ierr
-        integer :: i, j, idx
+        integer :: i, j
         type(MPI_Status) :: stat
         type(MPI_Request) :: send_req
 
-        ! Copy own tile albedo into the buffer
+        !zero buffer
+        !$acc kernels present(nbr_albedo_2d)
+        nbr_albedo_2d = 0.0
+        !$acc end kernels
 
+        ! Copy own tile albedo into the buffer
         associate(albedo => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
                   shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d)
         !$acc parallel loop gang vector collapse(2) present(nbr_albedo_2d, albedo, shortwave)
         do j = jts, jte
             do i = its, ite
-                nbr_albedo_2d(i,j) = albedo(i,j) * shortwave(i,j)  ! zero out ocean points
+                nbr_albedo_2d(i,j) = albedo(i,j) * shortwave(i,j)
             end do
         end do
         end associate
@@ -419,7 +423,7 @@ contains
         n_phases = ceiling(real(R_cells) / real(min_tile_w))
 
         !Do an MPI max reduce on n_phases so that sync calls are always complete
-        call MPI_Allreduce(MPI_IN_PLACE, n_phases, 1, MPI_REAL, MPI_MAX, domain%compute_comms)
+        call MPI_Allreduce(MPI_IN_PLACE, n_phases, 1, MPI_INT, MPI_MAX, domain%compute_comms)
 
         ! Track the extent of valid data in nbr_albedo_2d
         i_lo = its; i_hi = ite
@@ -428,8 +432,7 @@ contains
         ! Allocate work buffers sized for the largest possible strip exchange
         buf_size = max(ide - ids + 1, jde - jds + 1) * (min_tile_w + 2 * R_cells)
         allocate(send_buf(buf_size), recv_buf(buf_size))
-
-        !$acc update host(nbr_albedo_2d)
+        !$acc data create(send_buf, recv_buf)
 
         do phase = 1, n_phases
             width = min(min_tile_w, R_cells - (phase - 1) * min_tile_w)
@@ -443,13 +446,13 @@ contains
                 send_len = (i_hi - i_lo + 1) * width
                 max_recv_len = send_len
                 ! Pack: send our southernmost `width` rows to south neighbor
-                idx = 0
+                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_albedo_2d)
                 do j = j_lo, j_lo + width - 1
                     do i = i_lo, i_hi
-                        idx = idx + 1
-                        send_buf(idx) = nbr_albedo_2d(i, j)
+                        send_buf((j - j_lo) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_albedo_2d(i, j)
                     end do
                 end do
+                !$acc host_data use_device(send_buf, recv_buf)
                 call MPI_Isend(send_buf, send_len, MPI_REAL, &
                                domain%halo%south_neighbor, 100 + phase, &
                                domain%compute_comms, send_req, ierr)
@@ -457,13 +460,15 @@ contains
                               domain%halo%south_neighbor, 200 + phase, &
                               domain%compute_comms, stat, ierr)
                 call MPI_Wait(send_req, stat, ierr)
+                !$acc end host_data
                 ! Unpack only the rows we have space for (closest to our domain)
                 if (recv_width > 0) then
-                    idx = (width - recv_width) * (i_hi - i_lo + 1)
+                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_albedo_2d)
                     do j = j_lo - recv_width, j_lo - 1
                         do i = i_lo, i_hi
-                            idx = idx + 1
-                            nbr_albedo_2d(i, j) = recv_buf(idx)
+                            nbr_albedo_2d(i, j) = recv_buf( &
+                                (width - recv_width) * (i_hi - i_lo + 1) + &
+                                (j - (j_lo - recv_width)) * (i_hi - i_lo + 1) + (i - i_lo) + 1)
                         end do
                     end do
                     j_lo = j_lo - recv_width
@@ -475,13 +480,13 @@ contains
                 recv_width = max(0, min(width, domain%jhe - j_hi))
                 send_len = (i_hi - i_lo + 1) * width
                 max_recv_len = send_len
-                idx = 0
+                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_albedo_2d)
                 do j = j_hi - width + 1, j_hi
                     do i = i_lo, i_hi
-                        idx = idx + 1
-                        send_buf(idx) = nbr_albedo_2d(i, j)
+                        send_buf((j - (j_hi - width + 1)) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_albedo_2d(i, j)
                     end do
                 end do
+                !$acc host_data use_device(send_buf, recv_buf)
                 call MPI_Isend(send_buf, send_len, MPI_REAL, &
                                domain%halo%north_neighbor, 200 + phase, &
                                domain%compute_comms, send_req, ierr)
@@ -489,13 +494,13 @@ contains
                               domain%halo%north_neighbor, 100 + phase, &
                               domain%compute_comms, stat, ierr)
                 call MPI_Wait(send_req, stat, ierr)
+                !$acc end host_data
                 ! Unpack only the rows we have space for (closest to our domain)
                 if (recv_width > 0) then
-                    idx = 0
+                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_albedo_2d)
                     do j = j_hi + 1, j_hi + recv_width
                         do i = i_lo, i_hi
-                            idx = idx + 1
-                            nbr_albedo_2d(i, j) = recv_buf(idx)
+                            nbr_albedo_2d(i, j) = recv_buf((j - (j_hi + 1)) * (i_hi - i_lo + 1) + (i - i_lo) + 1)
                         end do
                     end do
                     j_hi = j_hi + recv_width
@@ -511,13 +516,13 @@ contains
                 recv_width = max(0, min(width, i_lo - domain%ihs))
                 send_len = width * (j_hi - j_lo + 1)
                 max_recv_len = send_len
-                idx = 0
+                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_albedo_2d)
                 do j = j_lo, j_hi
                     do i = i_lo, i_lo + width - 1
-                        idx = idx + 1
-                        send_buf(idx) = nbr_albedo_2d(i, j)
+                        send_buf((j - j_lo) * width + (i - i_lo) + 1) = nbr_albedo_2d(i, j)
                     end do
                 end do
+                !$acc host_data use_device(send_buf, recv_buf)
                 call MPI_Isend(send_buf, send_len, MPI_REAL, &
                                domain%halo%west_neighbor, 300 + phase, &
                                domain%compute_comms, send_req, ierr)
@@ -525,14 +530,14 @@ contains
                               domain%halo%west_neighbor, 400 + phase, &
                               domain%compute_comms, stat, ierr)
                 call MPI_Wait(send_req, stat, ierr)
+                !$acc end host_data
                 ! Unpack only the columns we have space for (closest to our domain)
                 if (recv_width > 0) then
-                    idx = 0
+                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_albedo_2d)
                     do j = j_lo, j_hi
-                        idx = idx + (width - recv_width)
                         do i = i_lo - recv_width, i_lo - 1
-                            idx = idx + 1
-                            nbr_albedo_2d(i, j) = recv_buf(idx)
+                            nbr_albedo_2d(i, j) = recv_buf( &
+                                (j - j_lo) * width + (width - recv_width) + (i - (i_lo - recv_width)) + 1)
                         end do
                     end do
                     i_lo = i_lo - recv_width
@@ -544,13 +549,13 @@ contains
                 recv_width = max(0, min(width, domain%ihe - i_hi))
                 send_len = width * (j_hi - j_lo + 1)
                 max_recv_len = send_len
-                idx = 0
+                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_albedo_2d)
                 do j = j_lo, j_hi
                     do i = i_hi - width + 1, i_hi
-                        idx = idx + 1
-                        send_buf(idx) = nbr_albedo_2d(i, j)
+                        send_buf((j - j_lo) * width + (i - (i_hi - width + 1)) + 1) = nbr_albedo_2d(i, j)
                     end do
                 end do
+                !$acc host_data use_device(send_buf, recv_buf)
                 call MPI_Isend(send_buf, send_len, MPI_REAL, &
                                domain%halo%east_neighbor, 400 + phase, &
                                domain%compute_comms, send_req, ierr)
@@ -558,15 +563,14 @@ contains
                               domain%halo%east_neighbor, 300 + phase, &
                               domain%compute_comms, stat, ierr)
                 call MPI_Wait(send_req, stat, ierr)
+                !$acc end host_data
                 ! Unpack only the columns we have space for (closest to our domain)
                 if (recv_width > 0) then
-                    idx = 0
+                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_albedo_2d)
                     do j = j_lo, j_hi
                         do i = i_hi + 1, i_hi + recv_width
-                            idx = idx + 1
-                            nbr_albedo_2d(i, j) = recv_buf(idx)
+                            nbr_albedo_2d(i, j) = recv_buf((j - j_lo) * width + (i - (i_hi + 1)) + 1)
                         end do
-                        idx = idx + (width - recv_width)
                     end do
                     i_hi = i_hi + recv_width
                 endif
@@ -574,9 +578,8 @@ contains
 
         end do
 
+        !$acc end data
         deallocate(send_buf, recv_buf)
-
-        !$acc update device(nbr_albedo_2d)
 
     end subroutine gather_neighborhood_albedo
 
@@ -1607,7 +1610,8 @@ contains
                       shortwave_direct_above => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct_above)%v)%data_2d, &
                       hlm => domain%vars_3d(domain%var_indx(kVARS%hlm)%v)%data_3d)
             
-            !$acc parallel loop gang vector collapse(2) present(shortwave_cached, shortwave_diffuse, shortwave_direct, shortwave, shortwave_direct_above, solar_elevation_store, solar_azimuth_store, cos_project_angle) wait(1)
+            !$acc parallel loop gang vector collapse(2) present(shortwave_cached, shortwave_diffuse, shortwave_direct, &
+            !$acc&      hlm, shortwave, shortwave_direct_above, solar_elevation_store, solar_azimuth_store, cos_project_angle) wait(1)
             do j = jts,jte
                 do i = its,ite
                     shortwave_direct(i,j) = max( shortwave_cached(i,j) - shortwave_diffuse(i,j),0.0)
@@ -1641,12 +1645,12 @@ contains
             ! --- Terrain reflected shortwave radiation ---
             ! Based on Dozier (1980), Helbig et al. (2009), Chu et al. (2021)
             ! Simple method with multi-reflection correction and elevation-aware neighborhood albedo
-            if (run_full_radiation .and. R_cells > 0) then
+            if (run_full_radiation .and. options%rad%terrain_refl_radius > 0) then
 
                 allocate(nbr_albedo_2d(domain%ihs:domain%ihe, domain%jhs:domain%jhe))
-                nbr_albedo_2d = 0.0
                 !$acc data create(nbr_albedo_2d)
 
+                !$acc wait(1) ! wait for prior update to shortwave radiation before calculating reflected SW in following subroutine
                 ! Gather neighborhood albedo from neighboring MPI processes
                 call gather_neighborhood_albedo(domain, nbr_albedo_2d)
 
@@ -1659,7 +1663,7 @@ contains
                           ihs => domain%ihs, ihe => domain%ihe, jhs => domain%jhs, jhe => domain%jhe)
 
                 !$acc parallel loop gang vector collapse(2) &
-                !$acc& present(svf, slope_ang, aspect_ang, nbr_albedo_2d, shortwave, sw_terrain, &
+                !$acc& present(svf, slope_ang, aspect_ang, albedo_2d, nbr_albedo_2d, shortwave, sw_terrain, &
                 !$acc&         azimuth_offset, inv_dist2_offset, ihs, ihe, jhs, jhe) &
                 !$acc& private(local_albedo, nbr_albedo, albedo_sum, weight_sum, facing, &
                 !$acc&         w_refl, albedo_terrain, terrain_vf, refl_correction, di, dj, ii, jj)
@@ -1701,7 +1705,7 @@ contains
                         if (weight_sum > 1.0e-8) then
                             albedo_terrain = albedo_sum / weight_sum
                         else
-                            albedo_terrain = local_albedo
+                            albedo_terrain = local_albedo * shortwave(i,j)
                         endif
 
                         ! Terrain view factor = fraction of hemisphere occupied by terrain

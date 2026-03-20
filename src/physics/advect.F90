@@ -645,9 +645,9 @@ contains
                 W_m(i,kme,j) = w(i,kme,j) * dt * jaco_w(i,kme,j) * rho(i,kme,j)
             enddo
         enddo
+        !$acc wait(1,2,3,4)
         !$acc end data
 
-        !$acc wait(1,2,3,4)
     end subroutine adv_std_compute_wind
 
     subroutine adv_std_clean_wind_arrays(U_m,V_m,W_m,denom)

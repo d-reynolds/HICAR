@@ -169,7 +169,7 @@ contains
         
         end associate
         !$acc end data
-        !$acc wait (10)
+
         !------------------------------------------------------------
         ! Now do the same for the convective wind field if needed
         !------------------------------------------------------------
@@ -241,7 +241,7 @@ contains
         end do
         end do
         end do
-
+        !$acc wait(10)
         !$acc end data
     end subroutine
 
@@ -498,8 +498,8 @@ contains
         endif
         end associate
 
-        !$acc end data
         !$acc wait(1)
+        !$acc end data
     end subroutine calc_divergence
     
 
