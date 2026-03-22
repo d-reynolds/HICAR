@@ -289,7 +289,7 @@ contains
 
         if (adv_den) then
             if (dqdt) then
-                 !$acc parallel async(0)
+                !$acc parallel async(0)
                 !$acc loop gang vector collapse(3)
                 do j = jms, jme
                     do k = kms, kme
@@ -321,6 +321,7 @@ contains
                     v_met(i,k,jme+1) = v_dqdt_3d(i,k,jme+1) * jaco_v(i,k,jme+1) * (1.5*rho(i,k,jme) - 0.5*rho(i,k,jme-1))
                 enddo
                 enddo
+                !$acc end parallel
             else ! else if not using dqdt, just apply metric terms to get face-staggered winds
                 !$acc parallel async(0)
                 !$acc loop gang vector collapse(3)
@@ -354,8 +355,9 @@ contains
                     v_met(i,k,jme+1) = v(i,k,jme+1) * jaco_v(i,k,jme+1) * (1.5*rho(i,k,jme) - 0.5*rho(i,k,jme-1))
                 enddo
                 enddo
+                !$acc end parallel
             endif ! end if use_dqdt
-            !$acc loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) async(0)
             do j = jms, jme
                 do k = kms, kme-1
                 do i = ims, ime
@@ -364,7 +366,6 @@ contains
                 enddo
                 enddo
             enddo
-            !$acc end parallel
         else ! else if not advecting density, just apply metric terms to get face-staggered winds
             if (dqdt) then
                 !$acc parallel async(0)
@@ -496,10 +497,11 @@ contains
             enddo
             enddo
         endif
-        end associate
 
         !$acc wait(1)
         !$acc end data
+        end associate
+
     end subroutine calc_divergence
     
 

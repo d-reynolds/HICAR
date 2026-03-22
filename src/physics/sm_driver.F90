@@ -257,8 +257,8 @@ contains
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d, &
-                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_salt)%v)%data_2d, &
-                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_susp)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &

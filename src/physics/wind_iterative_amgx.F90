@@ -994,7 +994,8 @@ contains
                 endif
                 if (STD_OUT_PE) then
                     write(*,*) '  Retry status=', solve_status, ' iterations=', n_iters
-                    write(*,*) '  Residual at iter 0:', res_val1, ' final:', res_val2
+                    write(*,*) '  Residual at iter 0:     ', res_val1
+                    write(*,*) '  Residual at final iter: ', res_val2
                 endif
             end do
 
@@ -2198,11 +2199,13 @@ contains
         integer(c_int), value, intent(in) :: length
         integer :: i
         
-        ! Print the message character by character
-        do i = 1, length
-            write(*, '(A)', advance='no') msg(i)
-        end do
-        
+        if (STD_OUT_PE) then
+            ! Print the message character by character
+            do i = 1, length
+                write(*, '(A)', advance='no') msg(i)
+            end do
+        endif
+
     end subroutine amgx_print_callback
 
     !>------------------------------------------------------------

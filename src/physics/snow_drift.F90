@@ -561,7 +561,7 @@ contains
             call exch_fine_mesh_level(domain, k)
         enddo
 
-        !$acc enter data create(rho_fm, sn_qs_old, sn_ns_old, div, jaco_fm, jaco_u_fm, jaco_v_fm)
+        !$acc data create(rho_fm, sn_qs_old, sn_ns_old, div, jaco_fm, jaco_u_fm, jaco_v_fm)
 
         ! Zero sublimation accumulator for this step
         !$acc parallel loop gang vector collapse(2)
@@ -1198,6 +1198,7 @@ contains
     !! Solves: a(k)*x(k-1) + b(k)*x(k) + c(k)*x(k+1) = d(k)
     !!----------------------------------------------------------
     subroutine thomas_solve(n, a, b, c, d)
+        !$acc routine seq
         implicit none
         integer, intent(in)    :: n
         real, intent(in)       :: a(n), c(n)
@@ -1206,7 +1207,6 @@ contains
         integer :: k
         real    :: w
 
-        !$acc kernels present(a,b,c,d)
         ! Forward sweep
         do k = 2, n
             w = a(k) / b(k-1)
@@ -1219,7 +1219,7 @@ contains
         do k = n-1, 1, -1
             d(k) = (d(k) - c(k) * d(k+1)) / b(k)
         enddo
-        !$acc end kernels
+
     end subroutine thomas_solve
 
 end module snow_drift

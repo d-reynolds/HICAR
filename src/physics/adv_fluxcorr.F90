@@ -45,7 +45,10 @@ contains
         jts = domain%jts
         jte = domain%jte    
 
-        if (allocated(usign)) deallocate(usign)
+        if (allocated(usign)) then
+            !$acc exit data delete(usign, vsign, wsign, scale_in, scale_out, qmax, qmin, flux_x_up, flux_y_up, flux_z_up, dumb_q)
+            deallocate(usign)
+        endif
         if (allocated(vsign)) deallocate(vsign)
         if (allocated(wsign)) deallocate(wsign)
         if (allocated(scale_in)) deallocate(scale_in)
@@ -55,10 +58,7 @@ contains
         if (allocated(flux_x_up)) deallocate(flux_x_up)
         if (allocated(flux_y_up)) deallocate(flux_y_up)
         if (allocated(flux_z_up)) deallocate(flux_z_up)
-        if (allocated(dumb_q)) then
-            deallocate(dumb_q)
-            !$acc exit data delete(usign, vsign, wsign, scale_in, scale_out, qmax, qmin, flux_x_up, flux_y_up, flux_z_up, dumb_q)
-        end if
+        if (allocated(dumb_q)) deallocate(dumb_q)
 
         allocate(usign(its-1:ite+1,kms:kme,jts-1:jte+1))
         allocate(vsign(its-1:ite+1,kms:kme,jts-1:jte+1))
@@ -718,16 +718,16 @@ contains
         integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
         integer, intent(in) :: its_l, ite_l, jts_l, jte_l
 
-        if (allocated(usign_fm))      deallocate(usign_fm)
+        if (allocated(usign_fm))      then
+            !$acc exit data delete(usign_fm, vsign_fm, scale_in_fm, scale_out_fm, flux_x_up_fm, flux_y_up_fm, dumb_q_fm)
+            deallocate(usign_fm)
+        endif
         if (allocated(vsign_fm))      deallocate(vsign_fm)
         if (allocated(scale_in_fm))   deallocate(scale_in_fm)
         if (allocated(scale_out_fm))  deallocate(scale_out_fm)
         if (allocated(flux_x_up_fm))  deallocate(flux_x_up_fm)
         if (allocated(flux_y_up_fm))  deallocate(flux_y_up_fm)
-        if (allocated(dumb_q_fm)) then
-            deallocate(dumb_q_fm)
-            !$acc exit data delete(usign_fm, vsign_fm, scale_in_fm, scale_out_fm, flux_x_up_fm, flux_y_up_fm, dumb_q_fm)
-        end if
+        if (allocated(dumb_q_fm))     deallocate(dumb_q_fm)
 
         allocate(usign_fm(its_l-1:ite_l+1, ks:ke, jts_l-1:jte_l+1))
         allocate(vsign_fm(its_l-1:ite_l+1, ks:ke, jts_l-1:jte_l+1))
