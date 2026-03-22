@@ -450,10 +450,7 @@ contains
         call rad_apply_dtheta(domain, options, dt)
         call lsm_apply_fluxes(domain,options,dt)
         call pbl_apply_tend(domain,options,dt)
-
-        if (options%sm%suspension_layer == 1 .and. options%sm%bs_atm_feedback) then
-            call snow_drift_apply_feedback(domain, options, dt)
-        endif
+        call snow_drift_apply_feedback(domain, options, dt)
 
     end subroutine integrate_physics_tendencies
 

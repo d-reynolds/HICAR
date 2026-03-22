@@ -1107,6 +1107,8 @@ contains
         integer :: i, j, its_l, ite_l, jts_l, jte_l, kts_l
         real :: subl_flux, dqv, dth
 
+        if (.not.(options%sm%suspension_layer == 1 .and. options%sm%bs_atm_feedback .and. options%physics%snowmodel > 0)) return
+
         its_l = domain%its ; ite_l = domain%ite
         jts_l = domain%jts ; jte_l = domain%jte
         kts_l = domain%kts
@@ -1124,11 +1126,11 @@ contains
 
         ! Sublimation adds moisture and cools the air
         ! bs_subl is in W/m^2 (positive = sublimation occurring, energy consumed)
-        !$acc parallel loop gang vector collapse(2) present(density, dz, pii, th, qv, bs_subl)
+        !$acc parallel loop gang vector collapse(2) present(density, dz, pii, th, qv, bs_subl, qs, ns, sn_qs, sn_ns, qs_flux_cache, ns_flux_cache, snc_dz)
         do j = jts_l, jte_l
             do i = its_l, ite_l
-                subl_flux = bs_subl(i,j)  ! W/m^2
-                if (abs(subl_flux) > 1.0E-10) then
+                subl_flux = bs_subl(i,j)  ! W/m^2, positive = sublimation
+                if (abs(subl_flux) > 0) then
                     ! Sublimation adds moisture: subl_flux/XLS gives mass flux (kg/m^2/s)
                     dqv = (subl_flux / XLS * dt) / (density(i,kts_l,j) * dz(i,kts_l,j))
                     qv(i,kts_l,j) = qv(i,kts_l,j) + dqv
@@ -1136,14 +1138,14 @@ contains
                     ! Sublimation cools air: energy consumed by sublimation
                     dth = -(subl_flux * dt) / (cp * density(i,kts_l,j) * dz(i,kts_l,j) * pii(i,kts_l,j))
                     th(i,kts_l,j) = th(i,kts_l,j) + dth
-
-                    ! fluxes are positve upward
+                endif
+                if (abs(qs_flux_cache(i,j)) > 0) then
+                    ! Fluxes are positive upward
                     sn_qs(i,snc_N_loc,j) = sn_qs(i,snc_N_loc,j) - qs_flux_cache(i,j) * dt / snc_dz(i,snc_N_loc,j)
                     sn_ns(i,snc_N_loc,j) = sn_ns(i,snc_N_loc,j) - ns_flux_cache(i,j) * dt / snc_dz(i,snc_N_loc,j)
 
                     qs(i,kts,j) = qs(i,kts,j) + qs_flux_cache(i,j) * dt / dz(i,kts,j)
                     ns(i,kts,j) = ns(i,kts,j) + ns_flux_cache(i,j) * dt / dz(i,kts,j)
-
                 endif
             enddo
         enddo

@@ -381,7 +381,9 @@ module module_sm_SNOWPACKdrv
             do i = its, ite
                 if (.not.(run_snowpack_flag(i,j))) cycle
                 
-                sublimation(i,j) = snowpack_get_mass_sublimation(sfluxes(i,j)%cxxmem%addr)
+                ! Negate: SNOWPACK uses positive = into snowpack (deposition),
+                ! HICAR uses positive = mass lost from snow (sublimation)
+                sublimation(i,j) = -snowpack_get_mass_sublimation(sfluxes(i,j)%cxxmem%addr)
 
             enddo
         enddo
@@ -425,8 +427,10 @@ module module_sm_SNOWPACKdrv
         do j = jts, jte
             do i = its, ite
                 if (run_snowpack_flag(i,j)) then
-                    sensible_heat(i,j) = bconds(i,j)%get_qs()
-                    latent_heat(i,j) = bconds(i,j)%get_ql()
+                    ! Negate: SNOWPACK uses positive-downward (into snow),
+                    ! HICAR uses positive-upward (into atmosphere)
+                    sensible_heat(i,j) = -bconds(i,j)%get_qs()
+                    latent_heat(i,j) = -bconds(i,j)%get_ql()
                 endif
             enddo
         enddo
@@ -479,25 +483,25 @@ module module_sm_SNOWPACKdrv
                 n_elem = snowpack_get_num_elements(stations_in(i,j)%cxxmem%addr)
                 n_node = snowpack_get_num_nodes(stations_in(i,j)%cxxmem%addr)
 
-                call snowpack_set_all_node_T(stations_in(i,j)%cxxmem%addr, real(T_node(i,1:n_node,j), kind=8), n_node)
-                call snowpack_set_all_element_deposition_julian(stations_in(i,j)%cxxmem%addr, real(depositionDate(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_L(stations_in(i,j)%cxxmem%addr, real(Layer_Thick(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_Te(stations_in(i,j)%cxxmem%addr, real(T_elem(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_theta_ice(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_I(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_theta_water(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_W(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_theta_air(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_A(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_theta_soil(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_S(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_theta_water_pref(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_WP(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_rg(stations_in(i,j)%cxxmem%addr, real(Rg(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_rb(stations_in(i,j)%cxxmem%addr, real(Rb(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_dd(stations_in(i,j)%cxxmem%addr, real(Dd(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_sp(stations_in(i,j)%cxxmem%addr, real(Sp(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_mk(stations_in(i,j)%cxxmem%addr, int(mk(i,1:n_elem,j), kind=c_short), n_elem)
-                ! TODO: FIX FOR LATER ! call snowpack_set_all_element_mass_hoar(stations_in(i,j)%cxxmem%addr, real(mass_hoar(i,1:n_elem,j), kind=8), n_elem)
-                ! call snowpack_set_all_element_ne(stations_in(i,j)%cxxmem%addr, ne_arr(1:n_elem), n_elem)
-                call snowpack_set_all_element_CDot(stations_in(i,j)%cxxmem%addr, real(CDot(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_metamo(stations_in(i,j)%cxxmem%addr, real(metamo(i,1:n_elem,j), kind=8), n_elem)
-                call snowpack_set_all_element_N3(stations_in(i,j)%cxxmem%addr, real(N3(i,1:n_elem,j), kind=8), n_elem)
+                call snowpack_set_all_node_T(stations_in(i,j)%cxxmem%addr, real(T_node(i,n_node:1:-1,j), kind=8), n_node)
+                call snowpack_set_all_element_deposition_julian(stations_in(i,j)%cxxmem%addr, real(depositionDate(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_L(stations_in(i,j)%cxxmem%addr, real(Layer_Thick(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_Te(stations_in(i,j)%cxxmem%addr, real(T_elem(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_theta_ice(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_I(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_theta_water(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_W(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_theta_air(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_A(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_theta_soil(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_S(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_theta_water_pref(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_WP(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_rg(stations_in(i,j)%cxxmem%addr, real(Rg(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_rb(stations_in(i,j)%cxxmem%addr, real(Rb(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_dd(stations_in(i,j)%cxxmem%addr, real(Dd(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_sp(stations_in(i,j)%cxxmem%addr, real(Sp(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_mk(stations_in(i,j)%cxxmem%addr, int(mk(i,n_elem:1:-1,j), kind=c_short), n_elem)
+                ! TODO: FIX FOR LATER ! call snowpack_set_all_element_mass_hoar(stations_in(i,j)%cxxmem%addr, real(mass_hoar(i,n_elem:1:-1,j), kind=8), n_elem)
+                ! call snowpack_set_all_element_ne(stations_in(i,j)%cxxmem%addr, ne_arr(n_elem:1:-1), n_elem)
+                call snowpack_set_all_element_CDot(stations_in(i,j)%cxxmem%addr, real(CDot(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_metamo(stations_in(i,j)%cxxmem%addr, real(metamo(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_N3(stations_in(i,j)%cxxmem%addr, real(N3(i,n_elem:1:-1,j), kind=8), n_elem)
 
                 call stations_in(i,j)%set_c_h(real(snow_height(i,j), kind=8))
                 ! ! call stations_in(i,j)%set_swe(real(snow_water_equivalent(i,j), kind=8))
@@ -567,79 +571,79 @@ module module_sm_SNOWPACKdrv
                     ! Now handle element(layer) and node(interface) properties
                     n_snow_layers(i,j) = n_elem
 
-
                     call snowpack_get_all_node_T(stations_in(i,j)%cxxmem%addr, tmp_arr, n_node)
-                    T_node(i,1:n_node,j) = real(tmp_arr(1:n_node))
-                    T_node(i,n_node+1:,j) = 0.0
+                    T_node(i,1:n_node,j) = real(tmp_arr(n_node:1:-1))
 
                     call snowpack_get_all_element_deposition_julian(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    depositionDate(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    depositionDate(i,n_elem+1:,j) = 0.0
+                    depositionDate(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_L(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Layer_Thick(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    Layer_Thick(i,n_elem+1:,j) = 0.0
+                    Layer_Thick(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_Te(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    T_elem(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    T_elem(i,n_elem+1:,j) = 0.0
+                    T_elem(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_theta_ice(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Vol_Frac_I(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    Vol_Frac_I(i,n_elem+1:,j) = 0.0
+                    Vol_Frac_I(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_theta_water(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Vol_Frac_W(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    Vol_Frac_W(i,n_elem+1:,j) = 0.0
+                    Vol_Frac_W(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_theta_air(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Vol_Frac_A(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    Vol_Frac_A(i,n_elem+1:,j) = 0.0
+                    Vol_Frac_A(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_theta_soil(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Vol_Frac_S(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    Vol_Frac_S(i,n_elem+1:,j) = 0.0
+                    Vol_Frac_S(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_theta_water_pref(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Vol_Frac_WP(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    Vol_Frac_WP(i,n_elem+1:,j) = 0.0
+                    Vol_Frac_WP(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_rg(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Rg(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    Rg(i,n_elem+1:,j) = 0.0
+                    Rg(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_rb(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Rb(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    Rb(i,n_elem+1:,j) = 0.0
+                    Rb(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_dd(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Dd(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    Dd(i,n_elem+1:,j) = 0.0
+                    Dd(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_sp(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Sp(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    Sp(i,n_elem+1:,j) = 0.0
+                    Sp(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_mk(stations_in(i,j)%cxxmem%addr, tmp_mk, n_elem)
-                    mk(i,1:n_elem,j) = real(tmp_mk(1:n_elem))
-                    mk(i,n_elem+1:,j) = 0.0
+                    mk(i,1:n_elem,j) = real(tmp_mk(n_elem:1:-1))
 
                     ! TODO: FIX FOR LATER ! call snowpack_get_all_element_mass_hoar(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
                     ! TODO: FIX FOR LATER ! mass_hoar(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
 
                     call snowpack_get_all_element_CDot(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    CDot(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    CDot(i,n_elem+1:,j) = 0.0
+                    CDot(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_metamo(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    metamo(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    metamo(i,n_elem+1:,j) = 0.0
+                    metamo(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
 
                     call snowpack_get_all_element_N3(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    N3(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
-                    N3(i,n_elem+1:,j) = 0.0
-
+                    N3(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                else
+                    n_elem = 0
+                    n_node = 0
                 endif
+                T_node(i,n_node+1:,j) = 0.0
+                depositionDate(i,n_elem+1:,j) = 0.0
+                T_elem(i,n_elem+1:,j) = 0.0
+                Vol_Frac_I(i,n_elem+1:,j) = 0.0
+                Vol_Frac_W(i,n_elem+1:,j) = 0.0
+                Vol_Frac_A(i,n_elem+1:,j) = 0.0
+                Vol_Frac_S(i,n_elem+1:,j) = 0.0
+                Vol_Frac_WP(i,n_elem+1:,j) = 0.0
+                Rg(i,n_elem+1:,j) = 0.0
+                Rb(i,n_elem+1:,j) = 0.0
+                Dd(i,n_elem+1:,j) = 0.0
+                Sp(i,n_elem+1:,j) = 0.0
+                mk(i,n_elem+1:,j) = 0.0
+                CDot(i,n_elem+1:,j) = 0.0
+                metamo(i,n_elem+1:,j) = 0.0
+                N3(i,n_elem+1:,j) = 0.0
             enddo
         enddo
 
@@ -652,7 +656,7 @@ module module_sm_SNOWPACKdrv
         type(domain_t), intent(in) :: domain
         type(snow_station), intent(inout) :: stations_in(its:ite,jts:jte)
 
-        integer(c_short) :: elem_id
+        integer(c_short) :: sn_k, hicar_k
         type(element_data) :: elem
 
         associate(                      &
@@ -685,15 +689,16 @@ module module_sm_SNOWPACKdrv
                     call stations_in(i,j)%set_soil_node(0_c_size_t)   ! No soil layers
 
                     do k = 1, n_snow_layers(i,j)
-                        elem_id = k
-                        elem = element_data(elem_id)               
-                        call elem%set_theta([real(Vol_Soil(i,k,j),kind=8), &
-                                             real(Vol_Ice(i,k,j),kind=8), &
-                                             real(Vol_Water(i,k,j),kind=8), &
-                                             real(Vol_WP(i,k,j),kind=8), &
-                                             real(Vol_Air(i,k,j),kind=8)])
+                        sn_k = k
+                        hicar_k = n_snow_layers(i,j) - k + 1
+                        elem = element_data(sn_k)               
+                        call elem%set_theta([real(Vol_Soil(i,hicar_k,j),kind=8), &
+                                             real(Vol_Ice(i,hicar_k,j),kind=8), &
+                                             real(Vol_Water(i,hicar_k,j),kind=8), &
+                                             real(Vol_WP(i,hicar_k,j),kind=8), &
+                                             real(Vol_Air(i,hicar_k,j),kind=8)])
 
-                        call elem%set_deposition_date_julian(real(depositionDate(i,k,j),kind=8))
+                        call elem%set_deposition_date_julian(real(depositionDate(i,hicar_k,j),kind=8))
                         ! Add element to station using the new addElement method
                         call stations_in(i,j)%add_element(elem)
                     enddo
