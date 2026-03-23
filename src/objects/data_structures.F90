@@ -85,6 +85,10 @@ module data_structures
         type(C_PTR) :: vh_aligned_data, vp_aligned_data, va_aligned_data
 
         type(C_PTR) :: uplan, vplan
+
+        ! Work arrays for linear_perturbation (allocated once, reused per call)
+        real, allocatable, dimension(:,:) :: layer_count, layer_fraction
+        real, allocatable, dimension(:,:) :: internal_z_top, internal_z_bottom
     end type linear_theory_type
 
     ! ------------------------------------------------
