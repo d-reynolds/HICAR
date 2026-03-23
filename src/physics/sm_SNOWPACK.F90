@@ -15,6 +15,7 @@ module module_sm_SNOWPACKdrv
     use namelist_utils, only : translate_numeric_mapping
     use mod_atm_utilities, only : relative_humidity
     use string, only : str, to_upper
+    use omp_lib, only : omp_get_wtime
 
     implicit none
 
@@ -22,8 +23,19 @@ module module_sm_SNOWPACKdrv
     type(snow_station), allocatable :: stations(:,:)
     logical, allocatable :: run_snowpack_flag(:,:) 
 
+    integer, parameter :: kMAX_SNOWPACK_ELEMENTS = 100
+    logical :: truncation_warned = .false.
+
     integer :: ims, ime, jms, jme, its, ite, jts, jte
     integer :: i, j, k
+
+    interface
+        subroutine snowpack_SHROUD_memory_destructor(cap) &
+            bind(C, name="snowpack_SHROUD_memory_destructor")
+            import :: snowpack_SHROUD_capsule_data
+            type(snowpack_SHROUD_capsule_data), intent(inout) :: cap
+        end subroutine
+    end interface
 
     private
     public :: sm_SNOWPACK_init,sm_SNOWPACK
@@ -109,7 +121,7 @@ module module_sm_SNOWPACKdrv
         call cfg%add_key("HEIGHT_NEW_ELEM", "SnowpackAdvanced", "0.001")
         call cfg%add_key("COMBINE_ELEMENTS", "SnowpackAdvanced", "true")
         call cfg%add_key("COMB_THRESH_L", "SnowpackAdvanced", "0.01")
-        call cfg%add_key("REDUCE_N_ELEMENTS", "SnowpackAdvanced", str(options%sm%snowpack_reduce_n_elements,c_bool=.True.))
+        call cfg%add_key("REDUCE_N_ELEMENTS", "SnowpackAdvanced", str(options%sm%snowpack_reduce_n_elements))
         call cfg%add_key("FIXED_POSITIONS", "SnowpackAdvanced", "0.25 0.5 1.0")
         call cfg%add_key("NUMBER_FIXED_RATES", "SnowpackAdvanced", "0")
         call cfg%add_key("MAX_NUMBER_MEAS_TEMPERATURES", "SnowpackAdvanced", "7")
@@ -178,28 +190,6 @@ module module_sm_SNOWPACKdrv
                     call stations(i,j)%set_bare_soil_z0(0.002d0)   ! Bare soil roughness [m]
                     call stations(i,j)%set_soil_node(0_c_size_t)   ! No soil layers
 
-                    ! 7. ElementData - create element and add to station
-                    do k = 1, kSNOW_GRID_Z
-                        elem_id = k
-                        elem = element_data(elem_id)
-                        call elem%set_l(0.05d0)
-                        call elem%set_te(268.0d0)
-                        call elem%set_rg(0.5d0)
-                        call elem%set_rb(0.25d0)
-                        call elem%set_dd(0.3d0)
-                        call elem%set_sp(0.7d0)
-
-                        ! Set theta values: [SOIL, ICE, WATER, WATER_PREF, AIR]
-                        call elem%set_theta([0.0d0, 0.5d0, 0.1d0, 0.0d0, 0.4d0])
-
-                        ! Set deposition date (Julian day 2460310 ≈ Jan 1, 2024)
-                        call elem%set_deposition_date_julian(2460310.0d0)
-                        
-                        ! Add element to station using the new addElement method
-                        call stations(i,j)%add_element(elem)
-                    enddo
-
-                    call stations(i,j)%set_c_h(kSNOW_GRID_Z*0.05d0 )
                 enddo
             enddo
 
@@ -229,49 +219,67 @@ module module_sm_SNOWPACKdrv
         type(surface_fluxes), allocatable :: sdata(:,:)
         type(current_meteo), allocatable :: meteo(:,:)
 
-        real :: start_time, end_time, elapsed_time
-        real(c_double) :: Te_arr(100), Rho_arr(100), L_arr(100)
-        real(c_double) :: theta_ice_arr(100), theta_water_arr(100), theta_air_arr(100)
-        real(c_double) :: T_arr(100), z_arr(100)
+        real(kind=8) :: start_time, end_time, t_setup, t_loop, t_copyout, t_cleanup
 
         ! Initialize cumulative precipitation
         cumu_precip = 0.0d0 ! dummy input var if forceaddsnowfall is set to true in the config options
 
         call update_run_snowpack_flag(domain,current_snow)
 
-        ! start timing loop, get clock time
-        call cpu_time(start_time)
+        ! start timing loop, get wall-clock time
+        start_time = omp_get_wtime()
 
         !! ------------------------------- copy existing snowpack state (TODO: future work, for now just use persistent station array with single nest) -------------------------------
         call MeteoIn(domain, current_rain, current_snow, windspd, meteo)
         call SurfaceFluxesIn(domain, sdata)
         call BoundaryConditionsIn(domain, bdata)
-        ! call SnowStationsIn(domain, stations)
+        t_setup = omp_get_wtime()
 
         ! Loop over horizontal grid points
-        !$OMP PARALLEL DO COLLAPSE(2) DEFAULT(SHARED) PRIVATE(i, j, snp) &
-        !$OMP FIRSTPRIVATE(cumu_precip) SCHEDULE(DYNAMIC,1)
+        ! Create one Snowpack solver per thread (not per cell) to avoid
+        ! massive concurrent malloc/free pressure from C++ heap contention
+        !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(i, j, snp) FIRSTPRIVATE(cumu_precip)
+        snp = snowpack(snp_cfg)
+        !$OMP DO COLLAPSE(2) SCHEDULE(DYNAMIC,1)
         do j = jts, jte
             do i = its, ite
             !! ------------------------------- Run snowpack step -------------------------------
             if (run_snowpack_flag(i,j)) then
-                snp = snowpack(snp_cfg)
                 call snp%run_snowpack_model(meteo(i,j), stations(i,j), cumu_precip, bdata(i,j), sdata(i,j))
                 call sdata(i,j)%collect_surface_fluxes(bdata(i,j), stations(i,j), meteo(i,j))
             endif
             end do
         end do
-        !$OMP END PARALLEL DO
+        !$OMP END DO
+        call snowpack_SHROUD_memory_destructor(snp%cxxmem)
+        !$OMP END PARALLEL
+        t_loop = omp_get_wtime()
 
         !! ------------------------------- copy out new snowpack state -------------------------------
         call SurfaceFluxesOut(domain, sdata)
         call BoundaryConditionsOut(domain, bdata)
         call SnowStationsOut(domain, stations)
+        t_copyout = omp_get_wtime()
 
-        ! end timing loop, get clock time
-        call cpu_time(end_time)
-        elapsed_time = end_time - start_time
-        if (STD_OUT_PE) write(*,'(A,F8.3,A)') "SNOWPACK time elapsed: ", elapsed_time, " seconds"
+        ! Clean up C++ objects before local arrays go out of scope
+        do j = jts, jte
+            do i = its, ite
+                if (run_snowpack_flag(i,j)) then
+                    call snowpack_SHROUD_memory_destructor(meteo(i,j)%cxxmem)
+                    call snowpack_SHROUD_memory_destructor(sdata(i,j)%cxxmem)
+                    call snowpack_SHROUD_memory_destructor(bdata(i,j)%cxxmem)
+                endif
+            end do
+        end do
+
+        ! end timing
+        end_time = omp_get_wtime()
+        if (STD_OUT_PE) write(*,'(A,F8.3,A,4(A,F8.3))') &
+            "SNOWPACK total: ", end_time - start_time, "s", &
+            "  setup=", t_setup - start_time, &
+            "  loop=", t_loop - t_setup, &
+            "  copyout=", t_copyout - t_loop, &
+            "  cleanup=", end_time - t_copyout
 
     end subroutine sm_SNOWPACK
 
@@ -448,7 +456,7 @@ module module_sm_SNOWPACKdrv
         type(snow_station), intent(inout) :: stations_in(its:ite,jts:jte)
 
         integer(c_size_t) :: n_elem, n_node
-        integer :: ne_arr(1:kSNOW_GRID_Z)
+        integer :: ne_arr(1:kMAX_SNOWPACK_ELEMENTS)
 
         ne_arr = 1
 
@@ -523,8 +531,9 @@ module module_sm_SNOWPACKdrv
         type(snow_station), intent(inout) :: stations_in(its:ite,jts:jte)
 
         integer(c_size_t) :: n_elem, n_node
-        real(c_double) :: tmp_arr(100)
-        integer(c_short) :: tmp_mk(100)
+        integer :: n_save, n_save_nodes
+        real(c_double) :: tmp_arr(kMAX_SNOWPACK_ELEMENTS), tmp_node_arr(kMAX_SNOWPACK_ELEMENTS+1)
+        integer(c_short) :: tmp_mk(kMAX_SNOWPACK_ELEMENTS)
 
         associate(                      &
                     snow_height => domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d,               &
@@ -568,82 +577,108 @@ module module_sm_SNOWPACKdrv
                         n_node = 0
                     endif
 
-                    ! Now handle element(layer) and node(interface) properties
-                    n_snow_layers(i,j) = n_elem
+                    ! Safety check: SNOWPACK element count must fit in tmp buffer
+                    if (n_elem > kMAX_SNOWPACK_ELEMENTS) then
+                        write(*,'(A,I0,A,I0,A,I0,A,I0,A)') "ERROR: SNOWPACK element count (", n_elem, &
+                            ") exceeds buffer size (", kMAX_SNOWPACK_ELEMENTS, ") at (", i, ",", j, ")"
+                        stop "SNOWPACK element count exceeds kMAX_SNOWPACK_ELEMENTS"
+                    endif
 
-                    call snowpack_get_all_node_T(stations_in(i,j)%cxxmem%addr, tmp_arr, n_node)
-                    T_node(i,1:n_node,j) = real(tmp_arr(n_node:1:-1))
+                    ! Clamp to domain array size — keep top (surface) layers, discard deeper layers
+                    ! (following CRYOWRF approach: SNOWPACK C++ objects retain full resolution,
+                    !  domain arrays store only the top sm_nsnow_max layers for output/restart)
+                    n_save = min(int(n_elem), kSNOW_GRID_Z)
+                    n_save_nodes = n_save + 1
+
+                    if (n_elem > kSNOW_GRID_Z .and. .not. truncation_warned) then
+                        write(*,'(A,I0,A,I0,A)') "WARNING: SNOWPACK has ", n_elem, &
+                            " layers but sm_nsnow_max = ", kSNOW_GRID_Z, &
+                            ". Truncating deeper layers from domain arrays."
+                        truncation_warned = .true.
+                    endif
+
+                    ! Store clamped layer count in domain (consistent with domain array sizes)
+                    n_snow_layers(i,j) = n_save
+
+                    ! Copy layer data from SNOWPACK to domain arrays.
+                    ! SNOWPACK order: tmp_arr(1)=ground, tmp_arr(n_elem)=surface
+                    ! HICAR order: layer 1=surface, layer n=ground (reversed)
+                    ! With truncation: keep top n_save from SNOWPACK = indices n_elem down to n_elem-n_save+1
+
+                    call snowpack_get_all_node_T(stations_in(i,j)%cxxmem%addr, tmp_node_arr, n_node)
+                    if (n_save_nodes > 0) T_node(i,1:n_save_nodes,j) = real(tmp_node_arr(n_node:n_node-n_save_nodes+1:-1))
 
                     call snowpack_get_all_element_deposition_julian(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    depositionDate(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) depositionDate(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_L(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Layer_Thick(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) Layer_Thick(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_Te(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    T_elem(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) T_elem(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_theta_ice(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Vol_Frac_I(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) Vol_Frac_I(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_theta_water(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Vol_Frac_W(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) Vol_Frac_W(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_theta_air(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Vol_Frac_A(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) Vol_Frac_A(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_theta_soil(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Vol_Frac_S(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) Vol_Frac_S(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_theta_water_pref(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Vol_Frac_WP(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) Vol_Frac_WP(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_rg(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Rg(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) Rg(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_rb(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Rb(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) Rb(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_dd(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Dd(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) Dd(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_sp(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    Sp(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) Sp(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_mk(stations_in(i,j)%cxxmem%addr, tmp_mk, n_elem)
-                    mk(i,1:n_elem,j) = real(tmp_mk(n_elem:1:-1))
+                    if (n_save > 0) mk(i,1:n_save,j) = real(tmp_mk(n_elem:n_elem-n_save+1:-1))
 
                     ! TODO: FIX FOR LATER ! call snowpack_get_all_element_mass_hoar(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    ! TODO: FIX FOR LATER ! mass_hoar(i,1:n_elem,j) = real(tmp_arr(1:n_elem))
+                    ! TODO: FIX FOR LATER ! mass_hoar(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_CDot(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    CDot(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) CDot(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_metamo(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    metamo(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) metamo(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_N3(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    N3(i,1:n_elem,j) = real(tmp_arr(n_elem:1:-1))
+                    if (n_save > 0) N3(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
                 else
-                    n_elem = 0
-                    n_node = 0
+                    n_save = 0
+                    n_save_nodes = 0
                 endif
-                T_node(i,n_node+1:,j) = 0.0
-                depositionDate(i,n_elem+1:,j) = 0.0
-                T_elem(i,n_elem+1:,j) = 0.0
-                Vol_Frac_I(i,n_elem+1:,j) = 0.0
-                Vol_Frac_W(i,n_elem+1:,j) = 0.0
-                Vol_Frac_A(i,n_elem+1:,j) = 0.0
-                Vol_Frac_S(i,n_elem+1:,j) = 0.0
-                Vol_Frac_WP(i,n_elem+1:,j) = 0.0
-                Rg(i,n_elem+1:,j) = 0.0
-                Rb(i,n_elem+1:,j) = 0.0
-                Dd(i,n_elem+1:,j) = 0.0
-                Sp(i,n_elem+1:,j) = 0.0
-                mk(i,n_elem+1:,j) = 0.0
-                CDot(i,n_elem+1:,j) = 0.0
-                metamo(i,n_elem+1:,j) = 0.0
-                N3(i,n_elem+1:,j) = 0.0
+                ! Zero out unused layers above n_save
+                T_node(i,n_save_nodes+1:,j) = 0.0
+                depositionDate(i,n_save+1:,j) = 0.0
+                T_elem(i,n_save+1:,j) = 0.0
+                Vol_Frac_I(i,n_save+1:,j) = 0.0
+                Vol_Frac_W(i,n_save+1:,j) = 0.0
+                Vol_Frac_A(i,n_save+1:,j) = 0.0
+                Vol_Frac_S(i,n_save+1:,j) = 0.0
+                Vol_Frac_WP(i,n_save+1:,j) = 0.0
+                Rg(i,n_save+1:,j) = 0.0
+                Rb(i,n_save+1:,j) = 0.0
+                Dd(i,n_save+1:,j) = 0.0
+                Sp(i,n_save+1:,j) = 0.0
+                mk(i,n_save+1:,j) = 0.0
+                CDot(i,n_save+1:,j) = 0.0
+                metamo(i,n_save+1:,j) = 0.0
+                N3(i,n_save+1:,j) = 0.0
             enddo
         enddo
 

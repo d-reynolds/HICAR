@@ -211,10 +211,12 @@ contains
 
         ! Change z length of snow arrays here, since we need to change their size for the output arrays, which are set in
         ! output_options_namelist
-        if (this%physics%snowmodel==kSM_FSM) then
-            kSNOW_GRID_Z = this%sm%fsm_nsnow_max
+        if (this%physics%snowmodel==kSM_FSM .or. this%physics%snowmodel==kSM_SNOWPACK) then
+            kSNOW_GRID_Z = this%sm%sm_nsnow_max
             kSNOWSOIL_GRID_Z = kSNOW_GRID_Z+kSOIL_GRID_Z
+        endif
 
+        if (this%physics%snowmodel==kSM_FSM) then
             if (this%sm%suspension_layer == 1 .and. this%sm%fsm_sntran > 0) then
                 if (STD_OUT_PE) write(*,*) " "
                 if (STD_OUT_PE) write(*,*) "WARNING: The CRYOWRF-style blowing snow drift model is not currently compatible with the FSM's SNOWTRAN scheme"
@@ -1945,7 +1947,7 @@ contains
         integer :: name_unit, rc
         logical :: print_info, gennml
 
-        integer :: fsm_nsnow_max(kMAX_NESTS)      ! maximum number of snow layers in the FSM2trans snow model
+        integer :: sm_nsnow_max(kMAX_NESTS)      ! maximum number of snow layers in the FSM2trans snow model
         integer, dimension(kMAX_NESTS) :: fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
                    fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst
         real, dimension(kMAX_NESTS)    :: fsm_ds_min, fsm_ds_surflay
@@ -1956,13 +1958,13 @@ contains
 
         logical, dimension(kMAX_NESTS) :: snowpack_enable_vapour_transport
         character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_variant
-        logical, dimension(kMAX_NESTS) :: snowpack_reduce_n_elements
+        integer, dimension(kMAX_NESTS) :: snowpack_reduce_n_elements
 
         integer, dimension(kMAX_NESTS) :: suspension_fine_mesh_levels, suspension_layer
         logical, dimension(kMAX_NESTS) :: bs_atm_feedback
 
         ! define the namelist
-        namelist /sm_parameters/ fsm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
+        namelist /sm_parameters/ sm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
                                  fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst, &
                                  fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn, &
                                  snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt, &
@@ -1979,7 +1981,7 @@ contains
         gennml = .False.
         if (present(gen_nml)) gennml = gen_nml
 
-        call set_nml_var_default(fsm_nsnow_max, 'fsm_nsnow_max', print_info, gennml)
+        call set_nml_var_default(sm_nsnow_max, 'sm_nsnow_max', print_info, gennml)
         call set_nml_var_default(fsm_albedo, 'fsm_albedo', print_info, gennml)
         call set_nml_var_default(fsm_canmod, 'fsm_canmod', print_info, gennml)
         call set_nml_var_default(fsm_checks, 'fsm_checks', print_info, gennml)
@@ -2053,7 +2055,7 @@ contains
             ! endif
         endif
 
-        call set_nml_var(sm_options%fsm_nsnow_max, fsm_nsnow_max(n_indx), 'fsm_nsnow_max', fsm_nsnow_max(1))
+        call set_nml_var(sm_options%sm_nsnow_max, sm_nsnow_max(n_indx), 'sm_nsnow_max', sm_nsnow_max(1))
         call set_nml_var(sm_options%fsm_albedo, fsm_albedo(n_indx), 'fsm_albedo', fsm_albedo(1))
         call set_nml_var(sm_options%fsm_canmod, fsm_canmod(n_indx), 'fsm_canmod', fsm_canmod(1))
         call set_nml_var(sm_options%fsm_checks, fsm_checks(n_indx), 'fsm_checks', fsm_checks(1))
@@ -2950,7 +2952,7 @@ contains
         call append_kv_real   (config_str, pos, 'lsm', 'nmp_soiltstep',    this%lsm%nmp_soiltstep)
 
         ! --- sm group ---
-        call append_kv_int    (config_str, pos, 'sm', 'fsm_nsnow_max',    this%sm%fsm_nsnow_max)
+        call append_kv_int    (config_str, pos, 'sm', 'sm_nsnow_max',    this%sm%sm_nsnow_max)
         call append_kv_real   (config_str, pos, 'sm', 'fsm_ds_min',       this%sm%fsm_ds_min)
         call append_kv_real   (config_str, pos, 'sm', 'fsm_ds_surflay',   this%sm%fsm_ds_surflay)
         call append_kv_int    (config_str, pos, 'sm', 'fsm_albedo',       this%sm%fsm_albedo)
@@ -2989,7 +2991,7 @@ contains
         call append_kv_int    (config_str, pos, 'sm', 'snowpack_atmospheric_stability',   this%sm%snowpack_atmospheric_stability)
         call append_kv_int    (config_str, pos, 'sm', 'snowpack_variant',                 this%sm%snowpack_variant)
         call append_kv_int    (config_str, pos, 'sm', 'snowpack_albedo_parameterization', this%sm%snowpack_albedo_parameterization)
-        call append_kv_logical(config_str, pos, 'sm', 'snowpack_reduce_n_elements',       this%sm%snowpack_reduce_n_elements)
+        call append_kv_int    (config_str, pos, 'sm', 'snowpack_reduce_n_elements',       this%sm%snowpack_reduce_n_elements)
         call append_kv_logical(config_str, pos, 'sm', 'snowpack_enable_vapour_transport', this%sm%snowpack_enable_vapour_transport)
         call append_kv_int    (config_str, pos, 'sm', 'suspension_layer',              this%sm%suspension_layer)
         call append_kv_int    (config_str, pos, 'sm', 'suspension_fine_mesh_levels',   this%sm%suspension_fine_mesh_levels)

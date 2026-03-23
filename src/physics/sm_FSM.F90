@@ -170,7 +170,7 @@ contains
         z0_bare = 0.01
         dx_HICAR=domain%dx
         NNsoil_HICAR=options%lsm%num_soil_layers
-        NNsmax_HICAR=options%sm%fsm_nsnow_max
+        NNsmax_HICAR=options%sm%sm_nsnow_max
         DDs_min=options%sm%fsm_ds_min
         DDs_surflay=options%sm%fsm_ds_surflay
 
@@ -350,7 +350,7 @@ contains
         !        if (.not.(fsnow(i,j)*SUM(Ds(:,i,j))==domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(j-1+domain%its,i-1+domain%jts))) then
         !            albs(i,j) = 0.75
         !            fsnow(i,j) = 1
-        !            Nsnow (i,j)= min(6,options%lsm%fsm_nsnow_max)
+        !            Nsnow (i,j)= min(6,options%sm%sm_nsnow_max)
         !            Tsnow(:,i,j) = 268
         !            Tsoil(:,i,j) = 273
         !            theta(:,i,j) = 0.2

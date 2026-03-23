@@ -114,7 +114,17 @@ else()
         set(SNOWPACK_FORTRAN_FREEFORM_FLAG "-ffree-form")
     endif()
 
-    set(SNOWPACK_FORTRAN_FFLAGS "${SNOWPACK_FORTRAN_FREEFORM_FLAG} -fPIC")
+    set(SNOWPACK_FORTRAN_FFLAGS "${SNOWPACK_FORTRAN_FREEFORM_FLAG} -O3 -fPIC")
+
+    # SNOWPACK's SetCompilerOptions.cmake has no NVHPC/nvc++ support.
+    # Without this, OPTIM is empty and CMAKE_CXX_FLAGS_RELEASE is force-set to "",
+    # causing the entire SNOWPACK C++ library to compile with no optimization.
+    # USER_COMPILER_OPTIONS is added to EXTRA → CMAKE_CXX_FLAGS, bypassing the empty OPTIM.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "NVHPC")
+        set(SNOWPACK_USER_COMPILER_OPTIONS "-O3 -DNDEBUG -DNOSAFECHECKS")
+    else()
+        set(SNOWPACK_USER_COMPILER_OPTIONS "")
+    endif()
 
     set(METEOIO_DIR "${CMAKE_BINARY_DIR}/external/meteoio" CACHE PATH "MeteoIO source directory" FORCE)
     set(METEOIO_BUILD "${CMAKE_BINARY_DIR}/external/METEOIO-build" CACHE PATH "MeteoIO build directory" FORCE)
@@ -134,6 +144,7 @@ else()
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
             -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+            -DUSER_COMPILER_OPTIONS=${SNOWPACK_USER_COMPILER_OPTIONS}
             -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${METEOIO_DIR}/lib
             -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=${METEOIO_DIR}/lib
             -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${METEOIO_DIR}/lib
@@ -156,7 +167,7 @@ else()
     set(SNOWPACK_BUILD "${CMAKE_BINARY_DIR}/external/SNOWPACK-build" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
     set(SNOWPACK_STAMPS "${CMAKE_BINARY_DIR}/external/SNOWPACK-stamps" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
 
-    set(SNOWPACK_FORTRAN_CXXFLAGS "${SNOWPACK_SYSROOT_FLAG} -fPIC -I${SNOWPACK_DIR} -I${METEOIO_DIR}")
+    set(SNOWPACK_FORTRAN_CXXFLAGS "${SNOWPACK_SYSROOT_FLAG} -O3 -fPIC -I${SNOWPACK_DIR} -I${METEOIO_DIR}")
 
     # Build SNOWPACK (depends on MeteoIO)
     ExternalProject_Add(SNOWPACK
@@ -175,6 +186,7 @@ else()
             -DMETEOIO_LIBRARY=${METEOIO_LIBRARY}
             -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
             -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+            -DUSER_COMPILER_OPTIONS=${SNOWPACK_USER_COMPILER_OPTIONS}
             -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${SNOWPACK_DIR}/lib
             -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=${SNOWPACK_DIR}/lib
             -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${SNOWPACK_DIR}/lib

@@ -3306,10 +3306,10 @@ contains
             ! Snow Model parameters namelist variables
             ! --------------------------------------
             ! --------------------------------------
-            case ("fsm_nsnow_max")
-                description = "Maximum number of snow layers to allow for a FSM simulation"
+            case ("sm_nsnow_max")
+                description = "Maximum number of snow layers to store in domain arrays (used by FSM and SNOWPACK)"
                 min = 3
-                max = 20
+                max = 500
                 default = "6"
                 group = "SM_Parameters"
             case ("fsm_ds_min")
@@ -3575,8 +3575,11 @@ contains
                 default = "default"
                 group = "SM_Parameters"
             case("snowpack_reduce_n_elements")
-                description = "Enable more 'aggressive' combining for layers deeper in the snowpack"
-                default = ".False."
+                description = "Level of SNOWPACK layer combining"//achar(10)//BLNK_CHR_N// &
+                    "(0 = OFF, 1 = standard, 2 = aggressive depth-dependent combining)"
+                min = 0
+                max = 2
+                default = "2"
                 group = "SM_Parameters"
             case("suspension_layer")
                 description = "Blowing snow drift model selection"//achar(10)//BLNK_CHR_N// &

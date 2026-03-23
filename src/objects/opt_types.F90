@@ -208,8 +208,7 @@ module options_types
     ! store Snow Model options
     ! ------------------------------------------------
     type sm_options_type
-        integer :: fsm_nsnow_max                        ! maximum number of snow layers for FSM2 to use. Set here, since it will
-                                                        ! change the size of arrays elsewhere in domain_obj 
+        integer :: sm_nsnow_max                         ! maximum number of snow layers to store in domain arrays (used by FSM and SNOWPACK)
         real    :: fsm_ds_min, fsm_ds_surflay
         integer :: fsm_albedo
         integer :: fsm_canmod
@@ -251,7 +250,7 @@ module options_types
         integer :: snowpack_atmospheric_stability  ! option to include atmospheric stability effects in SNOWPACK
         integer :: snowpack_variant                     ! choice of SNOWPACK variant (standard, glacier, tundra, etc.)
         integer :: snowpack_albedo_parameterization  ! choice of albedo parameterization in SNOWPACK
-        logical :: snowpack_reduce_n_elements      ! option to reduce number of snow layers for computational efficiency
+        integer :: snowpack_reduce_n_elements      ! level of SNOWPACK layer combining (0=off, 1=standard, 2=aggressive)
         logical :: snowpack_enable_vapour_transport  ! option to enable vapour transport between snow layers in SNOWPACK
 
         ! Options for CRYOWRF-style blowing snow drift

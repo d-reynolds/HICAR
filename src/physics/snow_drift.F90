@@ -85,7 +85,7 @@ module snow_drift
     real, allocatable, save :: ns_flux_cache(:,:)            ! (ims:ime, jms:jme) cached interface flux tendency to ns
 
     ! Halo exchange wrapper variables
-    type(variable_t), save :: exch_var_2d
+    type(variable_t), save :: exch_var
 
     ! Domain index copies
     integer, save :: ids, ide, jds, jde, kds, kde
@@ -172,6 +172,11 @@ contains
         kts = domain%kts ; kte = domain%kte
 
         snc_N_loc = options%sm%suspension_fine_mesh_levels
+        if (snc_N_loc > domain%kme .and. STD_OUT_PE) then
+            write(*,*) "WARNING: number of fine mesh levels specified for suspension scheme greater than number of atmospheric levels: ",kte
+            write(*,*) "WARNING: clipping fine mesh levels to: ",kte
+        endif
+        snc_N_loc = min(snc_N_loc,kte)
 
         ! Allocate fine mesh arrays
         allocate(snc_Z(ims:ime, snc_N_loc, jms:jme))
@@ -217,7 +222,7 @@ contains
 
         !$acc enter data copyin(snc_dz,snc_Z,subl_mass_2d,kH_fm,wind_fm,v_fm,u_fm,sn_ns,sn_qs) create(qv_fm,t_fm,w_fm,qs_flux_cache,ns_flux_cache)
         ! Initialize halo exchange variable
-        call exch_var_2d%initialize(kVARS%terrain, domain%grid2d)
+        call exch_var%initialize(kVARS%density, domain%grid)
 
         ! Precompute gamma ratios for Eq. 13 sublimation (Sharma et al. 2023)
         GAMMA_RATIO_S = gamma(1.0 + 1.5*MITCHELL_BM_S + alpha) / gamma(alpha)
@@ -557,9 +562,7 @@ contains
         allocate(jaco_v_fm(ims:ime, 1:snc_N_loc, jms:jme))
 
         ! Halo exchange before saving initial state for RK3 advection
-        do k = 1, snc_N_loc
-            call exch_fine_mesh_level(domain, k)
-        enddo
+        call exch_fine_mesh_3d(domain)
 
         !$acc data create(rho_fm, sn_qs_old, sn_ns_old, div, jaco_fm, jaco_u_fm, jaco_v_fm)
 
@@ -615,9 +618,7 @@ contains
             end select
 
             ! Halo exchange before each substep
-            do k = 1, snc_N_loc
-                call exch_fine_mesh_level(domain, k)
-            enddo
+            call exch_fine_mesh_3d(domain)
 
             ! --- Advect q_bs ---
             call flux_2d_fm(sn_qs, U_m_fm, V_m_fm, t_fac, &
@@ -1162,35 +1163,34 @@ contains
     !>----------------------------------------------------------
     !! Halo exchange for a single fine mesh level
     !!----------------------------------------------------------
-    subroutine exch_fine_mesh_level(domain, k)
+    subroutine exch_fine_mesh_3d(domain)
         implicit none
         type(domain_t), intent(inout) :: domain
-        integer,        intent(in)    :: k
 
-        associate(exch_var_2d_data => exch_var_2d%data_2d)
-        !$acc data present(exch_var_2d_data, sn_qs, sn_qs)
+        associate(exch_var_data => exch_var%data_3d)
+        !$acc data present(exch_var_data, sn_qs, sn_qs)
         !$acc kernels 
-        exch_var_2d_data = 0.0
-        exch_var_2d_data(its:ite, jts:jte) = sn_qs(its:ite, k, jts:jte)
+        exch_var_data = 0.0
+        exch_var_data(its:ite, 1:snc_N_loc, jts:jte) = sn_qs(its:ite, 1:snc_N_loc, jts:jte)
         !$acc end kernels
-        call domain%halo%exch_var(exch_var_2d)
+        call domain%halo%exch_var(exch_var)
 
         !$acc kernels 
-        sn_qs(ims:ime, k, jms:jme) = exch_var_2d_data(ims:ime, jms:jme)
+        sn_qs(ims:ime, 1:snc_N_loc, jms:jme) = exch_var_data(ims:ime, 1:snc_N_loc, jms:jme)
 
         ! Also exchange number concentration
-        exch_var_2d_data = 0.0
-        exch_var_2d_data(its:ite, jts:jte) = sn_ns(its:ite, k, jts:jte)
+        exch_var_data = 0.0
+        exch_var_data(its:ite, 1:snc_N_loc, jts:jte) = sn_ns(its:ite, 1:snc_N_loc, jts:jte)
         !$acc end kernels
 
-        call domain%halo%exch_var(exch_var_2d)
+        call domain%halo%exch_var(exch_var)
         !$acc kernels 
-        sn_ns(ims:ime, k, jms:jme) = exch_var_2d_data(ims:ime, jms:jme)
+        sn_ns(ims:ime, 1:snc_N_loc, jms:jme) = exch_var_data(ims:ime, 1:snc_N_loc, jms:jme)
         !$acc end kernels
         !$acc end data
         end associate
 
-    end subroutine exch_fine_mesh_level
+    end subroutine exch_fine_mesh_3d
 
 
     !>----------------------------------------------------------

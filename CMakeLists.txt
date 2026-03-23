@@ -674,6 +674,11 @@ if(COMPILER STREQUAL "nvfortran" AND OPENACC)
 	foreach(source ${SM_SOURCES})
 		set_source_files_properties(${source} PROPERTIES COMPILE_OPTIONS "-mp")
 	endforeach()
+	# sm_SNOWPACK.F90 has OpenMP parallel regions but no OpenACC directives.
+	# Disable OpenACC to prevent CUDA context initialization for OpenMP threads.
+	set_source_files_properties(
+		${PROJECT_SOURCE_DIR}/src/physics/sm_SNOWPACK.F90
+		PROPERTIES COMPILE_OPTIONS "-mp;-noacc")
 endif()
 
 # Apply the same compile options to hicar_lib as are set on HICAR
