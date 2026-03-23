@@ -42,6 +42,7 @@ module planetary_boundary_layer
     real,allocatable, dimension(:,:)    ::  windspd, regime
     ! integer, allocatable, dimension(:,:) :: kpbl2d
     real, allocatable, dimension(:,:,:) :: RTHRATEN!, tend_u_ugrid, tend_v_vgrid
+    real, allocatable, dimension(:,:,:) :: trid_a, trid_b, trid_c, trid_rhs  ! work arrays for scalar PBL diffusion
 
     private
     public :: pbl_var_request, pbl_init, pbl, pbl_finalize, pbl_apply_tend
@@ -147,8 +148,17 @@ contains
             endif
             allocate(RTHRATEN(ims:ime, kms:kme, jms:jme)) !initialize radiative heating tendencies and set to 0 in case user turns on ysu radiative heating w/o radiations scheme
             RTHRATEN = 0.0
-            
-            !$acc enter data copyin(windspd,regime,RTHRATEN)
+
+            if (allocated(trid_a)) then
+                !$acc exit data delete(trid_a, trid_b, trid_c, trid_rhs)
+                deallocate(trid_a, trid_b, trid_c, trid_rhs)
+            endif
+            allocate(trid_a(ims:ime, kms:kme, jms:jme))
+            allocate(trid_b(ims:ime, kms:kme, jms:jme))
+            allocate(trid_c(ims:ime, kms:kme, jms:jme))
+            allocate(trid_rhs(ims:ime, kms:kme, jms:jme))
+
+            !$acc enter data copyin(windspd,regime,RTHRATEN) create(trid_a,trid_b,trid_c,trid_rhs)
             
             ! initialize tendencies (this is done in ysu init but only for tiles, not mem (ie its vs ims))
             ! BK: check if this actually matters ???
@@ -377,9 +387,129 @@ contains
             end do
             end associate
 
-        
+            ! Implicit vertical diffusion of hydrometeor number concentrations
+            ! using the eddy diffusivity (exch_h) computed by YSU.
+            ! Follows WRF's scalar_pblmix approach with zero-flux BCs.
+            associate(exch_h => domain%vars_3d(domain%var_indx(kVARS%coeff_heat_exchange_3d)%v)%data_3d, &
+                      rho    => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,                &
+                      dz     => domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d)
+
+            if (domain%var_indx(kVARS%snow_mass)%v > 0) &
+                call pbl_scalar_diff(domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d, exch_h, rho, dz, dt)
+            if (domain%var_indx(kVARS%ice_number)%v > 0) &
+                call pbl_scalar_diff(domain%vars_3d(domain%var_indx(kVARS%ice_number)%v)%data_3d, exch_h, rho, dz, dt)
+            if (domain%var_indx(kVARS%rain_number)%v > 0) &
+                call pbl_scalar_diff(domain%vars_3d(domain%var_indx(kVARS%rain_number)%v)%data_3d, exch_h, rho, dz, dt)
+            if (domain%var_indx(kVARS%snow_number)%v > 0) &
+                call pbl_scalar_diff(domain%vars_3d(domain%var_indx(kVARS%snow_number)%v)%data_3d, exch_h, rho, dz, dt)
+            if (domain%var_indx(kVARS%graupel_number)%v > 0) &
+                call pbl_scalar_diff(domain%vars_3d(domain%var_indx(kVARS%graupel_number)%v)%data_3d, exch_h, rho, dz, dt)
+
+            end associate
+
         endif
     end subroutine pbl_apply_tend
+
+
+    subroutine pbl_scalar_diff(phi, exch_h, rho, dz, dt_in)
+        !---------------------------------------------------------------
+        ! Apply implicit vertical diffusion to a scalar field using
+        ! the eddy diffusivity (exch_h) output by the PBL scheme.
+        ! Follows WRF's scalar_pblmix approach (Thomas algorithm).
+        ! Zero-flux boundary conditions at surface and model top.
+        !
+        ! Uses module-level work arrays trid_a, trid_b, trid_c, trid_rhs
+        ! and module-level index variables.
+        !---------------------------------------------------------------
+        implicit none
+        real, dimension(ims:ime, kms:kme, jms:jme), intent(inout) :: phi
+        real, dimension(ims:ime, kms:kme, jms:jme), intent(in)    :: exch_h, rho, dz
+        real, intent(in) :: dt_in
+
+        real    :: rho_int, dz_half, cddz_below, cddz_above, fk
+        integer :: i2, j2, k2, kte_pbl
+
+        kte_pbl = kte - 1   ! YSU operates on kts:kte-1
+
+        ! Step 1: Build tridiagonal coefficients
+        ! exch_h(i,k,j) = diffusivity at interface between levels k-1 and k [m^2/s]
+        !$acc parallel present(trid_a, trid_b, trid_c, trid_rhs, phi, exch_h, rho, dz)
+        !$acc loop gang vector collapse(3) private(rho_int, dz_half, cddz_below, cddz_above)
+        do j2 = jts, jte
+        do k2 = kts, kte_pbl
+        do i2 = its, ite
+            ! Sub-diagonal: coupling with level below
+            if (k2 > kts) then
+                rho_int    = 0.5*(rho(i2,k2-1,j2) + rho(i2,k2,j2))
+                dz_half    = 0.5*(dz(i2,k2-1,j2)  + dz(i2,k2,j2))
+                cddz_below = rho_int * exch_h(i2,k2,j2) / dz_half
+                trid_a(i2,k2,j2) = -dt_in * cddz_below / (rho(i2,k2,j2) * dz(i2,k2,j2))
+            else
+                trid_a(i2,k2,j2) = 0.0   ! zero-flux surface BC
+            endif
+
+            ! Super-diagonal: coupling with level above
+            if (k2 < kte_pbl) then
+                rho_int    = 0.5*(rho(i2,k2,j2) + rho(i2,k2+1,j2))
+                dz_half    = 0.5*(dz(i2,k2,j2)  + dz(i2,k2+1,j2))
+                cddz_above = rho_int * exch_h(i2,k2+1,j2) / dz_half
+                trid_c(i2,k2,j2) = -dt_in * cddz_above / (rho(i2,k2,j2) * dz(i2,k2,j2))
+            else
+                trid_c(i2,k2,j2) = 0.0   ! zero-flux top BC
+            endif
+
+            ! Main diagonal (diagonally dominant)
+            trid_b(i2,k2,j2)   = 1.0 - trid_a(i2,k2,j2) - trid_c(i2,k2,j2)
+            ! RHS = current scalar value
+            trid_rhs(i2,k2,j2) = phi(i2,k2,j2)
+        enddo
+        enddo
+        enddo
+        !$acc end parallel
+
+        ! Step 2: Thomas algorithm forward elimination
+        ! First level
+        !$acc parallel present(trid_a, trid_b, trid_c, trid_rhs)
+        !$acc loop gang vector collapse(2) private(fk)
+        do j2 = jts, jte
+        do i2 = its, ite
+            fk = 1.0 / trid_b(i2,kts,j2)
+            trid_c(i2,kts,j2)   = fk * trid_c(i2,kts,j2)
+            trid_rhs(i2,kts,j2) = fk * trid_rhs(i2,kts,j2)
+        enddo
+        enddo
+        !$acc end parallel
+
+        ! Interior + top levels
+        !$acc parallel present(trid_a, trid_b, trid_c, trid_rhs)
+        !$acc loop gang vector collapse(2) private(fk)
+        do j2 = jts, jte
+        do i2 = its, ite
+        !$acc loop seq
+            do k2 = kts+1, kte_pbl
+                fk = 1.0 / (trid_b(i2,k2,j2) - trid_a(i2,k2,j2) * trid_c(i2,k2-1,j2))
+                trid_c(i2,k2,j2)   = fk * trid_c(i2,k2,j2)
+                trid_rhs(i2,k2,j2) = fk * (trid_rhs(i2,k2,j2) - trid_a(i2,k2,j2) * trid_rhs(i2,k2-1,j2))
+            enddo
+        enddo
+        enddo
+        !$acc end parallel
+
+        ! Step 3: Back substitution — write result into phi, clamp non-negative
+        !$acc parallel present(phi, trid_c, trid_rhs)
+        !$acc loop gang vector collapse(2)
+        do j2 = jts, jte
+        do i2 = its, ite
+            phi(i2,kte_pbl,j2) = max(0.0, trid_rhs(i2,kte_pbl,j2))
+        !$acc loop seq
+            do k2 = kte_pbl-1, kts, -1
+                phi(i2,k2,j2) = max(0.0, trid_rhs(i2,k2,j2) - trid_c(i2,k2,j2) * phi(i2,k2+1,j2))
+            enddo
+        enddo
+        enddo
+        !$acc end parallel
+
+    end subroutine pbl_scalar_diff
 
 
     subroutine pbl_finalize(options)
@@ -393,7 +523,8 @@ contains
         !endif
 
 
-        !$acc exit data delete(windspd,regime,RTHRATEN)
+        !$acc exit data delete(windspd,regime,RTHRATEN,trid_a,trid_b,trid_c,trid_rhs)
+        if (allocated(trid_a)) deallocate(trid_a, trid_b, trid_c, trid_rhs)
 
     end subroutine pbl_finalize
 end module planetary_boundary_layer
