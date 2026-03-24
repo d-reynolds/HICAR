@@ -34,7 +34,11 @@ module snow_model_driver
     use module_sm_FSMdrv,   only : sm_FSM_init, sm_FSM
 #endif
 #ifdef SNOWPACK
+#ifdef SNOWPACK_GPU
+    use snowpack_gpu_driver, only : snowpack_gpu_init, snowpack_gpu_step
+#else
     use module_sm_SNOWPACKdrv, only : sm_snowpack_init, sm_SNOWPACK
+#endif
 #endif
     use snow_drift,            only : snow_drift_var_request, snow_drift_init, snow_drift_step
 
@@ -163,8 +167,13 @@ contains
 #endif
         else if (options%physics%snowmodel==kSM_SNOWPACK) then
 #ifdef SNOWPACK
+#ifdef SNOWPACK_GPU
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: Snowpack (GPU/OpenACC)"
+            call snowpack_gpu_init(domain,options,context_change)
+#else
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: Snowpack"
             call sm_snowpack_init(domain,options,context_change)
+#endif
 #else
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    User asked to use Snowpack, but it is not compiled in this version of HICAR"
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Please de-select Snowpack as the snow model in the namelist, or recompile HICAR with the Snowpack library linked"
@@ -327,6 +336,10 @@ contains
 
             else if (options%physics%snowmodel==kSM_SNOWPACK) then
 #ifdef SNOWPACK
+#ifdef SNOWPACK_GPU
+                ! GPU SNOWPACK: data stays on device, no host/device transfers needed
+                call snowpack_gpu_step(domain,options,lsm_dt,current_rain,current_snow,windspd)
+#else
                 ! EVAN'S BIG DRIVER HERE:
                 ! input variables for SNOWPACK, which we need, are:
 
@@ -413,6 +426,7 @@ contains
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
+#endif
 #endif
             endif
             end associate
