@@ -376,7 +376,6 @@ contains
 
         ! Read the dimension lengths
         call io_getdims(filename,varname,dimcnt)
-        if (size(dimcnt)>nominal_dim) dimcnt(nominal_dim+1:size(dimcnt))=1 ! set count for extra dims to 1
 
         if (present(starts) .and. present(counts))then
 
@@ -394,11 +393,15 @@ contains
             !check that starts and counts are within dimcnt
             if (any(starts < 1) .or. any(counts < 1) .or. any(starts + counts - 1 > dimcnt)) then
                 write(*,*) "ERROR: starts and counts are out of bounds for variable ", varname, " in file ", filename
+                write(*,*) "starts: ",starts
+                write(*,*) "counts: ",counts
+                write(*,*) "Dimension Counts from file: ",dimcnt
                 stop
             endif
 
             dimcnt(1:size(counts))=counts(1:size(counts))
             dimstart(1:size(starts))=starts(1:size(starts))
+            if (size(dimcnt)>nominal_dim) dimcnt(nominal_dim+1:size(dimcnt))=1 ! set count for extra dims to 1
         endif
 
         ! Open the file. IOR(NF90_NOWRITE,NF90_NETCDF4) tells netCDF we want read-only access to the file.

@@ -428,10 +428,13 @@ module options_types
         character (len=kMAX_NAME_LENGTH) :: hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,landvar,lakedepthvar, &
                                         snowh_var, soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var, &
                                         vegtype_var,vegfrac_var, albedo_var, vegfracmax_var, lai_var, canwat_var, &
-                                        sinalpha_var, cosalpha_var
+                                        sinalpha_var, cosalpha_var, surface_temp_var
 
         character(len=kMAX_NAME_LENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var !!MJ added
 
+        ! Initial surface temperature options
+        real    :: init_surf_temp               ! fallback initial surface temperature [K] (default 280)
+        real    :: init_sst                     ! initial sea surface temperature [K] (default 280)
 
     end type domain_options_type
 

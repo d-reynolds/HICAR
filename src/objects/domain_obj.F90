@@ -1923,13 +1923,20 @@ contains
         type(options_t), intent(in)     :: options
 
         integer :: i, nsoil
-        real, allocatable :: temporary_data(:,:), temporary_data_3d(:,:,:)
+        real, allocatable :: surf_temp(:,:), temporary_data(:,:), temporary_data_3d(:,:,:)
         real :: soil_thickness(20)
-        real :: init_surf_temp
 
         soil_thickness = 1.0
         soil_thickness(1:4) = [0.1, 0.2, 0.5, 1.0]
-        init_surf_temp = 280
+
+        ! Read optional 2D surface temperature field from domain file
+        if (options%domain%surface_temp_var /= "") then
+            call io_read(options%domain%init_conditions_file, options%domain%surface_temp_var, surf_temp)
+            if (STD_OUT_PE) write(*,*) "  Read surface temperature field from: ", trim(options%domain%surface_temp_var)
+        else
+            allocate(surf_temp(this%grid%ims:this%grid%ime,this%grid%jms:this%grid%jme))
+            surf_temp = options%domain%init_surf_temp
+        endif
 
         if (STD_OUT_PE) write (*,*) "Reading Land Variables"
         if (STD_OUT_PE) flush(output_unit)
@@ -2005,12 +2012,14 @@ contains
                     if (STD_OUT_PE) write(*,*) trim(options%domain%init_conditions_file),"  ",trim(options%domain%soil_deept_var)
                 endif
                 if (minval(this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d)< 200) then
-                    where(this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d<200) this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d=init_surf_temp ! <200 is just broken, set to mean annual air temperature at mid-latidudes
+                    where(this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d<200) &
+                        this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = options%domain%init_surf_temp
                 endif
             endif
         else
             if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = init_surf_temp
+                this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         endif
 
@@ -2298,9 +2307,16 @@ contains
             endif
         endif
 
-        ! these will all be udpated by either forcing data or the land model, but initialize to sensible values to avoid breaking other initialization routines
-        if (this%var_indx(kVARS%skin_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%skin_temperature)%v)%data_2d = init_surf_temp
-        if (this%var_indx(kVARS%sst)%v > 0) this%vars_2d(this%var_indx(kVARS%sst)%v)%data_2d = init_surf_temp
+        ! Initialize surface temperature fields from 2D field (if provided) or scalar fallback
+        ! These will be further updated by the land model, but need sensible initial values
+        if (this%var_indx(kVARS%skin_temperature)%v > 0) then
+            this%vars_2d(this%var_indx(kVARS%skin_temperature)%v)%data_2d = &
+                surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+        endif
+
+        ! SST uses its own option (separate from land surface temperature)
+        if (this%var_indx(kVARS%sst)%v > 0) this%vars_2d(this%var_indx(kVARS%sst)%v)%data_2d = options%domain%init_sst
+
         if (this%var_indx(kVARS%roughness_z0)%v > 0) this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d = 0.001
         if (this%var_indx(kVARS%sensible_heat)%v > 0) this%vars_2d(this%var_indx(kVARS%sensible_heat)%v)%data_2d=0
         if (this%var_indx(kVARS%latent_heat)%v > 0) this%vars_2d(this%var_indx(kVARS%latent_heat)%v)%data_2d=0
@@ -2308,16 +2324,29 @@ contains
         if (this%var_indx(kVARS%v_10m)%v > 0) this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d=0
 
         if (this%var_indx(kVARS%windspd_10m)%v > 0) this%vars_2d(this%var_indx(kVARS%windspd_10m)%v)%data_2d=0
-        if (this%var_indx(kVARS%temperature_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d=init_surf_temp
+        if (this%var_indx(kVARS%temperature_2m)%v > 0) then
+            this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d = &
+                surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+        endif
         if (this%var_indx(kVARS%humidity_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%humidity_2m)%v)%data_2d=0.001
         if (this%var_indx(kVARS%surface_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%surface_pressure)%v)%data_2d=102000
         if (this%var_indx(kVARS%land_emissivity)%v > 0) this%vars_2d(this%var_indx(kVARS%land_emissivity)%v)%data_2d=0.95
         if (this%var_indx(kVARS%longwave_up)%v > 0) this%vars_2d(this%var_indx(kVARS%longwave_up)%v)%data_2d=0
         if (this%var_indx(kVARS%ground_heat_flux)%v > 0) this%vars_2d(this%var_indx(kVARS%ground_heat_flux)%v)%data_2d=0
-        if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d=init_surf_temp
-        if (this%var_indx(kVARS%ground_surf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%ground_surf_temperature)%v)%data_2d=init_surf_temp
+
+        if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) then
+            this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d = &
+                surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+        endif
+        if (this%var_indx(kVARS%ground_surf_temperature)%v > 0) then
+            this%vars_2d(this%var_indx(kVARS%ground_surf_temperature)%v)%data_2d = &
+                surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+        endif
         if (this%var_indx(kVARS%canopy_vapor_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_vapor_pressure)%v)%data_2d=2000
-        if (this%var_indx(kVARS%canopy_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d=init_surf_temp
+        if (this%var_indx(kVARS%canopy_temperature)%v > 0) then
+            this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d = &
+                surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+        endif
         if (this%var_indx(kVARS%coeff_momentum_drag)%v > 0) this%vars_2d(this%var_indx(kVARS%coeff_momentum_drag)%v)%data_2d=0.01
         if (this%var_indx(kVARS%chs)%v > 0) this%vars_2d(this%var_indx(kVARS%chs)%v)%data_2d=0.01
         if (this%var_indx(kVARS%chs2)%v > 0) this%vars_2d(this%var_indx(kVARS%chs2)%v)%data_2d=0.01
@@ -3083,10 +3112,10 @@ contains
         ims_b = 0; ime_b = 0; jms_b = 0; jme_b = 0
 
         if (do_boundary) then
-            if (do_west) ims_b(1) = ims; ime_b(1) = ims+filter_width+halo_size; jms_b(1) = jms; jme_b(1) = jme;
-            if (do_east) ims_b(2) = ime-filter_width-halo_size; ime_b(2) = ime; jms_b(2) = jms; jme_b(2) = jme;
-            if (do_north) ims_b(3) = ims; ime_b(3) = ime; jms_b(3) = jme-filter_width-halo_size; jme_b(3) = jme;
-            if (do_south) ims_b(4) = ims; ime_b(4) = ime; jms_b(4) = jms; jme_b(4) = jms+filter_width+halo_size;
+            if (do_west) ims_b(1) = ims; ime_b(1) = ims+filter_width+halo_size-1; jms_b(1) = jms; jme_b(1) = jme;
+            if (do_east) ims_b(2) = ime-filter_width-halo_size+1; ime_b(2) = ime; jms_b(2) = jms; jme_b(2) = jme;
+            if (do_north) ims_b(3) = ims; ime_b(3) = ime; jms_b(3) = jme-filter_width-halo_size+1; jme_b(3) = jme;
+            if (do_south) ims_b(4) = ims; ime_b(4) = ime; jms_b(4) = jms; jme_b(4) = jms+filter_width+halo_size-1;
 
             ! limit vertical extent of west and east boundaries to the extent of the north/south indices
             ! this prevents double-calculating points in the corners

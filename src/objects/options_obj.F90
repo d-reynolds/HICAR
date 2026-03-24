@@ -1065,6 +1065,7 @@ contains
         logical, dimension(kMAX_NESTS) :: sleve, use_agl_height
 
         real, dimension(kMAX_NESTS) :: dx, flat_z_height, decay_rate_L_topo, decay_rate_S_topo, sleve_n, agl_cap, max_agl_height
+        real, dimension(kMAX_NESTS) :: init_surf_temp, init_sst
         integer, dimension(kMAX_NESTS) :: nz, longitude_system, terrain_smooth_windowsize, terrain_smooth_cycles
 
         character(len=kMAX_FILE_LENGTH) :: init_conditions_file(kMAX_NESTS)
@@ -1073,7 +1074,7 @@ contains
                                         snowh_var, soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var, soil_deept_var,           &
                                         vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
                                         sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, &
-                                        aspect_angle_var, shd_var  !!MJ added
+                                        aspect_angle_var, shd_var, surface_temp_var  !!MJ added
 
         namelist /domain/ dx, nz, longitude_system, init_conditions_file, &
                             landvar,lakedepthvar, snowh_var, agl_cap, use_agl_height, &
@@ -1081,6 +1082,7 @@ contains
                             soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
                             vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
                             sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, & !! MJ added
+                            surface_temp_var, init_surf_temp, init_sst, &
                             dz_levels, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n
         CHARACTER(LEN=200) :: error_msg
 
@@ -1131,6 +1133,7 @@ contains
         call set_nml_var_default(canwat_var, 'canwat_var', print_info, gennml)
         call set_nml_var_default(sinalpha_var, 'sinalpha_var', print_info, gennml)
         call set_nml_var_default(cosalpha_var, 'cosalpha_var', print_info, gennml)
+        call set_nml_var_default(surface_temp_var, 'surface_temp_var', print_info, gennml)
 
         call set_nml_var_default(svf_var, 'svf_var', print_info, gennml)
         call set_nml_var_default(hlm_var, 'hlm_var', print_info, gennml)
@@ -1138,6 +1141,9 @@ contains
         call set_nml_var_default(slope_angle_var, 'slope_angle_var', print_info, gennml)
         call set_nml_var_default(aspect_angle_var, 'aspect_angle_var', print_info, gennml)
         call set_nml_var_default(shd_var, 'shd_var', print_info, gennml)
+
+        call set_nml_var_default(init_surf_temp, 'init_surf_temp', print_info, gennml)
+        call set_nml_var_default(init_sst, 'init_sst', print_info, gennml)
 
         call set_nml_var_default(dz_levels, 'dz_levels', print_info, gennml)
 
@@ -1225,6 +1231,7 @@ contains
         call set_nml_var(domain_options%canwat_var, canwat_var(n_indx), 'canwat_var',domain_options, canwat_var(1))
         call set_nml_var(domain_options%sinalpha_var, sinalpha_var(n_indx), 'sinalpha_var',domain_options, sinalpha_var(1))
         call set_nml_var(domain_options%cosalpha_var, cosalpha_var(n_indx), 'cosalpha_var',domain_options, cosalpha_var(1))
+        call set_nml_var(domain_options%surface_temp_var, surface_temp_var(n_indx), 'surface_temp_var',domain_options, surface_temp_var(1))
 
         call set_nml_var(domain_options%svf_var, svf_var(n_indx), 'svf_var',domain_options, svf_var(1))
         call set_nml_var(domain_options%hlm_var, hlm_var(n_indx), 'hlm_var',domain_options, hlm_var(1))
@@ -1232,6 +1239,9 @@ contains
         call set_nml_var(domain_options%slope_angle_var, slope_angle_var(n_indx), 'slope_angle_var',domain_options, slope_angle_var(1))
         call set_nml_var(domain_options%aspect_angle_var, aspect_angle_var(n_indx), 'aspect_angle_var',domain_options, aspect_angle_var(1))
         call set_nml_var(domain_options%shd_var, shd_var(n_indx), 'shd_var',domain_options, shd_var(1))
+
+        call set_nml_var(domain_options%init_surf_temp, init_surf_temp(n_indx), 'init_surf_temp', init_surf_temp(1))
+        call set_nml_var(domain_options%init_sst, init_sst(n_indx), 'init_sst', init_sst(1))
 
         if (.not.(read_namelist)) return
         
@@ -3022,6 +3032,8 @@ contains
         call append_kv_logical(config_str, pos, 'domain', 'use_agl_height',               this%domain%use_agl_height)
         call append_kv_real   (config_str, pos, 'domain', 'agl_cap',                      this%domain%agl_cap)
         call append_kv_int    (config_str, pos, 'domain', 'longitude_system',             this%domain%longitude_system)
+        call append_kv_real   (config_str, pos, 'domain', 'init_surf_temp',               this%domain%init_surf_temp)
+        call append_kv_real   (config_str, pos, 'domain', 'init_sst',                     this%domain%init_sst)
 
         ! --- forcing group (behavior-affecting fields only) ---
         call append_kv_logical(config_str, pos, 'forcing', 'qv_is_relative_humidity', this%forcing%qv_is_relative_humidity)

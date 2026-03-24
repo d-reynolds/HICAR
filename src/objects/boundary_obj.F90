@@ -343,7 +343,7 @@ contains
                                     
             ! Read subset of data directly using netCDF Fortran API
             
-            call io_read(this%firstfile, options%zvar,   temp_3d,   this%firststep, &
+            call io_read(this%firstfile, options%zvar,   temp_3d,   extradim_start=this%firststep, &
                          starts=start_3d, counts=count_3d)
             nx = size(temp_3d,1)
             ny = size(temp_3d,2)

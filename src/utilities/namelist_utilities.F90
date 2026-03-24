@@ -1878,6 +1878,27 @@ contains
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Domain"
+            case ("surface_temp_var")
+                description = "Name of 2D surface temperature variable in domain file."//achar(10)//BLNK_CHR_N// &
+                    "If provided, used to initialize skin/canopy/ground/leaf temperatures instead of init_surf_temp scalar"
+                units = "K"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("init_surf_temp")
+                description = "Fallback initial surface temperature used when surface_temp_var is not provided"
+                units = "K"
+                min = 200
+                max = 310
+                default = "280"
+                group = "Domain"
+            case ("init_sst")
+                description = "Initial sea surface temperature"
+                units = "K"
+                min = 260
+                max = 300
+                default = "280"
+                group = "Domain"
             case ("vegtype_var")
                 description = "Name of the vegetation type variable in domain file"
                 allocate(dimensions(2))
