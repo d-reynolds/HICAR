@@ -67,9 +67,18 @@ endif()
 option(ASSERTIONS "Check logical assertions at runtime" ON)
 option(FSM "Link to the FSM2 snow model, requires separate compilation of the FSM2 model" OFF)
 option(SNOWPACK "Link to the SNOWPACK snow model, requires separate compilation of the SNOWPACK model" OFF)
+option(SNOWPACK_GPU "Use GPU-accelerated pure-Fortran SNOWPACK (replaces C++ SNOWPACK, requires OpenACC)" OFF)
 option(NCCL "Link to the NCCL library, if available" ON)
 option(OPENACC "Enable OpenACC support for GPU acceleration" OFF)
 option(SRUN_FLAGS "srun flags to use for running the test cases" "")
+
+# SNOWPACK_GPU implies both SNOWPACK and OPENACC
+if(SNOWPACK_GPU)
+    set(SNOWPACK ON CACHE BOOL "Enable SNOWPACK support in HICAR" FORCE)
+    if(NOT OPENACC_SET_BY_USER)
+        set(OPENACC ON CACHE BOOL "Enable OpenACC support for GPU acceleration" FORCE)
+    endif()
+endif()
 #########################################
 
 #Set constants for project
@@ -312,7 +321,21 @@ find_package(MPI REQUIRED)
 find_package(OpenMP)
 find_package(FFTW REQUIRED)
 find_package(NetCDF REQUIRED)
-if (SNOWPACK)
+if (SNOWPACK_GPU)
+	# GPU SNOWPACK: compile pure-Fortran GPU modules directly, no C++ SNOWPACK needed
+	if(NOT SNOWPACK_DIR OR SNOWPACK_DIR STREQUAL "")
+		message(FATAL_ERROR "SNOWPACK_GPU requires SNOWPACK_DIR to be set to the SNOWPACK source directory (containing fortran/snowpack_gpu_*.F90)")
+	endif()
+	set(SNOWPACK_GPU_SRC_DIR "${SNOWPACK_DIR}/fortran")
+	file(GLOB SNOWPACK_GPU_SOURCES "${SNOWPACK_GPU_SRC_DIR}/snowpack_gpu_*.F90")
+	if(NOT SNOWPACK_GPU_SOURCES)
+		message(FATAL_ERROR "No snowpack_gpu_*.F90 files found in ${SNOWPACK_GPU_SRC_DIR}")
+	endif()
+	list(APPEND SOURCE_FILES ${SNOWPACK_GPU_SOURCES})
+	# Remove the C++ SNOWPACK Fortran driver (replaced by snowpack_gpu_driver)
+	list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/sm_SNOWPACK.F90)
+	message(STATUS "SNOWPACK GPU sources: ${SNOWPACK_GPU_SOURCES}")
+elseif (SNOWPACK)
 	find_package(SNOWPACK REQUIRED)
 else()
 	# remove sm_SNOWPACK.F90, which contains the SNOWPACK driver, from the source files if SNOWPACK support is disabled
@@ -559,7 +582,11 @@ if (FSM)
 	add_definitions(-DFSM)
 endif()
 
-if(SNOWPACK_FOUND)
+if(SNOWPACK_GPU)
+    # GPU SNOWPACK: pure Fortran, no C++ libraries needed
+    add_definitions(-DSNOWPACK -DSNOWPACK_GPU)
+    message(STATUS "SNOWPACK GPU support enabled (pure Fortran OpenACC, no C++ SNOWPACK/MeteoIO needed)")
+elseif(SNOWPACK_FOUND)
     # If SNOWPACK should be built from source, add dependency
     if(BUILD_SNOWPACK_FROM_SOURCE)
         add_dependencies(hicar_lib SNOWPACK)
@@ -667,18 +694,30 @@ if (COMPILER STREQUAL "cray" AND FSM)
 	endforeach()
 endif()
 
-# sm_* files (snow model drivers) need OpenMP but not OpenACC.
-# Add -mp
+# sm_* files (snow model drivers) need OpenMP but not OpenACC (for CPU snow models).
+# With SNOWPACK_GPU, sm_driver.F90 calls GPU kernels and needs OpenACC.
 if(COMPILER STREQUAL "nvfortran" AND OPENACC)
-	file(GLOB SM_SOURCES ${PROJECT_SOURCE_DIR}/src/physics/sm_*.F90)
-	foreach(source ${SM_SOURCES})
-		set_source_files_properties(${source} PROPERTIES COMPILE_OPTIONS "-mp")
-	endforeach()
-	# sm_SNOWPACK.F90 has OpenMP parallel regions but no OpenACC directives.
-	# Disable OpenACC to prevent CUDA context initialization for OpenMP threads.
-	set_source_files_properties(
-		${PROJECT_SOURCE_DIR}/src/physics/sm_SNOWPACK.F90
-		PROPERTIES COMPILE_OPTIONS "-mp;-noacc")
+	if(NOT SNOWPACK_GPU)
+		# CPU snow models: disable OpenACC on all sm_* files
+		file(GLOB SM_SOURCES ${PROJECT_SOURCE_DIR}/src/physics/sm_*.F90)
+		foreach(source ${SM_SOURCES})
+			set_source_files_properties(${source} PROPERTIES COMPILE_OPTIONS "-mp")
+		endforeach()
+		# sm_SNOWPACK.F90 has OpenMP parallel regions but no OpenACC directives.
+		# Disable OpenACC to prevent CUDA context initialization for OpenMP threads.
+		if(EXISTS ${PROJECT_SOURCE_DIR}/src/physics/sm_SNOWPACK.F90)
+			set_source_files_properties(
+				${PROJECT_SOURCE_DIR}/src/physics/sm_SNOWPACK.F90
+				PROPERTIES COMPILE_OPTIONS "-mp;-noacc")
+		endif()
+	else()
+		# GPU SNOWPACK: sm_driver.F90 needs OpenACC (calls snowpack_gpu_step with !$acc present),
+		# but sm_FSM.F90 still needs OpenMP-only
+		file(GLOB SM_FSM_SOURCES ${PROJECT_SOURCE_DIR}/src/physics/sm_FSM*.F90)
+		foreach(source ${SM_FSM_SOURCES})
+			set_source_files_properties(${source} PROPERTIES COMPILE_OPTIONS "-mp")
+		endforeach()
+	endif()
 endif()
 
 # Apply the same compile options to hicar_lib as are set on HICAR
