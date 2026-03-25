@@ -165,6 +165,13 @@ subroutine update_component_nest(comp_arr,options,ioclient)
             if (STD_OUT_PE_IO) flush(output_unit)
 
             call comp%gather_forcing()
+
+            ! One-time: gather init-only 2D + extra 3D restart vars
+            if (.not. comp%initial_nest_done) then
+                call comp%gather_forcing_2d()
+                call comp%gather_forcing_3d_init()
+            endif
+
             if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",comp%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Completed gathering forcings"
             if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",comp%nest_indx," --------------"
@@ -179,8 +186,6 @@ subroutine update_component_nest(comp_arr,options,ioclient)
                     call sim_time_safety_under%set(child_nest%sim_time%mjd() - comp%small_time_delta%days())
 
                     if ( (comp%sim_time >= sim_time_safety_under .and. .not.(child_nest%ended)) )then
-                        ! This call will distribute the model state of the forcing fields to the child nest
-                        ! if (STD_OUT_PE_IO) write(*,*) "Distributing forcings to child nest: ",options%general%child_nests(n)
                         call comp%distribute_forcing(child_nest, n)
                         if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",comp%nest_indx," --------------"
                         if (STD_OUT_PE_IO) write(*,*) "Distributed forcings to child nest: ",options%general%child_nests(n)
@@ -191,6 +196,9 @@ subroutine update_component_nest(comp_arr,options,ioclient)
                 end select
                 end associate
             enddo
+
+            ! Mark init transfer as done after distributing to all children
+            if (.not. comp%initial_nest_done) comp%initial_nest_done = .true.
         class default
             ! if ioclient is null, then we are acting as an ioserver
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then

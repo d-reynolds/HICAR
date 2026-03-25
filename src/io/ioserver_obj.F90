@@ -16,7 +16,7 @@ submodule(ioserver_interface) ioserver_implementation
   use debug_module,             only : check_ncdf
   use iso_fortran_env
   use iso_c_binding
-  use output_metadata,          only : get_varindx
+  use output_metadata,          only : get_varindx, get_varmeta
   use meta_data_interface,      only : meta_data_t
   use time_object,              only : Time_type
   use string,                   only : split_str, as_string
@@ -67,6 +67,8 @@ contains
 
         this%n_child_ioservers = size(options(nest_indx)%general%child_nests)
         this%n_f = 0
+        this%n_f_2d = 0
+        this%n_f_3d_init = 0
 
         !determine if we need to increase our k index due to some very large soil field
         this%n_w_3d = 0
@@ -82,9 +84,40 @@ contains
             endif
 
             allocate(this%send_nest_types(this%n_child_ioservers,this%n_servers))
-            allocate(this%buffer_nest_types(this%n_child_ioservers,this%n_servers))    
+            allocate(this%buffer_nest_types(this%n_child_ioservers,this%n_servers))
             allocate(this%nest_types_initialized(this%n_child_ioservers))
             this%nest_types_initialized = .false.
+
+            ! Count init-only restart vars (2D + extra 3D not in atmospheric forcing)
+            block
+                type(meta_data_t) :: tmp_meta
+                integer :: v
+                do v = 1, kMAX_STORAGE_VARS
+                    if (options(some_child_id)%vars_to_allocate(v) <= 0) cycle
+                    if (options(some_child_id)%vars_for_restart(v) <= 0) cycle
+                    tmp_meta = get_varmeta(v)
+                    if (len_trim(tmp_meta%name) == 0) cycle
+                    if (any(options(some_child_id)%forcing%vars_to_read == tmp_meta%name)) cycle
+                    if (tmp_meta%two_d)   this%n_f_2d = this%n_f_2d + 1
+                    if (tmp_meta%three_d) this%n_f_3d_init = this%n_f_3d_init + 1
+                enddo
+            end block
+
+            if (this%n_f_2d > 0) then
+                allocate(this%gather_buffer_2d(this%n_f_2d, this%i_s_w:this%i_e_w+1, this%j_s_w:this%j_e_w+1))
+                allocate(this%send_nest_types_2d(this%n_child_ioservers, this%n_servers))
+                allocate(this%buffer_nest_types_2d(this%n_child_ioservers, this%n_servers))
+                allocate(this%nest_types_2d_initialized(this%n_child_ioservers))
+                this%nest_types_2d_initialized = .false.
+            endif
+            if (this%n_f_3d_init > 0) then
+                allocate(this%gather_buffer_3d_init(this%n_f_3d_init, this%i_s_w:this%i_e_w+1, &
+                         this%k_s_w:this%k_e_f, this%j_s_w:this%j_e_w+1))
+                allocate(this%send_nest_types_3d_init(this%n_child_ioservers, this%n_servers))
+                allocate(this%buffer_nest_types_3d_init(this%n_child_ioservers, this%n_servers))
+                allocate(this%nest_types_3d_init_initialized(this%n_child_ioservers))
+                this%nest_types_3d_init_initialized = .false.
+            endif
         endif
         if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
         if (STD_OUT_PE_IO) write(*,*) "IOServer: Setting up outputter..."
@@ -358,6 +391,278 @@ contains
 
     end subroutine setup_nest_types
 
+    ! 2D version of setup_nest_types: no k dimension
+    module subroutine setup_nest_types_2d(this, child_ioserver, send_nest_types, buffer_nest_types)
+        class(ioserver_t), intent(inout) :: this
+        type(ioserver_t), intent(in)    :: child_ioserver
+        type(MPI_Datatype), intent(out) :: send_nest_types(:), buffer_nest_types(:)
+
+        integer :: n, my_rank, i, j, v, mask_size
+        integer :: ierr, i_start, i_end, j_start, j_end, counter
+        integer, allocatable, dimension(:) :: parent_ims, parent_ime, parent_jms, parent_jme
+        integer, allocatable, dimension(:) :: child_isr, child_ier, child_jsr, child_jer, block_lengths, displacements
+        real,    allocatable, dimension(:,:) :: mask, test_write_buffer_2d
+
+        call MPI_Comm_rank(this%IO_Comms, my_rank, ierr)
+
+        allocate(parent_ims(this%n_servers), parent_ime(this%n_servers), parent_jms(this%n_servers), parent_jme(this%n_servers))
+        allocate(child_isr(this%n_servers), child_ier(this%n_servers), child_jsr(this%n_servers), child_jer(this%n_servers))
+
+        parent_ims = 0; parent_ime = 0; parent_jms = 0; parent_jme = 0
+        child_isr = 0; child_ier = 0; child_jsr = 0; child_jer = 0
+
+        parent_ims(my_rank+1) = this%i_s_w; parent_ime(my_rank+1) = this%i_e_w
+        parent_jms(my_rank+1) = this%j_s_w; parent_jme(my_rank+1) = this%j_e_w
+
+        child_isr(my_rank+1) = child_ioserver%i_s_r; child_ier(my_rank+1) = child_ioserver%i_e_r
+        child_jsr(my_rank+1) = child_ioserver%j_s_r; child_jer(my_rank+1) = child_ioserver%j_e_r
+
+        call MPI_Allreduce(MPI_IN_PLACE,child_isr,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,child_ier,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,child_jsr,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,child_jer,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+
+        call MPI_Allreduce(MPI_IN_PLACE,parent_ims,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,parent_ime,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,parent_jms,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,parent_jme,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+
+        allocate(test_write_buffer_2d(this%i_s_w:this%i_e_w+1, this%j_s_w:this%j_e_w+1))
+        test_write_buffer_2d = kEMPT_BUFF
+        do i=1,this%n_children
+            if (this%iewc(i)==this%ide .and. this%jewc(i)==this%jde) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i)+1,this%jswc(i):this%jewc(i)+1) = 1.0
+            else if (this%iewc(i)==this%ide) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i)+1,this%jswc(i):this%jewc(i)) = 1.0
+            else if (this%jewc(i)==this%jde) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)+1) = 1.0
+            else
+                test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)) = 1.0
+            endif
+        enddo
+
+        do n = 1,this%n_servers
+            ! Send type: from gather_buffer_2d (no k dimension)
+            i_start = max(child_isr(n),this%i_s_w)
+            i_end = min(child_ier(n),this%i_e_w)+1
+            j_start = max(child_jsr(n),this%j_s_w)
+            j_end = min(child_jer(n),this%j_e_w)+1
+
+            if (i_end >= i_start .and. j_end >= j_start) then
+                counter = count(test_write_buffer_2d(i_start:i_end,j_start:j_end)/=kEMPT_BUFF)*this%n_f_2d
+
+                if (counter > 0) then
+                    if (allocated(block_lengths)) deallocate(block_lengths)
+                    if (allocated(displacements)) deallocate(displacements)
+                    allocate(block_lengths(counter)); allocate(displacements(counter))
+                    block_lengths = 1
+                    counter = 0
+                    do j = j_start, j_end
+                        do i = i_start, i_end
+                            do v = 1, this%n_f_2d
+                                if (test_write_buffer_2d(i,j) /= kEMPT_BUFF) then
+                                    counter = counter + 1
+                                    displacements(counter) = (v-1) + ((i-this%i_s_w) + &
+                                        (j-this%j_s_w) * (this%i_e_w-this%i_s_w+2)) * this%n_f_2d
+                                endif
+                            enddo
+                        enddo
+                    enddo
+                    call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, send_nest_types(n))
+                else
+                    send_nest_types(n) = MPI_REAL
+                endif
+            else
+                send_nest_types(n) = MPI_REAL
+            endif
+            call MPI_Type_commit(send_nest_types(n))
+
+            ! Buffer type: into child forcing_buffer_2d (no k dimension)
+            i_start = max(parent_ims(n),child_ioserver%i_s_r)
+            i_end = min(parent_ime(n),child_ioserver%i_e_r)+1
+            j_start = max(parent_jms(n),child_ioserver%j_s_r)
+            j_end = min(parent_jme(n),child_ioserver%j_e_r)+1
+
+            if (allocated(mask)) deallocate(mask)
+            allocate(mask(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1))
+            mask_size = (parent_ime(n)-parent_ims(n)+2)*(parent_jme(n)-parent_jms(n)+2)
+            mask = kEMPT_BUFF
+            if (my_rank == n-1) then
+                mask(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1) = &
+                    test_write_buffer_2d(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1)
+            endif
+            call MPI_Bcast(mask, mask_size, MPI_REAL, n-1, this%IO_Comms, ierr)
+
+            if (i_end >= i_start .and. j_end >= j_start) then
+                counter = count(mask(i_start:i_end,j_start:j_end)/=kEMPT_BUFF)*this%n_f_2d
+
+                if (counter > 0) then
+                    if (allocated(block_lengths)) deallocate(block_lengths)
+                    if (allocated(displacements)) deallocate(displacements)
+                    allocate(block_lengths(counter)); allocate(displacements(counter))
+                    block_lengths = 1
+                    counter = 0
+                    do j = j_start, j_end
+                        do i = i_start, i_end
+                            do v = 1, this%n_f_2d
+                                if (mask(i,j) /= kEMPT_BUFF) then
+                                    counter = counter + 1
+                                    displacements(counter) = (v-1) + ((i-child_ioserver%i_s_r) + &
+                                        (j-child_ioserver%j_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+2)) * this%n_f_2d
+                                endif
+                            enddo
+                        enddo
+                    enddo
+                    call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, buffer_nest_types(n))
+                else
+                    buffer_nest_types(n) = MPI_REAL
+                endif
+            else
+                buffer_nest_types(n) = MPI_REAL
+            endif
+            call MPI_Type_commit(buffer_nest_types(n))
+        enddo
+    end subroutine setup_nest_types_2d
+
+    ! 3D init version of setup_nest_types: same as setup_nest_types but uses n_f_3d_init
+    module subroutine setup_nest_types_3d_init(this, child_ioserver, send_nest_types, buffer_nest_types)
+        class(ioserver_t), intent(inout) :: this
+        type(ioserver_t), intent(in)    :: child_ioserver
+        type(MPI_Datatype), intent(out) :: send_nest_types(:), buffer_nest_types(:)
+
+        integer :: n, my_rank, i, j, k, v, mask_size
+        integer :: ierr, i_start, i_end, j_start, j_end, counter
+        integer, allocatable, dimension(:) :: parent_ims, parent_ime, parent_jms, parent_jme
+        integer, allocatable, dimension(:) :: child_isr, child_ier, child_jsr, child_jer, block_lengths, displacements
+        real,    allocatable, dimension(:,:) :: mask, test_write_buffer_2d
+
+        call MPI_Comm_rank(this%IO_Comms, my_rank, ierr)
+
+        allocate(parent_ims(this%n_servers), parent_ime(this%n_servers), parent_jms(this%n_servers), parent_jme(this%n_servers))
+        allocate(child_isr(this%n_servers), child_ier(this%n_servers), child_jsr(this%n_servers), child_jer(this%n_servers))
+
+        parent_ims = 0; parent_ime = 0; parent_jms = 0; parent_jme = 0
+        child_isr = 0; child_ier = 0; child_jsr = 0; child_jer = 0
+
+        parent_ims(my_rank+1) = this%i_s_w; parent_ime(my_rank+1) = this%i_e_w
+        parent_jms(my_rank+1) = this%j_s_w; parent_jme(my_rank+1) = this%j_e_w
+
+        child_isr(my_rank+1) = child_ioserver%i_s_r; child_ier(my_rank+1) = child_ioserver%i_e_r
+        child_jsr(my_rank+1) = child_ioserver%j_s_r; child_jer(my_rank+1) = child_ioserver%j_e_r
+
+        call MPI_Allreduce(MPI_IN_PLACE,child_isr,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,child_ier,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,child_jsr,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,child_jer,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+
+        call MPI_Allreduce(MPI_IN_PLACE,parent_ims,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,parent_ime,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,parent_jms,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,parent_jme,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
+
+        allocate(test_write_buffer_2d(this%i_s_w:this%i_e_w+1, this%j_s_w:this%j_e_w+1))
+        test_write_buffer_2d = kEMPT_BUFF
+        do i=1,this%n_children
+            if (this%iewc(i)==this%ide .and. this%jewc(i)==this%jde) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i)+1,this%jswc(i):this%jewc(i)+1) = 1.0
+            else if (this%iewc(i)==this%ide) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i)+1,this%jswc(i):this%jewc(i)) = 1.0
+            else if (this%jewc(i)==this%jde) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)+1) = 1.0
+            else
+                test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)) = 1.0
+            endif
+        enddo
+
+        do n = 1,this%n_servers
+            i_start = max(child_isr(n),this%i_s_w)
+            i_end = min(child_ier(n),this%i_e_w)+1
+            j_start = max(child_jsr(n),this%j_s_w)
+            j_end = min(child_jer(n),this%j_e_w)+1
+
+            if (i_end >= i_start .and. j_end >= j_start) then
+                counter = count(test_write_buffer_2d(i_start:i_end,j_start:j_end)/=kEMPT_BUFF) &
+                          *this%n_f_3d_init*(this%k_e_f-this%k_s_w+1)
+
+                if (counter > 0) then
+                    if (allocated(block_lengths)) deallocate(block_lengths)
+                    if (allocated(displacements)) deallocate(displacements)
+                    allocate(block_lengths(counter)); allocate(displacements(counter))
+                    block_lengths = 1
+                    counter = 0
+                    do j = j_start, j_end
+                        do k = this%k_s_w, this%k_e_f
+                            do i = i_start, i_end
+                                do v = 1, this%n_f_3d_init
+                                    if (test_write_buffer_2d(i,j) /= kEMPT_BUFF) then
+                                        counter = counter + 1
+                                        displacements(counter) = (v-1) + ((i-this%i_s_w) + (k-this%k_s_w) * (this%i_e_w-this%i_s_w+2) + &
+                                            (j-this%j_s_w) * (this%i_e_w-this%i_s_w+2) * (this%k_e_f-this%k_s_w+1))*this%n_f_3d_init
+                                    endif
+                                enddo
+                            enddo
+                        enddo
+                    enddo
+                    call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, send_nest_types(n))
+                else
+                    send_nest_types(n) = MPI_REAL
+                endif
+            else
+                send_nest_types(n) = MPI_REAL
+            endif
+            call MPI_Type_commit(send_nest_types(n))
+
+            i_start = max(parent_ims(n),child_ioserver%i_s_r)
+            i_end = min(parent_ime(n),child_ioserver%i_e_r)+1
+            j_start = max(parent_jms(n),child_ioserver%j_s_r)
+            j_end = min(parent_jme(n),child_ioserver%j_e_r)+1
+
+            if (allocated(mask)) deallocate(mask)
+            allocate(mask(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1))
+            mask_size = (parent_ime(n)-parent_ims(n)+2)*(parent_jme(n)-parent_jms(n)+2)
+            mask = kEMPT_BUFF
+            if (my_rank == n-1) then
+                mask(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1) = &
+                    test_write_buffer_2d(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1)
+            endif
+            call MPI_Bcast(mask, mask_size, MPI_REAL, n-1, this%IO_Comms, ierr)
+
+            if (i_end >= i_start .and. j_end >= j_start) then
+                counter = count(mask(i_start:i_end,j_start:j_end)/=kEMPT_BUFF) &
+                          *this%n_f_3d_init*(child_ioserver%k_e_r-child_ioserver%k_s_r+1)
+
+                if (counter > 0) then
+                    if (allocated(block_lengths)) deallocate(block_lengths)
+                    if (allocated(displacements)) deallocate(displacements)
+                    allocate(block_lengths(counter)); allocate(displacements(counter))
+                    block_lengths = 1
+                    counter = 0
+                    do j = j_start, j_end
+                        do k = child_ioserver%k_s_r, child_ioserver%k_e_r
+                            do i = i_start, i_end
+                                do v = 1, this%n_f_3d_init
+                                    if (mask(i,j) /= kEMPT_BUFF) then
+                                        counter = counter + 1
+                                        displacements(counter) = (v-1) + ((i-child_ioserver%i_s_r) + &
+                                            (k-child_ioserver%k_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+2) + &
+                                            (j-child_ioserver%j_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+2) * &
+                                            (child_ioserver%k_e_r-child_ioserver%k_s_r+1))*this%n_f_3d_init
+                                    endif
+                                enddo
+                            enddo
+                        enddo
+                    enddo
+                    call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, buffer_nest_types(n))
+                else
+                    buffer_nest_types(n) = MPI_REAL
+                endif
+            else
+                buffer_nest_types(n) = MPI_REAL
+            endif
+            call MPI_Type_commit(buffer_nest_types(n))
+        enddo
+    end subroutine setup_nest_types_3d_init
+
     subroutine test_nest_types(ioserver, child_ioserver, child_indx)
         implicit none
         class(ioserver_t), intent(in) :: ioserver
@@ -573,6 +878,8 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,this%n_w_3d,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,this%n_w_2d,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,this%n_f,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,this%n_f_2d,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,this%n_f_3d_init,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
 
         call MPI_Allreduce(MPI_IN_PLACE,this%n_r,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
 
@@ -602,6 +909,26 @@ contains
             do n = 1,this%n_children
                 call MPI_WIN_SHARED_QUERY(this%nest_win, (n-1), win_size, size_out, tmp_ptr)
                 call C_F_POINTER(tmp_ptr, this%child_gather_buffers(n)%buff, [this%n_f, this%nx_w, this%nz_w, this%ny_w])
+            enddo
+        endif
+
+        if (this%n_f_2d > 0) then
+            allocate(this%child_gather_buffers_2d(this%n_children))
+            win_size = this%n_f_2d*this%nx_w*this%ny_w
+            call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%nest_win_2d)
+            do n = 1,this%n_children
+                call MPI_WIN_SHARED_QUERY(this%nest_win_2d, (n-1), win_size, size_out, tmp_ptr)
+                call C_F_POINTER(tmp_ptr, this%child_gather_buffers_2d(n)%buff, [this%n_f_2d, this%nx_w, this%ny_w])
+            enddo
+        endif
+
+        if (this%n_f_3d_init > 0) then
+            allocate(this%child_gather_buffers_3d_init(this%n_children))
+            win_size = this%n_f_3d_init*this%nx_w*this%nz_w*this%ny_w
+            call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%nest_win_3d_init)
+            do n = 1,this%n_children
+                call MPI_WIN_SHARED_QUERY(this%nest_win_3d_init, (n-1), win_size, size_out, tmp_ptr)
+                call C_F_POINTER(tmp_ptr, this%child_gather_buffers_3d_init(n)%buff, [this%n_f_3d_init, this%nx_w, this%nz_w, this%ny_w])
             enddo
         endif
 
@@ -899,6 +1226,38 @@ contains
 
     end subroutine gather_forcing
 
+    module subroutine gather_forcing_2d(this)
+        class(ioserver_t), intent(inout) :: this
+        integer :: i
+
+        if (this%n_f_2d <= 0) return
+
+        call MPI_Win_Start(this%children_group, 0, this%nest_win_2d)
+
+        do i = 1, this%n_children
+            this%gather_buffer_2d(:, this%iswc(i):this%iewc(i)+1, this%jswc(i):this%jewc(i)+1) = &
+                this%child_gather_buffers_2d(i)%buff(:, 1:(this%iewc(i)-this%iswc(i)+2), 1:(this%jewc(i)-this%jswc(i)+2))
+        enddo
+
+        call MPI_Win_Complete(this%nest_win_2d)
+    end subroutine gather_forcing_2d
+
+    module subroutine gather_forcing_3d_init(this)
+        class(ioserver_t), intent(inout) :: this
+        integer :: i
+
+        if (this%n_f_3d_init <= 0) return
+
+        call MPI_Win_Start(this%children_group, 0, this%nest_win_3d_init)
+
+        do i = 1, this%n_children
+            this%gather_buffer_3d_init(:, this%iswc(i):this%iewc(i)+1, this%k_s_w:this%k_e_f, this%jswc(i):this%jewc(i)+1) = &
+                this%child_gather_buffers_3d_init(i)%buff(:, 1:(this%iewc(i)-this%iswc(i)+2), this%k_s_w:this%k_e_f, 1:(this%jewc(i)-this%jswc(i)+2))
+        enddo
+
+        call MPI_Win_Complete(this%nest_win_3d_init)
+    end subroutine gather_forcing_3d_init
+
     module subroutine distribute_forcing(this, child_ioserver, child_indx)
         class(ioserver_t), intent(inout) :: this
         class(ioserver_t), intent(inout)    :: child_ioserver
@@ -950,7 +1309,90 @@ contains
 
         ! This call will scatter the forcing fields to the ioclients of the nest child
         call child_ioserver%scatter_forcing()
-        ! call child_ioserver%increment_input_time()
+
+        ! One-time init transfer: distribute 2D + extra 3D restart vars, then MPI_Send to child ioclients
+        if (.not. this%initial_nest_done) then
+            block
+                integer :: ci, nx_c, ny_c, nz_c, msg_size_2d, msg_size_3d
+                integer, allocatable :: send_2d_sizes(:), buff_2d_sizes(:), disp_2d(:)
+                integer, allocatable :: send_3d_sizes(:), buff_3d_sizes(:), disp_3d(:)
+
+                ! 2D init distribute
+                if (this%n_f_2d > 0) then
+                    if (.not. this%nest_types_2d_initialized(child_indx)) then
+                        if (allocated(child_ioserver%forcing_buffer_2d)) deallocate(child_ioserver%forcing_buffer_2d)
+                        allocate(child_ioserver%forcing_buffer_2d(this%n_f_2d, &
+                            child_ioserver%i_s_r:child_ioserver%i_e_r+1, child_ioserver%j_s_r:child_ioserver%j_e_r+1))
+                        call this%setup_nest_types_2d(child_ioserver, &
+                            this%send_nest_types_2d(child_indx,:), this%buffer_nest_types_2d(child_indx,:))
+                        this%nest_types_2d_initialized(child_indx) = .true.
+                    endif
+
+                    allocate(send_2d_sizes(this%n_servers), buff_2d_sizes(this%n_servers), disp_2d(this%n_servers))
+                    disp_2d = 0
+                    do n = 1, this%n_servers
+                        call MPI_Type_get_extent(this%send_nest_types_2d(child_indx,n), lowerbound, extent)
+                        send_2d_sizes(n) = merge(1, 0, extent > real_size)
+                        call MPI_Type_get_extent(this%buffer_nest_types_2d(child_indx,n), lowerbound, extent)
+                        buff_2d_sizes(n) = merge(1, 0, extent > real_size)
+                    enddo
+
+                    call MPI_Alltoallw(this%gather_buffer_2d, send_2d_sizes, disp_2d, this%send_nest_types_2d(child_indx,:), &
+                        child_ioserver%forcing_buffer_2d, buff_2d_sizes, disp_2d, this%buffer_nest_types_2d(child_indx,:), this%IO_Comms)
+                    deallocate(send_2d_sizes, buff_2d_sizes, disp_2d)
+
+                    ! MPI_Send 2D data to each child ioclient
+                    do ci = 1, child_ioserver%n_children
+                        nx_c = child_ioserver%ierc(ci) - child_ioserver%isrc(ci) + 2
+                        ny_c = child_ioserver%jerc(ci) - child_ioserver%jsrc(ci) + 2
+                        msg_size_2d = this%n_f_2d * nx_c * ny_c
+                        call MPI_Send(child_ioserver%forcing_buffer_2d(:, &
+                            child_ioserver%isrc(ci):child_ioserver%ierc(ci)+1, &
+                            child_ioserver%jsrc(ci):child_ioserver%jerc(ci)+1), &
+                            msg_size_2d, MPI_REAL, ci-1, 98, child_ioserver%client_comms, ierr)
+                    enddo
+                endif
+
+                ! 3D init distribute
+                if (this%n_f_3d_init > 0) then
+                    if (.not. this%nest_types_3d_init_initialized(child_indx)) then
+                        if (allocated(child_ioserver%forcing_buffer_3d_init)) deallocate(child_ioserver%forcing_buffer_3d_init)
+                        allocate(child_ioserver%forcing_buffer_3d_init(this%n_f_3d_init, &
+                            child_ioserver%i_s_r:child_ioserver%i_e_r+1, child_ioserver%k_s_r:child_ioserver%k_e_r, &
+                            child_ioserver%j_s_r:child_ioserver%j_e_r+1))
+                        call this%setup_nest_types_3d_init(child_ioserver, &
+                            this%send_nest_types_3d_init(child_indx,:), this%buffer_nest_types_3d_init(child_indx,:))
+                        this%nest_types_3d_init_initialized(child_indx) = .true.
+                    endif
+
+                    allocate(send_3d_sizes(this%n_servers), buff_3d_sizes(this%n_servers), disp_3d(this%n_servers))
+                    disp_3d = 0
+                    do n = 1, this%n_servers
+                        call MPI_Type_get_extent(this%send_nest_types_3d_init(child_indx,n), lowerbound, extent)
+                        send_3d_sizes(n) = merge(1, 0, extent > real_size)
+                        call MPI_Type_get_extent(this%buffer_nest_types_3d_init(child_indx,n), lowerbound, extent)
+                        buff_3d_sizes(n) = merge(1, 0, extent > real_size)
+                    enddo
+
+                    call MPI_Alltoallw(this%gather_buffer_3d_init, send_3d_sizes, disp_3d, this%send_nest_types_3d_init(child_indx,:), &
+                        child_ioserver%forcing_buffer_3d_init, buff_3d_sizes, disp_3d, this%buffer_nest_types_3d_init(child_indx,:), this%IO_Comms)
+                    deallocate(send_3d_sizes, buff_3d_sizes, disp_3d)
+
+                    ! MPI_Send 3D init data to each child ioclient
+                    do ci = 1, child_ioserver%n_children
+                        nx_c = child_ioserver%ierc(ci) - child_ioserver%isrc(ci) + 2
+                        nz_c = child_ioserver%kerc(ci) - child_ioserver%ksrc(ci) + 1
+                        ny_c = child_ioserver%jerc(ci) - child_ioserver%jsrc(ci) + 2
+                        msg_size_3d = this%n_f_3d_init * nx_c * nz_c * ny_c
+                        call MPI_Send(child_ioserver%forcing_buffer_3d_init(:, &
+                            child_ioserver%isrc(ci):child_ioserver%ierc(ci)+1, &
+                            child_ioserver%ksrc(ci):child_ioserver%kerc(ci), &
+                            child_ioserver%jsrc(ci):child_ioserver%jerc(ci)+1), &
+                            msg_size_3d, MPI_REAL, ci-1, 99, child_ioserver%client_comms, ierr)
+                    enddo
+                endif
+            end block
+        endif
     end subroutine
 
     module subroutine scatter_forcing(this)

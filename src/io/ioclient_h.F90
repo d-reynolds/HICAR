@@ -60,16 +60,26 @@ module ioclient_interface
       logical :: nest_updated = .False.
 
       real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer_3d, forcing_buffer
-      real, dimension(:,:,:),   pointer :: write_buffer_2d
-      type(MPI_Win) :: write_win_3d, write_win_2d, read_win, forcing_win
+      real, dimension(:,:,:),   pointer :: write_buffer_2d, forcing_buffer_2d
+      real, dimension(:,:,:,:), pointer :: forcing_buffer_3d_init
+      type(MPI_Win) :: write_win_3d, write_win_2d, read_win, forcing_win, forcing_win_2d
+      type(MPI_Win) :: forcing_win_3d_init
       type(MPI_Group) :: parent_group
       character(len=kMAX_NAME_LENGTH) :: vars_for_nest(kMAX_STORAGE_VARS)
+
+      ! Init-only nest transfer: 2D + extra 3D restart vars (not in atmospheric forcing)
+      character(len=kMAX_NAME_LENGTH) :: vars_for_nest_2d(kMAX_STORAGE_VARS)
+      character(len=kMAX_NAME_LENGTH) :: vars_for_nest_3d_init(kMAX_STORAGE_VARS)
+      character(len=kMAX_NAME_LENGTH) :: vars_for_nest_init_2d(kMAX_STORAGE_VARS)
+      character(len=kMAX_NAME_LENGTH) :: vars_for_nest_init_3d(kMAX_STORAGE_VARS)
+      logical :: initial_nest_done = .false.
 
   contains
 
       procedure, public  :: push
       procedure, public  :: receive
       procedure, public  :: receive_rst
+      procedure, public  :: receive_nest_init
       procedure, public  :: update_nest
       procedure, public  :: init => init_ioclient
   end type
@@ -121,6 +131,18 @@ module ioclient_interface
           type(options_t),  intent(in)     :: options
 
       end subroutine
+
+        !>----------------------------------------------------------
+        !! Receive initial 2D+3D restart state from parent nest
+        !! (one-time transfer at child wake-up)
+        !!
+        !!----------------------------------------------------------
+        module subroutine receive_nest_init(this, domain, forcing)
+            implicit none
+            class(ioclient_t), intent(inout) :: this
+            type(domain_t),    intent(inout) :: domain
+            type(boundary_t),  intent(in)    :: forcing
+        end subroutine
 
         !>----------------------------------------------------------
         !! Update the nest

@@ -332,7 +332,14 @@ contains
         call boundary%update_computed_vars(options)
 
         if (STD_OUT_PE) write(*,*) "Initializing forcing interpolation"
-        call domain%get_initial_conditions(boundary, options)    
+        call domain%get_initial_conditions(boundary, options)
+
+        ! Receive full restart state from parent nest (one-time, with geo-interpolation)
+        if (options%general%parent_nest > 0) then
+            if (STD_OUT_PE) write(*,*) "Receiving 2D+3D restart state from parent nest"
+            if (STD_OUT_PE) flush(output_unit)
+            call ioclient%receive_nest_init(domain, boundary)
+        endif
 
         if (options%restart%restart) then
             if (STD_OUT_PE) write(*,*) "Reading restart data"
