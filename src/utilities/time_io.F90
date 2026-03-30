@@ -100,12 +100,49 @@ contains
 
     end function time_gain_from_units
 
+    !> Validate that a time units string has the expected YYYY-MM-DD format
+    !! with zero-padded month and day. Prints a helpful error if not.
+    subroutine validate_time_units_format(units)
+        implicit none
+        character(len=*), intent(in) :: units
+        integer :: since_loc, date_start
+        character(len=10) :: date_str
+
+        since_loc = index(units, "since")
+        if (since_loc == 0) then
+            write(*,*) "ERROR: time units attribute missing 'since' keyword: ", trim(units)
+            stop "Error: malformed time units attribute"
+        end if
+
+        date_start = since_loc + index(units(since_loc:), " ")
+        if (date_start <= since_loc .or. date_start + 9 > len(units)) then
+            write(*,*) "ERROR: cannot find date in time units: ", trim(units)
+            stop "Error: malformed time units attribute"
+        end if
+
+        date_str = units(date_start:date_start+9)
+
+        ! Check for YYYY-MM-DD format (hyphens at positions 5 and 8)
+        if (date_str(5:5) /= '-' .or. date_str(8:8) /= '-') then
+            write(*,*) "ERROR: time units date is not in YYYY-MM-DD format: '", trim(date_str), "'"
+            write(*,*) "  Full units string: ", trim(units)
+            write(*,*) "  Expected format: '<units> since YYYY-MM-DD HH:MM:SS'"
+            write(*,*) "  This can happen when tools like CDO write non-zero-padded dates"
+            write(*,*) "  (e.g. '2017-2-14' instead of '2017-02-14')."
+            write(*,*) "  Fix with: ncatted -a units,time,o,c,'hours since YYYY-MM-DD HH:MM:SS' file.nc"
+            stop "Error: time units date must use zero-padded YYYY-MM-DD format"
+        end if
+
+    end subroutine validate_time_units_format
+
     function year_from_units(units) result(year)
         implicit none
         character(len=*), intent(in) :: units
         integer :: year
 
         integer :: since_loc, year_loc
+
+        call validate_time_units_format(units)
 
         since_loc = index(units,"since")
 
@@ -123,6 +160,8 @@ contains
 
         integer :: since_loc, month_loc
 
+        call validate_time_units_format(units)
+
         since_loc = index(units,"since")
 
         month_loc = index(units(since_loc:)," ") + 5
@@ -138,6 +177,8 @@ contains
         integer :: day
 
         integer :: since_loc, day_loc
+
+        call validate_time_units_format(units)
 
         since_loc = index(units,"since")
 
@@ -156,6 +197,8 @@ contains
 
         integer :: since_loc, hour_loc
         if (present(error)) error = 0
+
+        call validate_time_units_format(units)
 
         since_loc = index(units,"since")
 
