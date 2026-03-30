@@ -60,9 +60,9 @@ module land_surface
     ! also avoids adding LOTS of LSM variables to the main domain datastrucurt
     real,allocatable, dimension(:,:)    :: SMSTAV,SFCRUNOFF,UDRUNOFF,                           &
                                            SNOWC, ACSNOW, ACSNOM,           &
-                                           QSFC, SR, VEGFRAC, windspd,  &
-                                           nmp_snow, nmp_snowh, land_mask
-    real, allocatable, dimension(:,:,:)  :: nmp_snow_t
+                                           QSFC, SR, VEGFRAC, windspd,  nmp_albedo, &
+                                           nmp_snow, nmp_snowh, nmp_tskin, land_mask
+    real, allocatable, dimension(:,:,:)  :: nmp_snow_t, nmp_soil_t
     integer, allocatable, dimension(:,:) :: nmp_snow_nlayers
     real,allocatable, dimension(:)      :: DZs
     real, parameter :: XICE_THRESHOLD = 1.0
@@ -766,6 +766,7 @@ contains
                 lsm_last_precip => domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
                 lsm_last_snow => domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d, &
                 skin_temperature => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                soil_temperature => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
                 soil_totalmoisture => domain%vars_2d(domain%var_indx(kVARS%soil_totalmoisture)%v)%data_2d, &
                 albedo_dom => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
                 soil_water_content => domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d, &
@@ -805,7 +806,7 @@ contains
                 end do
 
                 if (options%physics%snowmodel>0) then
-                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_snow_nlayers, nmp_snow_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
+                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
                     do j = jms, jme
                         do i = ims, ime
                             SR(i,j) = 0.0 ! This, in combination with setting OPT_SNF to 4 in the LSM_init, will turn off snowfall partitioning in NoahMP
@@ -814,23 +815,35 @@ contains
                             nmp_snowh(i,j) = 0.0
                             nmp_snow(i,j) = 0.0
                             nmp_snow_nlayers(i,j) = 0
+                            nmp_albedo(i,j) = albedo_dom(i,j)
+                            nmp_tskin(i,j) = skin_temperature(i,j)
                             !$acc loop seq
                             do k=1,num_snow_layers
                                 nmp_snow_t(i,k,j) = 273.15
                             enddo
+                            !$acc loop seq
+                            do k=1,num_soil_layers
+                                nmp_soil_t(i,k,j) = soil_temperature(i,k,j)
+                            enddo
                         enddo
                     enddo
                 else
-                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_snow_nlayers, nmp_snow_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
+                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
                     do j = jms, jme
                         do i = ims, ime
                             SR(i,j) = current_snow(i,j)/(current_precipitation(i,j)+epsilon)
                             nmp_snowh(i,j) = snow_height(i,j)
                             nmp_snow(i,j) = snow_water_equivalent(i,j)
                             nmp_snow_nlayers(i,j) = snow_nlayers(i,j)
+                            nmp_albedo(i,j) = albedo_dom(i,j)
+                            nmp_tskin(i,j) = skin_temperature(i,j)
                             !$acc loop seq
                             do k=1,num_snow_layers
                                 nmp_snow_t(i,k,j) = snow_temperature(i,k,j)
+                            enddo
+                            !$acc loop seq
+                            do k=1,num_soil_layers
+                                nmp_soil_t(i,k,j) = soil_temperature(i,k,j)
                             enddo
                         end do
                     end do
@@ -974,7 +987,7 @@ contains
                             domain%vars_2d(domain%var_indx(kVARS%irr_frac_sprinkler)%v)%data_2d,        &  ! only used if iopt_irr > 0
                             domain%vars_2d(domain%var_indx(kVARS%irr_frac_micro)%v)%data_2d,            &  ! only used if iopt_irr > 0
                             domain%vars_2d(domain%var_indx(kVARS%irr_frac_flood)%v)%data_2d,            &  ! only used if iopt_irr > 0
-                            domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,          &  ! TSK
+                            nmp_tskin,          &  ! TSK
                             domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d,             &  !  HFX
                             domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d,                       &
                             domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d,               &  ! LH
@@ -982,10 +995,10 @@ contains
                             SMSTAV,                                   &
                             domain%vars_2d(domain%var_indx(kVARS%soil_totalmoisture)%v)%data_2d,        &
                             SFCRUNOFF, UDRUNOFF,                      &
-                            albedo_dom, SNOWC,                            &
+                            nmp_albedo, SNOWC,                            &
                             domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d,        &
                             domain%vars_3d(domain%var_indx(kVARS%soil_water_content_liq)%v)%data_3d,    &
-                            domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d,          &
+                            nmp_soil_t,          &
                             nmp_snow,                                 &
                             nmp_snowh,                                &
                             domain%vars_2d(domain%var_indx(kVARS%canopy_water)%v)%data_2d,              &
@@ -1132,20 +1145,28 @@ contains
                     end do
                 end do
 
-                if ( .not.(options%physics%snowmodel>0)) then
-                    !$acc parallel loop gang vector collapse(2) present(nmp_snow, nmp_snowh, nmp_snow_nlayers, nmp_snow_t, snow_height, snow_water_equivalent, snow_nlayers, snow_temperature)
-                    do j = jts, jte
-                        do i = its, ite
+                !$acc parallel loop gang vector collapse(2) present(nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, snow_height, snow_water_equivalent, snow_nlayers, snow_temperature)
+                do j = jts, jte
+                    do i = its, ite
+                        if (options%physics%snowmodel==0) then
                             snow_height(i,j) = nmp_snowh(i,j)
                             snow_water_equivalent(i,j) = nmp_snow(i,j)
                             snow_nlayers(i,j) = nmp_snow_nlayers(i,j)
                             !$acc loop
-                            do k = 1, 3
+                            do k = 1, num_snow_layers
                                 snow_temperature(i,k,j) = nmp_snow_t(i,k,j)
                             end do
-                        end do
+                        endif
+                        if (options%physics%snowmodel==0 .or. snow_height(i,j)==0.0) then
+                            skin_temperature(i,j) = nmp_tskin(i,j)
+                            albedo_dom(i,j) = nmp_albedo(i,j)
+                            !$acc loop
+                            do k = 1, num_soil_layers
+                                soil_temperature(i,k,j) = nmp_soil_t(i,k,j)
+                            end do
+                        endif
                     end do
-                endif
+                end do
 
                 ! where(domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d > options%lsm%max_swe) domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = options%lsm%max_swe
             endif !end if noahmp
@@ -1265,7 +1286,7 @@ contains
         ITIMESTEP=1
 
         if (allocated(SMSTAV)) then
-            !$acc exit data delete(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_snow_nlayers, nmp_snow_t)
+            !$acc exit data delete(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t)
             deallocate(SMSTAV)
         endif
         if (allocated(SFCRUNOFF)) deallocate(SFCRUNOFF)
@@ -1277,8 +1298,11 @@ contains
         if (allocated(VEGFRAC)) deallocate(VEGFRAC)
         if (allocated(nmp_snow)) deallocate(nmp_snow)
         if (allocated(nmp_snowh)) deallocate(nmp_snowh)
+        if (allocated(nmp_albedo)) deallocate(nmp_albedo)
         if (allocated(nmp_snow_nlayers)) deallocate(nmp_snow_nlayers)
+        if (allocated(nmp_tskin)) deallocate(nmp_tskin)
         if (allocated(nmp_snow_t)) deallocate(nmp_snow_t)
+        if (allocated(nmp_soil_t)) deallocate(nmp_soil_t)
         if (allocated(DZs)) deallocate(DZs)
 
         allocate(SMSTAV(ims:ime,jms:jme),source=0.5)!average soil moisture available for transp (between SMCWLT and SMCMAX)
@@ -1294,14 +1318,17 @@ contains
 
         allocate(nmp_snow(ims:ime,jms:jme))
         allocate(nmp_snowh(ims:ime,jms:jme))
+        allocate(nmp_albedo(ims:ime,jms:jme))
         allocate(nmp_snow_nlayers(ims:ime,jms:jme))
+        allocate(nmp_tskin(ims:ime,jms:jme))
         allocate(nmp_snow_t(ims:ime,1:num_snow_layers,jms:jme), source=273.15)
+        allocate(nmp_soil_t(ims:ime,1:num_soil_layers,jms:jme), source=273.15)
         allocate(DZs(num_soil_layers))
 
         DZs = [0.1,0.2,0.4,0.8]
 
 
-        !$acc enter data copyin(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_snow_nlayers, nmp_snow_t)
+        !$acc enter data copyin(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t)
 
     end subroutine allocate_noah_data
 

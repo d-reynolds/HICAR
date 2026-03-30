@@ -1973,6 +1973,102 @@ contains
                 dimensions = ["Y", "X"]
                 units = "m"
                 group = "Domain"
+            case ("snowpack_nlayers_var")
+                description = "Name of the number of snow layers variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_deposition_var")
+                description = "Name of the snow deposition date variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfi_var")
+                description = "Name of the snow void fraction ice variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfw_var")
+                description = "Name of the snow void fraction water variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfa_var")
+                description = "Name of the snow void fraction air variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfs_var")
+                description = "Name of the snow void fraction solid variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfwp_var")
+                description = "Name of the snow void fraction water preferential flow variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_ds_var")
+                description = "Name of the snow layer thickness variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                units = "mm"
+                group = "Domain"
+            case ("snowpack_tsnow_var")
+                description = "Name of the snow temperature variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                units = "K"
+                group = "Domain"
+            case ("snowpack_tsnow_i_var")
+                description = "Name of the snow interface temperature variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                units = "K"
+                group = "Domain"
+            case ("snowpack_rg_var")
+                description = "Name of the snow grain radius variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                units = "mm"
+                group = "Domain"
+            case ("snowpack_rb_var")
+                description = "Name of the snow bond radius variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                units = "mm"
+                group = "Domain"
+            case ("snowpack_dd_var")
+                description = "Name of the snow dendricity variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                units = "kg/m^3"
+                group = "Domain"
+            case ("snowpack_sp_var")
+                description = "Name of the snow sphericity variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_mk_var")
+                description = "Name of the snow marker variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_cdot_var")
+                description = "Name of the snow cdot variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_snow_stress_var")
+                description = "Name of the snow stress variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_n3_var")
+                description = "Name of the snow coordination variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
             ! --------------------------------------
             ! --------------------------------------
             ! Forcing namelist variables
@@ -3570,7 +3666,7 @@ contains
                     "'MO_MICHLMAYR' = Stearns and Weidner (1993) modified by Michlmayr (2008)"
                 default = "MO_HOLTSLAG"
                 if (present(val_keys)) then
-                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "MO_HOLTSLAG", trim(str(kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG)), "MO_MICHLMAYR", trim(str(kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR))]
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "NEUTRAL", trim(str(kSNOWPACK_ATMOS_STAB_NEUTRAL)), "MO_HOLTSLAG", trim(str(kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG)), "MO_MICHLMAYR", trim(str(kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR))]
                 endif
                 group = "SM_Parameters"
             case("snowpack_albedo_parameterization")
@@ -3579,7 +3675,7 @@ contains
                     "'SCHMUCKI_OGS' = from SCHMUCKI_ALLX32 regression with optical grain size"
                 default = "LEHNING_2"
                 if (present(val_keys)) then
-                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "LEHNING_2", trim(str(kSNOWPACK_ALBEDO_PARAM_LEHNING_2)), "SCHMUCKI_OGS", trim(str(kSNOWPACK_ALBEDO_PARAM_SCHMUCKI_OGS))]
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "LEHNING_2", trim(str(kSNOWPACK_ALBEDO_PARAM_LEHNING_2)), "SCHMUCKI", trim(str(kSNOWPACK_ALBEDO_PARAM_SCHMUCKI))]
                 endif
                 group = "SM_Parameters"
             case("snowpack_enable_vapour_transport")

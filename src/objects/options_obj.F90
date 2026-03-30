@@ -1074,7 +1074,13 @@ contains
                                         snowh_var, soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var, soil_deept_var,           &
                                         vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
                                         sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, &
-                                        aspect_angle_var, shd_var, surface_temp_var  !!MJ added
+                                        aspect_angle_var, shd_var, surface_temp_var, &  !!MJ added
+                                        snowpack_nlayers_var, snowpack_deposition_var, &
+                                        snowpack_vfi_var, snowpack_vfw_var, snowpack_vfa_var, &
+                                        snowpack_vfs_var, snowpack_vfwp_var, snowpack_ds_var, &
+                                        snowpack_tsnow_var, snowpack_tsnow_i_var, &
+                                        snowpack_rg_var, snowpack_rb_var, snowpack_dd_var, snowpack_sp_var, &
+                                        snowpack_mk_var, snowpack_cdot_var, snowpack_snow_stress_var, snowpack_n3_var
 
         namelist /domain/ dx, nz, longitude_system, init_conditions_file, &
                             landvar,lakedepthvar, snowh_var, agl_cap, use_agl_height, &
@@ -1083,6 +1089,12 @@ contains
                             vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
                             sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, & !! MJ added
                             surface_temp_var, init_surf_temp, init_sst, &
+                            snowpack_nlayers_var, snowpack_deposition_var, &
+                            snowpack_vfi_var, snowpack_vfw_var, snowpack_vfa_var, &
+                            snowpack_vfs_var, snowpack_vfwp_var, snowpack_ds_var, &
+                            snowpack_tsnow_var, snowpack_tsnow_i_var, &
+                            snowpack_rg_var, snowpack_rb_var, snowpack_dd_var, snowpack_sp_var, &
+                            snowpack_mk_var, snowpack_cdot_var, snowpack_snow_stress_var, snowpack_n3_var, &
                             dz_levels, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n
         CHARACTER(LEN=200) :: error_msg
 
@@ -1141,6 +1153,25 @@ contains
         call set_nml_var_default(slope_angle_var, 'slope_angle_var', print_info, gennml)
         call set_nml_var_default(aspect_angle_var, 'aspect_angle_var', print_info, gennml)
         call set_nml_var_default(shd_var, 'shd_var', print_info, gennml)
+
+        call set_nml_var_default(snowpack_nlayers_var, 'snowpack_nlayers_var', print_info, gennml)
+        call set_nml_var_default(snowpack_deposition_var, 'snowpack_deposition_var', print_info, gennml)
+        call set_nml_var_default(snowpack_vfi_var, 'snowpack_vfi_var', print_info, gennml)
+        call set_nml_var_default(snowpack_vfw_var, 'snowpack_vfw_var', print_info, gennml)
+        call set_nml_var_default(snowpack_vfa_var, 'snowpack_vfa_var', print_info, gennml)
+        call set_nml_var_default(snowpack_vfs_var, 'snowpack_vfs_var', print_info, gennml)
+        call set_nml_var_default(snowpack_vfwp_var, 'snowpack_vfwp_var', print_info, gennml)
+        call set_nml_var_default(snowpack_ds_var, 'snowpack_ds_var', print_info, gennml)
+        call set_nml_var_default(snowpack_tsnow_var, 'snowpack_tsnow_var', print_info, gennml)
+        call set_nml_var_default(snowpack_tsnow_i_var, 'snowpack_tsnow_i_var', print_info, gennml)
+        call set_nml_var_default(snowpack_rg_var, 'snowpack_rg_var', print_info, gennml)
+        call set_nml_var_default(snowpack_rb_var, 'snowpack_rb_var', print_info, gennml)
+        call set_nml_var_default(snowpack_dd_var, 'snowpack_dd_var', print_info, gennml)
+        call set_nml_var_default(snowpack_sp_var, 'snowpack_sp_var', print_info, gennml)
+        call set_nml_var_default(snowpack_mk_var, 'snowpack_mk_var', print_info, gennml)
+        call set_nml_var_default(snowpack_cdot_var, 'snowpack_cdot_var', print_info, gennml)
+        call set_nml_var_default(snowpack_snow_stress_var, 'snowpack_snow_stress_var', print_info, gennml)
+        call set_nml_var_default(snowpack_n3_var, 'snowpack_n3_var', print_info, gennml)
 
         call set_nml_var_default(init_surf_temp, 'init_surf_temp', print_info, gennml)
         call set_nml_var_default(init_sst, 'init_sst', print_info, gennml)
@@ -1239,6 +1270,25 @@ contains
         call set_nml_var(domain_options%slope_angle_var, slope_angle_var(n_indx), 'slope_angle_var',domain_options, slope_angle_var(1))
         call set_nml_var(domain_options%aspect_angle_var, aspect_angle_var(n_indx), 'aspect_angle_var',domain_options, aspect_angle_var(1))
         call set_nml_var(domain_options%shd_var, shd_var(n_indx), 'shd_var',domain_options, shd_var(1))
+
+        call set_nml_var(domain_options%snowpack_nlayers_var, snowpack_nlayers_var(n_indx), 'snowpack_nlayers_var',domain_options, snowpack_nlayers_var(1))
+        call set_nml_var(domain_options%snowpack_deposition_var, snowpack_deposition_var(n_indx), 'snowpack_deposition_var',domain_options, snowpack_deposition_var(1))
+        call set_nml_var(domain_options%snowpack_vfi_var, snowpack_vfi_var(n_indx), 'snowpack_vfi_var',domain_options, snowpack_vfi_var(1))
+        call set_nml_var(domain_options%snowpack_vfw_var, snowpack_vfw_var(n_indx), 'snowpack_vfw_var',domain_options, snowpack_vfw_var(1))
+        call set_nml_var(domain_options%snowpack_vfa_var, snowpack_vfa_var(n_indx), 'snowpack_vfa_var',domain_options, snowpack_vfa_var(1))
+        call set_nml_var(domain_options%snowpack_vfs_var, snowpack_vfs_var(n_indx), 'snowpack_vfs_var',domain_options, snowpack_vfs_var(1))
+        call set_nml_var(domain_options%snowpack_vfwp_var, snowpack_vfwp_var(n_indx), 'snowpack_vfwp_var',domain_options, snowpack_vfwp_var(1))
+        call set_nml_var(domain_options%snowpack_ds_var, snowpack_ds_var(n_indx), 'snowpack_ds_var',domain_options, snowpack_ds_var(1))
+        call set_nml_var(domain_options%snowpack_tsnow_var, snowpack_tsnow_var(n_indx), 'snowpack_tsnow_var',domain_options, snowpack_tsnow_var(1))
+        call set_nml_var(domain_options%snowpack_tsnow_i_var, snowpack_tsnow_i_var(n_indx), 'snowpack_tsnow_i_var',domain_options, snowpack_tsnow_i_var(1))
+        call set_nml_var(domain_options%snowpack_rg_var, snowpack_rg_var(n_indx), 'snowpack_rg_var',domain_options, snowpack_rg_var(1))
+        call set_nml_var(domain_options%snowpack_rb_var, snowpack_rb_var(n_indx), 'snowpack_rb_var',domain_options, snowpack_rb_var(1))
+        call set_nml_var(domain_options%snowpack_dd_var, snowpack_dd_var(n_indx), 'snowpack_dd_var',domain_options, snowpack_dd_var(1))
+        call set_nml_var(domain_options%snowpack_sp_var, snowpack_sp_var(n_indx), 'snowpack_sp_var',domain_options, snowpack_sp_var(1))
+        call set_nml_var(domain_options%snowpack_mk_var, snowpack_mk_var(n_indx), 'snowpack_mk_var',domain_options, snowpack_mk_var(1))
+        call set_nml_var(domain_options%snowpack_cdot_var, snowpack_cdot_var(n_indx), 'snowpack_cdot_var',domain_options, snowpack_cdot_var(1))
+        call set_nml_var(domain_options%snowpack_snow_stress_var, snowpack_snow_stress_var(n_indx), 'snowpack_snow_stress_var',domain_options, snowpack_snow_stress_var(1))
+        call set_nml_var(domain_options%snowpack_n3_var, snowpack_n3_var(n_indx), 'snowpack_n3_var',domain_options, snowpack_n3_var(1))
 
         call set_nml_var(domain_options%init_surf_temp, init_surf_temp(n_indx), 'init_surf_temp', init_surf_temp(1))
         call set_nml_var(domain_options%init_sst, init_sst(n_indx), 'init_sst', init_sst(1))

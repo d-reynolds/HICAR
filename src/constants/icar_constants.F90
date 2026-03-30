@@ -406,7 +406,7 @@ module icar_constants
         integer :: mk
         integer :: mass_hoar
         integer :: CDot
-        integer :: metamo
+        integer :: snow_stress
         integer :: N3              ! Coordination number (dimensionless)
 
         ! Blowing snow drift variables (CRYOWRF-style)
@@ -567,9 +567,10 @@ module icar_constants
     ! SNOWPACK constants
     integer, parameter :: kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG = 1
     integer, parameter :: kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR = 2
+    integer, parameter :: kSNOWPACK_ATMOS_STAB_NEUTRAL = 0
 
     integer, parameter :: kSNOWPACK_ALBEDO_PARAM_LEHNING_2 = 1
-    integer, parameter :: kSNOWPACK_ALBEDO_PARAM_SCHMUCKI_OGS = 2
+    integer, parameter :: kSNOWPACK_ALBEDO_PARAM_SCHMUCKI = 2
 
     integer, parameter :: kSNOWPACK_VARIANT_ANTARCTICA = 1
     integer, parameter :: kSNOWPACK_VARIANT_ALPS      = 2

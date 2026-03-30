@@ -432,6 +432,14 @@ module options_types
 
         character(len=kMAX_NAME_LENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var !!MJ added
 
+        ! SNOWPACK initial state variable names from domain file
+        character(len=kMAX_NAME_LENGTH) :: snowpack_nlayers_var, snowpack_deposition_var, &
+                                        snowpack_vfi_var, snowpack_vfw_var, snowpack_vfa_var, &
+                                        snowpack_vfs_var, snowpack_vfwp_var, snowpack_ds_var, &
+                                        snowpack_tsnow_var, snowpack_tsnow_i_var, &
+                                        snowpack_rg_var, snowpack_rb_var, snowpack_dd_var, snowpack_sp_var, &
+                                        snowpack_mk_var, snowpack_cdot_var, snowpack_snow_stress_var, snowpack_n3_var
+
         ! Initial surface temperature options
         real    :: init_surf_temp               ! fallback initial surface temperature [K] (default 280)
         real    :: init_sst                     ! initial sea surface temperature [K] (default 280)

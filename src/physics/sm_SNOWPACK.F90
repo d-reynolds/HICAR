@@ -1,13 +1,13 @@
 !!
 !!----------------------------------------------------------
 module module_sm_SNOWPACKdrv
-    use time_object,         only : Time_type
-    use mod_wrf_constants,   only : piconst, XLS
     use icar_constants
-    use iso_fortran_env,       only : output_unit
     use options_interface,   only : options_t
-    use variable_interface,  only : variable_t
+    use meta_data_interface,  only : meta_data_t
     use domain_interface,    only : domain_t
+    use io_routines, only : io_read, io_var_reversed
+    use output_metadata,            only : get_varmeta
+    use netcdf
     use iso_c_binding
     use meteoio_mod
     use snowpack_mod
@@ -16,6 +16,7 @@ module module_sm_SNOWPACKdrv
     use mod_atm_utilities, only : relative_humidity
     use string, only : str, to_upper
     use omp_lib, only : omp_get_wtime
+    use mod_wrf_constants, only: STBOLT
 
     implicit none
 
@@ -76,8 +77,11 @@ module module_sm_SNOWPACKdrv
         cfg = config()
 
         ! Snowpack section (from CRYOWRF tests/io.ini)
-        call cfg%add_key("CALCULATION_STEP_LENGTH", "Snowpack", trim(str(options%lsm%update_interval)))
-        call cfg%add_key("METEO_STEP_LENGTH", "Snowpack", trim(str(options%lsm%update_interval)))
+        ! update_interval is in SECONDS (e.g. 300s = 5 min).
+        ! CALCULATION_STEP_LENGTH is in MINUTES for SNOWPACK.
+        ! Previously passed raw seconds (300) as minutes → 18000s timestep bug.
+        call cfg%add_key("CALCULATION_STEP_LENGTH", "Snowpack", trim(str(int(options%lsm%update_interval / 60.0))))
+        call cfg%add_key("METEO_STEP_LENGTH", "Snowpack", trim(str(int(options%lsm%update_interval / 60.0))))
         call cfg%add_key("HEIGHT_OF_WIND_VALUE", "Snowpack", "12.0")
         call cfg%add_key("HEIGHT_OF_METEO_VALUES", "Snowpack", "12.0")
         call cfg%add_key("ENFORCE_MEASURED_SNOW_HEIGHTS", "Snowpack", "false")
@@ -169,39 +173,35 @@ module module_sm_SNOWPACKdrv
                 stations(i,j) = snow_station(.false., .false.)
 
                 call snowpack_station_resize(stations(i,j)%cxxmem%addr, 0_c_size_t)
+
+                ! Station-level properties (must be set after init)
+                call stations(i,j)%set_cos_sl(real(cos(domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d(i,j)),kind=8))       ! cos(slope angle) - flat ground
+                call stations(i,j)%set_sector(0_c_size_t)  ! Slope sector
+                call stations(i,j)%set_altitude(real(domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d(i,j), kind=8))
+                call stations(i,j)%set_p_albedo(0.2d0)     ! Parameterized albedo (bare soil)
+                call stations(i,j)%set_albedo(real(domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d(i,j), kind=8))       ! Surface albedo
+                call stations(i,j)%set_soil_alb(0.2d0)     ! Soil albedo - typical bare soil
+                call stations(i,j)%set_soil_emissivity(0.98d0) ! Soil emissivity
+                call stations(i,j)%set_bare_soil_z0(0.002d0)   ! Bare soil roughness [m]
+                call stations(i,j)%set_soil_node(0_c_size_t)   ! No soil layers
+
             enddo
         enddo
 
-        ! TODO: temporary auto-init snowpack to 15cm everywhere for testing
-        if (.not.(options%restart%restart .or. context_change)) then
-            ! ---------------------------- Setup 2D grid of snow stations ----------------------------
-            do j = jts, jte
-                do i = its, ite
-                    
-                    ! cycle if this is a water pixel
-                    if (.not.run_snowpack_flag(i,j)) cycle
-                    ! Station-level properties (must be set after init)
-                    call stations(i,j)%set_cos_sl(real(cos(domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d(i,j)),kind=8))       ! cos(slope angle) - flat ground
-                    call stations(i,j)%set_sector(0_c_size_t)  ! Slope sector
-                    call stations(i,j)%set_p_albedo(0.2d0)     ! Parameterized albedo (bare soil)
-                    call stations(i,j)%set_albedo(0.2d0)       ! Surface albedo
-                    call stations(i,j)%set_soil_alb(0.2d0)     ! Soil albedo - typical bare soil
-                    call stations(i,j)%set_soil_emissivity(0.98d0) ! Soil emissivity
-                    call stations(i,j)%set_bare_soil_z0(0.002d0)   ! Bare soil roughness [m]
-                    call stations(i,j)%set_soil_node(0_c_size_t)   ! No soil layers
+        end associate
 
-                enddo
-            enddo
-
-            call SnowStationsOut(domain, stations)
-        else
-            call update_run_snowpack_flag(domain)
-                
-            call SnowStationsInitRestart(domain, stations)
-
-            call SnowStationsIn(domain, stations)
-
+        ! Read initial SNOWPACK state from domain file if variable names provided
+        if (options%domain%snowpack_nlayers_var /= "") then
+            call read_snowpack_state(domain, options)
         endif
+        
+        ! call SnowStationsIn(domain, stations)
+
+        call update_run_snowpack_flag(domain)
+
+        ! copy in any initial snowpack state if we are supposed to run snowpack already at a given pixel
+        call SnowStationsIn(domain, stations)
+
 
     end subroutine sm_SNOWPACK_init
 
@@ -294,6 +294,7 @@ module module_sm_SNOWPACKdrv
         type(current_meteo), allocatable, intent(out) :: meteo(:,:)
 
         real(kind=8), dimension(its:ite,jts:jte) :: total_precip, precip_phase, rh
+        real(kind=8) :: lw_out
 
         allocate(meteo(its:ite,jts:jte))
 
@@ -303,7 +304,8 @@ module module_sm_SNOWPACKdrv
                     p => domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                       &
                     roughness_z0 => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d,       &
                     incoming_shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
-                    net_longwave => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d,   &
+                    shortwave_terrain => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d, &
+                    longwave_in => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d,   &
                     ground_temp => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d,               &
                     skin_temperature => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d              &
                  )
@@ -319,7 +321,7 @@ module module_sm_SNOWPACKdrv
                 meteo(i,j) = current_meteo()
 
                 !! ------------------------------- Set meteo variables -------------------------------
-                call meteo(i,j)%set_date_julian(2460310.0d0)  ! Date (Julian day 2460310 ≈ Jan 1, 2024)
+                call meteo(i,j)%set_date_julian(real(domain%sim_time%mjd(),kind=8))  ! Date (Julian day 2460310 ≈ Jan 1, 2024)
                 call meteo(i,j)%set_ta(real(temperature(i,1,j), kind=8))          ! Air temperature [K] - CRYOWRF Coupler: l_TA
                 call meteo(i,j)%set_rh(rh(i,j))            ! Relative humidity [0-1] - CRYOWRF Coupler: l_RH
                 call meteo(i,j)%set_rh_avg(rh(i,j))        ! Running mean RH, set same as RH
@@ -330,12 +332,14 @@ module module_sm_SNOWPACKdrv
                 ! call meteo(i,j)%set_ustar(0.3d0)          ! Friction velocity [m/s]
                 call meteo(i,j)%set_z0(real(roughness_z0(i,j), kind=8))           ! Roughness length [m] - matches ROUGHNESS_LENGTH config -- CURRENTLY OVERWRITTEN IN SNOWPACK
                 call meteo(i,j)%set_iswr(real(incoming_shortwave(i,j), kind=8))         ! Incoming shortwave [W/m2] - CRYOWRF Coupler: l_iswr
+                call meteo(i,j)%set_rswr(real(shortwave_terrain(i,j), kind=8))    ! Reflected shortwave [W/m2] from HICAR terrain radiation
 
                 call meteo(i,j)%set_ea(-999.0d0)            ! Atmospheric emissivity - CRYOWRF Coupler: Mdata.ea, setting to -999 to force recalculation in SNOWPACK
 
-                ! SET NET LW TO NET_LW FROM driving model...
-                call meteo(i,j)%set_lw_net(real(net_longwave(i,j), kind=8))       ! Net longwave [W/m2] - computed from ilwr-outgoing SET to incoming longwave to 0.98*sb*temp^4
-                ! ... SET TSS to the value used in HICAR to compute outgoing LW
+                ! Compute net longwave from incoming LW (HICAR) minus outgoing LW (surface emission)
+                ! Positive = net energy into snowpack
+                lw_out = 0.98d0 * STBOLT * skin_temperature(i,j)**4
+                call meteo(i,j)%set_lw_net(real(longwave_in(i,j) - lw_out, kind=8))
                 call meteo(i,j)%set_tss(real(skin_temperature(i,j), kind=8))          ! Snow surface temperature [K]
 
                 ! NOTE: because SOIL_FLUX is set to false above, ts0 has to be the ground surface temperature from NoahMP
@@ -457,6 +461,8 @@ module module_sm_SNOWPACKdrv
 
         integer(c_size_t) :: n_elem, n_node
         integer :: ne_arr(1:kMAX_SNOWPACK_ELEMENTS)
+        integer(c_short) :: sn_k, hicar_k
+        type(element_data) :: elem
 
         ne_arr = 1
 
@@ -481,38 +487,45 @@ module module_sm_SNOWPACKdrv
                     mk => domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d,                               &
                     mass_hoar => domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d,                 &
                     CDot => domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d,                           &
-                    metamo => domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d,                      &
+                    snow_stress => domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d,                      &
                     N3 => domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d                        &
                  )
 
         do j = jts, jte
             do i = its, ite
                 if (.not.(run_snowpack_flag(i,j))) cycle
+
+                do k = 1, n_snow_layers(i,j)
+                    sn_k = k
+                    hicar_k = n_snow_layers(i,j) - k + 1
+                    elem = element_data(sn_k)               
+                    call elem%set_theta([real(Vol_Frac_S(i,hicar_k,j),kind=8), &
+                                            real(Vol_Frac_I(i,hicar_k,j),kind=8), &
+                                            real(Vol_Frac_W(i,hicar_k,j),kind=8), &
+                                            real(Vol_Frac_WP(i,hicar_k,j),kind=8), &
+                                            real(Vol_Frac_A(i,hicar_k,j),kind=8)])
+
+                    call elem%set_deposition_date_julian(real(depositionDate(i,hicar_k,j),kind=8))
+                    ! Add element to station using the new addElement method
+                    call stations_in(i,j)%add_element(elem)
+                enddo
+
                 n_elem = snowpack_get_num_elements(stations_in(i,j)%cxxmem%addr)
                 n_node = snowpack_get_num_nodes(stations_in(i,j)%cxxmem%addr)
 
                 call snowpack_set_all_node_T(stations_in(i,j)%cxxmem%addr, real(T_node(i,n_node:1:-1,j), kind=8), n_node)
-                call snowpack_set_all_element_deposition_julian(stations_in(i,j)%cxxmem%addr, real(depositionDate(i,n_elem:1:-1,j), kind=8), n_elem)
                 call snowpack_set_all_element_L(stations_in(i,j)%cxxmem%addr, real(Layer_Thick(i,n_elem:1:-1,j), kind=8), n_elem)
                 call snowpack_set_all_element_Te(stations_in(i,j)%cxxmem%addr, real(T_elem(i,n_elem:1:-1,j), kind=8), n_elem)
-                call snowpack_set_all_element_theta_ice(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_I(i,n_elem:1:-1,j), kind=8), n_elem)
-                call snowpack_set_all_element_theta_water(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_W(i,n_elem:1:-1,j), kind=8), n_elem)
-                call snowpack_set_all_element_theta_air(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_A(i,n_elem:1:-1,j), kind=8), n_elem)
-                call snowpack_set_all_element_theta_soil(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_S(i,n_elem:1:-1,j), kind=8), n_elem)
-                call snowpack_set_all_element_theta_water_pref(stations_in(i,j)%cxxmem%addr, real(Vol_Frac_WP(i,n_elem:1:-1,j), kind=8), n_elem)
                 call snowpack_set_all_element_rg(stations_in(i,j)%cxxmem%addr, real(Rg(i,n_elem:1:-1,j), kind=8), n_elem)
                 call snowpack_set_all_element_rb(stations_in(i,j)%cxxmem%addr, real(Rb(i,n_elem:1:-1,j), kind=8), n_elem)
                 call snowpack_set_all_element_dd(stations_in(i,j)%cxxmem%addr, real(Dd(i,n_elem:1:-1,j), kind=8), n_elem)
                 call snowpack_set_all_element_sp(stations_in(i,j)%cxxmem%addr, real(Sp(i,n_elem:1:-1,j), kind=8), n_elem)
                 call snowpack_set_all_element_mk(stations_in(i,j)%cxxmem%addr, int(mk(i,n_elem:1:-1,j), kind=c_short), n_elem)
-                ! TODO: FIX FOR LATER ! call snowpack_set_all_element_mass_hoar(stations_in(i,j)%cxxmem%addr, real(mass_hoar(i,n_elem:1:-1,j), kind=8), n_elem)
-                ! call snowpack_set_all_element_ne(stations_in(i,j)%cxxmem%addr, ne_arr(n_elem:1:-1), n_elem)
                 call snowpack_set_all_element_CDot(stations_in(i,j)%cxxmem%addr, real(CDot(i,n_elem:1:-1,j), kind=8), n_elem)
-                call snowpack_set_all_element_metamo(stations_in(i,j)%cxxmem%addr, real(metamo(i,n_elem:1:-1,j), kind=8), n_elem)
+                ! call snowpack_set_all_element_metamo(stations_in(i,j)%cxxmem%addr, real(metamo(i,n_elem:1:-1,j), kind=8), n_elem)
                 call snowpack_set_all_element_N3(stations_in(i,j)%cxxmem%addr, real(N3(i,n_elem:1:-1,j), kind=8), n_elem)
 
                 call stations_in(i,j)%set_c_h(real(snow_height(i,j), kind=8))
-                ! ! call stations_in(i,j)%set_swe(real(snow_water_equivalent(i,j), kind=8))
                 call stations_in(i,j)%set_albedo(real(albedo(i,j), kind=8))
 
             enddo
@@ -538,6 +551,10 @@ module module_sm_SNOWPACKdrv
         associate(                      &
                     snow_height => domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d,               &
                     snow_water_equivalent => domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d,                 &
+                    land_emissivity => domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d,                 &
+                    roughness_z0 => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d,                 &
+                    skin_temperature => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,                 &
+                    ground_temp => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d,                 &
                     albedo => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d,                 &
                     n_snow_layers => domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di,                 &
                     depositionDate => domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d,       &
@@ -556,7 +573,7 @@ module module_sm_SNOWPACKdrv
                     mk => domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d,                               &
                     mass_hoar => domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d,                 &
                     CDot => domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d,                           &
-                    metamo => domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d,                      &
+                    snow_stress => domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d,                      &
                     N3 => domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d                               &
             )
         do j = jts, jte
@@ -571,10 +588,14 @@ module module_sm_SNOWPACKdrv
                         albedo(i,j) = stations_in(i,j)%get_albedo()
                         n_elem = snowpack_get_num_elements(stations_in(i,j)%cxxmem%addr)
                         n_node = snowpack_get_num_nodes(stations_in(i,j)%cxxmem%addr)
+                        land_emissivity(i,j) = 0.98 
+                        roughness_z0(i,j) = 0.002 !m
                     else
                         albedo(i,j) = stations_in(i,j)%get_soil_alb()
                         n_elem = 0
                         n_node = 0
+                        skin_temperature(i,j) = 273.15
+                        ground_temp(i,1,j) = 273.15
                     endif
 
                     ! Safety check: SNOWPACK element count must fit in tmp buffer
@@ -606,7 +627,11 @@ module module_sm_SNOWPACKdrv
                     ! With truncation: keep top n_save from SNOWPACK = indices n_elem down to n_elem-n_save+1
 
                     call snowpack_get_all_node_T(stations_in(i,j)%cxxmem%addr, tmp_node_arr, n_node)
-                    if (n_save_nodes > 0) T_node(i,1:n_save_nodes,j) = real(tmp_node_arr(n_node:n_node-n_save_nodes+1:-1))
+                    if (n_save_nodes > 0) then
+                        T_node(i,1:n_save_nodes,j) = real(tmp_node_arr(n_node:n_node-n_save_nodes+1:-1))
+                        skin_temperature(i,j) = T_node(i,1,j)
+                        ground_temp(i,1,j) = T_node(i,n_save_nodes,j)
+                    endif
 
                     call snowpack_get_all_element_deposition_julian(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
                     if (n_save > 0) depositionDate(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
@@ -653,8 +678,8 @@ module module_sm_SNOWPACKdrv
                     call snowpack_get_all_element_CDot(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
                     if (n_save > 0) CDot(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
-                    call snowpack_get_all_element_metamo(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    if (n_save > 0) metamo(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
+                    ! call snowpack_get_all_element_metamo(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
+                    ! if (n_save > 0) metamo(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_N3(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
                     if (n_save > 0) N3(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
@@ -677,7 +702,7 @@ module module_sm_SNOWPACKdrv
                 Sp(i,n_save+1:,j) = 0.0
                 mk(i,n_save+1:,j) = 0.0
                 CDot(i,n_save+1:,j) = 0.0
-                metamo(i,n_save+1:,j) = 0.0
+                snow_stress(i,n_save+1:,j) = 0.0
                 N3(i,n_save+1:,j) = 0.0
             enddo
         enddo
@@ -685,65 +710,6 @@ module module_sm_SNOWPACKdrv
         end associate
 
     end subroutine SnowStationsOut
-
-    subroutine SnowStationsInitRestart(domain, stations_in)
-        implicit none
-        type(domain_t), intent(in) :: domain
-        type(snow_station), intent(inout) :: stations_in(its:ite,jts:jte)
-
-        integer(c_short) :: sn_k, hicar_k
-        type(element_data) :: elem
-
-        associate(                      &
-                    snow_height => domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d,               &
-                    snow_water_equivalent => domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d,                 &
-                    albedo => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d,                 &
-                    n_snow_layers => domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di,                 &
-                    depositionDate => domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d,       &
-                    Vol_Soil => domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d,       &
-                    Vol_Ice => domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d,       &
-                    Vol_Water => domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d,       &
-                    Vol_WP => domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d,       &
-                    Vol_Air => domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d       &
-            )
-
-            do j = jts, jte
-                do i = its, ite
-                    
-                    ! cycle if this pixel is not being run
-                    if (.not.run_snowpack_flag(i,j)) cycle
-
-                    ! Station-level properties (must be set after init)
-                    call stations_in(i,j)%set_cos_sl(real(cos(domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d(i,j)), kind=8))       ! cos(slope angle) - flat ground
-                    call stations_in(i,j)%set_sector(0_c_size_t)  ! Slope sector
-                    call stations_in(i,j)%set_p_albedo(0.2d0)     ! Parameterized albedo (bare soil)
-                    call stations_in(i,j)%set_albedo(real(albedo(i,j), kind=8))       ! Surface albedo
-                    call stations_in(i,j)%set_soil_alb(0.2d0)     ! Soil albedo - typical bare soil
-                    call stations_in(i,j)%set_soil_emissivity(0.98d0) ! Soil emissivity
-                    call stations_in(i,j)%set_bare_soil_z0(0.002d0)   ! Bare soil roughness [m]
-                    call stations_in(i,j)%set_soil_node(0_c_size_t)   ! No soil layers
-
-                    do k = 1, n_snow_layers(i,j)
-                        sn_k = k
-                        hicar_k = n_snow_layers(i,j) - k + 1
-                        elem = element_data(sn_k)               
-                        call elem%set_theta([real(Vol_Soil(i,hicar_k,j),kind=8), &
-                                             real(Vol_Ice(i,hicar_k,j),kind=8), &
-                                             real(Vol_Water(i,hicar_k,j),kind=8), &
-                                             real(Vol_WP(i,hicar_k,j),kind=8), &
-                                             real(Vol_Air(i,hicar_k,j),kind=8)])
-
-                        call elem%set_deposition_date_julian(real(depositionDate(i,hicar_k,j),kind=8))
-                        ! Add element to station using the new addElement method
-                        call stations_in(i,j)%add_element(elem)
-                    enddo
-
-                enddo
-            enddo
-
-            end associate
-
-    end subroutine SnowStationsInitRestart
 
     subroutine update_run_snowpack_flag(domain,current_snow)
         implicit none
@@ -767,5 +733,188 @@ module module_sm_SNOWPACKdrv
         endif
 
     end subroutine
+
+    !>--------------------------------- read_snowpack_state --------------------------------
+    ! Reads SNOWPACK state variables from the domain file into domain arrays.
+    ! Variables not found in the file are silently skipped (domain keeps defaults).
+    ! Called before SnowStationsIn so that stations get initialized from file data.
+    !>--------------------------------------------------------------------------------------
+    subroutine read_snowpack_state(domain, options)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        type(options_t), intent(in)   :: options
+
+        character(len=kMAX_FILE_LENGTH) :: filename
+        integer :: nz
+        
+        filename = options%domain%init_conditions_file
+        if (STD_OUT_PE) write(*,*) "Reading SNOWPACK initial state from: ", trim(filename)
+
+        ! 2D: snow_nlayers (always read — gate was checked by caller)
+        call try_read_snp_var(filename, options%domain%snowpack_nlayers_var, domain, kVARS%snow_nlayers)
+
+
+
+        call try_read_snp_var(filename, options%domain%snowpack_vfi_var, domain, kVARS%Vol_Frac_I)
+        call try_read_snp_var(filename, options%domain%snowpack_vfw_var, domain, kVARS%Vol_Frac_W)
+        call try_read_snp_var(filename, options%domain%snowpack_vfa_var, domain, kVARS%Vol_Frac_A)
+        call try_read_snp_var(filename, options%domain%snowpack_vfs_var, domain, kVARS%Vol_Frac_S)
+        call try_read_snp_var(filename, options%domain%snowpack_vfwp_var, domain, kVARS%Vol_Frac_WP)
+        call try_read_snp_var(filename, options%domain%snowpack_deposition_var, domain, kVARS%depositionDate)
+        call try_read_snp_var(filename, options%domain%snowpack_ds_var, domain, kVARS%Ds)
+        call try_read_snp_var(filename, options%domain%snowpack_tsnow_var, domain, kVARS%snow_temperature)
+        call try_read_snp_var(filename, options%domain%snowpack_tsnow_i_var, domain, kVARS%snow_temperature_i)
+        call try_read_snp_var(filename, options%domain%snowpack_rg_var, domain, kVARS%Rg)
+        call try_read_snp_var(filename, options%domain%snowpack_rb_var, domain, kVARS%Rb)
+        call try_read_snp_var(filename, options%domain%snowpack_dd_var, domain, kVARS%Dd)
+        call try_read_snp_var(filename, options%domain%snowpack_sp_var, domain, kVARS%Sp)
+        call try_read_snp_var(filename, options%domain%snowpack_mk_var, domain, kVARS%mk)
+        call try_read_snp_var(filename, options%domain%snowpack_cdot_var, domain, kVARS%CDot)
+        ! call try_read_snp_var(filename, options%domain%snowpack_metamo_var, domain, kVARS%metamo)
+
+        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d,1.0),0.0)
+        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d,1.0),0.0)
+        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d,1.0),0.0)
+        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d,1.0),0.0)
+        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d,1.0),0.0)
+
+        if (options%domain%snowpack_tsnow_i_var == "") then
+            if (STD_OUT_PE) write(*,*) "Snow Temperature on interface not provided, filling in with snow temperature at elements..."
+            nz = size(domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d,2)
+            domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(:,1:nz,:) = domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d
+            domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(:,nz+1,:) = domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(:,nz,:) 
+        endif
+
+        if (STD_OUT_PE) write(*,*) "Done reading SNOWPACK initial state"
+
+    end subroutine read_snowpack_state
+
+
+    subroutine try_read_snp_var(filename, varname, domain, kvar)
+        implicit none
+        character(len=*), intent(in) :: filename, varname
+        type(domain_t), intent(inout) :: domain
+        integer, intent(in) :: kvar
+
+        type(meta_data_t) :: var
+
+        var = get_varmeta(kvar)
+
+        if (varname /= "") then
+            if (var%two_d) then
+                if (var%dtype==kINTEGER) then
+                    call try_read_snp_2d_int(filename, varname, domain, kvar)
+                elseif (var%dtype==kREAL) then
+                    ! not yet used
+                endif
+            elseif (var%three_d) then
+                call try_read_snp_3d(filename, varname, domain, kvar)
+            endif
+        else
+            if (STD_OUT_PE) write(*,*) "-------------------------------------------------------------------------"
+            if (STD_OUT_PE) write(*,*) "WARNING: SNOWPACK static data partial, data for snowpack variable: ",trim(var%name)
+            if (STD_OUT_PE) write(*,*) "WARNING: not provided. Behavior undefined. Setting to 0 and continuing"
+            if (STD_OUT_PE) write(*,*) "-------------------------------------------------------------------------"
+            if (var%two_d) then
+                if (var%dtype==kINTEGER) then
+                    domain%vars_2d(domain%var_indx(kvar)%v)%data_2di = 0
+                elseif (var%dtype==kREAL) then
+                    domain%vars_2d(domain%var_indx(kvar)%v)%data_2d = 0.0
+                endif
+            elseif (var%three_d) then
+                domain%vars_3d(domain%var_indx(kvar)%v)%data_3d = 0.0
+            endif
+        endif   
+
+    end subroutine try_read_snp_var
+
+    !> Try to read a 2D integer variable from file into domain.
+    !! Silently skips if the variable is not in the file or not allocated in domain.
+    subroutine try_read_snp_2d_int(filename, varname, domain, kvar)
+        implicit none
+        character(len=*), intent(in) :: filename, varname
+        type(domain_t), intent(inout) :: domain
+        integer, intent(in) :: kvar
+
+        real, allocatable :: temp_2d(:,:)
+        integer :: ncid, varid, err
+
+        if (domain%var_indx(kvar)%v <= 0) return
+
+        err = nf90_open(filename, NF90_NOWRITE, ncid)
+        if (err /= NF90_NOERR) return
+        err = nf90_inq_varid(ncid, varname, varid)
+        err =  nf90_close(ncid)
+
+        if (err /= NF90_NOERR) then
+            if (STD_OUT_PE) write(*,*) "  SNOWPACK init: variable '", trim(varname), "' not found, skipping"
+            return
+        endif
+
+        call io_read(filename, varname, temp_2d)
+        domain%vars_2d(domain%var_indx(kvar)%v)%data_2di(ims:ime,jms:jme) = &
+            int(temp_2d(ims:ime,jms:jme))
+        if (STD_OUT_PE) write(*,*) "  SNOWPACK init: read '", trim(varname), "'"
+
+    end subroutine try_read_snp_2d_int
+
+
+    !> Try to read a 3D variable from file into domain.
+    !! Silently skips if the variable is not in the file or not allocated in domain.
+    subroutine try_read_snp_3d(filename, varname, domain, kvar)
+        implicit none
+        character(len=*), intent(in) :: filename, varname
+        type(domain_t), intent(inout) :: domain
+        integer, intent(in) :: kvar
+
+        real, allocatable :: temp_3d(:,:,:), data3d(:,:,:)
+        integer :: ncid, varid, err, nx_file, ny_file, nz_file, nz_dom
+        integer :: i, j, n_layer
+        logical :: layer_1_top
+
+        if (domain%var_indx(kvar)%v <= 0) return
+
+        err = nf90_open(filename, NF90_NOWRITE, ncid)
+        if (err /= NF90_NOERR) return
+        err = nf90_inq_varid(ncid, varname, varid)
+        err = nf90_close(ncid)
+
+        if (err /= NF90_NOERR) then
+            if (STD_OUT_PE) write(*,*) "  SNOWPACK init: variable '", trim(varname), "' not found, skipping"
+            return
+        endif
+
+        call io_read(filename, varname, temp_3d)
+
+        ! Map file data (x, z, y) into domain array (x, z, y)
+        nz_dom = size(domain%vars_3d(domain%var_indx(kvar)%v)%data_3d, 2)
+        nx_file = size(temp_3d,1)
+        ny_file = size(temp_3d,2)
+        nz_file = size(temp_3d,3)
+
+        temp_3d = reshape(temp_3d, shape=[nx_file,nz_file,ny_file], order=[1,3,2])
+
+        domain%vars_3d(domain%var_indx(kvar)%v)%data_3d(ims:ime, 1:min(nz_file,nz_dom), jms:jme) = &
+            temp_3d(ims:ime, 1:min(nz_file,nz_dom), jms:jme)
+
+        layer_1_top = .False.
+        layer_1_top = io_var_reversed(filename, varname)
+
+        if (.not.(layer_1_top)) then
+            allocate(data3d(ims:ime,1:min(nz_file,nz_dom),jms:jme))
+            data3d = domain%vars_3d(domain%var_indx(kvar)%v)%data_3d
+            domain%vars_3d(domain%var_indx(kvar)%v)%data_3d = -999
+            do j = jms, jme
+            do i = ims, ime
+                n_layer = domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(i,j)
+                domain%vars_3d(domain%var_indx(kvar)%v)%data_3d(i,n_layer:1:-1,j) = data3d(i,1:n_layer,j)
+            enddo
+            enddo
+            deallocate(data3d)
+        endif
+
+        if (STD_OUT_PE) write(*,*) "  SNOWPACK init: read '", trim(varname), "'"
+
+    end subroutine try_read_snp_3d
 
 end module module_sm_SNOWPACKdrv

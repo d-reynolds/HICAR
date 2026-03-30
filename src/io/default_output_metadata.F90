@@ -3958,12 +3958,12 @@ contains
         !>------------------------------------------------------------
         !!  SNOWPACK: snow layer deposition date
         !------------------------------------------------------------
-        else if (var_idx==kVARS%metamo) then
-            var_meta%name        = "metamo"
+        else if (var_idx==kVARS%snow_stress) then
+            var_meta%name        = "snow_stress"
             var_meta%dimensions  = three_d_t_snow_dimensions
             var_meta%dim_len(2)  = kSNOW_GRID_Z
-            var_meta%attributes  = [attribute_t("standard_name", "metamo"),   &
-                               attribute_t("units",         "-"),                        &
+            var_meta%attributes  = [attribute_t("standard_name", "snow_stress"),   &
+                               attribute_t("units",         "Pa"),                        &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
