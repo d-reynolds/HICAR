@@ -1980,94 +1980,94 @@ contains
                 group = "Domain"
             case ("snowpack_deposition_var")
                 description = "Name of the snow deposition date variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             case ("snowpack_vfi_var")
                 description = "Name of the snow void fraction ice variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             case ("snowpack_vfw_var")
                 description = "Name of the snow void fraction water variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             case ("snowpack_vfa_var")
                 description = "Name of the snow void fraction air variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             case ("snowpack_vfs_var")
                 description = "Name of the snow void fraction solid variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             case ("snowpack_vfwp_var")
                 description = "Name of the snow void fraction water preferential flow variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             case ("snowpack_ds_var")
                 description = "Name of the snow layer thickness variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 units = "mm"
                 group = "Domain"
             case ("snowpack_tsnow_var")
                 description = "Name of the snow temperature variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 units = "K"
                 group = "Domain"
             case ("snowpack_tsnow_i_var")
                 description = "Name of the snow interface temperature variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["Si", "Y", "X"]
                 units = "K"
                 group = "Domain"
             case ("snowpack_rg_var")
                 description = "Name of the snow grain radius variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 units = "mm"
                 group = "Domain"
             case ("snowpack_rb_var")
                 description = "Name of the snow bond radius variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 units = "mm"
                 group = "Domain"
             case ("snowpack_dd_var")
                 description = "Name of the snow dendricity variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 units = "kg/m^3"
                 group = "Domain"
             case ("snowpack_sp_var")
                 description = "Name of the snow sphericity variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             case ("snowpack_mk_var")
                 description = "Name of the snow marker variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             case ("snowpack_cdot_var")
                 description = "Name of the snow cdot variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             case ("snowpack_snow_stress_var")
                 description = "Name of the snow stress variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             case ("snowpack_n3_var")
                 description = "Name of the snow coordination variable in domain file (used by SNOWPACK)"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             ! --------------------------------------
             ! --------------------------------------

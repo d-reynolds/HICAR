@@ -188,15 +188,11 @@ module module_sm_SNOWPACKdrv
             enddo
         enddo
 
-        end associate
-
         ! Read initial SNOWPACK state from domain file if variable names provided
         if (options%domain%snowpack_nlayers_var /= "") then
             call read_snowpack_state(domain, options)
         endif
         
-        ! call SnowStationsIn(domain, stations)
-
         call update_run_snowpack_flag(domain)
 
         ! copy in any initial snowpack state if we are supposed to run snowpack already at a given pixel
@@ -770,7 +766,7 @@ module module_sm_SNOWPACKdrv
         call try_read_snp_var(filename, options%domain%snowpack_sp_var, domain, kVARS%Sp)
         call try_read_snp_var(filename, options%domain%snowpack_mk_var, domain, kVARS%mk)
         call try_read_snp_var(filename, options%domain%snowpack_cdot_var, domain, kVARS%CDot)
-        ! call try_read_snp_var(filename, options%domain%snowpack_metamo_var, domain, kVARS%metamo)
+        ! call try_read_snp_var(filename, options%domain%snowpack_snow_stress_var, domain, kVARS%snow_stress)
 
         domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d,1.0),0.0)
         domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d,1.0),0.0)
