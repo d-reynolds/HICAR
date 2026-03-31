@@ -130,11 +130,11 @@ contains
         is_file_parallel = .True.!can_file_parallel(this%file_list(this%curfile))
         if (this%ncfile_id < 0) then
             if (.not.(is_file_parallel)) then
-                call check_ncdf( nf90_open(this%file_list(this%curfile), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id), " Opening file "//trim(this%file_list(this%curfile)))
+                call check_ncdf( nf90_open(trim(this%file_list(this%curfile)), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id), " Opening file "//trim(this%file_list(this%curfile)))
             else
                 par_comm_info = MPI_INFO_NULL
                 call MPI_Comm_get_info(par_comms, par_comm_info)
-                call check_ncdf( nf90_open(this%file_list(this%curfile), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id, &
+                call check_ncdf( nf90_open(trim(this%file_list(this%curfile)), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id, &
                         comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL), " Opening file "//trim(this%file_list(this%curfile)))
             endif
         endif

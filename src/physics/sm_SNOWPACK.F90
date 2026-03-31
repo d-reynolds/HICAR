@@ -300,7 +300,7 @@ module module_sm_SNOWPACKdrv
                     p => domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                       &
                     roughness_z0 => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d,       &
                     incoming_shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
-                    shortwave_terrain => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d, &
+                    ! shortwave_terrain => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d, &
                     longwave_in => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d,   &
                     ground_temp => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d,               &
                     skin_temperature => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d              &
@@ -328,7 +328,7 @@ module module_sm_SNOWPACKdrv
                 ! call meteo(i,j)%set_ustar(0.3d0)          ! Friction velocity [m/s]
                 call meteo(i,j)%set_z0(real(roughness_z0(i,j), kind=8))           ! Roughness length [m] - matches ROUGHNESS_LENGTH config -- CURRENTLY OVERWRITTEN IN SNOWPACK
                 call meteo(i,j)%set_iswr(real(incoming_shortwave(i,j), kind=8))         ! Incoming shortwave [W/m2] - CRYOWRF Coupler: l_iswr
-                call meteo(i,j)%set_rswr(real(shortwave_terrain(i,j), kind=8))    ! Reflected shortwave [W/m2] from HICAR terrain radiation
+                ! call meteo(i,j)%set_rswr(real(shortwave_terrain(i,j), kind=8))    ! Reflected shortwave [W/m2] from HICAR terrain radiation
 
                 call meteo(i,j)%set_ea(-999.0d0)            ! Atmospheric emissivity - CRYOWRF Coupler: Mdata.ea, setting to -999 to force recalculation in SNOWPACK
 

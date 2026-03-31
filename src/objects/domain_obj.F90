@@ -315,7 +315,8 @@ contains
         type(options_t), intent(in)    :: options
 
         type(meta_data_t) :: tmp_var
-        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(22), kEXCH_VARS(9)
+        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(22)
+        integer, allocatable :: kEXCH_VARS(:)
 
         kADV_VARS = (/kVARS%potential_temperature,&
                       kVARS%water_vapor,&
@@ -340,15 +341,23 @@ contains
                       kVARS%ice3_a,&
                       kVARS%ice3_c/)
 
-        kEXCH_VARS = (/kVARS%density,&
-                       kVARS%sensible_heat,&
-                       kVARS%skin_temperature,&
-                       kVARS%Ds,&
-                       kVARS%fsnow,&
-                       kVARS%Sice,&
-                       kVARS%Sliq,&
-                       kVARS%snow_temperature,&
-                       kVARS%snow_nlayers/)
+        if (options%sm%sm_nsnow_max > this%kme) then
+            allocate(kEXCH_VARS(3))
+            kEXCH_VARS = (/kVARS%density,&
+                        kVARS%sensible_heat,&
+                        kVARS%skin_temperature/)
+        else
+            allocate(kEXCH_VARS(9))
+            kEXCH_VARS = (/kVARS%density,&
+                        kVARS%sensible_heat,&
+                        kVARS%skin_temperature,&
+                        kVARS%Ds,&
+                        kVARS%fsnow,&
+                        kVARS%Sice,&
+                        kVARS%Sliq,&
+                        kVARS%snow_temperature,&
+                        kVARS%snow_nlayers/)
+        endif
 
         !Advection variables -- these are exchanged AND advected
         n_vars = 0

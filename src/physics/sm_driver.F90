@@ -406,7 +406,9 @@ contains
 #ifdef SNOWPACK
 #ifdef SNOWPACK_GPU
                 ! GPU SNOWPACK: data stays on device, no host/device transfers needed
+                !$acc enter data copyin(current_rain, current_snow, windspd)
                 call snowpack_gpu_step(domain,options,lsm_dt,current_rain,current_snow,windspd)
+                !$acc exit data delete(current_rain, current_snow, windspd)
 #else
                 ! EVAN'S BIG DRIVER HERE:
                 ! input variables for SNOWPACK, which we need, are:

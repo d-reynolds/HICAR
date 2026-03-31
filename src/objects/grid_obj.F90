@@ -280,7 +280,16 @@ contains
         !run with more than 8 z levels. So this should not be an issue.
         if (present(global_nz)) then
             if (this%nz <= global_nz) then
-            call create_MPI_types(this, win_nz=global_nz)
+                call create_MPI_types(this, win_nz=global_nz)
+            else
+                ! Initialize MPI types to NULL when nz > global_nz to avoid
+                ! uninitialized handles causing undefined behavior downstream
+                this%NS_halo = MPI_DATATYPE_NULL
+                this%EW_halo = MPI_DATATYPE_NULL
+                this%corner_halo = MPI_DATATYPE_NULL
+                this%NS_win_halo = MPI_DATATYPE_NULL
+                this%EW_win_halo = MPI_DATATYPE_NULL
+                this%corner_win_halo = MPI_DATATYPE_NULL
             endif
         else
             call create_MPI_types(this)

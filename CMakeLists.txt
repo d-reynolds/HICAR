@@ -324,7 +324,7 @@ find_package(NetCDF REQUIRED)
 if (SNOWPACK_GPU)
 	# GPU SNOWPACK: compile pure-Fortran GPU modules directly, no C++ SNOWPACK needed
 	if(NOT SNOWPACK_DIR OR SNOWPACK_DIR STREQUAL "")
-		message(FATAL_ERROR "SNOWPACK_GPU requires SNOWPACK_DIR to be set to the SNOWPACK source directory (containing fortran/snowpack_gpu_*.F90)")
+		find_package(SNOWPACK REQUIRED)
 	endif()
 	set(SNOWPACK_GPU_SRC_DIR "${SNOWPACK_DIR}/fortran")
 	file(GLOB SNOWPACK_GPU_SOURCES "${SNOWPACK_GPU_SRC_DIR}/snowpack_gpu_*.F90")
