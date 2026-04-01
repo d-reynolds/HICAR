@@ -38,11 +38,15 @@ module linear_theory_winds
     use iso_fortran_env
     use mpi_f08
     use fft,                        only: fftw_execute_dft,                    &
-                                          fftw_alloc_complex, fftw_free,       &
                                           fftw_plan_dft_2d, fftw_destroy_plan, &
                                           FFTW_FORWARD, FFTW_MEASURE,          &
                                           FFTW_BACKWARD, FFTW_ESTIMATE ! note fft module is defined in fftshift.f90
     use fftshifter,                 only: ifftshift, fftshift
+#ifdef _OPENACC
+    use openacc
+    use cufft_interface
+    use fftshifter,                 only: ifftshift2cc_gpu
+#endif
     use domain_interface,           only: domain_t
     use string,                     only: str
     use grid_interface,             only: grid_t
@@ -122,7 +126,41 @@ contains
         real,                     intent(in)    :: U, V
         real,                     intent(in)    :: Nsq
         type(linear_theory_type), intent(inout) :: lt_data
+#ifdef _OPENACC
+        integer :: i, j, nx, ny
 
+        nx = size(lt_data%k, 1)
+        ny = size(lt_data%k, 2)
+
+        associate(mimag => lt_data%mimag, &
+                  m => lt_data%m, &
+                  sig => lt_data%sig, &
+                  kl => lt_data%kl, &
+                  k => lt_data%k, &
+                  l => lt_data%l, &
+                  msq => lt_data%msq, &
+                  denom => lt_data%denom &
+        )
+
+        !$acc parallel loop gang vector collapse(2) present(sig, k, l, &
+        !$acc   denom, msq, kl, mimag, m)
+        do j = 1, ny
+            do i = 1, nx
+                sig(i,j) = U * k(i,j) + V * l(i,j)
+                if (sig(i,j) == 0.0) sig(i,j) = SMALL_VALUE
+
+                denom(i,j) = sig(i,j)**2
+                msq(i,j) = Nsq / denom(i,j) * kl(i,j)
+                mimag(i,j) = real(sqrt(-msq(i,j))) * imaginary_number
+
+                m(i,j) = sqrt(msq(i,j))
+                if (sig(i,j) < 0.0) m(i,j) = m(i,j) * (-1)
+                if (real(msq(i,j)) < 0.0) m(i,j) = mimag(i,j)
+            end do
+        end do
+
+        end associate
+#else
         lt_data%sig  = U * lt_data%k + V * lt_data%l
         where(lt_data%sig == 0) lt_data%sig = SMALL_VALUE
 
@@ -135,6 +173,7 @@ contains
         lt_data%m = sqrt(lt_data%msq)
         where(lt_data%sig < 0) lt_data%m = lt_data%m * (-1)
         where(real(lt_data%msq) < 0) lt_data%m = lt_data%mimag
+#endif
 
     end subroutine linear_perturbation_setup
 
@@ -147,7 +186,49 @@ contains
         real,                     intent(in)    :: z
         complex(C_DOUBLE_COMPLEX),intent(in)    :: fourier_terrain(:,:)
         type(linear_theory_type), intent(inout) :: lt_data
+#ifdef _OPENACC
+        integer :: i, j, nx, ny, ierr
 
+        nx = size(fourier_terrain, 1)
+        ny = size(fourier_terrain, 2)
+
+        associate(ineta => lt_data%ineta, &
+                  m => lt_data%m, &
+                  sig => lt_data%sig, &
+                  kl => lt_data%kl, &
+                  k => lt_data%k, &
+                  l => lt_data%l, &
+                  uhat => lt_data%uhat, &
+                  vhat => lt_data%vhat  &
+        )
+
+
+        ! Element-wise complex arithmetic on GPU
+        !$acc parallel loop gang vector collapse(2) present(ineta, m, sig, &
+        !$acc   kl, k, l, uhat, vhat, fourier_terrain)
+        do j = 1, ny
+            do i = 1, nx
+                ineta(i,j) = imaginary_number * fourier_terrain(i,j) * exp(imaginary_number * m(i,j) * z)
+                ineta(i,j) = ineta(i,j) / (kl(i,j) / ((0 - m(i,j)) * sig(i,j)))
+                uhat(i,j) = k(i,j) * ineta(i,j)
+                vhat(i,j) = l(i,j) * ineta(i,j)
+            end do
+        end do
+
+        end associate
+
+        ! GPU ifftshift using pre-allocated workspace
+        call ifftshift2cc_gpu(lt_data%uhat, lt_data%fftshift_tmp, nx, ny)
+        call ifftshift2cc_gpu(lt_data%vhat, lt_data%fftshift_tmp, nx, ny)
+
+        ! Execute inverse FFT on GPU via cuFFT
+        !$acc host_data use_device(lt_data%uhat, lt_data%u_perturb)
+        ierr = cufftExecZ2Z(lt_data%cufft_plan, c_loc(lt_data%uhat), c_loc(lt_data%u_perturb), CUFFT_INVERSE)
+        !$acc end host_data
+        !$acc host_data use_device(lt_data%vhat, lt_data%v_perturb)
+        ierr = cufftExecZ2Z(lt_data%cufft_plan, c_loc(lt_data%vhat), c_loc(lt_data%v_perturb), CUFFT_INVERSE)
+        !$acc end host_data
+#else
         lt_data%ineta = imaginary_number * fourier_terrain * exp(imaginary_number * lt_data%m * z)
 
         ! uhat = -m * sig * k * ineta / kl,  vhat = -m * sig * l * ineta / kl  (no coriolis)
@@ -159,6 +240,7 @@ contains
         call ifftshift(lt_data%vhat)
         call fftw_execute_dft(lt_data%uplan, lt_data%uhat, lt_data%u_perturb)
         call fftw_execute_dft(lt_data%vplan, lt_data%vhat, lt_data%v_perturb)
+#endif
 
     end subroutine linear_perturbation_apply_z
 
@@ -253,6 +335,87 @@ contains
         lt_data%v_perturb = lt_data%v_accumulator / lt_data%layer_count
     end subroutine linear_perturbation
 
+#ifdef _OPENACC
+    !>----------------------------------------------------------
+    !! GPU variant of linear_perturbation that takes precomputed scalars
+    !! and buffer-extended z arrays to avoid on-device reductions.
+    !! All data must be present on GPU before calling.
+    !!----------------------------------------------------------
+    subroutine linear_perturbation_gpu(start_z, end_z, step_size, int_z_top, int_z_bot, &
+                                       fourier_terrain, lt_data)
+        implicit none
+        real,                     intent(in)    :: start_z, end_z, step_size
+        real,                     intent(in)    :: int_z_top(:,:), int_z_bot(:,:)
+        complex(C_DOUBLE_COMPLEX),intent(in)    :: fourier_terrain(:,:)
+        type(linear_theory_type), intent(inout) :: lt_data
+
+        real    :: current_z, half_step
+        integer :: i, j, nx, ny
+
+        nx = size(fourier_terrain, 1)
+        ny = size(fourier_terrain, 2)
+        half_step = step_size / 2.0
+
+        associate(u_accumulator => lt_data%u_accumulator, &
+                  v_accumulator => lt_data%v_accumulator, &
+                  layer_count => lt_data%layer_count, &
+                  layer_fraction => lt_data%layer_fraction, &
+                  u_perturb => lt_data%u_perturb, &
+                  v_perturb => lt_data%v_perturb &
+        )
+
+        ! Single present lookup for all arrays — avoids repeated per-component
+        ! present-table lookups on each inner parallel loop launch
+        !$acc data present(u_accumulator, v_accumulator, layer_count, &
+        !$acc   layer_fraction, u_perturb, v_perturb, int_z_top, int_z_bot)
+
+        ! Zero accumulators on GPU
+        !$acc parallel loop gang vector collapse(2)
+        do j = 1, ny
+            do i = 1, nx
+                u_accumulator(i,j) = (0.0d0, 0.0d0)
+                v_accumulator(i,j) = (0.0d0, 0.0d0)
+                layer_count(i,j) = 0.0
+            end do
+        end do
+
+        current_z = start_z + half_step
+
+        do while (current_z < end_z)
+            call linear_perturbation_apply_z(current_z, fourier_terrain, lt_data)
+
+            ! Layer fraction and accumulation on GPU
+            !$acc parallel loop gang vector collapse(2)
+            do j = 1, ny
+                do i = 1, nx
+                    layer_fraction(i,j) = max(0.0,                                                     &
+                        min(half_step, current_z - int_z_bot(i,j)) + min(0.0, int_z_top(i,j) - current_z)     &
+                      + min(half_step, int_z_top(i,j) - current_z) + min(0.0, current_z - int_z_bot(i,j))     &
+                    ) / step_size
+
+                    layer_count(i,j) = layer_count(i,j) + layer_fraction(i,j)
+                    u_accumulator(i,j) = u_accumulator(i,j) + u_perturb(i,j) * layer_fraction(i,j)
+                    v_accumulator(i,j) = v_accumulator(i,j) + v_perturb(i,j) * layer_fraction(i,j)
+                end do
+            end do
+
+            current_z = current_z + step_size
+        enddo
+
+        ! Final normalization on GPU
+        !$acc parallel loop gang vector collapse(2)
+        do j = 1, ny
+            do i = 1, nx
+                u_perturb(i,j) = u_accumulator(i,j) / layer_count(i,j)
+                v_perturb(i,j) = v_accumulator(i,j) / layer_count(i,j)
+            end do
+        end do
+
+        !$acc end data
+        end associate
+    end subroutine linear_perturbation_gpu
+#endif
+
     !>----------------------------------------------------------
     !! Add a smoothed buffer around the edge of the terrain to prevent crazy wrap around effects
     !! in the FFT due to discontinuities between the left and right (or top and bottom) edges of the domain
@@ -339,7 +502,6 @@ contains
         integer, intent(in) :: nx, ny
         real,    intent(in) :: dx
 
-        integer(C_SIZE_T) :: n_elements
         real :: gain, offset
         integer :: i
 
@@ -382,35 +544,42 @@ contains
         lt_data%kl = lt_data%k**2 + lt_data%l**2
         WHERE (lt_data%kl == 0.0) lt_data%kl = SMALL_VALUE
 
-        ! using fftw_alloc routines to ensure better allignment for vectorization may not be threadsafe
-        n_elements = nx * ny
-        !$omp critical (fftw_lock)
-        lt_data%uh_aligned_data = fftw_alloc_complex(n_elements)
-        lt_data%up_aligned_data = fftw_alloc_complex(n_elements)
-        lt_data%ua_aligned_data = fftw_alloc_complex(n_elements)
-        lt_data%vh_aligned_data = fftw_alloc_complex(n_elements)
-        lt_data%vp_aligned_data = fftw_alloc_complex(n_elements)
-        lt_data%va_aligned_data = fftw_alloc_complex(n_elements)
-        !$omp end critical (fftw_lock)
-
-        call c_f_pointer(lt_data%uh_aligned_data,   lt_data%uhat,           [nx,ny])
-        call c_f_pointer(lt_data%up_aligned_data,   lt_data%u_perturb,      [nx,ny])
-        call c_f_pointer(lt_data%ua_aligned_data,   lt_data%u_accumulator,  [nx,ny])
-        call c_f_pointer(lt_data%vh_aligned_data,   lt_data%vhat,           [nx,ny])
-        call c_f_pointer(lt_data%vp_aligned_data,   lt_data%v_perturb,      [nx,ny])
-        call c_f_pointer(lt_data%va_aligned_data,   lt_data%v_accumulator,  [nx,ny])
-
-        ! note FFTW plan creation is not threadsafe
-        !$omp critical (fftw_lock)
-        lt_data%uplan = fftw_plan_dft_2d(ny,nx, lt_data%uhat, lt_data%u_perturb, FFTW_BACKWARD, FFTW_MEASURE) ! alternatives to MEASURE are PATIENT, or ESTIMATE
-        lt_data%vplan = fftw_plan_dft_2d(ny,nx, lt_data%vhat, lt_data%v_perturb, FFTW_BACKWARD, FFTW_MEASURE) ! alternatives to MEASURE are PATIENT, or ESTIMATE
-        !$omp end critical (fftw_lock)
+        allocate(lt_data%uhat(nx,ny))
+        allocate(lt_data%u_perturb(nx,ny))
+        allocate(lt_data%u_accumulator(nx,ny))
+        allocate(lt_data%vhat(nx,ny))
+        allocate(lt_data%v_perturb(nx,ny))
+        allocate(lt_data%v_accumulator(nx,ny))
+        allocate(lt_data%fftshift_tmp(nx,ny))
 
         ! Pre-allocate work arrays for linear_perturbation (reused across calls)
         allocate(lt_data%layer_count(nx,ny))
         allocate(lt_data%layer_fraction(nx,ny))
         allocate(lt_data%internal_z_top(nx,ny))
         allocate(lt_data%internal_z_bottom(nx,ny))
+
+#ifdef _OPENACC
+        ! Create cuFFT plan and bind to the OpenACC default CUDA stream
+        ! so cuFFT executions are properly ordered with OpenACC kernels
+        i = cufftPlan2d(lt_data%cufft_plan, ny, nx, CUFFT_Z2Z)
+        i = cufftSetStream(lt_data%cufft_plan, transfer(acc_get_cuda_stream(acc_async_sync), C_NULL_PTR))
+
+        ! Put all lt_data arrays on the GPU
+        !$acc enter data copyin(lt_data%k, lt_data%l, lt_data%kl)
+        !$acc enter data create(lt_data%sig, lt_data%denom, lt_data%m, lt_data%msq, lt_data%mimag)
+        !$acc enter data create(lt_data%ineta, lt_data%uhat, lt_data%vhat)
+        !$acc enter data create(lt_data%u_perturb, lt_data%v_perturb)
+        !$acc enter data create(lt_data%u_accumulator, lt_data%v_accumulator)
+        !$acc enter data create(lt_data%layer_count, lt_data%layer_fraction)
+        !$acc enter data create(lt_data%internal_z_top, lt_data%internal_z_bottom)
+        !$acc enter data create(lt_data%fftshift_tmp)
+#else
+        ! FFTW plan creation (not threadsafe)
+        !$omp critical (fftw_lock)
+        lt_data%uplan = fftw_plan_dft_2d(ny,nx, lt_data%uhat, lt_data%u_perturb, FFTW_BACKWARD, FFTW_MEASURE)
+        lt_data%vplan = fftw_plan_dft_2d(ny,nx, lt_data%vhat, lt_data%v_perturb, FFTW_BACKWARD, FFTW_MEASURE)
+        !$omp end critical (fftw_lock)
+#endif
 
     end subroutine initialize_linear_theory_data
 
@@ -422,6 +591,27 @@ contains
     subroutine destroy_linear_theory_data(lt_data)
         implicit none
         type(linear_theory_type), intent(inout) :: lt_data
+        integer :: ierr
+
+#ifdef _OPENACC
+        ! Remove lt_data arrays from GPU before deallocation
+        !$acc exit data delete(lt_data%k, lt_data%l, lt_data%kl)
+        !$acc exit data delete(lt_data%sig, lt_data%denom, lt_data%m, lt_data%msq, lt_data%mimag)
+        !$acc exit data delete(lt_data%ineta, lt_data%uhat, lt_data%vhat)
+        !$acc exit data delete(lt_data%u_perturb, lt_data%v_perturb)
+        !$acc exit data delete(lt_data%u_accumulator, lt_data%v_accumulator)
+        !$acc exit data delete(lt_data%layer_count, lt_data%layer_fraction)
+        !$acc exit data delete(lt_data%internal_z_top, lt_data%internal_z_bottom)
+        !$acc exit data delete(lt_data%fftshift_tmp)
+
+        ierr = cufftDestroy(lt_data%cufft_plan)
+#else
+        ! FFTW plan destruction (not threadsafe)
+        !$omp critical (fftw_lock)
+        call fftw_destroy_plan(lt_data%uplan)
+        call fftw_destroy_plan(lt_data%vplan)
+        !$omp end critical (fftw_lock)
+#endif
 
         if (allocated(lt_data%k))       deallocate(lt_data%k)
         if (allocated(lt_data%l))       deallocate(lt_data%l)
@@ -438,27 +628,14 @@ contains
         if (allocated(lt_data%internal_z_top))   deallocate(lt_data%internal_z_top)
         if (allocated(lt_data%internal_z_bottom))deallocate(lt_data%internal_z_bottom)
 
-        !$omp critical (fftw_lock)
-        call fftw_free(lt_data%uh_aligned_data)
-        call fftw_free(lt_data%up_aligned_data)
-        call fftw_free(lt_data%ua_aligned_data)
-        call fftw_free(lt_data%vh_aligned_data)
-        call fftw_free(lt_data%vp_aligned_data)
-        call fftw_free(lt_data%va_aligned_data)
-        !$omp end critical (fftw_lock)
+        if (allocated(lt_data%uhat))          deallocate(lt_data%uhat)
+        if (allocated(lt_data%u_perturb))     deallocate(lt_data%u_perturb)
+        if (allocated(lt_data%u_accumulator)) deallocate(lt_data%u_accumulator)
+        if (allocated(lt_data%vhat))          deallocate(lt_data%vhat)
+        if (allocated(lt_data%v_perturb))     deallocate(lt_data%v_perturb)
+        if (allocated(lt_data%v_accumulator)) deallocate(lt_data%v_accumulator)
+        if (allocated(lt_data%fftshift_tmp))  deallocate(lt_data%fftshift_tmp)
 
-        NULLIFY(lt_data%uhat)
-        NULLIFY(lt_data%u_perturb)
-        NULLIFY(lt_data%u_accumulator)
-        NULLIFY(lt_data%vhat)
-        NULLIFY(lt_data%v_perturb)
-        NULLIFY(lt_data%v_accumulator)
-
-        ! note FFTW plan creation is not threadsafe
-        !$omp critical (fftw_lock)
-        call fftw_destroy_plan(lt_data%uplan)
-        call fftw_destroy_plan(lt_data%vplan)
-        !$omp end critical (fftw_lock)
     end subroutine destroy_linear_theory_data
 
 
@@ -573,6 +750,9 @@ contains
         integer(KIND=MPI_ADDRESS_KIND) :: win_size
         type(MPI_Win) :: U_LUT_win, V_LUT_win
         real, pointer, dimension(:,:,:,:,:,:) :: U_LUT_p, V_LUT_p
+        real, allocatable :: start_z_arr(:), end_z_arr(:), step_size_arr(:)
+        real, allocatable :: int_z_top(:,:,:), int_z_bot(:,:,:)
+        integer :: ii, jj
 
         type(grid_t), allocatable :: u_grids(:), v_grids(:)
 
@@ -689,6 +869,98 @@ contains
                                            + domain%vars_3d(domain%var_indx(kVARS%global_dz_interface)%v)%data_3d(:,z,:)
             end do
 
+#ifdef _OPENACC
+            ! GPU path: precompute per-z-level scalars and buffer-extended z arrays on host,
+            ! then run the entire LUT computation on GPU
+
+            allocate(start_z_arr(nz), end_z_arr(nz), step_size_arr(nz))
+            allocate(int_z_top(fftnx, fftny, nz), int_z_bot(fftnx, fftny, nz))
+
+            ! Precompute reductions and buffer-extended z arrays on host (avoids GPU reductions)
+            do z = 1, nz
+                start_z_arr(z) = minval(z_above_terrain_bot(:,z,:))
+                end_z_arr(z)   = maxval(z_above_terrain_top(:,z,:))
+                step_size_arr(z) = min(minimum_layer_size, minval(z_above_terrain_top(:,z,:) - z_above_terrain_bot(:,z,:)))
+
+                int_z_top(:,:,z) = maxval(z_above_terrain_top(:,z,:))
+                int_z_top(buffer:buffer+global_nx-1, buffer:buffer+global_ny-1, z) = z_above_terrain_top(:,z,:)
+                int_z_bot(:,:,z) = minval(z_above_terrain_bot(:,z,:))
+                int_z_bot(buffer:buffer+global_nx-1, buffer:buffer+global_ny-1, z) = z_above_terrain_bot(:,z,:)
+            end do
+
+            ! Put read-only and work arrays on GPU
+            !$acc enter data copyin(terrain_frequency, int_z_top, int_z_bot)
+            !$acc enter data create(temporary_u, temporary_v)
+
+            do ijk = start_pos, stop_pos
+                ik = ijk / n_nsq_values
+                j = mod(ijk,n_nsq_values) + 1
+                i = ik/n_spd_values + 1
+                k = mod(ik,n_spd_values) + 1
+
+                u = calc_u( dir_values(i), spd_values(k) )
+                v = calc_v( dir_values(i), spd_values(k) )
+
+                if ((u==0.0).and.(v==0.0)) then
+                    loops_completed = loops_completed + nz
+                    cycle
+                endif
+
+                ! Setup z-independent Fourier quantities on GPU
+                call linear_perturbation_setup(u, v, exp(nsq_values(j)), lt_data_m)
+
+                do z=1,nz
+                    ! Compute perturbation on GPU using precomputed z arrays
+                    call linear_perturbation_gpu(start_z_arr(z), end_z_arr(z), step_size_arr(z), &
+                                                    int_z_top(:,:,z), int_z_bot(:,:,z),              &
+                                                    terrain_frequency, lt_data_m)
+
+                    ! Extract buffer region into temporary arrays on GPU
+                    if (nxu /= nx) then
+                        associate(u_perturb => lt_data_m%u_perturb, v_perturb => lt_data_m%v_perturb)
+                        !$acc parallel present(temporary_u, u_perturb)
+                        !$acc loop gang vector collapse(2)
+                        do jj = 1, fftny - buffer*2
+                            do ii = 1, fftnx - buffer*2 + 1
+                                temporary_u(ii,jj,z) = real( real(                                 &
+                                    ( u_perturb(buffer+ii-1, buffer+jj)                  &
+                                    + u_perturb(buffer+ii,   buffer+jj) ))) / 2.0
+                            end do
+                        end do
+                        !$acc loop gang vector collapse(2)
+                        do jj = 1, fftny - buffer*2 + 1
+                            do ii = 1, fftnx - buffer*2
+                                temporary_v(ii,jj,z) = real( real(                                 &
+                                    ( v_perturb(buffer+ii, buffer+jj-1)                  &
+                                    + v_perturb(buffer+ii, buffer+jj) ))) / 2.0
+                            end do
+                        end do
+                        !$acc end parallel
+                        end associate
+                    else
+                        stop "ERROR: linear wind LUT creation not set up for non-staggered grids yet"
+                    endif
+
+                    loops_completed = loops_completed+1
+                enddo
+
+                ! Copy results to host for MPI distribution
+                !$acc update host(temporary_u, temporary_v)
+                do z=1,nz
+                    call copy_data_to_remote(temporary_u(:,:,z), u_grids, U_LUT_win, i,j,k, z, nxu, nz, ny)
+                    call copy_data_to_remote(temporary_v(:,:,z), v_grids, V_LUT_win, i,j,k, z, nx, nz, nyv)
+                end do
+
+                if (options%general%interactive) then
+                    if (STD_OUT_PE) write(*,"(f5.1,A)") loops_completed/real(nz*(stop_pos-start_pos+1))*100," %"
+                    if (STD_OUT_PE) flush(output_unit)
+                endif
+            end do
+
+            !$acc exit data delete(terrain_frequency, int_z_top, int_z_bot)
+            !$acc exit data delete(temporary_u, temporary_v)
+            deallocate(start_z_arr, end_z_arr, step_size_arr, int_z_top, int_z_bot)
+#else
             do ijk = start_pos, stop_pos
                 ! Decode (dir, nsq, spd) indices from combined ijk index
                 ik = ijk / n_nsq_values
@@ -736,6 +1008,7 @@ contains
                     if (STD_OUT_PE) flush(output_unit)
                 endif
             end do
+#endif
 
             deallocate(z_above_terrain_bot, z_above_terrain_top)
 
