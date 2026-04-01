@@ -70,8 +70,28 @@ FIND_LIB(snowpack SNOWPACK_LIBRARY "${SNOWPACK_DIR}")
 FIND_LIB(snowpack_fortran SNOWPACK_FORTRAN_LIBRARY "${SNOWPACK_DIR}")
 FIND_LIB(meteoio METEOIO_LIBRARY "${METEOIO_DIR}")
 
+if (SNOWPACK_GPU) 
+    # If GPU SNOWPACK is enabled, also look for the GPU Fortran bindings library
+    message(STATUS "SNOWPACK_GPU is enabled, only fetching snowpack repo...")
 
-if (SNOWPACK_LIBRARY AND SNOWPACK_INCLUDE_DIR AND SNOWPACK_FORTRAN_LIBRARY AND METEOIO_LIBRARY AND METEOIO_INCLUDE_DIR)
+    set(SNOWPACK_DIR "${CMAKE_BINARY_DIR}/external/SNOWPACK" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
+    set(SNOWPACK_BUILD "${CMAKE_BINARY_DIR}/external/SNOWPACK-build" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
+    set(SNOWPACK_STAMPS "${CMAKE_BINARY_DIR}/external/SNOWPACK-stamps" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
+
+    # Fetch SNOWPACK
+    FetchContent_Declare(SNOWPACK
+        GIT_REPOSITORY    https://git.wsl.ch/snow-models/snowpack.git
+        GIT_TAG           fortran-bindings
+        GIT_SHALLOW       TRUE
+        PREFIX            "${SNOWPACK_STAMPS}"
+        SOURCE_DIR        "${SNOWPACK_DIR}"
+        BINARY_DIR        "${SNOWPACK_BUILD}"
+    )
+	FetchContent_Populate(SNOWPACK)
+
+    set(SNOWPACK_FOUND TRUE)
+
+elseif (SNOWPACK_LIBRARY AND SNOWPACK_INCLUDE_DIR AND SNOWPACK_FORTRAN_LIBRARY AND METEOIO_LIBRARY AND METEOIO_INCLUDE_DIR)
     message(STATUS "Found pre-installed SNOWPACK library: ${SNOWPACK_LIBRARY}")
     message(STATUS "Using SNOWPACK include directory: ${SNOWPACK_INCLUDE_DIR}")
     set(SNOWPACK_FOUND TRUE)
@@ -225,7 +245,7 @@ else()
     set(BUILD_SNOWPACK_FROM_SOURCE TRUE CACHE BOOL "SNOWPACK should be built from source" FORCE)
 endif()
 
-if(SNOWPACK AND NOT SNOWPACK_FOUND)
+if( (SNOWPACK OR SNOWPACK_GPU) AND NOT SNOWPACK_FOUND)
 	message(WARNING "SNOWPACK not found, disabling SNOWPACK support.\nTo enable, set the SNOWPACK_DIR variable to the root directory of the SNOWPACK install (i.e. the directory which contains the 'lib' and 'build' subdirectories).")
 	set(SNOWPACK OFF)
 endif()

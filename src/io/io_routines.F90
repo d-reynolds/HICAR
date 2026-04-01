@@ -320,11 +320,12 @@ contains
     !! @retval  logical     True if variable should be flipped, False otherwise
     !!
     !!------------------------------------------------------------
-    logical function io_var_reversed(filename, var_name)
+    logical function io_var_reversed(filename, var_name, err_out)
         implicit none
         character(len=*), intent(in) :: filename
         character(len=*), intent(in) :: var_name
-        
+        integer, optional, intent(out) :: err_out
+
         ! Local variables
         integer :: ncid, var_id, err
         character(len=kMAX_NAME_LENGTH) :: attr_val
@@ -338,11 +339,13 @@ contains
         ! Get variable ID
         call check(nf90_inq_varid(ncid, var_name, var_id), " Getting var ID for "//trim(var_name))
         
+        if (present(err_out)) err_out = 1
         ! Check for positive = "down" attribute
         err = nf90_get_att(ncid, var_id, "positive", attr_val)
         if (err == nf90_noerr) then
             if (trim(adjustl(attr_val)) == "down") then
                 io_var_reversed = .not.(io_var_reversed)
+                if (present(err_out)) err_out = 0
             endif
         endif
         
@@ -351,6 +354,7 @@ contains
         if (err == nf90_noerr) then
             if (trim(adjustl(attr_val)) == "down" .or. trim(adjustl(attr_val)) == "decreasing") then
                 io_var_reversed = .not.(io_var_reversed)
+                if (present(err_out)) err_out = 0
             endif
         endif
         

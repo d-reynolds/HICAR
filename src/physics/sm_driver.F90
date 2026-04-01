@@ -34,7 +34,11 @@ module snow_model_driver
     use module_sm_FSMdrv,   only : sm_FSM_init, sm_FSM
 #endif
 #ifdef SNOWPACK
+#ifdef SNOWPACK_GPU
+    use snowpack_gpu_driver, only : snowpack_gpu_init, snowpack_gpu_step
+#else
     use module_sm_SNOWPACKdrv, only : sm_snowpack_init, sm_SNOWPACK
+#endif
 #endif
     use snow_drift,            only : snow_drift_var_request, snow_drift_init, snow_drift_step
 
@@ -103,7 +107,7 @@ contains
                          kVARS%snow_temperature, kVARS%Ds, kVARS%snow_temperature_i, kVARS%Vol_Frac_I, kVARS%Vol_Frac_W, &
                          kVARS%Vol_Frac_A, kVARS%Vol_Frac_S, kVARS%Vol_Frac_WP, kVARS%Rg, kVARS%Rb, kVARS%Dd, kVARS%Sp, kVARS%mk, &
                          kVARS%snow_nlayers,                                                                      &
-                         kVARS%mass_hoar, kVARS%CDot, kVARS%metamo, kVARS%N3, kVARS%depositionDate, kVARS%dSWE_subl])
+                         kVARS%mass_hoar, kVARS%CDot, kVARS%snow_stress, kVARS%N3, kVARS%depositionDate, kVARS%dSWE_subl])
 
              call options%restart_vars( &
                          [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
@@ -117,7 +121,7 @@ contains
                          kVARS%snow_temperature, kVARS%Ds, kVARS%snow_temperature_i, kVARS%Vol_Frac_I, kVARS%Vol_Frac_W, &
                          kVARS%Vol_Frac_A, kVARS%Vol_Frac_S, kVARS%Vol_Frac_WP, kVARS%Rg, kVARS%Rb, kVARS%Dd, kVARS%Sp, kVARS%mk, &
                          kVARS%snow_nlayers,                                                                      &
-                         kVARS%mass_hoar, kVARS%CDot, kVARS%metamo, kVARS%N3, kVARS%depositionDate])
+                         kVARS%mass_hoar, kVARS%CDot, kVARS%snow_stress, kVARS%N3, kVARS%depositionDate])
         endif
 
         ! CRYOWRF-style blowing snow drift (works with both FSM and SNOWPACK)
@@ -163,8 +167,81 @@ contains
 #endif
         else if (options%physics%snowmodel==kSM_SNOWPACK) then
 #ifdef SNOWPACK
+#ifdef SNOWPACK_GPU
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: Snowpack (GPU/OpenACC)"
+            call snowpack_gpu_init(domain,options,context_change)
+#else
+
+            ! --- Update host: SNOWPACK-specific inputs ---
+            !$acc update host( &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rg)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rb)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Dd)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sp)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
+
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: Snowpack"
             call sm_snowpack_init(domain,options,context_change)
+
+            ! --- Update device: SNOWPACK outputs ---
+            !$acc update device( &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rg)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rb)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Dd)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sp)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
+
+#endif
 #else
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    User asked to use Snowpack, but it is not compiled in this version of HICAR"
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Please de-select Snowpack as the snow model in the namelist, or recompile HICAR with the Snowpack library linked"
@@ -327,6 +404,12 @@ contains
 
             else if (options%physics%snowmodel==kSM_SNOWPACK) then
 #ifdef SNOWPACK
+#ifdef SNOWPACK_GPU
+                ! GPU SNOWPACK: data stays on device, no host/device transfers needed
+                !$acc enter data copyin(current_rain, current_snow, windspd)
+                call snowpack_gpu_step(domain,options,lsm_dt,current_rain,current_snow,windspd)
+                !$acc exit data delete(current_rain, current_snow, windspd)
+#else
                 ! EVAN'S BIG DRIVER HERE:
                 ! input variables for SNOWPACK, which we need, are:
 
@@ -381,7 +464,7 @@ contains
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
-                !$acc   domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
 
                 call sm_SNOWPACK(domain,options,lsm_dt,current_rain,current_snow,windspd)
@@ -411,8 +494,9 @@ contains
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
-                !$acc   domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
+#endif
 #endif
             endif
             end associate

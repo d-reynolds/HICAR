@@ -2232,6 +2232,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "temperature_in_surface_snow"),         &
                                attribute_t("units",         "K"),                                   &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
         
         !>------------------------------------------------------------
@@ -2254,6 +2255,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("non_standard_name", "snow_layer_ice_content"),          &
                                attribute_t("units",         "mm"),                                  &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
         
         !>------------------------------------------------------------
@@ -2265,6 +2267,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("non_standard_name", "snow_layer_liquid_water_content"), &
                                attribute_t("units",         "mm"),                                  &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
         
         !>------------------------------------------------------------
@@ -3484,6 +3487,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "snow_ice_content"),                    &
                                attribute_t("units",         "kg m-2"),                                   &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
                        		
         !>------------------------------------------------------------
@@ -3495,6 +3499,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "snow_water_content"),                    &
                                attribute_t("units",         "kg m-2"),                                   &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
                 		
         !>------------------------------------------------------------
@@ -3506,6 +3511,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "snow_layer_thickness"),                    &
                                attribute_t("units",         "m"),                                   &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
            
         !>------------------------------------------------------------
@@ -3587,6 +3593,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "snow_effective_radius"),   &
                                attribute_t("units",         "microns"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3598,7 +3605,8 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "snow_freezing_rate"),   &
                                attribute_t("units",         "kg m-2 s-1"),                        &
-                               attribute_t("coordinates",   "lat  lon")]
+                               attribute_t("positive",       "down"),                          &
+                               attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
         !!  BCPHI mass in snow layer from SNICAR
@@ -3609,6 +3617,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "black_carbon_hydrophillic_mass_in_snow"),   &
                                attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3620,6 +3629,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "black_carbon_hydrophobic_mass_in_snow"),   &
                                attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
         
         !>------------------------------------------------------------
@@ -3631,6 +3641,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "organic_carbon_hydrophillic_mass_in_snow"),   &
                                attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3642,6 +3653,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "organic_carbon_hydrophobic_mass_in_snow"),   &
                                attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3653,6 +3665,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "dust1_mass_in_snow"),   &
                                attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3664,6 +3677,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "dust2_mass_in_snow"),   &
                                attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3675,6 +3689,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "dust3_mass_in_snow"),   &
                                attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3686,6 +3701,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "dust4_mass_in_snow"),   &
                                attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3697,6 +3713,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "dust5_mass_in_snow"),   &
                                attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3708,6 +3725,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "black_carbon_hydrophillic_concentration_in_snow"),   &
                                attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3719,6 +3737,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "black_carbon_hydrophobic_concentration_in_snow"),   &
                                attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3730,6 +3749,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "organic_carbon_hydrophillic_concentration_in_snow"),   &
                                attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3741,6 +3761,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "organic_carbon_hydrophobic_concentration_in_snow"),   &
                                attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3752,6 +3773,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "dust1_concentration_in_snow"),   &
                                attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3763,6 +3785,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "dust2_concentration_in_snow"),   &
                                attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3774,6 +3797,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "dust3_concentration_in_snow"),   &
                                attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
                                
         !>------------------------------------------------------------
@@ -3785,6 +3809,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "dust4_concentration_in_snow"),   &
                                attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3796,6 +3821,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "dust5_concentration_in_snow"),   &
                                attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3807,10 +3833,11 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "snow_layer_deposition_date"),   &
                                attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
                             
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: snow layer interface temperature
         !------------------------------------------------------------
         else if (var_idx==kVARS%snow_temperature_i) then
             var_meta%name        = "snow_temperature_i"
@@ -3818,10 +3845,11 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z+1 !TODO: THIS SHOULD BE STAGGERED ONTO THE SNOW+1 GRID
             var_meta%attributes  = [attribute_t("standard_name", "snow_layer_interface_temperature"),   &
                                attribute_t("units",         "kg kg-1"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: snow layer volumetric fraction of snowice
         !------------------------------------------------------------
         else if (var_idx==kVARS%Vol_Frac_I) then
             var_meta%name        = "Vol_Frac_I"
@@ -3829,10 +3857,11 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "Volumetric fraction of ice in snowpack"),   &
                                attribute_t("units",         "m3 m-3"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: snow layer volumetric fraction of water
         !------------------------------------------------------------
         else if (var_idx==kVARS%Vol_Frac_W) then
             var_meta%name        = "Vol_Frac_W"
@@ -3840,10 +3869,11 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "Volumetric fraction of water in snowpack"),   &
                                attribute_t("units",         "m3 m-3"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: snow layer volumetric fraction of air
         !------------------------------------------------------------
         else if (var_idx==kVARS%Vol_Frac_A) then
             var_meta%name        = "Vol_Frac_A"
@@ -3851,10 +3881,11 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "Volumetric fraction of air in snowpack"),   &
                                attribute_t("units",         "m3 m-3"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: snow layer volumetric fraction of snow
         !------------------------------------------------------------
         else if (var_idx==kVARS%Vol_Frac_S) then
             var_meta%name        = "Vol_Frac_S"
@@ -3862,10 +3893,11 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "Volumetric fraction of snow in snowpack"),   &
                                attribute_t("units",         "m3 m-3"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: snow layer volumetric fraction of preferential flow water
         !------------------------------------------------------------
         else if (var_idx==kVARS%Vol_Frac_WP) then
             var_meta%name        = "Vol_Frac_WP"
@@ -3873,10 +3905,11 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "Volumetric fraction of preferential flow water in snowpack"),   &
                                attribute_t("units",         "m3 m-3"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: snow layer grain radius
         !------------------------------------------------------------
         else if (var_idx==kVARS%Rg) then
             var_meta%name        = "Rg"
@@ -3884,10 +3917,11 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "grain radius"),   &
                                attribute_t("units",         "mm"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: snow layer grain bond radius
         !------------------------------------------------------------
         else if (var_idx==kVARS%Rb) then
             var_meta%name        = "Rb"
@@ -3895,10 +3929,11 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "grain bond radius"),   &
                                attribute_t("units",         "mm"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: snow layer dendricity
         !------------------------------------------------------------
         else if (var_idx==kVARS%Dd) then
             var_meta%name        = "Dd"
@@ -3907,10 +3942,11 @@ contains
             var_meta%attributes  = [attribute_t("standard_name", "snow dendricity"),   &
                                attribute_t("description",         "0 = none, 1 = newsnow"),                        &
                                attribute_t("units",         "-"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: snow layer sphericity
         !------------------------------------------------------------
         else if (var_idx==kVARS%Sp) then
             var_meta%name        = "Sp"
@@ -3919,10 +3955,11 @@ contains
             var_meta%attributes  = [attribute_t("standard_name", "Sp"),   &
                                attribute_t("description",         "1 = round, 0 = angular"),                        &
                                attribute_t("units",         "-"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: snow grain marker (?)
         !------------------------------------------------------------
         else if (var_idx==kVARS%mk) then
             var_meta%name        = "mk"
@@ -3930,10 +3967,11 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "grain marker"),   &
                                attribute_t("units",         "-"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  SNOWPACK: snow layer deposition date
+        !!  SNOWPACK: mass of hoar in layer
         !------------------------------------------------------------
         else if (var_idx==kVARS%mass_hoar) then
             var_meta%name        = "mass_hoar"
@@ -3941,6 +3979,7 @@ contains
             var_meta%dim_len(2)  = kSNOW_GRID_Z
             var_meta%attributes  = [attribute_t("standard_name", "mass_hoar"),   &
                                attribute_t("units",         "-"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3953,17 +3992,19 @@ contains
             var_meta%attributes  = [attribute_t("standard_name", "CDot"),   &
                                attribute_t("description",         "Stress rate, that is the overload change rate"),                        &
                                attribute_t("units",         "(Pa s-1)"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
         !!  SNOWPACK: snow layer deposition date
         !------------------------------------------------------------
-        else if (var_idx==kVARS%metamo) then
-            var_meta%name        = "metamo"
+        else if (var_idx==kVARS%snow_stress) then
+            var_meta%name        = "snow_stress"
             var_meta%dimensions  = three_d_t_snow_dimensions
             var_meta%dim_len(2)  = kSNOW_GRID_Z
-            var_meta%attributes  = [attribute_t("standard_name", "metamo"),   &
-                               attribute_t("units",         "-"),                        &
+            var_meta%attributes  = [attribute_t("standard_name", "snow_stress"),   &
+                               attribute_t("units",         "Pa"),                        &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -3976,6 +4017,7 @@ contains
             var_meta%attributes  = [attribute_t("standard_name", "coordination_number_N3"),   &
                                attribute_t("description",   "Grain coordination number"),     &
                                attribute_t("units",         "1"),                              &
+                               attribute_t("positive",       "down"),                          &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -4029,26 +4071,6 @@ contains
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  Blowing snow suspended ice mixing ratio (3D tracer)
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%bs_susp_ice_mass) then
-            var_meta%name        = "bs_ice_mass"
-            var_meta%dimensions  = three_d_t_dimensions
-            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_ice_mixing_ratio"),   &
-                               attribute_t("units",         "kg kg-1"),                        &
-                               attribute_t("coordinates",   "lat lon")]
-
-        !>------------------------------------------------------------
-        !!  Blowing snow suspended ice number concentration (3D tracer)
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%bs_susp_ice_number) then
-            var_meta%name        = "bs_ice_num"
-            var_meta%dimensions  = three_d_t_dimensions
-            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_ice_number_concentration"),   &
-                               attribute_t("units",         "kg-1"),                        &
-                               attribute_t("coordinates",   "lat lon")]
-
-        !>------------------------------------------------------------
         !!  Blowing snow accumulated saltation SWE change
         !!------------------------------------------------------------
         else if (var_idx==kVARS%bs_drift_swe_salt) then
@@ -4076,6 +4098,27 @@ contains
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_sublimation_swe_change"),   &
                                attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Snow mass concentration on fine mesh (blowing snow mesh)
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%qs_fm) then
+            var_meta%name        = "qs_blow_mesh"
+            var_meta%dimensions  = three_d_t_fm_dimensions
+            var_meta%dim_len(2)  = kFM_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_mass_concentration"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Snow number concentration on fine mesh (blowing snow mesh)
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%ns_fm) then
+            var_meta%name        = "ns_blow_mesh"
+            var_meta%dimensions  = three_d_t_fm_dimensions
+            var_meta%dim_len(2)  = kFM_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_number_concentration"),   &
+                               attribute_t("units",         "cm-3"),                        &
                                attribute_t("coordinates",   "lat lon")]
 
         end if

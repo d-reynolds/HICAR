@@ -774,35 +774,63 @@ contains
         j_s_l = jts_l - 1
         j_e_l = jte_l + 1
 
-        coef = (1.0/12.0) * t_factor
-        t_factor_up = 0.5 * t_factor
+        if (horder==3) then
+            coef = (1.0/12.0) * t_factor
 
-        ! ==========================================
-        ! Horizontal fluxes (3rd order)
-        ! ==========================================
-        !$acc parallel loop gang vector collapse(3)
-        do j = j_s_l, j_e_l+1
-            do k = ks, ke
-                do i = i_s_l, i_e_l+1
-                    ! X-direction flux
-                    u_val = U_m(i,k,j)
-                    abs_u_val = ABS(u_val)
-                    tmp = 7.0 * (q(i,k,j) + q(i-1,k,j)) - (q(i+1,k,j) + q(i-2,k,j))
-                    tmp = u_val * tmp
-                    tmp = tmp - abs_u_val * (3.0 * (q(i,k,j) - q(i-1,k,j)) - (q(i+1,k,j) - q(i-2,k,j)))
-                    flux_x_fm(i,k,j) = tmp * coef
+            ! ==========================================
+            ! Horizontal fluxes (3rd order)
+            ! ==========================================
+            !$acc parallel loop gang vector collapse(3)
+            do j = j_s_l, j_e_l+1
+                do k = ks, ke
+                    do i = i_s_l, i_e_l+1
+                        ! X-direction flux
+                        u_val = U_m(i,k,j)
+                        abs_u_val = ABS(u_val)
+                        tmp = 7.0 * (q(i,k,j) + q(i-1,k,j)) - (q(i+1,k,j) + q(i-2,k,j))
+                        tmp = u_val * tmp
+                        tmp = tmp - abs_u_val * (3.0 * (q(i,k,j) - q(i-1,k,j)) - (q(i+1,k,j) - q(i-2,k,j)))
+                        flux_x_fm(i,k,j) = tmp * coef
 
-                    ! Y-direction flux
-                    v_val = V_m(i,k,j)
-                    abs_u_val = ABS(v_val)
-                    tmp = 7.0 * (q(i,k,j) + q(i,k,j-1)) - (q(i,k,j+1) + q(i,k,j-2))
-                    tmp = v_val * tmp
-                    tmp = tmp - abs_u_val * (3.0 * (q(i,k,j) - q(i,k,j-1)) - (q(i,k,j+1) - q(i,k,j-2)))
-                    flux_y_fm(i,k,j) = tmp * coef
+                        ! Y-direction flux
+                        v_val = V_m(i,k,j)
+                        abs_u_val = ABS(v_val)
+                        tmp = 7.0 * (q(i,k,j) + q(i,k,j-1)) - (q(i,k,j+1) + q(i,k,j-2))
+                        tmp = v_val * tmp
+                        tmp = tmp - abs_u_val * (3.0 * (q(i,k,j) - q(i,k,j-1)) - (q(i,k,j+1) - q(i,k,j-2)))
+                        flux_y_fm(i,k,j) = tmp * coef
+                    enddo
                 enddo
             enddo
-        enddo
+        else if (horder==5) then
+            coef = (1./60)*t_factor
 
+            ! ==========================================
+            ! Horizontal fluxes (5th order)
+            ! ==========================================
+            !$acc parallel loop gang vector collapse(3)
+            do j = j_s_l, j_e_l+1
+                do k = ks, ke
+                    do i = i_s_l, i_e_l+1
+                        ! X-direction flux
+                        u_val = U_m(i,k,j)
+                        abs_u_val = ABS(u_val)
+                        tmp = 37.0 * (q(i,k,j) + q(i-1,k,j)) - 8.0 * (q(i+1,k,j) + q(i-2,k,j)) + (q(i+2,k,j) + q(i-3,k,j))
+                        tmp = u_val * tmp
+                        tmp = tmp - abs_u_val * (10.0 * (q(i,k,j) - q(i-1,k,j)) - 5.0 * (q(i+1,k,j) - q(i-2,k,j)) + (q(i+2,k,j) - q(i-3,k,j)))
+                        flux_x_fm(i,k,j) = tmp * coef
+
+                        ! Y-direction flux
+                        v_val = V_m(i,k,j)
+                        abs_u_val = ABS(v_val)
+                        tmp = 37.0 * (q(i,k,j) + q(i,k,j-1)) - 8.0 * (q(i,k,j+1) + q(i,k,j-2)) + (q(i,k,j+2) + q(i,k,j-3))
+                        tmp = v_val * tmp
+                        tmp = tmp - abs_u_val * (10.0 * (q(i,k,j) - q(i,k,j-1)) - 5.0 * (q(i,k,j+1) - q(i,k,j-2)) + (q(i,k,j+2) - q(i,k,j-3)))
+                        flux_y_fm(i,k,j) = tmp * coef
+                    enddo
+                enddo
+            enddo
+        endif
         ! ==========================================
         ! Vertical fluxes (3rd order with fine-mesh BCs)
         ! ==========================================

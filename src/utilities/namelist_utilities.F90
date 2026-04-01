@@ -1973,6 +1973,102 @@ contains
                 dimensions = ["Y", "X"]
                 units = "m"
                 group = "Domain"
+            case ("snowpack_nlayers_var")
+                description = "Name of the number of snow layers variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_deposition_var")
+                description = "Name of the snow deposition date variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfi_var")
+                description = "Name of the snow void fraction ice variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfw_var")
+                description = "Name of the snow void fraction water variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfa_var")
+                description = "Name of the snow void fraction air variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfs_var")
+                description = "Name of the snow void fraction solid variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfwp_var")
+                description = "Name of the snow void fraction water preferential flow variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_ds_var")
+                description = "Name of the snow layer thickness variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                units = "mm"
+                group = "Domain"
+            case ("snowpack_tsnow_var")
+                description = "Name of the snow temperature variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                units = "K"
+                group = "Domain"
+            case ("snowpack_tsnow_i_var")
+                description = "Name of the snow interface temperature variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["Si", "Y ", "X "]
+                units = "K"
+                group = "Domain"
+            case ("snowpack_rg_var")
+                description = "Name of the snow grain radius variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                units = "mm"
+                group = "Domain"
+            case ("snowpack_rb_var")
+                description = "Name of the snow bond radius variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                units = "mm"
+                group = "Domain"
+            case ("snowpack_dd_var")
+                description = "Name of the snow dendricity variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                units = "kg/m^3"
+                group = "Domain"
+            case ("snowpack_sp_var")
+                description = "Name of the snow sphericity variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_mk_var")
+                description = "Name of the snow marker variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_cdot_var")
+                description = "Name of the snow cdot variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_snow_stress_var")
+                description = "Name of the snow stress variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_n3_var")
+                description = "Name of the snow coordination variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
             ! --------------------------------------
             ! --------------------------------------
             ! Forcing namelist variables
@@ -3570,7 +3666,7 @@ contains
                     "'MO_MICHLMAYR' = Stearns and Weidner (1993) modified by Michlmayr (2008)"
                 default = "MO_HOLTSLAG"
                 if (present(val_keys)) then
-                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "MO_HOLTSLAG", trim(str(kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG)), "MO_MICHLMAYR", trim(str(kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR))]
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "NEUTRAL", trim(str(kSNOWPACK_ATMOS_STAB_NEUTRAL)), "MO_HOLTSLAG", trim(str(kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG)), "MO_MICHLMAYR", trim(str(kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR))]
                 endif
                 group = "SM_Parameters"
             case("snowpack_albedo_parameterization")
@@ -3579,7 +3675,7 @@ contains
                     "'SCHMUCKI_OGS' = from SCHMUCKI_ALLX32 regression with optical grain size"
                 default = "LEHNING_2"
                 if (present(val_keys)) then
-                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "LEHNING_2", trim(str(kSNOWPACK_ALBEDO_PARAM_LEHNING_2)), "SCHMUCKI_OGS", trim(str(kSNOWPACK_ALBEDO_PARAM_SCHMUCKI_OGS))]
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "LEHNING_2", trim(str(kSNOWPACK_ALBEDO_PARAM_LEHNING_2)), "SCHMUCKI", trim(str(kSNOWPACK_ALBEDO_PARAM_SCHMUCKI))]
                 endif
                 group = "SM_Parameters"
             case("snowpack_enable_vapour_transport")
@@ -3794,5 +3890,207 @@ contains
         endif
 
     end subroutine get_nml_var_metadata
+
+
+    !> -------------------------------
+    !! Extract variable names from a namelist section in a user's namelist file.
+    !! Finds the &nml_name section, reads lines until '/', and extracts
+    !! tokens before '=' as variable names.
+    !! -------------------------------
+    subroutine extract_nml_varnames_from_file(filename, nml_name, varnames, nvar)
+        implicit none
+        character(len=*), intent(in) :: filename, nml_name
+        character(len=kMAX_NAME_LENGTH), intent(out) :: varnames(:)
+        integer, intent(out) :: nvar
+
+        integer :: funit, ios, eq_pos, paren_pos, i
+        character(len=1024) :: line, trimmed
+        character(len=kMAX_NAME_LENGTH) :: varname, nml_lower, section_name
+        logical :: in_section, in_quotes
+
+        nvar = 0
+        in_section = .false.
+        nml_lower = to_lower(trim(nml_name))
+
+        open(newunit=funit, file=filename, status='old', action='read', iostat=ios)
+        if (ios /= 0) return
+
+        do
+            read(funit, '(A)', iostat=ios) line
+            if (ios /= 0) exit
+
+            trimmed = adjustl(line)
+
+            ! Check for start of a namelist section
+            if (trimmed(1:1) == '&') then
+                if (in_section) exit  ! hit next section, done
+                section_name = to_lower(trim(trimmed(2:)))
+                ! Strip trailing whitespace/comments from section name
+                do i = 1, len_trim(section_name)
+                    if (section_name(i:i) == ' ' .or. section_name(i:i) == '!') then
+                        section_name = section_name(1:i-1)
+                        exit
+                    endif
+                end do
+                if (trim(section_name) == trim(nml_lower)) in_section = .true.
+                cycle
+            endif
+
+            if (.not. in_section) cycle
+
+            ! Check for end of namelist section
+            if (trimmed(1:1) == '/') exit
+
+            ! Strip inline comments (quote-aware)
+            in_quotes = .false.
+            do i = 1, len_trim(trimmed)
+                if (trimmed(i:i) == "'") in_quotes = .not. in_quotes
+                if (trimmed(i:i) == '!' .and. .not. in_quotes) then
+                    trimmed = trimmed(1:i-1)
+                    exit
+                endif
+            end do
+
+            ! Skip blank lines
+            if (len_trim(trimmed) == 0) cycle
+
+            ! Look for '=' to identify a variable assignment
+            eq_pos = index(trimmed, '=')
+            if (eq_pos == 0) cycle  ! continuation line, skip
+
+            ! Extract variable name (token before '=')
+            varname = adjustl(trim(trimmed(1:eq_pos-1)))
+
+            ! Strip array indices: take part before '('
+            paren_pos = index(varname, '(')
+            if (paren_pos > 0) varname = varname(1:paren_pos-1)
+
+            varname = to_lower(trim(varname))
+            if (len_trim(varname) == 0) cycle
+
+            ! Add if not already present and array not full
+            if (nvar >= size(varnames)) cycle
+            nvar = nvar + 1
+            varnames(nvar) = varname
+        end do
+
+        close(funit)
+
+    end subroutine extract_nml_varnames_from_file
+
+
+    !> -------------------------------
+    !! Extract valid variable names from WRITE(NML=) scratch file output.
+    !! Parses compiler-generated namelist output to get the set of valid names.
+    !! -------------------------------
+    subroutine extract_nml_varnames_from_scratch(scratch_unit, varnames, nvar)
+        implicit none
+        integer, intent(in) :: scratch_unit
+        character(len=kMAX_NAME_LENGTH), intent(out) :: varnames(:)
+        integer, intent(out) :: nvar
+
+        integer :: ios, eq_pos, paren_pos
+        character(len=1024) :: line, trimmed
+        character(len=kMAX_NAME_LENGTH) :: varname
+
+        nvar = 0
+        rewind(scratch_unit)
+
+        do
+            read(scratch_unit, '(A)', iostat=ios) line
+            if (ios /= 0) exit
+
+            trimmed = adjustl(line)
+
+            ! Skip the &group_name header line
+            if (trimmed(1:1) == '&') cycle
+            ! Stop at end of namelist
+            if (trimmed(1:1) == '/') exit
+
+            ! Look for '=' to identify a variable entry
+            eq_pos = index(trimmed, '=')
+            if (eq_pos == 0) cycle
+
+            ! Extract variable name (token before '=')
+            varname = adjustl(trim(trimmed(1:eq_pos-1)))
+
+            ! Strip array indices
+            paren_pos = index(varname, '(')
+            if (paren_pos > 0) varname = varname(1:paren_pos-1)
+
+            varname = to_lower(trim(varname))
+            if (len_trim(varname) == 0) cycle
+
+            ! Add if not already present
+            if (.not. any(varnames(1:nvar) == varname) .and. nvar < size(varnames)) then
+                nvar = nvar + 1
+                varnames(nvar) = varname
+            endif
+        end do
+
+    end subroutine extract_nml_varnames_from_scratch
+
+
+    !> -------------------------------
+    !! After a namelist read error, identify which user-supplied variable names
+    !! are not valid members of the namelist group. Prints the invalid names.
+    !!
+    !! nml_name:       name of the namelist group (e.g. 'domain')
+    !! nml_file:       path to the user's namelist file
+    !! valid_nml_unit: scratch file unit containing WRITE(NML=) output with defaults
+    !! -------------------------------
+    subroutine find_invalid_nml_vars(nml_name, nml_file, valid_nml_unit)
+        implicit none
+        character(len=*), intent(in) :: nml_name, nml_file
+        integer, intent(in) :: valid_nml_unit
+
+        integer, parameter :: MAX_VARS = 200
+        character(len=kMAX_NAME_LENGTH) :: user_vars(MAX_VARS), valid_vars(MAX_VARS)
+        character(len=kMAX_NAME_LENGTH) :: invalid_vars(MAX_VARS)
+        integer :: n_user, n_valid, n_invalid
+        integer :: i, j
+        logical :: found
+
+        call extract_nml_varnames_from_file(nml_file, nml_name, user_vars, n_user)
+        call extract_nml_varnames_from_scratch(valid_nml_unit, valid_vars, n_valid)
+
+        ! If we couldn't parse either file, skip the comparison
+        if (n_user == 0 .or. n_valid == 0) return
+
+        ! Find user variables that are not in the valid set
+        n_invalid = 0
+        do i = 1, n_user
+            found = .false.
+            do j = 1, n_valid
+                if (trim(user_vars(i)) == trim(valid_vars(j))) then
+                    found = .true.
+                    exit
+                endif
+            end do
+            if (.not. found) then
+                n_invalid = n_invalid + 1
+                invalid_vars(n_invalid) = user_vars(i)
+            endif
+        end do
+
+        if (n_invalid == 0) return
+
+        if (STD_OUT_PE) then
+            write(*,*) "    The following variable(s) are not valid in the '", &
+                trim(nml_name), "' namelist:"
+            do i = 1, n_invalid
+                write(*,*) "      - ", trim(invalid_vars(i))
+            end do
+            write(*,*)
+            write(*,*) "    To see all valid namelist variables, generate a default namelist file using:"
+            write(*,*) "        ./HICAR --gen-nml default.nml"
+            write(*,*)
+            write(*,*) "    To check if a variable is valid namelist variable use:"
+            write(*,*) "        ./HICAR -v [YOUR_VAR]"
+            write(*,*)
+        endif
+
+    end subroutine find_invalid_nml_vars
+
 
 end module namelist_utils

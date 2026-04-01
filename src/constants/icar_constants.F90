@@ -406,7 +406,7 @@ module icar_constants
         integer :: mk
         integer :: mass_hoar
         integer :: CDot
-        integer :: metamo
+        integer :: snow_stress
         integer :: N3              ! Coordination number (dimensionless)
 
         ! Blowing snow drift variables (CRYOWRF-style)
@@ -414,8 +414,8 @@ module icar_constants
         integer :: bs_saltation_flux      ! 2D: saltation layer mass (kg/m^2)
         integer :: bs_suspension_flux     ! 2D: suspension layer mass (kg/m^2)
         integer :: bs_sublimation_flux    ! 2D: sublimation flux from blowing snow (W/m^2)
-        integer :: bs_susp_ice_mass       ! 3D: blowing snow ice mixing ratio (kg/kg)
-        integer :: bs_susp_ice_number     ! 3D: blowing snow number concentration (#/kg)
+        integer :: qs_fm                  ! 3D: blowing snow ice mixing ratio (kg/kg)
+        integer :: ns_fm                  ! 3D: blowing snow number concentration (#/kg)
         integer :: bs_drift_swe_salt      ! 2D: accumulated saltation SWE change
         integer :: bs_drift_swe_susp      ! 2D: accumulated suspension SWE change
         integer :: bs_drift_swe_subl      ! 2D: accumulated sublimation SWE change
@@ -452,6 +452,7 @@ module icar_constants
     character(len=18) :: three_d_t_soil_dimensions(4)       = [character(len=18) :: "lon_x","nsoil","lat_y","time"]
     character(len=18) :: three_d_t_snow_dimensions(4)       = [character(len=18) :: "lon_x","nsnow","lat_y","time"]
     character(len=18) :: three_d_t_snow_i_dimensions(4)     = [character(len=18) :: "lon_x","nsnow_i","lat_y","time"]
+    character(len=18) :: three_d_t_fm_dimensions(4)         = [character(len=18) :: "lon_x","level_fm","lat_y","time"]
     character(len=18) :: three_d_t_snowsoil_dimensions(4)   = [character(len=18) :: "lon_x","nsnowsoil","lat_y","time"]
     character(len=18) :: three_d_soilcomp_dimensions(3)     = [character(len=18) :: "lon_x","nsoil_composition","lat_y"]
     character(len=18) :: three_d_crop_dimensions(3)         = [character(len=18) :: "lon_x","crop","lat_y"]
@@ -552,6 +553,7 @@ module icar_constants
     ! the fixed lengths of various land-surface grids
     integer, parameter :: kSOIL_GRID_Z       = 4
     integer            :: kSNOW_GRID_Z       = 3
+    integer            :: kFM_GRID_Z         = 10
     integer            :: kSNOWSOIL_GRID_Z   = 7
     integer, parameter :: kCROP_GRID_Z       = 5
     integer, parameter :: kMONTH_GRID_Z      = 12
@@ -567,9 +569,10 @@ module icar_constants
     ! SNOWPACK constants
     integer, parameter :: kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG = 1
     integer, parameter :: kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR = 2
+    integer, parameter :: kSNOWPACK_ATMOS_STAB_NEUTRAL = 0
 
     integer, parameter :: kSNOWPACK_ALBEDO_PARAM_LEHNING_2 = 1
-    integer, parameter :: kSNOWPACK_ALBEDO_PARAM_SCHMUCKI_OGS = 2
+    integer, parameter :: kSNOWPACK_ALBEDO_PARAM_SCHMUCKI = 2
 
     integer, parameter :: kSNOWPACK_VARIANT_ANTARCTICA = 1
     integer, parameter :: kSNOWPACK_VARIANT_ALPS      = 2

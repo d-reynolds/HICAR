@@ -285,4 +285,37 @@ contains
     end subroutine ifftshift2r
 
 
+#ifdef _OPENACC
+    !>------------------------------------------------------------
+    !! GPU-friendly inverse FFT shift for 2D C_DOUBLE_COMPLEX arrays.
+    !! Uses a pre-allocated workspace instead of allocating per call.
+    !! Data must already be present on the GPU device.
+    !!------------------------------------------------------------
+    subroutine ifftshift2cc_gpu(fftimage, tmp, nx, ny)
+        implicit none
+        integer, intent(in) :: nx, ny
+        complex(C_DOUBLE_COMPLEX), intent(inout) :: fftimage(nx,ny)
+        complex(C_DOUBLE_COMPLEX), intent(out)   :: tmp(nx,ny)
+        integer :: i, j, ii, jj
+
+        !$acc parallel loop gang vector collapse(2) present(fftimage, tmp)
+        do j = 1, ny
+            do i = 1, nx
+                ii = mod(i + (nx+1)/2, nx)
+                if (ii == 0) ii = nx
+                jj = mod(j + (ny+1)/2, ny)
+                if (jj == 0) jj = ny
+                tmp(i,j) = fftimage(ii,jj)
+            end do
+        end do
+
+        !$acc parallel loop gang vector collapse(2) present(fftimage, tmp)
+        do j = 1, ny
+            do i = 1, nx
+                fftimage(i,j) = tmp(i,j)
+            end do
+        end do
+    end subroutine ifftshift2cc_gpu
+#endif
+
 end module fftshifter
