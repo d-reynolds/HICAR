@@ -9,7 +9,7 @@ submodule(options_interface) options_implementation
     use model_tracking,             only : print_model_diffs
     use output_metadata,            only : get_varname, get_varindx, get_varmeta
     use namelist_utils,             only : set_nml_var, set_nml_var_default, set_namelist, write_nml_file_end, &
-                                           translate_numeric_mapping
+                                           translate_numeric_mapping, find_invalid_nml_vars
     use iso_fortran_env
     use meta_data_interface,        only : meta_data_t
     implicit none
@@ -408,7 +408,7 @@ contains
         type(physics_type), intent(inout) :: phys_options
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: read_nml, info_only, gen_nml
-        integer :: name_unit, rc
+        integer :: name_unit, rc, nml_scratch
         !variables to be used in the namelist
         character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: pbl, lsm, mp, sfc, sm, water, rad, conv, adv, wind
         logical :: print_info, gennml, read_namelist
@@ -444,7 +444,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=physics,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('physics',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=physics)
+                rewind(nml_scratch)
+                call print_nml_error('physics', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
         endif
 
         !store options
@@ -495,7 +502,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: read_nml, info_only, gen_nml
 
-        integer :: name_unit, rc, i, j, status, var_indx
+        integer :: name_unit, rc, i, j, status, var_indx, nml_scratch
         integer :: frames_per_outfile(kMAX_NESTS)
         real    :: outputinterval(kMAX_NESTS)
         logical :: file_exists, print_info, gennml, read_namelist
@@ -528,7 +535,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=output,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('output',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=output)
+                rewind(nml_scratch)
+                call print_nml_error('output', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
         endif
         if (ALL(output_vars(:,n_indx)==kCHAR_NO_VAL)) then
             if (.not.read_namelist) then
@@ -577,7 +591,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: read_nml, info_only, gen_nml
 
-        integer :: name_unit, rc
+        integer :: name_unit, rc, nml_scratch
         integer    :: restartinterval(kMAX_NESTS)
 
         logical :: file_exists, read_namelist, print_info, gennml, override_check(kMAX_NESTS), restart_run(kMAX_NESTS)
@@ -611,7 +625,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=restart,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('restart',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=restart)
+                rewind(nml_scratch)
+                call print_nml_error('restart', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
         endif
         ! Restart interval for this particular nest must be set to be the number of output intervals for this nest
         ! which results in the same restart timestep for the first nest
@@ -648,7 +669,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: read_nml, info_only, gen_nml
 
-        integer :: name_unit, rc, i, j, nfiles
+        integer :: name_unit, rc, i, j, nfiles, nml_scratch
         logical :: compute_p, print_info, read_namelist, gennml
         logical, dimension(kMAX_NESTS) :: limit_rh, z_is_geopotential,&
                    time_varying_z, t_is_potential, qv_is_spec_humidity, &
@@ -750,7 +771,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=forcing,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('forcing',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=forcing)
+                rewind(nml_scratch)
+                call print_nml_error('forcing', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
         endif
 
         call set_nml_var(options%forcing%t_offset, t_offset(n_indx), 't_offset', t_offset(1))
@@ -915,7 +943,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: read_nml, info_only, gen_nml
 
-        integer :: name_unit, rc, count, i
+        integer :: name_unit, rc, count, i, nml_scratch
         integer, dimension(kMAX_NESTS) :: parent_nest, nests
         logical :: read_namelist, print_info, gennml
 
@@ -980,7 +1008,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=general,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('general',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=general)
+                rewind(nml_scratch)
+                call print_nml_error('general', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
         endif
 
         call set_nml_var(gen_options%calendar, calendar(n_indx), 'calendar', calendar(1))
@@ -1062,7 +1097,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: read_nml, info_only, gen_nml
 
-        integer :: name_unit, rc, this_level
+        integer :: name_unit, rc, this_level, nml_scratch
         logical :: read_namelist, print_info, gennml
 
         real, dimension(MAXLEVELS, kMAX_NESTS) :: dz_levels
@@ -1189,7 +1224,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=domain,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('domain',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=domain)
+                rewind(nml_scratch)
+                call print_nml_error('domain', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             sleve(n_indx) = sleve(1)
             use_agl_height(n_indx) = use_agl_height(1)
@@ -1353,7 +1395,7 @@ contains
         logical, intent(in), optional  :: info_only, gen_nml
 
         logical :: print_info, gennml
-        integer :: name_unit, rc
+        integer :: name_unit, rc, nml_scratch
 
         real, dimension(kMAX_NESTS)    :: Nt_c, TNO, am_s, rho_g, av_s, bv_s, fv_s, av_g, bv_g, av_i, &
                                           Ef_si, Ef_rs, Ef_rg, Ef_ri, C_cubes, C_sqrd, mu_r, t_adjust
@@ -1404,7 +1446,14 @@ contains
             open(io_newunit(name_unit), file=mp_filename)
             read(name_unit,iostat=rc,nml=mp_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('mp_parameters',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=mp_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('mp_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=mp_filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             Ef_rw_l(n_indx) = Ef_rw_l(1)
             Ef_sw_l(n_indx) = Ef_sw_l(1)
@@ -1462,7 +1511,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        integer :: name_unit, rc
+        integer :: name_unit, rc, nml_scratch
         logical :: print_info, gennml
 
         integer :: vert_smooth(kMAX_NESTS)
@@ -1547,7 +1596,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=lt_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('lt_parameters',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=lt_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('lt_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             variable_N(n_indx) = variable_N(1)
             smooth_nsq(n_indx) = smooth_nsq(1)
@@ -1609,7 +1665,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        integer :: name_unit, rc
+        integer :: name_unit, rc, nml_scratch
         logical :: print_info, gennml
 
         logical :: boundary_buffer(kMAX_NESTS)   ! apply some smoothing to the x and y boundaries in MPDATA
@@ -1644,7 +1700,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=adv_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('adv_parameters',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=adv_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('adv_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             boundary_buffer(n_indx) = boundary_buffer(1)
             MPDATA_FCT(n_indx) = MPDATA_FCT(1)
@@ -1686,7 +1749,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        integer :: name_unit, rc
+        integer :: name_unit, rc, nml_scratch
         logical :: print_info, gennml
 
         integer :: ysu_topdown_pblmix(kMAX_NESTS) ! controls if radiative, top-down mixing in YSU scheme is turned on
@@ -1711,7 +1774,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=pbl_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('pbl_parameters',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=pbl_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('pbl_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
         endif
 
         call set_nml_var(pbl_options%ysu_topdown_pblmix, ysu_topdown_pblmix(n_indx), 'ysu_topdown_pblmix', ysu_topdown_pblmix(1))
@@ -1731,7 +1801,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        integer :: name_unit, rc
+        integer :: name_unit, rc, nml_scratch
         integer, dimension(kMAX_NESTS) :: isfflx, scm_force_flux, iz0tlnd, isftcflx
         real    :: sbrlim(kMAX_NESTS)
 
@@ -1760,7 +1830,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=sfc_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('sfc_parameters',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=sfc_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('sfc_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
         endif
         
         call set_nml_var(sfc_options%isfflx, isfflx(n_indx), 'isfflx', isfflx(1))
@@ -1786,7 +1863,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        integer :: name_unit, rc
+        integer :: name_unit, rc, nml_scratch
         logical :: print_info, gennml
 
         real, dimension(kMAX_NESTS) :: tendency_fraction, tend_qv_fraction, tend_qc_fraction, tend_th_fraction, tend_qi_fraction, &
@@ -1819,7 +1896,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=cu_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('cu_parameters',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=cu_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('cu_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
         endif
 
         ! if not set separately, default to the global tendency setting
@@ -1853,7 +1937,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        integer :: name_unit, rc
+        integer :: name_unit, rc, nml_scratch
         logical :: print_info, gennml
 
         character(len=kMAX_NAME_LENGTH) :: LU_Categories(kMAX_NESTS) ! Category definitions (e.g. USGS, MODIFIED_IGBP_MODIS_NOAH)
@@ -1939,7 +2023,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=lsm_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('lsm_parameters',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=lsm_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('lsm_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             monthly_vegfrac(n_indx) = monthly_vegfrac(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
@@ -2008,7 +2099,7 @@ contains
         integer, intent(in) :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        integer :: name_unit, rc
+        integer :: name_unit, rc, nml_scratch
         logical :: print_info, gennml
 
         integer :: sm_nsnow_max(kMAX_NESTS)      ! maximum number of snow layers in the FSM2trans snow model
@@ -2094,7 +2185,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=sm_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('sm_parameters',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=sm_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('sm_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             fsm_hn_on(n_indx) = fsm_hn_on(1)
             fsm_for_hn(n_indx) = fsm_for_hn(1)
@@ -2175,7 +2273,7 @@ contains
         integer, intent(in)  :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
 
-        integer :: name_unit, rc
+        integer :: name_unit, rc, nml_scratch
         logical :: print_info, gennml
 
         real    :: update_interval_rad(kMAX_NESTS)             ! minimum number of seconds between RRTMG updates
@@ -2212,7 +2310,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=rad_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('rad_parameters',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=rad_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('rad_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             read_ghg(n_indx) = read_ghg(1)
             terrain_shading(n_indx) = terrain_shading(1)
@@ -2247,7 +2352,7 @@ contains
         integer, intent(in)           :: n_indx
         logical, intent(in), optional  :: info_only, gen_nml
         
-        integer :: name_unit, rc, update_frequency_checked     ! logical unit number for namelist
+        integer :: name_unit, rc, update_frequency_checked, nml_scratch     ! logical unit number for namelist
         logical :: print_info, gennml
         !Define parameters
         integer, dimension(kMAX_NESTS) :: wind_iterations, wind_solver_iterations, update_frequency
@@ -2287,7 +2392,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=wind,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('wind',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=wind)
+                rewind(nml_scratch)
+                call print_nml_error('wind', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             Sx(n_indx) = Sx(1)
             thermal(n_indx) = thermal(1)
@@ -2330,7 +2442,7 @@ contains
         integer, intent(in)           :: n_indx
         logical, intent(in), optional  :: read_nml, info_only, gen_nml
         
-        integer :: name_unit, rc                            ! logical unit number for namelist
+        integer :: name_unit, rc, nml_scratch                  ! logical unit number for namelist
         !Define parameters
         real :: cfl_reduction_factor(kMAX_NESTS)    
         logical :: RK3(kMAX_NESTS)
@@ -2361,7 +2473,14 @@ contains
             open(io_newunit(name_unit), file=filename)
             read(name_unit,iostat=rc,nml=time_parameters,IOMSG=error_msg)
             close(name_unit)
-            if (rc /= 0) call print_nml_error('time_parameters',msg=error_msg,iostat=rc)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=time_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('time_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             RK3(n_indx) = RK3(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
@@ -2736,17 +2855,19 @@ contains
 
     end subroutine version_check
 
-    subroutine print_nml_error(nml_name, msg, iostat)
+    subroutine print_nml_error(nml_name, msg, iostat, nml_file, valid_nml_unit)
         implicit none
         character(len=*), intent(in) :: nml_name, msg
         integer, intent(in) :: iostat
-        
+        character(len=*), intent(in), optional :: nml_file
+        integer, intent(in), optional :: valid_nml_unit
+
         integer :: obj_indx
 
-        if (STD_OUT_PE) write(*,*) 
+        if (STD_OUT_PE) write(*,*)
         if (STD_OUT_PE) write(*,*) "  -----------------------------------------------------------------"
         if (STD_OUT_PE) write(*,*) "  ERROR reading '",trim(nml_name),"' namelist, continuing with defaults"
-        if (STD_OUT_PE) write(*,*) 
+        if (STD_OUT_PE) write(*,*)
 
         IF (IS_IOSTAT_END(iostat)) THEN
             if (STD_OUT_PE) WRITE(*,*) '    End of file encountered'
@@ -2754,26 +2875,32 @@ contains
         ELSE IF (IS_IOSTAT_EOR(iostat)) THEN
             if (STD_OUT_PE)  WRITE(*,*) '    End of record encountered'
             stop
-        ELSE    
+        ELSE
             if (STD_OUT_PE) write(*,*) "    ERROR message: ", trim(msg)
-            !see if msg contains string "Bad data"
-            if (index(msg, "Bad data") > 0) then
-                !get index of location after first occurance of "object" in msg
-                obj_indx = index(msg, "object") + len("object ")
-                if (STD_OUT_PE) write(*,*) "    Alternatively, the user may have defined a variable in the namelist that is not valid."
-                if (STD_OUT_PE) write(*,*) "    Please check that the variable following '", trim(msg(obj_indx:)), "' is valid."
-                if (STD_OUT_PE) write(*,*) 
-                if (STD_OUT_PE) write(*,*) "    To see all valid namelist variables, generate a default namelist file using:"
-                if (STD_OUT_PE) write(*,*) "        ./HICAR --gen-nml default.nml"
-                if (STD_OUT_PE) write(*,*) 
-                if (STD_OUT_PE) write(*,*) "    To check if a variable is valid namelist variable use:"
-                if (STD_OUT_PE) write(*,*) "        ./HICAR -v [YOUR_VAR]"
-                if (STD_OUT_PE) write(*,*) 
+
+            ! Try to identify invalid variable names by comparing user's file against valid names
+            if (present(nml_file) .and. present(valid_nml_unit)) then
+                call find_invalid_nml_vars(nml_name, nml_file, valid_nml_unit)
+            else
+                !see if msg contains string "Bad data"
+                if (index(msg, "Bad data") > 0) then
+                    !get index of location after first occurance of "object" in msg
+                    obj_indx = index(msg, "object") + len("object ")
+                    if (STD_OUT_PE) write(*,*) "    Alternatively, the user may have defined a variable in the namelist that is not valid."
+                    if (STD_OUT_PE) write(*,*) "    Please check that the variable following '", trim(msg(obj_indx:)), "' is valid."
+                    if (STD_OUT_PE) write(*,*)
+                    if (STD_OUT_PE) write(*,*) "    To see all valid namelist variables, generate a default namelist file using:"
+                    if (STD_OUT_PE) write(*,*) "        ./HICAR --gen-nml default.nml"
+                    if (STD_OUT_PE) write(*,*)
+                    if (STD_OUT_PE) write(*,*) "    To check if a variable is valid namelist variable use:"
+                    if (STD_OUT_PE) write(*,*) "        ./HICAR -v [YOUR_VAR]"
+                    if (STD_OUT_PE) write(*,*)
+                endif
             endif
         END IF
 
         if (STD_OUT_PE) write(*,*) "  -----------------------------------------------------------------"
-        if (STD_OUT_PE) write(*,*) 
+        if (STD_OUT_PE) write(*,*)
 
     end subroutine
 
