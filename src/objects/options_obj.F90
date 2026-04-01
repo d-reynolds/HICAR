@@ -225,6 +225,10 @@ contains
             endif
         endif
 
+        if (this%sm%suspension_layer == 1) then
+            kFM_GRID_Z = this%sm%suspension_fine_mesh_levels
+        endif
+
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
         if ((this%physics%landsurface>0).and.(this%physics%boundarylayer==0)) then
             if (STD_OUT_PE) write(*,*) "  "

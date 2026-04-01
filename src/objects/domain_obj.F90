@@ -890,6 +890,8 @@ contains
                                 if (var_meta%ystag > 0) grid = this%v_grid
                             case ("level_i")
                                 grid = this%grid8w
+                            case ("level_fm")
+                                grid = this%grid_fm
                             case ("nsoil")
                                 grid = this%grid_soil
                             case ("nsnow")
@@ -2472,6 +2474,7 @@ contains
         call this%grid_snow%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
         call this%grid_snow_i%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z+1, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
         call this%grid_snowsoil%set_grid_dimensions(     nx_global, ny_global, kSNOWSOIL_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
+        call this%grid_fm%set_grid_dimensions(           nx_global, ny_global, kFM_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
         call this%grid_soilcomp%set_grid_dimensions(     nx_global, ny_global, kSOILCOMP_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
         call this%grid_gecros%set_grid_dimensions(       nx_global, ny_global, kGECROS_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
         call this%grid_croptype%set_grid_dimensions(     nx_global, ny_global, kCROP_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)

@@ -4071,26 +4071,6 @@ contains
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  Blowing snow suspended ice mixing ratio (3D tracer)
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%bs_susp_ice_mass) then
-            var_meta%name        = "bs_ice_mass"
-            var_meta%dimensions  = three_d_t_dimensions
-            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_ice_mixing_ratio"),   &
-                               attribute_t("units",         "kg kg-1"),                        &
-                               attribute_t("coordinates",   "lat lon")]
-
-        !>------------------------------------------------------------
-        !!  Blowing snow suspended ice number concentration (3D tracer)
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%bs_susp_ice_number) then
-            var_meta%name        = "bs_ice_num"
-            var_meta%dimensions  = three_d_t_dimensions
-            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_ice_number_concentration"),   &
-                               attribute_t("units",         "kg-1"),                        &
-                               attribute_t("coordinates",   "lat lon")]
-
-        !>------------------------------------------------------------
         !!  Blowing snow accumulated saltation SWE change
         !!------------------------------------------------------------
         else if (var_idx==kVARS%bs_drift_swe_salt) then
@@ -4118,6 +4098,27 @@ contains
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_sublimation_swe_change"),   &
                                attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+        !>------------------------------------------------------------
+        !!  Snow mass concentration on fine mesh (blowing snow mesh)
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%qs_fm) then
+            var_meta%name        = "qs_blow_mesh"
+            var_meta%dimensions  = three_d_t_fm_dimensions
+            var_meta%dim_len(2)  = kFM_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_mass_concentration"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Snow number concentration on fine mesh (blowing snow mesh)
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%ns_fm) then
+            var_meta%name        = "ns_blow_mesh"
+            var_meta%dimensions  = three_d_t_fm_dimensions
+            var_meta%dim_len(2)  = kFM_GRID_Z
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_number_concentration"),   &
+                               attribute_t("units",         "cm-3"),                        &
                                attribute_t("coordinates",   "lat lon")]
 
         end if
