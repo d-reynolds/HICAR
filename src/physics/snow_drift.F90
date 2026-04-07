@@ -21,6 +21,7 @@ module snow_drift
     use mod_wrf_constants,  only : KARMAN, gravity, cp, R_d, XLV, XLS
     use wind,               only : calc_divergence
     use icar_constants
+    use data_structures, only : index_type
 
     implicit none
     private
@@ -82,8 +83,8 @@ module snow_drift
     real, allocatable, save :: qs_flux_cache(:,:)            ! (ims:ime, jms:jme) cached interface flux tendency to qs
     real, allocatable, save :: ns_flux_cache(:,:)            ! (ims:ime, jms:jme) cached interface flux tendency to ns
 
-    ! Halo exchange wrapper variables
-    type(variable_t), save :: exch_var
+    ! Halo exchange variable indices for batch exchange
+    type(index_type), save :: exch_vars_fm(2)
 
     ! Domain index copies
     integer, save :: ids, ide, jds, jde, kds, kde
@@ -209,8 +210,11 @@ contains
         end do
 
         !$acc enter data copyin(snc_dz,snc_Z,subl_mass_2d,kH_fm,wind_fm,v_fm,u_fm) create(qv_fm,t_fm,w_fm,qs_flux_cache,ns_flux_cache)
-        ! Initialize halo exchange variable
-        call exch_var%initialize(kVARS%density, domain%grid)
+        ! Initialize fine mesh exchange variable indices for batch halo exchange
+        exch_vars_fm(1)%v = domain%var_indx(kVARS%qs_fm)%v
+        exch_vars_fm(1)%id = domain%vars_3d(exch_vars_fm(1)%v)%id
+        exch_vars_fm(2)%v = domain%var_indx(kVARS%ns_fm)%v
+        exch_vars_fm(2)%id = domain%vars_3d(exch_vars_fm(2)%v)%id
 
         ! Precompute gamma ratios for Eq. 13 sublimation (Sharma et al. 2023)
         GAMMA_RATIO_S = gamma(1.0 + 1.5*MITCHELL_BM_S + alpha) / gamma(alpha)
@@ -236,6 +240,8 @@ contains
 
         integer :: i, j
         real    :: dx
+
+        if (options%physics%snowmodel == 0 .or. options%sm%suspension_layer /= 1) return
 
         dx = domain%dx
 
@@ -713,10 +719,8 @@ contains
                     enddo
 
                     ! Effective velocity at each interface: V_net = Vq_avg - w_fm (positive = downward)
-                    Vq_iface_down(0) = 0.0; Vq_iface_up(0) = 0.0
-                    Vn_iface_down(0) = 0.0; Vn_iface_up(0) = 0.0
-                    Vq_iface_down(snc_N_loc) = 0.0; Vq_iface_up(snc_N_loc) = 0.0
-                    Vn_iface_down(snc_N_loc) = 0.0; Vn_iface_up(snc_N_loc) = 0.0
+                    Vq_iface_down(0) = max(Vq(1), 0.0); Vq_iface_up(0) = 0.0
+                    Vn_iface_down(0) = max(Vn(1), 0.0); Vn_iface_up(0) = 0.0
 
                     !$acc loop seq
                     do k = 1, snc_N_loc - 1
@@ -728,6 +732,9 @@ contains
                         Vn_iface_down(k) = max(V_net_n, 0.0)
                         Vn_iface_up(k)   = max(-V_net_n, 0.0)
                     enddo
+
+                    Vq_iface_down(snc_N_loc) = 0.0; Vq_iface_up(snc_N_loc) = 0.0
+                    Vn_iface_down(snc_N_loc) = 0.0; Vn_iface_up(snc_N_loc) = 0.0
 
                     ! ============ Thomas solve for q_bs ============
                     a = 0.0; b = 0.0; c = 0.0; d_rhs = 0.0
@@ -1195,40 +1202,15 @@ contains
 
 
     !>----------------------------------------------------------
-    !! Halo exchange for a single fine mesh level
+    !! Batch halo exchange for fine mesh variables (qs_fm, ns_fm)
+    !! Uses the domain's existing batch exchange infrastructure with NCCL support
     !!----------------------------------------------------------
     subroutine exch_fine_mesh_3d(domain)
         implicit none
         type(domain_t), intent(inout) :: domain
 
-        associate(exch_var_data => exch_var%data_3d, &
-                  qs_fm => domain%vars_3d(domain%var_indx(kVARS%qs_fm)%v)%data_3d, &
-                  ns_fm => domain%vars_3d(domain%var_indx(kVARS%ns_fm)%v)%data_3d &
-        )
-
-        !$acc data present(exch_var_data, qs_fm, qs_fm)
-        !$acc kernels 
-        exch_var_data = 0.0
-        exch_var_data(its:ite, 1:snc_N_loc, jts:jte) = qs_fm(its:ite, 1:snc_N_loc, jts:jte)
-        !$acc end kernels
-        call domain%halo%exch_var(exch_var)
-
-        !$acc kernels
-        qs_fm(ims:ime, 1:snc_N_loc, jms:jme) = exch_var_data(ims:ime, 1:snc_N_loc, jms:jme)
-        !$acc end kernels
-
-        ! Also exchange number concentration
-        !$acc kernels
-        exch_var_data = 0.0
-        exch_var_data(its:ite, 1:snc_N_loc, jts:jte) = ns_fm(its:ite, 1:snc_N_loc, jts:jte)
-        !$acc end kernels
-
-        call domain%halo%exch_var(exch_var)
-        !$acc kernels 
-        ns_fm(ims:ime, 1:snc_N_loc, jms:jme) = exch_var_data(ims:ime, 1:snc_N_loc, jms:jme)
-        !$acc end kernels
-        !$acc end data
-        end associate
+        call domain%halo%halo_3d_send_batch(exch_vars_fm, domain%vars_3d)
+        call domain%halo%halo_3d_retrieve_batch(exch_vars_fm, domain%vars_3d)
 
     end subroutine exch_fine_mesh_3d
 

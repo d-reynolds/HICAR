@@ -40,7 +40,7 @@ module snow_model_driver
     use module_sm_SNOWPACKdrv, only : sm_snowpack_init, sm_SNOWPACK
 #endif
 #endif
-    use snow_drift,            only : snow_drift_var_request, snow_drift_init, snow_drift_step
+    use snow_drift,            only : snow_drift_var_request, snow_drift_init
 
     implicit none
 
@@ -502,12 +502,6 @@ contains
             endif
             end associate
         endif
-
-        ! CRYOWRF-style blowing snow drift
-        if (options%physics%snowmodel > 0 .and. options%sm%suspension_layer == 1) then
-            call snow_drift_step(domain, options, dt)
-        endif
-
 
         end subroutine snow_model
 

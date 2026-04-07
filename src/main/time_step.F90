@@ -26,6 +26,8 @@ module time_step
     use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
     use icar_constants,             only : STD_OUT_PE, kVARS
+    use snow_drift,                 only : snow_drift_step
+
     implicit none
 
     private
@@ -419,6 +421,11 @@ contains
                 !call domain%enforce_limits()
                 if (options%general%debug) call domain_check(domain, "advect(domain")
                 call domain%adv_timer%stop()
+
+                call domain%lsm_timer%start()
+                call snow_drift_step(domain, options, real(dt%seconds()))!, halo=1)
+                if (options%general%debug) call domain_check(domain, "suspension")
+                call domain%lsm_timer%stop()
 
                 call integrate_physics_tendencies(domain, options, real(dt%seconds()))
 
