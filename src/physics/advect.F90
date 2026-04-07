@@ -774,7 +774,31 @@ contains
         j_s_l = jts_l - 1
         j_e_l = jte_l + 1
 
-        if (horder==3) then
+        if (horder == 1) then
+            t_factor_up = 0.5 * t_factor
+
+            ! ==========================================
+            ! Horizontal fluxes (1st order upwind)
+            ! ==========================================
+            !$acc parallel loop gang vector collapse(3)
+            do j = j_s_l, j_e_l+1
+                do k = ks, ke
+                    do i = i_s_l, i_e_l+1
+                        ! X-direction flux
+                        u_val = U_m(i,k,j)
+                        abs_u_val = ABS(u_val)
+                        flux_x_fm(i,k,j) = ((u_val + abs_u_val) * q(i-1,k,j) + &
+                                            (u_val - abs_u_val) * q(i,k,j)) * t_factor_up
+
+                        ! Y-direction flux
+                        v_val = V_m(i,k,j)
+                        abs_u_val = ABS(v_val)
+                        flux_y_fm(i,k,j) = ((v_val + abs_u_val) * q(i,k,j-1) + &
+                                            (v_val - abs_u_val) * q(i,k,j)) * t_factor_up
+                    enddo
+                enddo
+            enddo
+        else if (horder==3) then
             coef = (1.0/12.0) * t_factor
 
             ! ==========================================

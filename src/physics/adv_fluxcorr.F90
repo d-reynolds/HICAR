@@ -24,7 +24,7 @@ module adv_fluxcorr
     real,    allocatable, dimension(:,:,:)   :: dumb_q
 
     ! Fine-mesh flux correction arrays
-    integer, allocatable, dimension(:,:,:)   :: usign_fm, vsign_fm, wsign_fm
+    integer, allocatable, dimension(:,:,:)   :: usign_fm, vsign_fm
     real,    allocatable, dimension(:,:,:)   :: scale_in_fm, scale_out_fm
     real,    allocatable, dimension(:,:,:)   :: flux_x_up_fm, flux_y_up_fm
     real,    allocatable, dimension(:,:,:)   :: dumb_q_fm
@@ -719,11 +719,10 @@ contains
         integer, intent(in) :: its_l, ite_l, jts_l, jte_l
 
         if (allocated(usign_fm))      then
-            !$acc exit data delete(usign_fm, vsign_fm, wsign_fm, scale_in_fm, scale_out_fm, flux_x_up_fm, flux_y_up_fm, dumb_q_fm)
+            !$acc exit data delete(usign_fm, vsign_fm, scale_in_fm, scale_out_fm, flux_x_up_fm, flux_y_up_fm, dumb_q_fm)
             deallocate(usign_fm)
         endif
         if (allocated(vsign_fm))      deallocate(vsign_fm)
-        if (allocated(wsign_fm))      deallocate(wsign_fm)
         if (allocated(scale_in_fm))   deallocate(scale_in_fm)
         if (allocated(scale_out_fm))  deallocate(scale_out_fm)
         if (allocated(flux_x_up_fm))  deallocate(flux_x_up_fm)
@@ -732,7 +731,6 @@ contains
 
         allocate(usign_fm(its_l-1:ite_l+1, ks:ke, jts_l-1:jte_l+1))
         allocate(vsign_fm(its_l-1:ite_l+1, ks:ke, jts_l-1:jte_l+1))
-        allocate(wsign_fm(its_l-1:ite_l+1, ks:ke, jts_l-1:jte_l+1))
 
         allocate(scale_in_fm(its_l-1:ite_l+1, ks:ke, jts_l-1:jte_l+1))
         allocate(scale_out_fm(its_l-1:ite_l+1, ks:ke, jts_l-1:jte_l+1))
@@ -740,17 +738,16 @@ contains
         allocate(flux_y_up_fm(ims_l:ime_l, ks:ke, jms_l:jme_l))
         allocate(dumb_q_fm(ims_l:ime_l, ks:ke, jms_l:jme_l))
 
-        !$acc enter data create(usign_fm, vsign_fm, wsign_fm, scale_in_fm, scale_out_fm, flux_x_up_fm, flux_y_up_fm, dumb_q_fm)
+        !$acc enter data create(usign_fm, vsign_fm, scale_in_fm, scale_out_fm, flux_x_up_fm, flux_y_up_fm, dumb_q_fm)
     end subroutine init_fluxcorr_fm
 
 
-    subroutine set_sign_arrays_fm(u, v, w, &
+    subroutine set_sign_arrays_fm(u, v, &
         ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
         implicit none
         integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
         integer, intent(in) :: its_l, ite_l, jts_l, jte_l
         real, dimension(its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3), intent(in) :: u, v
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: w
 
         integer :: i, j, k
 
@@ -773,39 +770,18 @@ contains
                     else
                         vsign_fm(i,k,j) = 0
                     end if
-
-                    if (k > ks) then
-                        if (w(i,k,j) < 0) then
-                            if (k < ke) then
-                                wsign_fm(i,k,j) = 1
-                            else
-                                wsign_fm(i,k,j) = 0
-                            end if
-                        elseif (w(i,k-1,j) > 0) then
-                            wsign_fm(i,k,j) = -1
-                        else
-                            wsign_fm(i,k,j) = 0
-                        end if
-                    else
-                        if (w(i,k,j) < 0) then
-                            wsign_fm(i,k,j) = 1
-                        else
-                            wsign_fm(i,k,j) = 0
-                        end if
-                    end if
-
                 end do
             end do
         end do
     end subroutine set_sign_arrays_fm
 
 
-    subroutine compute_upwind_fluxes_fm(q, u, v, flux_z, denom, &
+    subroutine compute_upwind_fluxes_fm(q, u, v, denom, &
         ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
         implicit none
         integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
         integer, intent(in) :: its_l, ite_l, jts_l, jte_l
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: q, denom, flux_z
+        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: q, denom
         real, dimension(its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3), intent(in) :: u, v
 
         real :: q0, u_val, v_val, w_val, abs_u, abs_v, abs_w
@@ -821,21 +797,21 @@ contains
 
                     u_val = u(i,k,j)
                     abs_u = abs(u_val)
-                    flux_x_up_fm(i,k,j) = 0.5 * (u_val * (q(i-1,k,j) + q0) + &
+                    flux_x_up_fm(i,k,j) = 0.25 * (u_val * (q(i-1,k,j) + q0) + &
                                                     abs_u * (q(i-1,k,j) - q0))
 
                     v_val = v(i,k,j)
                     abs_v = abs(v_val)
-                    flux_y_up_fm(i,k,j) = 0.5 * (v_val * (q(i,k,j-1) + q0) + &
+                    flux_y_up_fm(i,k,j) = 0.25 * (v_val * (q(i,k,j-1) + q0) + &
                                                     abs_v * (q(i,k,j-1) - q0))
 
                 enddo
             enddo
         enddo
 
-        return ! at the moment, the fine-mesh flux limiter is only stable when computing the upwind flux
-        ! off of one large upwind step, instead of decomposing it into two steps to keep it under the CFL for upwind
-        ! This seems to stem from flux_z being calculated differently. 
+        ! return ! at the moment, the fine-mesh flux limiter is only stable when computing the upwind flux
+        ! ! off of one large upwind step, instead of decomposing it into two steps to keep it under the CFL for upwind
+        ! ! This seems to stem from flux_z being calculated differently. 
 
         ! STEP 2: Compute intermediate concentration after first half-step
         !$acc parallel loop gang vector collapse(3)
@@ -848,7 +824,7 @@ contains
 
                     denom_val = denom(i,k,j)
 
-                    dumb_q_fm(i,k,j) = q(i,k,j) - (flux_diff_x + flux_diff_y) * denom_val + 0.5*flux_z(i,k,j)
+                    dumb_q_fm(i,k,j) = q(i,k,j) - (flux_diff_x + flux_diff_y) * denom_val
                 enddo
             enddo
         enddo
@@ -876,23 +852,23 @@ contains
     end subroutine compute_upwind_fluxes_fm
 
 
-    subroutine WRF_flux_corr_fm(q, u, v, flux_x, flux_y, flux_z, denom, &
+    subroutine WRF_flux_corr_fm(q, u, v, flux_x, flux_y, denom, &
         ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
         implicit none
         integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
         integer, intent(in) :: its_l, ite_l, jts_l, jte_l
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: q, denom, flux_z
+        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: q, denom
         real, dimension(its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3), intent(in) :: u, v
         real, dimension(its_l-1:ite_l+2, ks:ke, jts_l-1:jte_l+2), intent(inout) :: flux_x, flux_y
 
-        real :: dz_t_i, q0, q_i, q_j, q_k, temp, flux_in, flux_out
+        real :: dz_t_i, q0, q_i, q_j, temp, flux_in, flux_out
         real :: scale, scale_in_val, scale_out_val, qmax_local, qmin_local
         real :: fx, fx1, fy, fy1, fz, fz1
         real :: flux_x_up_0, flux_x_up_1, flux_y_up_0, flux_y_up_1
         integer :: i, j, k
 
         ! Compute two-step upwind fluxes
-        call compute_upwind_fluxes_fm(q, u, v, flux_z, denom, &
+        call compute_upwind_fluxes_fm(q, u, v, denom, &
             ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
 
         ! STEP 1: Compute scale_in/scale_out using upwind fluxes
@@ -903,10 +879,9 @@ contains
                     q0 = q(i,k,j)
                     q_i = q(i+usign_fm(i,k,j),k,j)
                     q_j = q(i,k,j+vsign_fm(i,k,j))
-                    q_k = q(i,k+wsign_fm(i,k,j),j)
 
-                    qmax_local = max(q0, q_i, q_j, q_k)
-                    qmin_local = min(q0, q_i, q_j, q_k)
+                    qmax_local = max(q0, q_i, q_j)
+                    qmin_local = min(q0, q_i, q_j)
 
                     if ((abs(qmax_local) + abs(qmin_local)) == 0.0) then
                         scale_in_fm(i,k,j) = 0.0
@@ -925,7 +900,7 @@ contains
                     fy1 = flux_y(i,k,j+1) - flux_y_up_1
 
                     temp = q0 - ((flux_x_up_1 - flux_x_up_0) + &
-                                 (flux_y_up_1 - flux_y_up_0) ) * denom(i,k,j) + flux_z(i,k,j)
+                                (flux_y_up_1 - flux_y_up_0) ) * denom(i,k,j)
 
                     flux_in = ((max(0.0,-fx1) + max(0.0,fx)) + &
                                (max(0.0,-fy1) + max(0.0,fy)) ) * denom(i,k,j)

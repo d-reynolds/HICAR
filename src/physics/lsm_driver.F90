@@ -1175,9 +1175,11 @@ contains
             end associate
 
             endif ! end if landsurface > 0 .or. watersurface > 0
+        endif ! end if time to call lsm
 
-            call snow_model(domain, options, lsm_dt)
+        call snow_model(domain, options, dt)
 
+        if (last_model_time(domain%nest_indx) == domain%sim_time%seconds()) then ! if we just ran this call, update the precip tracking arrays, now that snowmodel has potentially been called
             if (options%physics%landsurface == kLSM_NOAHMP .or. options%physics%watersurface == kWATER_LAKE .or. options%physics%snowmodel > 0) then
                 associate(precipitation => domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
                     lsm_last_precip => domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d)
@@ -1224,7 +1226,7 @@ contains
             endif
             !!
 
-        endif ! end if time to call lsm
+        endif ! end if we just called the LSM this call
         
     end subroutine lsm
 

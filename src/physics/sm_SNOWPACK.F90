@@ -519,7 +519,7 @@ module module_sm_SNOWPACKdrv
                 call snowpack_set_all_element_mk(stations_in(i,j)%cxxmem%addr, int(mk(i,n_elem:1:-1,j), kind=c_short), n_elem)
                 call snowpack_set_all_element_CDot(stations_in(i,j)%cxxmem%addr, real(CDot(i,n_elem:1:-1,j), kind=8), n_elem)
                 ! call snowpack_set_all_element_metamo(stations_in(i,j)%cxxmem%addr, real(metamo(i,n_elem:1:-1,j), kind=8), n_elem)
-                call snowpack_set_all_element_N3(stations_in(i,j)%cxxmem%addr, real(N3(i,n_elem:1:-1,j), kind=8), n_elem)
+                ! call snowpack_set_all_element_N3(stations_in(i,j)%cxxmem%addr, real(N3(i,n_elem:1:-1,j), kind=8), n_elem)
 
                 call stations_in(i,j)%set_c_h(real(snow_height(i,j), kind=8))
                 call stations_in(i,j)%set_albedo(real(albedo(i,j), kind=8))
@@ -774,12 +774,29 @@ module module_sm_SNOWPACKdrv
         domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d,1.0),0.0)
         domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d,1.0),0.0)
 
-        if (options%domain%snowpack_tsnow_i_var == "") then
+        if (options%domain%snowpack_tsnow_i_var == "" .and. options%domain%snowpack_nlayers_var /= "") then
             if (STD_OUT_PE) write(*,*) "Snow Temperature on interface not provided, filling in with snow temperature at elements..."
-            nz = size(domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d,2)
-            domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(:,1:nz,:) = domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d
-            domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(:,nz+1,:) = domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(:,nz,:) 
+            do j = jms, jme
+                do i = ims, ime
+                    nz = domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(i,j)
+                    domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(i,2:nz,j) = 0.5 * (domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,1:nz-1,j) + &
+                                                                                                            domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,2:nz,j))
+                    domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(i,nz+1,j) = domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,nz,j) 
+                    domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(i,1,j) = domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,1,j) 
+                enddo
+            enddo
         endif
+
+        do j = jms, jme
+            do i = ims, ime
+                if (domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(i,j) > 0) then
+                    domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(i,j) = &
+                        sum(domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d(i,1:domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(i,j),j))
+                else
+                    domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(i,j) = 0.0
+                endif
+            enddo
+        enddo
 
         if (STD_OUT_PE) write(*,*) "Done reading SNOWPACK initial state"
 
@@ -865,7 +882,7 @@ module module_sm_SNOWPACKdrv
 
         real, allocatable :: temp_3d(:,:,:), data3d(:,:,:)
         integer :: ncid, varid, err, nx_file, ny_file, nz_file, nz_dom
-        integer :: i, j, n_layer
+        integer :: i, j, n_layer, no_attribute
         logical :: layer_1_top
 
         if (domain%var_indx(kvar)%v <= 0) return
@@ -893,10 +910,10 @@ module module_sm_SNOWPACKdrv
         domain%vars_3d(domain%var_indx(kvar)%v)%data_3d(ims:ime, 1:min(nz_file,nz_dom), jms:jme) = &
             temp_3d(ims:ime, 1:min(nz_file,nz_dom), jms:jme)
 
-        layer_1_top = .False.
-        layer_1_top = io_var_reversed(filename, varname)
+        layer_1_top = .True.
+        layer_1_top = io_var_reversed(filename, varname, no_attribute)
 
-        if (.not.(layer_1_top)) then
+        if ((.not. layer_1_top) .and. (no_attribute == 0)) then
             allocate(data3d(ims:ime,1:min(nz_file,nz_dom),jms:jme))
             data3d = domain%vars_3d(domain%var_indx(kvar)%v)%data_3d
             domain%vars_3d(domain%var_indx(kvar)%v)%data_3d = -999

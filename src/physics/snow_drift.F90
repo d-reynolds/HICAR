@@ -30,7 +30,7 @@ module snow_drift
     ! Physical parameters
     ! -----------------------------------------------
     real, parameter :: PI_CONST     = 3.14159265358979323846
-    real, parameter :: H_SALT       = 0.15        ! Saltation layer height (m)
+    real, parameter :: LOWEST_LAYER       = 0.5        ! Lowest layer height (m)
     real, parameter :: BS_QS_MIN    = 0.0!1.0E-12     ! Floor for mass mixing ratio (kg/kg)
     real, parameter :: BS_NS_MIN    = 0.0!1.0E-6      ! Floor for number concentration (#/kg)
     real, parameter :: RHO_ICE      = 917.0       ! Density of ice (kg/m^3)
@@ -191,19 +191,19 @@ contains
         Kh_fm       = 0.0
         subl_mass_2d = 0.0
 
-        ! Build logarithmic fine mesh from H_SALT to approximate first model level height
+        ! Build logarithmic fine mesh from LOWEST_LAYER to approximate first model level height
         ! Heights are AGL; the actual coupling height varies per cell and is handled at runtime
         do j = jms, jme
             do i = ims, ime
                 fm_top  = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,1,j) * 0.5  ! Approximate first model level; adjusted per cell at runtime
 
-                dlog_z = log(fm_top) / real(snc_N_loc)
+                dlog_z = log(fm_top / LOWEST_LAYER) / real(snc_N_loc)
                 do k = 1, snc_N_loc
-                    snc_Z(i, k, j) = exp(real(k-1) * dlog_z) + 0.5*dlog_z
+                    snc_Z(i, k, j) = LOWEST_LAYER * exp((real(k) - 0.5) * dlog_z)
                 end do
-                snc_dz(i,1,j) = exp(dlog_z) - 1.0
+                snc_dz(i,1,j) = LOWEST_LAYER * (exp(dlog_z) - 1.0)
                 do k = 2, snc_N_loc
-                    snc_dz(i,k,j) = exp(real(k) * dlog_z) - exp(real(k-1) * dlog_z)
+                    snc_dz(i,k,j) = LOWEST_LAYER * (exp(real(k) * dlog_z) - exp(real(k-1) * dlog_z))
                 enddo
             enddo
         end do
@@ -253,7 +253,7 @@ contains
         call saltation_step(domain, dt, dx)
 
         ! 4. Fine mesh suspension (horizontal advection + vertical diffusion/settling/sublimation)
-        call snow_drift_integrate(domain, dt, dx)
+        call snow_drift_integrate(domain, dt, dx, options)
 
         ! 5. Accumulate diagnostics
         call accumulate_diagnostics(domain)
@@ -404,9 +404,9 @@ contains
                 !$acc loop
                 do k = 1, snc_N_loc
                     ! vertical wind
-                    w_fm(i,k,j) = w(i,1,j) * (snc_Z(i,k,j) / dz(i,1,j))
+                    w_fm(i,k,j) = w(i,1,j) * (snc_Z(i,k,j) / (dz(i,1,j) * 0.5))
                     ! Diffusivity coefficient
-                    Kh_fm(i,k,j) = Kh(i,1,j) * (snc_Z(i,k,j) / dz(i,1,j))
+                    Kh_fm(i,k,j) = Kh(i,2,j) * (snc_Z(i,k,j) / (dz(i,1,j) * 0.5))
 
                     log_ratio = log(max(snc_Z(i,k,j), z0_loc * 1.1) / z0_loc) &
                                 / log(z_ref / z0_loc)
@@ -485,13 +485,14 @@ contains
     !! Operator C: Phase change / sublimation (Eq. 21b) explicit
     !! Surface mass balance (Eq. 22)
     !!----------------------------------------------------------
-    subroutine snow_drift_integrate(domain, dt, dx)
+    subroutine snow_drift_integrate(domain, dt, dx, options)
         use adv_std,      only: adv_std_compute_wind_2d_fm, flux_2d_fm, sum_kernel_2d_fm, adv_std_clean_wind_arrays_fm, &
                                 flux_x_fm, flux_y_fm, flux_z_fm
         use adv_fluxcorr, only: init_fluxcorr_fm, set_sign_arrays_fm, WRF_flux_corr_fm
         implicit none
         type(domain_t), intent(inout) :: domain
         real,           intent(in)    :: dt, dx
+        type(options_t), intent(in)   :: options
 
         integer :: i, j, k, iter
         real    :: rho_air, T_air, qv_air, e_sat, e_air, sigma_i
@@ -499,6 +500,10 @@ contains
         real    :: S_q, S_N, h_salt_loc
         real    :: Kh_half, dep_mass_salt, dep_mass_susp, dep_num_susp
         real    :: dz_below, dz_above
+        real    :: q_salt_val, n_salt_val, ghost_coeff
+        real    :: dq_entrain, dz_salt_interface
+        real    :: q_ghost_limited, n_ghost_limited
+        real    :: ghost_coeff_top, dz_top_interface
         real    :: lambda, A_thermo, eta, phi_best, X_best
         real    :: am_loc, bm_loc, gr_loc, tmp_1, C_salt
 
@@ -513,15 +518,18 @@ contains
         ! Thomas algorithm arrays (per column)
         real :: a(snc_N_loc), b(snc_N_loc), c(snc_N_loc), d_rhs(snc_N_loc)
         real :: Vq(snc_N_loc), Vn(snc_N_loc)
+        real :: Vq_iface_down(0:snc_N_loc), Vq_iface_up(0:snc_N_loc)
+        real :: Vn_iface_down(0:snc_N_loc), Vn_iface_up(0:snc_N_loc)
+        real :: V_net_q, V_net_n, dt_thomas
 
         ! Advection work arrays
-        real, allocatable :: dq_v_qs(:,:,:), dq_v_ns(:,:,:)
+
         real, allocatable :: rho_fm(:,:,:), div(:,:,:)
         real, allocatable :: U_m_fm(:,:,:), V_m_fm(:,:,:), denom_fm(:,:,:)
         real, allocatable :: qs_fm_old(:,:,:), ns_fm_old(:,:,:)
         real, allocatable :: jaco_fm(:,:,:), jaco_u_fm(:,:,:), jaco_v_fm(:,:,:)
         real    :: t_fac
-        integer :: flux_corr
+        integer :: flux_corr, max_iters
 
         associate( &
             density    => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
@@ -538,7 +546,10 @@ contains
             bs_swe_susp => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d, &
             bs_swe_subl => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d,  &
             qs_fm => domain%vars_3d(domain%var_indx(kVARS%qs_fm)%v)%data_3d, &
-            ns_fm => domain%vars_3d(domain%var_indx(kVARS%ns_fm)%v)%data_3d &
+            ns_fm => domain%vars_3d(domain%var_indx(kVARS%ns_fm)%v)%data_3d, &
+            qs_atm => domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d, &
+            ns_atm => domain%vars_3d(domain%var_indx(kVARS%snow_number)%v)%data_3d, &
+            dz_atm => domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d &
         )
 
 
@@ -554,30 +565,28 @@ contains
         allocate(jaco_fm  (ims:ime, 1:snc_N_loc, jms:jme))
         allocate(jaco_u_fm(ims:ime, 1:snc_N_loc, jms:jme))
         allocate(jaco_v_fm(ims:ime, 1:snc_N_loc, jms:jme))
-        allocate(dq_v_qs(ims:ime, 1:snc_N_loc, jms:jme), source=0.0)
-        allocate(dq_v_ns(ims:ime, 1:snc_N_loc, jms:jme), source=0.0)
 
         ! Halo exchange before saving initial state for RK3 advection
         call exch_fine_mesh_3d(domain)
 
-        !$acc data create(rho_fm, qs_fm_old, ns_fm_old, div, jaco_fm, jaco_u_fm, jaco_v_fm, dq_v_qs, dq_v_ns)
+        !$acc data create(rho_fm, qs_fm_old, ns_fm_old, div, jaco_fm, jaco_u_fm, jaco_v_fm)
 
         ! Zero sublimation accumulator for this step
-        !$acc parallel loop gang vector collapse(2)
+        !$acc parallel loop gang vector collapse(2) default(present)
         do j = jms, jme
             do i = ims, ime
                 subl_mass_2d(i,j) = 0.0
                 bs_subl(i,j) = 0.0
             enddo
         enddo
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) default(present)
         do j = jms, jme
             do k = 1, snc_N_loc
                 do i = ims, ime
                     rho_fm(i,k,j) = density(i,kts,j)
-                    jaco_fm(i,k,j)   = jacobian(i,kts,j)
-                    jaco_u_fm(i,k,j) = jacobian_u(i,kts,j)
-                    jaco_v_fm(i,k,j) = jacobian_v(i,kts,j)
+                    jaco_fm(i,k,j)   = 1.0!jacobian(i,kts,j)
+                    jaco_u_fm(i,k,j) = 1.0!jacobian_u(i,kts,j)
+                    jaco_v_fm(i,k,j) = 1.0!jacobian_v(i,kts,j)
                     ! Save initial states for RK3
                     qs_fm_old(i,k,j) = qs_fm(i,k,j)
                     ns_fm_old(i,k,j) = ns_fm(i,k,j)
@@ -593,300 +602,283 @@ contains
             U_m_fm, V_m_fm, denom_fm, &
             ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
 
-        ! Initialize flux correction arrays and sign arrays (used on 3rd substep)
-        call init_fluxcorr_fm(ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
-        call set_sign_arrays_fm(U_m_fm, V_m_fm, w_fm, &
-            ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+        if (options%adv%flux_corr == kFLUXCOR_MONO) then
+            ! Initialize flux correction arrays and sign arrays (used on 3rd substep)
+            call init_fluxcorr_fm(ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+            call set_sign_arrays_fm(U_m_fm, V_m_fm, &
+                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+        endif
+
+        if (options%time%RK3) then
+            max_iters = 3
+        else
+            max_iters = 1
+        endif
         ! ===================================================================
-        ! Compute vertical advection tendencies from q_old (divergence compensation).
-        ! These are added to each RK3 substep so the intermediate states see the
-        ! combined H+V flux divergence (≈0 for divergence-free 3D wind), preventing
-        ! the horizontal advection from over-depleting cells.
+        ! IMEX-RK3: Explicit horizontal advection + implicit vertical transport
+        ! Each RK3 substep: horizontal advection (3rd-order) followed by
+        ! implicit Thomas solver (diffusion + effective velocity + ghost cell)
         ! ===================================================================
-        ! Initialize with current state
-        !$acc parallel loop gang vector collapse(3)
-        do j = jms, jme
-            do k = 1, snc_N_loc
-                do i = ims, ime
-                    dq_v_qs(i,k,j) = qs_fm(i,k,j)
-                    dq_v_ns(i,k,j) = ns_fm(i,k,j)
-                enddo
-            enddo
-        enddo
 
-        ! ===================================================================
-        ! Operator A2 — Subcycled explicit vertical advection (1st-order upwind)
-        ! Flux at interface with free atmosphere applied in couple_to_3d_grid
-        ! ===================================================================
-        !$acc parallel loop gang vector collapse(2) firstprivate(flux_v)
-        do j = jms, jme
-            do i = ims, ime
-                max_Cr_col = 0.0
-                !$acc loop seq
-                do k = 1, snc_N_loc
-                    max_Cr_col = max(max_Cr_col, abs(w_fm(i,k,j)) * dt / snc_dz(i,k,j))
-                enddo
-                n_sub = max(1, ceiling(max_Cr_col / CFL_MAX_V))
-                dt_sub = dt / real(n_sub)
-
-                !$acc loop seq
-                do iter_v = 1, n_sub
-                    ! Vertical advection for q_bs copy
-                    flux_v(0) = 0.0
-                    !$acc loop
-                    do k = 1, snc_N_loc - 1
-                        w_iface = 0.5 * (w_fm(i,k,j) + w_fm(i,k+1,j))
-                        flux_v(k) = max(w_iface, 0.0) * dq_v_qs(i,k,j) &
-                                   + min(w_iface, 0.0) * dq_v_qs(i,k+1,j)
-                    enddo
-                    flux_v(snc_N_loc) = 0.0
-                    !$acc loop
-                    do k = 1, snc_N_loc
-                        dq_v_qs(i,k,j) = dq_v_qs(i,k,j) - dt_sub / snc_dz(i,k,j) * (flux_v(k) - flux_v(k-1))
-                        dq_v_qs(i,k,j) = max(0.0, dq_v_qs(i,k,j))
-                    enddo
-
-                    ! Vertical advection for N_bs copy
-                    flux_v(0) = 0.0
-                    !$acc loop
-                    do k = 1, snc_N_loc - 1
-                        w_iface = 0.5 * (w_fm(i,k,j) + w_fm(i,k+1,j))
-                        flux_v(k) = max(w_iface, 0.0) * dq_v_ns(i,k,j) &
-                                   + min(w_iface, 0.0) * dq_v_ns(i,k+1,j)
-                    enddo
-                    flux_v(snc_N_loc) = 0.0
-                    !$acc loop
-                    do k = 1, snc_N_loc
-                        dq_v_ns(i,k,j) = dq_v_ns(i,k,j) - dt_sub / snc_dz(i,k,j) * (flux_v(k) - flux_v(k-1))
-                        dq_v_ns(i,k,j) = max(0.0, dq_v_ns(i,k,j))
-                    enddo
-                enddo
-            enddo
-        enddo
-
-        ! Convert to tendencies: dq_v = vertically_advected - q_old
-        !$acc parallel loop gang vector collapse(3)
-        do j = jms, jme
-            do k = 1, snc_N_loc
-                do i = ims, ime
-                    dq_v_qs(i,k,j) = dq_v_qs(i,k,j) - qs_fm(i,k,j)
-                    dq_v_ns(i,k,j) = dq_v_ns(i,k,j) - ns_fm(i,k,j)
-                enddo
-            enddo
-        enddo
-
-        ! RK3 advection loop
-        do iter = 1, 3
-            select case(iter)
-            case (1)
-                t_fac = 1.0/3.0
-                flux_corr = 0
-            case (2)
-                t_fac = 0.5
-                flux_corr = 0
-            case (3)
+        do iter = 1, max_iters
+            if (options%time%RK3) then
+                select case(iter)
+                case (1)
+                    t_fac = 1.0/3.0
+                    flux_corr = 0
+                case (2)
+                    t_fac = 0.5
+                    flux_corr = 0
+                case (3)
+                    t_fac = 1.0
+                    flux_corr = kFLUXCOR_MONO
+                end select
+            else
                 t_fac = 1.0
-                flux_corr = kFLUXCOR_MONO
-            end select
+                flux_corr = 0
+            endif
 
             ! Halo exchange before each substep
             if (iter > 1) call exch_fine_mesh_3d(domain)
 
-            ! --- Advect q_bs ---
+            ! --- Explicit horizontal advection for q_bs ---
             call flux_2d_fm(qs_fm, U_m_fm, V_m_fm, t_fac, &
                 ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
 
             if (flux_corr == kFLUXCOR_MONO) then
                 call WRF_flux_corr_fm(qs_fm_old, U_m_fm, V_m_fm, &
-                    flux_x_fm, flux_y_fm, dq_v_qs, denom_fm, &
+                    flux_x_fm, flux_y_fm, denom_fm, &
                     ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
             endif
 
             call sum_kernel_2d_fm(qs_fm_old, qs_fm, denom_fm, &
                 ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
 
-            ! Add vertical tendency to stabilize intermediate RK3 states
-            !$acc parallel loop gang vector collapse(3)
-            do j = jms, jme
-                do k = 1, snc_N_loc
-                    do i = ims, ime
-                        qs_fm(i,k,j) = qs_fm(i,k,j) + dq_v_qs(i,k,j) * t_fac
-                    enddo
-                enddo
-            enddo
-
-            ! --- Advect N_bs ---
+            ! --- Explicit horizontal advection for N_bs ---
             call flux_2d_fm(ns_fm, U_m_fm, V_m_fm, t_fac, &
                 ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
 
             if (flux_corr == kFLUXCOR_MONO) then
                 call WRF_flux_corr_fm(ns_fm_old, U_m_fm, V_m_fm, &
-                    flux_x_fm, flux_y_fm, dq_v_ns, denom_fm, &
+                    flux_x_fm, flux_y_fm, denom_fm, &
                     ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
             endif
 
             call sum_kernel_2d_fm(ns_fm_old, ns_fm, denom_fm, &
                 ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
 
-            ! Add vertical tendency to stabilize intermediate RK3 states
-            !$acc parallel loop gang vector collapse(3)
-            do j = jms, jme
-                do k = 1, snc_N_loc
-                    do i = ims, ime
-                        ns_fm(i,k,j) = ns_fm(i,k,j) + dq_v_ns(i,k,j) * t_fac
+            ! --- Implicit vertical transport (Thomas solver) within each RK substep ---
+            dt_thomas = dt * t_fac
+
+            !$acc parallel loop gang vector collapse(2) firstprivate(a, b, c, d_rhs, Vq, Vn, &
+            !$acc& Vq_iface_down, Vq_iface_up, Vn_iface_down, Vn_iface_up)
+            do j = jts, jte
+                do i = its, ite
+                    rho_air = density(i,kts,j)
+
+                    ! --- Compute saltation ghost-cell values ---
+                    q_salt_val = 0.0
+                    n_salt_val = 0.0
+                    if (bs_salt_mass(i,j) > 0.0) then
+                        h_salt_loc = z0(i,j) + (3.1 * ustar_2d(i,j) * cos_a_e)**2 / (4.0 * gravity)
+                        C_salt = bs_salt_mass(i,j) / (2.8 * bs_ustar_t(i,j))
+                        tmp_1 = (0.45 * 9.81) / (ustar_2d(i,j)**2)
+                        q_salt_val = exp(-h_salt_loc * tmp_1) * (C_salt * tmp_1) / rho_air
+                        n_salt_val = q_salt_val * (gamma(alpha)/gamma(alpha + 3.0)) &
+                                   * (6.0/(PI_CONST*RHO_ICE)) * ((alpha/D_MEAN_SALT)**3)
+                    endif
+
+                    ! --- Compute settling velocities and effective interface velocities ---
+                    !$acc loop
+                    do k = 1, snc_N_loc
+                        lambda = ((max(ns_fm(i,k,j),1e-10) * RHO_ICE * PI_CONST * gamma(alpha + 3.0)) &
+                                / (max(qs_fm(i,k,j), 1e-10) * 6.0 * gamma(alpha)) )**(1.0/3.0)
+                        eta = rho_air * NU_AIR
+                        phi_best = (4.0/3.0) * rho_air * (RHO_ICE - rho_air) * gravity / (eta * eta)
+                        X_best = phi_best * (alpha/lambda)**3
+
+                        if (X_best <= MITCHELL_X1) then
+                            am_loc = MITCHELL_AM_S;  bm_loc = MITCHELL_BM_S
+                        else if (X_best <= MITCHELL_X2) then
+                            am_loc = MITCHELL_AM_I;  bm_loc = MITCHELL_BM_I
+                        else
+                            am_loc = MITCHELL_AM_T;  bm_loc = MITCHELL_BM_T
+                        endif
+
+                        V_coef = am_loc * eta * phi_best**(bm_loc) / rho_air
+                        Vq(k) = V_coef * gamma(3*bm_loc + 2 + alpha) / (gamma(alpha) * gamma(alpha + 3)) * lambda**(1-3*bm_loc)
+                        Vn(k) = V_coef * gamma(3*bm_loc - 1 + alpha) / (gamma(alpha)) * lambda**(1-3*bm_loc)
+                        Vq(k) = max(SETTLE_MIN, min(Vq(k), 2.0))
+                        Vn(k) = max(SETTLE_MIN, min(Vn(k), 2.0))
                     enddo
-                enddo
-            enddo
-        enddo
+
+                    ! Effective velocity at each interface: V_net = Vq_avg - w_fm (positive = downward)
+                    Vq_iface_down(0) = 0.0; Vq_iface_up(0) = 0.0
+                    Vn_iface_down(0) = 0.0; Vn_iface_up(0) = 0.0
+                    Vq_iface_down(snc_N_loc) = 0.0; Vq_iface_up(snc_N_loc) = 0.0
+                    Vn_iface_down(snc_N_loc) = 0.0; Vn_iface_up(snc_N_loc) = 0.0
+
+                    !$acc loop seq
+                    do k = 1, snc_N_loc - 1
+                        w_iface = 0.5 * (w_fm(i,k,j) + w_fm(i,k+1,j))
+                        V_net_q = 0.5*(Vq(k) + Vq(k+1)) - w_iface
+                        V_net_n = 0.5*(Vn(k) + Vn(k+1)) - w_iface
+                        Vq_iface_down(k) = max(V_net_q, 0.0)
+                        Vq_iface_up(k)   = max(-V_net_q, 0.0)
+                        Vn_iface_down(k) = max(V_net_n, 0.0)
+                        Vn_iface_up(k)   = max(-V_net_n, 0.0)
+                    enddo
+
+                    ! ============ Thomas solve for q_bs ============
+                    a = 0.0; b = 0.0; c = 0.0; d_rhs = 0.0
+
+                    ! k=1: Ghost-cell bottom BC from saltation
+                    dz_salt_interface = 0.5 * snc_dz(i,1,j)
+                    ghost_coeff = dt_thomas * Kh_fm(i,1,j) / (dz_salt_interface * snc_dz(i,1,j))
+                    if (ghost_coeff * q_salt_val * rho_air * snc_dz(i,1,j) > swe(i,j) &
+                        .and. q_salt_val > 0.0) then
+                        q_ghost_limited = swe(i,j) / (ghost_coeff * rho_air * snc_dz(i,1,j))
+                    else
+                        q_ghost_limited = q_salt_val
+                    endif
+
+                    b(1) = 1.0 + ghost_coeff
+                    ! Effective velocity at interface above cell 1
+                    b(1) = b(1) + dt_thomas * Vq_iface_down(0) / snc_dz(i,1,j)   ! loss below (ghost)
+                    b(1) = b(1) + dt_thomas * Vq_iface_up(1)   / snc_dz(i,1,j)   ! loss above
+                    if (snc_N_loc > 1) then
+                        dz_above = 0.5 * (snc_dz(i,1,j) + snc_dz(i,2,j))
+                        Kh_half  = 0.5 * (Kh_fm(i,2,j) + Kh_fm(i,1,j))
+                        c(1)     = -dt_thomas * Kh_half / (dz_above * snc_dz(i,1,j))
+                        b(1)     = b(1) - c(1)
+                        c(1)     = c(1) - dt_thomas * Vq_iface_down(1) / snc_dz(i,1,j) ! gain from k+1
+                    endif
+                    d_rhs(1) = qs_fm(i,1,j) + ghost_coeff * q_ghost_limited
+
+                    ! Interior levels
+                    !$acc loop
+                    do k = 2, snc_N_loc - 1
+                        dz_below = 0.5 * (snc_dz(i,k-1,j) + snc_dz(i,k,j))
+                        dz_above = 0.5 * (snc_dz(i,k,j)   + snc_dz(i,k+1,j))
+
+                        Kh_half = 0.5 * (Kh_fm(i,k,j) + Kh_fm(i,k-1,j))
+                        a(k) = -dt_thomas * Kh_half / (dz_below * snc_dz(i,k,j))
+
+                        Kh_half = 0.5 * (Kh_fm(i,k+1,j) + Kh_fm(i,k,j))
+                        c(k) = -dt_thomas * Kh_half / (dz_above * snc_dz(i,k,j))
+
+                        b(k) = 1.0 - a(k) - c(k)
+
+                        ! Effective velocity upwind terms
+                        c(k) = c(k) - dt_thomas * Vq_iface_down(k)   / snc_dz(i,k,j)  ! gain from above
+                        b(k) = b(k) + dt_thomas * Vq_iface_up(k)     / snc_dz(i,k,j)  ! loss upward
+                        b(k) = b(k) + dt_thomas * Vq_iface_down(k-1) / snc_dz(i,k,j)  ! loss downward
+                        a(k) = a(k) - dt_thomas * Vq_iface_up(k-1)   / snc_dz(i,k,j)  ! gain from below
+
+                        d_rhs(k) = qs_fm(i,k,j)
+                    enddo
+
+                    ! k=N: Top boundary (zero-gradient)
+                    if (snc_N_loc > 1) then
+                        dz_below = 0.5 * (snc_dz(i,snc_N_loc-1,j) + snc_dz(i,snc_N_loc,j))
+                        Kh_half = 0.5 * (Kh_fm(i,snc_N_loc,j) + Kh_fm(i,snc_N_loc-1,j))
+                        a(snc_N_loc) = -dt_thomas * Kh_half / (dz_below * snc_dz(i,snc_N_loc,j))
+                        c(snc_N_loc) = 0.0
+                        b(snc_N_loc) = 1.0 - a(snc_N_loc)
+                        b(snc_N_loc) = b(snc_N_loc) + dt_thomas * Vq_iface_down(snc_N_loc-1) / snc_dz(i,snc_N_loc,j)
+                        a(snc_N_loc) = a(snc_N_loc) - dt_thomas * Vq_iface_up(snc_N_loc-1) / snc_dz(i,snc_N_loc,j)
+                        d_rhs(snc_N_loc) = qs_fm(i,snc_N_loc,j)
+                    endif
+
+                    call thomas_solve(snc_N_loc, a, b, c, d_rhs)
+                    !$acc loop
+                    do k = 1, snc_N_loc
+                        qs_fm(i,k,j) = max(BS_QS_MIN, d_rhs(k))
+                    enddo
+
+                    ! Mass tracking: ghost-cell entrainment and settling deposition
+                    dq_entrain = ghost_coeff * (q_ghost_limited - qs_fm(i,1,j)) * rho_air * snc_dz(i,1,j)
+                    dep_mass_susp = rho_air * Vq_iface_down(0) * qs_fm(i,1,j) * dt_thomas
+                    swe(i,j) = swe(i,j) - dq_entrain + dep_mass_susp
+                    bs_swe_susp(i,j) = bs_swe_susp(i,j) - dq_entrain + dep_mass_susp
+
+                    ! ============ Thomas solve for N_bs ============
+                    a = 0.0; b = 0.0; c = 0.0; d_rhs = 0.0
+
+                    if (q_salt_val > 0.0) then
+                        n_ghost_limited = q_ghost_limited * (n_salt_val / q_salt_val)
+                    else
+                        n_ghost_limited = 0.0
+                    endif
+
+                    b(1) = 1.0 + ghost_coeff
+                    b(1) = b(1) + dt_thomas * Vn_iface_down(0) / snc_dz(i,1,j)
+                    b(1) = b(1) + dt_thomas * Vn_iface_up(1)   / snc_dz(i,1,j)
+                    if (snc_N_loc > 1) then
+                        dz_above = 0.5 * (snc_dz(i,1,j) + snc_dz(i,2,j))
+                        Kh_half  = 0.5 * (Kh_fm(i,2,j) + Kh_fm(i,1,j))
+                        c(1)     = -dt_thomas * Kh_half / (dz_above * snc_dz(i,1,j))
+                        b(1)     = b(1) - c(1)
+                        c(1)     = c(1) - dt_thomas * Vn_iface_down(1) / snc_dz(i,1,j)
+                    endif
+                    d_rhs(1) = ns_fm(i,1,j) + ghost_coeff * n_ghost_limited
+
+                    !$acc loop
+                    do k = 2, snc_N_loc - 1
+                        dz_below = 0.5 * (snc_dz(i,k-1,j) + snc_dz(i,k,j))
+                        dz_above = 0.5 * (snc_dz(i,k,j)   + snc_dz(i,k+1,j))
+
+                        Kh_half = 0.5 * (Kh_fm(i,k,j) + Kh_fm(i,k-1,j))
+                        a(k) = -dt_thomas * Kh_half / (dz_below * snc_dz(i,k,j))
+
+                        Kh_half = 0.5 * (Kh_fm(i,k+1,j) + Kh_fm(i,k,j))
+                        c(k) = -dt_thomas * Kh_half / (dz_above * snc_dz(i,k,j))
+
+                        b(k) = 1.0 - a(k) - c(k)
+
+                        c(k) = c(k) - dt_thomas * Vn_iface_down(k)   / snc_dz(i,k,j)
+                        b(k) = b(k) + dt_thomas * Vn_iface_up(k)     / snc_dz(i,k,j)
+                        b(k) = b(k) + dt_thomas * Vn_iface_down(k-1) / snc_dz(i,k,j)
+                        a(k) = a(k) - dt_thomas * Vn_iface_up(k-1)   / snc_dz(i,k,j)
+
+                        d_rhs(k) = ns_fm(i,k,j)
+                    enddo
+
+                    if (snc_N_loc > 1) then
+                        dz_below = 0.5 * (snc_dz(i,snc_N_loc-1,j) + snc_dz(i,snc_N_loc,j))
+                        Kh_half = 0.5 * (Kh_fm(i,snc_N_loc,j) + Kh_fm(i,snc_N_loc-1,j))
+                        a(snc_N_loc) = -dt_thomas * Kh_half / (dz_below * snc_dz(i,snc_N_loc,j))
+                        c(snc_N_loc) = 0.0
+                        b(snc_N_loc) = 1.0 - a(snc_N_loc)
+                        b(snc_N_loc) = b(snc_N_loc) + dt_thomas * Vn_iface_down(snc_N_loc-1) / snc_dz(i,snc_N_loc,j)
+                        a(snc_N_loc) = a(snc_N_loc) - dt_thomas * Vn_iface_up(snc_N_loc-1) / snc_dz(i,snc_N_loc,j)
+                        d_rhs(snc_N_loc) = ns_fm(i,snc_N_loc,j)
+                    endif
+
+                    call thomas_solve(snc_N_loc, a, b, c, d_rhs)
+                    !$acc loop
+                    do k = 1, snc_N_loc
+                        ns_fm(i,k,j) = max(BS_NS_MIN, d_rhs(k))
+                    enddo
+
+                enddo  ! i
+            enddo  ! j
+
+        enddo  ! RK3 iter
 
 
 
         ! ===================================================================
-        ! Operator B — Vertical mixing + sedimentation (Eq. 21a, Thomas)
+        ! Post-RK3: Sublimation + Surface mass balance
+        ! (Thomas solver now runs inside RK3 substeps above)
         ! ===================================================================
-        !$acc parallel loop gang vector collapse(2) firstprivate(a, b, c, d_rhs, Vq, Vn)
+        !$acc parallel loop gang vector collapse(2)
         do j = jts, jte
             do i = its, ite
                 rho_air = density(i,kts,j)
 
-                ! --- Bottom BC from saltation (direct assignment, not max) ---
-                if (bs_salt_mass(i,j) > 0.0) then
-                    ! Sharma et al., 2023 EQ 18b
-                    h_salt_loc = z0(i,j) + (3.1 * ustar_2d(i,j) * cos_a_e)**2 / (4.0 * gravity)
-                    ! Solve EQ 19a at height h_salt:
-                    C_salt = bs_salt_mass(i,j) / (2.8 * bs_ustar_t(i,j))
-                    ! Decay coefficient Lamda_salt given as 0.45 in Sharma et al. (2023)
-                    tmp_1 = (0.45 * 9.81)  / (ustar_2d(i,j)**2)
-                    qs_fm(i,1,j) = exp(-h_salt_loc * tmp_1) * ( C_salt * tmp_1)  / (rho_air)
-                    ! Compute number concentration from mass using mean diameter (D_MEAN_SALT)
-                    ns_fm(i,1,j) = qs_fm(i,1,j) * (gamma(alpha)/gamma(alpha + 3.0)) * (6.0/(PI_CONST*RHO_ICE)) * ((alpha/D_MEAN_SALT)**3)
-                endif
-
-                ! --- Compute per-level terminal velocities (Vq and Vn) ---
-                !$acc loop
-                do k = 1, snc_N_loc
-                    ! Lambda from mass and number           
-                    lambda = ((ns_fm(i,k,j) * RHO_ICE * PI_CONST * gamma(alpha + 3.0)) / (max(qs_fm(i,k,j), 1e-10) * 6.0 * gamma(alpha)) )**(1.0/3.0)
-
-                    ! Best number parameter phi (Mitchell 1996)
-                    eta = rho_air * NU_AIR
-                    phi_best = (4.0/3.0) * rho_air * (RHO_ICE - rho_air) * gravity / (eta * eta)
-
-                    ! Mean Best number for regime selection
-                    X_best = phi_best * (alpha/lambda)**3
-
-                    ! Select Mitchell (1996) regime coefficients
-                    if (X_best <= MITCHELL_X1) then
-                        am_loc = MITCHELL_AM_S;  bm_loc = MITCHELL_BM_S;  gr_loc = GAMMA_RATIO_S
-                    else if (X_best <= MITCHELL_X2) then
-                        am_loc = MITCHELL_AM_I;  bm_loc = MITCHELL_BM_I;  gr_loc = GAMMA_RATIO_I
-                    else
-                        am_loc = MITCHELL_AM_T;  bm_loc = MITCHELL_BM_T;  gr_loc = GAMMA_RATIO_T
-                    endif
-
-                    V_coef = am_loc * eta * phi_best**(bm_loc) / rho_air
-
-                    Vq(k) = V_coef * gamma(3*bm_loc + 2 + alpha) / (gamma(alpha) * gamma(alpha + 3)) * lambda**(1-3*bm_loc)
-                    Vn(k) = V_coef * gamma(3*bm_loc - 1 + alpha) / (gamma(alpha)) * lambda**(1-3*bm_loc)
-                    Vq(k) = max(SETTLE_MIN, min(Vq(k), 2.0))
-                    Vn(k) = max(SETTLE_MIN, min(Vn(k), 2.0))
-                enddo
-
-                ! --- Thomas solve for q_bs (diffusion + sedimentation, fully implicit) ---
-                a = 0.0; b = 0.0; c = 0.0; d_rhs = 0.0
-
-                ! k=1: Bottom boundary with implicit sedimentation
-                ! Loss to surface; gain from cell above (c(1) already 0 from init)
-                b(1)     = 1.0 + dt * Vq(1) / snc_dz(i,1,j)
-                if (snc_N_loc > 1) c(1) = -dt * Vq(2) / snc_dz(i,1,j)
-                d_rhs(1) = qs_fm(i,1,j)
-
-                ! Interior levels
-                !$acc loop
-                do k = 2, snc_N_loc - 1
-                    dz_below = 0.5 * (snc_dz(i,k-1,j) + snc_dz(i,k,j))
-                    dz_above = 0.5 * (snc_dz(i,k,j)   + snc_dz(i,k+1,j))
-
-                    ! Implicit diffusion coefficients
-                    Kh_half = 0.5 * (Kh_fm(i,k,j) + Kh_fm(i,k-1,j))
-                    a(k) = -dt * Kh_half / (dz_below * snc_dz(i,k,j))
-
-                    Kh_half = 0.5 * (Kh_fm(i,k+1,j) + Kh_fm(i,k,j))
-                    c(k) = -dt * Kh_half / (dz_above * snc_dz(i,k,j))
-
-                    b(k) = 1.0 - a(k) - c(k)
-
-                    ! Implicit sedimentation (upwind: gain from above, loss from self)
-                    c(k) = c(k) - dt * Vq(k+1) / snc_dz(i,k,j)
-                    b(k) = b(k) + dt * Vq(k)   / snc_dz(i,k,j)
-
-                    d_rhs(k) = qs_fm(i,k,j)
-                enddo
-
-                ! k=N: Top boundary (zero-gradient: c=0)
-                if (snc_N_loc > 1) then
-                    dz_below = 0.5 * (snc_dz(i,snc_N_loc-1,j) + snc_dz(i,snc_N_loc,j))
-                    Kh_half = 0.5 * (Kh_fm(i,snc_N_loc,j) + Kh_fm(i,snc_N_loc-1,j))
-                    a(snc_N_loc) = -dt * Kh_half / (dz_below * snc_dz(i,snc_N_loc,j))
-                    c(snc_N_loc) = 0.0
-                    b(snc_N_loc) = 1.0 - a(snc_N_loc) + dt * Vq(snc_N_loc) / snc_dz(i,snc_N_loc,j)
-                    d_rhs(snc_N_loc) = qs_fm(i,snc_N_loc,j)
-                endif
-
-                call thomas_solve(snc_N_loc, a, b, c, d_rhs)
-                !$acc loop
-                do k = 1, snc_N_loc
-                    qs_fm(i,k,j) = max(BS_QS_MIN, d_rhs(k))
-                enddo
-
-                ! --- Thomas solve for N_bs (same structure, using Vn) ---
-                a = 0.0; b = 0.0; c = 0.0; d_rhs = 0.0
-
-                ! k=1: Bottom boundary with implicit sedimentation
-                b(1)     = 1.0 + dt * Vn(1) / snc_dz(i,1,j)
-                if (snc_N_loc > 1) c(1) = -dt * Vn(2) / snc_dz(i,1,j)
-                d_rhs(1) = ns_fm(i,1,j)
-
-                ! Interior levels
-                !$acc loop
-                do k = 2, snc_N_loc - 1
-                    dz_below = 0.5 * (snc_dz(i,k-1,j) + snc_dz(i,k,j))
-                    dz_above = 0.5 * (snc_dz(i,k,j)   + snc_dz(i,k+1,j))
-
-                    Kh_half = 0.5 * (Kh_fm(i,k,j) + Kh_fm(i,k-1,j))
-                    a(k) = -dt * Kh_half / (dz_below * snc_dz(i,k,j))
-
-                    Kh_half = 0.5 * (Kh_fm(i,k+1,j) + Kh_fm(i,k,j))
-                    c(k) = -dt * Kh_half / (dz_above * snc_dz(i,k,j))
-
-                    b(k) = 1.0 - a(k) - c(k)
-
-                    ! Implicit sedimentation
-                    c(k) = c(k) - dt * Vn(k+1) / snc_dz(i,k,j)
-                    b(k) = b(k) + dt * Vn(k)   / snc_dz(i,k,j)
-
-                    d_rhs(k) = ns_fm(i,k,j)
-                enddo
-
-                ! k=N: Top boundary
-                if (snc_N_loc > 1) then
-                    dz_below = 0.5 * (snc_dz(i,snc_N_loc-1,j) + snc_dz(i,snc_N_loc,j))
-                    Kh_half = 0.5 * (Kh_fm(i,snc_N_loc,j) + Kh_fm(i,snc_N_loc-1,j))
-                    a(snc_N_loc) = -dt * Kh_half / (dz_below * snc_dz(i,snc_N_loc,j))
-                    c(snc_N_loc) = 0.0
-                    b(snc_N_loc) = 1.0 - a(snc_N_loc) + dt * Vn(snc_N_loc) / snc_dz(i,snc_N_loc,j)
-                    d_rhs(snc_N_loc) = ns_fm(i,snc_N_loc,j)
-                endif
-
-                call thomas_solve(snc_N_loc, a, b, c, d_rhs)
-
-                !$acc loop
-                do k = 1, snc_N_loc
-                    ns_fm(i,k,j) = max(BS_NS_MIN, d_rhs(k))
-                enddo
-
                 ! ===================================================================
-                ! Operator C — Sublimation (Eq. 21b / Eq. 13, explicit, AFTER Thomas)
+                ! Sublimation (Eq. 21b / Eq. 13, explicit)
                 ! Sharma et al. (2023) Eq. 13: integrated over gamma distribution
                 ! ===================================================================
 
@@ -953,16 +945,16 @@ contains
 
                 ! ===================================================================
                 ! Surface mass balance (Eq. 22)
+                ! Suspension entrainment/deposition already applied to SWE above
+                ! (in the flux BC and post-Thomas deposition steps)
                 ! ===================================================================
 
-                ! Deposition: settling from level 1 deposits onto snowpack
+                ! Saltation deposition from horizontal divergence
                 dep_mass_salt = (bs_salt_mass(i,j) * div(i,1,j) / wind_fm(i,snc_N_loc,j)) * dt
-                dep_mass_susp = (rho_air * Vq(1) * qs_fm(i,1,j)) * dt
-                dep_num_susp = (rho_air * Vn(1) * ns_fm(i,1,j)) * dt
-
-                bs_swe_susp(i,j) = bs_swe_susp(i,j) + dep_mass_susp
                 bs_swe_salt(i,j) = bs_swe_salt(i,j) + dep_mass_salt
-                swe(i,j) = swe(i,j) + dep_mass_susp + dep_mass_salt 
+                swe(i,j) = swe(i,j) + dep_mass_salt
+                ! Note: suspension entrainment/deposition already applied to SWE and
+                ! bs_swe_susp in the post-Thomas mass tracking step above (lines 866-871)
 
                 ! Sublimation diagnostics
                 bs_subl(i,j)     = subl_mass_2d(i,j) * XLS / dt  ! W/m^2
@@ -975,7 +967,7 @@ contains
         end associate
         ! Cleanup advection arrays
         call adv_std_clean_wind_arrays_fm(U_m_fm, V_m_fm, denom_fm)
-        deallocate(rho_fm, qs_fm_old, ns_fm_old, jaco_fm, jaco_u_fm, jaco_v_fm, dq_v_qs, dq_v_ns)
+        deallocate(rho_fm, qs_fm_old, ns_fm_old, jaco_fm, jaco_u_fm, jaco_v_fm)
 
     end subroutine snow_drift_integrate
 
