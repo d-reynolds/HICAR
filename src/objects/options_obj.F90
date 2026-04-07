@@ -310,8 +310,8 @@ contains
             if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
         endif
 
-        if (this%physics%landsurface>0) then
-            this%sfc%isfflx = 1
+        if (this%physics%landsurface>0 .or. this%physics%snowmodel>0) then
+            this%sfc%isfflx = 0
             this%sfc%scm_force_flux = 1
         endif
         

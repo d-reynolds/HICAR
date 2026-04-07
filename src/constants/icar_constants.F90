@@ -270,7 +270,6 @@ module icar_constants
         integer :: wind_alpha
         integer :: froude
         integer :: blk_ri
-        integer :: out_longwave_rad
         integer :: longwave_cloud_forcing
         integer :: shortwave_cloud_forcing
         integer :: th_lwrad

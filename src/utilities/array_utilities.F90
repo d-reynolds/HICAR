@@ -706,7 +706,7 @@ contains
         type(halo_t), intent(inout), optional :: halo
         logical, optional, intent(in)   :: do_dqdt
 
-        integer :: iters, n
+        integer :: iters, n, windowsize_use
         logical :: dqdt
 
         iters = 1
@@ -720,7 +720,10 @@ contains
             write(*,*) "ERROR smooth_array_var: windowsize (", windowsize, &
                        ") exceeds halo_size (", var%grid%halo_size, ")."
             write(*,*) "  Use nsmooths > 1 with a smaller windowsize instead."
-            stop
+            write(*,*) "  continuing, clamping window size to halo_size: ", var%grid%halo_size, "."
+            windowsize_use = var%grid%halo_size
+        else
+            windowsize_use = windowsize
         endif
 
         ! Ensure halos are consistent before the first smoothing pass.
@@ -733,15 +736,15 @@ contains
         do n = 1, iters
             if (var%three_d) then
                 if (dqdt) then
-                    call smooth_array_3d(var%dqdt_3d, windowsize, ydim)
+                    call smooth_array_3d(var%dqdt_3d, windowsize_use, ydim)
                 else
-                    call smooth_array_3d(var%data_3d, windowsize, ydim)
+                    call smooth_array_3d(var%data_3d, windowsize_use, ydim)
                 endif
             else if (var%two_d) then
                 if (dqdt) then
-                    call smooth_array_2d(var%dqdt_2d, windowsize)
+                    call smooth_array_2d(var%dqdt_2d, windowsize_use)
                 else
-                    call smooth_array_2d(var%data_2d, windowsize)
+                    call smooth_array_2d(var%data_2d, windowsize_use)
                 endif
             endif
             if (present(halo)) call halo%exch_var(var, do_dqdt=dqdt)

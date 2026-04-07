@@ -207,7 +207,7 @@ contains
             !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
-            !$acc   domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
 
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: Snowpack"
@@ -238,7 +238,7 @@ contains
             !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
-            !$acc   domain%vars_3d(domain%var_indx(kVARS%metamo)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
 
 #endif
@@ -301,14 +301,6 @@ contains
             allocate(current_snow(ims:ime,jms:jme), source=0.0) ! MJ added 
             allocate(current_rain(ims:ime,jms:jme), source=0.0) ! MJ added 
 
-            associate( &
-                u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
-                v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d, &
-                precipitation => domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
-                snowfall => domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d, &
-                lsm_last_precip => domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
-                lsm_last_snow => domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d &
-                )
 
             ! --- Update host: common snow model inputs ---
             !$acc update host( &
@@ -318,6 +310,15 @@ contains
             !$acc   domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d, &
             !$acc   domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
             !$acc   domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d)
+            
+            associate( &
+                u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
+                v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d, &
+                precipitation => domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
+                snowfall => domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d, &
+                lsm_last_precip => domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
+                lsm_last_snow => domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d &
+                )
 
             windspd = sqrt(u_10m**2 + v_10m**2)
             where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up

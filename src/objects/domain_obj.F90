@@ -583,19 +583,6 @@ contains
                 end associate
             endif
 
-            if (this%var_indx(kVARS%ustar)%v > 0) then
-                associate(ustar => this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d)
-
-                !$acc parallel loop gang vector collapse(2) wait(2,3) async(5) present(ustar)
-                do j = jts,jte
-                    do i = its,ite
-                        ! now calculate master ustar based on U and V combined in quadrature
-                        ustar(i,j) = sqrt(u_mass(i,kms,j)**2 + v_mass(i,kms,j)**2) * surf_temp_1(i,j)
-                    enddo
-                enddo
-
-                end associate
-            endif
         endif
 
 

@@ -640,7 +640,7 @@ contains
         call options%alloc_vars( &
                      [kVARS%pressure,     kVARS%pressure_interface,    kVARS%potential_temperature,   kVARS%exner,            &
                       kVARS%shortwave, kVARS%shortwave_direct, kVARS%shortwave_diffuse,   kVARS%longwave,                                                                     &
-                      kVARS%out_longwave_rad, &
+                      kVARS%longwave_up, &
                       kVARS%land_mask,    kVARS%snow_water_equivalent,                                                        &
                       kVARS%dz_interface, kVARS%skin_temperature,      kVARS%temperature,             kVARS%density,          &
                       kVARS%longwave_cloud_forcing,                    kVARS%land_emissivity,         kVARS%temperature_interface,  &
@@ -652,7 +652,7 @@ contains
         call options%restart_vars( &
                      [kVARS%pressure,     kVARS%pressure_interface,    kVARS%potential_temperature,   kVARS%exner,            &
                       kVARS%water_vapor,  kVARS%shortwave, kVARS%shortwave_direct, kVARS%shortwave_diffuse,    kVARS%longwave,                                                 &          
-                      kVARS%out_longwave_rad, &
+                      kVARS%longwave_up, &
                       kVARS%snow_water_equivalent,                                                                            &
                       kVARS%dz_interface, kVARS%skin_temperature,      kVARS%temperature,             kVARS%density,          &
                       kVARS%longwave_cloud_forcing,                    kVARS%land_emissivity, kVARS%temperature_interface,    &
@@ -801,7 +801,7 @@ contains
                       shortwave_diffuse => domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
                       shortwave_direct => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d, &
                       longwave => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d, &
-                      out_longwave_rad => domain%vars_2d(domain%var_indx(kVARS%out_longwave_rad)%v)%data_2d, &
+                      longwave_up => domain%vars_2d(domain%var_indx(kVARS%longwave_up)%v)%data_2d, &
                       cloud_fraction => domain%vars_2d(domain%var_indx(kVARS%cloud_fraction)%v)%data_2d, &
                       land_mask => domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
                       dz_interface => domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d, &
@@ -1153,7 +1153,7 @@ contains
     !                           lwupt, lwuptc, lwuptcln, lwdnt, lwdntc, lwdntcln,     &        !if lwupt defined, all MUST be defined
     !                           lwupb, lwupbc, lwupbcln, lwdnb, lwdnbc, lwdnbcln,     &
                                 glw = domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d,                        &
-                                olr = domain%vars_2d(domain%var_indx(kVARS%out_longwave_rad)%v)%data_2d,                &
+                                olr = domain%vars_2d(domain%var_indx(kVARS%longwave_up)%v)%data_2d,                &
                                 lwcf = domain%vars_2d(domain%var_indx(kVARS%longwave_cloud_forcing)%v)%data_2d,         &
                                 emiss = domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d,               &
                                 p8w = domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d,              &
@@ -1402,10 +1402,10 @@ contains
                                             emis_sfc,   &
                                             fluxes_lw))
 
-                    !$acc parallel loop gang vector collapse(2) present(out_longwave_rad, longwave, flx_up, flx_dn)
+                    !$acc parallel loop gang vector collapse(2) present(longwave_up, longwave, flx_up, flx_dn)
                     do j = jb_s,jb_e 
                         do i = its,ite
-                            out_longwave_rad(i,j) = flx_up((i - its + 1) + (j - jb_s)*(ite-its + 1), 1)
+                            longwave_up(i,j) = flx_up((i - its + 1) + (j - jb_s)*(ite-its + 1), 1)
                             longwave(i,j) = flx_dn((i - its + 1) + (j - jb_s)*(ite-its + 1), 1)
                         enddo
                     enddo

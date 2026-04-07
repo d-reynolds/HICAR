@@ -341,11 +341,11 @@ contains
         real               :: mr, e, es
 
         ! convert specific humidity to mixing ratio
-        mr = qv / (1-qv)
+        mr = qv !/ (1-qv)
         ! convert mixing ratio to vapor pressure
         e = mr * p / (0.62197+mr)
         ! convert temperature to saturated vapor pressure
-        es = 611.2 * exp(17.67 * (t - 273.15) / (t - 29.65))
+        es = sat_vapor_pressure(t)
         ! finally return relative humidity
         relative_humidity = e / es
 
@@ -585,22 +585,7 @@ contains
         real :: e_s,a,b
         real :: sat_mr
 
-        ! from http://www.dtic.mil/dtic/tr/fulltext/u2/778316.pdf
-        !   Lowe, P.R. and J.M. Ficke., 1974: THE COMPUTATION OF SATURATION VAPOR PRESSURE
-        !       Environmental Prediction Research Facility, Technical Paper No. 4-74
-        ! which references:
-        !   Murray, F. W., 1967: On the computation of saturation vapor pressure.
-        !       Journal of Applied Meteorology, Vol. 6, pp. 203-204.
-        ! Also notes a 6th order polynomial and look up table as viable options.
-        if (temperature < 273.15) then
-            a = 21.8745584
-            b = 7.66
-        else
-            a = 17.2693882
-            b = 35.86
-        endif
-
-        e_s = 610.78 * exp(a * (temperature - 273.16) / (temperature - b)) !(Pa)
+        e_s = sat_vapor_pressure(temperature) !(Pa)
 
         ! alternate formulations
         ! Polynomial:
@@ -616,6 +601,41 @@ contains
         ! from : http://www.srh.noaa.gov/images/epz/wxcalc/mixingRatio.pdf
         sat_mr = 0.6219907 * e_s / (pressure - e_s) !(kg/kg)
     end function sat_mr
+
+    !>----------------------------------------------------------
+    !!  Calculate the saturated vapor pressure for a given temperature
+    !!
+    !!  If temperature > 0C: returns the saturated vapor pressure with respect to liquid
+    !!  If temperature < 0C: returns the saturated vapor pressure with respect to ice
+    !!
+    !!  @param temperature  Air Temperature [K]
+    !!  @retval sat_vapor_pressure      Saturated vapor pressure [Pa]
+    !!
+    !!-----------------------------------------------------------
+    elemental function sat_vapor_pressure(temperature) result(e_s)
+        !$acc routine seq
+        implicit none
+        real,intent(in) :: temperature
+        real :: e_s,a,b
+
+        ! from http://www.dtic.mil/dtic/tr/fulltext/u2/778316.pdf
+        !   Lowe, P.R. and J.M. Ficke., 1974: THE COMPUTATION OF SATURATION VAPOR PRESSURE
+        !!       Environmental Prediction Research Facility, Technical Paper No. 4-74
+        !! which references:
+        !!   Murray, F. W., 1967: On the computation of saturation vapor pressure.
+        !!       Journal of Applied Meteorology, Vol. 6, pp. 203-204.
+        !! Also notes a 6th order polynomial and look up table as viable options.
+        if (temperature < 273.15) then
+            a = 21.8745584
+            b = 7.66
+        else
+            a = 17.2693882
+            b = 35.86
+        endif
+
+        e_s = 610.78 * exp(a * (temperature - 273.16) / (temperature - b)) !(Pa)
+
+    end function sat_vapor_pressure
 
     !> -------------------------------
     !!

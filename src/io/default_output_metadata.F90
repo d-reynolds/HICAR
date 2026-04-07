@@ -1211,18 +1211,7 @@ contains
             var_meta%attributes  = [attribute_t("non_standard_name", "Topographic position index"), &
                                 attribute_t("units",         "-"),                                                 &
                                 attribute_t("coordinates",   "lat lon")]
-                                                                                                                                                                                                        
-
-        !>------------------------------------------------------------
-        !!  Outgoing longwave radiation
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%out_longwave_rad) then
-            var_meta%name        = "rlut"
-            var_meta%dimensions  = two_d_t_dimensions
-            var_meta%attributes  = [attribute_t("standard_name", "toa_outgoing_longwave_flux"), &
-                               attribute_t("units",         "W m-2"),                      &
-                               attribute_t("coordinates",   "lat lon")]
-        
+                                                                                                                                                                                                                
 
         !>------------------------------------------------------------
         !!  Longwave cloud forcing

@@ -3023,7 +3023,7 @@ contains
             ! --------------------------------------
             case ("isfflx")
                 description = "Use surface fluxes calculated by LSM scheme."//achar(10)//BLNK_CHR_N// &
-                    "If lsm is turned on, this will be changed to 1. 0=off, 1=on"
+                    "If lsm or a snow model is turned on, this will be changed to 0. 0=off, 1=on"
                 allocate(values(2))
                 values = [0, 1]
                 default = "1"
