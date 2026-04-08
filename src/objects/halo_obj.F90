@@ -15,7 +15,7 @@ use meta_data_interface,        only : meta_data_t
 use, intrinsic :: iso_c_binding
 #ifdef USE_NCCL
     use nccl_interface
-    use openacc
+    use openacc, only: acc_get_device_num, acc_device_nvidia
 #endif
 implicit none
 

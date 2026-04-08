@@ -1,5 +1,5 @@
 module flow_events
-    use iso_fortran_env
+    use iso_fortran_env, only: output_unit
     use mpi_f08
     use options_interface,  only : options_t
     use domain_interface,   only : domain_t
@@ -10,7 +10,7 @@ module flow_events
     use ioserver_interface,         only : ioserver_t
     use ioclient_interface,         only : ioclient_t
     use nest_manager, only: any_nests_not_done, nest_next_up, should_update_nests, &
-        can_update_child_nest, end_nest_context, switch_nest_context, wake_nest
+        end_nest_context, switch_nest_context, wake_nest
     use time_step, only: step
     use initialization, only: init_model, init_model_state
 #ifdef USE_AMGX

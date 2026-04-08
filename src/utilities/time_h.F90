@@ -13,7 +13,7 @@
 module time_object
     use time_delta_object, only : time_delta_t
     use iso_fortran_env, only: real64
-    use icar_constants
+    use icar_constants, only: NOCALENDAR, kDEFAULT_CALENDAR, GREGORIAN, NOLEAP, THREESIXTY
     implicit none
 
     private

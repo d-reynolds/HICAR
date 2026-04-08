@@ -17,20 +17,20 @@
 !!
 !!-----------------------------------------
 program icar
-    use iso_fortran_env
-    use mpi_f08
+    use iso_fortran_env, only: output_unit
+    use mpi_f08, only: MPI_initialized, MPI_INIT, MPI_Comm_Rank, MPI_COMM_WORLD, MPI_Finalize
     use options_interface,  only : options_t
     use flow_object_interface, only : comp_arr_t
     use boundary_interface, only : boundary_t
     use ioclient_interface, only : ioclient_t
 
     use initialization,     only : split_processes, init_options
-    use icar_constants
+    use icar_constants, only: kMAX_NESTS, kMAX_FILE_LENGTH, STD_OUT_PE
     use namelist_utils,     only : get_nml_var_default
     use output_metadata,    only : list_output_vars, initialize_var_constants
     use flow_events,        only : component_init, component_loop, component_program_end
 #ifdef _OPENACC
-    use openacc
+    use openacc, only: acc_shutdown, acc_device_nvidia
 #endif
     implicit none
 

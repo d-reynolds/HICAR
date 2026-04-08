@@ -9,7 +9,7 @@
 module variable_dict_interface
     ! variable type to store... this could be made unlimited but that complicates use
     use variable_interface,     only : variable_t
-    use icar_constants
+    use icar_constants, only: kMAX_NAME_LENGTH, kMAX_STORAGE_VARS
 
     !>------------------------------------------------
     !! Defines the object that is actually stored in the dictionary array

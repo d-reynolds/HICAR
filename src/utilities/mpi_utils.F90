@@ -1,5 +1,5 @@
 module mpi_utils_module
-    use mpi_f08
+    use mpi_f08, only: MPI_Comm_Rank, MPI_COMM_WORLD
     implicit none
 
 contains

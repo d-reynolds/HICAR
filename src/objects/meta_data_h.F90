@@ -1,5 +1,5 @@
 module meta_data_interface
-    use icar_constants
+    use icar_constants, only: kMAX_NAME_LENGTH, kMAX_ATTR_LENGTH, kMAX_DIM_LENGTH, kREAL, kUNSET_REAL
 
     implicit none
 

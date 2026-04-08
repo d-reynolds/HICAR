@@ -467,6 +467,11 @@ if(NOT AMGX_LIBRARY)
 		endif()
 		add_definitions(-DUSE_PETSC)
 		list(APPEND SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_petsc.F90)
+		set_source_files_properties(
+			${PROJECT_SOURCE_DIR}/src/physics/wind.F90
+			PROPERTIES OBJECT_DEPENDS
+			${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/hicar_lib.dir/src/physics/wind_iterative_petsc.F90.o
+		)
 	endif()
 endif()
 #########################################################

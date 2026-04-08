@@ -9,7 +9,7 @@
 !! ----------------------------------------------------------------------------
 module time_step
     use iso_fortran_env, only : output_unit
-    use mpi_f08
+    use mpi_f08, only: MPI_Allreduce, MPI_REAL, MPI_MIN
     use string,                     only : as_string
     use microphysics,               only : mp
     use advection,                  only : advect

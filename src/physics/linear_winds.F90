@@ -35,7 +35,7 @@
 !!----------------------------------------------------------
 module linear_theory_winds
     use, intrinsic :: iso_c_binding
-    use iso_fortran_env
+    use iso_fortran_env, only: output_unit
     use mpi_f08
     use fft,                        only: fftw_execute_dft,                    &
                                           fftw_plan_dft_2d, fftw_destroy_plan, &
@@ -43,8 +43,8 @@ module linear_theory_winds
                                           FFTW_BACKWARD, FFTW_ESTIMATE ! note fft module is defined in fftshift.f90
     use fftshifter,                 only: ifftshift, fftshift
 #ifdef _OPENACC
-    use openacc
-    use cufft_interface
+    use openacc, only: acc_get_cuda_stream, acc_async_sync
+    use cufft_interface, only: cufftExecZ2Z, CUFFT_INVERSE, cufftPlan2d, CUFFT_Z2Z, cufftSetStream, cufftDestroy
     use fftshifter,                 only: ifftshift2cc_gpu
 #endif
     use domain_interface,           only: domain_t

@@ -10,7 +10,7 @@
 !!
 !!------------------------------------------------------------
 module vertical_interpolation
-    use data_structures
+    use data_structures, only: vert_look_up_table, interpolable_type
     implicit none
 
     private
