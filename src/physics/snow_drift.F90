@@ -107,6 +107,8 @@ contains
         call options%alloc_vars( &
             [kVARS%bs_threshold_ustar,  &
              kVARS%bs_saltation_flux,   &
+             kVARS%bs_saltation_height, &
+             kVARS%bs_saltation_concentration, &
              kVARS%bs_swe_exchange,    &
              kVARS%bs_sublimation_flux, &
              kVARS%bs_drift_swe_salt,   &
@@ -436,6 +438,16 @@ contains
 
 
     !>----------------------------------------------------------
+    !! Saltation step — now a no-op.
+    !!
+    !! The saltation mass flux, saltation height, and saltation-top concentration
+    !! are computed by the SNOWPACK Fortran driver (Doorschot & Lehning 2002) and
+    !! written directly into bs_saltation_flux / bs_saltation_height /
+    !! bs_saltation_concentration BEFORE snow_drift_step is called (lsm runs at
+    !! time_step.F90:392, snow_drift_step at line 426). This subroutine is kept
+    !! as a hook in case future logic (halo exchanges, diagnostics) needs to run
+    !! between the SNOWPACK write and the suspension integrate.
+
     !! Saltation step with iterative halo exchange
     !! Sorensen (2004) / Sharma et al. (2023) Eq. 17 + upwind divergence
     !!----------------------------------------------------------
@@ -537,6 +549,7 @@ contains
         real, allocatable :: jaco_fm(:,:,:), jaco_u_fm(:,:,:), jaco_v_fm(:,:,:)
         real    :: t_fac
         integer :: flux_corr, max_iters
+        logical :: using_snowpack
 
         associate( &
             density    => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
@@ -549,6 +562,8 @@ contains
             ustar_2d   => domain%vars_2d(domain%var_indx(kVARS%ustar)%v)%data_2d, &
             bs_ustar_t => domain%vars_2d(domain%var_indx(kVARS%bs_threshold_ustar)%v)%data_2d, &
             bs_salt_mass => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d, &
+            bs_salt_height => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_height)%v)%data_2d, &
+            bs_salt_conc => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_concentration)%v)%data_2d, &
             bs_subl    => domain%vars_2d(domain%var_indx(kVARS%bs_sublimation_flux)%v)%data_2d, &
             bs_swe_salt => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d, &
             bs_swe_susp => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d, &
@@ -577,6 +592,7 @@ contains
         ! Halo exchange before saving initial state for RK3 advection
         call exch_fine_mesh_3d(domain)
 
+        using_snowpack = (options%physics%snowmodel == kSM_SNOWPACK)
         !$acc data create(rho_fm, qs_fm_old, ns_fm_old, div, jaco_fm, jaco_u_fm, jaco_v_fm)
 
         ! Zero sublimation accumulator for this step
@@ -694,16 +710,28 @@ contains
                 do i = its, ite
                     rho_air = density(i,kts,j)
 
-                    ! --- Compute saltation ghost-cell values ---
+                    ! --- Saltation ghost-cell values from SNOWPACK Doorschot-Lehning ---
+                    ! SNOWPACK writes bs_salt_conc (kg/m^3) and bs_salt_height (m) directly;
+                    ! convert concentration to mixing ratio via / rho_air for use as the
+                    ! bottom ghost-cell BC of the suspension diffusion equation.
                     q_salt_val = 0.0
                     n_salt_val = 0.0
-                    if (bs_salt_mass(i,j) > 0.0) then
-                        h_salt_loc = 0.0843*(ustar_2d(i,j))**(1.27) !z0(i,j) + (3.1 * ustar_2d(i,j) * cos_a_e)**2 / (4.0 * gravity)
-                        C_salt = bs_salt_mass(i,j) / (2.8 * bs_ustar_t(i,j))
-                        tmp_1 = (0.45 * 9.81) / (ustar_2d(i,j)**2)
-                        q_salt_val = exp(-h_salt_loc * tmp_1) * (C_salt * tmp_1) / rho_air
-                        n_salt_val = q_salt_val * (gamma(alpha)/gamma(alpha + 3.0)) &
-                                   * (6.0/(PI_CONST*RHO_ICE)) * ((alpha/D_MEAN_SALT)**3)
+                    if (using_snowpack) then
+                        h_salt_loc = bs_salt_height(i,j)
+                        if (bs_salt_mass(i,j) > 0.0 .and. bs_salt_conc(i,j) > 0.0) then
+                            q_salt_val = bs_salt_conc(i,j) / rho_air
+                            n_salt_val = q_salt_val * (gamma(alpha)/gamma(alpha + 3.0)) &
+                                    * (6.0/(PI_CONST*RHO_ICE)) * ((alpha/D_MEAN_SALT)**3)
+                        endif
+                    else
+                        if (bs_salt_mass(i,j) > 0.0) then
+                            h_salt_loc = 0.0843*(ustar_2d(i,j))**(1.27) !z0(i,j) + (3.1 * ustar_2d(i,j) * cos_a_e)**2 / (4.0 * gravity)
+                            C_salt = bs_salt_mass(i,j) / (2.8 * bs_ustar_t(i,j))
+                            tmp_1 = (0.45 * 9.81) / (ustar_2d(i,j)**2)
+                            q_salt_val = exp(-h_salt_loc * tmp_1) * (C_salt * tmp_1) / rho_air
+                            n_salt_val = q_salt_val * (gamma(alpha)/gamma(alpha + 3.0)) &
+                                    * (6.0/(PI_CONST*RHO_ICE)) * ((alpha/D_MEAN_SALT)**3)
+                        endif
                     endif
 
                     ! --- Compute settling velocities and effective interface velocities ---

@@ -77,7 +77,8 @@ contains
                          kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%snowfall, kVARS%albedo,                &
                          kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%snow_nlayers,   &
                          kVARS%shd, kVARS%meltflux_out_tstep, kVARS%Sliq_out, &
-                         kVARS%windspd_10m, kVARS%bs_saltation_flux, kVARS%bs_suspension_flux, kVARS%dSWE_blow_subl, kVARS%dSWE_subl, kVARS%dSWE_slide, &
+                         kVARS%windspd_10m, kVARS%bs_saltation_flux, kVARS%bs_saltation_height, kVARS%bs_saltation_concentration, &
+                         kVARS%bs_suspension_flux, kVARS%dSWE_blow_subl, kVARS%dSWE_subl, kVARS%dSWE_slide, &
                          kVARS%shortwave_direct, kVARS%shortwave_diffuse, kVARS%ground_surf_temperature])
              
              call options%restart_vars( &
@@ -336,6 +337,8 @@ contains
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_height)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_concentration)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
@@ -378,6 +381,8 @@ contains
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_height)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_concentration)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &

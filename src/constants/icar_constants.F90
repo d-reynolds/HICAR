@@ -410,7 +410,9 @@ module icar_constants
 
         ! Blowing snow drift variables (CRYOWRF-style)
         integer :: bs_threshold_ustar     ! 2D: threshold friction velocity (m/s)
-        integer :: bs_saltation_flux      ! 2D: saltation layer mass (kg/m^2)
+        integer :: bs_saltation_flux      ! 2D: saltation mass flux (kg/m/s)
+        integer :: bs_saltation_height    ! 2D: saltation reference height (m)
+        integer :: bs_saltation_concentration ! 2D: snow concentration at saltation height (kg/m^3)
         integer :: bs_suspension_flux     ! 2D: suspension layer mass (kg/m^2)
         integer :: bs_sublimation_flux    ! 2D: sublimation flux from blowing snow (W/m^2)
         integer :: qs_fm                  ! 3D: blowing snow ice mixing ratio (kg/kg)

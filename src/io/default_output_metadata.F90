@@ -4030,6 +4030,26 @@ contains
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
+        !!  Blowing snow saltation reference height
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_saltation_height) then
+            var_meta%name        = "bs_salt_height"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_saltation_height"),   &
+                               attribute_t("units",         "m"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Blowing snow mass concentration at saltation height
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_saltation_concentration) then
+            var_meta%name        = "bs_salt_conc"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_saltation_concentration"),   &
+                               attribute_t("units",         "kg m-3"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
         !!  Blowing snow suspension layer flux
         !!------------------------------------------------------------
         else if (var_idx==kVARS%bs_suspension_flux) then
