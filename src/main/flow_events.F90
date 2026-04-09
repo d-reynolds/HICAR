@@ -396,16 +396,17 @@ subroutine component_loop(components, options, boundary, ioclient)
                 endif
             end do
 
-            call component_end_of_nest_loop(components(i)%comp,i)
+            call component_end_of_nest_loop(components(i)%comp,boundary(i),i)
         enddo
     enddo
 
 end subroutine component_loop
 
 
-subroutine component_end_of_nest_loop(component,nest_indx)
+subroutine component_end_of_nest_loop(component,boundary,nest_indx)
     implicit none
     class(flow_obj_t), intent(inout) :: component
+    type(boundary_t), intent(inout) :: boundary
     integer, intent(in) :: nest_indx
 
     ! check if the type of component is a domain or an ioserver
@@ -416,6 +417,7 @@ subroutine component_end_of_nest_loop(component,nest_indx)
             if (component%ended) then
                 call end_nest_context()
                 call component%release()
+                call boundary%release()
                 if (STD_OUT_PE) write(*,*) "Domain ",nest_indx," has reached the end of its run time."
                 if (STD_OUT_PE) flush(output_unit)
             endif

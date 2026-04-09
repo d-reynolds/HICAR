@@ -65,6 +65,7 @@ module boundary_interface
         procedure :: update_computed_vars
         procedure :: interpolate_original_levels
         procedure :: setup_z
+        procedure :: release => release_boundary
     end type
 
     interface
@@ -117,7 +118,12 @@ module boundary_interface
         class(boundary_t),   intent(inout)   :: this
         type(options_t),     intent(in)      :: options
     end subroutine
-    
+
+    module subroutine release_boundary(this)
+        implicit none
+        class(boundary_t), intent(inout) :: this
+    end subroutine
+
   end interface
 
 end module

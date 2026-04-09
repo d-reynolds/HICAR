@@ -1251,4 +1251,37 @@ contains
         enddo
     end subroutine
 
+    module subroutine release_boundary(this)
+        implicit none
+        class(boundary_t), intent(inout) :: this
+
+        ! Clean up GPU copies of interpolation lookup tables
+        ! (entered in domain_obj.F90 setup_geo_interpolation)
+        if (allocated(this%geo%geolut%x)) then
+            !$acc exit data delete(this%geo%geolut%x, this%geo%geolut%y, this%geo%geolut%w)
+        endif
+        if (allocated(this%geo_u%geolut%x)) then
+            !$acc exit data delete(this%geo_u%geolut%x, this%geo_u%geolut%y, this%geo_u%geolut%w)
+        endif
+        if (allocated(this%geo_v%geolut%x)) then
+            !$acc exit data delete(this%geo_v%geolut%x, this%geo_v%geolut%y, this%geo_v%geolut%w)
+        endif
+        if (allocated(this%geo%vert_lut%z)) then
+            !$acc exit data delete(this%geo%vert_lut%z, this%geo%vert_lut%w)
+        endif
+        if (allocated(this%geo_agl%vert_lut%z)) then
+            !$acc exit data delete(this%geo_agl%vert_lut%z, this%geo_agl%vert_lut%w)
+        endif
+        if (allocated(this%geo_u%vert_lut%z)) then
+            !$acc exit data delete(this%geo_u%vert_lut%z, this%geo_u%vert_lut%w)
+        endif
+        if (allocated(this%geo_v%vert_lut%z)) then
+            !$acc exit data delete(this%geo_v%vert_lut%z, this%geo_v%vert_lut%w)
+        endif
+        if (allocated(this%geo%z)) then
+            !$acc exit data delete(this%geo%z)
+        endif
+
+    end subroutine
+
 end submodule

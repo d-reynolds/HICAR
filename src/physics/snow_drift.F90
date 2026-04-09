@@ -676,8 +676,8 @@ contains
             ! --- Implicit vertical transport (Thomas solver) within each RK substep ---
             dt_thomas = dt * t_fac
 
-            !$acc parallel loop gang vector collapse(2) firstprivate(a, b, c, d_rhs, Vq, Vn, &
-            !$acc& Vq_iface_down, Vq_iface_up, Vn_iface_down, Vn_iface_up)
+            !$acc parallel loop gang vector collapse(2) private(a, b, c, d_rhs, Vq, Vn, &
+            !$acc& Vq_iface_down, Vq_iface_up, Vn_iface_down, Vn_iface_up) default(present)
             do j = jts, jte
                 do i = its, ite
                     rho_air = density(i,kts,j)

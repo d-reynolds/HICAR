@@ -250,7 +250,15 @@ contains
         class(domain_t), intent(inout) :: this
 
         integer :: i
-        
+
+        ! Clean up halo MPI windows and GPU data (must happen before removing halo from device)
+        call this%halo%finalize()
+
+        ! Clean up domain geo%z GPU copy (entered in setup_geo_interpolation)
+        if (allocated(this%geo%z)) then
+            !$acc exit data delete(this%geo%z)
+        endif
+
         !$acc exit data finalize delete(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
         !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
         !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, &
@@ -305,8 +313,6 @@ contains
                 deallocate(this%forcing_hi(i)%dqdt_3d)
             endif
         end do
-
-        call this%halo%finalize()
 
     end subroutine
     

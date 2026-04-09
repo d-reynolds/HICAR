@@ -1030,7 +1030,8 @@ contains
         ! use the geographic lookup table generated earlier to
         ! compute a bilinear interpolation from lo to hi
         ! if we are doing the interior too, just iterate over all x and y
-            !$acc data present_or_copyin(fieldin, geolut%x, geolut%y, geolut%w) present_or_copy(fieldout)
+            associate( x => geolut%x, y => geolut%y, w => geolut%w )
+            !$acc data present_or_copyin(fieldin, x, y, w) present_or_copy(fieldout)
             !$acc parallel loop gang vector collapse(3) private(l, localx, localy, localw, local_center)
             do k=kms,kme
                 do j=jms,jme
@@ -1040,18 +1041,18 @@ contains
                         ! This loop is used if doing a triangular bi-linear interpolation on the grid
                         ! Need to see all 4 points to compute the "local_center" value for the triangulation
                         do l=1,4
-                            localx=geolut%x(l,i,k)
-                            localy=geolut%y(l,i,k)
+                            localx=x(l,i,k)
+                            localy=y(l,i,k)
                             local_center = local_center + fieldin(localx, min(j,nz_input), localy)
                             ! This is the actual interpolation adding the value from the two raw grid points
                             if (l < 3) then
 
-                                localw=geolut%w(l,i,k)
+                                localw=w(l,i,k)
                                 fieldout(i,j,k) = fieldout(i,j,k) + fieldin(localx, min(j,nz_input), localy) * localw
                             endif
                         enddo
                         ! This is the actual interpolation adding the value from the center average of all four grid points
-                        localw = geolut%w(3,i,k)
+                        localw = w(3,i,k)
                         fieldout(i,j,k) = fieldout(i,j,k) + local_center/4 * localw
 
                         ! This loop is used if doing a straight bi-linear interpolation on the grid
@@ -1065,6 +1066,7 @@ contains
                 enddo
             enddo
             !$acc end data
+            end associate
         endif
     end subroutine geo_interp
 
@@ -1093,7 +1095,8 @@ contains
 
         ! use the geographic lookup table generated earlier to
         ! compute a bilinear interpolation from lo to hi
-        !$acc data present_or_copyin(fieldin, geolut%x, geolut%y, geolut%w) present_or_copy(fieldout)
+        associate( x => geolut%x, y => geolut%y, w => geolut%w )
+        !$acc data present_or_copyin(fieldin, x, y, w) present_or_copy(fieldout)
         !$acc parallel loop gang vector collapse(2) private(l, localx, localy, localw, local_center)
         do k = jms, jme
             do i = ims, ime
@@ -1102,17 +1105,17 @@ contains
                 ! This loop is used if doing a triangular bi-linear interpolation on the grid
                 ! Need to see all 4 points to compute the "local_center" value for the triangulation
                 do l = 1, 4
-                    localx = geolut%x(l,i,k)
-                    localy = geolut%y(l,i,k)
+                    localx = x(l,i,k)
+                    localy = y(l,i,k)
                     local_center = local_center + fieldin(localx,localy)
                     ! This is the actual interpolation adding the value from the two raw grid points
                     if (l < 3) then
-                        localw = geolut%w(l,i,k)
+                        localw = w(l,i,k)
                         fieldout(i,k) = fieldout(i,k) + fieldin(localx,localy) * localw
                     endif
                 enddo
                 ! This is the actual interpolation adding the value from the center average of all four grid points
-                localw = geolut%w(3,i,k)
+                localw = w(3,i,k)
                 fieldout(i,k) = fieldout(i,k) + local_center/4 * localw
 
                 ! This loop is used if doing a straight bi-linear interpolation on the grid
@@ -1125,6 +1128,7 @@ contains
             enddo
         enddo
         !$acc end data
+        end associate
 
     end subroutine
 
