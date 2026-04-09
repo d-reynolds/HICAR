@@ -15,7 +15,7 @@ use meta_data_interface,        only : meta_data_t
 use, intrinsic :: iso_c_binding
 #ifdef USE_NCCL
     use nccl_interface
-    use openacc, only: acc_get_device_num, acc_device_nvidia
+    use openacc, only: acc_get_device_num, acc_device_nvidia, acc_get_cuda_stream, acc_async_sync
 #endif
 implicit none
 
@@ -146,11 +146,12 @@ module subroutine init_halo(this, exch_vars, grid, comms)
             write(*,*) "ERROR: NCCL communicator init failed on rank ", this%halo_rank
             call MPI_Abort(comms, nccl_ierr)
         endif
-        nccl_ierr = nccl_stream_create(this%nccl_stream)
-        if (nccl_ierr /= 0) then
-            write(*,*) "ERROR: NCCL stream creation failed on rank ", this%halo_rank
-            call MPI_Abort(comms, nccl_ierr)
-        endif
+        ! Use OpenACC's synchronous-queue CUDA stream for NCCL operations.
+        ! Sharing the stream provides natural within-stream ordering between
+        ! pack/unpack OpenACC kernels and NCCL send/recv, eliminating the need
+        ! for host-side stream synchronization and silencing racecheck false
+        ! positives that arise from cross-stream host-side syncs.
+        this%nccl_stream = transfer(acc_get_cuda_stream(acc_async_sync), this%nccl_stream)
         if (STD_OUT_PE) write(*,*) "NCCL communicator initialized for halo exchange"
 #endif
 
@@ -321,7 +322,7 @@ module subroutine finalize(this)
     integer :: ierr
 
 #ifdef USE_NCCL
-        call nccl_stream_destroy(this%nccl_stream)
+        ! Note: do NOT destroy this%nccl_stream — it's owned by OpenACC, not us.
         call nccl_comm_destroy(this%nccl_comm)
 #else
     if (this%n_2d > 0) then
@@ -1040,8 +1041,8 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
         ew_msg_size = this%n_3d * this%halo_size * this%grid%halo_nz * this%grid%ew_halo_ny
         corner_msg_size = this%n_3d * this%halo_size * this%grid%halo_nz * this%halo_size
 
-        !$acc wait  ! ensure pack kernels complete before NCCL reads buffers
-
+        ! NCCL operations share OpenACC's stream, so within-stream ordering
+        ! automatically serializes the preceding pack kernels before NCCL reads.
         call nccl_group_start()
 
         if (.not. this%north_boundary) then
@@ -1212,7 +1213,7 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
 
     integer :: n, p, k_max, i, j, k, n_vars
     integer :: halo_size, kms, kme, ims, jms, its, ite, jts, jte
-    integer :: kms_var, kme_var, nccl_ierr
+    integer :: kms_var, kme_var
 
     if (this%n_3d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
@@ -1223,8 +1224,9 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
     jts = this%jts; jte = this%jte
 
 #ifdef USE_NCCL
-        ! Single stream sync replaces 8 MPI_Win_Wait calls
-        nccl_ierr = nccl_stream_synchronize(this%nccl_stream)
+        ! NCCL shares OpenACC's stream — within-stream ordering ensures NCCL
+        ! writes to receive buffers complete before the unpack kernels below
+        ! read them. No explicit sync needed.
 #else
     if (.not.(this%north_boundary)) call MPI_Win_Wait(this%north_3d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_3d_win)
@@ -1499,8 +1501,8 @@ module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
         ns_msg_size = this%n_2d * this%grid%ns_halo_nx * this%halo_size
         ew_msg_size = this%n_2d * this%halo_size * this%grid%ew_halo_ny
 
-        !$acc wait  ! ensure pack kernels complete before NCCL reads buffers
-
+        ! NCCL operations share OpenACC's stream, so within-stream ordering
+        ! automatically serializes the preceding pack kernels before NCCL reads.
         call nccl_group_start()
 
         if (.not. this%north_boundary) then
@@ -1584,7 +1586,7 @@ module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
     class(halo_t), intent(inout) :: this
     type(index_type), intent(inout) :: vars_to_ret(:)
     type(variable_t), intent(inout) :: var_data(:)
-    integer :: n, p, i, j, k, n_vars, nccl_ierr
+    integer :: n, p, i, j, k, n_vars
     integer :: halo_size, ims, jms, its, ite, jts, jte
 
     if (this%n_2d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
@@ -1595,8 +1597,9 @@ module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
     jts = this%jts; jte = this%jte
 
 #ifdef USE_NCCL
-        ! Single stream sync replaces 4 MPI_Win_Wait calls
-        nccl_ierr = nccl_stream_synchronize(this%nccl_stream)
+        ! NCCL shares OpenACC's stream — within-stream ordering ensures NCCL
+        ! writes to receive buffers complete before the unpack kernels below
+        ! read them. No explicit sync needed.
 #else
     if (.not.(this%north_boundary)) call MPI_Win_Wait(this%north_2d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_2d_win)
