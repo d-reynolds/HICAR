@@ -751,7 +751,7 @@ contains
 
         integer :: i, j, k
 
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) default(present)
         do j = jts_l-1, jte_l+1
             do k = ks, ke
                 do i = its_l-1, ite_l+1
@@ -789,7 +789,7 @@ contains
         integer :: i, j, k
 
         ! STEP 1: First half-step upwind fluxes
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) default(present)
         do j = jts_l-2, jte_l+3
             do k = ks, ke
                 do i = its_l-2, ite_l+3
@@ -814,7 +814,7 @@ contains
         ! ! This seems to stem from flux_z being calculated differently. 
 
         ! STEP 2: Compute intermediate concentration after first half-step
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) default(present)
         do j = jts_l-2, jte_l+2
             do k = ks, ke
                 do i = its_l-2, ite_l+2
@@ -830,7 +830,7 @@ contains
         enddo
 
         ! STEP 3: Second half-step upwind fluxes (accumulate)
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) default(present)
         do j = jts_l-1, jte_l+2
             do k = ks, ke
                 do i = its_l-1, ite_l+2
@@ -872,7 +872,7 @@ contains
             ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
 
         ! STEP 1: Compute scale_in/scale_out using upwind fluxes
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) default(present)
         do j = jts_l-1, jte_l+1
             do k = ks, ke
                 do i = its_l-1, ite_l+1
@@ -915,7 +915,7 @@ contains
         enddo
 
         ! STEP 2: Apply flux corrections
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) default(present)
         do j = jts_l, jte_l+1
             do k = ks, ke
                 do i = its_l, ite_l+1

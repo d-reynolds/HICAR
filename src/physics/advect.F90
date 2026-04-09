@@ -682,7 +682,12 @@ contains
         real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: u_cell, v_cell, rho
         real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: jaco, jaco_u, jaco_v
         real, intent(in) :: dx, dt
-        real, allocatable, intent(out) :: U_m(:,:,:), V_m(:,:,:), denom(:,:,:)
+        ! U_m, V_m, denom must be pre-allocated by the caller and already on
+        ! the device (via !$acc enter data create). The caller manages their
+        ! lifecycle to avoid OpenACC dummy-argument tracking issues.
+        real, intent(inout) :: U_m   (its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3)
+        real, intent(inout) :: V_m   (its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3)
+        real, intent(inout) :: denom (ims_l:ime_l,     ks:ke, jms_l:jme_l)
 
         integer :: i, j, k
         integer :: i_s_w_l, i_e_w_l, j_s_w_l, j_e_w_l
@@ -695,24 +700,19 @@ contains
         i_e_l   = ite_l + 1
         j_s_l   = jts_l - 1
         j_e_l   = jte_l + 1
-        i_s_w_l = its_l - 2
-        i_e_w_l = ite_l + 2
-        j_s_w_l = jts_l - 2
-        j_e_w_l = jte_l + 2
 
-
-        ! Allocate wind arrays (extended bounds for flux correction)
-        allocate(U_m    (i_s_w_l:i_e_w_l+1, ks:ke, j_s_w_l:j_e_w_l+1))
-        allocate(V_m    (i_s_w_l:i_e_w_l+1, ks:ke, j_s_w_l:j_e_w_l+1))
-        allocate(denom  (ims_l:ime_l, ks:ke, jms_l:jme_l))
+        i_s_w_l = max(its_l - 2, ims_l+1)  ! Ensure we don't go out of bounds
+        i_e_w_l = min(ite_l + 2, ime_l-1)
+        j_s_w_l = max(jts_l - 2, jms_l+1)
+        j_e_w_l = min(jte_l + 2, jme_l-1)
 
         ! Allocate module-level fine-mesh flux arrays
         allocate(flux_x_fm(i_s_l:i_e_l+1, ks:ke,   j_s_l:j_e_l+1))
         allocate(flux_y_fm(i_s_l:i_e_l+1, ks:ke,   j_s_l:j_e_l+1))
-        !$acc enter data create(U_m, V_m, denom, flux_x_fm, flux_y_fm)
+        !$acc enter data create(flux_x_fm, flux_y_fm)
 
         ! Compute 1/(rho * jaco) denominator
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) default(present)
         do j = jms_l, jme_l
             do k = ks, ke
                 do i = ims_l, ime_l
@@ -722,7 +722,7 @@ contains
         enddo
 
         ! U_m: face-staggered in x (mirrors adv_std_compute_wind line 1203)
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) default(present)
         do j = j_s_w_l, j_e_w_l+1
             do k = ks, ke
                 do i = i_s_w_l, i_e_w_l+1
@@ -733,7 +733,7 @@ contains
         enddo
 
         ! V_m: face-staggered in y (mirrors line 1206)
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) default(present)
         do j = j_s_w_l, j_e_w_l+1
             do k = ks, ke
                 do i = i_s_w_l, i_e_w_l+1
@@ -780,7 +780,7 @@ contains
             ! ==========================================
             ! Horizontal fluxes (1st order upwind)
             ! ==========================================
-            !$acc parallel loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) default(present)
             do j = j_s_l, j_e_l+1
                 do k = ks, ke
                     do i = i_s_l, i_e_l+1
@@ -804,7 +804,7 @@ contains
             ! ==========================================
             ! Horizontal fluxes (3rd order)
             ! ==========================================
-            !$acc parallel loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) default(present)
             do j = j_s_l, j_e_l+1
                 do k = ks, ke
                     do i = i_s_l, i_e_l+1
@@ -832,7 +832,7 @@ contains
             ! ==========================================
             ! Horizontal fluxes (5th order)
             ! ==========================================
-            !$acc parallel loop gang vector collapse(3)
+            !$acc parallel loop gang vector collapse(3) default(present)
             do j = j_s_l, j_e_l+1
                 do k = ks, ke
                     do i = i_s_l, i_e_l+1
@@ -927,7 +927,7 @@ contains
 
         integer :: i, j, k
 
-        !$acc parallel loop gang vector collapse(3)
+        !$acc parallel loop gang vector collapse(3) default(present)
         do j = jts_l, jte_l
             do k = ks, ke
                 do i = its_l, ite_l
@@ -944,14 +944,10 @@ contains
     !! Deallocate fine-mesh wind and flux arrays.
     !! Mirrors adv_std_clean_wind_arrays for the fine mesh.
     !!------------------------------------------------------------
-    subroutine adv_std_clean_wind_arrays_fm(U_m, V_m, denom)
+    subroutine adv_std_clean_wind_arrays_fm()
         implicit none
-        real, allocatable, dimension(:,:,:), intent(inout) :: U_m, V_m, denom
 
-        !$acc exit data delete(U_m, V_m, denom, flux_x_fm, flux_y_fm)
-        if (allocated(U_m)) deallocate(U_m)
-        if (allocated(V_m)) deallocate(V_m)
-        if (allocated(denom)) deallocate(denom)
+        !$acc exit data delete(flux_x_fm, flux_y_fm)
         if (allocated(flux_x_fm)) deallocate(flux_x_fm)
         if (allocated(flux_y_fm)) deallocate(flux_y_fm)
 

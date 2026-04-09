@@ -22,6 +22,7 @@ module snow_drift
     use wind,               only : calc_divergence
     use icar_constants
     use data_structures, only : index_type
+    use mod_atm_utilities, only : relative_humidity
 
     implicit none
     private
@@ -501,7 +502,7 @@ contains
         type(options_t), intent(in)   :: options
 
         integer :: i, j, k, iter
-        real    :: rho_air, T_air, qv_air, e_sat, e_air, sigma_i
+        real    :: rho_air, T_air, qv_air, e_sat, rh, sigma_i
         real    :: D_m, V_coef
         real    :: S_q, S_N, h_salt_loc
         real    :: Kh_half, dep_mass_salt, dep_mass_susp, dep_num_susp
@@ -544,6 +545,7 @@ contains
             jacobian_v => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
             swe        => domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
             z0         => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+            psfc       => domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d, &
             ustar_2d   => domain%vars_2d(domain%var_indx(kVARS%ustar)%v)%data_2d, &
             bs_ustar_t => domain%vars_2d(domain%var_indx(kVARS%bs_threshold_ustar)%v)%data_2d, &
             bs_salt_mass => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d, &
@@ -601,6 +603,16 @@ contains
         enddo
 
         call calc_divergence(div, domain, horz_only=.True., use_dqdt=.False., advect_density=.False.)
+
+        ! Allocate fine-mesh wind/denom arrays here (not inside adv_std_compute_wind_2d_fm)
+        ! and manage their device lifecycle directly on these local variables.
+        ! This avoids NVHPC OpenACC issues with !$acc enter/exit data on allocatable
+        ! dummy arguments, which can leave stale device mappings across calls and
+        ! cause "partially present" errors when nest contexts switch.
+        allocate(U_m_fm  (its-2:ite+3, 1:snc_N_loc, jts-2:jte+3))
+        allocate(V_m_fm  (its-2:ite+3, 1:snc_N_loc, jts-2:jte+3))
+        allocate(denom_fm(ims:ime,     1:snc_N_loc, jms:jme))
+        !$acc enter data create(U_m_fm, V_m_fm, denom_fm)
 
         ! Compute 3D fine-mesh wind Courant numbers (U_m_fm, V_m_fm, denom_fm)
         call adv_std_compute_wind_2d_fm(u_fm, v_fm, rho_fm, &
@@ -686,7 +698,7 @@ contains
                     q_salt_val = 0.0
                     n_salt_val = 0.0
                     if (bs_salt_mass(i,j) > 0.0) then
-                        h_salt_loc = z0(i,j) + (3.1 * ustar_2d(i,j) * cos_a_e)**2 / (4.0 * gravity)
+                        h_salt_loc = 0.0843*(ustar_2d(i,j))**(1.27) !z0(i,j) + (3.1 * ustar_2d(i,j) * cos_a_e)**2 / (4.0 * gravity)
                         C_salt = bs_salt_mass(i,j) / (2.8 * bs_ustar_t(i,j))
                         tmp_1 = (0.45 * 9.81) / (ustar_2d(i,j)**2)
                         q_salt_val = exp(-h_salt_loc * tmp_1) * (C_salt * tmp_1) / rho_air
@@ -879,7 +891,7 @@ contains
         ! Post-RK3: Sublimation + Surface mass balance
         ! (Thomas solver now runs inside RK3 substeps above)
         ! ===================================================================
-        !$acc parallel loop gang vector collapse(2)
+        !$acc parallel loop gang vector collapse(2) default(present)
         do j = jts, jte
             do i = its, ite
                 rho_air = density(i,kts,j)
@@ -896,12 +908,12 @@ contains
 
                     ! Saturation vapor pressure over ice (Buck 1981)
                     e_sat = 611.15 * exp(22.452 * (T_air - 273.15) / (T_air - 0.61))
-                    ! e_air = qv_air * rho_air * RV * T_air
+                    rh = relative_humidity(T_air, qv_air, psfc(i,j))
 
                     ! ! Saturation deficit (negative when subsaturated)
-                    ! sigma_i = (e_air / e_sat) - 1.0
+                    sigma_i = rh - 1.0
 
-                    if (qs_fm(i,k,j) > 0.0) then
+                    if (qs_fm(i,k,j) > 0.0 .and. ns_fm(i,k,j) > 0.0) then
                         ! Mean volume diameter
                         D_m = max( alpha/( (max(ns_fm(i,k,j), 1.0e-10) * RHO_ICE * PI_CONST * gamma(alpha + 3.0)) / (max(qs_fm(i,k,j), 1.0e-10) * 6.0 * gamma(alpha)))**(1.0/3.0), 20.0E-6)
 
@@ -930,16 +942,24 @@ contains
                         endif
 
                         ! Eq. 13: S_q integrated over gamma distribution
-                        S_q = ns_fm(i,k,j) * &
+                        S_q = ns_fm(i,k,j) * (sigma_i * &
                               (0.78 * alpha * A_thermo / lambda + &
                                0.308 * A_thermo * SC_THIRD * sqrt(am_loc) * phi_best**(bm_loc/2.0) * &
-                               gr_loc / lambda**(1.0 + 1.5*bm_loc))
+                               gr_loc / lambda**(1.0 + 1.5*bm_loc)) )
 
-                        ! Limit to available mass
-                        S_q = max(S_q, -qs_fm(i,k,j) / dt)
 
-                        ! Eq. 14: S_N (Morrison & Grabowski 2008)
-                        S_N = S_q * (ns_fm(i,k,j) / max(qs_fm(i,k,j), 1.0e-10))
+
+                        if (S_q <= 0.0) then
+                            ! Limit to available mass
+                            S_q = max(S_q, (-qs_fm(i,k,j) / dt))
+                            ! Eq. 14: S_N (Morrison & Grabowski 2008)
+                            S_N = S_q * (ns_fm(i,k,j) / max(qs_fm(i,k,j), 1.0e-10))
+                        else
+                            S_q = S_q !min(S_q,DBLE((bs_qv_spec(k)-loc_qsat)*0.999/dt_in))
+                            ! Limit to available number
+                            S_N = 0.0
+                        endif
+                        S_N = MAX(S_N, -ns_fm(i,k,j)/dt)
 
                         ! Update fields
                         qs_fm(i,k,j) = max(BS_QS_MIN, qs_fm(i,k,j) + S_q * dt)
@@ -972,8 +992,12 @@ contains
         !$acc end data
 
         end associate
-        ! Cleanup advection arrays
-        call adv_std_clean_wind_arrays_fm(U_m_fm, V_m_fm, denom_fm)
+        ! Cleanup advection arrays — handle U_m_fm/V_m_fm/denom_fm directly here
+        ! (on the local variables) to avoid NVHPC dummy-argument tracking issues.
+        !$acc exit data delete(U_m_fm, V_m_fm, denom_fm)
+        deallocate(U_m_fm, V_m_fm, denom_fm)
+        ! Module-level flux_x_fm/flux_y_fm cleanup is still in adv_std module
+        call adv_std_clean_wind_arrays_fm()
         deallocate(rho_fm, qs_fm_old, ns_fm_old, jaco_fm, jaco_u_fm, jaco_v_fm)
 
     end subroutine snow_drift_integrate
