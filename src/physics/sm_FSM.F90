@@ -446,9 +446,6 @@ contains
         if ((domain%sim_time%seconds()   >=    last_output%seconds())) then
             !If we are the first call since the last output, reset the per-output counters
             domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d = 0.
-            domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d  = 0.
-            domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d  = 0.
-            domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d  = 0.
             last_output = domain%next_output
         endif
         
@@ -603,9 +600,13 @@ contains
                 
                     if (SNTRAN>0) then
                         ! Convert to rate 1/s
-                        domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d(hi,hj)=domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d(hi,hj) + dSWE_salt_(j,i)
-                        domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d(hi,hj)= domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d(hi,hj) + dSWE_susp_(j,i)
-                        domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d(hi,hj)= domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d(hi,hj) + dSWE_subl_(j,i)
+                        domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d(hi,hj)=dSWE_salt_(j,i)
+                        domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d(hi,hj)= dSWE_susp_(j,i)
+                        domain%vars_2d(domain%var_indx(kVARS%bs_sublimation_flux)%v)%data_2d(hi,hj)= dSWE_subl_(j,i)
+
+                        domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d(hi,hj)=domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d(hi,hj) + domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d(hi,hj)
+                        domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d(hi,hj)= domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d(hi,hj) + domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d(hi,hj)
+                        domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d(hi,hj)= domain%vars_2d(domain%var_indx(kVARS%bs_sublimation_flux)%v)%data_2d(hi,hj) + domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d(hi,hj)
                         !Add sublimated snow to latent heat flux. 
                         !Sometimes FSM returns NaN values for blowing snow sublimation, so mask those out here
                         if (abs(dSWE_subl_(j,i))>1) dSWE_subl_(j,i) = 0.0

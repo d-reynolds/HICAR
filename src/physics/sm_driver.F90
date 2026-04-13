@@ -78,7 +78,7 @@ contains
                          kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%snow_nlayers,   &
                          kVARS%shd, kVARS%meltflux_out_tstep, kVARS%Sliq_out, &
                          kVARS%windspd_10m, kVARS%bs_saltation_flux, kVARS%bs_saltation_height, kVARS%bs_saltation_concentration, &
-                         kVARS%bs_suspension_flux, kVARS%dSWE_blow_subl, kVARS%dSWE_subl, kVARS%dSWE_slide, &
+                         kVARS%bs_suspension_flux, kVARS%dSWE_slide, &
                          kVARS%shortwave_direct, kVARS%shortwave_diffuse, kVARS%ground_surf_temperature])
              
              call options%restart_vars( &
@@ -340,8 +340,10 @@ contains
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_height)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_concentration)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d, &
-                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d, &
-                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_sublimation_flux)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
@@ -384,7 +386,9 @@ contains
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_height)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_concentration)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d, &
-                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
@@ -508,7 +512,7 @@ contains
             end associate
             if (options%sm%suspension_layer == 1) then
                 ! zero out bs_swe_exch since it was tracking mass changes between snowmodel calls
-                associate (bs_swe_exchange => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d)
+                associate (bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d)
                 !$acc kernels default(present)
                 bs_swe_exch = 0.0
                 !$acc end kernels

@@ -258,8 +258,10 @@ contains
         ! 2. Build fine mesh wind profiles
         call build_fine_mesh_winds(domain)
 
-        ! 3. Saltation step with iterative halo exchange
-        call saltation_step(domain, dt, dx)
+        if (.not.(options%physics%snowmodel == kSM_SNOWPACK .and. options%sm%saltation_model == kSALTATION_DOORSCHOT)) then
+            ! 3. Saltation concentration calculation
+            call saltation_step(domain, dt, dx)
+        endif
 
         ! 4. Fine mesh suspension (horizontal advection + vertical diffusion/settling/sublimation)
         call snow_drift_integrate(domain, dt, dx, options)
@@ -567,6 +569,7 @@ contains
             bs_salt_mass => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d, &
             bs_salt_height => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_height)%v)%data_2d, &
             bs_salt_conc => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_concentration)%v)%data_2d, &
+            bs_susp_flux => domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d, &
             bs_subl    => domain%vars_2d(domain%var_indx(kVARS%bs_sublimation_flux)%v)%data_2d, &
             bs_swe_salt => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d, &
             bs_swe_susp => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d, &
@@ -722,7 +725,7 @@ contains
                     n_salt_val = 0.0
                     if (using_snowpack .and. saltation_doorschot) then
                         h_salt_loc = bs_salt_height(i,j)
-                        if (bs_salt_mass(i,j) > 0.0 .and. bs_salt_conc(i,j) > 0.0 .and. &
+                        if (bs_salt_conc(i,j) > 0.0 .and. &
                             swe(i,j) >= 0.5 .and. skin_temp(i,j) < 272.15) then
                             q_salt_val = bs_salt_conc(i,j) / rho_air
                                 n_salt_val = 0.45 * q_salt_val &
@@ -864,7 +867,7 @@ contains
                     ! bs_swe_susp and applied to SNOWPACK elements at the next SNOWPACK step)
                     dq_entrain = ghost_coeff * (q_ghost_limited - qs_fm(i,1,j)) * rho_air * snc_dz(i,1,j)
                     dep_mass_susp = rho_air * Vq_iface_down(0) * qs_fm(i,1,j) * dt_thomas
-                    bs_swe_susp(i,j) = bs_swe_susp(i,j) - dq_entrain + dep_mass_susp
+                    bs_susp_flux(i,j) = (- dq_entrain + dep_mass_susp)/dt
 
                     ! ============ Thomas solve for N_bs ============
                     a = 0.0; b = 0.0; c = 0.0; d_rhs = 0.0
@@ -1026,9 +1029,11 @@ contains
                 dep_mass_salt = (bs_salt_mass(i,j) * div(i,1,j) / wind_fm(i,snc_N_loc,j)) * dt
                 bs_swe_salt(i,j) = bs_swe_salt(i,j) + dep_mass_salt
 
+                bs_swe_susp(i,j) = bs_swe_susp(i,j) + bs_susp_flux(i,j) * dt
+
                 ! Sublimation diagnostics
                 bs_subl(i,j)     = subl_mass_2d(i,j) * XLS / dt  ! W/m^2
-                bs_swe_subl(i,j) = bs_swe_subl(i,j) + subl_mass_2d(i,j)
+                bs_swe_subl(i,j) = bs_swe_subl(i,j) + subl_mass_2d(i,j) * dt
 
             enddo
         enddo

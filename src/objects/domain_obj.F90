@@ -2389,7 +2389,6 @@ contains
         if (this%var_indx(kVARS%bs_saltation_flux)%v > 0)   this%vars_2d(this%var_indx(kVARS%bs_saltation_flux)%v)%data_2d=0.
         if (this%var_indx(kVARS%bs_suspension_flux)%v > 0)  this%vars_2d(this%var_indx(kVARS%bs_suspension_flux)%v)%data_2d=0.
         if (this%var_indx(kVARS%dSWE_subl)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_subl)%v)%data_2d=0.
-        if (this%var_indx(kVARS%dSWE_blow_subl)%v > 0)        this%vars_2d(this%var_indx(kVARS%dSWE_blow_subl)%v)%data_2d=0.
         if (this%var_indx(kVARS%dSWE_slide)%v > 0)            this%vars_2d(this%var_indx(kVARS%dSWE_slide)%v)%data_2d=0.
 
         !!

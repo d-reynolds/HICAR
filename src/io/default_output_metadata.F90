@@ -3544,23 +3544,13 @@ contains
                                attribute_t("coordinates",   "lat lon")]
           
         !>------------------------------------------------------------
-        !!  blowing snow sublimation
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%dSWE_blow_subl) then
-            var_meta%name        = "blow_subl"
-            var_meta%dimensions  = two_d_t_dimensions
-            var_meta%attributes  = [attribute_t("standard_name", "blowing-snow sublimation"),   &
-                               attribute_t("units",         "kg m-2 t-1"),                        &
-                               attribute_t("coordinates",   "lat lon")]
-          
-        !>------------------------------------------------------------
         !!  static snow sublimation
         !!------------------------------------------------------------
         else if (var_idx==kVARS%dSWE_subl) then
             var_meta%name        = "snow_subl"
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "snow sublimation"),   &
-                               attribute_t("units",         "kg m-2 t-1"),                        &
+                               attribute_t("units",         "kg m-2 s-1"),                        &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
@@ -4076,14 +4066,14 @@ contains
             var_meta%name        = "bs_subl_flux"
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_sublimation_flux"),   &
-                               attribute_t("units",         "W m-2"),                        &
+                               attribute_t("units",         "kg m-2 s-1"),                        &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
         !!  Blowing snow accumulated saltation SWE change
         !!------------------------------------------------------------
         else if (var_idx==kVARS%bs_drift_swe_salt) then
-            var_meta%name        = "bs_swe_salt"
+            var_meta%name        = "bs_salt_swe"
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_saltation_swe_change"),   &
                                attribute_t("units",         "kg m-2"),                        &
@@ -4093,7 +4083,7 @@ contains
         !!  Blowing snow accumulated suspension SWE change
         !!------------------------------------------------------------
         else if (var_idx==kVARS%bs_drift_swe_susp) then
-            var_meta%name        = "bs_swe_susp"
+            var_meta%name        = "bs_susp_swe"
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_suspension_swe_change"),   &
                                attribute_t("units",         "kg m-2"),                        &
@@ -4103,7 +4093,7 @@ contains
         !!  Blowing snow accumulated sublimation SWE change
         !!------------------------------------------------------------
         else if (var_idx==kVARS%bs_drift_swe_subl) then
-            var_meta%name        = "bs_swe_subl"
+            var_meta%name        = "bs_subl_swe"
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "blowing_snow_sublimation_swe_change"),   &
                                attribute_t("units",         "kg m-2"),                        &
