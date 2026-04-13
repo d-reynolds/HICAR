@@ -249,9 +249,9 @@ contains
         dx = domain%dx
 
         ! 1. Compute threshold friction velocity
-        if (options%physics%snowmodel == kSM_SNOWPACK) then
-            call compute_threshold_ustar_snowpack(domain)
-        else
+        ! When running with SNOWPACK, bs_threshold_ustar is already written by
+        ! comp_drift_mass_flux inside snowpack_gpu_step — no need to recompute.
+        if (options%physics%snowmodel /= kSM_SNOWPACK) then
             call compute_threshold_ustar_generic(domain)
         endif
 
@@ -265,7 +265,7 @@ contains
         call snow_drift_integrate(domain, dt, dx, options)
 
         ! 5. Accumulate diagnostics
-        call accumulate_diagnostics(domain)
+        ! call accumulate_diagnostics(domain)
 
         ! 6. Couple fine mesh top to 3D atmospheric grid
         call couple_to_3d_grid(domain, dt)
@@ -524,7 +524,9 @@ contains
         real    :: q_ghost_limited, n_ghost_limited
         real    :: ghost_coeff_top, dz_top_interface
         real    :: lambda, A_thermo, eta, phi_best, X_best
-        real    :: am_loc, bm_loc, gr_loc, tmp_1, C_salt
+        real    :: am_loc, bm_loc, gr_loc
+        ! CRYOWRF saltation BC variables
+        real    :: upart, conc_col, k_salt, c_salt_loc
 
         ! Subcycled vertical advection variables
         real    :: flux_v(0:snc_N_loc)  ! Vertical interface fluxes
@@ -532,7 +534,6 @@ contains
         real    :: max_Cr_col, dt_sub   ! Per-column max CFL and subcycle timestep
         integer :: n_sub, iter_v        ! Subcycle count and iterator
         real, parameter :: CFL_MAX_V = 0.9  ! Max vertical Courant number per subcycle
-        real, parameter :: cos_a_e = 0.9063
 
         ! Thomas algorithm arrays (per column)
         real :: a(snc_N_loc), b(snc_N_loc), c(snc_N_loc), d_rhs(snc_N_loc)
@@ -549,7 +550,7 @@ contains
         real, allocatable :: jaco_fm(:,:,:), jaco_u_fm(:,:,:), jaco_v_fm(:,:,:)
         real    :: t_fac
         integer :: flux_corr, max_iters
-        logical :: using_snowpack
+        logical :: using_snowpack, saltation_doorschot
 
         associate( &
             density    => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
@@ -557,6 +558,8 @@ contains
             jacobian_u => domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, &
             jacobian_v => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
             swe        => domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+            skin_temp  => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+            bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d, &
             z0         => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
             psfc       => domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d, &
             ustar_2d   => domain%vars_2d(domain%var_indx(kVARS%ustar)%v)%data_2d, &
@@ -593,6 +596,7 @@ contains
         call exch_fine_mesh_3d(domain)
 
         using_snowpack = (options%physics%snowmodel == kSM_SNOWPACK)
+        saltation_doorschot = (options%sm%saltation_model == kSALTATION_DOORSCHOT)
         !$acc data create(rho_fm, qs_fm_old, ns_fm_old, div, jaco_fm, jaco_u_fm, jaco_v_fm)
 
         ! Zero sublimation accumulator for this step
@@ -716,21 +720,33 @@ contains
                     ! bottom ghost-cell BC of the suspension diffusion equation.
                     q_salt_val = 0.0
                     n_salt_val = 0.0
-                    if (using_snowpack) then
+                    if (using_snowpack .and. saltation_doorschot) then
                         h_salt_loc = bs_salt_height(i,j)
-                        if (bs_salt_mass(i,j) > 0.0 .and. bs_salt_conc(i,j) > 0.0) then
+                        if (bs_salt_mass(i,j) > 0.0 .and. bs_salt_conc(i,j) > 0.0 .and. &
+                            swe(i,j) >= 0.5 .and. skin_temp(i,j) < 272.15) then
                             q_salt_val = bs_salt_conc(i,j) / rho_air
-                            n_salt_val = q_salt_val * (gamma(alpha)/gamma(alpha + 3.0)) &
-                                    * (6.0/(PI_CONST*RHO_ICE)) * ((alpha/D_MEAN_SALT)**3)
+                                n_salt_val = 0.45 * q_salt_val &
+                                        * (6.0 / (PI_CONST * D_MEAN_SALT**3 * RHO_ICE))
                         endif
                     else
-                        if (bs_salt_mass(i,j) > 0.0) then
-                            h_salt_loc = 0.0843*(ustar_2d(i,j))**(1.27) !z0(i,j) + (3.1 * ustar_2d(i,j) * cos_a_e)**2 / (4.0 * gravity)
-                            C_salt = bs_salt_mass(i,j) / (2.8 * bs_ustar_t(i,j))
-                            tmp_1 = (0.45 * 9.81) / (ustar_2d(i,j)**2)
-                            q_salt_val = exp(-h_salt_loc * tmp_1) * (C_salt * tmp_1) / rho_air
-                            n_salt_val = q_salt_val * (gamma(alpha)/gamma(alpha + 3.0)) &
-                                    * (6.0/(PI_CONST*RHO_ICE)) * ((alpha/D_MEAN_SALT)**3)
+                        bs_salt_height(i,j) = 0.15   ! [m] fixed saltation reference height
+
+                        ! Safety gates (CRYOWRF Coupler.cpp lines 969-975)
+                        if (bs_salt_mass(i,j) > 0.0 .and. swe(i,j) >= 0.5 &
+                            .and. skin_temp(i,j) < 272.15) then
+                            ! Particle speed: 75% of log-law wind at h_salt (Nishimura 2014)
+                            upart = 0.75 * ustar_2d(i,j) / 0.4 * log(bs_salt_height(i,j) / 0.002)
+                            if (upart > 0.0) then
+                                conc_col   = bs_salt_mass(i,j) / upart  ! [kg/m^2] column mass
+                                ! Capped inverse scale height (Melo et al. 2024 Fig. 4)
+                                k_salt     = max(0.45 * gravity / max(ustar_2d(i,j)**2, 1.0e-4), &
+                                                1.0 / 0.04)
+                                bs_salt_conc(i,j) = conc_col * k_salt * exp(-k_salt * bs_salt_height(i,j))  ! [kg/m^3]
+                                q_salt_val = bs_salt_conc(i,j) / rho_air  ! [kg/kg]
+                                ! Number conc with fixed d=140μm (CRYOWRF Coupler.cpp line 990)
+                                n_salt_val = 0.45 * q_salt_val &
+                                        * (6.0 / (PI_CONST * 0.00014**3 * RHO_ICE))
+                            endif
                         endif
                     endif
 
@@ -844,9 +860,10 @@ contains
                     enddo
 
                     ! Mass tracking: ghost-cell entrainment and settling deposition
+                    ! (SWE is NOT modified here — the net mass budget is accumulated in
+                    ! bs_swe_susp and applied to SNOWPACK elements at the next SNOWPACK step)
                     dq_entrain = ghost_coeff * (q_ghost_limited - qs_fm(i,1,j)) * rho_air * snc_dz(i,1,j)
                     dep_mass_susp = rho_air * Vq_iface_down(0) * qs_fm(i,1,j) * dt_thomas
-                    swe(i,j) = swe(i,j) - dq_entrain + dep_mass_susp
                     bs_swe_susp(i,j) = bs_swe_susp(i,j) - dq_entrain + dep_mass_susp
 
                     ! ============ Thomas solve for N_bs ============
@@ -1005,11 +1022,9 @@ contains
                 ! ===================================================================
 
                 ! Saltation deposition from horizontal divergence
+                ! (SWE is NOT modified here — net budget applied via bs_swe_exchange)
                 dep_mass_salt = (bs_salt_mass(i,j) * div(i,1,j) / wind_fm(i,snc_N_loc,j)) * dt
                 bs_swe_salt(i,j) = bs_swe_salt(i,j) + dep_mass_salt
-                swe(i,j) = swe(i,j) + dep_mass_salt
-                ! Note: suspension entrainment/deposition already applied to SWE and
-                ! bs_swe_susp in the post-Thomas mass tracking step above (lines 866-871)
 
                 ! Sublimation diagnostics
                 bs_subl(i,j)     = subl_mass_2d(i,j) * XLS / dt  ! W/m^2
@@ -1018,6 +1033,16 @@ contains
             enddo
         enddo
         !$acc end data
+
+        ! Accumulate net drift mass exchange for SNOWPACK element modification.
+        ! Positive = deposition (mass added to snowpack), negative = erosion.
+        ! Applied to SNOWPACK elements at the NEXT snowpack_gpu_step call.
+        !$acc parallel loop gang vector collapse(2) default(present)
+        do j = jts, jte
+            do i = its, ite
+                bs_swe_exch(i,j) = bs_swe_salt(i,j) + bs_swe_susp(i,j)
+            enddo
+        enddo
 
         end associate
         ! Cleanup advection arrays — handle U_m_fm/V_m_fm/denom_fm directly here
@@ -1160,33 +1185,33 @@ contains
     !>----------------------------------------------------------
     !! Accumulate diagnostic fields
     !!----------------------------------------------------------
-    subroutine accumulate_diagnostics(domain)
-        implicit none
-        type(domain_t), intent(inout) :: domain
-        integer :: i, j
+    ! subroutine accumulate_diagnostics(domain)
+    !     implicit none
+    !     type(domain_t), intent(inout) :: domain
+    !     integer :: i, j
 
-        associate( &
-            bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d, &
-            bs_drift_swe_salt => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d, &
-            bs_drift_swe_susp => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d, &
-            bs_drift_swe_subl => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d &
-        )
+    !     associate( &
+    !         bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d, &
+    !         bs_drift_swe_salt => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d, &
+    !         bs_drift_swe_susp => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d, &
+    !         bs_drift_swe_subl => domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d &
+    !     )
 
-        ! Sublimation adds moisture and cools the air
-        ! bs_subl is in W/m^2 (positive = sublimation occurring, energy consumed)
-        !$acc parallel loop gang vector collapse(2) present(bs_swe_exch, bs_drift_swe_salt, bs_drift_swe_susp, bs_drift_swe_subl)
-        do j = jts, jte
-            do i = its, ite
-                ! Mass exchange = net of saltation + suspension + sublimation
-                bs_swe_exch(i,j) = &
-                    bs_drift_swe_salt(i,j) + &
-                    bs_drift_swe_susp(i,j) + &
-                    bs_drift_swe_subl(i,j)
-            enddo
-        enddo
-        end associate
+    !     ! Sublimation adds moisture and cools the air
+    !     ! bs_subl is in W/m^2 (positive = sublimation occurring, energy consumed)
+    !     !$acc parallel loop gang vector collapse(2) present(bs_swe_exch, bs_drift_swe_salt, bs_drift_swe_susp, bs_drift_swe_subl)
+    !     do j = jts, jte
+    !         do i = its, ite
+    !             ! Mass exchange = net of saltation + suspension + sublimation
+    !             bs_swe_exch(i,j) = &
+    !                 bs_drift_swe_salt(i,j) + &
+    !                 bs_drift_swe_susp(i,j) !+ &
+    !                 ! bs_drift_swe_subl(i,j)
+    !         enddo
+    !     enddo
+    !     end associate
 
-    end subroutine accumulate_diagnostics
+    ! end subroutine accumulate_diagnostics
 
 
     !>----------------------------------------------------------

@@ -257,6 +257,7 @@ module options_types
         integer :: suspension_layer    ! 0=off, 1=CRYOWRF-style
         integer :: suspension_fine_mesh_levels               ! Fine mesh levels for near-surface suspension (default 15)
         logical :: bs_atm_feedback     ! Atmospheric feedback from blowing snow sublimation
+        integer :: saltation_model     ! kSALTATION_SORENSEN (0, default) or kSALTATION_DOORSCHOT (1)
 
     end type sm_options_type
 

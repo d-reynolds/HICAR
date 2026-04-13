@@ -2113,6 +2113,7 @@ contains
 
         logical, dimension(kMAX_NESTS) :: snowpack_enable_vapour_transport
         character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_variant
+        character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: saltation_model
         integer, dimension(kMAX_NESTS) :: snowpack_reduce_n_elements
 
         integer, dimension(kMAX_NESTS) :: suspension_fine_mesh_levels, suspension_layer
@@ -2125,7 +2126,7 @@ contains
                                  snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt, &
                                  snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable, &
                                  snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_reduce_n_elements, snowpack_variant, snowpack_enable_vapour_transport, &
-                                 suspension_fine_mesh_levels, suspension_layer, bs_atm_feedback
+                                 suspension_fine_mesh_levels, suspension_layer, bs_atm_feedback, saltation_model
                                  
 
         CHARACTER(LEN=200) :: error_msg
@@ -2176,6 +2177,7 @@ contains
         call set_nml_var_default(suspension_layer, 'suspension_layer', print_info, gennml)
         call set_nml_var_default(suspension_fine_mesh_levels, 'suspension_fine_mesh_levels', print_info, gennml)
         call set_nml_var_default(bs_atm_feedback, 'bs_atm_feedback', print_info, gennml)
+        call set_nml_var_default(saltation_model, 'saltation_model', print_info, gennml)
 
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
@@ -2258,6 +2260,7 @@ contains
         call set_nml_var(sm_options%suspension_layer, suspension_layer(n_indx), 'suspension_layer', suspension_layer(1))
         call set_nml_var(sm_options%suspension_fine_mesh_levels, suspension_fine_mesh_levels(n_indx), 'suspension_fine_mesh_levels', suspension_fine_mesh_levels(1))
         call set_nml_var(sm_options%bs_atm_feedback, bs_atm_feedback(n_indx), 'bs_atm_feedback')
+        call set_nml_var(sm_options%saltation_model, saltation_model(n_indx), 'saltation_model', saltation_model(1))
 
     end subroutine sm_parameters_namelist
     !> -------------------------------
@@ -3187,6 +3190,7 @@ contains
         call append_kv_int    (config_str, pos, 'sm', 'suspension_layer',              this%sm%suspension_layer)
         call append_kv_int    (config_str, pos, 'sm', 'suspension_fine_mesh_levels',   this%sm%suspension_fine_mesh_levels)
         call append_kv_logical(config_str, pos, 'sm', 'bs_atm_feedback',               this%sm%bs_atm_feedback)
+        call append_kv_int    (config_str, pos, 'sm', 'saltation_model',               this%sm%saltation_model)
 
         ! --- rad group ---
         call append_kv_logical(config_str, pos, 'rad', 'terrain_shading',      this%rad%terrain_shading)

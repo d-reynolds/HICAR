@@ -578,6 +578,10 @@ module icar_constants
     integer, parameter :: kSNOWPACK_VARIANT_ANTARCTICA = 1
     integer, parameter :: kSNOWPACK_VARIANT_ALPS      = 2
 
+    ! Saltation model selector (snow drift bottom BC)
+    integer, parameter :: kSALTATION_SORENSEN  = 0   ! default — matches CRYOWRF
+    integer, parameter :: kSALTATION_DOORSCHOT = 1
+
     ! mm of accumulated precip before "tipping" into the bucket
     ! only performed on output operations
     integer, parameter :: kPRECIP_BUCKET_SIZE=100

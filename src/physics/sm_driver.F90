@@ -506,6 +506,14 @@ contains
 #endif
             endif
             end associate
+            if (options%sm%suspension_layer == 1) then
+                ! zero out bs_swe_exch since it was tracking mass changes between snowmodel calls
+                associate (bs_swe_exchange => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d)
+                !$acc kernels default(present)
+                bs_swe_exch = 0.0
+                !$acc end kernels
+                end associate
+            endif
         endif
 
         end subroutine snow_model

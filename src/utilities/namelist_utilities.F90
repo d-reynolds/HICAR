@@ -3669,6 +3669,17 @@ contains
                     val_keys = [character(len=kMAX_NAME_LENGTH) :: "NEUTRAL", trim(str(kSNOWPACK_ATMOS_STAB_NEUTRAL)), "MO_HOLTSLAG", trim(str(kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG)), "MO_MICHLMAYR", trim(str(kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR))]
                 endif
                 group = "SM_Parameters"
+            case("saltation_model")
+                description = "saltation mass flux model used by SNOWPACK / snow drift"//achar(10)//BLNK_CHR_N// &
+                    "'SORENSEN' (default CRYOWRF suspension model) based on Sorensen (2004)"//achar(10)//BLNK_CHR_N// &
+                    "'DOORSCHOT' = Doorschot & Lehning (2002) iterative trajectory model"
+                default = "SORENSEN"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: &
+                        "SORENSEN",  trim(str(kSALTATION_SORENSEN)),  &
+                        "DOORSCHOT", trim(str(kSALTATION_DOORSCHOT))]
+                endif
+                group = "SM_Parameters"
             case("snowpack_albedo_parameterization")
                 description = "which albedo parameterization to use in SnowPack model"//achar(10)//BLNK_CHR_N// &
                     "'LEHNING_2' = default SnowPack albedo parameterization"//achar(10)//BLNK_CHR_N// &
