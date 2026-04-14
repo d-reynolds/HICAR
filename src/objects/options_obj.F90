@@ -229,6 +229,16 @@ contains
             kFM_GRID_Z = this%sm%suspension_fine_mesh_levels
         endif
 
+#ifndef SNOWPACK_FORTRAN
+        if (this%sm%saltation_model == kSALTATION_DOORSCHOT) then
+            if (STD_OUT_PE) write(*,*) "  "
+            if (STD_OUT_PE) write(*,*) "  ATTENTION: The Doorschot saltation model is only compatible with the SNOWPACK GPU port"
+            if (STD_OUT_PE) write(*,*) "  ATTENTION: and is not currently compatible with the SNOWPACK CPU implementation. "
+            if (STD_OUT_PE) write(*,*) "  ATTENTION: setting saltation_model to default to avoid errors. "
+            this%sm%saltation_model = kSALTATION_SORENSEN
+        endif
+#endif
+
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
         if ((this%physics%landsurface>0).and.(this%physics%boundarylayer==0)) then
             if (STD_OUT_PE) write(*,*) "  "

@@ -34,8 +34,8 @@ module snow_model_driver
     use module_sm_FSMdrv,   only : sm_FSM_init, sm_FSM
 #endif
 #ifdef SNOWPACK
-#ifdef SNOWPACK_GPU
-    use snowpack_gpu_driver, only : snowpack_gpu_init, snowpack_gpu_step
+#ifdef SNOWPACK_FORTRAN
+    use snowpack_driver, only : snowpack_init, snowpack_step
 #else
     use module_sm_SNOWPACKdrv, only : sm_snowpack_init, sm_SNOWPACK
 #endif
@@ -169,9 +169,9 @@ contains
 #endif
         else if (options%physics%snowmodel==kSM_SNOWPACK) then
 #ifdef SNOWPACK
-#ifdef SNOWPACK_GPU
+#ifdef SNOWPACK_FORTRAN
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: Snowpack (GPU/OpenACC)"
-            call snowpack_gpu_init(domain,options,context_change)
+            call snowpack_init(domain,options,context_change)
 #else
 
             ! --- Update host: SNOWPACK-specific inputs ---
@@ -416,10 +416,10 @@ contains
 
             else if (options%physics%snowmodel==kSM_SNOWPACK) then
 #ifdef SNOWPACK
-#ifdef SNOWPACK_GPU
+#ifdef SNOWPACK_FORTRAN
                 ! GPU SNOWPACK: data stays on device, no host/device transfers needed
                 !$acc enter data copyin(current_rain, current_snow, windspd)
-                call snowpack_gpu_step(domain,options,lsm_dt,current_rain,current_snow,windspd)
+                call snowpack_step(domain,options,lsm_dt,current_rain,current_snow,windspd)
                 !$acc exit data delete(current_rain, current_snow, windspd)
 #else
                 ! EVAN'S BIG DRIVER HERE:

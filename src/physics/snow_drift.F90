@@ -249,28 +249,29 @@ contains
 
         dx = domain%dx
 
-        ! 1. Compute threshold friction velocity
-        ! When running with SNOWPACK, bs_threshold_ustar is already written by
-        ! comp_drift_mass_flux inside snowpack_gpu_step — no need to recompute.
-        if (options%physics%snowmodel /= kSM_SNOWPACK) then
-            call compute_threshold_ustar_generic(domain)
-        endif
-
-        ! 2. Build fine mesh wind profiles
+        ! 1. Build fine mesh wind profiles
         call build_fine_mesh_winds(domain)
 
-        if (.not.(options%physics%snowmodel == kSM_SNOWPACK .and. options%sm%saltation_model == kSALTATION_DOORSCHOT)) then
-            ! 3. Saltation concentration calculation
-            call saltation_step(domain, dt, dx)
+        ! 2. Compute threshold friction velocity
+        ! When running with SNOWPACK, bs_threshold_ustar is already written by
+        ! comp_drift_mass_flux inside snowpack_fortran_step — no need to recompute.
+        if (options%physics%snowmodel /= kSM_SNOWPACK) then
+            call compute_threshold_ustar_generic(domain)
+#ifndef SNOWPACK_FORTRAN
+        else
+            call compute_threshold_ustar_snowpack(domain)
+#endif
         endif
+
+#ifndef SNOWPACK_FORTRAN
+        ! 3. Saltation concentration calculation
+        call saltation_step(domain, dt, dx)
+#endif
 
         ! 4. Fine mesh suspension (horizontal advection + vertical diffusion/settling/sublimation)
         call snow_drift_integrate(domain, dt, dx, options)
 
-        ! 5. Accumulate diagnostics
-        ! call accumulate_diagnostics(domain)
-
-        ! 6. Couple fine mesh top to 3D atmospheric grid
+        ! 5. Couple fine mesh top to 3D atmospheric grid
         call couple_to_3d_grid(domain, dt)
 
     end subroutine snow_drift_step
@@ -481,11 +482,10 @@ contains
                 rho_air   = density(i,kts,j)
 
                 if (ustar_loc > ustar_t .and. swe(i,j) > 1.0) then
-                    ! Sorensen (2004) / Sharma et al. (2023) Eq. 17:
-                    ! Qsalt = (rho/g) * u*^3 * (1 - (u*_t/u*)^2) * (2.6 + 2.5*(u*_t/u*)^2 + 2*(u*_t/u*))
-                    ratio_t = ustar_t / ustar_loc
-                    bs_salt_mass(i,j) = (rho_air / gravity) * ustar_loc**3 * &
-                                (1.0 - ratio_t**2) * (2.6 + 2.5 * ratio_t**2 + 2.0 * ratio_t)
+                    ! This comes from the SNOWPACK code, which is based on Doorschot & Lehning (2002) and Sorensen (1991):
+                    bs_salt_mass(i,j) = 0.0014 * rho_air * ustar_loc &
+                        * (ustar_loc - ustar_t) &
+                        * (ustar_loc + 7.6 * ustar_t + 205.0)
                 else
                     bs_salt_mass(i,j) = 0.0
                 endif
@@ -1038,8 +1038,8 @@ contains
 
                 ! Accumulate net drift mass exchange for SNOWPACK element modification.
                 ! Positive = deposition (mass added to snowpack), negative = erosion.
-                ! Applied to SNOWPACK elements at the NEXT snowpack_gpu_step call.
-                bs_swe_exch(i,j) = bs_susp_flux(i,j) * dt + dep_mass_salt
+                ! Applied to SNOWPACK elements at the NEXT snowpack_fortran_step call.
+                bs_swe_exch(i,j) = bs_swe_exch(i,j) + bs_susp_flux(i,j) * dt + dep_mass_salt
 
             enddo
         enddo
