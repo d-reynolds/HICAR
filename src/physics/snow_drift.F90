@@ -111,6 +111,7 @@ contains
              kVARS%bs_saltation_concentration, &
              kVARS%bs_swe_exchange,    &
              kVARS%bs_sublimation_flux, &
+             kVARS%bs_suspension_flux, &
              kVARS%bs_drift_swe_salt,   &
              kVARS%bs_drift_swe_susp,   &
              kVARS%bs_drift_swe_subl,   &
@@ -1033,21 +1034,17 @@ contains
 
                 ! Sublimation diagnostics
                 bs_subl(i,j)     = subl_mass_2d(i,j) * XLS / dt  ! W/m^2
-                bs_swe_subl(i,j) = bs_swe_subl(i,j) + subl_mass_2d(i,j) * dt
+                bs_swe_subl(i,j) = bs_swe_subl(i,j) + subl_mass_2d(i,j)
+
+                ! Accumulate net drift mass exchange for SNOWPACK element modification.
+                ! Positive = deposition (mass added to snowpack), negative = erosion.
+                ! Applied to SNOWPACK elements at the NEXT snowpack_gpu_step call.
+                bs_swe_exch(i,j) = bs_susp_flux(i,j) * dt + dep_mass_salt
 
             enddo
         enddo
         !$acc end data
 
-        ! Accumulate net drift mass exchange for SNOWPACK element modification.
-        ! Positive = deposition (mass added to snowpack), negative = erosion.
-        ! Applied to SNOWPACK elements at the NEXT snowpack_gpu_step call.
-        !$acc parallel loop gang vector collapse(2) default(present)
-        do j = jts, jte
-            do i = its, ite
-                bs_swe_exch(i,j) = bs_swe_salt(i,j) + bs_swe_susp(i,j)
-            enddo
-        enddo
 
         end associate
         ! Cleanup advection arrays — handle U_m_fm/V_m_fm/denom_fm directly here
@@ -1230,7 +1227,7 @@ contains
         real,            intent(in)    :: dt
 
         integer :: i, j, its_l, ite_l, jts_l, jte_l, kts_l
-        real :: subl_flux, dqv, dth
+        real :: subl_flux
 
         if (.not.(options%sm%suspension_layer == 1 .and. options%sm%bs_atm_feedback .and. options%physics%snowmodel > 0)) return
 
@@ -1239,33 +1236,16 @@ contains
         kts_l = domain%kts
 
         associate( &
-            density => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
             dz      => domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d, &
-            pii     => domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d, &
-            th      => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d, &
-            qv      => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
-            bs_subl => domain%vars_2d(domain%var_indx(kVARS%bs_sublimation_flux)%v)%data_2d, &
             qs      => domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d, &
             ns      => domain%vars_3d(domain%var_indx(kVARS%snow_number)%v)%data_3d, &
             qs_fm => domain%vars_3d(domain%var_indx(kVARS%qs_fm)%v)%data_3d, &
             ns_fm => domain%vars_3d(domain%var_indx(kVARS%ns_fm)%v)%data_3d &
         )
 
-        ! Sublimation adds moisture and cools the air
-        ! bs_subl is in W/m^2 (positive = sublimation occurring, energy consumed)
-        !$acc parallel loop gang vector collapse(2) present(density, dz, pii, th, qv, bs_subl, qs, ns, qs_fm, ns_fm, qs_flux_cache, ns_flux_cache, snc_dz)
+        !$acc parallel loop gang vector collapse(2) present(dz, qs, ns, qs_fm, ns_fm, qs_flux_cache, ns_flux_cache, snc_dz)
         do j = jts_l, jte_l
             do i = its_l, ite_l
-                subl_flux = bs_subl(i,j)  ! W/m^2, positive = sublimation
-                if (abs(subl_flux) > 0) then
-                    ! Sublimation adds moisture: subl_flux/XLS gives mass flux (kg/m^2/s)
-                    dqv = (subl_flux / XLS * dt) / (density(i,kts_l,j) * dz(i,kts_l,j))
-                    qv(i,kts_l,j) = qv(i,kts_l,j) + dqv
-
-                    ! Sublimation cools air: energy consumed by sublimation
-                    dth = -(subl_flux * dt) / (cp * density(i,kts_l,j) * dz(i,kts_l,j) * pii(i,kts_l,j))
-                    th(i,kts_l,j) = th(i,kts_l,j) + dth
-                endif
                 if (abs(qs_flux_cache(i,j)) > 0) then
                     ! Fluxes are positive upward
                     qs_fm(i,snc_N_loc,j) = max(qs_fm(i,snc_N_loc,j) - qs_flux_cache(i,j) * dt / snc_dz(i,snc_N_loc,j),0.0)

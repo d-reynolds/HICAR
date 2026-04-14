@@ -72,13 +72,12 @@ contains
         !Expect the worse
         error = 1
 
-        call get_outputfiles(this,file_list)
+        call get_outputfiles(this, file_list, options)
 
         if (size(file_list) > 0) then
             !Find output file and step in output filelist
             this%output_counter = find_timestep_in_filelist(file_list, 'time', options%restart%restart_time,this%output_fn,error=error)
         endif
-        call check_file_exists(this%output_fn, message='Trying to initialize a restart run, but the supplied output file to append to: "'//trim(this%output_fn)//'" does not exist')
 
         !If there was no error getting output step, then a file already exists which contains our time step
         if (error == 0) then
@@ -87,13 +86,11 @@ contains
             this%out_ncfile_id = this%active_nc_id
 
             ! if this is a restart run, then there will be no initial call to save_out_file, meaning
-            ! that the output counter should be auto-incremented to 2 (1 + 1) here 
+            ! that the output counter should be auto-incremented to 2 (1 + 1) here
             this%output_counter = this%output_counter + 1
         ! if there was an error getting the output step, then we assume that there is no file for the current output time step
         else
-            write(*,*) "No existing output file found for restart run. Technically, this should never happen."
-            write(*,*) "If you wanted to restart on purpose without any existing output files, just be aware."
-            write(*,*) "We will set the output counter to 1 and start producing a new output file."
+            write(*,*) "No existing output file found for restart time. A new output file will be created."
 
             ! set back to 1, in case this was set when calling find_timestep_in_filelist
             this%output_counter = 1
@@ -104,48 +101,50 @@ contains
 
     end subroutine init_restart
     
-    subroutine get_outputfiles(this,file_list)
+    subroutine get_outputfiles(this, file_list, options)
         implicit none
-        class(output_t),  intent(in)   :: this
-        character(len=*), allocatable, intent(inout):: file_list(:)
-        
-        integer :: i, error, nfiles, unit, PE_RANK_GLOBAL
-        character(len=kMAX_FILE_LENGTH)  :: file
+        class(output_t),  intent(in)    :: this
+        character(len=*), allocatable, intent(inout) :: file_list(:)
+        type(options_t),  intent(in)    :: options
+
+        integer :: nfiles
         character(len=kMAX_FILE_LENGTH), allocatable :: temp_list(:)
-        character(len=kMAX_FILE_LENGTH) :: temp_file
-        character(len=kMAX_FILE_LENGTH) :: cmd_str
-        
+        character(len=kMAX_FILE_LENGTH) :: candidate
+        type(Time_type) :: t_candidate
+        real(kind=8) :: file_interval_days
+        logical :: exists
+
+        ! Time between file starts (in days) = outputinterval * frames_per_outfile / 86400
+        file_interval_days = dble(options%output%outputinterval) &
+                           * dble(options%output%frames_per_outfile) / 86400.0d0
+        ! Guard against zero interval
+        if (file_interval_days <= 0.0d0) file_interval_days = 1.0d0
+
         allocate(temp_list(MAX_NUMBER_FILES))
-        call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
+        nfiles = 0
 
-        temp_file = '.tmp_outfiles'//trim(str(PE_RANK_GLOBAL))//'.txt'
-        
-        ! look for files with the format base_out_file_name + "YYYY-MM-DD_HH-MM-SS.nc" and store in a temporary file
-        cmd_str = 'ls '//trim(this%base_out_file_name)//'[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9]-[0-9][0-9]-[0-9][0-9].nc > '//trim(temp_file)
-        call EXECUTE_COMMAND_LINE( cmd_str, EXITSTAT=error )
+        ! Enumerate candidate filenames by stepping through time from start to
+        ! end (or restart time, whichever is later). For each candidate file-start
+        ! time, construct the expected filename and check if it exists on disk.
+        t_candidate = options%general%start_time
+        do while (t_candidate%mjd() <= max(options%general%end_time%mjd(), &
+                                            options%restart%restart_time%mjd()) + file_interval_days)
+            write(candidate, '(A,A,".nc")') &
+                trim(this%base_out_file_name), &
+                trim(as_string(t_candidate, this%file_date_format))
 
-        if (error /= 0) then
-            return
-        endif
-        
-        open( io_newunit(unit), file = trim(temp_file) )
-        i=0
-        error=0
-        do while (error==0)
-            read(unit, '(A)', iostat=error) file
-            if (error==0) then
-                i=i+1
-                temp_list(i) = trim(file)
+            inquire(file=trim(candidate), exist=exists)
+            if (exists) then
+                nfiles = nfiles + 1
+                if (nfiles <= MAX_NUMBER_FILES) temp_list(nfiles) = candidate
             endif
-        enddo
-        close(unit)
-        
-        cmd_str = 'rm '//trim(temp_file)
-        call system( cmd_str )
-        
-        nfiles = i
+
+            ! Advance by one file's worth of time
+            call t_candidate%set(t_candidate%mjd() + file_interval_days)
+        end do
+
         allocate(file_list(nfiles))
-        file_list(1:nfiles) = temp_list(1:nfiles)
+        if (nfiles > 0) file_list(1:nfiles) = temp_list(1:min(nfiles, MAX_NUMBER_FILES))
         deallocate(temp_list)
     end subroutine
 
@@ -474,6 +473,8 @@ contains
         else
             ! in case we need to add a new variable when setting up variables
             call check_ncdf(nf90_redef(this%active_nc_id), "Setting redefine mode for: "//trim(filename))
+            ! Always update global attributes (e.g. git version, history) even on existing files
+            call add_global_attributes(this)
         endif
 
         !This command cuts down on write time and must be done once the file is opened

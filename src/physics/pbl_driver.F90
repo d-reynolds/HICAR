@@ -32,14 +32,14 @@ module planetary_boundary_layer
     !use module_bl_ysu, only : ysuinit, ysu
     use module_bl_ysu, only : ysuinit, ysu
     use module_bl_ysu_gpu, only : ysuinit_gpu, ysu_gpu
-    use mod_wrf_constants, only : EOMEG, XLV, r_v, R_d, KARMAN, gravity, EP_1, EP_2, cp, rcp, rovg
+    use mod_wrf_constants, only : EOMEG, XLV, XLS, r_v, R_d, KARMAN, gravity, EP_1, EP_2, cp, rcp, rovg
     use icar_constants !, only : karman,stefan_boltzmann
     use ieee_arithmetic ! for debugging
     use array_utilities, only : array_offset_x_3d, array_offset_y_3d
 
 
     implicit none
-    real,allocatable, dimension(:,:)    ::  windspd, regime
+    real,allocatable, dimension(:,:)    ::  windspd, regime, sensible_heat_tmp, qfx_tmp
     ! integer, allocatable, dimension(:,:) :: kpbl2d
     real, allocatable, dimension(:,:,:) :: RTHRATEN!, tend_u_ugrid, tend_v_vgrid
     real, allocatable, dimension(:,:,:) :: trid_a, trid_b, trid_c, trid_rhs  ! work arrays for scalar PBL diffusion
@@ -149,6 +149,18 @@ contains
             allocate(RTHRATEN(ims:ime, kms:kme, jms:jme)) !initialize radiative heating tendencies and set to 0 in case user turns on ysu radiative heating w/o radiations scheme
             RTHRATEN = 0.0
 
+            if (allocated(sensible_heat_tmp)) then
+                !$acc exit data delete(sensible_heat_tmp)
+                deallocate(sensible_heat_tmp)
+            endif
+            allocate(sensible_heat_tmp(ims:ime, jms:jme))
+
+            if (allocated(qfx_tmp)) then
+                !$acc exit data delete(qfx_tmp)
+                deallocate(qfx_tmp)
+            endif
+            allocate(qfx_tmp(ims:ime, jms:jme))
+
             if (allocated(trid_a)) then
                 !$acc exit data delete(trid_a, trid_b, trid_c, trid_rhs)
                 deallocate(trid_a, trid_b, trid_c, trid_rhs)
@@ -158,7 +170,7 @@ contains
             allocate(trid_c(ims:ime, kms:kme, jms:jme))
             allocate(trid_rhs(ims:ime, kms:kme, jms:jme))
 
-            !$acc enter data copyin(windspd,regime,RTHRATEN) create(trid_a,trid_b,trid_c,trid_rhs)
+            !$acc enter data copyin(windspd,regime,RTHRATEN,qfx_tmp,sensible_heat_tmp) create(trid_a,trid_b,trid_c,trid_rhs)
             
             ! initialize tendencies (this is done in ysu init but only for tiles, not mem (ie its vs ims))
             ! BK: check if this actually matters ???
@@ -233,6 +245,8 @@ contains
                       tend_qv_pbl => domain%tend%qv_pbl, tend_qc_pbl => domain%tend%qc_pbl, tend_qi_pbl => domain%tend%qi_pbl, &
                       tend_th_lwrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_lwrad)%v)%data_3d, &
                       tend_th_swrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_swrad)%v)%data_3d, &
+                      sensible_heat => domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+                      qfx => domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d, &
                       u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
                       v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d)
             !$acc parallel present(tend_u, tend_v, tend_th_pbl, tend_qv_pbl, tend_qc_pbl, tend_qi_pbl, &
@@ -270,6 +284,33 @@ contains
             ! endif
             !$acc end parallel
 
+
+            ! Add blowing snow sublimation feedback to the sensible and latent heat
+            ! flux fields. The PBL scheme reads these and
+            ! distributes the fluxes vertically through the boundary layer.
+            ! bs_subl is in W/m^2 (positive = sublimation occurring, energy consumed)
+            if (options%sm%suspension_layer == 1 .and. options%sm%bs_atm_feedback .and. options%physics%snowmodel  > 0) then
+                associate(bs_subl => domain%vars_2d(domain%var_indx(kVARS%bs_sublimation_flux)%v)%data_2d)
+                !$acc parallel loop gang vector collapse(2) default(present)
+                do j = jms, jme
+                    do i = ims ,ime
+                        ! Sublimation cools air → negative sensible heat contribution
+                        sensible_heat_tmp(i,j) = sensible_heat(i,j) - bs_subl(i,j)  ! W/m^2, positive = sublimation
+
+                        ! Sublimation adds moisture → positive latent heat contribution
+                        qfx_tmp(i,j) = qfx(i,j) + bs_subl(i,j) / XLS
+                    enddo
+                enddo
+                end associate
+            else
+                !$acc parallel loop gang vector collapse(2) default(present)
+                do j = jms, jme
+                    do i = ims, ime
+                        sensible_heat_tmp(i,j) = sensible_heat(i,j)
+                        qfx_tmp(i,j) = qfx(i,j)
+                    enddo
+                enddo
+            endif
             end associate
 
             call ysu_gpu(u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d                           & !-- u3d         3d u-velocity interpolated to theta points (m/s)
@@ -304,8 +345,8 @@ contains
                     ,psim=domain%vars_2d(domain%var_indx(kVARS%psim)%v)%data_2d               & !-- psim        similarity stability function for momentum - intent(in)
                     ,psih=domain%vars_2d(domain%var_indx(kVARS%psih)%v)%data_2d               & !-- psih        similarity stability function for heat- intent(in)
                     ,xland=domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di                               &
-                    ,hfx=domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d                     & !  HFX  - net upward heat flux at the surface (W/m^2)
-                    ,qfx=domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d           & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
+                    ,hfx=sensible_heat_tmp                     & !  HFX  - net upward heat flux at the surface (W/m^2)
+                    ,qfx=qfx_tmp           & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
                     !,UOCE=uoce,VOCE=voce                                  & !ocean currents -- not currently used
                     !,CTOPO=ctopo,CTOPO2=ctopo2                            & !optional, only applied to momentum tendencies, not currently used
                     ! ,tke_pbl=domain%vars_2d(domain%var_indx(kVARS%tke_pbl)%v)%data_2d               &

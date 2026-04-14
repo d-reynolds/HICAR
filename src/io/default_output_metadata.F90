@@ -4085,7 +4085,7 @@ contains
             var_meta%name        = "bs_subl_flux"
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("long_name", "Blowing snow sublimation flux"),   &
-                               attribute_t("units",         "kg m-2 s-1"),                        &
+                               attribute_t("units",         "W m-2 s-1"),                        &
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
