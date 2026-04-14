@@ -56,18 +56,28 @@ module ioserver_interface
         type(reader_t) :: reader
         
         real, dimension(:,:,:,:), allocatable     :: gather_buffer, forcing_buffer
-        ! real, dimension(:,:,:,:), allocatable :: forcing_buffer
+        ! Init-only nest transfer buffers (2D + extra 3D restart vars)
+        real, dimension(:,:,:),   allocatable     :: gather_buffer_2d
+        real, dimension(:,:,:,:), allocatable     :: gather_buffer_3d_init
+        real, dimension(:,:,:),   allocatable     :: forcing_buffer_2d
+        real, dimension(:,:,:,:), allocatable     :: forcing_buffer_3d_init
 
         type(buffer_3d_t), allocatable :: write_buffer_3d(:), read_buffer(:), child_gather_buffers(:)
+        type(buffer_3d_t), allocatable :: child_gather_buffers_3d_init(:)
         type(buffer_2d_t), allocatable :: write_buffer_2d(:)
+        type(buffer_2d_t), allocatable :: child_gather_buffers_2d(:)
 
         type(MPI_Win) :: write_win_3d, write_win_2d, read_win, nest_win
+        type(MPI_Win) :: nest_win_2d, nest_win_3d_init
         type(MPI_Group) :: children_group
 
         ! These MPI datatypes describe the access patterns between the IO read/write buffers and
         ! the child read/write buffers
         type(MPI_Datatype), allocatable, dimension(:) :: rst_types_3d, rst_types_2d, child_rst_types_3d, child_rst_types_2d
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types, buffer_nest_types
+        type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types_2d, buffer_nest_types_2d
+        type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types_3d_init, buffer_nest_types_3d_init
+        logical, allocatable :: nest_types_2d_initialized(:), nest_types_3d_init_initialized(:)
         
         ! coarray-indices of child io processes, indexed according to the COMPUTE_TEAM
         integer, allocatable :: children_ranks(:)
@@ -87,7 +97,8 @@ module ioserver_interface
         integer, allocatable, dimension(:) :: isrc, ierc, ksrc, kerc, jsrc, jerc, iswc, iewc, kswc, kewc, jswc, jewc, isrec, ierec, jsrec, jerec
         
         integer :: i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, i_s_r, i_e_r, k_s_r, k_e_r, k_e_f, j_s_r, j_e_r, i_s_re, i_e_re, j_s_re, j_e_re, n_restart
-        integer :: nx_w, nz_w, ny_w, n_w_3d, n_w_2d, nx_r, nz_r, ny_r, n_r, n_f, nx_re, ny_re
+        integer :: nx_w, nz_w, ny_w, n_w_3d, n_w_2d, nx_r, nz_r, ny_r, n_r, n_f, n_f_2d, n_f_3d_init, nx_re, ny_re
+        logical :: initial_nest_done = .false.
         integer         :: ide, kde, jde
         integer :: restart_counter = 0
         integer :: output_counter = 0
@@ -123,7 +134,11 @@ module ioserver_interface
         procedure, public  :: close_files
         procedure, public  :: init => init_ioserver
         procedure, private  :: setup_nest_types
+        procedure, private  :: setup_nest_types_2d
+        procedure, private  :: setup_nest_types_3d_init
         procedure, public  :: gather_forcing
+        procedure, public  :: gather_forcing_2d
+        procedure, public  :: gather_forcing_3d_init
         procedure, public  :: distribute_forcing
         procedure, private  :: scatter_forcing
   end type
@@ -161,6 +176,18 @@ module ioserver_interface
             type(MPI_Datatype), intent(out) :: send_nest_types(:), buffer_nest_types(:)
         end subroutine
 
+        module subroutine setup_nest_types_2d(this, child_ioserver, send_nest_types, buffer_nest_types)
+            class(ioserver_t), intent(inout) :: this
+            type(ioserver_t), intent(in)    :: child_ioserver
+            type(MPI_Datatype), intent(out) :: send_nest_types(:), buffer_nest_types(:)
+        end subroutine
+
+        module subroutine setup_nest_types_3d_init(this, child_ioserver, send_nest_types, buffer_nest_types)
+            class(ioserver_t), intent(inout) :: this
+            type(ioserver_t), intent(in)    :: child_ioserver
+            type(MPI_Datatype), intent(out) :: send_nest_types(:), buffer_nest_types(:)
+        end subroutine
+
         !>----------------------------------------------------------
         !! Set the domain data structure to be used when writing
         !!
@@ -181,6 +208,14 @@ module ioserver_interface
         !!
         !!----------------------------------------------------------
         module subroutine gather_forcing(this)
+            class(ioserver_t), intent(inout) :: this
+        end subroutine
+
+        module subroutine gather_forcing_2d(this)
+            class(ioserver_t), intent(inout) :: this
+        end subroutine
+
+        module subroutine gather_forcing_3d_init(this)
             class(ioserver_t), intent(inout) :: this
         end subroutine
 
