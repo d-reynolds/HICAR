@@ -177,7 +177,7 @@ generate_standard_nml() {
         sed -i'.bak' "s/rad = 'rrtmg'/rad = 'rrtmgp'/g" "$out_nml"
     fi
     # Shorten run: 10 min instead of 20, output every 5 min for restart checkpoints
-    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 01:10:00'/g" "$out_nml"
+    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 00:10:00'/g" "$out_nml"
     sed -i'.bak' 's/outputinterval = 600/outputinterval = 300/g' "$out_nml"
 
     # Override output and restart folders
@@ -213,8 +213,8 @@ generate_restart_nml() {
     fi
 
     # Shorten run: end at 10 min, restart from 5 min checkpoint, output every 5 min
-    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 01:10:00'/g" "$out_nml"
-    sed -i'.bak' "s/restart_date = '2017-02-14 00:10:00'/restart_date = '2017-02-14 01:00:00'/g" "$out_nml"
+    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 00:10:00'/g" "$out_nml"
+    sed -i'.bak' "s/restart_date = '2017-02-14 00:10:00'/restart_date = '2017-02-14 00:05:00'/g" "$out_nml"
     #sed -i'.bak' 's/outputinterval = 600/outputinterval = 300/g' "$out_nml"
 
     # Override output and restart folders

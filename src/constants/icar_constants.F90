@@ -388,6 +388,7 @@ module icar_constants
         integer :: dSWE_blow_subl
         integer :: dSWE_slide
         integer :: meltflux_out_tstep
+        integer :: meltflux_out_cumul
         integer :: Sliq_out
 
         !SNOWPACK variables

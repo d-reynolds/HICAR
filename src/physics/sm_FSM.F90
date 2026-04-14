@@ -87,8 +87,7 @@ module module_sm_FSMdrv
         Sf24_tracker(:,:,:), &    !24h snow fall tracker
         ! snowfall_sum(:,:),       & !aggregated per output interval
         ! rainfall_sum(:,:),       & !aggregated per output interval
-        Roff_sum(:,:),           & !aggregated per output interval
-        meltflux_out_sum(:,:)      !aggregated per output interval
+        Roff_sum(:,:)              !aggregated per output interval
 
 contains
  
@@ -224,7 +223,6 @@ contains
         if (allocated(dSWE_slide_)) deallocate(dSWE_slide_)
         if (allocated(Sf24_tracker)) deallocate(Sf24_tracker)
         if (allocated(Roff_sum)) deallocate(Roff_sum)
-        if (allocated(meltflux_out_sum)) deallocate(meltflux_out_sum)
 
         allocate(Esrf_(Nx_HICAR,Ny_HICAR)); Esrf_=0.
         allocate(Gsoil_(Nx_HICAR,Ny_HICAR));Gsoil_=0.
@@ -244,7 +242,6 @@ contains
         allocate(dSWE_slide_(Nx_HICAR,Ny_HICAR)); dSWE_slide_=0.
         allocate(Sf24_tracker(24,Nx_HICAR,Ny_HICAR));Sf24_tracker=0.
         allocate(Roff_sum(Nx_HICAR,Ny_HICAR)); Roff_sum=0.
-        allocate(meltflux_out_sum(Nx_HICAR,Ny_HICAR)); meltflux_out_sum=0.   
         !!
 
         call FSM_SETUP()
@@ -632,8 +629,9 @@ contains
         !snowfall_sum=snowfall_sum+Sf
         !rainfall_sum=rainfall_sum+Rf
         Roff_sum=Roff_sum+Roff_
-        meltflux_out_sum=meltflux_out_sum+meltflux_out_
-        
+
+        ! Write instantaneous melt runoff per snow model dt
+        domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d(its:ite,jts:jte) = TRANSPOSE(meltflux_out_)
 
         Delta_t=mod(domain%sim_time%seconds(),options%output%output_dt%seconds())
         if ( abs(options%output%output_dt%seconds()-(Delta_t+dt)) <= 1.e-3 ) then
@@ -642,12 +640,10 @@ contains
         !    domain%vars_2d(domain%var_indx(kVARS%rainfall_tstep)%v)%data_2d(its:ite,jts:jte)=rainfall_sum
         !    domain%vars_2d(domain%var_indx(kVARS%snowfall_tstep)%v)%data_2d(its:ite,jts:jte)=snowfall_sum
            domain%vars_2d(domain%var_indx(kVARS%runoff_tstep)%v)%data_2d(its:ite,jts:jte)=TRANSPOSE(Roff_sum)
-           domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d(its:ite,jts:jte)=TRANSPOSE(meltflux_out_sum)
         !    !! reseting the container to zero for next output interval
         !    rainfall_sum = 0.
-        !    snowfall_sum = 0.                
+        !    snowfall_sum = 0.
            Roff_sum = 0.
-           meltflux_out_sum = 0.
         endif
         
         !!

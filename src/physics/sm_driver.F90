@@ -76,7 +76,7 @@ contains
                          kVARS%lsm_last_precip, kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%land_emissivity,    &
                          kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%snowfall, kVARS%albedo,                &
                          kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%snow_nlayers,   &
-                         kVARS%shd, kVARS%meltflux_out_tstep, kVARS%Sliq_out, &
+                         kVARS%shd, kVARS%meltflux_out_tstep, kVARS%meltflux_out_cumul, kVARS%Sliq_out, &
                          kVARS%windspd_10m, kVARS%bs_saltation_flux, kVARS%bs_saltation_height, kVARS%bs_saltation_concentration, &
                          kVARS%bs_suspension_flux, kVARS%dSWE_slide, &
                          kVARS%shortwave_direct, kVARS%shortwave_diffuse, kVARS%ground_surf_temperature])
@@ -108,7 +108,8 @@ contains
                          kVARS%snow_temperature, kVARS%Ds, kVARS%snow_temperature_i, kVARS%Vol_Frac_I, kVARS%Vol_Frac_W, &
                          kVARS%Vol_Frac_A, kVARS%Vol_Frac_S, kVARS%Vol_Frac_WP, kVARS%Rg, kVARS%Rb, kVARS%Dd, kVARS%Sp, kVARS%mk, &
                          kVARS%snow_nlayers, kVARS%bs_threshold_ustar, kVARS%bs_saltation_flux, kVARS%bs_saltation_height, kVARS%bs_saltation_concentration, &
-                         kVARS%mass_hoar, kVARS%CDot, kVARS%snow_stress, kVARS%N3, kVARS%depositionDate, kVARS%dSWE_subl])
+                         kVARS%mass_hoar, kVARS%CDot, kVARS%snow_stress, kVARS%N3, kVARS%depositionDate, kVARS%dSWE_subl, &
+                         kVARS%meltflux_out_tstep, kVARS%meltflux_out_cumul])
 
              call options%restart_vars( &
                          [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
@@ -403,6 +404,7 @@ contains
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%ground_surf_temperature)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%runoff_tstep)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_cumul)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
@@ -475,7 +477,9 @@ contains
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
-                !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_cumul)%v)%data_2d)
 
                 call sm_SNOWPACK(domain,options,lsm_dt,current_rain,current_snow,windspd)
 
@@ -505,11 +509,22 @@ contains
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
                 !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
-                !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_cumul)%v)%data_2d)
 #endif
 #endif
             endif
             end associate
+
+            ! Accumulate cumulative melt runoff (works for all snow models)
+            associate(meltflux_inst => domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+                      meltflux_cum  => domain%vars_2d(domain%var_indx(kVARS%meltflux_out_cumul)%v)%data_2d)
+                !$acc kernels default(present)
+                meltflux_cum(its:ite,jts:jte) = meltflux_cum(its:ite,jts:jte) + meltflux_inst(its:ite,jts:jte)
+                !$acc end kernels
+            end associate
+
             if (options%sm%suspension_layer == 1) then
                 ! zero out bs_swe_exch since it was tracking mass changes between snowmodel calls
                 associate (bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d)

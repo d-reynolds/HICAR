@@ -3542,15 +3542,25 @@ contains
                                attribute_t("coordinates",   "lat lon")]
           
         !>------------------------------------------------------------
-        !!  meltflux_out_tstep from FSM
+        !!  meltflux_out_tstep — instantaneous snowmelt runoff per snow model dt
         !!------------------------------------------------------------
         else if (var_idx==kVARS%meltflux_out_tstep) then
             var_meta%name        = "romc"
             var_meta%dimensions  = two_d_t_dimensions
-            var_meta%attributes  = [attribute_t("long_name", "Snowmelt runoff aggregated per output interval"),   &
+            var_meta%attributes  = [attribute_t("long_name", "Snowmelt runoff per snow model timestep"),   &
                                attribute_t("units",         "kg m-2"),                        &
                                attribute_t("coordinates",   "lat lon")]
-          
+
+        !>------------------------------------------------------------
+        !!  meltflux_out_cumul — cumulative snowmelt runoff
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%meltflux_out_cumul) then
+            var_meta%name        = "romcc"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "Cumulative snowmelt runoff"),   &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
         !>------------------------------------------------------------
         !!  Sliq_out from FSM
         !!------------------------------------------------------------

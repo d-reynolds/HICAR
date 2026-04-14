@@ -382,7 +382,8 @@ module module_sm_SNOWPACKdrv
         type(surface_fluxes), intent(in) :: sfluxes(its:ite,jts:jte)
 
         associate(                                                                                           &
-                    sublimation => domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d        &
+                    sublimation => domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d,       &
+                    meltflux_out => domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d &
                  )
         ! Loop over horizontal grid points
         do j = jts, jte
@@ -392,6 +393,9 @@ module module_sm_SNOWPACKdrv
                 ! Negate: SNOWPACK uses positive = into snowpack (deposition),
                 ! HICAR uses positive = mass lost from snow (sublimation)
                 sublimation(i,j) = -snowpack_get_mass_sublimation(sfluxes(i,j)%cxxmem%addr)
+
+                ! Snowmelt runoff (kg/m²), positive = water leaving snowpack base
+                meltflux_out(i,j) = snowpack_get_mass_runoff(sfluxes(i,j)%cxxmem%addr)
 
             enddo
         enddo
