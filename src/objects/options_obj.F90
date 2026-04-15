@@ -693,12 +693,14 @@ contains
                                         pvar,pbvar,phbvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,            &
                                         qncvar,qnivar,qnrvar,qngvar,qnsvar,hgtvar,shvar,lhvar,pblhvar,  &
                                         i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
+                                        qs_fmvar, ns_fmvar, &
                                         psvar, pslvar, swdown_var, lwdown_var, sst_var, time_var
 
         namelist /forcing/ forcing_file_list, inputinterval, t_offset, p_multiplier, limit_rh, z_is_geopotential, time_varying_z, &
                             t_is_potential, forcing_longitude_system, qv_is_relative_humidity, qv_is_spec_humidity, relax_filters, &
                             pvar,pbvar,phbvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,qncvar,qnivar,qnrvar,qngvar,qnsvar,&
                             i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
+                            qs_fmvar, ns_fmvar, &
                             hgtvar,shvar,lhvar,pblhvar,   &
                             latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar,zvar, &
                             psvar, pslvar, swdown_var, lwdown_var, sst_var, time_var
@@ -766,6 +768,8 @@ contains
         call set_nml_var_default(i1cvar, 'i1cvar', print_info, gennml)
         call set_nml_var_default(i2cvar, 'i2cvar', print_info, gennml)
         call set_nml_var_default(i3cvar, 'i3cvar', print_info, gennml)
+        call set_nml_var_default(qs_fmvar, 'qs_fmvar', print_info, gennml)
+        call set_nml_var_default(ns_fmvar, 'ns_fmvar', print_info, gennml)
         call set_nml_var_default(shvar, 'shvar', print_info, gennml)
         call set_nml_var_default(lhvar, 'lhvar', print_info, gennml)
         call set_nml_var_default(swdown_var, 'swdown_var', print_info, gennml)
@@ -894,6 +898,8 @@ contains
         call set_nml_var(options%forcing%i1cvar, i1cvar, 'i1cvar', options%forcing, i)
         call set_nml_var(options%forcing%i2cvar, i2cvar, 'i2cvar', options%forcing, i)
         call set_nml_var(options%forcing%i3cvar, i3cvar, 'i3cvar', options%forcing, i)
+        call set_nml_var(options%forcing%qs_fmvar, qs_fmvar, 'qs_fmvar', options%forcing, i)
+        call set_nml_var(options%forcing%ns_fmvar, ns_fmvar, 'ns_fmvar', options%forcing, i)
         call set_nml_var(options%forcing%shvar, shvar, 'shvar', options%forcing, i)
         call set_nml_var(options%forcing%lhvar, lhvar, 'lhvar', options%forcing, i)
         call set_nml_var(options%forcing%swdown_var, swdown_var, 'swdown_var', options%forcing, i)
@@ -2813,7 +2819,9 @@ contains
         if (0<this%vars_to_allocate( kVARS%ice1_c) ) call set_nml_var(this%forcing%i1cvar, get_varname( kVARS%ice1_c ), 'i1cvar', this%forcing, i, no_check=.True.)
         if (0<this%vars_to_allocate( kVARS%ice2_c) ) call set_nml_var(this%forcing%i2cvar, get_varname( kVARS%ice2_c ), 'i2cvar', this%forcing, i, no_check=.True.)
         if (0<this%vars_to_allocate( kVARS%ice3_c) ) call set_nml_var(this%forcing%i3cvar, get_varname( kVARS%ice3_c ), 'i3cvar', this%forcing, i, no_check=.True.)
-        
+        if (0<this%vars_to_allocate( kVARS%qs_fm) ) call set_nml_var(this%forcing%qs_fmvar, get_varname( kVARS%qs_fm ), 'qs_fmvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ns_fm) ) call set_nml_var(this%forcing%ns_fmvar, get_varname( kVARS%ns_fm ), 'ns_fmvar', this%forcing, i, no_check=.True.)
+
     end subroutine setup_synthetic_forcing
 
 

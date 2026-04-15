@@ -2407,6 +2407,20 @@ contains
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
                 type = 1
+            case ("qs_fmvar")
+                description = "Name of the blowing-snow fine-mesh mass mixing ratio variable in forcing file (parent nest)"
+                units = "kg/kg"
+                allocate(dimensions(4))
+                dimensions = ["T", "Z", "Y", "X"]
+                group = "Forcing"
+                type = 1
+            case ("ns_fmvar")
+                description = "Name of the blowing-snow fine-mesh number concentration variable in forcing file (parent nest)"
+                units = "kg-1"
+                allocate(dimensions(4))
+                dimensions = ["T", "Z", "Y", "X"]
+                group = "Forcing"
+                type = 1
             case ("zvar")
                 description = "Name of the vertical height variable in forcing file"
                 units = "m"
@@ -3722,6 +3736,7 @@ contains
                 min = 0
                 max = 30
                 group = "SM_Parameters"
+                type = 1
             case("bs_atm_feedback")
                 description = "Enable atmospheric feedback from blowing snow sublimation"//achar(10)//BLNK_CHR_N// &
                     "(.False. = OFF, .True. = ON)"

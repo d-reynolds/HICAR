@@ -375,7 +375,8 @@ module options_types
         character (len=kMAX_NAME_LENGTH) :: latvar="",lonvar="",uvar="",ulat="",ulon="",vvar="",vlat="",vlon="",wvar="", &
                         pvar="",pbvar="",phbvar="",tvar="",qvvar="",qcvar="",qivar="",qrvar="",qsvar="",qgvar="",i2mvar="",i3mvar="",&
                         qncvar="",qnivar="",qnrvar="",qnsvar="",qngvar="",i2nvar="",i3nvar="",&
-                        i1avar="",i1cvar="",i2avar="",i2cvar="",i3avar="",i3cvar="",hgtvar="", &
+                        i1avar="",i1cvar="",i2avar="",i2cvar="",i3avar="",i3cvar="", &
+                        qs_fmvar="",ns_fmvar="",hgtvar="", &
                         pslvar="", psvar="", sst_var="", pblhvar="", &
                         shvar="",lhvar="",zvar="", &
                         swdown_var="", lwdown_var="", &

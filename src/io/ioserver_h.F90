@@ -17,7 +17,7 @@ module ioserver_interface
   use reader_interface,   only : reader_t
   use output_interface,   only : output_t
   use options_interface,  only : options_t
-  use flow_object_interface, only : flow_obj_t
+  use flow_object_interface, only : flow_obj_t, comp_arr_t
   
   implicit none
 
@@ -36,6 +36,24 @@ module ioserver_interface
   type buffer_2d_t
      real, pointer, dimension(:,:,:) :: buff
   end type buffer_2d_t
+
+  ! Ragged list of (i,j) cells assigned to one peer ioserver, used to build
+  ! nest-transfer MPI datatypes. Populated by build_nest_geometry and consumed
+  ! by build_indexed_type_from_cells.
+  type :: nest_cell_list_t
+     integer :: n = 0
+     integer, allocatable :: i(:), j(:)
+  end type nest_cell_list_t
+
+  ! Per-child nest geometry: which (i,j) cells go to/from each peer ioserver.
+  ! This information is invariant in the k axis and in n_vars, so it is shared
+  ! across the 3D-per-step, 2D-init, and 3D-init datatype variants. Built once
+  ! (lazily) per child and freed after all three datatype sets are committed.
+  type :: nest_geometry_t
+     logical :: built = .false.
+     type(nest_cell_list_t), allocatable :: send_cells(:)
+     type(nest_cell_list_t), allocatable :: buff_cells(:)
+  end type nest_geometry_t
 
   type , extends(flow_obj_t) :: ioserver_t
 
@@ -78,6 +96,9 @@ module ioserver_interface
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types_2d, buffer_nest_types_2d
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types_3d_init, buffer_nest_types_3d_init
         logical, allocatable :: nest_types_2d_initialized(:), nest_types_3d_init_initialized(:)
+
+        ! Per-child cached cell geometry shared across the three setup_nest_types_* variants
+        type(nest_geometry_t), allocatable :: nest_geometry(:)
         
         ! coarray-indices of child io processes, indexed according to the COMPUTE_TEAM
         integer, allocatable :: children_ranks(:)
@@ -98,6 +119,7 @@ module ioserver_interface
         
         integer :: i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, i_s_r, i_e_r, k_s_r, k_e_r, k_e_f, j_s_r, j_e_r, i_s_re, i_e_re, j_s_re, j_e_re, n_restart
         integer :: nx_w, nz_w, ny_w, n_w_3d, n_w_2d, nx_r, nz_r, ny_r, n_r, n_f, n_f_2d, n_f_3d_init, nx_re, ny_re
+        integer, public :: nz_init_3d = 0
         logical :: initial_nest_done = .false.
         integer         :: ide, kde, jde
         integer :: restart_counter = 0
@@ -136,10 +158,12 @@ module ioserver_interface
         procedure, private  :: setup_nest_types
         procedure, private  :: setup_nest_types_2d
         procedure, private  :: setup_nest_types_3d_init
+        procedure, private  :: build_nest_geometry
         procedure, public  :: gather_forcing
         procedure, public  :: gather_forcing_2d
         procedure, public  :: gather_forcing_3d_init
         procedure, public  :: distribute_forcing
+        procedure, public  :: distribute_init_forcing
         procedure, private  :: scatter_forcing
   end type
 
@@ -170,22 +194,43 @@ module ioserver_interface
         !! Set the nest datatypes used to gather forcing data for child ioserver
         !!
         !!----------------------------------------------------------
-        module subroutine setup_nest_types(this, child_ioserver, send_nest_types, buffer_nest_types)
+        module subroutine setup_nest_types(this, child_ioserver, child_indx, send_nest_types, buffer_nest_types)
             class(ioserver_t), intent(inout) :: this
             type(ioserver_t), intent(in)    :: child_ioserver
+            integer,            intent(in)  :: child_indx
             type(MPI_Datatype), intent(out) :: send_nest_types(:), buffer_nest_types(:)
         end subroutine
 
-        module subroutine setup_nest_types_2d(this, child_ioserver, send_nest_types, buffer_nest_types)
+        module subroutine setup_nest_types_2d(this, child_ioserver, child_indx, send_nest_types, buffer_nest_types)
             class(ioserver_t), intent(inout) :: this
             type(ioserver_t), intent(in)    :: child_ioserver
+            integer,            intent(in)  :: child_indx
             type(MPI_Datatype), intent(out) :: send_nest_types(:), buffer_nest_types(:)
         end subroutine
 
-        module subroutine setup_nest_types_3d_init(this, child_ioserver, send_nest_types, buffer_nest_types)
+        module subroutine setup_nest_types_3d_init(this, child_ioserver, child_indx, send_nest_types, buffer_nest_types)
             class(ioserver_t), intent(inout) :: this
             type(ioserver_t), intent(in)    :: child_ioserver
+            integer,            intent(in)  :: child_indx
             type(MPI_Datatype), intent(out) :: send_nest_types(:), buffer_nest_types(:)
+        end subroutine
+
+        ! One-time init transfer for a parent nest: resolve the per-family
+        ! nz_init_3d (max across this parent and its children), grow this
+        ! parent's gather_buffer_3d_init if needed, run gather_forcing_2d +
+        ! gather_forcing_3d_init, then push the init 2D + 3D restart vars
+        ! to every child via MPI_Alltoallw + MPI_Send. Called once per
+        ! parent, guarded by initial_nest_done.
+        module subroutine distribute_init_forcing(this, components, child_nests)
+            class(ioserver_t), intent(inout) :: this
+            type(comp_arr_t),  intent(inout) :: components(:)
+            integer,           intent(in)    :: child_nests(:)
+        end subroutine
+
+        module subroutine build_nest_geometry(this, child_ioserver, geom)
+            class(ioserver_t),     intent(inout) :: this
+            type(ioserver_t),      intent(in)    :: child_ioserver
+            type(nest_geometry_t), intent(inout) :: geom
         end subroutine
 
         !>----------------------------------------------------------

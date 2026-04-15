@@ -59,57 +59,18 @@ contains
         if (domain%jme == domain%jde) this%j_e_w = domain%jde
 
 
-        ! If this run uses nests, then set the variables which we need to output to a child nest
-        ! Because microphysics must be the same for all nests, we can use any of the forcing_options
-        ! structures on a child nest, since these are all the same. Use domain #2, since there will always
-        ! be at least 1 nest following this condition
+        ! If this run uses nests, then set the variables which we need to output to a child nest.
+        ! Microphysics must be the same for all nests, so any child's forcing_options may be used;
+        ! pick the first child nest id.
         if (size(options(n_indx)%general%child_nests) > 0) then
             some_child_id = options(n_indx)%general%child_nests(1)
             this%vars_for_nest = options(some_child_id)%forcing%vars_to_read
-
-            ! Compute init-only 2D + extra 3D restart vars to send to children
-            block
-                type(meta_data_t) :: tmp_meta
-                integer :: v, j_2d, j_3d
-                this%vars_for_nest_2d(:) = ''; this%vars_for_nest_3d_init(:) = ''
-                j_2d = 1; j_3d = 1
-                do v = 1, kMAX_STORAGE_VARS
-                    if (options(some_child_id)%vars_to_allocate(v) <= 0) cycle
-                    if (options(some_child_id)%vars_for_restart(v) <= 0) cycle
-                    tmp_meta = get_varmeta(v)
-                    if (len_trim(tmp_meta%name) == 0) cycle
-                    if (any(this%vars_for_nest == tmp_meta%name)) cycle
-                    if (tmp_meta%two_d) then
-                        this%vars_for_nest_2d(j_2d) = tmp_meta%name; j_2d = j_2d + 1
-                    endif
-                    if (tmp_meta%three_d) then
-                        this%vars_for_nest_3d_init(j_3d) = tmp_meta%name; j_3d = j_3d + 1
-                    endif
-                enddo
-            end block
+            call classify_nest_init_vars(options(some_child_id), this%vars_for_nest, this%send_init_vars)
         endif
 
-        ! If this is a child nest, compute the 2D + 3D restart vars to receive from parent
-        this%vars_for_nest_init_2d(:) = ''; this%vars_for_nest_init_3d(:) = ''
+        ! If this is a child nest, compute the 2D + 3D restart vars to receive from parent.
         if (options(n_indx)%general%parent_nest > 0) then
-            block
-                type(meta_data_t) :: tmp_meta
-                integer :: v, j_2d, j_3d
-                j_2d = 1; j_3d = 1
-                do v = 1, kMAX_STORAGE_VARS
-                    if (options(n_indx)%vars_to_allocate(v) <= 0) cycle
-                    if (options(n_indx)%vars_for_restart(v) <= 0) cycle
-                    tmp_meta = get_varmeta(v)
-                    if (len_trim(tmp_meta%name) == 0) cycle
-                    if (any(options(n_indx)%forcing%vars_to_read == tmp_meta%name)) cycle
-                    if (tmp_meta%two_d) then
-                        this%vars_for_nest_init_2d(j_2d) = tmp_meta%name; j_2d = j_2d + 1
-                    endif
-                    if (tmp_meta%three_d) then
-                        this%vars_for_nest_init_3d(j_3d) = tmp_meta%name; j_3d = j_3d + 1
-                    endif
-                enddo
-            end block
+            call classify_nest_init_vars(options(n_indx), options(n_indx)%forcing%vars_to_read, this%recv_init_vars)
         endif
 
         ! Change 2: Store output/restart classification and compute counts
@@ -228,6 +189,7 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,n_f,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,n_f_2d,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,n_f_3d_init,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,this%nz_init_3d,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
         call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
@@ -515,84 +477,20 @@ contains
 
         ! One-time init: pack 2D + extra 3D restart vars for child nest initialization
         if (.not. this%initial_nest_done) then
-            block
-                integer :: n_2d, n_3d_i, v_indx, v_idx
-                type(meta_data_t) :: v_meta
+            if (associated(this%forcing_buffer_2d)) then
+                call pack_init_vars_2d(this, domain, this%send_init_vars%vars_2d)
+                !$acc wait
+                !$acc update host(this%forcing_buffer_2d)
+                call MPI_Win_Post(this%parent_group, 0, this%forcing_win_2d)
+            endif
 
-                ! Pack 2D init vars into forcing_buffer_2d
-                if (associated(this%forcing_buffer_2d)) then
-                    n_2d = 1
-                    do i = 1, kMAX_STORAGE_VARS
-                        if (this%vars_for_nest_2d(i) == '') cycle
-                        v_indx = get_varindx(this%vars_for_nest_2d(i))
-                        v_idx = domain%var_indx(v_indx)%v
-                        if (v_idx <= 0) then; n_2d = n_2d + 1; cycle; endif
+            if (associated(this%forcing_buffer_3d_init)) then
+                call pack_init_vars_3d(this, domain, this%send_init_vars%vars_3d)
+                !$acc wait
+                !$acc update host(this%forcing_buffer_3d_init)
+                call MPI_Win_Post(this%parent_group, 0, this%forcing_win_3d_init)
+            endif
 
-                        var = domain%vars_2d(v_idx)
-                        i_s_w = this%i_s_w; i_e_w = this%i_e_w + var%xstag
-                        j_s_w = this%j_s_w; j_e_w = this%j_e_w + var%ystag
-                        nx = i_e_w - i_s_w + 1; ny = j_e_w - j_s_w + 1
-
-                        if (var%dtype == kREAL) then
-                            associate(src => domain%vars_2d(v_idx)%data_2d, dst => this%forcing_buffer_2d)
-                            !$acc parallel loop gang vector collapse(2) present(dst, src)
-                            do jj = 1, ny
-                              do ii = 1, nx
-                                dst(n_2d, ii, jj) = src(i_s_w+ii-1, j_s_w+jj-1)
-                              enddo
-                            enddo
-                            end associate
-                        elseif (var%dtype == kINTEGER) then
-                            associate(src => domain%vars_2d(v_idx)%data_2di, dst => this%forcing_buffer_2d)
-                            !$acc parallel loop gang vector collapse(2) present(dst, src)
-                            do jj = 1, ny
-                              do ii = 1, nx
-                                dst(n_2d, ii, jj) = real(src(i_s_w+ii-1, j_s_w+jj-1))
-                              enddo
-                            enddo
-                            end associate
-                        endif
-                        n_2d = n_2d + 1
-                    enddo
-
-                    !$acc wait
-                    !$acc update host(this%forcing_buffer_2d)
-                    call MPI_Win_Post(this%parent_group, 0, this%forcing_win_2d)
-                endif
-
-                ! Pack extra 3D init vars into forcing_buffer_3d_init
-                if (associated(this%forcing_buffer_3d_init)) then
-                    n_3d_i = 1
-                    do i = 1, kMAX_STORAGE_VARS
-                        if (this%vars_for_nest_3d_init(i) == '') cycle
-                        v_indx = get_varindx(this%vars_for_nest_3d_init(i))
-                        v_idx = domain%var_indx(v_indx)%v
-                        if (v_idx <= 0) then; n_3d_i = n_3d_i + 1; cycle; endif
-
-                        var = domain%vars_3d(v_idx)
-                        i_s_w = this%i_s_w; i_e_w = this%i_e_w + var%xstag
-                        j_s_w = this%j_s_w; j_e_w = this%j_e_w + var%ystag
-                        nx = i_e_w - i_s_w + 1; ny = j_e_w - j_s_w + 1
-                        nz_v = var%dim_len(2)
-
-                        associate(src => domain%vars_3d(v_idx)%data_3d, dst => this%forcing_buffer_3d_init)
-                        !$acc parallel loop gang vector collapse(3) present(dst, src)
-                        do jj = 1, ny
-                          do kk = 1, nz_v
-                            do ii = 1, nx
-                              dst(n_3d_i, ii, kk, jj) = src(i_s_w+ii-1, kk, j_s_w+jj-1)
-                            enddo
-                          enddo
-                        enddo
-                        end associate
-                        n_3d_i = n_3d_i + 1
-                    enddo
-
-                    !$acc wait
-                    !$acc update host(this%forcing_buffer_3d_init)
-                    call MPI_Win_Post(this%parent_group, 0, this%forcing_win_3d_init)
-                endif
-            end block
             this%initial_nest_done = .true.
         endif
 
@@ -752,7 +650,7 @@ contains
 
 
     ! Receive initial 2D+3D restart state from parent nest via temporary MPI_Recv.
-    ! Geo-interpolates each variable from forcing grid to domain grid using the
+    ! Each variable is geo-interpolated from forcing grid to domain grid using the
     ! geolut that was set up in get_initial_conditions.
     module subroutine receive_nest_init(this, domain, forcing)
         implicit none
@@ -760,92 +658,269 @@ contains
         type(domain_t),    intent(inout) :: domain
         type(boundary_t),  intent(in)    :: forcing
 
-        integer :: n, v, var_indx, idx, nx_r, ny_r, nz_r, nz_v, k
-        integer :: n_init_2d, n_init_3d, comm_size, ierr
-        real, allocatable :: recv_2d(:,:,:), recv_3d(:,:,:,:)
-        real, allocatable :: forcing_field(:,:), domain_field(:,:)
-        type(MPI_Status) :: status
+        integer :: n_init_2d, n_init_3d, comm_size, parent_rank
 
-        n_init_2d = count(this%vars_for_nest_init_2d /= '')
-        n_init_3d = count(this%vars_for_nest_init_3d /= '')
+        n_init_2d = count(this%recv_init_vars%vars_2d /= '')
+        n_init_3d = count(this%recv_init_vars%vars_3d /= '')
 
         if (n_init_2d == 0 .and. n_init_3d == 0) return
 
         call MPI_Comm_Size(this%parent_comms, comm_size)
-        nx_r = this%i_e_r - this%i_s_r + 2  ! +1 for stagger
-        ny_r = this%j_e_r - this%j_s_r + 2
-        nz_r = this%k_e_r - this%k_s_r + 1
+        parent_rank = comm_size - 1
 
-        ! Allocate interpolation temporaries
-        allocate(forcing_field(this%i_s_r:this%i_e_r, this%j_s_r:this%j_e_r))
-        allocate(domain_field(domain%ims:domain%ime, domain%jms:domain%jme))
-
-        ! Receive and process 2D vars
         if (n_init_2d > 0) then
-            allocate(recv_2d(n_init_2d, nx_r, ny_r))
-            call MPI_Recv(recv_2d, size(recv_2d), MPI_REAL, comm_size-1, 98, &
-                          this%parent_comms, status, ierr)
-
-            n = 1
-            do v = 1, kMAX_STORAGE_VARS
-                if (this%vars_for_nest_init_2d(v) == '') cycle
-                var_indx = get_varindx(this%vars_for_nest_init_2d(v))
-                idx = domain%var_indx(var_indx)%v
-                if (idx <= 0) then; n = n + 1; cycle; endif
-
-                ! Unpack onto forcing grid (without stagger extra)
-                forcing_field(this%i_s_r:this%i_e_r, this%j_s_r:this%j_e_r) = &
-                    recv_2d(n, 1:(this%i_e_r-this%i_s_r+1), 1:(this%j_e_r-this%j_s_r+1))
-
-                ! Geo-interpolate to domain grid
-                call geo_interp2d(domain_field, forcing_field, forcing%geo%geolut)
-
-                ! Write to domain
-                if (domain%vars_2d(idx)%dtype == kREAL) then
-                    domain%vars_2d(idx)%data_2d(domain%ims:domain%ime, domain%jms:domain%jme) = domain_field
-                    !$acc update device(domain%vars_2d(idx)%data_2d)
-                elseif (domain%vars_2d(idx)%dtype == kINTEGER) then
-                    domain%vars_2d(idx)%data_2di(domain%ims:domain%ime, domain%jms:domain%jme) = nint(domain_field)
-                    !$acc update device(domain%vars_2d(idx)%data_2di)
-                endif
-                n = n + 1
-            enddo
-            deallocate(recv_2d)
+            call unpack_init_vars_2d(this, domain, forcing, this%recv_init_vars%vars_2d, n_init_2d, parent_rank)
         endif
 
-        ! Receive and process extra 3D vars (layer-by-layer geo-interpolation)
         if (n_init_3d > 0) then
-            allocate(recv_3d(n_init_3d, nx_r, nz_r, ny_r))
-            call MPI_Recv(recv_3d, size(recv_3d), MPI_REAL, comm_size-1, 99, &
-                          this%parent_comms, status, ierr)
-
-            n = 1
-            do v = 1, kMAX_STORAGE_VARS
-                if (this%vars_for_nest_init_3d(v) == '') cycle
-                var_indx = get_varindx(this%vars_for_nest_init_3d(v))
-                idx = domain%var_indx(var_indx)%v
-                if (idx <= 0) then; n = n + 1; cycle; endif
-
-                nz_v = domain%vars_3d(idx)%dim_len(2)
-
-                do k = 1, nz_v
-                    forcing_field(this%i_s_r:this%i_e_r, this%j_s_r:this%j_e_r) = &
-                        recv_3d(n, 1:(this%i_e_r-this%i_s_r+1), k, 1:(this%j_e_r-this%j_s_r+1))
-
-                    call geo_interp2d(domain_field, forcing_field, forcing%geo%geolut)
-
-                    domain%vars_3d(idx)%data_3d(domain%ims:domain%ime, k, domain%jms:domain%jme) = domain_field
-                enddo
-                !$acc update device(domain%vars_3d(idx)%data_3d)
-                n = n + 1
-            enddo
-            deallocate(recv_3d)
+            call unpack_init_vars_3d(this, domain, forcing, this%recv_init_vars%vars_3d, n_init_3d, parent_rank)
         endif
-
-        deallocate(forcing_field, domain_field)
 
     end subroutine
 
+
+    ! Filter/classify kMAX_STORAGE_VARS into 2D and 3D name lists for the init-only
+    ! nest transfer. Used for both the parent-send path (opts = child's options,
+    ! forcing_vars = child's forcing var list) and the child-receive path
+    ! (opts = this node's options, forcing_vars = this node's forcing var list).
+    subroutine classify_nest_init_vars(opts, forcing_vars, out)
+        type(options_t),             intent(in)    :: opts
+        character(len=*),            intent(in)    :: forcing_vars(:)
+        type(nest_init_var_list_t),  intent(out)   :: out
+
+        type(meta_data_t) :: meta
+        integer :: v, j_2d, j_3d
+
+        out%vars_2d = ''
+        out%vars_3d = ''
+        j_2d = 1; j_3d = 1
+        do v = 1, kMAX_STORAGE_VARS
+            if (opts%vars_to_allocate(v) <= 0) cycle
+            if (opts%vars_for_restart(v) <= 0) cycle
+            meta = get_varmeta(v)
+            if (len_trim(meta%name) == 0) cycle
+            if (any(forcing_vars == meta%name)) cycle
+            if (meta%two_d) then
+                out%vars_2d(j_2d) = meta%name
+                j_2d = j_2d + 1
+            endif
+            if (meta%three_d) then
+                out%vars_3d(j_3d) = meta%name
+                j_3d = j_3d + 1
+            endif
+        enddo
+    end subroutine classify_nest_init_vars
+
+    ! Pack 2D init-only variables from domain storage into forcing_buffer_2d.
+    ! The caller is responsible for the surrounding !$acc wait / update host /
+    ! MPI_Win_Post sequence so that window logic stays visible at the call site.
+    subroutine pack_init_vars_2d(this, domain, var_names)
+        class(ioclient_t), intent(inout) :: this
+        type(domain_t),    intent(in)    :: domain
+        character(len=*),  intent(in)    :: var_names(:)
+
+        type(variable_t) :: var
+        integer :: i, v_indx, v_idx, n_2d, nx, ny, ii, jj, i_s_w, i_e_w, j_s_w, j_e_w
+
+        n_2d = 1
+        do i = 1, kMAX_STORAGE_VARS
+            if (var_names(i) == '') cycle
+            v_indx = get_varindx(var_names(i))
+            v_idx = domain%var_indx(v_indx)%v
+            if (v_idx <= 0) then; n_2d = n_2d + 1; cycle; endif
+
+            var = domain%vars_2d(v_idx)
+            i_s_w = this%i_s_w; i_e_w = this%i_e_w + var%xstag
+            j_s_w = this%j_s_w; j_e_w = this%j_e_w + var%ystag
+            nx = i_e_w - i_s_w + 1; ny = j_e_w - j_s_w + 1
+
+            if (var%dtype == kREAL) then
+                associate(src => domain%vars_2d(v_idx)%data_2d, dst => this%forcing_buffer_2d)
+                !$acc parallel loop gang vector collapse(2) present(dst, src)
+                do jj = 1, ny
+                  do ii = 1, nx
+                    dst(n_2d, ii, jj) = src(i_s_w+ii-1, j_s_w+jj-1)
+                  enddo
+                enddo
+                end associate
+            elseif (var%dtype == kINTEGER) then
+                associate(src => domain%vars_2d(v_idx)%data_2di, dst => this%forcing_buffer_2d)
+                !$acc parallel loop gang vector collapse(2) present(dst, src)
+                do jj = 1, ny
+                  do ii = 1, nx
+                    dst(n_2d, ii, jj) = real(src(i_s_w+ii-1, j_s_w+jj-1))
+                  enddo
+                enddo
+                end associate
+            endif
+            n_2d = n_2d + 1
+        enddo
+    end subroutine pack_init_vars_2d
+
+    ! Pack 3D init-only restart variables from domain storage into forcing_buffer_3d_init.
+    ! Caller handles surrounding !$acc wait / update host / MPI_Win_Post.
+    subroutine pack_init_vars_3d(this, domain, var_names)
+        class(ioclient_t), intent(inout) :: this
+        type(domain_t),    intent(in)    :: domain
+        character(len=*),  intent(in)    :: var_names(:)
+
+        type(variable_t) :: var
+        integer :: i, v_indx, v_idx, n_3d_i, nx, ny, nz_v, ii, jj, kk, i_s_w, i_e_w, j_s_w, j_e_w
+
+        n_3d_i = 1
+        do i = 1, kMAX_STORAGE_VARS
+            if (var_names(i) == '') cycle
+            v_indx = get_varindx(var_names(i))
+            v_idx = domain%var_indx(v_indx)%v
+            if (v_idx <= 0) then; n_3d_i = n_3d_i + 1; cycle; endif
+
+            var = domain%vars_3d(v_idx)
+            i_s_w = this%i_s_w; i_e_w = this%i_e_w + var%xstag
+            j_s_w = this%j_s_w; j_e_w = this%j_e_w + var%ystag
+            nx = i_e_w - i_s_w + 1; ny = j_e_w - j_s_w + 1
+            nz_v = var%dim_len(2)
+
+            associate(src => domain%vars_3d(v_idx)%data_3d, dst => this%forcing_buffer_3d_init)
+            !$acc parallel loop gang vector collapse(3) present(dst, src)
+            do jj = 1, ny
+              do kk = 1, nz_v
+                do ii = 1, nx
+                  dst(n_3d_i, ii, kk, jj) = src(i_s_w+ii-1, kk, j_s_w+jj-1)
+                enddo
+              enddo
+            enddo
+            end associate
+            n_3d_i = n_3d_i + 1
+        enddo
+    end subroutine pack_init_vars_3d
+
+    ! Receive 2D init-only variables from parent nest via MPI_Recv, then geo-interpolate
+    ! each from forcing grid to domain grid and write into domain storage.
+    subroutine unpack_init_vars_2d(this, domain, forcing, var_names, n_init_2d, parent_rank)
+        class(ioclient_t), intent(inout) :: this
+        type(domain_t),    intent(inout) :: domain
+        type(boundary_t),  intent(in)    :: forcing
+        character(len=*),  intent(in)    :: var_names(:)
+        integer,           intent(in)    :: n_init_2d, parent_rank
+
+        integer :: n, v, var_indx, idx, nx_r, ny_r, ierr
+        real, allocatable :: recv_2d(:,:,:)
+        real, allocatable :: forcing_field(:,:), domain_field(:,:)
+        type(MPI_Status)  :: status
+        type(meta_data_t) :: meta
+
+        nx_r = this%i_e_r - this%i_s_r + 2
+        ny_r = this%j_e_r - this%j_s_r + 2
+
+        allocate(recv_2d(n_init_2d, nx_r, ny_r))
+        call MPI_Recv(recv_2d, size(recv_2d), MPI_REAL, parent_rank, 98, &
+                      this%parent_comms, status, ierr)
+
+        ! 1-based bounds: the geolut stores 1-based local forcing-tile indices,
+        ! not global parent-grid indices.
+        allocate(forcing_field(this%i_e_r - this%i_s_r + 1, this%j_e_r - this%j_s_r + 1))
+        allocate(domain_field(domain%ims:domain%ime, domain%jms:domain%jme))
+
+        n = 1
+        do v = 1, kMAX_STORAGE_VARS
+            if (var_names(v) == '') cycle
+            var_indx = get_varindx(var_names(v))
+            idx = domain%var_indx(var_indx)%v
+            if (idx <= 0) then; n = n + 1; cycle; endif
+
+            ! Per-nest static var (geometry / grid metric / static surface
+            ! descriptor) — the child reads/derives these from its own input
+            ! file. Do NOT overwrite. Slot counter still advances so the next
+            ! var lands in the correct recv_2d position.
+            meta = get_varmeta(var_indx)
+            if (meta%static_data) then
+                n = n + 1
+                cycle
+            endif
+
+            ! Unpack onto forcing grid (without stagger extra)
+            forcing_field(:, :) = &
+                recv_2d(n, 1:(this%i_e_r-this%i_s_r+1), 1:(this%j_e_r-this%j_s_r+1))
+
+            call geo_interp2d(domain_field, forcing_field, forcing%geo%geolut)
+
+            ! Write to domain
+            if (domain%vars_2d(idx)%dtype == kREAL) then
+                domain%vars_2d(idx)%data_2d(domain%ims:domain%ime, domain%jms:domain%jme) = domain_field
+                !$acc update device(domain%vars_2d(idx)%data_2d)
+            elseif (domain%vars_2d(idx)%dtype == kINTEGER) then
+                domain%vars_2d(idx)%data_2di(domain%ims:domain%ime, domain%jms:domain%jme) = nint(domain_field)
+                !$acc update device(domain%vars_2d(idx)%data_2di)
+            endif
+            n = n + 1
+        enddo
+    end subroutine unpack_init_vars_2d
+
+    ! Receive 3D init-only variables from parent nest via MPI_Recv, then layer-by-layer
+    ! geo-interpolate each from forcing grid to domain grid and write into domain storage.
+    subroutine unpack_init_vars_3d(this, domain, forcing, var_names, n_init_3d, parent_rank)
+        class(ioclient_t), intent(inout) :: this
+        type(domain_t),    intent(inout) :: domain
+        type(boundary_t),  intent(in)    :: forcing
+        character(len=*),  intent(in)    :: var_names(:)
+        integer,           intent(in)    :: n_init_3d, parent_rank
+
+        integer :: n, v, var_indx, idx, nx_r, ny_r, nz_r, nz_v, k, ierr
+        integer :: msg_count
+        real, allocatable :: recv_3d(:,:,:,:)
+        real, allocatable :: forcing_field(:,:), domain_field(:,:)
+        type(MPI_Status)  :: status, probe_status
+        type(meta_data_t) :: meta
+
+        nx_r = this%i_e_r - this%i_s_r + 2
+        ny_r = this%j_e_r - this%j_s_r + 2
+
+        ! Learn the k extent of the incoming init-3D message from its actual
+        ! element count.
+        call MPI_Probe(parent_rank, 99, this%parent_comms, probe_status, ierr)
+        call MPI_Get_count(probe_status, MPI_REAL, msg_count, ierr)
+        nz_r = msg_count / (n_init_3d * nx_r * ny_r)
+
+        allocate(recv_3d(n_init_3d, nx_r, nz_r, ny_r))
+        call MPI_Recv(recv_3d, size(recv_3d), MPI_REAL, parent_rank, 99, &
+                      this%parent_comms, status, ierr)
+
+        ! 1-based bounds: the geolut stores 1-based local forcing-tile indices,
+        ! not global parent-grid indices.
+        allocate(forcing_field(this%i_e_r - this%i_s_r + 1, this%j_e_r - this%j_s_r + 1))
+        allocate(domain_field(domain%ims:domain%ime, domain%jms:domain%jme))
+
+        n = 1
+        do v = 1, kMAX_STORAGE_VARS
+            if (var_names(v) == '') cycle
+            var_indx = get_varindx(var_names(v))
+            idx = domain%var_indx(var_indx)%v
+            if (idx <= 0) then; n = n + 1; cycle; endif
+
+            ! Per-nest static var (geometry / grid metric / static surface
+            ! descriptor) — the child reads/derives these from its own input
+            ! file. Do NOT overwrite. Slot counter still advances so the next
+            ! var lands in the correct recv_3d position.
+            meta = get_varmeta(var_indx)
+            if (meta%static_data) then
+                n = n + 1
+                cycle
+            endif
+
+            nz_v = domain%vars_3d(idx)%dim_len(2)
+
+            do k = 1, nz_v
+                forcing_field(:, :) = &
+                    recv_3d(n, 1:(this%i_e_r-this%i_s_r+1), k, 1:(this%j_e_r-this%j_s_r+1))
+
+                call geo_interp2d(domain_field, forcing_field, forcing%geo%geolut)
+
+                domain%vars_3d(idx)%data_3d(domain%ims:domain%ime, k, domain%jms:domain%jme) = domain_field
+            enddo
+            !$acc update device(domain%vars_3d(idx)%data_3d)
+            n = n + 1
+        enddo
+    end subroutine unpack_init_vars_3d
 
     !Necesary? Should communicate relevant post/wait calls and free window
     subroutine close_client(this)

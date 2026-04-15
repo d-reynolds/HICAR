@@ -42,6 +42,11 @@ module meta_data_interface
         integer :: n_attrs = 0
         logical :: unlimited_dim = .False.
         logical :: output = .True.   ! Whether this variable can appear in output files
+        ! Per-nest static variable: geometry / grid metric / static surface descriptor.
+        ! The child reads/derives these from its own input file in read_core_variables /
+        ! setup_sleve, so they must NOT be overwritten by the parent->child nest init
+        ! transfer at child wake-up. Checked in unpack_init_vars_{2d,3d}.
+        logical :: static_data = .False.
 
         type(attribute_t), allocatable :: attributes(:)
     contains

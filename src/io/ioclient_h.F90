@@ -25,6 +25,15 @@ module ioclient_interface
   private
   public :: ioclient_t
 
+  ! Pair of variable-name lists used to describe one direction of the
+  ! init-only nest transfer (parent -> children or children <- parent).
+  ! 2D variables and init-only 3D restart variables live in the same struct
+  ! because the two lists are always populated, consumed, and freed together.
+  type :: nest_init_var_list_t
+      character(len=kMAX_NAME_LENGTH) :: vars_2d(kMAX_STORAGE_VARS) = ''
+      character(len=kMAX_NAME_LENGTH) :: vars_3d(kMAX_STORAGE_VARS) = ''
+  end type nest_init_var_list_t
+
   !>----------------------------------------------------------
   !! Output type definition
   !!
@@ -47,6 +56,7 @@ module ioclient_interface
       integer, public :: server
       
       integer, public ::  i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, n_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_r, i_s_re, i_e_re, j_s_re, j_e_re, ide, kde, jde
+      integer, public :: nz_init_3d = 0
       integer :: restart_counter = 0
       integer :: output_counter = 0
       integer :: frames_per_outfile, restart_count
@@ -68,10 +78,8 @@ module ioclient_interface
       character(len=kMAX_NAME_LENGTH) :: vars_for_nest(kMAX_STORAGE_VARS)
 
       ! Init-only nest transfer: 2D + extra 3D restart vars (not in atmospheric forcing)
-      character(len=kMAX_NAME_LENGTH) :: vars_for_nest_2d(kMAX_STORAGE_VARS)
-      character(len=kMAX_NAME_LENGTH) :: vars_for_nest_3d_init(kMAX_STORAGE_VARS)
-      character(len=kMAX_NAME_LENGTH) :: vars_for_nest_init_2d(kMAX_STORAGE_VARS)
-      character(len=kMAX_NAME_LENGTH) :: vars_for_nest_init_3d(kMAX_STORAGE_VARS)
+      type(nest_init_var_list_t) :: send_init_vars  ! parent -> children (this node is parent)
+      type(nest_init_var_list_t) :: recv_init_vars  ! child  <- parent   (this node is child)
       logical :: initial_nest_done = .false.
 
   contains

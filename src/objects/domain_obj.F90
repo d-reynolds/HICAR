@@ -3282,7 +3282,7 @@ contains
 
         ! number of layers has to be used when subsetting for update_pressure (for now)
         integer :: nz, p, var_indx, pressure_indx, pot_temp_indx, i, j, k, dict_indx
-        logical :: var_is_u, var_is_v, var_is_pressure, var_is_potential_temp, agl_interp, force_boundaries
+        logical :: var_is_u, var_is_v, var_is_pressure, var_is_potential_temp, agl_interp, force_boundaries, var_is_fm
 
         update_only = .False.
         if (present(update)) update_only = update
@@ -3325,6 +3325,10 @@ contains
                 var_is_potential_temp = (forcing%variables%var_list(input_idx)%var%id == kVARS%potential_temperature)
                 var_is_u = (forcing%variables%var_list(input_idx)%var%id == kVARS%u)
                 var_is_v = (forcing%variables%var_list(input_idx)%var%id == kVARS%v)
+                var_is_fm = .False.
+                if (size(var_to_interpolate%dimensions) >= 2) then
+                    var_is_fm = (trim(var_to_interpolate%dimensions(2)) == "level_fm")
+                endif
                 !If we are dealing with anything but pressure and temperature (basically mass/number species), consider height above ground
                 !for interpolation. If the user has not selected AGL interpolation in the namelist, this will result in standard z-interpolation
                 agl_interp = .not.(var_is_pressure .or. var_is_potential_temp)
@@ -3337,7 +3341,7 @@ contains
                 ! if just updating, use the dqdt variable otherwise use the 3D variable
                 if (update_only) then
                     call interpolate_variable(this%forcing_hi(p)%dqdt_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
-                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
+                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth, is_fm_var=var_is_fm)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind tendencies
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
                         call smooth_array(this%forcing_hi(p), windowsize=1, ydim=3, &
@@ -3351,7 +3355,7 @@ contains
                     endif
                 else
                     call interpolate_variable(this%forcing_hi(p)%data_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
-                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
+                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth, is_fm_var=var_is_fm)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind fields
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
                         call smooth_array(this%forcing_hi(p), windowsize=1, ydim=3, &
@@ -3524,7 +3528,7 @@ contains
     !! calling the appropriate interpolation routine (2D vs 3D) with the appropriate grid (mass, u, v)
     !!
     !! -------------------------------
-    subroutine interpolate_variable(var_data, input_data, forcing, dom, interpolate_agl_in, var_is_u, var_is_v, nsmooth)
+    subroutine interpolate_variable(var_data, input_data, forcing, dom, interpolate_agl_in, var_is_u, var_is_v, nsmooth, is_fm_var)
         implicit none
         real,  allocatable, intent(inout) :: var_data(:,:,:)
         type(variable_t),   intent(inout) :: input_data
@@ -3533,11 +3537,12 @@ contains
         logical,            intent(in),   optional :: interpolate_agl_in
         logical,            intent(in),   optional :: var_is_u, var_is_v
         integer,            intent(in),   optional :: nsmooth
+        logical,            intent(in),   optional :: is_fm_var
 
         ! note that 3D variables have a different number of vertical levels, so they have to first be interpolated
         ! to the high res horizontal grid, then vertically interpolated to the actual icar domain
         real, allocatable :: temp_3d(:,:,:)
-        logical :: interpolate_agl, uvar, vvar
+        logical :: interpolate_agl, uvar, vvar, fm_var
         integer :: nx, ny, nz, ims, ime, jms, jme
         integer :: windowsize, z
 
@@ -3549,6 +3554,17 @@ contains
         if (present(var_is_v)) vvar = var_is_v
         windowsize = 0
         if (present(nsmooth)) windowsize = nsmooth
+        fm_var = .False.
+        if (present(is_fm_var)) fm_var = is_fm_var
+
+        ! Fine-mesh tracers (qs_fm, ns_fm) share the atmospheric horizontal grid but live on
+        ! their own log-spaced AGL vertical stack. Parent and child both carry kFM_GRID_Z
+        ! levels with the same fractional spacing, so level k maps 1:1 — only the horizontal
+        ! bilinear interpolation is needed.
+        if (fm_var) then
+            call geo_interp(var_data, input_data%data_3d, forcing%geo%geolut)
+            return
+        endif
 
         ims = lbound(var_data,1)
         ime = ubound(var_data,1)

@@ -166,12 +166,6 @@ subroutine update_component_nest(comp_arr,options,ioclient)
 
             call comp%gather_forcing()
 
-            ! One-time: gather init-only 2D + extra 3D restart vars
-            if (.not. comp%initial_nest_done) then
-                call comp%gather_forcing_2d()
-                call comp%gather_forcing_3d_init()
-            endif
-
             if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",comp%nest_indx," --------------"
             if (STD_OUT_PE_IO) write(*,*) "Completed gathering forcings"
             if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",comp%nest_indx," --------------"
@@ -197,8 +191,17 @@ subroutine update_component_nest(comp_arr,options,ioclient)
                 end associate
             enddo
 
-            ! Mark init transfer as done after distributing to all children
-            if (.not. comp%initial_nest_done) comp%initial_nest_done = .true.
+            ! One-time init transfer: resolves per-family nz_init_3d, drives
+            ! gather_forcing_2d + gather_forcing_3d_init, and pushes the init
+            ! 2D + extra 3D restart vars to every child ioclient. Runs AFTER
+            ! the per-child main distribute_forcing loop above so each child
+            ! has already unblocked past its ioclient%receive (via the main
+            ! scatter_forcing) and is ready to post the init MPI_Recv by the
+            ! time we MPI_Send here. All cross-nest coordination lives in
+            ! this method.
+            if (.not. comp%initial_nest_done) then
+                call comp%distribute_init_forcing(comp_arr, options%general%child_nests)
+            endif
         class default
             ! if ioclient is null, then we are acting as an ioserver
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then

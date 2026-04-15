@@ -18,7 +18,7 @@ submodule(boundary_interface) boundary_implementation
     use mod_wrf_constants,      only : gravity
     use variable_interface,     only : variable_t
     use meta_data_interface, only : meta_data_t
-    use icar_constants,         only : STD_OUT_PE, kMAX_FILE_LENGTH, kVARS
+    use icar_constants,         only : STD_OUT_PE, kMAX_FILE_LENGTH, kVARS, kFM_GRID_Z
     use output_metadata,        only : get_varmeta
 
     implicit none
@@ -641,15 +641,22 @@ contains
         real, allocatable :: temp_2d_data(:,:)
         real, allocatable :: temp_3d_data(:,:,:)
         type(variable_t)  :: new_variable
-        logical :: computed_flag
+        logical :: computed_flag, is_fm
         integer :: nx, ny, nz
         type(meta_data_t) :: var_meta
 
         ! these variables are computed (e.g. pressure from height or height from pressure)
         computed_flag = (len_trim(var_name) > 9 .and. var_name(max(1,len_trim(var_name)-8):len_trim(var_name)) == "_computed")
 
+        ! Fine-mesh (blowing-snow) variables live on their own vertical stack (kFM_GRID_Z levels),
+        ! not the atmospheric nz. Size the boundary buffer accordingly so parent-to-child packing,
+        ! scattering, and horizontal interpolation all agree on the z extent.
+        var_meta = get_varmeta(indx)
+        is_fm = (size(var_meta%dimensions) >= 2 .and. trim(var_meta%dimensions(2)) == "level_fm")
+
         nx = (this%ite - this%its + 1)
         nz = this%kte
+        if (is_fm) nz = kFM_GRID_Z
         ny = (this%jte - this%jts + 1)
         
         !handle staggered variables
@@ -662,9 +669,6 @@ contains
             ! if we are setting up the boundary for a nest, dims will be set to 0. In this case,
             ! check the variable associated with indx in kVARS to see if it is a staggered variable
             if (sum(dims) == 0) then
-                !get meta data associated with this index
-                var_meta = get_varmeta(indx)
-
                 !add stagger, if present
                 if (dims(1) == 0) nx = nx+var_meta%xstag
                 if (dims(2) == 0) ny = ny+var_meta%ystag
@@ -1236,6 +1240,8 @@ contains
             if (vars_to_read(i) == opt%forcing%i2cvar) var_indx(i) = kVARS%ice2_c
             if (vars_to_read(i) == opt%forcing%i3avar) var_indx(i) = kVARS%ice3_a
             if (vars_to_read(i) == opt%forcing%i3cvar) var_indx(i) = kVARS%ice3_c
+            if (vars_to_read(i) == opt%forcing%qs_fmvar) var_indx(i) = kVARS%qs_fm
+            if (vars_to_read(i) == opt%forcing%ns_fmvar) var_indx(i) = kVARS%ns_fm
             if (vars_to_read(i) == opt%forcing%hgtvar) var_indx(i) = kVARS%terrain
             if (vars_to_read(i) == opt%forcing%pslvar) var_indx(i) = kVARS%sea_surface_pressure
             if (vars_to_read(i) == opt%forcing%psvar) var_indx(i) = kVARS%surface_pressure

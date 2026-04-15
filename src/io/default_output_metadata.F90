@@ -691,6 +691,7 @@ contains
         else if (var_idx==kVARS%z) then
             var_meta%name        = "z"
             var_meta%dimensions  = three_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -701,6 +702,7 @@ contains
         else if (var_idx==kVARS%z_interface) then
             var_meta%name        = "z_i"
             var_meta%dimensions  = three_d_interface_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -710,6 +712,7 @@ contains
         else if (var_idx==kVARS%global_z_interface) then
             var_meta%name        = "global_z_i"
             var_meta%dimensions  = three_d_neighbor_interface_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -720,6 +723,7 @@ contains
         else if (var_idx==kVARS%dz) then
             var_meta%name        = "dz"
             var_meta%dimensions  = three_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "layer_thickness between mass points"),                 &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -730,6 +734,7 @@ contains
         else if (var_idx==kVARS%dz_interface) then
             var_meta%name        = "dz_i"
             var_meta%dimensions  = three_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "layer_thickness between k half-levels"),                 &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -739,6 +744,7 @@ contains
         else if (var_idx==kVARS%global_dz_interface) then
             var_meta%name        = "global_dz_i"
             var_meta%dimensions  = three_d_neighbor_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "layer_thickness between k half-levels"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -749,6 +755,7 @@ contains
         else if (var_idx==kVARS%dzdx) then
             var_meta%name        = "dzdx"
             var_meta%dimensions  = three_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "dzdx of domain mesh"),                 &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -759,6 +766,7 @@ contains
         else if (var_idx==kVARS%dzdy) then
             var_meta%name        = "dzdy"
             var_meta%dimensions  = three_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "dzdy of domain mesh"),                 &
                                attribute_t("units",         "1"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -768,6 +776,7 @@ contains
         else if (var_idx==kVARS%dzdx_u) then
             var_meta%name        = "dzdx_u"
             var_meta%dimensions  = three_d_u_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "dzdx of domain mesh on staggered u grid"),                 &
                                 attribute_t("units",         "1"),                                   &
                                 attribute_t("coordinates",   "u_lat u_lon")]
@@ -778,6 +787,7 @@ contains
         else if (var_idx==kVARS%dzdy_v) then
             var_meta%name        = "dzdy_v"
             var_meta%dimensions  = three_d_v_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "dzdy of domain mesh on staggered v grid"),                 &
                                 attribute_t("units",         "1"),                                   &
                                 attribute_t("coordinates",   "v_lat v_lon")]
@@ -787,6 +797,7 @@ contains
         else if (var_idx==kVARS%h1) then
             var_meta%name        = "h1"
             var_meta%dimensions  = two_d_neighbor_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "High-frequency terrain component"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -796,6 +807,7 @@ contains
         else if (var_idx==kVARS%h2) then
             var_meta%name        = "h2"
             var_meta%dimensions  = two_d_neighbor_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Low-frequency terrain component"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -805,6 +817,7 @@ contains
         else if (var_idx==kVARS%h1_u) then
             var_meta%name        = "h1_u"
             var_meta%dimensions  = two_d_u_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "High-frequency terrain component on staggered u grid"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "u_lat u_lon")]
@@ -814,6 +827,7 @@ contains
         else if (var_idx==kVARS%h2_u) then
             var_meta%name        = "h2_u"
             var_meta%dimensions  = two_d_u_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Low-frequency terrain component on staggered u grid"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "u_lat u_lon")]
@@ -823,6 +837,7 @@ contains
         else if (var_idx==kVARS%h1_v) then
             var_meta%name        = "h1_v"
             var_meta%dimensions  = two_d_v_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "High-frequency terrain component on staggered v grid"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "v_lat v_lon")]
@@ -832,6 +847,7 @@ contains
         else if (var_idx==kVARS%h2_v) then
             var_meta%name        = "h2_v"
             var_meta%dimensions  = two_d_v_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Low-frequency terrain component on staggered v grid"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "v_lat v_lon")]
@@ -841,6 +857,7 @@ contains
         else if (var_idx==kVARS%jacobian) then
             var_meta%name        = "jacobian"
             var_meta%dimensions  = three_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Jacobian of the z-coordinate transform"),                 &
                                 attribute_t("units",         "1"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -850,6 +867,7 @@ contains
         else if (var_idx==kVARS%jacobian_u) then
             var_meta%name        = "jacobian_u"
             var_meta%dimensions  = three_d_u_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Jacobian of the z-coordinate transform on staggered u grid"),                 &
                                 attribute_t("units",         "1"),                                   &
                                 attribute_t("coordinates",   "u_lat u_lon")]
@@ -859,6 +877,7 @@ contains
         else if (var_idx==kVARS%jacobian_v) then
             var_meta%name        = "jacobian_v"
             var_meta%dimensions  = three_d_v_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Jacobian of the z-coordinate transform on staggered v grid"),                 &
                                 attribute_t("units",         "1"),                                   &
                                 attribute_t("coordinates",   "v_lat v_lon")]
@@ -868,6 +887,7 @@ contains
         else if (var_idx==kVARS%jacobian_w) then
             var_meta%name        = "jacobian_w"
             var_meta%dimensions  = three_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Jacobian of the z-coordinate transform on k half-levels"),                 &
                                 attribute_t("units",         "1"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -877,6 +897,7 @@ contains
         else if (var_idx==kVARS%sintheta) then
             var_meta%name        = "sintheta"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "sin of grid rotation from true north"),                 &
                                 attribute_t("units",         "1"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -886,6 +907,7 @@ contains
         else if (var_idx==kVARS%costheta) then
             var_meta%name        = "costheta"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "cos of grid rotation from true north"),                 &
                                 attribute_t("units",         "1"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -895,6 +917,7 @@ contains
         else if (var_idx==kVARS%relax_filter_2d) then
             var_meta%name        = "relax_filter_2d"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "2D relaxation filter used for attenuating forcing of boundary forcing variables"),                 &
                                 attribute_t("units",         "1"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -904,6 +927,7 @@ contains
         else if (var_idx==kVARS%relax_filter_3d) then
             var_meta%name        = "relax_filter_3d"
             var_meta%dimensions  = three_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "3D relaxation filter used for attenuating forcing of boundary forcing variables"),                 &
                                 attribute_t("units",         "1"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -913,6 +937,7 @@ contains
         else if (var_idx==kVARS%advection_dz) then
             var_meta%name        = "advection_dz"
             var_meta%dimensions  = three_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "dz used for calculating advection"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]                    
@@ -922,6 +947,7 @@ contains
         else if (var_idx==kVARS%global_terrain) then
             var_meta%name        = "global_terrain"
             var_meta%dimensions  = two_d_global_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Domain terrain"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -931,6 +957,7 @@ contains
         else if (var_idx==kVARS%neighbor_terrain) then
             var_meta%name        = "neighbor_terrain"
             var_meta%dimensions  = two_d_neighbor_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Domain terrain"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -941,6 +968,7 @@ contains
         else if (var_idx==kVARS%slope) then
             var_meta%name        = "slope"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "slope of the terrain"),                 &
                                 attribute_t("units",         "rad"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -950,6 +978,7 @@ contains
         else if (var_idx==kVARS%slope_angle) then
             var_meta%name        = "slope_angle"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.    
             var_meta%attributes  = [attribute_t("long_name", "slope of the terrain"),                 &
                                 attribute_t("units",         "radians"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -959,6 +988,7 @@ contains
         else if (var_idx==kVARS%aspect_angle) then
             var_meta%name        = "aspect_angle"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Aspect of the terrain"),                 &
                                 attribute_t("units",         "radians"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -968,6 +998,7 @@ contains
         else if (var_idx==kVARS%neighbor_slope_angle) then
             var_meta%name        = "neighbor_slope_angle"
             var_meta%dimensions  = two_d_neighbor_dimensions
+            var_meta%static_data = .True.
             var_meta%output      = .False.
             var_meta%attributes  = [attribute_t("long_name", "Slope angle in neighborhood"),             &
                                 attribute_t("units",         "radians"),                                   &
@@ -978,6 +1009,7 @@ contains
         else if (var_idx==kVARS%neighbor_aspect_angle) then
             var_meta%name        = "neighbor_aspect_angle"
             var_meta%dimensions  = two_d_neighbor_dimensions
+            var_meta%static_data = .True.
             var_meta%output      = .False.
             var_meta%attributes  = [attribute_t("long_name", "Aspect angle in neighborhood"),            &
                                 attribute_t("units",         "radians"),                                   &
@@ -988,6 +1020,7 @@ contains
         else if (var_idx==kVARS%svf) then
             var_meta%name        = "svf"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%output      = .False.
             var_meta%attributes  = [attribute_t("long_name", "sky view fraction"),                 &
                                 attribute_t("units",         "1"),                                   &
@@ -998,6 +1031,7 @@ contains
         else if (var_idx==kVARS%hlm) then
             var_meta%name        = "hlm"
             var_meta%dimensions  = three_d_hlm_dimensions
+            var_meta%static_data = .True.
             var_meta%output      = .False.
             var_meta%dim_len(2)  = 90
             var_meta%attributes  = [attribute_t("long_name", "Horizon line matrix"),                 &
@@ -1009,6 +1043,7 @@ contains
         else if (var_idx==kVARS%shd) then
             var_meta%name        = "shd"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Snow holding depth of terrain"),                 &
                                 attribute_t("units",         "m"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
@@ -1195,6 +1230,7 @@ contains
         else if (var_idx==kVARS%froude_terrain) then
             var_meta%name        = "froude_terrain"
             var_meta%dimensions  = four_d_azim_dimensions
+            var_meta%static_data = .True.    
             var_meta%attributes  = [attribute_t("long_name", "Blocking terrain height used in calculation of froude number"), &
                                 attribute_t("units",         "m"),                                                 &
                                 attribute_t("coordinates",   "lat lon")]
@@ -1204,6 +1240,7 @@ contains
         else if (var_idx==kVARS%Sx) then
             var_meta%name        = "Sx"
             var_meta%dimensions  = four_d_azim_dimensions
+            var_meta%static_data = .True.    
             var_meta%output      = .False.
             var_meta%attributes  = [attribute_t("long_name", "Maximum upwind slope"), &
                                 attribute_t("units",         "1"),                                                 &
@@ -1214,6 +1251,7 @@ contains
         else if (var_idx==kVARS%TPI) then
             var_meta%name        = "TPI"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.    
             var_meta%attributes  = [attribute_t("long_name", "Topographic position index"), &
                                 attribute_t("units",         "1"),                                                 &
                                 attribute_t("coordinates",   "lat lon")]
@@ -1599,6 +1637,7 @@ contains
         else if (var_idx==kVARS%veg_type) then
             var_meta%name        = "veg_type"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "vegetation_type"),                 &
                                attribute_t("units",      "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
@@ -1609,6 +1648,7 @@ contains
         else if (var_idx==kVARS%soil_type) then
             var_meta%name        = "soil_type"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "soil_type"),                 &
                                attribute_t("units",      "1"),                                      &
                                attribute_t("coordinates",   "lat lon")]
@@ -2683,6 +2723,7 @@ contains
         else if (var_idx==kVARS%soil_deep_temperature) then
             var_meta%name        = "soil_deep_temperature"
             var_meta%dimensions  = two_d_t_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "deep_soil_temperature"),           &
                                attribute_t("units",         "K"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -3136,6 +3177,7 @@ contains
         else if (var_idx==kVARS%z_lake3d) then
             var_meta%name        = "z_lake3d"
             var_meta%dimensions  = three_d_t_lake_dimensions
+            var_meta%static_data = .True.    
             var_meta%dim_len(2)  = kLAKE_Z
             var_meta%attributes  = [attribute_t("long_name", "Lake layer depth"),     &
                                attribute_t("units",         "m"),                               &
@@ -3147,6 +3189,7 @@ contains
         else if (var_idx==kVARS%dz_lake3d) then
             var_meta%name        = "dz_lake3d"
             var_meta%dimensions  = three_d_t_lake_dimensions
+            var_meta%static_data = .True.    
             var_meta%dim_len(2)  = kLAKE_Z
             var_meta%attributes  = [attribute_t("long_name", "Lake layer thickness"),     &
                                attribute_t("units",         "m"),                               &
@@ -3157,6 +3200,7 @@ contains
         else if (var_idx==kVARS%lake_depth) then
             var_meta%name        = "lake_depth"
             var_meta%dimensions  = two_d_t_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "Lake depth"),     &
                                 attribute_t("units",         "m"),                               &
                                 attribute_t("coordinates",   "lat lon")]
@@ -3409,6 +3453,7 @@ contains
         else if (var_idx==kVARS%land_mask) then
             var_meta%name        = "land_mask"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("standard_name", "land_binary_mask"),             &
                                attribute_t("long_name", "Land-water mask"),                 &
                                attribute_t("coordinates",       "lat lon")]
@@ -3420,6 +3465,7 @@ contains
         else if (var_idx==kVARS%terrain) then
             var_meta%name        = "terrain"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("standard_name", "height_above_reference_ellipsoid"),    &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
@@ -3430,6 +3476,7 @@ contains
         else if (var_idx==kVARS%latitude) then
             var_meta%name        = "lat"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("standard_name", "latitude"),                            &
                                attribute_t("units",         "degrees_north"),                       &
                                attribute_t("axis","Y")]
@@ -3440,6 +3487,7 @@ contains
         else if (var_idx==kVARS%longitude) then
             var_meta%name        = "lon"
             var_meta%dimensions  = two_d_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("standard_name", "longitude"),                           &
                                attribute_t("units",         "degrees_east"),                        &
                                attribute_t("axis","X")]
@@ -3450,6 +3498,7 @@ contains
         else if (var_idx==kVARS%u_latitude) then
             var_meta%name        = "u_lat"
             var_meta%dimensions  = two_d_u_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "latitude_on_u_grid"),              &
                                attribute_t("units",         "degrees_north"),                       &
                                attribute_t("axis","Y")]
@@ -3460,6 +3509,7 @@ contains
         else if (var_idx==kVARS%u_longitude) then
             var_meta%name        = "u_lon"
             var_meta%dimensions  = two_d_u_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "longitude_on_u_grid"),             &
                                attribute_t("units",         "degrees_east"),                        &
                                attribute_t("axis","X")]
@@ -3470,6 +3520,7 @@ contains
         else if (var_idx==kVARS%v_latitude) then
             var_meta%name        = "v_lat"
             var_meta%dimensions  = two_d_v_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "latitude_on_v_grid"),              &
                                attribute_t("units",         "degrees_north"),                       &
                                attribute_t("axis","Y")]
@@ -3480,6 +3531,7 @@ contains
         else if (var_idx==kVARS%v_longitude) then
             var_meta%name        = "v_lon"
             var_meta%dimensions  = two_d_v_dimensions
+            var_meta%static_data = .True.
             var_meta%attributes  = [attribute_t("long_name", "longitude_on_v_grid"),             &
                                attribute_t("units",         "degrees_east"),                        &
                                attribute_t("axis","X")]
@@ -4137,6 +4189,7 @@ contains
             var_meta%attributes  = [attribute_t("long_name", "Blowing snow mass mixing ratio on fine mesh"),   &
                                attribute_t("units",         "kg m-2"),                        &
                                attribute_t("coordinates",   "lat lon")]
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qs_fmvar /= "")
 
         !>------------------------------------------------------------
         !!  Snow number concentration on fine mesh (blowing snow mesh)
@@ -4148,6 +4201,7 @@ contains
             var_meta%attributes  = [attribute_t("long_name", "Blowing snow number concentration on fine mesh"),   &
                                attribute_t("units",         "cm-3"),                        &
                                attribute_t("coordinates",   "lat lon")]
+            if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%ns_fmvar /= "")
 
         end if
 
