@@ -1926,9 +1926,10 @@ contains
         class(domain_t), intent(inout)  :: this
         type(options_t), intent(in)     :: options
 
-        integer :: i, nsoil
+        integer :: i, j, nsoil
         real, allocatable :: surf_temp(:,:), temporary_data(:,:), temporary_data_3d(:,:,:)
         real :: soil_thickness(20)
+        real :: dzdx_val, dzdy_val, slope_rad_val, slope_deg_val, shd_norm, cos_slope_thresh
 
         soil_thickness = 1.0
         soil_thickness(1:4) = [0.1, 0.2, 0.5, 1.0]
@@ -2225,6 +2226,37 @@ contains
                            temporary_data)
             if (this%var_indx(kVARS%shd)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%shd)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+        else
+            if (this%var_indx(kVARS%shd)%v > 0) then
+                if (STD_OUT_PE) write(*,*) "    SHD not specified; computing from DEM..."
+                ! The following code comes from the SLF OSHD pre-processing code, written by Louis Quéno 2022
+                ! Shd (Snow holding depth) is needed by the Snowslide parameterization (Bernhardt and Schulz 2010)
+                ! Values for the parameterization of Shd come from (Marsh) et al., 2022
+
+
+                associate(terrain => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d, &
+                          shd     => this%vars_2d(this%var_indx(kVARS%shd)%v)%data_2d)
+                    do j = this%jts, this%jte
+                        do i = this%its, this%ite
+                            ! Compute dz/dx via centered differences, forward/backward at boundaries
+                            dzdx_val = (terrain(i+1,j) - terrain(i-1,j)) / (2.0 * this%dx)
+                            dzdy_val = (terrain(i,j+1) - terrain(i,j-1)) / (2.0 * this%dx)
+
+                            ! Slope in radians, then convert to degrees with a minimum of 10 degrees
+                            slope_rad_val = atan(sqrt(dzdx_val**2 + dzdy_val**2))
+                            slope_deg_val = max(slope_rad_val / deg2rad, 10.0)
+
+                            shd_norm = 3178.4 * slope_deg_val**(-1.998)
+                            cos_slope_thresh = max(cos(slope_deg_val * deg2rad), 0.001)
+                            shd(i,j) = shd_norm * cos_slope_thresh
+                        enddo
+                    enddo
+                !$acc update device(shd)
+                call this%halo%exch_var(this%vars_2d(this%var_indx(kVARS%shd)%v),corners=.True.)
+                !$acc update host(shd)
+                end associate
+
             endif
         endif
 

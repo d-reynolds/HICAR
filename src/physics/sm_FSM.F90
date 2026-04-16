@@ -10,11 +10,11 @@ module module_sm_FSMdrv
     use options_interface,   only : options_t
     use variable_interface,  only : variable_t
     use domain_interface,    only : domain_t
-    use FSM_interface , only:  FSM_SETUP,FSM_DRIVE,FSM_PHYSICS, FSM_SNOWSLIDE, FSM_SNOWSLIDE_END, FSM_CUMULATE_SD, FSM_SNOWTRAN_SETUP, FSM_SNOWTRAN_SALT_START, FSM_SNOWTRAN_SALT, FSM_SNOWTRAN_SALT_END, FSM_SNOWTRAN_SUSP_START, FSM_SNOWTRAN_SUSP, FSM_SNOWTRAN_SUSP_END, FSM_SNOWTRAN_ACCUM
+    use FSM_interface , only:  FSM_SETUP,FSM_DRIVE,FSM_PHYSICS, FSM_CUMULATE_SD, FSM_SNOWTRAN_SETUP, FSM_SNOWTRAN_SALT_START, FSM_SNOWTRAN_SALT, FSM_SNOWTRAN_SALT_END, FSM_SNOWTRAN_SUSP_START, FSM_SNOWTRAN_SUSP, FSM_SNOWTRAN_SUSP_END, FSM_SNOWTRAN_ACCUM
     use FSM_interface , only:  Nx_HICAR, Ny_HICAR, NNsmax_HICAR, NNsoil_HICAR, lat_HICAR, &
                                lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,shd_HICAR, LHN_ON, LFOR_HN, &
                                NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,NOSHDTN,NALRADT,&
-                               NSNTRAN,NSNSLID,NSNOLAY,NCHECKS, LZ0PERT, LWCPERT, LFSPERT, LALPERT, LSLPERT, CTILE, rtthresh, DDs_min, DDs_surflay
+                               NSNTRAN,NSNOLAY,NCHECKS, LZ0PERT, LWCPERT, LFSPERT, LALPERT, LSLPERT, CTILE, rtthresh, DDs_min, DDs_surflay
     use FSM_interface, only: &
       year,          &
       month,         &
@@ -47,8 +47,7 @@ module module_sm_FSMdrv
       Sliq_out_,     &
       dSWE_salt_,      &
       dSWE_susp_,      &
-      dSWE_subl_,      &
-      dSWE_slide_!,     &
+      dSWE_subl_
       !Qs_u,       &
       !Qs_v
 
@@ -66,21 +65,20 @@ module module_sm_FSMdrv
       albs,          &
       theta,         &
       z0sn
-    use FSM_interface, only: SNTRAN, SNSLID
+    use FSM_interface, only: SNTRAN
     
     implicit none
 
     private
     public :: sm_FSM_init,sm_FSM
    
-    type(variable_t) :: Qs_u_var, Qs_v_var, SD_0_var, Sice_0_var  
+    type(variable_t) :: Qs_u_var, Qs_v_var
     integer :: ids,ide,jds,jde,kds,kde ! Domain dimensions
     integer :: ims,ime,jms,jme,kms,kme ! Local Memory dimensions
     integer :: its,ite,jts,jte,kts,kte ! Processing Tile dimensions
     integer :: hour_old
 
     type(Time_type) :: last_output
-    real            :: last_snowslide
    
     real, allocatable :: &
         z0_bare(:,:),    &       !bare ground z0 before getting covered in snow
@@ -111,7 +109,7 @@ contains
         jms = domain%grid%jms
         jme = domain%grid%jme
         
-        !if (SNTRAN+SNSLID > 0) then
+        !if (SNTRAN > 0) then
         its = domain%grid%its-1
         ite = domain%grid%ite+1
         jts = domain%grid%jts-1
@@ -135,7 +133,7 @@ contains
             last_output = options%general%start_time
         endif
         
-        last_snowslide = 4000
+
 
         !!
         if (allocated(lat_HICAR)) deallocate(lat_HICAR)
@@ -186,7 +184,7 @@ contains
         NOSHDTN=options%sm%fsm_oshdtn
         NALRADT=options%sm%fsm_alradt
         NSNTRAN=options%sm%fsm_sntran
-        NSNSLID=options%sm%fsm_snslid
+
         NSNOLAY=options%sm%fsm_snolay
         NCHECKS=options%sm%fsm_checks
 
@@ -220,7 +218,7 @@ contains
         if (allocated(dSWE_salt_)) deallocate(dSWE_salt_)
         if (allocated(dSWE_susp_)) deallocate(dSWE_susp_)
         if (allocated(dSWE_subl_)) deallocate(dSWE_subl_)
-        if (allocated(dSWE_slide_)) deallocate(dSWE_slide_)
+
         if (allocated(Sf24_tracker)) deallocate(Sf24_tracker)
         if (allocated(Roff_sum)) deallocate(Roff_sum)
 
@@ -239,18 +237,16 @@ contains
         allocate(dSWE_salt_(Nx_HICAR,Ny_HICAR)); dSWE_salt_=0.
         allocate(dSWE_susp_(Nx_HICAR,Ny_HICAR)); dSWE_susp_=0.
         allocate(dSWE_subl_(Nx_HICAR,Ny_HICAR)); dSWE_subl_=0.
-        allocate(dSWE_slide_(Nx_HICAR,Ny_HICAR)); dSWE_slide_=0.
+
         allocate(Sf24_tracker(24,Nx_HICAR,Ny_HICAR));Sf24_tracker=0.
         allocate(Roff_sum(Nx_HICAR,Ny_HICAR)); Roff_sum=0.
         !!
 
         call FSM_SETUP()
 
-        if (SNTRAN+SNSLID > 0) then
+        if (SNTRAN > 0) then
             call Qs_u_var%initialize(kVARS%density,domain%grid2d)
             call Qs_v_var%initialize(kVARS%density,domain%grid2d)
-            call SD_0_var%initialize(kVARS%density,domain%grid2d)
-            call Sice_0_var%initialize(kVARS%density,domain%grid2d)
         endif
 
         !!
@@ -316,8 +312,8 @@ contains
                             if (domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(hi,hj)/(k+1) < DDs_min) exit
                         enddo
 
-                        Nsnow(j,i)     = 1 
-                        fsnow(j,i)     = 0.95
+                        Nsnow(j,i)     = max(1,domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(hi,hj)) !at least 1 layer of snow if there is any snow height, otherwise FSM2trans gets unhappy. We will just put all the snow in that one layer, which is not ideal but should be ok for small amounts of snow. We will also rely on the fact that FSM2trans will set the snow properties (density, temperature) to reasonable defaults for any layers that we don't initialize with snow in them.
+                        fsnow(j,i)     = max(0.95, domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(hi,hj))
                         domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(hi,hj) = Nsnow(j,i)
                         domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(hi,hj) = fsnow(j,i)
 
@@ -375,16 +371,8 @@ contains
         integer :: i,j,k, hj, hi, i_s, i_e, j_s, j_e
         real :: Delta_t
         real, dimension(its:ite,jts:jte) :: SWE_pre
-        real, dimension(Nx_HICAR,Ny_HICAR) :: SD_0, Sice_0, SD_0_buff, Sice_0_buff, Qs_u, Qs_v
-        logical, dimension(Nx_HICAR,Ny_HICAR) :: aval
-        logical :: first_SLIDE, do_snowslide
+        real, dimension(Nx_HICAR,Ny_HICAR) :: Qs_u, Qs_v
         character(len=1024) :: filename
-        
-        !if (SNTRAN+SNSLID > 0) then
-        do_snowslide = .False.
-        if (SNSLID > 0) then
-            do_snowslide = (last_snowslide > 3600.) !Hard code to just be called every hour...
-        endif
 
         j_s = 2
         i_s = 2
@@ -404,7 +392,17 @@ contains
         day=real(domain%sim_time%day)
         hour=real(domain%sim_time%hour)
         dt=lsm_dt
-        
+    
+        fsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d(its:ite,jts:jte))
+        Nsnow = TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(its:ite,jts:jte))                        
+        !!
+        do i=1,NNsmax_HICAR
+            Tsnow(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(its:ite,i,jts:jte))
+            Sice(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d(its:ite,i,jts:jte))
+            Sliq(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d(its:ite,i,jts:jte))
+            Ds(i,:,:) = TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d(its:ite,i,jts:jte))
+        enddo
+
         call exch_FSM_state_vars(domain,corners_in=.True.)
 
         LW=TRANSPOSE(domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d(its:ite,jts:jte))
@@ -439,12 +437,6 @@ contains
                      TRANSPOSE(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(its:ite,domain%grid%kms,jts:jte))) 
         Udir = 90 - (Udir * 180/piconst + 180)
         where(Udir<0) Udir=Udir+360
-        
-        if ((domain%sim_time%seconds()   >=    last_output%seconds())) then
-            !If we are the first call since the last output, reset the per-output counters
-            domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d = 0.
-            last_output = domain%next_output
-        endif
         
         SWE_pre = domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(its:ite,jts:jte)
                 !!  
@@ -498,59 +490,8 @@ contains
 
         endif
 
-        
-        !Call Snowslide here -- must be done here and not in FSM since we need control over the parallelization of the routine
-        if (do_snowslide .and. SNSLID > 0) then
 
-            last_snowslide = last_snowslide + lsm_dt
-
-            if (do_snowslide) then
-                SD_0 = 0.0
-                Sice_0 = 0.0
-                SD_0_buff = 0.0
-                Sice_0_buff = 0.0
-
-                dSWE_slide_ = 0.0
-                first_SLIDE = .True.
-                aval = .False.
-                !Snowslide needs the corner snow depth information from corner neighbor processes
-                ! call exch_FSM_state_vars(domain,corners_in=.True.)
-                
-                do i=1,10
-                    call FSM_SNOWSLIDE(SD_0,Sice_0,SD_0_buff,Sice_0_buff,aval,first_SLIDE,dSWE_slide_)
-                    
-                    ! Copy interior buffer for exchange
-                    call exch_SLIDE_buffers(domain,SD_0_buff,Sice_0_buff)
-                    
-                    !Now, where the buffer is positive for halo cells, record that an avalanche was passed here
-                    aval = .False.
-                    where(SD_0_buff > SD_0) aval=.True.
-                    aval(j_s:j_e,i_s:i_e) = .False.
-                    
-                    !Must accumulate slide changes here, since we will loop over calls to snowslide
-                    domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = &
-                            domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d(domain%its:domain%ite,domain%jts:domain%jte) + TRANSPOSE(dSWE_slide_(j_s:j_e,i_s:i_e))
-
-                    ! trade over buffer to halo cells, in case avalanching snow was passed on previous iteration.
-                    SD_0(1,:) = SD_0_buff(1,:)
-                    SD_0(Nx_HICAR,:) = SD_0_buff(Nx_HICAR,:)
-                    SD_0(:,1) = SD_0_buff(:,1)
-                    SD_0(:,Ny_HICAR) = SD_0_buff(:,Ny_HICAR)
-
-                    Sice_0(1,:) = Sice_0_buff(1,:)
-                    Sice_0(Nx_HICAR,:) = Sice_0_buff(Nx_HICAR,:)
-                    Sice_0(:,1) = Sice_0_buff(:,1)
-                    Sice_0(:,Ny_HICAR) = Sice_0_buff(:,Ny_HICAR)
-
-
-                enddo
-                call FSM_SNOWSLIDE_END(SD_0,Sice_0)
-                last_snowslide = 0
-            endif
-        endif
-        
         !Accumulate all the SNTRAN fluxes calculated above
-        ! Do this here so that the grid and halo are still consistent for SNSLID if it is called
         if (SNTRAN > 0) call FSM_SNOWTRAN_ACCUM()
 
         !The End.
@@ -726,29 +667,6 @@ contains
         Qs_v = TRANSPOSE(Qs_v_var%data_2d(its:ite,jts:jte))
 
     end subroutine exch_SNTRAN_Qs
-
-    subroutine exch_SLIDE_buffers(domain,SD_0,Sice_0)
-        implicit none
-        
-        type(domain_t), intent(inout) :: domain
-        
-        real, dimension(Nx_HICAR,Ny_HICAR), intent(inout) :: SD_0, Sice_0
-
-        SD_0_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(SD_0(2:Nx_HICAR-1,2:Ny_HICAR-1))
-        Sice_0_var%data_2d(domain%its:domain%ite,domain%jts:domain%jte) = TRANSPOSE(Sice_0(2:Nx_HICAR-1,2:Ny_HICAR-1))
-        
-        !$acc update device(SD_0_var%data_2d, Sice_0_var%data_2d)
-
-        call domain%halo%exch_var(SD_0_var, corners=.True.)
-        call domain%halo%exch_var(Sice_0_var, corners=.True.)
-
-        !$acc update host(SD_0_var%data_2d, Sice_0_var%data_2d)
-
-        SD_0 = TRANSPOSE(SD_0_var%data_2d(its:ite,jts:jte))
-        Sice_0 = TRANSPOSE(Sice_0_var%data_2d(its:ite,jts:jte))
-
-
-    end subroutine exch_SLIDE_buffers
 
 
 !!

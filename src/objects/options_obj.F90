@@ -2120,7 +2120,7 @@ contains
 
         integer :: sm_nsnow_max(kMAX_NESTS)      ! maximum number of snow layers in the FSM2trans snow model
         integer, dimension(kMAX_NESTS) :: fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
-                   fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst
+                   fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_sntran, fsm_zoffst
         real, dimension(kMAX_NESTS)    :: fsm_ds_min, fsm_ds_surflay
         logical, dimension(kMAX_NESTS) :: fsm_hn_on, fsm_for_hn
 
@@ -2134,15 +2134,16 @@ contains
 
         integer, dimension(kMAX_NESTS) :: suspension_fine_mesh_levels, suspension_layer
         logical, dimension(kMAX_NESTS) :: bs_atm_feedback
+        integer, dimension(kMAX_NESTS) :: snowslide
 
         ! define the namelist
         namelist /sm_parameters/ sm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
-                                 fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_snslid, fsm_sntran, fsm_zoffst, &
+                                 fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_sntran, fsm_zoffst, &
                                  fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn, &
                                  snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt, &
                                  snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable, &
                                  snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_reduce_n_elements, snowpack_variant, snowpack_enable_vapour_transport, &
-                                 suspension_fine_mesh_levels, suspension_layer, bs_atm_feedback, saltation_model
+                                 suspension_fine_mesh_levels, suspension_layer, bs_atm_feedback, saltation_model, snowslide
                                  
 
         CHARACTER(LEN=200) :: error_msg
@@ -2164,7 +2165,6 @@ contains
         call set_nml_var_default(fsm_radsbg, 'fsm_radsbg', print_info, gennml)
         call set_nml_var_default(fsm_snfrac, 'fsm_snfrac', print_info, gennml)
         call set_nml_var_default(fsm_snolay, 'fsm_snolay', print_info, gennml)
-        call set_nml_var_default(fsm_snslid, 'fsm_snslid', print_info, gennml)
         call set_nml_var_default(fsm_sntran, 'fsm_sntran', print_info, gennml)
         call set_nml_var_default(fsm_zoffst, 'fsm_zoffst', print_info, gennml)
         call set_nml_var_default(fsm_ds_min, 'fsm_ds_min', print_info, gennml)
@@ -2194,6 +2194,7 @@ contains
         call set_nml_var_default(suspension_fine_mesh_levels, 'suspension_fine_mesh_levels', print_info, gennml)
         call set_nml_var_default(bs_atm_feedback, 'bs_atm_feedback', print_info, gennml)
         call set_nml_var_default(saltation_model, 'saltation_model', print_info, gennml)
+        call set_nml_var_default(snowslide, 'snowslide', print_info, gennml)
 
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
@@ -2246,7 +2247,6 @@ contains
         call set_nml_var(sm_options%fsm_radsbg, fsm_radsbg(n_indx), 'fsm_radsbg', fsm_radsbg(1))
         call set_nml_var(sm_options%fsm_snfrac, fsm_snfrac(n_indx), 'fsm_snfrac', fsm_snfrac(1))
         call set_nml_var(sm_options%fsm_snolay, fsm_snolay(n_indx), 'fsm_snolay', fsm_snolay(1))
-        call set_nml_var(sm_options%fsm_snslid, fsm_snslid(n_indx), 'fsm_snslid', fsm_snslid(1))
         call set_nml_var(sm_options%fsm_sntran, fsm_sntran(n_indx), 'fsm_sntran', fsm_sntran(1))
         call set_nml_var(sm_options%fsm_zoffst, fsm_zoffst(n_indx), 'fsm_zoffst', fsm_zoffst(1))
         call set_nml_var(sm_options%fsm_ds_min, fsm_ds_min(n_indx), 'fsm_ds_min', fsm_ds_min(1))
@@ -2277,6 +2277,7 @@ contains
         call set_nml_var(sm_options%suspension_fine_mesh_levels, suspension_fine_mesh_levels(n_indx), 'suspension_fine_mesh_levels', suspension_fine_mesh_levels(1))
         call set_nml_var(sm_options%bs_atm_feedback, bs_atm_feedback(n_indx), 'bs_atm_feedback')
         call set_nml_var(sm_options%saltation_model, saltation_model(n_indx), 'saltation_model', saltation_model(1))
+        call set_nml_var(sm_options%snowslide, snowslide(n_indx), 'snowslide', snowslide(1))
 
     end subroutine sm_parameters_namelist
     !> -------------------------------
@@ -3177,7 +3178,6 @@ contains
         call append_kv_int    (config_str, pos, 'sm', 'fsm_radsbg',       this%sm%fsm_radsbg)
         call append_kv_int    (config_str, pos, 'sm', 'fsm_snfrac',       this%sm%fsm_snfrac)
         call append_kv_int    (config_str, pos, 'sm', 'fsm_snolay',       this%sm%fsm_snolay)
-        call append_kv_int    (config_str, pos, 'sm', 'fsm_snslid',       this%sm%fsm_snslid)
         call append_kv_int    (config_str, pos, 'sm', 'fsm_sntran',       this%sm%fsm_sntran)
         call append_kv_int    (config_str, pos, 'sm', 'fsm_zoffst',       this%sm%fsm_zoffst)
         call append_kv_int    (config_str, pos, 'sm', 'fsm_oshdtn',       this%sm%fsm_oshdtn)
@@ -3209,6 +3209,7 @@ contains
         call append_kv_int    (config_str, pos, 'sm', 'suspension_fine_mesh_levels',   this%sm%suspension_fine_mesh_levels)
         call append_kv_logical(config_str, pos, 'sm', 'bs_atm_feedback',               this%sm%bs_atm_feedback)
         call append_kv_int    (config_str, pos, 'sm', 'saltation_model',               this%sm%saltation_model)
+        call append_kv_int    (config_str, pos, 'sm', 'snowslide',                   this%sm%snowslide)
 
         ! --- rad group ---
         call append_kv_logical(config_str, pos, 'rad', 'terrain_shading',      this%rad%terrain_shading)

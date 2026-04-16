@@ -41,6 +41,7 @@ module snow_model_driver
 #endif
 #endif
     use snow_drift,            only : snow_drift_var_request, snow_drift_init
+    use module_snowslide,      only : snowslide_var_request, snowslide_init, snowslide_step
 
     implicit none
 
@@ -54,7 +55,15 @@ module snow_model_driver
     logical :: restart
     integer :: update_interval
     real*8  :: last_model_time(kMAX_NESTS), next_update_time(kMAX_NESTS)
+    real*8  :: last_snowslide_time(kMAX_NESTS), next_snowslide_time(kMAX_NESTS)
     real :: lsm_dt
+
+    ! Cadence for SNOWSLIDE gravitational redistribution. Snowslide runs
+    ! once per hour (at the first snow-model tick on or after each hour
+    ! boundary), immediately before the snow model is invoked, so that the
+    ! snow model's built-in merge/split/metamorphism passes process the
+    ! fresh deposit on the same step.
+    real*8, parameter :: snowslide_interval_s = 3600.0d0
     
 contains
 
@@ -129,6 +138,11 @@ contains
         ! CRYOWRF-style blowing snow drift (works with both FSM and SNOWPACK)
         if (options%sm%suspension_layer == 1) then
             call snow_drift_var_request(options)
+        endif
+
+        ! SNOWSLIDE gravitational redistribution (works with any snow model)
+        if (options%sm%snowslide == 1) then
+            call snowslide_var_request(options)
         endif
 
     end subroutine sm_var_request
@@ -257,6 +271,12 @@ contains
             call snow_drift_init(domain, options)
         endif
 
+        ! Initialize SNOWSLIDE gravitational redistribution
+        if (options%sm%snowslide == 1) then
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Initializing SNOWSLIDE gravitational redistribution"
+            call snowslide_init(domain, options)
+        endif
+
         update_interval=options%lsm%update_interval
         if (.not.(context_change)) then
             if (update_interval<=10) then
@@ -275,6 +295,22 @@ contains
                 n_calls = int(elapsed / eff_interval)
                 last_model_time(domain%nest_indx) = options%general%start_time%seconds() + n_calls * eff_interval
                 next_update_time(domain%nest_indx) = last_model_time(domain%nest_indx) + eff_interval - 0.01
+            endif
+
+            ! Snowslide cadence: fire on the first snow-model tick, then every
+            ! snowslide_interval_s afterwards. On restart, align to the last
+            ! complete hour since start_time so timing is consistent.
+            if (options%sm%snowslide == 1) then
+                last_snowslide_time(domain%nest_indx) = domain%sim_time%seconds() - snowslide_interval_s
+                next_snowslide_time(domain%nest_indx) = domain%sim_time%seconds()
+                if (options%restart%restart) then
+                    elapsed = (options%restart%restart_time%seconds() - 0.01) - options%general%start_time%seconds()
+                    n_calls = int(elapsed / snowslide_interval_s)
+                    last_snowslide_time(domain%nest_indx) = options%general%start_time%seconds() &
+                                                            + n_calls * snowslide_interval_s
+                    next_snowslide_time(domain%nest_indx) = last_snowslide_time(domain%nest_indx) &
+                                                            + snowslide_interval_s - 0.01d0
+                endif
             endif
         endif
 
@@ -329,6 +365,18 @@ contains
             ! Setup the input data for the snow models
             current_snow = (snowfall-lsm_last_snow) !! MJ: snowfall in kg m-2
             current_rain = max(current_precipitation-current_snow,0.) !! MJ: rainfall in kg m-2
+
+            ! SNOWSLIDE gravitational redistribution runs on its own hourly
+            ! cadence, immediately before the snow model. This lets the snow
+            ! model's built-in merge/split/metamorphism/creep passes process
+            ! the fresh deposit on the same tick it was inserted.
+            if (options%sm%snowslide == 1 .and. &
+                domain%sim_time%seconds() >= next_snowslide_time(domain%nest_indx)) then
+                last_snowslide_time(domain%nest_indx) = domain%sim_time%seconds()
+                next_snowslide_time(domain%nest_indx) = next_snowslide_time(domain%nest_indx) &
+                                                        + snowslide_interval_s
+                call snowslide_step(domain, options)
+            endif
 
             if (options%physics%snowmodel==kSM_FSM) then
 #ifdef FSM

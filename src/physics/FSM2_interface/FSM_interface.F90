@@ -63,7 +63,7 @@ module FSM_interface
     public :: Nx_HICAR, Ny_HICAR, zH_HICAR, NNsmax_HICAR, NNsoil_HICAR, lat_HICAR,lon_HICAR,terrain_HICAR,dx_HICAR,slope_HICAR,&
               shd_HICAR, SNTRAN, SNSLID, LHN_ON, LFOR_HN, &
               NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,NOSHDTN,NALRADT,&
-              NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS, DDs_min,DDs_surflay,                           &
+              NSNTRAN,NSNOLAY,NHISWET,NCHECKS, DDs_min,DDs_surflay,                           &
               CTILE,rtthresh, LZ0PERT,LWCPERT,LFSPERT,LALPERT,LSLPERT
 
     !!
@@ -123,7 +123,7 @@ module FSM_interface
 
     integer :: &
         NALBEDO,NCANMOD,NCONDCT,NDENSTY,NEXCHNG,NHYDROL,NSNFRAC,NRADSBG,NZOFFST,NOSHDTN,NALRADT,&
-        NSNTRAN,NSNSLID,NSNOLAY,NHISWET,NCHECKS
+        NSNTRAN,NSNOLAY,NHISWET,NCHECKS
         
     logical :: LZ0PERT,LWCPERT,LFSPERT,LALPERT,LSLPERT
         

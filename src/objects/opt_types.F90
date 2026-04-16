@@ -220,7 +220,6 @@ module options_types
         integer :: fsm_radsbg
         integer :: fsm_snfrac
         integer :: fsm_snolay
-        integer :: fsm_snslid
         integer :: fsm_sntran
         integer :: fsm_zoffst
         integer :: fsm_oshdtn
@@ -258,6 +257,9 @@ module options_types
         integer :: suspension_fine_mesh_levels               ! Fine mesh levels for near-surface suspension (default 15)
         logical :: bs_atm_feedback     ! Atmospheric feedback from blowing snow sublimation
         integer :: saltation_model     ! kSALTATION_SORENSEN (0, default) or kSALTATION_DOORSCHOT (1)
+
+        ! SNOWSLIDE gravitational redistribution (works with any snow model)
+        integer :: snowslide           ! 0=off, 1=on
 
     end type sm_options_type
 

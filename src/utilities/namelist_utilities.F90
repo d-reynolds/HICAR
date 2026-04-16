@@ -3544,13 +3544,6 @@ contains
                 values = [0, 1]
                 default = "0"
                 group = "SM_Parameters"
-            case ("fsm_snslid")
-                description = "Flag to turn on SnowSlide in an FSM simulation"//achar(10)//BLNK_CHR_N// &
-                    "(0 = OFF, 1 = ON)"
-                allocate(values(2))
-                values = [0, 1]
-                default = "0"
-                group = "SM_Parameters"
             case ("fsm_snolay")
                 description = "Snow layering scheme to use in an FSM simulation"//achar(10)//BLNK_CHR_N// &
                     "(0 = Original Layering routine, 1 = Density-dependant layering)"
@@ -3682,6 +3675,13 @@ contains
                 if (present(val_keys)) then
                     val_keys = [character(len=kMAX_NAME_LENGTH) :: "NEUTRAL", trim(str(kSNOWPACK_ATMOS_STAB_NEUTRAL)), "MO_HOLTSLAG", trim(str(kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG)), "MO_MICHLMAYR", trim(str(kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR))]
                 endif
+                group = "SM_Parameters"
+            case("snowslide")
+                description = "SNOWSLIDE gravitational snow redistribution (Bernhardt & Schulz, 2010)"//achar(10)//BLNK_CHR_N// &
+                    "0 = off (default), 1 = on"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
                 group = "SM_Parameters"
             case("saltation_model")
                 description = "saltation mass flux model used by SNOWPACK / snow drift"//achar(10)//BLNK_CHR_N// &
