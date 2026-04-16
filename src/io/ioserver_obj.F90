@@ -1234,6 +1234,8 @@ contains
         integer, allocatable :: send_3d_sizes(:), buff_3d_sizes(:), disp_3d(:)
         INTEGER(KIND=MPI_ADDRESS_KIND) :: lowerbound, extent
 
+        if (this%initial_nest_done) return
+
         ! 1. Per-family max across this parent and its children.
         family_nz = this%nz_init_3d
         do n = 1, size(child_nests)

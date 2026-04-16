@@ -774,8 +774,7 @@ contains
                 snow_water_equivalent => domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
                 snow_nlayers => domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
                 land_emissivity => domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d, &
-                snow_temperature => domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
-                vegetation_fraction_out => domain%vars_2d(domain%var_indx(kVARS%vegetation_fraction_out)%v)%data_2d &
+                snow_temperature => domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d &
             )
             
             !$acc kernels
@@ -1134,6 +1133,7 @@ contains
 
                 month = domain%sim_time%month
 
+                associate(vegetation_fraction_out => domain%vars_2d(domain%var_indx(kVARS%vegetation_fraction_out)%v)%data_2d)
                 !$acc parallel loop gang vector collapse(2) present(veg_frac, vegetation_fraction_out)
                 do j = jts, jte
                     do i = its, ite
@@ -1144,6 +1144,7 @@ contains
                         endif
                     end do
                 end do
+                end associate
 
                 !$acc parallel loop gang vector collapse(2) present(nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, snow_height, snow_water_equivalent, snow_nlayers, snow_temperature)
                 do j = jts, jte
