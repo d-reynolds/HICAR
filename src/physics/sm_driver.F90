@@ -117,7 +117,7 @@ contains
                          kVARS%snow_temperature, kVARS%Ds, kVARS%snow_temperature_i, kVARS%Vol_Frac_I, kVARS%Vol_Frac_W, &
                          kVARS%Vol_Frac_A, kVARS%Vol_Frac_S, kVARS%Vol_Frac_WP, kVARS%Rg, kVARS%Rb, kVARS%Dd, kVARS%Sp, kVARS%mk, &
                          kVARS%snow_nlayers, kVARS%bs_threshold_ustar, kVARS%bs_saltation_flux, kVARS%bs_saltation_height, kVARS%bs_saltation_concentration, &
-                         kVARS%bs_swe_exchange, kVARS%mass_hoar, kVARS%CDot, kVARS%snow_stress, kVARS%N3, kVARS%depositionDate, kVARS%dSWE_subl, &
+                         kVARS%bs_swe_exchange, kVARS%bs_swe_erode_max, kVARS%mass_hoar, kVARS%CDot, kVARS%snow_stress, kVARS%N3, kVARS%depositionDate, kVARS%dSWE_subl, &
                          kVARS%meltflux_out_tstep, kVARS%meltflux_out_cumul])
 
              call options%restart_vars( &
@@ -574,10 +574,13 @@ contains
             end associate
 
             if (options%sm%suspension_layer == 1) then
-                ! zero out bs_swe_exch since it was tracking mass changes between snowmodel calls
-                associate (bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d)
+                ! zero out bs_swe_exch and bs_swe_erode_max since they tracked mass changes
+                ! and the historical deepest-erosion floor across this LSM step only.
+                associate (bs_swe_exch  => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d, &
+                           bs_swe_emax  => domain%vars_2d(domain%var_indx(kVARS%bs_swe_erode_max)%v)%data_2d)
                 !$acc kernels default(present)
                 bs_swe_exch = 0.0
+                bs_swe_emax = 0.0
                 !$acc end kernels
                 end associate
             endif
