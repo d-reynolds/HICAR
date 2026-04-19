@@ -37,6 +37,11 @@ module ioserver_interface
      real, pointer, dimension(:,:,:) :: buff
   end type buffer_2d_t
 
+  type rst_pack_t
+     real, allocatable :: buff_3d(:,:,:,:)
+     real, allocatable :: buff_2d(:,:,:)
+  end type rst_pack_t
+
   ! Ragged list of (i,j) cells assigned to one peer ioserver, used to build
   ! nest-transfer MPI datatypes. Populated by build_nest_geometry and consumed
   ! by build_indexed_type_from_cells.
@@ -85,9 +90,9 @@ module ioserver_interface
         type(buffer_2d_t), allocatable :: write_buffer_2d(:)
         type(buffer_2d_t), allocatable :: child_gather_buffers_2d(:)
 
-        type(MPI_Win) :: write_win_3d, write_win_2d, read_win, nest_win
-        type(MPI_Win) :: nest_win_2d, nest_win_3d_init
-        type(MPI_Group) :: children_group
+        ! write_win_3d/2d retained for the (stubbed) restart-read path. All
+        ! other RMA windows have been replaced with two-sided Isend/Irecv.
+        type(MPI_Win) :: write_win_3d, write_win_2d
 
         ! These MPI datatypes describe the access patterns between the IO read/write buffers and
         ! the child read/write buffers

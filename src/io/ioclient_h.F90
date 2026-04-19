@@ -69,12 +69,25 @@ module ioclient_interface
       logical :: written = .False.
       logical :: nest_updated = .False.
 
-      real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer_3d, forcing_buffer
-      real, dimension(:,:,:),   pointer :: write_buffer_2d, forcing_buffer_2d
-      real, dimension(:,:,:,:), pointer :: forcing_buffer_3d_init
-      type(MPI_Win) :: write_win_3d, write_win_2d, read_win, forcing_win, forcing_win_2d
-      type(MPI_Win) :: forcing_win_3d_init
-      type(MPI_Group) :: parent_group
+      real, dimension(:,:,:,:), pointer :: read_buffer => null()
+      real, dimension(:,:,:,:), pointer :: write_buffer_3d => null()
+      real, dimension(:,:,:,:), pointer :: forcing_buffer => null()
+      real, dimension(:,:,:),   pointer :: write_buffer_2d => null()
+      real, dimension(:,:,:),   pointer :: forcing_buffer_2d => null()
+      real, dimension(:,:,:,:), pointer :: forcing_buffer_3d_init => null()
+
+      ! Outstanding Irecv on read_buffer (kIO_TAG_READ). Posted early in
+      ! init_ioclient so the server-side Isend from parent scatter_forcing
+      ! during our wake does not race ahead of our reaching receive().
+      type(MPI_Request) :: read_req
+
+      ! Outstanding Irecvs for restart read (only if options%restart%restart).
+      ! Allocated + posted in init_ioclient, waited on in receive_rst.
+      type(MPI_Request) :: rst_req_3d, rst_req_2d
+      real, allocatable :: rst_scratch_3d(:,:,:,:)
+      real, allocatable :: rst_scratch_2d(:,:,:)
+      logical :: rst_posted = .false.
+
       character(len=kMAX_NAME_LENGTH) :: vars_for_nest(kMAX_STORAGE_VARS)
 
       ! Init-only nest transfer: 2D + extra 3D restart vars (not in atmospheric forcing)

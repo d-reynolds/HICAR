@@ -154,7 +154,6 @@ contains
         if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------" 
 
         call setup_MPI_windows(this)
-        call setup_MPI_types(this)
 
 
 
@@ -743,11 +742,7 @@ contains
     subroutine setup_MPI_windows(this)
         class(ioserver_t),   intent(inout)  :: this
 
-        type(c_ptr) :: tmp_ptr
-        integer(KIND=MPI_ADDRESS_KIND) :: win_size
-        integer :: ierr, real_size, n, size_out
-
-        CALL MPI_Type_size(MPI_REAL, real_size)
+        integer :: ierr, n
 
         ! +1 added to handle variables on staggered grids
         this%nx_w = maxval(this%iewc-this%iswc+1)+1
@@ -787,100 +782,52 @@ contains
         allocate(this%read_buffer(this%n_children))
         allocate(this%child_gather_buffers(this%n_children))
 
-        ! Shared memory windows — server reads client buffers directly
-        win_size = this%n_w_3d*this%nx_re*this%nz_w*this%ny_re
-        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_3d)
+        ! Plain per-child receive buffers — filled by Irecv in write_file
         do n = 1,this%n_children
-            call MPI_WIN_SHARED_QUERY(this%write_win_3d, (n-1), win_size, size_out, tmp_ptr)
-            call C_F_POINTER(tmp_ptr, this%write_buffer_3d(n)%buff, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re])
+            allocate(this%write_buffer_3d(n)%buff(this%n_w_3d, this%nx_re, this%nz_w, this%ny_re))
+            this%write_buffer_3d(n)%buff = kEMPT_BUFF
+            allocate(this%write_buffer_2d(n)%buff(this%n_w_2d, this%nx_re, this%ny_re))
+            this%write_buffer_2d(n)%buff = kEMPT_BUFF
         enddo
 
-        win_size = this%n_w_2d*this%nx_re*this%ny_re
-        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_2d)
-        do n = 1,this%n_children
-            call MPI_WIN_SHARED_QUERY(this%write_win_2d, (n-1), win_size, size_out, tmp_ptr)
-            call C_F_POINTER(tmp_ptr, this%write_buffer_2d(n)%buff, [this%n_w_2d, this%nx_re, this%ny_re])
-        enddo
-
+        ! Plain per-child receive buffers for nest forcing — filled by
+        ! Irecv in gather_forcing / gather_forcing_2d / gather_forcing_3d_init.
         if (this%n_f > 0) then
-            win_size = this%n_f*this%nx_w*this%ny_w*this%nz_w
-            call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%nest_win)
             do n = 1,this%n_children
-                call MPI_WIN_SHARED_QUERY(this%nest_win, (n-1), win_size, size_out, tmp_ptr)
-                call C_F_POINTER(tmp_ptr, this%child_gather_buffers(n)%buff, [this%n_f, this%nx_w, this%nz_w, this%ny_w])
+                allocate(this%child_gather_buffers(n)%buff(this%n_f, this%nx_w, this%nz_w, this%ny_w))
+                this%child_gather_buffers(n)%buff = kEMPT_BUFF
             enddo
         endif
 
         if (this%n_f_2d > 0) then
             allocate(this%child_gather_buffers_2d(this%n_children))
-            win_size = this%n_f_2d*this%nx_w*this%ny_w
-            call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%nest_win_2d)
             do n = 1,this%n_children
-                call MPI_WIN_SHARED_QUERY(this%nest_win_2d, (n-1), win_size, size_out, tmp_ptr)
-                call C_F_POINTER(tmp_ptr, this%child_gather_buffers_2d(n)%buff, [this%n_f_2d, this%nx_w, this%ny_w])
+                allocate(this%child_gather_buffers_2d(n)%buff(this%n_f_2d, this%nx_w, this%ny_w))
+                this%child_gather_buffers_2d(n)%buff = kEMPT_BUFF
             enddo
         endif
 
         if (this%n_f_3d_init > 0) then
             allocate(this%child_gather_buffers_3d_init(this%n_children))
-            win_size = this%n_f_3d_init*this%nx_w*this%nz_w*this%ny_w
-            call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%nest_win_3d_init)
             do n = 1,this%n_children
-                call MPI_WIN_SHARED_QUERY(this%nest_win_3d_init, (n-1), win_size, size_out, tmp_ptr)
-                call C_F_POINTER(tmp_ptr, this%child_gather_buffers_3d_init(n)%buff, [this%n_f_3d_init, this%nx_w, this%nz_w, this%ny_w])
+                allocate(this%child_gather_buffers_3d_init(n)%buff(this%n_f_3d_init, this%nx_w, this%nz_w, this%ny_w))
+                this%child_gather_buffers_3d_init(n)%buff = kEMPT_BUFF
             enddo
         endif
 
-        win_size = this%n_r*this%nx_r*this%nz_r*this%ny_r
-        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%read_win)
+        ! read_buffer: plain per-child send buffers used by scatter_forcing
+        ! (one MPI_Isend per child, kIO_TAG_READ).  No shared-memory window.
         do n = 1,this%n_children
-            call MPI_WIN_SHARED_QUERY(this%read_win, (n-1), win_size, size_out, tmp_ptr)
-            call C_F_POINTER(tmp_ptr, this%read_buffer(n)%buff, [this%n_r, this%nx_r, this%nz_r, this%ny_r])
+            allocate(this%read_buffer(n)%buff(this%n_r, this%nx_r, this%nz_r, this%ny_r))
+            this%read_buffer(n)%buff = kEMPT_BUFF
         enddo
-    
+
     end subroutine setup_MPI_windows
-
-    subroutine setup_MPI_types(this)
-        class(ioserver_t),   intent(inout)  :: this
-
-        integer :: i
-
-        allocate(this%rst_types_3d(this%n_children))
-        allocate(this%rst_types_2d(this%n_children))
-
-        allocate(this%child_rst_types_3d(this%n_children))
-        allocate(this%child_rst_types_2d(this%n_children))
-
-        do i = 1,this%n_children
-            call MPI_Type_create_subarray(4, [this%n_w_3d, (this%i_e_re-this%i_s_re+2), (this%k_e_w-this%k_s_w+1), (this%j_e_re-this%j_s_re+2)], &
-                [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), (this%k_e_w-this%k_s_w+1), (this%jerec(i)-this%jsrec(i)+2)], &
-                [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%rst_types_3d(i))
-        
-            call MPI_Type_create_subarray(3, [this%n_w_2d, (this%i_e_re-this%i_s_re+2), (this%j_e_re-this%j_s_re+2)], &
-                [this%n_w_2d, (this%ierec(i)-this%isrec(i)+2), (this%jerec(i)-this%jsrec(i)+2)], &
-                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%rst_types_2d(i))
-
-            call MPI_Type_create_subarray(4, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re], &
-                [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), this%nz_w, (this%jerec(i)-this%jsrec(i)+2)], &
-                [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_rst_types_3d(i))
-
-            call MPI_Type_create_subarray(3, [this%n_w_2d, this%nx_re, this%ny_re], &
-                [this%n_w_2d, (this%ierec(i)-this%isrec(i)+2), (this%jerec(i)-this%jsrec(i)+2)], &
-                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_rst_types_2d(i))
-
-            call MPI_Type_commit(this%rst_types_3d(i))
-            call MPI_Type_commit(this%rst_types_2d(i))
-            call MPI_Type_commit(this%child_rst_types_3d(i))
-            call MPI_Type_commit(this%child_rst_types_2d(i))
-        enddo
-    end subroutine setup_MPI_types
 
     subroutine init_with_clients(this)
         class(ioserver_t),   intent(inout)  :: this
         integer :: n, comm_size, ierr, i
         integer, allocatable, dimension(:) :: cnts, disps
-                        
-        type(MPI_Group) :: family_group
 
         !get number of clients on this communicator
         call MPI_Comm_size(this%client_comms, comm_size)
@@ -942,11 +889,6 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,this%kde,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,this%jde,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
 
-        call MPI_Comm_Group(this%client_comms,family_group)
-        call MPI_Comm_rank(this%client_comms,n)
-
-        call MPI_Group_Excl(family_group,1,[n],this%children_group)
-
         allocate(this%children_ranks(this%n_children))
 
         do n = 1,this%n_children
@@ -980,10 +922,12 @@ contains
         implicit none
         class(ioserver_t), intent(inout)  :: this
 
-        integer :: i, msg_size, ierr
+        integer :: i, msg_size, ierr, cc
         integer :: n, n_3d, n_2d, x_stag, y_stag, oi
         logical :: should_write_restart
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+        type(MPI_Request) :: reqs(2 * this%n_children)
+
         msg_size = 1
         disp = 0
 
@@ -995,16 +939,26 @@ contains
         if (STD_OUT_PE_IO) write(*,*) "Fetching data from child images for output"
         if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",this%nest_indx," --------------"
 
-        ! Receive dt from compute rank 0 for restart file (must happen before Win_Start to avoid deadlock)
+        ! Receive dt from compute rank 0 for restart file
         if (should_write_restart .or. this%first_write) then
-            call MPI_Recv(this%dt, 1, MPI_REAL, 0, 42, this%client_comms, MPI_STATUS_IGNORE, ierr)
+            call MPI_Recv(this%dt, 1, MPI_REAL, 0, kIO_TAG_DT_RESTART, this%client_comms, MPI_STATUS_IGNORE, ierr)
         endif
 
-        ! Do MPI_Win_Start on write_win to initiate get
-        call MPI_Win_Start(this%children_group,0,this%write_win_3d)
-        call MPI_Win_Start(this%children_group,0,this%write_win_2d)
+        ! Gather packed buffers from every child.  Matching Isend pairs are
+        ! posted in ioclient_obj::push (tags kIO_TAG_WRITE_3D / _2D).
+        do cc = 1, this%n_children
+            call MPI_Irecv(this%write_buffer_3d(cc)%buff, &
+                            size(this%write_buffer_3d(cc)%buff), MPI_REAL, &
+                            cc - 1, kIO_TAG_WRITE_3D, this%client_comms, &
+                            reqs(2*cc - 1), ierr)
+            call MPI_Irecv(this%write_buffer_2d(cc)%buff, &
+                            size(this%write_buffer_2d(cc)%buff), MPI_REAL, &
+                            cc - 1, kIO_TAG_WRITE_2D, this%client_comms, &
+                            reqs(2*cc), ierr)
+        enddo
+        call MPI_Waitall(2 * this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
 
-        ! Direct shared-memory reads with two-pass unpack
+        ! Unpack into outputer buffers (two-pass)
         ! Pass 1: output variables
         do i=1,this%n_children
             n_3d = 0; n_2d = 0
@@ -1041,9 +995,6 @@ contains
                 enddo
             endif
         enddo
-        ! Do MPI_Win_Complete on write_win to end get
-        call MPI_Win_Complete(this%write_win_3d)
-        call MPI_Win_Complete(this%write_win_2d)
         if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",this%nest_indx," --------------"
         if (STD_OUT_PE_IO) write(*,*) "Done data from child images for output"
         if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",this%nest_indx," --------------"
@@ -1100,67 +1051,78 @@ contains
     module subroutine gather_forcing(this)
         class(ioserver_t), intent(inout) :: this
 
-        integer :: i, msg_size
-        INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-
-        msg_size = 1
-        disp = 0
+        integer :: i, ierr
+        type(MPI_Request), allocatable :: reqs(:)
 
         if (this%n_f <= 0) then
             if (STD_OUT_PE) write(*,*) 'No forcing fields to gather, but we entered gather_forcing. This is a bug.'
             return
         endif
-        
-        ! Do MPI_Win_Start on nest_win to initiate get
-        call MPI_Win_Start(this%children_group,0,this%nest_win)
 
-        ! Direct shared-memory reads from child forcing buffers
+        ! Irecv child-packed forcing buffers into server-side per-child
+        ! receive buffers.  Matching Isend is in ioclient::update_nest.
+        allocate(reqs(this%n_children))
+        do i = 1, this%n_children
+            call MPI_Irecv(this%child_gather_buffers(i)%buff, &
+                           size(this%child_gather_buffers(i)%buff), MPI_REAL, &
+                           i - 1, kIO_TAG_NEST_3D, this%client_comms, reqs(i), ierr)
+        enddo
+        call MPI_Waitall(this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
+        deallocate(reqs)
+
+        ! Unpack received child buffers into the server's gather buffer
         do i=1,this%n_children
             this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,this%k_s_w:this%k_e_f,this%jswc(i):this%jewc(i)+1) = &
                 this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+2),this%k_s_w:this%k_e_f,1:(this%jewc(i)-this%jswc(i)+2))
         enddo
 
-        ! Do MPI_Win_Complete on nest_win to end get
-        call MPI_Win_Complete(this%nest_win)
-
     end subroutine gather_forcing
 
     module subroutine gather_forcing_2d(this)
         class(ioserver_t), intent(inout) :: this
-        integer :: i
+        integer :: i, ierr
+        type(MPI_Request), allocatable :: reqs(:)
 
         if (this%n_f_2d <= 0) return
 
-        call MPI_Win_Start(this%children_group, 0, this%nest_win_2d)
+        allocate(reqs(this%n_children))
+        do i = 1, this%n_children
+            call MPI_Irecv(this%child_gather_buffers_2d(i)%buff, &
+                           size(this%child_gather_buffers_2d(i)%buff), MPI_REAL, &
+                           i - 1, kIO_TAG_NEST_2D, this%client_comms, reqs(i), ierr)
+        enddo
+        call MPI_Waitall(this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
+        deallocate(reqs)
 
         do i = 1, this%n_children
             this%gather_buffer_2d(:, this%iswc(i):this%iewc(i)+1, this%jswc(i):this%jewc(i)+1) = &
                 this%child_gather_buffers_2d(i)%buff(:, 1:(this%iewc(i)-this%iswc(i)+2), 1:(this%jewc(i)-this%jswc(i)+2))
         enddo
 
-        call MPI_Win_Complete(this%nest_win_2d)
     end subroutine gather_forcing_2d
 
     module subroutine gather_forcing_3d_init(this)
         class(ioserver_t), intent(inout) :: this
-        integer :: i
+        integer :: i, ierr
+        type(MPI_Request), allocatable :: reqs(:)
 
         if (this%n_f_3d_init <= 0) return
 
-        call MPI_Win_Start(this%children_group, 0, this%nest_win_3d_init)
+        allocate(reqs(this%n_children))
+        do i = 1, this%n_children
+            call MPI_Irecv(this%child_gather_buffers_3d_init(i)%buff, &
+                           size(this%child_gather_buffers_3d_init(i)%buff), MPI_REAL, &
+                           i - 1, kIO_TAG_NEST_3D_INIT, this%client_comms, reqs(i), ierr)
+        enddo
+        call MPI_Waitall(this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
+        deallocate(reqs)
 
-        ! The parent's own init-3D data only extends to nz_w k-levels
-        ! (= k_e_w = the intra-nest Allreduce max). Slots above nz_w in
-        ! gather_buffer_3d_init remain at the 0.0 from the (re)allocation in
-        ! distribute_init_forcing. This keeps the read inside the child
-        ! ioclient's window view (sized nz_w via C_F_POINTER) even when the
-        ! per-family nz_init_3d is larger than this nest's nz_w.
+        ! The parent's own init-3D data only extends to nz_w k-levels.
         do i = 1, this%n_children
             this%gather_buffer_3d_init(:, this%iswc(i):this%iewc(i)+1, 1:this%nz_w, this%jswc(i):this%jewc(i)+1) = &
                 this%child_gather_buffers_3d_init(i)%buff(:, 1:(this%iewc(i)-this%iswc(i)+2), 1:this%nz_w, 1:(this%jewc(i)-this%jswc(i)+2))
         enddo
 
-        call MPI_Win_Complete(this%nest_win_3d_init)
     end subroutine gather_forcing_3d_init
 
     module subroutine distribute_forcing(this, child_ioserver, child_indx)
@@ -1372,24 +1334,22 @@ contains
     module subroutine scatter_forcing(this)
         class(ioserver_t), intent(inout) :: this
 
-        integer :: i, msg_size, p
-        real :: vmax, vmin
-        INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+        integer :: i, ierr
+        type(MPI_Request) :: reqs(this%n_children)
 
-        msg_size = 1
-        disp = 0
-
-        ! Do MPI_Win_Start on read_win to initiate put
-        call MPI_Win_Start(this%children_group,0,this%read_win)
-
-        ! Direct shared-memory copy to child read buffers
-        do i=1,this%n_children
-            this%read_buffer(i)%buff(:,1:(this%ierc(i)-this%isrc(i)+1)+1,:,1:(this%jerc(i)-this%jsrc(i)+1)+1) = &
-                this%forcing_buffer(:,this%isrc(i):this%ierc(i)+1,:,this%jsrc(i):this%jerc(i)+1)
+        ! Pack each child's slice into its send buffer and post one Isend
+        ! per child on kIO_TAG_READ.  Children post matching Irecv in
+        ! ioclient::receive.
+        do i = 1, this%n_children
+            this%read_buffer(i)%buff(:, 1:(this%ierc(i)-this%isrc(i)+1)+1, &
+                                      :, 1:(this%jerc(i)-this%jsrc(i)+1)+1) = &
+                this%forcing_buffer(:, this%isrc(i):this%ierc(i)+1, &
+                                     :, this%jsrc(i):this%jerc(i)+1)
+            call MPI_Isend(this%read_buffer(i)%buff, &
+                           size(this%read_buffer(i)%buff), MPI_REAL, &
+                           i - 1, kIO_TAG_READ, this%client_comms, reqs(i), ierr)
         enddo
-
-        ! Do MPI_Win_Complete on read_win to end put
-        call MPI_Win_Complete(this%read_win)
+        call MPI_Waitall(this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
 
     end subroutine
 
@@ -1400,8 +1360,9 @@ contains
         type(options_t),     intent(in)    :: options
 
         integer :: i, n_3d, n_2d, nx, ny, i_s_re, i_e_re, j_s_re, j_e_re
-        integer :: ncid, file_var_id, dimid_3d(4), nz, err, varid, start_3d(4), cnt_3d(4), start_2d(3), cnt_2d(3), msg_size
-        INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+        integer :: ncid, file_var_id, dimid_3d(4), nz, err, varid, start_3d(4), cnt_3d(4), start_2d(3), cnt_2d(3)
+        integer :: nx_c, ny_c, nz_c, ierr
+
         type(MPI_Info) :: IO_Comms_info
         real, allocatable :: data3d(:,:,:,:), restart_data_3d(:,:,:,:), restart_data_2d(:,:,:)
         type(meta_data_t)  :: var_meta
@@ -1410,13 +1371,12 @@ contains
         character(len=kMAX_STRING_LENGTH), allocatable :: tokens(:)
 
         integer :: restart_step                         ! time step relative to the start of the restart file
-        type(Time_type) :: time_at_step   ! restart date as a modified julian day        
+        type(Time_type) :: time_at_step   ! restart date as a modified julian day
+        type(MPI_Request), allocatable :: reqs(:)
+        type(rst_pack_t), allocatable :: packs(:)
 
         allocate(restart_data_3d(this%n_w_3d,this%i_s_re:this%i_e_re+1,this%k_s_w:this%k_e_w,this%j_s_re:this%j_e_re+1))
         allocate(restart_data_2d(this%n_w_2d,this%i_s_re:this%i_e_re+1,                      this%j_s_re:this%j_e_re+1))
-
-        msg_size = 1
-        disp = 0
 
         tokens = split_str(trim(options%domain%init_conditions_file), "/")
 
@@ -1501,23 +1461,33 @@ contains
         end do
         
         call check_ncdf(nf90_close(ncid), "Closing file "//trim(restart_in_file))
-        
-        ! Because this is for reading restart data, performance is not critical, and 
-        ! we use a simple MPI_fence syncronization
-        call MPI_Win_fence(0,this%write_win_3d)
-        call MPI_Win_fence(0,this%write_win_2d)
 
-        ! Loop through child images and send chunks of buffer array to each one
-        do i=1,this%n_children
-            !Note that the MPI datatypes here are reversed since we are working with the write window
-            call MPI_Put(restart_data_3d(1,this%isrec(i),1,this%jsrec(i)), msg_size, &
-                this%rst_types_3d(i), this%children_ranks(i), disp, msg_size, this%child_rst_types_3d(i), this%write_win_3d)
-
-            call MPI_Put(restart_data_2d(1,this%isrec(i),this%jsrec(i)), msg_size, &
-                this%rst_types_2d(i), this%children_ranks(i), disp, msg_size, this%child_rst_types_2d(i), this%write_win_2d)
+        ! Scatter restart slices to each child via flat Isend. One
+        ! per-child pack holds a contiguous copy of that child's
+        ! restart_data_{3d,2d} sub-block; clients post matching Irecv in
+        ! ioclient_obj::receive_rst (tags kIO_TAG_RST_3D / kIO_TAG_RST_2D).
+        allocate(packs(this%n_children))
+        allocate(reqs(2 * this%n_children))
+        nz_c = this%k_e_w - this%k_s_w + 1
+        do i = 1, this%n_children
+            nx_c = this%ierec(i) - this%isrec(i) + 2
+            ny_c = this%jerec(i) - this%jsrec(i) + 2
+            allocate(packs(i)%buff_3d(this%n_w_3d, nx_c, nz_c, ny_c))
+            allocate(packs(i)%buff_2d(this%n_w_2d, nx_c,       ny_c))
+            packs(i)%buff_3d = restart_data_3d(1:this%n_w_3d, &
+                                                this%isrec(i):this%isrec(i) + nx_c - 1, &
+                                                this%k_s_w:this%k_e_w, &
+                                                this%jsrec(i):this%jsrec(i) + ny_c - 1)
+            packs(i)%buff_2d = restart_data_2d(1:this%n_w_2d, &
+                                                this%isrec(i):this%isrec(i) + nx_c - 1, &
+                                                this%jsrec(i):this%jsrec(i) + ny_c - 1)
+            call MPI_Isend(packs(i)%buff_3d, size(packs(i)%buff_3d), MPI_REAL, &
+                            i - 1, kIO_TAG_RST_3D, this%client_comms, reqs(2*i - 1), ierr)
+            call MPI_Isend(packs(i)%buff_2d, size(packs(i)%buff_2d), MPI_REAL, &
+                            i - 1, kIO_TAG_RST_2D, this%client_comms, reqs(2*i),     ierr)
         enddo
-        call MPI_Win_fence(0,this%write_win_3d)
-        call MPI_Win_fence(0,this%write_win_2d)
+        call MPI_Waitall(2 * this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
+        ! packs + reqs auto-deallocate on block exit
 
     end subroutine 
 

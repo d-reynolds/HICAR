@@ -14,6 +14,7 @@
 !! 
 !!----------------------------------------------------------
 submodule(reader_interface) reader_implementation
+  use iso_fortran_env,    only : output_unit
   use debug_module,       only : check_ncdf
   use timer_interface,    only : timer_t
   use string,             only : as_string
@@ -35,7 +36,10 @@ contains
         type(dim_arrays_type), allocatable           :: var_dimensions(:)
         character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
         type(meta_data_t) :: var_meta
-        integer :: i, nx, ny, nz
+        type(Time_type), allocatable :: last_file_times(:)
+        type(Time_type) :: last_forcing_time
+        character(len=kMAX_FILE_LENGTH) :: last_file
+        integer :: i, nx, ny, nz, my_rank, comm_size, ierr
         integer, allocatable :: qv_dims(:)
         real, dimension(:,:,:), allocatable :: tmp_read_var
         
@@ -54,6 +58,52 @@ contains
         else
             call set_curfile_curstep(this, options%general%start_time, this%file_list, this%time_var, options%restart%restart)
         endif
+
+        ! Validate that the forcing files cover the requested simulation
+        ! end_time. Without this check, the reader silently hits EOF during
+        ! the run and the two-sided IO plumbing deadlocks (compute's
+        ! pre-posted Irecv on read_buffer never finds a matching Isend once
+        ! scatter_forcing is skipped).
+        last_file = this%file_list(size(this%file_list))
+        call read_times(last_file, this%time_var, last_file_times)
+
+        if (size(last_file_times) == 0) then
+            call MPI_Comm_Rank(MPI_COMM_WORLD, my_rank, ierr)
+            call MPI_Comm_Size(MPI_COMM_WORLD, comm_size, ierr)
+            if (my_rank == comm_size-1) then
+                write(*,*) ""
+                write(*,*) "================================================================"
+                write(*,*) "ERROR: forcing file contains no timestamps."
+                write(*,*) "================================================================"
+                write(*,*) "  File : ", trim(last_file)
+                write(*,*) "================================================================"
+                flush(output_unit)
+            endif
+            call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+        endif
+
+        last_forcing_time = last_file_times(size(last_file_times))
+
+        if (last_forcing_time < options%general%end_time) then
+            call MPI_Comm_Rank(MPI_COMM_WORLD, my_rank, ierr)
+            call MPI_Comm_Size(MPI_COMM_WORLD, comm_size, ierr)
+
+            if (my_rank == comm_size-1) then
+                write(*,*) ""
+                write(*,*) "================================================================"
+                write(*,*) "ERROR: forcing data does not cover the requested simulation end."
+                write(*,*) "================================================================"
+                write(*,*) "  Simulation end time    : ", trim(as_string(options%general%end_time))
+                write(*,*) "  Last forcing timestamp : ", trim(as_string(last_forcing_time))
+                write(*,*) "  Last forcing file      : ", trim(last_file)
+                write(*,*) ""
+                write(*,*) "Either shorten the namelist end_time or extend the forcing file list."
+                write(*,*) "================================================================"
+                flush(output_unit)
+            endif
+            call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+        endif
+
         !Now setup dimensions of reader_object so we know what part of input file that we should read
         this%its = its; this%ite = ite
         this%kts = kts; this%kte = kte

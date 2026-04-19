@@ -34,9 +34,8 @@ contains
         integer,            intent(in)     :: n_indx
 
         type(variable_t) :: var
-        type(MPI_Group) :: family_group
 
-        integer :: my_rank, comm_size, some_child_id
+        integer :: my_rank, comm_size, some_child_id, ierr, my_nx, my_ny
         
         this%i_s_r = forcing%its; this%i_e_r = forcing%ite
         this%k_s_r = forcing%kts; this%k_e_r = forcing%kte
@@ -84,15 +83,37 @@ contains
 
         call setup_MPI_windows(this)
 
-        !Setup the parent-child group used for buffer communication
-        call MPI_Comm_Group(this%parent_comms,family_group)
-        call MPI_Comm_size(this%parent_comms, comm_size)
+        ! Record the server's rank in parent_comms — used as destination /
+        ! source for all two-sided MPI calls with the IO server.
+        call MPI_Comm_Size(this%parent_comms, comm_size)
+        this%server = comm_size - 1
 
-        !Our rank is the last process in the group, which is equal to n_children
-        call MPI_Group_Incl(family_group, 1, [comm_size-1], this%parent_group)
+        ! Pre-post the first main-forcing Irecv so the server's Isend from
+        ! scatter_forcing (during our own wake OR during parent->child
+        ! handoff that fires before we wake) does not stall on an
+        ! unposted receive. Mirrors the old PSCW MPI_Win_Post(read_win)
+        ! that lived at the end of init_ioclient in the RMA design.
+        call MPI_Irecv(this%read_buffer, size(this%read_buffer), MPI_REAL, &
+                       this%server, kIO_TAG_READ, this%parent_comms, &
+                       this%read_req, ierr)
 
-        ! Do MPI_Win_Post on read_buffer to indicate that we are open for delivery of input data
-        call MPI_Win_Post(this%parent_group,0,this%read_win)
+        ! Restart: pre-post Irecvs so the server's Isend in
+        ! read_restart_file (which fires during the ioserver's wake, while
+        ! the compute ranks are still in init_model_state) does not stall.
+        if (options(n_indx)%restart%restart) then
+            my_nx = this%i_e_re - this%i_s_re + 2
+            my_ny = this%j_e_re - this%j_s_re + 2
+            allocate(this%rst_scratch_3d(size(this%write_buffer_3d, 1), my_nx, &
+                                          size(this%write_buffer_3d, 3), my_ny))
+            allocate(this%rst_scratch_2d(size(this%write_buffer_2d, 1), my_nx, my_ny))
+            call MPI_Irecv(this%rst_scratch_3d, size(this%rst_scratch_3d), MPI_REAL, &
+                           this%server, kIO_TAG_RST_3D, this%parent_comms, &
+                           this%rst_req_3d, ierr)
+            call MPI_Irecv(this%rst_scratch_2d, size(this%rst_scratch_2d), MPI_REAL, &
+                           this%server, kIO_TAG_RST_2D, this%parent_comms, &
+                           this%rst_req_2d, ierr)
+            this%rst_posted = .true.
+        endif
 
     end subroutine init_ioclient
 
@@ -149,12 +170,8 @@ contains
     subroutine setup_MPI_windows(this)
         class(ioclient_t),   intent(inout)  :: this
 
-        type(c_ptr) :: tmp_ptr
-        integer(KIND=MPI_ADDRESS_KIND) :: win_size
         integer :: nx_w, nz_w, ny_w, nx_re, ny_re, n_w_2d, n_f, n_f_2d, n_f_3d_init, n_w_3d, ierr
-        integer :: nx_r, nz_r, ny_r, n_r, real_size
-
-        CALL MPI_Type_size(MPI_REAL, real_size)
+        integer :: nx_r, nz_r, ny_r, n_r
 
         nx_w = 0
         nz_w = 0
@@ -193,46 +210,35 @@ contains
 
         call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
-        ! Shared memory windows for all builds; GPU builds get device copies for kernel packing
-        win_size = n_w_3d*nx_re*nz_w*ny_re
-        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_3d)
-        call C_F_POINTER(tmp_ptr, this%write_buffer_3d, [n_w_3d, nx_re, nz_w, ny_re])
+        ! Plain allocations — sent to server via Isend in push()
+        allocate(this%write_buffer_3d(n_w_3d, nx_re, nz_w, ny_re))
         this%write_buffer_3d = kEMPT_BUFF
         !$acc enter data copyin(this%write_buffer_3d)
 
-        win_size = n_w_2d*nx_re*ny_re
-        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%write_win_2d)
-        call C_F_POINTER(tmp_ptr, this%write_buffer_2d, [n_w_2d, nx_re, ny_re])
+        allocate(this%write_buffer_2d(n_w_2d, nx_re, ny_re))
         this%write_buffer_2d = kEMPT_BUFF
         !$acc enter data copyin(this%write_buffer_2d)
 
         if (n_f > 0) then
-            win_size = n_f*nx_w*ny_w*nz_w
-            call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%forcing_win)
-            call C_F_POINTER(tmp_ptr, this%forcing_buffer, [n_f, nx_w, nz_w, ny_w])
+            allocate(this%forcing_buffer(n_f, nx_w, nz_w, ny_w))
             this%forcing_buffer = kEMPT_BUFF
             !$acc enter data copyin(this%forcing_buffer)
         endif
 
         if (n_f_2d > 0) then
-            win_size = n_f_2d*nx_w*ny_w
-            call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%forcing_win_2d)
-            call C_F_POINTER(tmp_ptr, this%forcing_buffer_2d, [n_f_2d, nx_w, ny_w])
+            allocate(this%forcing_buffer_2d(n_f_2d, nx_w, ny_w))
             this%forcing_buffer_2d = kEMPT_BUFF
             !$acc enter data copyin(this%forcing_buffer_2d)
         endif
 
         if (n_f_3d_init > 0) then
-            win_size = n_f_3d_init*nx_w*nz_w*ny_w
-            call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%forcing_win_3d_init)
-            call C_F_POINTER(tmp_ptr, this%forcing_buffer_3d_init, [n_f_3d_init, nx_w, nz_w, ny_w])
+            allocate(this%forcing_buffer_3d_init(n_f_3d_init, nx_w, nz_w, ny_w))
             this%forcing_buffer_3d_init = kEMPT_BUFF
             !$acc enter data copyin(this%forcing_buffer_3d_init)
         endif
 
-        win_size = n_r*nx_r*nz_r*ny_r
-        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%parent_comms, tmp_ptr, this%read_win)
-        call C_F_POINTER(tmp_ptr, this%read_buffer, [n_r, nx_r, nz_r, ny_r])
+        ! read_buffer: plain heap allocation, filled by MPI_Irecv in receive()
+        allocate(this%read_buffer(n_r, nx_r, nz_r, ny_r))
         this%read_buffer = kEMPT_BUFF
         !$acc enter data copyin(this%read_buffer)
 
@@ -248,6 +254,7 @@ contains
         
         type(variable_t) :: var
         type(meta_data_t) :: tmp_var
+        type(MPI_Request) :: reqs(2)
         integer :: i, n_3d, n_2d, nx, ny, nz_v, i_s_w, i_e_w, j_s_w, j_e_w, idx
         logical :: should_do_restart
         integer :: ii, jj, kk
@@ -255,13 +262,6 @@ contains
 
         n_3d = 1
         n_2d = 1
-
-        !This is false only when it is the first call to push (i.e. first write call)
-        if (this%written) then
-            ! Do MPI_Win_Wait on write_buffer to make sure that server process has completed writing of previous data
-            call smart_wait(this%write_win_3d, 'Waiting for write_win_3d completion')
-            call smart_wait(this%write_win_2d, 'Waiting for write_win_2d completion')
-        endif
         this%written = .False.
 
         ! Change 2: Determine if restart variables should be packed this step
@@ -329,7 +329,7 @@ contains
             call MPI_Comm_Rank(this%parent_comms, my_rank)
             if (my_rank == 0) then
                 call MPI_Comm_Size(this%parent_comms, comm_size)
-                call MPI_Send(domain%dt, 1, MPI_REAL, comm_size-1, 42, this%parent_comms, ierr)
+                call MPI_Send(domain%dt, 1, MPI_REAL, comm_size-1, kIO_TAG_DT_RESTART, this%parent_comms, ierr)
             endif
 
             do i = 1, kMAX_STORAGE_VARS
@@ -395,10 +395,15 @@ contains
         this%restart_counter = this%restart_counter + 1
         if (this%first_push) this%first_push = .false.
 
-        ! Do MPI_Win_Post on write_win to inform that server process can begin writing of data
-        call MPI_Win_Post(this%parent_group,0,this%write_win_3d)
-        call MPI_Win_Post(this%parent_group,0,this%write_win_2d)
-
+        ! Ship the packed buffers to the IO server.  Server posts matching
+        ! MPI_Irecv in ioserver_obj::write_file.  Blocking Waitall below
+        ! keeps the Isend buffers live until the server has received; they
+        ! can then be safely overwritten by the next push().
+        call MPI_Isend(this%write_buffer_3d, size(this%write_buffer_3d), MPI_REAL, &
+                        this%server, kIO_TAG_WRITE_3D, this%parent_comms, reqs(1), ierr)
+        call MPI_Isend(this%write_buffer_2d, size(this%write_buffer_2d), MPI_REAL, &
+                        this%server, kIO_TAG_WRITE_2D, this%parent_comms, reqs(2), ierr)
+        call MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE, ierr)
 
     end subroutine 
 
@@ -409,18 +414,13 @@ contains
 
         type(variable_t) :: var
         type(meta_data_t) :: tmp_var
+        type(MPI_Request) :: req
         integer :: i, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, var_indx, idx
         logical :: var_val_check
         character(len=kMAX_NAME_LENGTH) :: err_msg
-        integer :: ii, jj, kk, nz_v
+        integer :: ii, jj, kk, nz_v, ierr
 
         n_3d = 1
-        ! Do MPI_Win_Wait on forcing_win. This is mostly unnecesarry, since the server process is what will be waiting on us, which is handeled by the MPI_Win_Start call
-        ! in ioserver%gather_foring. Still, MPI_Win_Wait is called here for completeness of PSCW model
-        if (this%nest_updated) then
-            call smart_wait(this%forcing_win, 'Waiting for forcing_win completion')
-        endif
-
         this%nest_updated = .False.
         !This is false only when it is the first call to push (i.e. first write call)
 
@@ -472,8 +472,13 @@ contains
         !$acc update host(this%forcing_buffer)
 
         this%nest_updated = .True.
-        ! Do MPI_Win_Post on forcing_win to inform that server process can begin gathering of nest data
-        call MPI_Win_Post(this%parent_group,0,this%forcing_win)
+
+        ! Ship packed forcing to the parent IO server.  Matching Irecv in
+        ! ioserver_obj::gather_forcing.  Blocking Wait keeps forcing_buffer
+        ! live until receive completes before we overwrite it next step.
+        call MPI_Isend(this%forcing_buffer, size(this%forcing_buffer), MPI_REAL, &
+                        this%server, kIO_TAG_NEST_3D, this%parent_comms, req, ierr)
+        call MPI_Wait(req, MPI_STATUS_IGNORE, ierr)
 
         ! One-time init: pack 2D + extra 3D restart vars for child nest initialization
         if (.not. this%initial_nest_done) then
@@ -481,14 +486,18 @@ contains
                 call pack_init_vars_2d(this, domain, this%send_init_vars%vars_2d)
                 !$acc wait
                 !$acc update host(this%forcing_buffer_2d)
-                call MPI_Win_Post(this%parent_group, 0, this%forcing_win_2d)
+                call MPI_Isend(this%forcing_buffer_2d, size(this%forcing_buffer_2d), MPI_REAL, &
+                                this%server, kIO_TAG_NEST_2D, this%parent_comms, req, ierr)
+                call MPI_Wait(req, MPI_STATUS_IGNORE, ierr)
             endif
 
             if (associated(this%forcing_buffer_3d_init)) then
                 call pack_init_vars_3d(this, domain, this%send_init_vars%vars_3d)
                 !$acc wait
                 !$acc update host(this%forcing_buffer_3d_init)
-                call MPI_Win_Post(this%parent_group, 0, this%forcing_win_3d_init)
+                call MPI_Isend(this%forcing_buffer_3d_init, size(this%forcing_buffer_3d_init), MPI_REAL, &
+                                this%server, kIO_TAG_NEST_3D_INIT, this%parent_comms, req, ierr)
+                call MPI_Wait(req, MPI_STATUS_IGNORE, ierr)
             endif
 
             this%initial_nest_done = .true.
@@ -509,12 +518,21 @@ contains
         integer :: i, n, nx, ny, var_id
         logical :: var_val_check
         character(len=kMAX_NAME_LENGTH) :: err_msg
-                
-        n = 1
-        ! Do MPI_Win_Wait on read_buffer to make sure that server process has completed data transfer
-        call smart_wait(this%read_win, 'Waiting for read_win completion')
+        integer :: dbg_rank, dbg_ierr, ierr
 
+        n = 1
+        ! Wait on the Irecv posted last time (in init_ioclient or the
+        ! tail of the previous receive() call). This lets the server's
+        ! scatter_forcing Isend complete without blocking on our arrival
+        ! in this routine — critical for init-time parent->child handoff.
+        call MPI_Wait(this%read_req, MPI_STATUS_IGNORE, ierr)
         !$acc update device(this%read_buffer)
+        ! Post the next Irecv now so a future scatter_forcing (next
+        ! timestep or next parent->child handoff) has a matching
+        ! receive already waiting.
+        call MPI_Irecv(this%read_buffer, size(this%read_buffer), MPI_REAL, &
+                        this%server, kIO_TAG_READ, this%parent_comms, &
+                        this%read_req, ierr)
 
         do i = 1, forcing%variables%n_vars
             if (forcing%variables%var_list(i)%var%computed) cycle
@@ -558,11 +576,8 @@ contains
             n = n + 1
         enddo
         !$acc wait
-        ! Do MPI_Win_Post on read_buffer to indicate that we are open for delivery of new input data
-        call MPI_Win_Post(this%parent_group,0,this%read_win)
 
-
-    end subroutine 
+    end subroutine
     
     ! This subroutine assigns the data from the write_buffer to the appropriate fields
     ! of the domain object. It is a "reverse write"
@@ -575,14 +590,25 @@ contains
         type(meta_data_t)     :: tmp_var
         type(variable_t)      :: var
         integer :: i, n_2d, n_3d, nx, ny, i_s_re, i_e_re, j_s_re, j_e_re
+        integer :: my_nx, my_ny, ierr
         character(len=kMAX_NAME_LENGTH) :: varname
 
-        ! Because this is for reading restart data, performance is not critical, and 
-        ! we use a simple MPI_fence syncronization
-        call MPI_Win_fence(0,this%write_win_3d)
-        call MPI_Win_fence(0,this%write_win_2d)
-        call MPI_Win_fence(0,this%write_win_3d)
-        call MPI_Win_fence(0,this%write_win_2d)
+        ! Wait on the restart Irecvs pre-posted in init_ioclient (matching
+        ! Isend is in ioserver_obj::read_restart_file, tags kIO_TAG_RST_3D
+        ! / _2D). Pre-posting prevents the server's Isend from stalling
+        ! while the compute rank is still in init_model_state.
+        if (this%rst_posted) then
+            call MPI_Wait(this%rst_req_3d, MPI_STATUS_IGNORE, ierr)
+            call MPI_Wait(this%rst_req_2d, MPI_STATUS_IGNORE, ierr)
+            my_nx = this%i_e_re - this%i_s_re + 2
+            my_ny = this%j_e_re - this%j_s_re + 2
+            this%write_buffer_3d(:, 1:my_nx, :, 1:my_ny) = this%rst_scratch_3d
+            this%write_buffer_2d(:, 1:my_nx,    1:my_ny) = this%rst_scratch_2d
+            !$acc update device(this%write_buffer_3d, this%write_buffer_2d)
+            deallocate(this%rst_scratch_3d)
+            deallocate(this%rst_scratch_2d)
+            this%rst_posted = .false.
+        endif
 
         n_3d = 1
         n_2d = 1
@@ -713,7 +739,7 @@ contains
 
     ! Pack 2D init-only variables from domain storage into forcing_buffer_2d.
     ! The caller is responsible for the surrounding !$acc wait / update host /
-    ! MPI_Win_Post sequence so that window logic stays visible at the call site.
+    ! MPI_Isend sequence so that the transport plumbing stays visible at the call site.
     subroutine pack_init_vars_2d(this, domain, var_names)
         class(ioclient_t), intent(inout) :: this
         type(domain_t),    intent(in)    :: domain
@@ -758,7 +784,7 @@ contains
     end subroutine pack_init_vars_2d
 
     ! Pack 3D init-only restart variables from domain storage into forcing_buffer_3d_init.
-    ! Caller handles surrounding !$acc wait / update host / MPI_Win_Post.
+    ! Caller handles surrounding !$acc wait / update host / MPI_Isend.
     subroutine pack_init_vars_3d(this, domain, var_names)
         class(ioclient_t), intent(inout) :: this
         type(domain_t),    intent(in)    :: domain
@@ -927,33 +953,26 @@ contains
         implicit none
         class(ioclient_t), intent(inout) :: this
 
-    end subroutine close_client
-
-    subroutine smart_wait(window, err_msg)
-        implicit none
-        type(MPI_Win), intent(in) :: window
-        character(len=*), intent(in) :: err_msg
-
         integer :: ierr
-        logical :: flag
-        double precision :: t_start, t_elapsed
 
-        flag = .False.
-        t_start = MPI_Wtime()
+        ! Cancel the pre-posted main-forcing Irecv left outstanding by the
+        ! last receive() call. MPI_Finalize may otherwise complain about
+        ! a live request on some implementations.
+        call MPI_Cancel(this%read_req, ierr)
+        call MPI_Wait(this%read_req, MPI_STATUS_IGNORE, ierr)
 
-        call MPI_Win_Test(window, flag, ierr)
-        do while (.not.(flag))
+        ! If restart was set but receive_rst was never reached (e.g. the
+        ! job errored out during init), free the pre-posted restart reqs.
+        if (this%rst_posted) then
+            call MPI_Cancel(this%rst_req_3d, ierr)
+            call MPI_Wait(this%rst_req_3d, MPI_STATUS_IGNORE, ierr)
+            call MPI_Cancel(this%rst_req_2d, ierr)
+            call MPI_Wait(this%rst_req_2d, MPI_STATUS_IGNORE, ierr)
+            if (allocated(this%rst_scratch_3d)) deallocate(this%rst_scratch_3d)
+            if (allocated(this%rst_scratch_2d)) deallocate(this%rst_scratch_2d)
+            this%rst_posted = .false.
+        endif
 
-            t_elapsed = MPI_Wtime() - t_start
-            if (t_elapsed > 600.0d0) then
-                if (STD_OUT_PE) write(*,*) err_msg
-                if (STD_OUT_PE) flush(output_unit)
-                stop
-            endif
-
-            call MPI_Win_Test(window, flag, ierr)
-            if (ierr /= 0) write(*,*) "MPI_Win_Test returned error: ",ierr
-        end do
-    end subroutine
+    end subroutine close_client
 
 end submodule

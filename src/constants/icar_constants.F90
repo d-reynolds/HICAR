@@ -477,6 +477,19 @@ module icar_constants
     ! Initial number of output variables for which pointers are created
     integer, parameter :: kINITIAL_VAR_SIZE= 128
 
+    ! MPI tag constants for IO client/server two-sided communication.
+    ! One tag per logical channel. Large separations (+100) leave room for
+    ! per-timestep subtags if we ever want pipelined overlap.
+    integer, parameter :: kIO_TAG_READ         = 101   ! server -> clients (forcing)
+    integer, parameter :: kIO_TAG_WRITE_3D     = 201   ! clients -> server (output 3D)
+    integer, parameter :: kIO_TAG_WRITE_2D     = 202   ! clients -> server (output 2D)
+    integer, parameter :: kIO_TAG_NEST_3D      = 301   ! child clients -> parent server (nest forcing 3D)
+    integer, parameter :: kIO_TAG_NEST_2D      = 302   ! child clients -> parent server (nest forcing 2D)
+    integer, parameter :: kIO_TAG_NEST_3D_INIT = 303   ! same, initial-condition variant
+    integer, parameter :: kIO_TAG_RST_3D       = 501   ! server -> clients (restart read, 3D)
+    integer, parameter :: kIO_TAG_RST_2D       = 502   ! server -> clients (restart read, 2D)
+    integer, parameter :: kIO_TAG_DT_RESTART   = 42    ! server <- rank-0 child (existing use)
+
     ! Maximum number of dimensions
     ! Note this is defined in NetCDF, though not enforced (a file can have more than 1024 dimensions)
     integer, parameter :: kMAX_DIMENSIONS  = 1024
