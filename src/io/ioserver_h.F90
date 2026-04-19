@@ -90,13 +90,9 @@ module ioserver_interface
         type(buffer_2d_t), allocatable :: write_buffer_2d(:)
         type(buffer_2d_t), allocatable :: child_gather_buffers_2d(:)
 
-        ! write_win_3d/2d retained for the (stubbed) restart-read path. All
-        ! other RMA windows have been replaced with two-sided Isend/Irecv.
-        type(MPI_Win) :: write_win_3d, write_win_2d
-
-        ! These MPI datatypes describe the access patterns between the IO read/write buffers and
-        ! the child read/write buffers
-        type(MPI_Datatype), allocatable, dimension(:) :: rst_types_3d, rst_types_2d, child_rst_types_3d, child_rst_types_2d
+        ! MPI datatypes describing nest-transfer access patterns. The
+        ! restart RMA datatypes (rst_types_*, child_rst_types_*) have been
+        ! retired alongside the move from MPI-RMA to two-sided Isend/Irecv.
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types, buffer_nest_types
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types_2d, buffer_nest_types_2d
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types_3d_init, buffer_nest_types_3d_init
