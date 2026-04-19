@@ -1128,7 +1128,7 @@ contains
         character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: landvar,lakedepthvar,hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
                                         snowh_var, soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var, soil_deept_var,           &
                                         vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
-                                        sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, &
+                                        sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_angle_var, &
                                         aspect_angle_var, shd_var, surface_temp_var, &  !!MJ added
                                         snowpack_nlayers_var, snowpack_deposition_var, &
                                         snowpack_vfi_var, snowpack_vfw_var, snowpack_vfa_var, &
@@ -1142,7 +1142,7 @@ contains
                             hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
                             soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
                             vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
-                            sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var, & !! MJ added
+                            sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_angle_var, aspect_angle_var, shd_var, & !! MJ added
                             surface_temp_var, init_surf_temp, init_sst, &
                             snowpack_nlayers_var, snowpack_deposition_var, &
                             snowpack_vfi_var, snowpack_vfw_var, snowpack_vfa_var, &
@@ -1204,7 +1204,6 @@ contains
 
         call set_nml_var_default(svf_var, 'svf_var', print_info, gennml)
         call set_nml_var_default(hlm_var, 'hlm_var', print_info, gennml)
-        call set_nml_var_default(slope_var, 'slope_var', print_info, gennml)
         call set_nml_var_default(slope_angle_var, 'slope_angle_var', print_info, gennml)
         call set_nml_var_default(aspect_angle_var, 'aspect_angle_var', print_info, gennml)
         call set_nml_var_default(shd_var, 'shd_var', print_info, gennml)
@@ -1328,7 +1327,6 @@ contains
 
         call set_nml_var(domain_options%svf_var, svf_var(n_indx), 'svf_var',domain_options, svf_var(1))
         call set_nml_var(domain_options%hlm_var, hlm_var(n_indx), 'hlm_var',domain_options, hlm_var(1))
-        call set_nml_var(domain_options%slope_var, slope_var(n_indx), 'slope_var',domain_options, slope_var(1))
         call set_nml_var(domain_options%slope_angle_var, slope_angle_var(n_indx), 'slope_angle_var',domain_options, slope_angle_var(1))
         call set_nml_var(domain_options%aspect_angle_var, aspect_angle_var(n_indx), 'aspect_angle_var',domain_options, aspect_angle_var(1))
         call set_nml_var(domain_options%shd_var, shd_var(n_indx), 'shd_var',domain_options, shd_var(1))

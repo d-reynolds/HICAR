@@ -1940,11 +1940,6 @@ contains
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Domain"
-            case ("slope_var")
-                description = "Name of the slope variable (0-1) in domain file"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
-                group = "Domain"
             case ("aspect_angle_var")
                 description = "Name of the aspect angle variable in domain file"
                 allocate(dimensions(2))

@@ -434,7 +434,7 @@ module options_types
                                         vegtype_var,vegfrac_var, albedo_var, vegfracmax_var, lai_var, canwat_var, &
                                         sinalpha_var, cosalpha_var, surface_temp_var
 
-        character(len=kMAX_NAME_LENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var !!MJ added
+        character(len=kMAX_NAME_LENGTH) :: svf_var, hlm_var, slope_angle_var, aspect_angle_var, shd_var !!MJ added
 
         ! SNOWPACK initial state variable names from domain file
         character(len=kMAX_NAME_LENGTH) :: snowpack_nlayers_var, snowpack_deposition_var, &

@@ -598,7 +598,7 @@ contains
         
         !! MJ added: the vars requested if we have terrain shading
         if (options%rad%terrain_shading) then
-            call options%alloc_vars( [kVARS%slope, kVARS%slope_angle, kVARS%aspect_angle, kVARS%svf, kVARS%hlm, kVARS%shortwave_direct, &
+            call options%alloc_vars( [kVARS%slope_angle, kVARS%aspect_angle, kVARS%svf, kVARS%hlm, kVARS%shortwave_direct, &
                                       kVARS%shortwave_diffuse, kVARS%shortwave_direct_above, &
                                       kVARS%shortwave_terrain, kVARS%terrain, kVARS%albedo, &
                                       kVARS%neighbor_terrain, kVARS%neighbor_slope_angle, kVARS%neighbor_aspect_angle])

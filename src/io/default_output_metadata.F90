@@ -963,16 +963,6 @@ contains
                                 attribute_t("coordinates",   "lat lon")]
                     
         !>------------------------------------------------------------
-        !!  Terrain slope
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%slope) then
-            var_meta%name        = "slope"
-            var_meta%dimensions  = two_d_dimensions
-            var_meta%static_data = .True.
-            var_meta%attributes  = [attribute_t("long_name", "slope of the terrain"),                 &
-                                attribute_t("units",         "rad"),                                   &
-                                attribute_t("coordinates",   "lat lon")]
-        !>------------------------------------------------------------
         !!  Terrain slope in degrees
         !!------------------------------------------------------------
         else if (var_idx==kVARS%slope_angle) then

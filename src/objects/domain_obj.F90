@@ -2220,6 +2220,117 @@ contains
                 this%vars_2d(this%var_indx(kVARS%canopy_water)%v)%data_2d = 0
             endif
         endif
+
+        !!
+        if (options%domain%slope_angle_var /= "") then
+            call io_read(options%domain%init_conditions_file,   &
+                            options%domain%slope_angle_var,         &
+                            temporary_data)
+            if (maxval(temporary_data) > 10.0) then
+                if (STD_OUT_PE) write(*,*) "WARNING: detected slope angles > 10 radians in domain input data."
+                if (STD_OUT_PE) write(*,*) "         Check units of slope angle variable in ", trim(options%domain%init_conditions_file), " ", trim(options%domain%slope_angle_var)
+                if (STD_OUT_PE) write(*,*) "         and ensure they are in radians (not degrees or percent slope)"
+                if (STD_OUT_PE) write(*,*) "         Auto-converting slope angle to radians assuming input was in degrees."
+                temporary_data = temporary_data * DEGRAD
+            endif
+            if (this%var_indx(kVARS%slope_angle)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+            if (this%var_indx(kVARS%neighbor_slope_angle)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d = &
+                    temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
+            endif
+        else ! calculate manually
+            associate(terrain => this%vars_2d(this%var_indx(kVARS%neighbor_terrain)%v)%data_2d)
+                do j = this%jhs, this%jhe
+                    do i = this%ihs, this%ihe
+                        ! Compute dz/dx via centered differences, forward/backward at boundaries
+                        if (i == this%ihs) then
+                            dzdx_val = (terrain(i+1,j) - terrain(i,j)) / this%dx
+                        elseif (i == this%ihe) then
+                            dzdx_val = (terrain(i,j) - terrain(i-1,j)) / this%dx
+                        else
+                            dzdx_val = (terrain(i+1,j) - terrain(i-1,j)) / (2.0 * this%dx)
+                        endif
+                        if (j == this%jhs) then
+                            dzdy_val = (terrain(i,j+1) - terrain(i,j)) / this%dx
+                        elseif (j == this%jhe) then
+                            dzdy_val = (terrain(i,j) - terrain(i,j-1)) / this%dx
+                        else
+                            dzdy_val = (terrain(i,j+1) - terrain(i,j-1)) / (2.0 * this%dx)
+                        endif
+
+                        if (this%var_indx(kVARS%neighbor_slope_angle)%v > 0) then
+                            this%vars_2d(this%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d(i,j) = atan(sqrt(dzdx_val**2 + dzdy_val**2))
+                        endif
+
+                        if (this%var_indx(kVARS%slope_angle)%v > 0 &
+                                .and. i <= this%grid%ime .and. j <= this%grid%jme &
+                                .and. i >= this%grid%ims .and. j >= this%grid%jms) then
+                            this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d(i,j) = atan(sqrt(dzdx_val**2 + dzdy_val**2))
+                        endif
+                    enddo
+                enddo
+            end associate
+        endif
+
+        !!
+        if (options%domain%aspect_angle_var /= "") then
+            call io_read(options%domain%init_conditions_file,   &
+                            options%domain%aspect_angle_var,         &
+                            temporary_data)
+            if (maxval(temporary_data) > 10.0) then
+                if (STD_OUT_PE) write(*,*) "WARNING: detected aspect angles > 10 radians in domain input data."
+                if (STD_OUT_PE) write(*,*) "         Check units of aspect angle variable in ", trim(options%domain%init_conditions_file), " ", trim(options%domain%aspect_angle_var)
+                if (STD_OUT_PE) write(*,*) "         and ensure they are in radians (not degrees or percent slope)"
+                if (STD_OUT_PE) write(*,*) "         Auto-converting aspect angle to radians assuming input was in degrees."
+                temporary_data = temporary_data * DEGRAD
+            endif
+            if (this%var_indx(kVARS%aspect_angle)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+            if (this%var_indx(kVARS%neighbor_aspect_angle)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d = &
+                    temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
+            endif
+        else ! calculate manually
+            ! Calculate neighbor aspect angle first from the DEM using centered differences
+            ! Aspect angle is the direction of steepest slope: atan2(dz/dy, dz/dx)
+            associate(terrain => this%vars_2d(this%var_indx(kVARS%neighbor_terrain)%v)%data_2d)
+                do j = this%jhs, this%jhe
+                    do i = this%ihs, this%ihe
+                        ! Compute dz/dx via centered differences, forward/backward at boundaries
+                        if (i == this%ihs) then
+                            dzdx_val = (terrain(i+1,j) - terrain(i,j)) / this%dx
+                        elseif (i == this%ihe) then
+                            dzdx_val = (terrain(i,j) - terrain(i-1,j)) / this%dx
+                        else
+                            dzdx_val = (terrain(i+1,j) - terrain(i-1,j)) / (2.0 * this%dx)
+                        endif
+                        if (j == this%jhs) then
+                            dzdy_val = (terrain(i,j+1) - terrain(i,j)) / this%dx
+                        elseif (j == this%jhe) then
+                            dzdy_val = (terrain(i,j) - terrain(i,j-1)) / this%dx
+                        else
+                            dzdy_val = (terrain(i,j+1) - terrain(i,j-1)) / (2.0 * this%dx)
+                        endif
+
+                        ! Aspect angle in radians: atan2(dzdy, dzdx)
+                        ! This gives direction perpendicular to contour lines (0 = E, π/2 = N, π = W, -π/2 = S)
+                        if (this%var_indx(kVARS%neighbor_aspect_angle)%v > 0) then
+                            this%vars_2d(this%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d(i,j) = atan2(dzdy_val, dzdx_val)
+                        endif
+
+                        if (this%var_indx(kVARS%aspect_angle)%v > 0 &
+                                .and. i <= this%grid%ime .and. j <= this%grid%jme &
+                                .and. i >= this%grid%ims .and. j >= this%grid%jms) then
+                            this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d(i,j) = atan2(dzdy_val, dzdx_val)
+                        endif
+                    enddo
+                enddo
+            end associate
+        endif
+
         if (options%domain%shd_var /= "") then
             call io_read(options%domain%init_conditions_file,   &
                            options%domain%shd_var,       &
@@ -2234,29 +2345,15 @@ contains
                 ! Shd (Snow holding depth) is needed by the Snowslide parameterization (Bernhardt and Schulz 2010)
                 ! Values for the parameterization of Shd come from (Marsh) et al., 2022
 
+                do j = this%jms, this%jme
+                    do i = this%ims, this%ime
+                        slope_deg_val = max(this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d(i,j) / deg2rad, 10.0)
 
-                associate(terrain => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d, &
-                          shd     => this%vars_2d(this%var_indx(kVARS%shd)%v)%data_2d)
-                    do j = this%jts, this%jte
-                        do i = this%its, this%ite
-                            ! Compute dz/dx via centered differences, forward/backward at boundaries
-                            dzdx_val = (terrain(i+1,j) - terrain(i-1,j)) / (2.0 * this%dx)
-                            dzdy_val = (terrain(i,j+1) - terrain(i,j-1)) / (2.0 * this%dx)
-
-                            ! Slope in radians, then convert to degrees with a minimum of 10 degrees
-                            slope_rad_val = atan(sqrt(dzdx_val**2 + dzdy_val**2))
-                            slope_deg_val = max(slope_rad_val / deg2rad, 10.0)
-
-                            shd_norm = 3178.4 * slope_deg_val**(-1.998)
-                            cos_slope_thresh = max(cos(slope_deg_val * deg2rad), 0.001)
-                            shd(i,j) = shd_norm * cos_slope_thresh
-                        enddo
+                        shd_norm = 3178.4 * slope_deg_val**(-1.998)
+                        cos_slope_thresh = max(cos(slope_deg_val * deg2rad), 0.001)
+                        this%vars_2d(this%var_indx(kVARS%shd)%v)%data_2d(i,j) = shd_norm * cos_slope_thresh
                     enddo
-                !$acc update device(shd)
-                call this%halo%exch_var(this%vars_2d(this%var_indx(kVARS%shd)%v),corners=.True.)
-                !$acc update host(shd)
-                end associate
-
+                enddo
             endif
         endif
 
@@ -2287,60 +2384,6 @@ contains
                 stop "svf_var not specified in domain file, but required for terrain shading"
             endif            
             !!
-            if (options%domain%slope_var /= "") then
-                call io_read(options%domain%init_conditions_file,   &
-                               options%domain%slope_var,         &
-                               temporary_data)
-                if (this%var_indx(kVARS%slope)%v > 0) then
-                    this%vars_2d(this%var_indx(kVARS%slope)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-                endif
-            else
-                stop "slope_var not specified in domain file, but required for terrain shading"
-            endif            
-            !!
-            if (options%domain%slope_angle_var /= "") then
-                call io_read(options%domain%init_conditions_file,   &
-                               options%domain%slope_angle_var,         &
-                               temporary_data)
-                if (maxval(temporary_data) > 10.0) then
-                    if (STD_OUT_PE) write(*,*) "WARNING: detected slope angles > 10 degrees in domain input data."
-                    if (STD_OUT_PE) write(*,*) "         Check units of slope angle variable in ", trim(options%domain%init_conditions_file), " ", trim(options%domain%slope_angle_var)
-                    if (STD_OUT_PE) write(*,*) "         and ensure they are in radians (not degrees or percent slope)"
-                    if (STD_OUT_PE) write(*,*) "         Auto-converting slope angle to radians assuming input was in degrees."
-                    temporary_data = temporary_data * DEGRAD
-                endif
-                if (this%var_indx(kVARS%slope_angle)%v > 0) then
-                    this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-                endif
-                if (this%var_indx(kVARS%neighbor_slope_angle)%v > 0) then
-                    this%vars_2d(this%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d = &
-                        temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
-                endif
-            else
-                stop "slope_angle_var not specified in domain file, but required for terrain shading"
-            endif
-            !!
-            if (options%domain%aspect_angle_var /= "") then
-                call io_read(options%domain%init_conditions_file,   &
-                               options%domain%aspect_angle_var,         &
-                               temporary_data)
-                if (maxval(temporary_data) > 10.0) then
-                    if (STD_OUT_PE) write(*,*) "WARNING: detected aspect angles > 10 degrees in domain input data."
-                    if (STD_OUT_PE) write(*,*) "         Check units of aspect angle variable in ", trim(options%domain%init_conditions_file), " ", trim(options%domain%aspect_angle_var)
-                    if (STD_OUT_PE) write(*,*) "         and ensure they are in radians (not degrees or percent slope)"
-                    if (STD_OUT_PE) write(*,*) "         Auto-converting aspect angle to radians assuming input was in degrees."
-                    temporary_data = temporary_data * DEGRAD
-                endif
-                if (this%var_indx(kVARS%aspect_angle)%v > 0) then
-                    this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-                endif
-                if (this%var_indx(kVARS%neighbor_aspect_angle)%v > 0) then
-                    this%vars_2d(this%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d = &
-                        temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
-                endif
-            else
-                stop "aspect_angle_var not specified in domain file, but required for terrain shading"
-            endif
         endif
 
         ! Initialize surface temperature fields from 2D field (if provided) or scalar fallback

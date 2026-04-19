@@ -347,7 +347,6 @@ module icar_constants
         integer :: costheta
         integer :: sintheta
         integer :: cosine_zenith_angle
-        integer :: slope
         integer :: slope_angle
         integer :: aspect_angle
         integer :: svf
