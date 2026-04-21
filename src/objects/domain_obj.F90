@@ -2486,6 +2486,7 @@ contains
 
         real, allocatable :: temporary_data(:,:)
         integer :: nx_global, ny_global, nz_global, nsmooth, adv_order, my_index
+        integer :: max_halo_nz
 
         nsmooth = max(1, int(options%wind%smooth_wind_distance / options%domain%dx))
         if (options%wind%smooth_wind_distance == 0.0) nsmooth = 0
@@ -2519,39 +2520,49 @@ contains
             my_index = my_index + 1
         endif
 
-        call this%grid%set_grid_dimensions(     nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, adv_order=adv_order)
-        call this%grid8w%set_grid_dimensions(   nx_global, ny_global, nz_global+1, image=my_index, comms=this%compute_comms, adv_order=adv_order)
+        ! Unified halo-window depth: every grid's halo MPI types and the
+        ! halo's _in_win windows are sized to this, so any grid whose nz
+        ! exceeds nz_global (e.g. kSNOW_GRID_Z in SNOWPACK builds) can be
+        ! halo-exchanged without hitting the old MPI_DATATYPE_NULL branch.
+        max_halo_nz = max(nz_global + 1, kSNOW_GRID_Z + 1, kSNOWSOIL_GRID_Z, &
+                          kSOIL_GRID_Z, kFM_GRID_Z, kSOILCOMP_GRID_Z,        &
+                          kGECROS_GRID_Z, kCROP_GRID_Z, kMONTH_GRID_Z,       &
+                          kLAKE_Z, kLAKE_SOISNO_Z, kLAKE_SOI_Z,              &
+                          kLAKE_SOISNO_1_Z, 90)
 
-        call this%u_grid%set_grid_dimensions( nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, adv_order=adv_order, nx_extra = 1)
-        call this%v_grid%set_grid_dimensions( nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, adv_order=adv_order, ny_extra = 1)
+        call this%grid%set_grid_dimensions(     nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid8w%set_grid_dimensions(   nx_global, ny_global, nz_global+1, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+
+        call this%u_grid%set_grid_dimensions( nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order, nx_extra = 1)
+        call this%v_grid%set_grid_dimensions( nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order, ny_extra = 1)
 
         ! for 2D mass variables
-        call this%grid2d%set_grid_dimensions( nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
+        call this%grid2d%set_grid_dimensions( nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
 
         ! setup a 2D lat/lon grid extended by nsmooth grid cells so that smoothing can take place "across" images
         ! This just sets up the fields to interpolate u and v to so that the input data are handled on an extended
         ! grid.  They are then subset to the u_grid and v_grids above before actual use.
-        call this%u_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order, nx_extra = 1)
+        call this%u_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order, nx_extra = 1)
 
         ! handle the v-grid too
-        call this%v_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order, ny_extra = 1)
-        
-        call this%column_grid%set_grid_dimensions(               0,         0, nz_global, image=my_index, comms=this%compute_comms, adv_order=adv_order) !! MJ added
-        call this%grid_soil%set_grid_dimensions(         nx_global, ny_global, kSOIL_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_snow%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_snow_i%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z+1, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_snowsoil%set_grid_dimensions(     nx_global, ny_global, kSNOWSOIL_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_fm%set_grid_dimensions(           nx_global, ny_global, kFM_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_soilcomp%set_grid_dimensions(     nx_global, ny_global, kSOILCOMP_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_gecros%set_grid_dimensions(       nx_global, ny_global, kGECROS_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_croptype%set_grid_dimensions(     nx_global, ny_global, kCROP_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_monthly%set_grid_dimensions(      nx_global, ny_global, kMONTH_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake%set_grid_dimensions(         nx_global, ny_global, kLAKE_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake_soisno%set_grid_dimensions(  nx_global, ny_global, kLAKE_SOISNO_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake_soi%set_grid_dimensions(     nx_global, ny_global, kLAKE_SOI_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake_soisno_1%set_grid_dimensions(nx_global, ny_global, kLAKE_SOISNO_1_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_hlm%set_grid_dimensions(     nx_global, ny_global, 90, image=my_index, comms=this%compute_comms, adv_order=adv_order) !! MJ added
-        call this%grid_Sx%set_grid_dimensions(     nx_global, ny_global, nz_global, 72, image=my_index, comms=this%compute_comms, adv_order=adv_order) !! MJ added
+        call this%v_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order, ny_extra = 1)
+
+        call this%column_grid%set_grid_dimensions(               0,         0, nz_global, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order) !! MJ added
+        call this%grid_soil%set_grid_dimensions(         nx_global, ny_global, kSOIL_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_snow%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_snow_i%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z+1, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_snowsoil%set_grid_dimensions(     nx_global, ny_global, kSNOWSOIL_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_fm%set_grid_dimensions(           nx_global, ny_global, kFM_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_soilcomp%set_grid_dimensions(     nx_global, ny_global, kSOILCOMP_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_gecros%set_grid_dimensions(       nx_global, ny_global, kGECROS_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_croptype%set_grid_dimensions(     nx_global, ny_global, kCROP_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_monthly%set_grid_dimensions(      nx_global, ny_global, kMONTH_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_lake%set_grid_dimensions(         nx_global, ny_global, kLAKE_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_lake_soisno%set_grid_dimensions(  nx_global, ny_global, kLAKE_SOISNO_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_lake_soi%set_grid_dimensions(     nx_global, ny_global, kLAKE_SOI_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_lake_soisno_1%set_grid_dimensions(nx_global, ny_global, kLAKE_SOISNO_1_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_hlm%set_grid_dimensions(     nx_global, ny_global, 90, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order) !! MJ added
+        call this%grid_Sx%set_grid_dimensions(     nx_global, ny_global, nz_global, 72, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order) !! MJ added
 
         call this%global_grid_2d%set_grid_dimensions(   nx_global, ny_global, 0)
         call this%global_grid%set_grid_dimensions(   nx_global, ny_global, nz_global)

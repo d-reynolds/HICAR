@@ -176,7 +176,7 @@ module subroutine init_halo(this, exch_vars, grid, comms)
         call MPI_INFO_SET(info_in, 'same_disp_unit', '.true.')
 #endif
         nx = this%grid%ns_halo_nx
-        nz = this%grid%halo_nz
+        nz = this%grid%halo_win_nz   ! single-var exch_var windows sized to max
         ny = this%halo_size+1
         win_size = nx*nz*ny
 
@@ -208,7 +208,7 @@ module subroutine init_halo(this, exch_vars, grid, comms)
         !$acc enter data copyin(this%north_in_buffer_2d, this%north_in_buffer)
 
         nx = this%halo_size+1
-        nz = this%grid%halo_nz
+        nz = this%grid%halo_win_nz   ! single-var exch_var windows sized to max
         ny = this%grid%ew_halo_ny
         win_size = nx*nz*ny
 
@@ -245,7 +245,7 @@ module subroutine init_halo(this, exch_vars, grid, comms)
         this%west_in_3d = 1
 
         nx = this%halo_size+1
-        nz = this%grid%halo_nz
+        nz = this%grid%halo_win_nz   ! single-var exch_var windows sized to max
         ny = this%halo_size+1
         win_size = nx*nz*ny
 

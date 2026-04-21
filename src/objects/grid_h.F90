@@ -15,6 +15,10 @@ module grid_interface
         integer :: jms, jme
         integer :: kms, kme
         integer :: ns_halo_nx, ew_halo_ny, halo_nz, halo_size
+        integer :: halo_win_nz  ! = max(nz, global_nz). Used only for single-var
+                                ! exch_var windows/buffers so grids with nz >
+                                ! nz_global (e.g. snow) can still be exchanged.
+                                ! Batch halo (atm-only) keeps using halo_nz.
         integer :: nx_e, ny_e
         integer :: nx_global, ny_global
         integer :: nx = 0

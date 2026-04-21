@@ -168,7 +168,18 @@ contains
       if (present(nx_extra)) this%nx_e = nx_extra ! used to add 1 to the u-field staggered grid
       if (present(ny_extra)) this%ny_e = ny_extra ! used to add 1 to the v-field staggered grid
       this%nz         = nz                                            ! note nz is both global and local
-      this%halo_nz    = this%nz
+      this%halo_nz    = this%nz    ! used by the batch halo path (atm-only)
+      ! halo_win_nz sizes the single-variable exch_var windows and buffers
+      ! (halo_obj.F90 _in_win/_in_buffer allocations). When global_nz is
+      ! passed it is the unified max_halo_nz across all grids — so any grid
+      ! whose nz exceeds nz_global (e.g. snow grids with kSNOW_GRID_Z >
+      ! nz_global) still has a window deep enough to hold a Put of its data.
+      ! Batch halo (atmospheric-only) keeps using halo_nz = this%nz.
+      if (present(global_nz)) then
+          this%halo_win_nz = max(this%nz, global_nz)
+      else
+          this%halo_win_nz = this%nz
+      endif
 
       this%halo_size = halo_size
 
@@ -273,16 +284,15 @@ contains
         !call MPI_Allreduce(this%nx,this%ns_halo_nx,1,MPI_INT,MPI_MAX,comms,ierr)
         !call MPI_Allreduce(this%ny,this%ew_halo_ny,1,MPI_INT,MPI_MAX,comms,ierr)
 
-        !If we have been passed the global_nz, it means that this grid is not the global, 3D grid. Thus, pass the global_nz to
-        !create_MPI_types so that the window nz is set correctly in accordance with what is done in halo_obj.f90. If this 3D grid's nz
-        !is larger than the global_nz, however, we have a problem, and should not try to make an MPI type for communication. There are
-        !only a few 3D grids with nz's larger than 8, none of which should need to be exchanged, and the model should almost always be 
-        !run with more than 8 z levels. So this should not be an issue.
+        ! When global_nz is passed it is the unified max_halo_nz across all
+        ! grids (set in domain_obj). By construction this%nz <= global_nz,
+        ! so the subarray types are always valid and we never need the
+        ! MPI_DATATYPE_NULL fallback that used to sit here.
         if (present(global_nz)) then
-            if (this%nz <= global_nz) then
-                call create_MPI_types(this, win_nz=global_nz)
-            else
-                ! Initialize MPI types to NULL when nz > global_nz to avoid
+            call create_MPI_types(this, win_nz=global_nz)
+        else
+                ! Initialize MPI types to NULL when no global_nz is provided,
+                ! since we do not know the size of the global z dimension used for the windows
                 ! uninitialized handles causing undefined behavior downstream
                 this%NS_halo = MPI_DATATYPE_NULL
                 this%EW_halo = MPI_DATATYPE_NULL
@@ -290,9 +300,6 @@ contains
                 this%NS_win_halo = MPI_DATATYPE_NULL
                 this%EW_win_halo = MPI_DATATYPE_NULL
                 this%corner_win_halo = MPI_DATATYPE_NULL
-            endif
-        else
-            call create_MPI_types(this)
         endif
       else
         !                 global nx           to acommodate staggered grids  

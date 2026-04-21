@@ -60,6 +60,7 @@ contains
         integer :: num_threads, found, PE_RANK_GLOBAL, NUM_SERVERS, NUM_COMPUTE, NUM_IO_PER_NODE, NUM_PROC_PER_NODE
         character(len=MPI_MAX_PROCESSOR_NAME) :: ENV_IO_PER_NODE
         type(MPI_Comm) :: globalComm, shared_comm, mainComms, IOComms
+        type(MPI_Info) :: host_only_info
 
 #ifdef _OPENACC
         integer :: dev, local_rank, comm_size, NUM_GPU_PER_NODE
@@ -155,22 +156,36 @@ contains
             endif
         enddo
 
+        ! MPI-4.1 hint: the IO comms only carry host buffers, so MPI can skip
+        ! the CUDA pointer-attribute probe on Isend/Irecv and on HDF5's
+        ! internal collectives. compute_comms is deliberately left untouched
+        ! because halo%exch_var passes device pointers on GPU builds
+        ! (see halo_obj.F90 `!$acc host_data use_device`). Ignored silently
+        ! by OpenMPI < 5.0.
+        call MPI_Info_create(host_only_info, ierr)
+        call MPI_Info_set(host_only_info, "mpi_memory_alloc_kinds", "system", ierr)
+
         do n = 1, n_nests
             associate(comp => components(n)%comp)
             select type (comp)
                 type is (domain_t)
                     CALL MPI_Comm_dup( mainComms, comp%compute_comms, ierr )
                     CALL MPI_Comm_dup( IOComms, ioclient(n)%parent_comms, ierr )
+                    call MPI_Comm_set_info(ioclient(n)%parent_comms, host_only_info, ierr)
 
                 type is (ioserver_t)
                     CALL MPI_Comm_dup( mainComms, comp%IO_comms, ierr )
                     CALL MPI_Comm_dup( IOComms, comp%client_comms, ierr )
+                    call MPI_Comm_set_info(comp%IO_comms,     host_only_info, ierr)
+                    call MPI_Comm_set_info(comp%client_comms, host_only_info, ierr)
 
                 class default
                     ! some default behavior
             end select
             end associate
         enddo
+
+        call MPI_Info_free(host_only_info, ierr)
 
 #ifdef _OPENACC
     !
