@@ -1,0 +1,589 @@
+!>----------------------------------------------------------
+!! This module provides a wrapper to call various snow models
+!! It sets up variables specific to the physics package to be used including both
+!!
+!! The main entry point to the code is snow_model(domain,options,lsm_dt)
+!!
+!! <pre>
+!! Call tree graph :
+!!  sm_init->[ external initialization routines]
+!!  sm->[  external sm routines]
+!!  sm_finalize
+!!
+!! High level routine descriptions / purpose
+!!   sm_init           - initializes physics package
+!!   sm                - sets up and calls main physics package
+!!   sm_finalize       - permits physics package cleanup (close files, deallocate memory)
+!!
+!! Inputs: domain, options, lsm_dt
+!!      domain,options  = as defined in data_structures
+!!      lsm_dt          = time step (seconds)
+!! </pre>
+!!
+!!  @author
+!!  Dylan Reynolds (dylan.reynolds@epfl.ch)
+!!
+!!----------------------------------------------------------
+module snow_model_driver
+    use domain_interface,   only : domain_t
+    use options_interface,  only : options_t
+    use mod_wrf_constants,   only : KARMAN, gravity, cp, R_d, rcp, EP_1, EP_2, SVPT0, SVP1, SVP2, SVP3, EOMEG, STBOLT, p1000mb, XLV
+    use ieee_arithmetic ! for debugging
+    use icar_constants
+#ifdef FSM
+    use module_sm_FSMdrv,   only : sm_FSM_init, sm_FSM
+#endif
+#ifdef SNOWPACK
+#ifdef SNOWPACK_FORTRAN
+    use snowpack_driver, only : snowpack_init, snowpack_step
+#else
+    use module_sm_SNOWPACKdrv, only : sm_snowpack_init, sm_SNOWPACK
+#endif
+#endif
+    use snow_drift,            only : snow_drift_var_request, snow_drift_init
+    use module_snowslide,      only : snowslide_var_request, snowslide_init, snowslide_step
+
+    implicit none
+
+    private
+    public :: sm_var_request, sm_init, snow_model   !, sm_finalize
+
+    integer :: ids, ide, jds, jde, kds, kde,  &
+               ims, ime, jms, jme, kms, kme,  &
+               its, ite, jts, jte, kts, kte, j, k, i
+
+    logical :: restart
+    integer :: update_interval
+    real*8  :: last_model_time(kMAX_NESTS), next_update_time(kMAX_NESTS)
+    real*8  :: last_snowslide_time(kMAX_NESTS), next_snowslide_time(kMAX_NESTS)
+    real :: lsm_dt
+
+    ! Cadence for SNOWSLIDE gravitational redistribution. Snowslide runs
+    ! once per hour (at the first snow-model tick on or after each hour
+    ! boundary), immediately before the snow model is invoked, so that the
+    ! snow model's built-in merge/split/metamorphism passes process the
+    ! fresh deposit on the same step.
+    real*8, parameter :: snowslide_interval_s = 3600.0d0
+    
+contains
+
+    subroutine sm_var_request(options)
+        implicit none
+        type(options_t),intent(inout) :: options
+
+        if (options%physics%snowmodel == kSM_FSM) then
+
+            call options%alloc_vars( &
+                         [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
+                         kVARS%exner, kVARS%dz_interface, kVARS%density, kVARS%pressure_interface, kVARS%shortwave,     &
+                         kVARS%longwave, kVARS%vegetation_fraction, kVARS%canopy_water, kVARS%snow_water_equivalent,    &
+                         kVARS%skin_temperature, kVARS%soil_water_content, kVARS%soil_temperature, kVARS%terrain,       &
+                         kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
+                         kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
+                         kVARS%soil_totalmoisture, kVARS%soil_deep_temperature, kVARS%roughness_z0, kVARS%ustar,        &
+                         kVARS%snow_height, kVARS%lai, kVARS%temperature_2m_veg, kVARS%slope_angle, kVARS%lsm_last_snow,&
+                         kVARS%lsm_last_precip, kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%land_emissivity,    &
+                         kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%snowfall, kVARS%albedo,                &
+                         kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%snow_nlayers,   &
+                         kVARS%shd, kVARS%meltflux_out_tstep, kVARS%meltflux_out_cumul, kVARS%Sliq_out, &
+                         kVARS%windspd_10m, kVARS%bs_saltation_flux, kVARS%bs_saltation_height, kVARS%bs_saltation_concentration, &
+                         kVARS%bs_suspension_flux, kVARS%bs_sublimation_flux, kVARS%bs_drift_swe_salt, kVARS%bs_drift_swe_susp, kVARS%bs_drift_swe_subl, kVARS%dSWE_slide, &
+                         kVARS%shortwave_direct, kVARS%shortwave_diffuse, kVARS%ground_surf_temperature])
+             
+             call options%restart_vars( &
+                         [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
+                         kVARS%density, kVARS%pressure_interface, kVARS%shortwave,                                      &
+                         kVARS%longwave, kVARS%canopy_water, kVARS%snow_water_equivalent,                               &
+                         kVARS%skin_temperature, kVARS%soil_water_content, kVARS%soil_temperature, kVARS%terrain,       &
+                         kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
+                         kVARS%snow_height,  kVARS%snowfall, kVARS%albedo, kVARS%QFX, kVARS%land_emissivity,            &
+                         kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
+                         kVARS%soil_totalmoisture, kVARS%roughness_z0, kVARS%lsm_last_snow, kVARS%lsm_last_precip,      &
+                         kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%snow_nlayers  ])
+
+        else if (options%physics%snowmodel == kSM_SNOWPACK) then
+
+            call options%alloc_vars( &
+                         [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
+                         kVARS%exner, kVARS%dz_interface, kVARS%density, kVARS%pressure_interface, kVARS%shortwave,     &
+                         kVARS%longwave, kVARS%vegetation_fraction, kVARS%canopy_water, kVARS%snow_water_equivalent,    &
+                         kVARS%skin_temperature, kVARS%soil_water_content, kVARS%soil_temperature, kVARS%terrain,       &
+                         kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
+                         kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
+                         kVARS%soil_totalmoisture, kVARS%soil_deep_temperature, kVARS%roughness_z0, kVARS%ustar,        &
+                         kVARS%snow_height, kVARS%lai, kVARS%temperature_2m_veg, kVARS%slope_angle, kVARS%lsm_last_snow,&
+                         kVARS%lsm_last_precip, kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%land_emissivity,    &
+                         kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%snowfall, kVARS%albedo,                &
+                         kVARS%snow_temperature, kVARS%Ds, kVARS%snow_temperature_i, kVARS%Vol_Frac_I, kVARS%Vol_Frac_W, &
+                         kVARS%Vol_Frac_A, kVARS%Vol_Frac_S, kVARS%Vol_Frac_WP, kVARS%Rg, kVARS%Rb, kVARS%Dd, kVARS%Sp, kVARS%mk, &
+                         kVARS%snow_nlayers, kVARS%bs_threshold_ustar, kVARS%bs_saltation_flux, kVARS%bs_saltation_height, kVARS%bs_saltation_concentration, &
+                         kVARS%bs_swe_exchange, kVARS%mass_hoar, kVARS%CDot, kVARS%snow_stress, kVARS%N3, kVARS%depositionDate, kVARS%dSWE_subl, &
+                         kVARS%meltflux_out_tstep, kVARS%meltflux_out_cumul])
+
+             call options%restart_vars( &
+                         [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
+                         kVARS%density, kVARS%pressure_interface, kVARS%shortwave,                                      &
+                         kVARS%longwave, kVARS%canopy_water, kVARS%snow_water_equivalent,                               &
+                         kVARS%skin_temperature, kVARS%soil_water_content, kVARS%soil_temperature, kVARS%terrain,       &
+                         kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
+                         kVARS%snow_height,  kVARS%snowfall, kVARS%albedo, kVARS%QFX, kVARS%land_emissivity,            &
+                         kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
+                         kVARS%soil_totalmoisture, kVARS%roughness_z0, kVARS%lsm_last_snow, kVARS%lsm_last_precip,      &
+                         kVARS%snow_temperature, kVARS%Ds, kVARS%snow_temperature_i, kVARS%Vol_Frac_I, kVARS%Vol_Frac_W, &
+                         kVARS%Vol_Frac_A, kVARS%Vol_Frac_S, kVARS%Vol_Frac_WP, kVARS%Rg, kVARS%Rb, kVARS%Dd, kVARS%Sp, kVARS%mk, &
+                         kVARS%snow_nlayers,                                                                      &
+                         kVARS%mass_hoar, kVARS%CDot, kVARS%snow_stress, kVARS%N3, kVARS%depositionDate])
+        endif
+
+        ! CRYOWRF-style blowing snow drift (works with both FSM and SNOWPACK)
+        if (options%sm%suspension_layer == 1) then
+            call snow_drift_var_request(options)
+        endif
+
+        ! SNOWSLIDE gravitational redistribution (works with any snow model)
+        if (options%sm%snowslide == 1) then
+            call snowslide_var_request(options)
+        endif
+
+    end subroutine sm_var_request
+
+
+    subroutine sm_init(domain,options,context_chng)
+        implicit none
+        type(domain_t),     intent(inout)   :: domain
+        type(options_t),    intent(in)      :: options
+        logical, optional,  intent(in)      :: context_chng
+
+        logical :: context_change
+        real*8 :: elapsed, eff_interval
+        integer :: n_calls
+
+        if (options%physics%snowmodel == 0) return
+
+        if (present(context_chng)) then
+            context_change = context_chng
+        else
+            context_change = .false.
+        endif
+
+        ids = domain%ids ; ide = domain%ide ; jds = domain%jds ; jde = domain%jde ; kds = domain%kds ; kde = domain%kde
+        ims = domain%ims ; ime = domain%ime ; jms = domain%jms ; jme = domain%jme ; kms = domain%kms ; kme = domain%kme
+        its = domain%its ; ite = domain%ite ; jts = domain%jts ; jte = domain%jte ; kts = domain%kts ; kte = domain%kte
+
+        if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing Snow Model"
+
+        if (options%physics%snowmodel==kSM_FSM) then
+#ifdef FSM
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: FSM2"
+            call sm_FSM_init(domain,options,context_change)
+#else
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    User asked to use FSM, but it is not compiled in this version of HICAR"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Please de-select FSM as the snow model in the namelist, or recompile HICAR with the FSM library linked"
+            stop "FSM2 not compiled in this version of HICAR"
+#endif
+        else if (options%physics%snowmodel==kSM_SNOWPACK) then
+#ifdef SNOWPACK
+#ifdef SNOWPACK_FORTRAN
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: Snowpack (GPU/OpenACC)"
+            call snowpack_init(domain,options,context_change)
+#else
+
+            ! --- Update host: SNOWPACK-specific inputs ---
+            !$acc update host( &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rg)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rb)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Dd)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sp)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
+
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: Snowpack"
+            call sm_snowpack_init(domain,options,context_change)
+
+            ! --- Update device: SNOWPACK outputs ---
+            !$acc update device( &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rg)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Rb)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Dd)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sp)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
+
+#endif
+#else
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    User asked to use Snowpack, but it is not compiled in this version of HICAR"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Please de-select Snowpack as the snow model in the namelist, or recompile HICAR with the Snowpack library linked"
+            stop "Snowpack not compiled in this version of HICAR"
+#endif
+
+        endif
+
+        ! Initialize CRYOWRF-style blowing snow drift
+        if (options%sm%suspension_layer == 1) then
+            call snow_drift_init(domain, options)
+        endif
+
+        ! Initialize SNOWSLIDE gravitational redistribution
+        if (options%sm%snowslide == 1) then
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Initializing SNOWSLIDE gravitational redistribution"
+            call snowslide_init(domain, options)
+        endif
+
+        update_interval=options%lsm%update_interval
+        if (.not.(context_change)) then
+            if (update_interval<=10) then
+                last_model_time(domain%nest_indx) = domain%sim_time%seconds()-10
+                next_update_time(domain%nest_indx) = domain%sim_time%seconds()
+            else
+                last_model_time(domain%nest_indx) = domain%sim_time%seconds()-update_interval
+                next_update_time(domain%nest_indx) = domain%sim_time%seconds()
+            endif
+            if (options%restart%restart) then
+                ! Determine when radiation was last called before the restart time,
+                ! based on the original simulation start time and the update interval
+                eff_interval = max(dble(update_interval), 10.0d0)
+                ! add a small fraction of a second in the case of roundoff errors restart time
+                elapsed = (options%restart%restart_time%seconds() - 0.01) - options%general%start_time%seconds()
+                n_calls = int(elapsed / eff_interval)
+                last_model_time(domain%nest_indx) = options%general%start_time%seconds() + n_calls * eff_interval
+                next_update_time(domain%nest_indx) = last_model_time(domain%nest_indx) + eff_interval - 0.01
+            endif
+
+            ! Snowslide cadence: fire on the first snow-model tick, then every
+            ! snowslide_interval_s afterwards. On restart, align to the last
+            ! complete hour since start_time so timing is consistent.
+            if (options%sm%snowslide == 1) then
+                last_snowslide_time(domain%nest_indx) = domain%sim_time%seconds() - snowslide_interval_s
+                next_snowslide_time(domain%nest_indx) = domain%sim_time%seconds()
+                if (options%restart%restart) then
+                    elapsed = (options%restart%restart_time%seconds() - 0.01) - options%general%start_time%seconds()
+                    n_calls = int(elapsed / snowslide_interval_s)
+                    last_snowslide_time(domain%nest_indx) = options%general%start_time%seconds() &
+                                                            + n_calls * snowslide_interval_s
+                    next_snowslide_time(domain%nest_indx) = last_snowslide_time(domain%nest_indx) &
+                                                            + snowslide_interval_s - 0.01d0
+                endif
+            endif
+        endif
+
+    end subroutine sm_init
+
+    subroutine snow_model(domain,options,dt)
+        implicit none
+        type(domain_t),     intent(inout)   :: domain
+        type(options_t),    intent(in)      :: options
+        real,               intent(in)      :: dt
+
+        real, allocatable, dimension(:,:) :: windspd
+        real, allocatable, dimension(:,:) :: current_precipitation
+        real, allocatable, dimension(:,:) :: current_snow
+        real, allocatable, dimension(:,:) :: current_rain
+
+        if (options%physics%snowmodel == 0) return
+
+        if ((domain%sim_time%seconds()) >= next_update_time(domain%nest_indx)) then
+            lsm_dt = domain%sim_time%seconds() - last_model_time(domain%nest_indx)
+            last_model_time(domain%nest_indx) = domain%sim_time%seconds() 
+            next_update_time(domain%nest_indx) = next_update_time(domain%nest_indx) + update_interval
+
+            allocate(current_precipitation(ims:ime,jms:jme), source=0.0)
+            allocate(windspd(ims:ime,jms:jme), source=1.0)
+            allocate(current_snow(ims:ime,jms:jme), source=0.0) ! MJ added 
+            allocate(current_rain(ims:ime,jms:jme), source=0.0) ! MJ added 
+
+
+            ! --- Update host: common snow model inputs ---
+            !$acc update host( &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
+            !$acc   domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d)
+            
+            associate( &
+                u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
+                v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d, &
+                precipitation => domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
+                snowfall => domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d, &
+                lsm_last_precip => domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
+                lsm_last_snow => domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d &
+                )
+
+            windspd = sqrt(u_10m**2 + v_10m**2)
+            where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
+            current_precipitation = (precipitation - lsm_last_precip) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
+
+            ! Setup the input data for the snow models
+            current_snow = (snowfall-lsm_last_snow) !! MJ: snowfall in kg m-2
+            current_rain = max(current_precipitation-current_snow,0.) !! MJ: rainfall in kg m-2
+
+            ! SNOWSLIDE gravitational redistribution runs on its own hourly
+            ! cadence, immediately before the snow model. This lets the snow
+            ! model's built-in merge/split/metamorphism/creep passes process
+            ! the fresh deposit on the same tick it was inserted.
+            if (options%sm%snowslide == 1 .and. &
+                domain%sim_time%seconds() >= next_snowslide_time(domain%nest_indx)) then
+                last_snowslide_time(domain%nest_indx) = domain%sim_time%seconds()
+                next_snowslide_time(domain%nest_indx) = next_snowslide_time(domain%nest_indx) &
+                                                        + snowslide_interval_s
+                call snowslide_step(domain, options)
+            endif
+
+            if (options%physics%snowmodel==kSM_FSM) then
+#ifdef FSM
+                ! --- Update host: FSM-specific inputs ---
+                !$acc update host( &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_height)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_concentration)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_sublimation_flux)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%QFX)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%ground_surf_temperature)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%runoff_tstep)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%Sliq_out)%v)%data_2d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d)
+
+                domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d(its:ite,jts:jte)=windspd(its:ite,jts:jte)
+
+                call sm_FSM(domain,options,lsm_dt,current_rain,current_snow,windspd)
+
+                ! --- Update device: FSM outputs ---
+                !$acc update device( &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%windspd_10m)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_height)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_saltation_concentration)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_suspension_flux)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_salt)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_susp)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%bs_drift_swe_subl)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%Sliq_out)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%fsnow)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%QFX)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%ground_surf_temperature)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%runoff_tstep)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_cumul)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d)
+#endif
+
+            else if (options%physics%snowmodel==kSM_SNOWPACK) then
+#ifdef SNOWPACK
+#ifdef SNOWPACK_FORTRAN
+                ! GPU SNOWPACK: data stays on device, no host/device transfers needed
+                !$acc enter data copyin(current_rain, current_snow, windspd)
+                call snowpack_step(domain,options,lsm_dt,current_rain,current_snow,windspd)
+                !$acc exit data delete(current_rain, current_snow, windspd)
+#else
+                ! EVAN'S BIG DRIVER HERE:
+                ! input variables for SNOWPACK, which we need, are:
+
+                ! - ta;       ///< Air temperature (K)
+                ! - rh;       ///< Relative humidity (% or 1)
+                ! - vw;       ///< Wind velocity at snow station (m s-1)
+                !!! - ustar;    ///< The friction velocity (m s-1) computed in mt_MicroMet() and also used later for the MeteoHeat fluxes
+                ! - z0;       ///< The roughness length computed in SnowDrift and also used later for the MeteoHeat fluxes (m)
+                ! - psi_s;    ///< Stability correction for scalar heat fluxes
+                ! - iswr;     ///< Incoming SHORTWAVE radiation (W m-2)
+                !!! - ea;       ///< Atmospheric emissivity (1)
+                ! - lw_net;   ///< Net longwave radiation (W m-2)
+                ! - tss;      ///< Snow surface temperature (K)
+                ! - ts0;      ///< Bottom temperatures of snow/soil pack (K)
+                ! - psum;     ///< precipitation sum over the current timestep (mm)
+                ! - psum_ph;  ///< precipitation phase for the current timestep (between 0 and 1, 0 is fully solid while 1 is fully liquid).
+                !!! - hs;       ///< The measured height of snow (m)
+                ! - geo_heat; ///< Geo heat flux (W/m^2), for the neumann lower boundary condition in the heat equation
+
+                ! --- Update host: SNOWPACK-specific inputs ---
+                !$acc update host( &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Rg)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Rb)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Dd)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Sp)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_cumul)%v)%data_2d)
+
+                call sm_SNOWPACK(domain,options,lsm_dt,current_rain,current_snow,windspd)
+
+                ! --- Update device: SNOWPACK outputs ---
+                !$acc update device( &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Rg)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Rb)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Dd)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%Sp)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%mk)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%mass_hoar)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%CDot)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
+                !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_cumul)%v)%data_2d)
+#endif
+#endif
+            endif
+            end associate
+
+            ! Accumulate cumulative melt runoff (works for all snow models)
+            associate(meltflux_inst => domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+                      meltflux_cum  => domain%vars_2d(domain%var_indx(kVARS%meltflux_out_cumul)%v)%data_2d)
+                !$acc kernels default(present)
+                meltflux_cum(its:ite,jts:jte) = meltflux_cum(its:ite,jts:jte) + meltflux_inst(its:ite,jts:jte)
+                !$acc end kernels
+            end associate
+
+            if (options%sm%suspension_layer == 1) then
+                ! zero out bs_swe_exch since it tracked mass changes
+                ! across this LSM step only.
+                associate (bs_swe_exch  => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d)
+                !$acc kernels default(present)
+                bs_swe_exch = 0.0
+                !$acc end kernels
+                end associate
+            endif
+        endif
+
+        end subroutine snow_model
+
+    end module snow_model_driver

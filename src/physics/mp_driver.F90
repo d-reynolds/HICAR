@@ -31,18 +31,19 @@ module microphysics
     use mod_wrf_constants,          only: EP_1, EP_2, cp, cpv, XLS, XLV, XLF, R_d, R_v, gravity, epsilon, cliq, cice, psat, rhowater, rhosnow, rhoair0
     use module_mp_thompson_aer,     only: mp_gt_driver_aer, thompson_aer_init
     use module_mp_thompson,         only: mp_gt_driver, thompson_init
+    use MODULE_MP_MORR_TWO_MOMENT_gpu,  only: MORR_TWO_MOMENT_INIT_gpu, MP_MORR_TWO_MOMENT_gpu
     use MODULE_MP_MORR_TWO_MOMENT,  only: MORR_TWO_MOMENT_INIT, MP_MORR_TWO_MOMENT
     use module_mp_wsm6,             only: wsm6, wsm6init
     use module_mp_wsm3,             only: wsm3, wsm3init
     use module_mp_simple,           only: mp_simple_driver
     use module_mp_jensen_ishmael,   only: mp_jensen_ishmael, jensen_ishmael_init
 
-    use time_object,                only: Time_type
     use options_interface,          only: options_t
     use domain_interface,           only: domain_t
     use wind,                       only: calc_w_real
 
     implicit none
+    private
 
     ! permit the microphysics to update on a longer time step than the advection
     integer :: update_interval
@@ -50,8 +51,8 @@ module microphysics
     ! temporary variables
     real,allocatable,dimension(:,:) :: SR, last_rain, last_snow, last_graup, refl_10cm
 
-
-    public :: mp, mp_var_request
+    public :: mp, mp_var_request, mp_init
+    
 contains
 
 
@@ -99,7 +100,11 @@ contains
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Simple Microphysics"
         elseif (options%physics%microphysics==kMP_MORRISON) then
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Morrison Microphysics"
+#ifdef _OPENACC
+            call MORR_TWO_MOMENT_INIT_gpu(hail_opt=1)
+#else
             call MORR_TWO_MOMENT_INIT(hail_opt=1)
+#endif
         elseif (options%physics%microphysics==kMP_ISHMAEL) then
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Jensen-Ischmael Microphysics"
             call jensen_ishmael_init()
@@ -126,12 +131,6 @@ contains
                       kVARS%snowfall,    kVARS%precipitation,           kVARS%graupel,      kVARS%graupel_mass,     &
                       kVARS%dz, kVARS%re_cloud, kVARS%re_ice, kVARS%re_snow ])
 
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,  kVARS%rain_number, &
-                       kVARS%snow_mass,           kVARS%ice_mass,   &
-                       kVARS%rain_mass,           kVARS%ice_number, kVARS%graupel_mass   ] )
-
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &
                        [kVARS%pressure,     kVARS%potential_temperature,    kVARS%water_vapor,   &
@@ -156,12 +155,6 @@ contains
                       kVARS%snow_mass, kVARS%ice_mass,               kVARS%dz,                               &
                       kVARS%snowfall,    kVARS%precipitation,           kVARS%graupel,   kVARS%graupel_mass])
 
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,  &
-                       kVARS%snow_mass,           kVARS%ice_mass,   &
-                       kVARS%rain_mass,           kVARS%graupel_mass   ] )
-
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &
                        [kVARS%pressure,     kVARS%potential_temperature,    kVARS%water_vapor,   &
@@ -183,11 +176,6 @@ contains
                      [kVARS%pressure,    kVARS%potential_temperature,   kVARS%exner,        kVARS%density,      &
                       kVARS%water_vapor, kVARS%cloud_water_mass,             kVARS%rain_mass,                      &
                       kVARS%dz,          kVARS%snowfall,                kVARS%precipitation ])
-
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,  &
-                       kVARS%rain_mass ] )
 
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &
@@ -214,12 +202,6 @@ contains
                        kVARS%ice1_rho, kVARS%ice1_phi, kVARS%ice1_vmi, kVARS%ice2_rho, kVARS%ice2_phi, kVARS%ice2_vmi, &
 			kVARS%ice3_rho, kVARS%ice3_phi, kVARS%ice3_vmi  ])
 
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,  kVARS%rain_number, &
-                       kVARS%ice_mass,   kVARS%rain_mass,           kVARS%ice_number, kVARS%ice1_a, &
-                       kVARS%ice1_c, kVARS%ice2_mass, kVARS%ice2_number, kVARS%ice2_a, kVARS%ice2_c, &
-                       kVARS%ice3_mass, kVARS%ice3_number, kVARS%ice3_a, kVARS%ice3_c] )
 
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &
@@ -248,12 +230,6 @@ contains
                       kVARS%tend_qr, kVARS%tend_qs, kVARS%tend_qi, kVARS%dz,   &
                       kVARS%re_cloud, kVARS%re_ice, kVARS%re_snow, kVARS%ice1_vmi, kVARS%ice2_vmi    ])
 
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,  kVARS%rain_number, &
-                       kVARS%snow_mass,           kVARS%ice_mass,   &
-                       kVARS%rain_mass,           kVARS%ice_number, kVARS%graupel_mass, &
-                       kVARS%graupel_number, kVARS%snow_number] )
 
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &
@@ -280,11 +256,6 @@ contains
                      [kVARS%pressure,    kVARS%potential_temperature,   kVARS%exner,        kVARS%density,      &
                       kVARS%water_vapor, kVARS%cloud_water_mass,             kVARS%rain_mass,  kVARS%snow_mass,  &
                       kVARS%precipitation, kVARS%snowfall,              kVARS%dz])
-
-        ! List the variables that are required to be advected for the simple microphysics
-        call options%advect_vars( &
-                      [kVARS%potential_temperature, kVARS%water_vapor, kVARS%cloud_water_mass,   &
-                       kVARS%rain_mass,           kVARS%snow_mass   ] )
 
         ! List the variables that are required to be allocated for the simple microphysics
         call options%restart_vars( &
@@ -370,6 +341,7 @@ contains
         integer,        intent(in)    :: ims,ime, jms,jme, kms,kme
         integer,        intent(in)    :: ids,ide, jds,jde, kds,kde
 
+        !$acc data create(SR, last_rain, last_snow, last_graup, refl_10cm)
         ! run the thompson microphysics
         if (options%physics%microphysics==kMP_THOMPSON) then
             ! call the thompson microphysics
@@ -457,6 +429,50 @@ contains
                                   kts = kts, kte = kte)
 
         elseif (options%physics%microphysics==kMP_MORRISON) then
+#ifdef _OPENACC
+            call MP_MORR_TWO_MOMENT_gpu(ITIMESTEP = 1,                   &
+                             TH = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,   &
+                             QV = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,             &
+                             QC = domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d,        &
+                             QR = domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d,               &
+                             QI = domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d,          &
+                             QS = domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d,               &
+                             QG = domain%vars_3d(domain%var_indx(kVARS%graupel_mass)%v)%data_3d,            &
+                             NI = domain%vars_3d(domain%var_indx(kVARS%ice_number)%v)%data_3d,        &
+                             NS = domain%vars_3d(domain%var_indx(kVARS%snow_number)%v)%data_3d,             &
+                             NR = domain%vars_3d(domain%var_indx(kVARS%rain_number)%v)%data_3d,             &
+                             NG = domain%vars_3d(domain%var_indx(kVARS%graupel_number)%v)%data_3d,          &
+                             RHO_IN = domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,                &
+                             PII = domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,                  &
+                             P = domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                 &
+                             DT_IN = dt, DZ = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d,     &
+                             W = domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d,                        &
+                             RAINNC = domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
+                             RAINNCV = last_rain, SR=SR,                  &
+                             SNOWNC = domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d,&
+                             SNOWNCV = last_snow,                         &
+                             GRAUPELNC = domain%vars_2d(domain%var_indx(kVARS%graupel)%v)%data_2d,          &
+                             GRAUPELNCV = last_graup,                    & ! hm added 7/13/13
+                             EFFC = domain%vars_3d(domain%var_indx(kVARS%re_cloud)%v)%data_3d,          &
+                             EFFI = domain%vars_3d(domain%var_indx(kVARS%re_ice)%v)%data_3d,            &
+                             EFFS = domain%vars_3d(domain%var_indx(kVARS%re_snow)%v)%data_3d,           &
+                             ISED3D = domain%vars_3d(domain%var_indx(kVARS%ice2_vmi)%v)%data_3d,           &
+                             SSED3D = domain%vars_3d(domain%var_indx(kVARS%ice1_vmi)%v)%data_3d,           &
+                             refl_10cm = refl_10cm, diagflag = .False.,   &
+                             do_radar_ref=0,                              & ! GT added for reflectivity calcs
+                             qrcuten=domain%tend%qr,                      &
+                             qscuten=domain%tend%qs,                      &
+                             qicuten=domain%tend%qi,                      &
+                             ids = ids, ide = ide,                   & ! domain dims
+                             jds = jds, jde = jde,                   &
+                             kds = kds, kde = kde,                   &
+                             ims = ims, ime = ime,                   & ! memory dims
+                             jms = jms, jme = jme,                   &
+                             kms = kms, kme = kme,                   &
+                             its = its, ite = ite,                   & ! tile dims
+                             jts = jts, jte = jte,                   &
+                             kts = kts, kte = kte)
+#else
             call MP_MORR_TWO_MOMENT(ITIMESTEP = 1,                   &
                              TH = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,   &
                              QV = domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,             &
@@ -499,6 +515,8 @@ contains
                              its = its, ite = ite,                   & ! tile dims
                              jts = jts, jte = jte,                   &
                              kts = kts, kte = kte)
+#endif
+
         elseif (options%physics%microphysics==kMP_ISHMAEL) then
             call mp_jensen_ishmael(ITIMESTEP=1,                &  !*                                                                         
                              DT_IN=dt,                           &  !*
@@ -616,60 +634,9 @@ contains
                               jts = jts, jte = jte,                   &
                               kts = kts, kte = kte)
         endif
+        !$acc end data
 
     end subroutine process_subdomain
-
-    subroutine process_halo(domain, options, dt, halo,  &
-                            its,ite, jts,jte, kts,kte,  &
-                            ims,ime, jms,jme, kms,kme,  &
-                            ids,ide, jds,jde, kds,kde)
-        implicit none
-        type(domain_t), intent(inout) :: domain
-        type(options_t),intent(in)    :: options
-        real,           intent(in)    :: dt
-        integer,        intent(in)    :: halo
-        integer,        intent(in)    :: its,ite, jts,jte, kts,kte
-        integer,        intent(in)    :: ims,ime, jms,jme, kms,kme
-        integer,        intent(in)    :: ids,ide, jds,jde, kds,kde
-        integer :: halo_its,halo_ite, halo_jts,halo_jte, halo_kts,halo_kte
-
-        ! process the western halo
-        halo_ite = its+halo-1
-        call process_subdomain(domain, options, dt, &
-                    its,halo_ite, jts,jte, kts,kte, &
-                    ims,ime, jms,jme, kms,kme,      &
-                    ids,ide, jds,jde, kds,kde)
-
-
-        ! process the eastern halo
-        halo_its = ite-halo+1
-        call process_subdomain(domain, options, dt, &
-                    halo_its,ite, jts,jte, kts,kte, &
-                    ims,ime, jms,jme, kms,kme,      &
-                    ids,ide, jds,jde, kds,kde)
-
-        ! for the top and bottom halos, we no longer process the corner elements, so subset i tile
-        halo_its = its+halo
-        halo_ite = ite-halo
-
-        ! process the southern halo
-        halo_jte = jts+halo-1
-        call process_subdomain(domain, options, dt,           &
-                    halo_its,halo_ite, jts,halo_jte, kts,kte, &
-                    ims,ime, jms,jme, kms,kme,                &
-                    ids,ide, jds,jde, kds,kde)
-
-
-        ! process the northern halo
-        halo_jts = jte-halo+1
-        call process_subdomain(domain, options, dt,           &
-                    halo_its,halo_ite, halo_jts,jte, kts,kte, &
-                    ims,ime, jms,jme, kms,kme,                &
-                    ids,ide, jds,jde, kds,kde)
-
-
-    end subroutine process_halo
-
 
     !>----------------------------------------------------------
     !! Microphysical driver
@@ -683,12 +650,11 @@ contains
     !! @param   dt_in       Current driving time step (this is the advection step)
     !!
     !!----------------------------------------------------------
-    subroutine mp(domain, options, dt_in, halo, subset)
+    subroutine mp(domain, options, dt_in)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t),intent(in)    :: options
         real,           intent(in)    :: dt_in
-        integer,        intent(in),   optional :: halo, subset
 
         real :: mp_dt
         integer ::ids,ide,jds,jde,kds,kde, itimestep=1
@@ -737,51 +703,19 @@ contains
                          domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, &
                          domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,   &
                          domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
-                         domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
-                             
+                         domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)                             
 
-            if (present(subset)) then
-                last_model_time = domain%sim_time%seconds()
-                call process_subdomain(domain, options, mp_dt,                 &
-                                       its = its + subset, ite = ite - subset, &
-                                       jts = jts + subset, jte = jte - subset, &
-                                       kts = kts,          kte = kte,          &
-                                       ims = ims, ime = ime,                   & ! memory dims
-                                       jms = jms, jme = jme,                   &
-                                       kms = kms, kme = kme,                   &
-                                       ids = ids, ide = ide,                   & ! domain dims
-                                       jds = jds, jde = jde,                   &
-                                       kds = kds, kde = kde)
-            endif
-
-            if (present(halo)) then
-                call process_halo(domain, options, mp_dt, halo, &
-                                       its = its, ite = ite,    &
-                                       jts = jts, jte = jte,    &
-                                       kts = kts, kte = kte,    &
-                                       ims = ims, ime = ime,    & ! memory dims
-                                       jms = jms, jme = jme,    &
-                                       kms = kms, kme = kme,    &
-                                       ids = ids, ide = ide,    & ! domain dims
-                                       jds = jds, jde = jde,    &
-                                       kds = kds, kde = kde)
-
-            endif
-
-            if ((.not.present(halo)).and.(.not.present(subset))) then
-                last_model_time = domain%sim_time%seconds()                             
-                call process_subdomain(domain, options, mp_dt,  &
-                                        its = its, ite = ite,    &
-                                        jts = jts, jte = jte,    &
-                                        kts = kts, kte = kte,    &
-                                        ims = ims, ime = ime,    & ! memory dims
-                                        jms = jms, jme = jme,    &
-                                        kms = kms, kme = kme,    &
-                                        ids = ids, ide = ide,    & ! domain dims
-                                        jds = jds, jde = jde,    &
-                                        kds = kds, kde = kde)
-
-            endif
+            last_model_time = domain%sim_time%seconds()                             
+            call process_subdomain(domain, options, mp_dt,  &
+                                    its = its, ite = ite,    &
+                                    jts = jts, jte = jte,    &
+                                    kts = kts, kte = kte,    &
+                                    ims = ims, ime = ime,    & ! memory dims
+                                    jms = jms, jme = jme,    &
+                                    kms = kms, kme = kme,    &
+                                    ids = ids, ide = ide,    & ! domain dims
+                                    jds = jds, jde = jde,    &
+                                    kds = kds, kde = kde)
 
         endif
 

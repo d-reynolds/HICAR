@@ -17,10 +17,9 @@ module reader_interface
   use icar_constants
   use options_interface,  only : options_t
   use options_types,      only : dim_arrays_type
-  use variable_dict_interface,  only : var_dict_t
-  use boundary_interface, only : boundary_t
   use time_object,        only : Time_type
   use time_delta_object,  only : time_delta_t
+  use meta_data_interface, only : meta_data_t
   implicit none
 
   private
@@ -40,12 +39,12 @@ module reader_interface
       ! have to keep reallocating variables whenever something is added or removed
       integer, public :: n_vars = 0
       logical, public :: eof      
-      type(var_dict_t)    :: variables      ! a dictionary with all forcing data
+      type(meta_data_t), allocatable    :: var_meta(:)      ! a dictionary with all forcing data
       type(Time_type) :: model_end_time, input_time
       type(time_delta_t) :: input_dt
       ! list of input files
       character (len=kMAX_FILE_LENGTH), allocatable :: file_list(:)
-      character (len=kMAX_NAME_LENGTH)   :: time_var
+      character (len=kMAX_NAME_LENGTH)   :: time_var, lat_var
 
       ! the netcdf ID for an open file
       integer :: ncfile_id
@@ -55,18 +54,19 @@ module reader_interface
 
       integer :: curfile, curstep
   contains
-      procedure, public :: init
+      procedure, public :: init => init_reader
       procedure, public :: read_next_step
       procedure, public :: close_file
   end type
 
   interface
 
-    module subroutine init(this, its, ite, kts, kte, jts, jte, options)
+    module subroutine init_reader(this, its, ite, kts, kte, jts, jte, options)
+        implicit none
         class(reader_t), intent(inout) :: this
         integer, intent(in) :: its, ite, kts, kte, jts, jte
         type(options_t), intent(in) :: options
-    end subroutine
+    end subroutine init_reader
 
       !>----------------------------------------------------------
       !! Read the next timestep (time) from the input file list

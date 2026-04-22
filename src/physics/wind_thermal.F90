@@ -10,7 +10,7 @@
 module wind_thermal
     use domain_interface,  only : domain_t
     use options_interface, only : options_t
-    use io_routines,       only : io_write
+    ! use io_routines,       only : io_write
     use mod_wrf_constants, only : cp, epsilon, piconst
     use icar_constants,          only : kVARS
     implicit none
@@ -84,19 +84,18 @@ contains
         enddo
 
         !Max flow height
-        if (therm_k_max==0) then
-            do k = kms,kme
-                z_mean = SUM(options%domain%dz_levels(1:k))
-                if (z_mean > Max_flow_height .and. therm_k_max==0) therm_k_max = max(2,k-1)
-            enddo
+        therm_k_max = 0
+        do k = kms,kme
+            z_mean = SUM(options%domain%dz_levels(1:k))
+            if (z_mean > Max_flow_height .and. therm_k_max==0) therm_k_max = max(2,k-1)
+        enddo
 
-            if (allocated(level_height)) deallocate(level_height)
-            allocate( level_height(ims:ime,kms:therm_k_max,jms:jme))
+        if (allocated(level_height)) deallocate(level_height)
+        allocate( level_height(ims:ime,kms:therm_k_max,jms:jme))
 
-            do k = kms,therm_k_max
-                level_height(:,k,:) = domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(:,k,:)-domain%vars_3d(domain%var_indx(kVARS%z_interface)%v)%data_3d(ims:ime,kms,jms:jme)
-            enddo
-        endif
+        do k = kms,therm_k_max
+            level_height(:,k,:) = domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(:,k,:)-domain%vars_3d(domain%var_indx(kVARS%z_interface)%v)%data_3d(ims:ime,kms,jms:jme)
+        enddo
         
     end subroutine
     

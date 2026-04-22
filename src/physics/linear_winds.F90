@@ -9,15 +9,14 @@
 !!
 !! <pre>
 !! Call tree graph :
-!!  linear_perturb->[ setup_linwinds -> add_buffer_topo,
-!!                    calc_domain_stability,
-!!                    linear_winds -> various fft routines]
+!!  linear_perturb -> spatial_winds
+!!  setup_linwinds -> [ add_buffer_topo, initialize_spatial_winds ]
 !!
 !! High level routine descriptions / purpose
-!!   calc_domain_stability    - calculates a mean Brunt Vaisala frequency over the domain
-!!   linear_winds             - primary routine that calculates the linear wind perturbation
-!!   add_buffer_topo          - generates a topo grid that with a surrounding buffer for the fft
-!!   initialize_spatial_winds - generated the look up tables to use spatially varying linear winds
+!!   linear_perturbation      - computes FFT-based linear wind perturbation for a single (U,V,Nsq) state
+!!   add_buffer_topo          - generates a topo grid with a surrounding buffer for the FFT
+!!   initialize_spatial_winds - generates the look up tables for spatially varying linear winds
+!!   spatial_winds            - per-timestep LUT interpolation and perturbation application
 !!   setup_linwinds           - sets up module level variables and calls add_buffer_topo
 !!   linear_perturb           - main entry point, calls setup on first entry for a given domain
 !!
@@ -36,16 +35,19 @@
 !!----------------------------------------------------------
 module linear_theory_winds
     use, intrinsic :: iso_c_binding
-    use iso_fortran_env
+    use iso_fortran_env, only: output_unit
     use mpi_f08
     use fft,                        only: fftw_execute_dft,                    &
-                                          fftw_alloc_complex, fftw_free,       &
                                           fftw_plan_dft_2d, fftw_destroy_plan, &
                                           FFTW_FORWARD, FFTW_MEASURE,          &
                                           FFTW_BACKWARD, FFTW_ESTIMATE ! note fft module is defined in fftshift.f90
     use fftshifter,                 only: ifftshift, fftshift
+#ifdef _OPENACC
+    use openacc, only: acc_get_cuda_stream, acc_async_sync
+    use cufft_interface, only: cufftExecZ2Z, CUFFT_INVERSE, cufftPlan2d, CUFFT_Z2Z, cufftSetStream, cufftDestroy
+    use fftshifter,                 only: ifftshift2cc_gpu
+#endif
     use domain_interface,           only: domain_t
-    !use io_routines,                only: io_read, io_write
     use string,                     only: str
     use grid_interface,             only: grid_t
     use linear_theory_lut_disk_io,  only: read_LUT, write_LUT
@@ -61,31 +63,13 @@ module linear_theory_winds
     implicit none
 
     private
-    public :: linear_perturb, linear_perturbation, linear_perturbation_at_height
-    public :: add_buffer_topo, initialize_linear_theory_data, setup_linwinds
+    public :: linear_perturb, setup_linwinds
 
     logical :: module_initialized = .False.
-    logical :: variable_N
     logical :: smooth_nsq
-    real    :: N_squared
+    complex(C_DOUBLE_COMPLEX),  allocatable :: terrain_frequency(:,:) ! FFT(terrain)
 
-    logical :: debug_print = .false.
-
-    interface linear_perturbation
-        module procedure linear_perturbation_constz, linear_perturbation_varyingz
-    end interface
-
-    !! unfortunately these have to be allocated every call because we could be calling on both the high-res
-    !! domain and the low res domain (to "remove" the linear winds)
-    real,                       allocatable,    dimension(:,:)  :: k, l, kl, sig
-    complex(C_DOUBLE_COMPLEX),  allocatable,    dimension(:,:)  :: denom, m, ineta, msq, mimag
-    complex(C_DOUBLE_COMPLEX),  pointer,        dimension(:,:,:):: uhat, u_hat, vhat, v_hat
-    type(C_PTR),                allocatable,    dimension(:)    :: uplans, vplans
-    type(C_PTR)                 :: uh_aligned_data, u_h_aligned_data, vh_aligned_data, v_h_aligned_data
-    logical                     :: data_allocated=.False. ! need a boolean because you cant test if a cptr is allocated?
-
-    ! note this data structure holds a lot of important variables for the new linear_perturbation subroutine
-    ! this is created at the module scope to prevent some apparent stack issues related to OpenMP and ifort
+    ! Module-scope lt_data to prevent stack issues with OpenMP/ifort
     type(linear_theory_type) :: lt_data_m
     !$omp threadprivate(lt_data_m)
 
@@ -93,7 +77,6 @@ module linear_theory_winds
     real, allocatable,          dimension(:)           :: dir_values, nsq_values, spd_values
     ! Look Up Tables for linear perturbation are nspd x n_dir_values x n_nsq_values x nx x nz x ny
     real, allocatable,          dimension(:,:,:,:,:,:) :: hi_u_LUT, hi_v_LUT !, rev_u_LUT, rev_v_LUT
-    ! real, pointer,              dimension(:,:,:,:,:,:) :: u_LUT, v_LUT
 
     ! store the linear perturbation so we can update it slightly each time step
     ! this permits the linear field to build up over time.
@@ -129,150 +112,163 @@ module linear_theory_winds
 contains
 
     !>----------------------------------------------------------
-    !! Calculate a single brunt vaisala frequency effectively averaged across the entire domain
-    !!
-    !!----------------------------------------------------------
-    ! pure function calc_domain_stability(domain) result(BV_freq)
-    !     implicit none
-    !     class(domain_t),intent(in)::domain
-    !     real :: BV_freq
-    !     real, allocatable, dimension(:) :: vertical_N
-    !     integer :: i, nx,nz,ny, top_layer,bottom_layer
-    !     real :: dz,dtheta,t_mean
-    !
-    !     nx=size(domain%th,1)
-    !     nz=size(domain%th,2)
-    !     ny=size(domain%th,3)
-    !     allocate(vertical_N(nz))
-    !
-    !     if (variable_N) then
-    !         do i=1,nz
-    !             top_layer    = min(i+stability_window_size, nz)
-    !             bottom_layer = max(i-stability_window_size,  1)
-    !
-    !             dz     = sum(domain%z (:,top_layer,:)-domain%z (:,bottom_layer,:))/(nx*ny) ! distance between top layer and bottom layer
-    !             dtheta = sum(domain%th(:,top_layer,:)-domain%th(:,bottom_layer,:))/(nx*ny) ! average temperature change between layers
-    !             t_mean = sum(domain%th(:,i,:))/(nx*ny) ! mean temperature in the current layer
-    !
-    !             ! BV frequency = gravity/theta * dtheta/dz
-    !             vertical_N(i)=gravity/t_mean * dtheta/dz
-    !         end do
-    !         ! calculate the mean stability over the entire profile
-    !         BV_freq=sum(vertical_N)/nz
-    !         ! impose limits so the linear solution doesn't go crazy in really stable or unstable air
-    !         BV_freq=min(max(BV_freq, min_stability), max_stability)
-    !     else
-    !         ! or just use the supplied BV frequency
-    !         BV_freq=N_squared
-    !     endif
-    !
-    !     deallocate(vertical_N)
-    ! end function calc_domain_stability
-
-    !>----------------------------------------------------------
     !! Compute linear wind perturbations given background U, V, Nsq
     !!
     !! see Appendix A of Barstad and Gronas (2006) Tellus,58A,2-18
     !!
     !!----------------------------------------------------------
-    subroutine linear_perturbation_at_height(U, V, Nsq, z, fourier_terrain, lt_data)
+    !>----------------------------------------------------------
+    !! Precompute z-independent Fourier-space quantities for a given (U, V, Nsq).
+    !! Must be called once before one or more calls to linear_perturbation_apply_z.
+    !!----------------------------------------------------------
+    subroutine linear_perturbation_setup(U, V, Nsq, lt_data)
         implicit none
-        real,                     intent(in)    :: U, V ! U and V components of background wind
-        real,                     intent(in)    :: Nsq  ! Brunt-Vaisalla frequency (N squared)
-        real,                     intent(in)    :: z    ! elevation at which to compute the linear solution
-        complex(C_DOUBLE_COMPLEX),intent(in)    :: fourier_terrain(:,:) ! FFT(terrain)
+        real,                     intent(in)    :: U, V
+        real,                     intent(in)    :: Nsq
         type(linear_theory_type), intent(inout) :: lt_data
+#ifdef _OPENACC
+        integer :: i, j, nx, ny
 
+        nx = size(lt_data%k, 1)
+        ny = size(lt_data%k, 2)
 
-        integer :: nx, ny ! store the size of the grid
+        associate(mimag => lt_data%mimag, &
+                  m => lt_data%m, &
+                  sig => lt_data%sig, &
+                  kl => lt_data%kl, &
+                  k => lt_data%k, &
+                  l => lt_data%l, &
+                  msq => lt_data%msq, &
+                  denom => lt_data%denom &
+        )
 
-        if ((U==0).and.(V==0)) then
-            lt_data%u_perturb = 0
-            lt_data%v_perturb = 0
-            return
-        endif
+        !$acc parallel loop gang vector collapse(2) present(sig, k, l, &
+        !$acc   denom, msq, kl, mimag, m)
+        do j = 1, ny
+            do i = 1, nx
+                sig(i,j) = U * k(i,j) + V * l(i,j)
+                if (sig(i,j) == 0.0) sig(i,j) = SMALL_VALUE
+
+                denom(i,j) = sig(i,j)**2
+                msq(i,j) = Nsq / denom(i,j) * kl(i,j)
+                mimag(i,j) = real(sqrt(-msq(i,j))) * imaginary_number
+
+                m(i,j) = sqrt(msq(i,j))
+                if (sig(i,j) < 0.0) m(i,j) = m(i,j) * (-1)
+                if (real(msq(i,j)) < 0.0) m(i,j) = mimag(i,j)
+            end do
+        end do
+
+        end associate
+#else
+        lt_data%sig  = U * lt_data%k + V * lt_data%l
+        where(lt_data%sig == 0) lt_data%sig = SMALL_VALUE
+
+        lt_data%denom = lt_data%sig**2
+
+        lt_data%msq   = Nsq / lt_data%denom * lt_data%kl
+        lt_data%mimag = (0, 0)
+        lt_data%mimag = lt_data%mimag + (real(sqrt(-lt_data%msq)) * imaginary_number)
+
+        lt_data%m = sqrt(lt_data%msq)
+        where(lt_data%sig < 0) lt_data%m = lt_data%m * (-1)
+        where(real(lt_data%msq) < 0) lt_data%m = lt_data%mimag
+#endif
+
+    end subroutine linear_perturbation_setup
+
+    !>----------------------------------------------------------
+    !! Apply the z-dependent phase factor and inverse FFT.
+    !! Requires linear_perturbation_setup to have been called first for this (U,V,Nsq).
+    !!----------------------------------------------------------
+    subroutine linear_perturbation_apply_z(z, fourier_terrain, lt_data)
+        implicit none
+        real,                     intent(in)    :: z
+        complex(C_DOUBLE_COMPLEX),intent(in)    :: fourier_terrain(:,:)
+        type(linear_theory_type), intent(inout) :: lt_data
+#ifdef _OPENACC
+        integer :: i, j, nx, ny, ierr
 
         nx = size(fourier_terrain, 1)
         ny = size(fourier_terrain, 2)
 
-        lt_data%sig  = U * lt_data%k + V * lt_data%l
-        ! prevent divide by zero
-        where(lt_data%sig == 0) lt_data%sig = SMALL_VALUE
+        associate(ineta => lt_data%ineta, &
+                  m => lt_data%m, &
+                  sig => lt_data%sig, &
+                  kl => lt_data%kl, &
+                  k => lt_data%k, &
+                  l => lt_data%l, &
+                  uhat => lt_data%uhat, &
+                  vhat => lt_data%vhat  &
+        )
 
-        lt_data%denom = lt_data%sig**2 ! -f**2 ! to add coriolis
 
-        lt_data%msq   = Nsq / lt_data%denom * lt_data%kl
-        lt_data%mimag = (0, 0) ! be sure to reset real and imaginary components
-        lt_data%mimag = lt_data%mimag + (real(sqrt(-lt_data%msq)) * imaginary_number)
+        ! Element-wise complex arithmetic on GPU
+        !$acc parallel loop gang vector collapse(2) present(ineta, m, sig, &
+        !$acc   kl, k, l, uhat, vhat, fourier_terrain)
+        do j = 1, ny
+            do i = 1, nx
+                ineta(i,j) = imaginary_number * fourier_terrain(i,j) * exp(imaginary_number * m(i,j) * z)
+                ineta(i,j) = ineta(i,j) / (kl(i,j) / ((0 - m(i,j)) * sig(i,j)))
+                uhat(i,j) = k(i,j) * ineta(i,j)
+                vhat(i,j) = l(i,j) * ineta(i,j)
+            end do
+        end do
 
-        lt_data%m = sqrt(lt_data%msq)                         ! vertical wave number, hydrostatic
-        where(lt_data%sig < 0) lt_data%m = lt_data%m * (-1)   ! equivalent to m = m * sign(sig)
-        where(real(lt_data%msq) < 0) lt_data%m = lt_data%mimag
+        end associate
 
+        ! GPU ifftshift using pre-allocated workspace
+        call ifftshift2cc_gpu(lt_data%uhat, lt_data%fftshift_tmp, nx, ny)
+        call ifftshift2cc_gpu(lt_data%vhat, lt_data%fftshift_tmp, nx, ny)
+
+        ! Execute inverse FFT on GPU via cuFFT
+        !$acc host_data use_device(lt_data%uhat, lt_data%u_perturb)
+        ierr = cufftExecZ2Z(lt_data%cufft_plan, c_loc(lt_data%uhat), c_loc(lt_data%u_perturb), CUFFT_INVERSE)
+        !$acc end host_data
+        !$acc host_data use_device(lt_data%vhat, lt_data%v_perturb)
+        ierr = cufftExecZ2Z(lt_data%cufft_plan, c_loc(lt_data%vhat), c_loc(lt_data%v_perturb), CUFFT_INVERSE)
+        !$acc end host_data
+#else
         lt_data%ineta = imaginary_number * fourier_terrain * exp(imaginary_number * lt_data%m * z)
-        !  what=sig*ineta
 
-        ! with coriolis : [-/+] j * [l/k] * f
-        !uhat = (0 - m) * ((sig * k) - (j * l * f)) * ineta / kl
-        !vhat = (0 - m) * ((sig * l) + (j * k * f)) * ineta / kl
-        ! removed coriolis term assumes the scale coriolis operates at is largely defined by the coarse model
-        ! if using e.g. a sounding or otherwise spatially constant u/v, then coriolis should be defined.
+        ! uhat = -m * sig * k * ineta / kl,  vhat = -m * sig * l * ineta / kl  (no coriolis)
         lt_data%ineta = lt_data%ineta / (lt_data%kl / ((0 - lt_data%m) * lt_data%sig))
         lt_data%uhat  = lt_data%k * lt_data%ineta
         lt_data%vhat  = lt_data%l * lt_data%ineta
 
-        ! pull it back out of fourier space.
-        ! The fftw transform scales by N so the previous Fzs/Nx/Ny provides the only normalization necessary (?)
         call ifftshift(lt_data%uhat)
         call ifftshift(lt_data%vhat)
-        ! plans are only created once and re-used, this is a limit to further parallelization at the moment.
         call fftw_execute_dft(lt_data%uplan, lt_data%uhat, lt_data%u_perturb)
         call fftw_execute_dft(lt_data%vplan, lt_data%vhat, lt_data%v_perturb)
+#endif
 
-        ! returns u_perturb and v_perturb
-    end subroutine linear_perturbation_at_height
+    end subroutine linear_perturbation_apply_z
 
-    subroutine linear_perturbation_constz(U, V, Nsq, z_bottom, z_top, minimum_step, fourier_terrain, lt_data)
+    !>----------------------------------------------------------
+    !! Convenience wrapper: compute linear wind perturbation at a single height.
+    !! Calls setup + apply_z internally.
+    !!----------------------------------------------------------
+    subroutine linear_perturbation_at_height(U, V, Nsq, z, fourier_terrain, lt_data)
         implicit none
-        real,                     intent(in)    :: U, V             ! U and V components of background wind
-        real,                     intent(in)    :: Nsq              ! Brunt-Vaisalla frequency (N squared)
-        real,                     intent(in)    :: z_top, z_bottom  ! elevation for the top and bottom bound of a layer
-        real,                     intent(in)    :: minimum_step     ! minimum layer step size to compute LT for
-        complex(C_DOUBLE_COMPLEX),intent(in)    :: fourier_terrain(:,:) ! FFT(terrain)
-        type(linear_theory_type), intent(inout) :: lt_data          ! intermediate arrays needed for LT calc
+        real,                     intent(in)    :: U, V
+        real,                     intent(in)    :: Nsq
+        real,                     intent(in)    :: z
+        complex(C_DOUBLE_COMPLEX),intent(in)    :: fourier_terrain(:,:)
+        type(linear_theory_type), intent(inout) :: lt_data
 
-        integer :: n_steps, i
-        real    :: step_size, current_z
-
-        ! Handle the trivial case quickly
         if ((U==0).and.(V==0)) then
             lt_data%u_perturb = 0
             lt_data%v_perturb = 0
             return
         endif
 
-        n_steps = max(1,ceiling((z_top - z_bottom) / minimum_step))
-        step_size = (z_top - z_bottom) / n_steps
+        call linear_perturbation_setup(U, V, Nsq, lt_data)
+        call linear_perturbation_apply_z(z, fourier_terrain, lt_data)
 
-        lt_data%u_accumulator = 0
-        lt_data%v_accumulator = 0
-
-        current_z = z_bottom + step_size / 2
-
-        do i=1,n_steps
-            call linear_perturbation_at_height(U,V,Nsq,current_z, fourier_terrain, lt_data)
-            lt_data%u_accumulator = lt_data%u_accumulator + lt_data%u_perturb
-            lt_data%v_accumulator = lt_data%v_accumulator + lt_data%v_perturb
-
-            current_z = current_z + step_size
-        enddo
-
-        lt_data%u_perturb = lt_data%u_accumulator / n_steps
-        lt_data%v_perturb = lt_data%v_accumulator / n_steps
-    end subroutine linear_perturbation_constz
+    end subroutine linear_perturbation_at_height
 
 
-    subroutine linear_perturbation_varyingz(U, V, Nsq, z_bottom, z_top, minimum_step, fourier_terrain, lt_data)
+    subroutine linear_perturbation(U, V, Nsq, z_bottom, z_top, minimum_step, fourier_terrain, lt_data, skip_setup)
         implicit none
         real,                     intent(in)    :: U, V             ! U and V components of background wind
         real,                     intent(in)    :: Nsq              ! Brunt-Vaisalla frequency (N squared)
@@ -280,11 +276,10 @@ contains
         real,                     intent(in)    :: minimum_step     ! minimum layer step size to compute LT for
         complex(C_DOUBLE_COMPLEX),intent(in)    :: fourier_terrain(:,:) ! FFT(terrain)
         type(linear_theory_type), intent(inout) :: lt_data          ! intermediate arrays needed for LT calc
+        logical,                  intent(in), optional :: skip_setup ! if .true., assume setup was already called
 
         integer :: n_steps, i
         real    :: step_size, current_z, start_z, end_z
-        real,   allocatable :: layer_count(:,:), layer_fraction(:,:)
-        real,   allocatable :: internal_z_top(:,:), internal_z_bottom(:,:)
 
         ! Handle the trivial case quickly
         if ((U==0).and.(V==0)) then
@@ -296,16 +291,14 @@ contains
         start_z = minval(z_bottom)
         end_z = maxval(z_top)
 
-        allocate(internal_z_top(size(lt_data%u_perturb,1),size(lt_data%u_perturb,2)), source=maxval(z_top))
-        internal_z_top(buffer:buffer+size(z_top,1)-1, buffer:buffer+size(z_top,2)-1) = z_top
+        ! Fill pre-allocated work arrays with buffer-extended z boundaries
+        lt_data%internal_z_top = maxval(z_top)
+        lt_data%internal_z_top(buffer:buffer+size(z_top,1)-1, buffer:buffer+size(z_top,2)-1) = z_top
 
-        allocate(internal_z_bottom(size(lt_data%u_perturb,1),size(lt_data%u_perturb,2)), source=minval(z_bottom))
-        internal_z_bottom(buffer:buffer+size(z_bottom,1)-1, buffer:buffer+size(z_bottom,2)-1) = z_bottom
+        lt_data%internal_z_bottom = minval(z_bottom)
+        lt_data%internal_z_bottom(buffer:buffer+size(z_bottom,1)-1, buffer:buffer+size(z_bottom,2)-1) = z_bottom
 
-        allocate(layer_count(size(lt_data%u_perturb,1), size(lt_data%u_perturb,2)))
-        layer_count = 0
-        allocate(layer_fraction, source=layer_count)
-
+        lt_data%layer_count = 0
 
         step_size = min(minimum_step, minval(z_top - z_bottom))
         if (step_size < 5) then
@@ -315,27 +308,113 @@ contains
 
         current_z = start_z + step_size/2 ! we want the value in the middle of each theoretical layer
 
+        ! Compute z-independent quantities (can be skipped if caller already called setup)
+        if (.not.(present(skip_setup).and.skip_setup)) then
+            call linear_perturbation_setup(U, V, Nsq, lt_data)
+        endif
+
         ! sum up u/v perturbations over all layers evaluated
         lt_data%u_accumulator = 0
         lt_data%v_accumulator = 0
 
         do while (current_z < end_z)
-            call linear_perturbation_at_height(U,V,Nsq,current_z, fourier_terrain, lt_data)
+            call linear_perturbation_apply_z(current_z, fourier_terrain, lt_data)
 
-            layer_fraction = max(0.0,                                                                                       &
-                                min(step_size/2, current_z - internal_z_bottom) + min(0.0, internal_z_top - current_z)      &
-                              + min(step_size/2, internal_z_top - current_z)    + min(0.0, current_z - internal_z_bottom)   ) / step_size
+            lt_data%layer_fraction = max(0.0,                                                                                                   &
+                                min(step_size/2, current_z - lt_data%internal_z_bottom) + min(0.0, lt_data%internal_z_top - current_z)          &
+                              + min(step_size/2, lt_data%internal_z_top - current_z)    + min(0.0, current_z - lt_data%internal_z_bottom)       ) / step_size
 
-            layer_count = layer_count + layer_fraction
-            lt_data%u_accumulator = lt_data%u_accumulator + lt_data%u_perturb * layer_fraction
-            lt_data%v_accumulator = lt_data%v_accumulator + lt_data%v_perturb * layer_fraction
+            lt_data%layer_count = lt_data%layer_count + lt_data%layer_fraction
+            lt_data%u_accumulator = lt_data%u_accumulator + lt_data%u_perturb * lt_data%layer_fraction
+            lt_data%v_accumulator = lt_data%v_accumulator + lt_data%v_perturb * lt_data%layer_fraction
 
             current_z = current_z + step_size
         enddo
 
-        lt_data%u_perturb = lt_data%u_accumulator / layer_count
-        lt_data%v_perturb = lt_data%v_accumulator / layer_count
-    end subroutine linear_perturbation_varyingz
+        lt_data%u_perturb = lt_data%u_accumulator / lt_data%layer_count
+        lt_data%v_perturb = lt_data%v_accumulator / lt_data%layer_count
+    end subroutine linear_perturbation
+
+#ifdef _OPENACC
+    !>----------------------------------------------------------
+    !! GPU variant of linear_perturbation that takes precomputed scalars
+    !! and buffer-extended z arrays to avoid on-device reductions.
+    !! All data must be present on GPU before calling.
+    !!----------------------------------------------------------
+    subroutine linear_perturbation_gpu(start_z, end_z, step_size, int_z_top, int_z_bot, &
+                                       fourier_terrain, lt_data)
+        implicit none
+        real,                     intent(in)    :: start_z, end_z, step_size
+        real,                     intent(in)    :: int_z_top(:,:), int_z_bot(:,:)
+        complex(C_DOUBLE_COMPLEX),intent(in)    :: fourier_terrain(:,:)
+        type(linear_theory_type), intent(inout) :: lt_data
+
+        real    :: current_z, half_step
+        integer :: i, j, nx, ny
+
+        nx = size(fourier_terrain, 1)
+        ny = size(fourier_terrain, 2)
+        half_step = step_size / 2.0
+
+        associate(u_accumulator => lt_data%u_accumulator, &
+                  v_accumulator => lt_data%v_accumulator, &
+                  layer_count => lt_data%layer_count, &
+                  layer_fraction => lt_data%layer_fraction, &
+                  u_perturb => lt_data%u_perturb, &
+                  v_perturb => lt_data%v_perturb &
+        )
+
+        ! Single present lookup for all arrays — avoids repeated per-component
+        ! present-table lookups on each inner parallel loop launch
+        !$acc data present(u_accumulator, v_accumulator, layer_count, &
+        !$acc   layer_fraction, u_perturb, v_perturb, int_z_top, int_z_bot)
+
+        ! Zero accumulators on GPU
+        !$acc parallel loop gang vector collapse(2)
+        do j = 1, ny
+            do i = 1, nx
+                u_accumulator(i,j) = (0.0d0, 0.0d0)
+                v_accumulator(i,j) = (0.0d0, 0.0d0)
+                layer_count(i,j) = 0.0
+            end do
+        end do
+
+        current_z = start_z + half_step
+
+        do while (current_z < end_z)
+            call linear_perturbation_apply_z(current_z, fourier_terrain, lt_data)
+
+            ! Layer fraction and accumulation on GPU
+            !$acc parallel loop gang vector collapse(2)
+            do j = 1, ny
+                do i = 1, nx
+                    layer_fraction(i,j) = max(0.0,                                                     &
+                        min(half_step, current_z - int_z_bot(i,j)) + min(0.0, int_z_top(i,j) - current_z)     &
+                      + min(half_step, int_z_top(i,j) - current_z) + min(0.0, current_z - int_z_bot(i,j))     &
+                    ) / step_size
+
+                    layer_count(i,j) = layer_count(i,j) + layer_fraction(i,j)
+                    u_accumulator(i,j) = u_accumulator(i,j) + u_perturb(i,j) * layer_fraction(i,j)
+                    v_accumulator(i,j) = v_accumulator(i,j) + v_perturb(i,j) * layer_fraction(i,j)
+                end do
+            end do
+
+            current_z = current_z + step_size
+        enddo
+
+        ! Final normalization on GPU
+        !$acc parallel loop gang vector collapse(2)
+        do j = 1, ny
+            do i = 1, nx
+                u_perturb(i,j) = u_accumulator(i,j) / layer_count(i,j)
+                v_perturb(i,j) = v_accumulator(i,j) / layer_count(i,j)
+            end do
+        end do
+
+        !$acc end data
+        end associate
+    end subroutine linear_perturbation_gpu
+#endif
 
     !>----------------------------------------------------------
     !! Add a smoothed buffer around the edge of the terrain to prevent crazy wrap around effects
@@ -423,7 +502,6 @@ contains
         integer, intent(in) :: nx, ny
         real,    intent(in) :: dx
 
-        integer(C_SIZE_T) :: n_elements
         real :: gain, offset
         integer :: i
 
@@ -439,8 +517,9 @@ contains
         allocate(lt_data%ineta(nx,ny))
 
         ! Compute 2D k and l wavenumber fields
+        ! Spacing must match DFT frequencies: dk = 2*pi/(nx*dx), range [-pi/dx, pi/dx)
         offset = piconst / dx
-        gain = 2 * offset / (nx-1)
+        gain = 2 * offset / nx
 
         ! compute k wave numbers for the first row
         do i=1, nx
@@ -451,7 +530,7 @@ contains
             lt_data%k(:,i) = lt_data%k(:,1)
         enddo
 
-        gain = 2 * offset / (ny-1)
+        gain = 2 * offset / ny
         ! compute l wave numbers for the first column
         do i=1,ny
             lt_data%l(1,i) = ((i-1)*gain-offset)
@@ -465,30 +544,42 @@ contains
         lt_data%kl = lt_data%k**2 + lt_data%l**2
         WHERE (lt_data%kl == 0.0) lt_data%kl = SMALL_VALUE
 
-        ! using fftw_alloc routines to ensure better allignment for vectorization may not be threadsafe
-        n_elements = nx * ny
+        allocate(lt_data%uhat(nx,ny))
+        allocate(lt_data%u_perturb(nx,ny))
+        allocate(lt_data%u_accumulator(nx,ny))
+        allocate(lt_data%vhat(nx,ny))
+        allocate(lt_data%v_perturb(nx,ny))
+        allocate(lt_data%v_accumulator(nx,ny))
+        allocate(lt_data%fftshift_tmp(nx,ny))
+
+        ! Pre-allocate work arrays for linear_perturbation (reused across calls)
+        allocate(lt_data%layer_count(nx,ny))
+        allocate(lt_data%layer_fraction(nx,ny))
+        allocate(lt_data%internal_z_top(nx,ny))
+        allocate(lt_data%internal_z_bottom(nx,ny))
+
+#ifdef _OPENACC
+        ! Create cuFFT plan and bind to the OpenACC default CUDA stream
+        ! so cuFFT executions are properly ordered with OpenACC kernels
+        i = cufftPlan2d(lt_data%cufft_plan, ny, nx, CUFFT_Z2Z)
+        i = cufftSetStream(lt_data%cufft_plan, transfer(acc_get_cuda_stream(acc_async_sync), C_NULL_PTR))
+
+        ! Put all lt_data arrays on the GPU
+        !$acc enter data copyin(lt_data%k, lt_data%l, lt_data%kl)
+        !$acc enter data create(lt_data%sig, lt_data%denom, lt_data%m, lt_data%msq, lt_data%mimag)
+        !$acc enter data create(lt_data%ineta, lt_data%uhat, lt_data%vhat)
+        !$acc enter data create(lt_data%u_perturb, lt_data%v_perturb)
+        !$acc enter data create(lt_data%u_accumulator, lt_data%v_accumulator)
+        !$acc enter data create(lt_data%layer_count, lt_data%layer_fraction)
+        !$acc enter data create(lt_data%internal_z_top, lt_data%internal_z_bottom)
+        !$acc enter data create(lt_data%fftshift_tmp)
+#else
+        ! FFTW plan creation (not threadsafe)
         !$omp critical (fftw_lock)
-        lt_data%uh_aligned_data = fftw_alloc_complex(n_elements)
-        lt_data%up_aligned_data = fftw_alloc_complex(n_elements)
-        lt_data%ua_aligned_data = fftw_alloc_complex(n_elements)
-        lt_data%vh_aligned_data = fftw_alloc_complex(n_elements)
-        lt_data%vp_aligned_data = fftw_alloc_complex(n_elements)
-        lt_data%va_aligned_data = fftw_alloc_complex(n_elements)
+        lt_data%uplan = fftw_plan_dft_2d(ny,nx, lt_data%uhat, lt_data%u_perturb, FFTW_BACKWARD, FFTW_MEASURE)
+        lt_data%vplan = fftw_plan_dft_2d(ny,nx, lt_data%vhat, lt_data%v_perturb, FFTW_BACKWARD, FFTW_MEASURE)
         !$omp end critical (fftw_lock)
-
-        call c_f_pointer(lt_data%uh_aligned_data,   lt_data%uhat,           [nx,ny])
-        call c_f_pointer(lt_data%up_aligned_data,   lt_data%u_perturb,      [nx,ny])
-        call c_f_pointer(lt_data%ua_aligned_data,   lt_data%u_accumulator,  [nx,ny])
-        call c_f_pointer(lt_data%vh_aligned_data,   lt_data%vhat,           [nx,ny])
-        call c_f_pointer(lt_data%vp_aligned_data,   lt_data%v_perturb,      [nx,ny])
-        call c_f_pointer(lt_data%va_aligned_data,   lt_data%v_accumulator,  [nx,ny])
-
-        ! note FFTW plan creation is not threadsafe
-        !$omp critical (fftw_lock)
-        lt_data%uplan = fftw_plan_dft_2d(ny,nx, lt_data%uhat, lt_data%u_perturb, FFTW_BACKWARD, FFTW_MEASURE) ! alternatives to MEASURE are PATIENT, or ESTIMATE
-        lt_data%vplan = fftw_plan_dft_2d(ny,nx, lt_data%vhat, lt_data%v_perturb, FFTW_BACKWARD, FFTW_MEASURE) ! alternatives to MEASURE are PATIENT, or ESTIMATE
-        !$omp end critical (fftw_lock)
-
+#endif
 
     end subroutine initialize_linear_theory_data
 
@@ -500,6 +591,27 @@ contains
     subroutine destroy_linear_theory_data(lt_data)
         implicit none
         type(linear_theory_type), intent(inout) :: lt_data
+        integer :: ierr
+
+#ifdef _OPENACC
+        ! Remove lt_data arrays from GPU before deallocation
+        !$acc exit data delete(lt_data%k, lt_data%l, lt_data%kl)
+        !$acc exit data delete(lt_data%sig, lt_data%denom, lt_data%m, lt_data%msq, lt_data%mimag)
+        !$acc exit data delete(lt_data%ineta, lt_data%uhat, lt_data%vhat)
+        !$acc exit data delete(lt_data%u_perturb, lt_data%v_perturb)
+        !$acc exit data delete(lt_data%u_accumulator, lt_data%v_accumulator)
+        !$acc exit data delete(lt_data%layer_count, lt_data%layer_fraction)
+        !$acc exit data delete(lt_data%internal_z_top, lt_data%internal_z_bottom)
+        !$acc exit data delete(lt_data%fftshift_tmp)
+
+        ierr = cufftDestroy(lt_data%cufft_plan)
+#else
+        ! FFTW plan destruction (not threadsafe)
+        !$omp critical (fftw_lock)
+        call fftw_destroy_plan(lt_data%uplan)
+        call fftw_destroy_plan(lt_data%vplan)
+        !$omp end critical (fftw_lock)
+#endif
 
         if (allocated(lt_data%k))       deallocate(lt_data%k)
         if (allocated(lt_data%l))       deallocate(lt_data%l)
@@ -511,27 +623,19 @@ contains
         if (allocated(lt_data%mimag))   deallocate(lt_data%mimag)
         if (allocated(lt_data%ineta))   deallocate(lt_data%ineta)
 
-        !$omp critical (fftw_lock)
-        call fftw_free(lt_data%uh_aligned_data)
-        call fftw_free(lt_data%up_aligned_data)
-        call fftw_free(lt_data%ua_aligned_data)
-        call fftw_free(lt_data%vh_aligned_data)
-        call fftw_free(lt_data%vp_aligned_data)
-        call fftw_free(lt_data%va_aligned_data)
-        !$omp end critical (fftw_lock)
+        if (allocated(lt_data%layer_count))      deallocate(lt_data%layer_count)
+        if (allocated(lt_data%layer_fraction))   deallocate(lt_data%layer_fraction)
+        if (allocated(lt_data%internal_z_top))   deallocate(lt_data%internal_z_top)
+        if (allocated(lt_data%internal_z_bottom))deallocate(lt_data%internal_z_bottom)
 
-        NULLIFY(lt_data%uhat)
-        NULLIFY(lt_data%u_perturb)
-        NULLIFY(lt_data%u_accumulator)
-        NULLIFY(lt_data%vhat)
-        NULLIFY(lt_data%v_perturb)
-        NULLIFY(lt_data%v_accumulator)
+        if (allocated(lt_data%uhat))          deallocate(lt_data%uhat)
+        if (allocated(lt_data%u_perturb))     deallocate(lt_data%u_perturb)
+        if (allocated(lt_data%u_accumulator)) deallocate(lt_data%u_accumulator)
+        if (allocated(lt_data%vhat))          deallocate(lt_data%vhat)
+        if (allocated(lt_data%v_perturb))     deallocate(lt_data%v_perturb)
+        if (allocated(lt_data%v_accumulator)) deallocate(lt_data%v_accumulator)
+        if (allocated(lt_data%fftshift_tmp))  deallocate(lt_data%fftshift_tmp)
 
-        ! note FFTW plan creation is not threadsafe
-        !$omp critical (fftw_lock)
-        call fftw_destroy_plan(lt_data%uplan)
-        call fftw_destroy_plan(lt_data%vplan)
-        !$omp end critical (fftw_lock)
     end subroutine destroy_linear_theory_data
 
 
@@ -593,27 +697,25 @@ contains
                 )
 
             !$omp critical
-       
 
-            !Create the subarray types, which describe how to traverse the two arrays in memory to extract the values wanted
+            ! Create subarray types describing source and destination memory layouts
             call MPI_Type_create_subarray(6, [n_spd_values, n_dir_values, n_nsq_values, LUT_nx, LUT_nz, LUT_ny], [1, 1, 1, nx, 1, ny], &
                 [(k-1),(i-1),(j-1),0,(z-1),0], MPI_ORDER_FORTRAN, MPI_REAL, LUT_type)
 
             call MPI_Type_create_subarray(2, [wind_nx, wind_ny], [nx, ny], &
                 [0,0], MPI_ORDER_FORTRAN, MPI_REAL, send_type)
 
-            ! Commit the types so that they can be used
             call MPI_Type_commit(send_type)
             call MPI_Type_commit(LUT_type)
-            !Perform the put
+
+            ! Passive target: lock target rank, put, unlock — no collective barrier needed
+            call MPI_Win_lock(MPI_LOCK_SHARED, img-1, 0, LUT_win)
             call MPI_Put(wind(ims,jms), msg_size, send_type, (img-1), disp, msg_size, LUT_type, LUT_win)
- 
-            !Free the types
+            call MPI_Win_unlock(img-1, LUT_win)
+
             call MPI_Type_free(send_type)
             call MPI_Type_free(LUT_type)
 
-            !this can be done as some kind of collective (is a 2D broadcast-y thing)
-            !LUT(k,i,j, 1:ime-ims+1, z, 1:jme-jms+1)[DOM_IMG_INDX(img)] = wind(ims:ime,jms:jme)
             !$omp end critical
 
             end associate
@@ -638,17 +740,19 @@ contains
         integer, dimension(3,2) :: LUT_dims
         integer :: loops_completed ! this is just used to measure progress in the LUT creation
         integer :: total_LUT_entries, ijk, start_pos, stop_pos
-        integer :: ims, jms, this_n, my_index, NUM_COMPUTE
-        real, allocatable :: temporary_u(:,:), temporary_v(:,:)
+        integer :: ims, jms, my_index, NUM_COMPUTE
+        real, allocatable :: temporary_u(:,:,:), temporary_v(:,:,:)
+        real, allocatable :: z_above_terrain_bot(:,:,:), z_above_terrain_top(:,:,:)
+        integer :: global_nx, global_ny
         character(len=kMAX_FILE_LENGTH) :: LUT_file
 
         type(c_ptr) :: tmp_ptr
         integer(KIND=MPI_ADDRESS_KIND) :: win_size
-
-        ! MPI windows
         type(MPI_Win) :: U_LUT_win, V_LUT_win
-        ! MPI buffers
         real, pointer, dimension(:,:,:,:,:,:) :: U_LUT_p, V_LUT_p
+        real, allocatable :: start_z_arr(:), end_z_arr(:), step_size_arr(:)
+        real, allocatable :: int_z_top(:,:,:), int_z_bot(:,:,:)
+        integer :: ii, jj
 
         type(grid_t), allocatable :: u_grids(:), v_grids(:)
 
@@ -666,8 +770,8 @@ contains
         ! the domain to work over
         nz = size(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,  2)
 
-        fftnx = size(domain%terrain_frequency, 1)
-        fftny = size(domain%terrain_frequency, 2)
+        fftnx = size(terrain_frequency, 1)
+        fftny = size(terrain_frequency, 2)
 
         call setup_remote_grids(u_grids, v_grids, domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, nz, &
         domain%grid%halo_size, domain%compute_comms)
@@ -738,132 +842,188 @@ contains
             loops_completed = 0
             if (STD_OUT_PE) write(*,*) "    Initializing linear theory"
             if (STD_OUT_PE) flush(output_unit)
-            ! Create MPI windows which will be used for one-sided communication of LUTs as they are being calculated
+
+            ! Create MPI windows for one-sided communication of LUT entries across ranks
             win_size = n_spd_values*n_dir_values*n_nsq_values*nxu*nz*ny
             call MPI_WIN_ALLOCATE(win_size*kREAL, kREAL, MPI_INFO_NULL, domain%compute_comms, tmp_ptr, U_LUT_win)
             call C_F_POINTER(tmp_ptr, U_LUT_p, [n_spd_values, n_dir_values, n_nsq_values, nxu, nz, ny])
-
             win_size = n_spd_values*n_dir_values*n_nsq_values*nx*nz*nyv
             call MPI_WIN_ALLOCATE(win_size*kREAL, kREAL, MPI_INFO_NULL, domain%compute_comms, tmp_ptr, V_LUT_win)
             call C_F_POINTER(tmp_ptr, V_LUT_p, [n_spd_values, n_dir_values, n_nsq_values, nx, nz, nyv])
             U_LUT_p = 1.0
             V_LUT_p = 1.0
 
-            ! $omp parallel default(shared) &
-            ! $omp private(i,j,k,ik,ijk, z, u,v, layer_height, layer_height_bottom, layer_height_top, temporary_u, temporary_v) &
-            ! $omp firstprivate(minimum_layer_size, n_dir_values, n_spd_values, n_nsq_values, nz,nx,ny,nxu,nyv,fftnx,fftny) &
-            ! $omp firstprivate(start_pos, stop_pos, total_LUT_entries)
-            ! $omp threadprivate(lt_data_m) declared at the top of the module
-
-            ! initialization has to happen in each thread so each thread has its own copy
-            ! lt_data_m is a threadprivate variable, within initialization, there are omp critical sections for fftw calls
             call initialize_linear_theory_data(lt_data_m, fftnx, fftny, domain%dx)
-            allocate(temporary_u(fftnx - buffer*2+1, fftny - buffer*2  ), source=0.0)
-            allocate(temporary_v(fftnx - buffer*2,   fftny - buffer*2+1), source=0.0)
-            this_n = stop_pos-start_pos+1
-            ! $omp do
-        
-            !call MPI_Win_fence(0,U_LUT_win)
-            !call MPI_Win_fence(0,V_LUT_win)
+            allocate(temporary_u(fftnx - buffer*2+1, fftny - buffer*2,   nz), source=0.0)
+            allocate(temporary_v(fftnx - buffer*2,   fftny - buffer*2+1, nz), source=0.0)
+
+            ! Precompute z_interface - terrain arrays (constant across all dir/spd/nsq combinations)
+            global_nx = size(domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, 1)
+            global_ny = size(domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, 2)
+            allocate(z_above_terrain_bot(global_nx, nz, global_ny))
+            allocate(z_above_terrain_top(global_nx, nz, global_ny))
+            do z = 1, nz
+                z_above_terrain_bot(:,z,:) = domain%vars_3d(domain%var_indx(kVARS%global_z_interface)%v)%data_3d(:,z,:) &
+                                           - domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d
+                z_above_terrain_top(:,z,:) = z_above_terrain_bot(:,z,:) &
+                                           + domain%vars_3d(domain%var_indx(kVARS%global_dz_interface)%v)%data_3d(:,z,:)
+            end do
+
+#ifdef _OPENACC
+            ! GPU path: precompute per-z-level scalars and buffer-extended z arrays on host,
+            ! then run the entire LUT computation on GPU
+
+            allocate(start_z_arr(nz), end_z_arr(nz), step_size_arr(nz))
+            allocate(int_z_top(fftnx, fftny, nz), int_z_bot(fftnx, fftny, nz))
+
+            ! Precompute reductions and buffer-extended z arrays on host (avoids GPU reductions)
+            do z = 1, nz
+                start_z_arr(z) = minval(z_above_terrain_bot(:,z,:))
+                end_z_arr(z)   = maxval(z_above_terrain_top(:,z,:))
+                step_size_arr(z) = min(minimum_layer_size, minval(z_above_terrain_top(:,z,:) - z_above_terrain_bot(:,z,:)))
+
+                int_z_top(:,:,z) = maxval(z_above_terrain_top(:,z,:))
+                int_z_top(buffer:buffer+global_nx-1, buffer:buffer+global_ny-1, z) = z_above_terrain_top(:,z,:)
+                int_z_bot(:,:,z) = minval(z_above_terrain_bot(:,z,:))
+                int_z_bot(buffer:buffer+global_nx-1, buffer:buffer+global_ny-1, z) = z_above_terrain_bot(:,z,:)
+            end do
+
+            ! Put read-only and work arrays on GPU
+            !$acc enter data copyin(terrain_frequency, int_z_top, int_z_bot)
+            !$acc enter data create(temporary_u, temporary_v)
+
             do ijk = start_pos, stop_pos
-                ! loop over the combined ijk space to improve parallelization (more granular parallelization)
-                ! because it is one combined loop, we have to calculate the i,k indicies from the combined ik variable
-
-                ! do ik=0, n_dir_values*n_spd_values*n_nsq_values-1
-                ik = ijk / n_nsq_values ! no +1 yet because this still needs to go through another div / mod iteration to compute i and k
-
-                ! do j=1, n_nsq_values
+                ik = ijk / n_nsq_values
                 j = mod(ijk,n_nsq_values) + 1
-
-                ! do i=1, n_spd_values
                 i = ik/n_spd_values + 1
-                ! do k=1, n_spd_values
                 k = mod(ik,n_spd_values) + 1
 
-                ! set the domain wide U and V values to the current u and v values
                 u = calc_u( dir_values(i), spd_values(k) )
                 v = calc_v( dir_values(i), spd_values(k) )
 
-                debug_print = .False.
-                if ((spd_values(k)==15).and.(abs(u-15) < 1).and.(j==15)) debug_print=.True.
-                ! calculate the linear wind field for the current u and v values
+                if ((u==0.0).and.(v==0.0)) then
+                    loops_completed = loops_completed + nz
+                    cycle
+                endif
 
+                ! Setup z-independent Fourier quantities on GPU
+                call linear_perturbation_setup(u, v, exp(nsq_values(j)), lt_data_m)
 
                 do z=1,nz
-                    ! print the current status if this is being run "interactively"
-                    if (options%general%interactive) then
-                        !$omp critical (print_lock)
-                        if (STD_OUT_PE) write(*,"(f5.1,A)") loops_completed/real(nz*(stop_pos-start_pos+1))*100," %"
-                        if (STD_OUT_PE) flush(output_unit)
-                        !$omp end critical (print_lock)
+                    ! Compute perturbation on GPU using precomputed z arrays
+                    call linear_perturbation_gpu(start_z_arr(z), end_z_arr(z), step_size_arr(z), &
+                                                    int_z_top(:,:,z), int_z_bot(:,:,z),              &
+                                                    terrain_frequency, lt_data_m)
+
+                    ! Extract buffer region into temporary arrays on GPU
+                    if (nxu /= nx) then
+                        associate(u_perturb => lt_data_m%u_perturb, v_perturb => lt_data_m%v_perturb)
+                        !$acc parallel present(temporary_u, u_perturb)
+                        !$acc loop gang vector collapse(2)
+                        do jj = 1, fftny - buffer*2
+                            do ii = 1, fftnx - buffer*2 + 1
+                                temporary_u(ii,jj,z) = real( real(                                 &
+                                    ( u_perturb(buffer+ii-1, buffer+jj)                  &
+                                    + u_perturb(buffer+ii,   buffer+jj) ))) / 2.0
+                            end do
+                        end do
+                        !$acc loop gang vector collapse(2)
+                        do jj = 1, fftny - buffer*2 + 1
+                            do ii = 1, fftnx - buffer*2
+                                temporary_v(ii,jj,z) = real( real(                                 &
+                                    ( v_perturb(buffer+ii, buffer+jj-1)                  &
+                                    + v_perturb(buffer+ii, buffer+jj) ))) / 2.0
+                            end do
+                        end do
+                        !$acc end parallel
+                        end associate
+                    else
+                        stop "ERROR: linear wind LUT creation not set up for non-staggered grids yet"
                     endif
 
-                    ! call update_irregular_grid(u,v, nsq_values(j), z, domain, minimum_layer_size)
-                    call linear_perturbation(u, v, exp(nsq_values(j)),                                                                      &
-                                             domain%vars_3d(domain%var_indx(kVARS%global_z_interface)%v)%data_3d(:,z,:) - &
-                                             domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d,                                      &
-                                             domain%vars_3d(domain%var_indx(kVARS%global_z_interface)%v)%data_3d(:,z,:) - &
-                                             domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d + domain%vars_3d(domain%var_indx(kVARS%global_dz_interface)%v)%data_3d(:,z,:),  &
-                                             minimum_layer_size, domain%terrain_frequency, lt_data_m)
+                    loops_completed = loops_completed+1
+                enddo
 
-                    ! need to handle stagger (nxu /= nx) and the buffer around edges of the domain
+                ! Copy results to host for MPI distribution
+                !$acc update host(temporary_u, temporary_v)
+                do z=1,nz
+                    call copy_data_to_remote(temporary_u(:,:,z), u_grids, U_LUT_win, i,j,k, z, nxu, nz, ny)
+                    call copy_data_to_remote(temporary_v(:,:,z), v_grids, V_LUT_win, i,j,k, z, nx, nz, nyv)
+                end do
+
+                if (options%general%interactive) then
+                    if (STD_OUT_PE) write(*,"(f5.1,A)") loops_completed/real(nz*(stop_pos-start_pos+1))*100," %"
+                    if (STD_OUT_PE) flush(output_unit)
+                endif
+            end do
+
+            !$acc exit data delete(terrain_frequency, int_z_top, int_z_bot)
+            !$acc exit data delete(temporary_u, temporary_v)
+            deallocate(start_z_arr, end_z_arr, step_size_arr, int_z_top, int_z_bot)
+#else
+            do ijk = start_pos, stop_pos
+                ! Decode (dir, nsq, spd) indices from combined ijk index
+                ik = ijk / n_nsq_values
+                j = mod(ijk,n_nsq_values) + 1
+                i = ik/n_spd_values + 1
+                k = mod(ik,n_spd_values) + 1
+
+                u = calc_u( dir_values(i), spd_values(k) )
+                v = calc_v( dir_values(i), spd_values(k) )
+
+                ! Setup z-independent Fourier quantities once for this (dir, spd, nsq)
+                call linear_perturbation_setup(u, v, exp(nsq_values(j)), lt_data_m)
+
+                ! Compute all z-levels, accumulate into 3D temporary arrays
+                do z=1,nz
+                    call linear_perturbation(u, v, exp(nsq_values(j)),        &
+                                             z_above_terrain_bot(:,z,:),       &
+                                             z_above_terrain_top(:,z,:),       &
+                                             minimum_layer_size, terrain_frequency, lt_data_m, skip_setup=.true.)
+
                     if (nxu /= nx) then
-                        temporary_u(:,:) = real( real(                                              &
+                        temporary_u(:,:,z) = real( real(                                              &
                                 ( lt_data_m%u_perturb(buffer:fftnx-buffer,     1+buffer:fftny-buffer)           &
                                 + lt_data_m%u_perturb(1+buffer:fftnx-buffer+1,     1+buffer:fftny-buffer)) )) / 2
 
-                        temporary_v(:,:) = real( real(                                              &
+                        temporary_v(:,:,z) = real( real(                                              &
                                 ( lt_data_m%v_perturb(1+buffer:fftnx-buffer,     buffer:fftny-buffer)         &
                                 + lt_data_m%v_perturb(1+buffer:fftnx-buffer,     1+buffer:fftny-buffer+1)) )) / 2
-                        call MPI_Win_fence(0,U_LUT_win)
-                        call MPI_Win_fence(0,V_LUT_win)
-                        call copy_data_to_remote(temporary_u, u_grids, U_LUT_win, i,j,k, z, nxu, nz, ny)
-                        call copy_data_to_remote(temporary_v, v_grids, V_LUT_win, i,j,k, z, nx, nz, nyv)
-                        call MPI_Win_fence(0,U_LUT_win)
-                        call MPI_Win_fence(0,V_LUT_win)
-
                     else
                         stop "ERROR: linear wind LUT creation not set up for non-staggered grids yet"
-                        ! hi_u_LUT(k,i,j,:,z,:) = real( real(                                                    &
-                        !         lt_data_m%u_perturb(1+buffer:fftnx-buffer,     1+buffer:fftny-buffer) ))
-                        !
-                        ! hi_v_LUT(k,i,j,:,z,:) = real( real(                                                    &
-                        !         lt_data_m%v_perturb(1+buffer:fftnx-buffer,     1+buffer:fftny-buffer) ))
                     endif
 
-                    !$omp critical (print_lock)
                     loops_completed = loops_completed+1
-                    !$omp end critical (print_lock)
-
                 enddo
-            end do
-            ! $omp end do
 
-            ! If this image doesn't have as many steps to run as some other images might,
-            ! then it has to run additional ghost step(s) so that it syncs with the others correctly
-            do i=1, (total_LUT_entries/NUM_COMPUTE+1) - this_n
-                ! the syncs should be outside of the z loop, but this is a little more forgiving with memory requirements
+                ! Distribute this entry to all ranks via passive target one-sided MPI
+                ! (lock/unlock inside copy_data_to_remote — no collective barriers)
                 do z=1,nz
-                    call MPI_Win_fence(0,U_LUT_win)
-                    call MPI_Win_fence(0,V_LUT_win)
-                    call MPI_Win_fence(0,U_LUT_win)
-                    call MPI_Win_fence(0,V_LUT_win)
-                enddo
-            enddo
+                    call copy_data_to_remote(temporary_u(:,:,z), u_grids, U_LUT_win, i,j,k, z, nxu, nz, ny)
+                    call copy_data_to_remote(temporary_v(:,:,z), v_grids, V_LUT_win, i,j,k, z, nx, nz, nyv)
+                end do
 
-            call MPI_Win_fence(0,U_LUT_win)
-            call MPI_Win_fence(0,V_LUT_win)
-       
+                if (options%general%interactive) then
+                    if (STD_OUT_PE) write(*,"(f5.1,A)") loops_completed/real(nz*(stop_pos-start_pos+1))*100," %"
+                    if (STD_OUT_PE) flush(output_unit)
+                endif
+            end do
+#endif
+
+            deallocate(z_above_terrain_bot, z_above_terrain_top)
+
+            ! Ensure all ranks have completed their puts before reading from the windows
+            call MPI_Barrier(domain%compute_comms)
+            call MPI_Win_sync(U_LUT_win)
+            call MPI_Win_sync(V_LUT_win)
             hi_u_LUT = U_LUT_p(:,:,:,:,:,:)
             hi_v_LUT = V_LUT_p(:,:,:,:,:,:)
-
             call MPI_Win_free(U_LUT_win)
             call MPI_Win_free(V_LUT_win)
 
             ! memory needs to be freed so this structure can be used again when removing linear winds
             call destroy_linear_theory_data(lt_data_m)
-            ! $omp end parallel
-!
+
             if (STD_OUT_PE) write(*,*) "All images: 100 % Complete"
             if (STD_OUT_PE) write(*,*) char(10),"--------  Linear wind look up table generation complete ---------"
             if (STD_OUT_PE) flush(output_unit)
@@ -896,120 +1056,111 @@ contains
         integer,        intent(in)   :: winsz
         logical,        intent(in)   :: update
 
-        logical :: externalN ! flag whether N is read from a field in the forcing dataset
         integer :: nx,nxu, ny,nyv, nz, i,j,k, smoothz
-        integer :: uk, vi !store a separate value of i for v and of k for u to we can handle nx+1, ny+1
+        integer :: uk, vi
         integer :: step, dpos, npos, spos, nexts, nextd, nextn
-        integer :: north, south, east, west, top, bottom, n
+        integer :: south, east, west, top, bottom
         real :: u, v
         real,allocatable :: u1d(:),v1d(:)
         integer :: ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme
         real :: dweight, nweight, sweight, curspd, curdir, curnsq, wind_first, wind_second
         real :: hydrometeors
 
-        ! pointers to the u/v data to be updated so they can point to different places depending on the update flag
-        real, allocatable :: u3d(:,:,:), v3d(:,:,:), nsquared(:,:,:)
+        associate(                                                                                          &
+            u_data    => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,                                &
+            v_data    => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d,                                &
+            u_dqdt    => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,                                &
+            v_dqdt    => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,                                &
+            theta     => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,             &
+            exner     => domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,                            &
+            z_data    => domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d,                                &
+            qv        => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,                      &
+            nsquared  => domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d                          &
+        )
 
-
+        ! Copy only the fields we need from device to host
+        !$acc update host(u_data, v_data, theta, exner, z_data, qv, nsquared)
         if (update) then
-            u3d = domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d
-            v3d = domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d
-        else
-            u3d = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d
-            v3d = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d
+            !$acc update host(u_dqdt, v_dqdt)
         endif
-        nsquared = domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d
+        if (domain%var_indx(kVARS%cloud_water_mass)%v > 0) then
+            !$acc update host(domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d)
+        endif
+        if (domain%var_indx(kVARS%ice_mass)%v > 0) then
+            !$acc update host(domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d)
+        endif
+        if (domain%var_indx(kVARS%rain_mass)%v > 0) then
+            !$acc update host(domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d)
+        endif
+        if (domain%var_indx(kVARS%snow_mass)%v > 0) then
+            !$acc update host(domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d)
+        endif
 
-        ims_u = lbound(u3d,1)
-        ime_u = ubound(u3d,1)
-        jms = lbound(u3d,3)
-        jme = ubound(u3d,3)
+        ims_u = lbound(u_data,1)
+        ime_u = ubound(u_data,1)
+        jms = lbound(u_data,3)
+        jme = ubound(u_data,3)
 
-        ims = lbound(v3d,1)
-        ime = ubound(v3d,1)
-        jms_v = lbound(v3d,3)
-        jme_v = ubound(v3d,3)
+        ims = lbound(v_data,1)
+        ime = ubound(v_data,1)
+        jms_v = lbound(v_data,3)
+        jme_v = ubound(v_data,3)
 
-        kms = lbound(u3d,2)
-        kme = ubound(u3d,2)
+        kms = lbound(u_data,2)
+        kme = ubound(u_data,2)
 
         nx  = size(domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d,1)
         ny  = size(domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d,2)
-        nz  = size(u3d,2)
-        nxu = size(u3d,1)
-        nyv = size(v3d,3)
+        nz  = size(u_data,2)
+        nxu = size(u_data,1)
+        nyv = size(v_data,3)
 
         if (reverse) then
-            ! u_LUT=>rev_u_LUT
-            ! v_LUT=>rev_v_LUT
+            ! TODO: lo_*_perturbation arrays are allocated but no low-res LUT is generated yet
             u_perturbation=>lo_u_perturbation
             v_perturbation=>lo_v_perturbation
         else
-            ! u_LUT=>hi_u_LUT
-            ! v_LUT=>hi_v_LUT
             u_perturbation=>hi_u_perturbation
             v_perturbation=>hi_v_perturbation
         endif
 
-        ! if (reverse) print*, "WARNING using fixed nsq for linear wind removal: 3e-6"
-        ! !$omp parallel firstprivate(nx,nxu,ny,nyv,nz, kms, kme, reverse, vsmooth, winsz, using_blocked_flow), default(none), &
-        ! !$omp private(i,j,k,step, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
-        ! !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v, blocked), &
-        ! !$omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
-        ! !$omp shared(domain, u3d,v3d, spd_values, dir_values, nsq_values, u_LUT, v_LUT), &
-        ! !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution), &
-        ! !$omp shared(min_stability, max_stability, n_dir_values, n_spd_values, n_nsq_values, smooth_nsq)
-        !
-        ! !$omp do
+        ! ---- Compute Brunt-Vaisala frequency (N²) ----
         do k=1,ny
-
             do j=1,nz
                 do i=1,nx
+                    top = min(j+vsmooth, nz)
+                    bottom = max(1, j - (vsmooth - (top-j)))
 
-                    !if (variable_N) then
-                        ! look up vsmooth gridcells up to nz at the maximum
-                        top = min(j+vsmooth, nz)
-                        ! if (top-j)/=vsmooth, then look down enough layers to make the window vsmooth in size
-                        bottom = max(1, j - (vsmooth - (top-j)))
+                    hydrometeors = 0
+                    if (domain%var_indx(kVARS%cloud_water_mass)%v > 0) &
+                        hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
+                    if (domain%var_indx(kVARS%ice_mass)%v > 0) &
+                        hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
+                    if (domain%var_indx(kVARS%rain_mass)%v > 0) &
+                        hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
+                    if (domain%var_indx(kVARS%snow_mass)%v > 0) &
+                        hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
 
-                        hydrometeors = 0
-                        if (domain%var_indx(kVARS%cloud_water_mass)%v > 0) &
-                            hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
-                        if (domain%var_indx(kVARS%ice_mass)%v > 0) &
-                            hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
-                        if (domain%var_indx(kVARS%rain_mass)%v > 0) &
-                            hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
-                        if (domain%var_indx(kVARS%snow_mass)%v > 0) &
-                            hydrometeors = hydrometeors + domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v)%data_3d(i+ims-1,j+kms-1,k+jms-1)
+                    if (.not.reverse) then
+                        nsquared(i+ims-1,j+kms-1,k+jms-1) = calc_stability(  &
+                            theta(i+ims-1,bottom+kms-1,k+jms-1), theta(i+ims-1,top+kms-1,k+jms-1),      &
+                            exner(i+ims-1,bottom+kms-1,k+jms-1), exner(i+ims-1,top+kms-1,k+jms-1),      &
+                            z_data(i+ims-1,bottom+kms-1,k+jms-1), z_data(i+ims-1,top+kms-1,k+jms-1),    &
+                            qv(i+ims-1,bottom+kms-1,k+jms-1), qv(i+ims-1,top+kms-1,k+jms-1),            &
+                            hydrometeors)
 
-
-                        if (.not.reverse) then
-                            nsquared(i+ims-1,j+kms-1,k+jms-1) = calc_stability(domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i+ims-1,bottom+kms-1,k+jms-1),                              &
-                                                             domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i+ims-1,top+kms-1,k+jms-1),                                                   &
-                                                             domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d(i+ims-1,bottom+kms-1,k+jms-1),domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d(i+ims-1,top+kms-1,k+jms-1),                &
-                                                             domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i+ims-1,bottom+kms-1,k+jms-1),  domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i+ims-1,top+kms-1,k+jms-1),                      &
-                                                             domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i+ims-1,bottom+kms-1,k+jms-1), domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d(i+ims-1,top+kms-1,k+jms-1),   &
-                                                             hydrometeors)
-
-                            nsquared(i+ims-1,j+kms-1,k+jms-1) = max(min_stability, min(max_stability, &
-                                                    nsquared(i+ims-1,j+kms-1,k+jms-1)))! * nsq_calibration(i,k)))
-                        else
-                            ! Low-res boundary condition variables will be in a different array format.  It should be
-                            ! easy enough to call calc_stability after e.g. transposing z and y dimension, but some
-                            ! e.g. pii will not be set in the forcing data, so this may need a little thought.
-                            nsquared(i+ims-1,j+kms-1,k+jms-1) = 3e-6
-                        endif
-                    !else
-                    !    nsquared(i+ims-1,j+kms-1,k+jms-1) = N_squared
-                    !endif
+                        nsquared(i+ims-1,j+kms-1,k+jms-1) = max(min_stability, min(max_stability, &
+                                                nsquared(i+ims-1,j+kms-1,k+jms-1)))
+                    else
+                        nsquared(i+ims-1,j+kms-1,k+jms-1) = 3e-6
+                    endif
                 end do
-                ! look up table is computed in log space
+                ! LUT is computed in log space
                 nsquared(:,j+kms-1,k+jms-1) = log(nsquared(:,j+kms-1,k+jms-1))
             end do
 
             if (smooth_nsq) then
                 do j=1,nz
-                    ! compute window as above.
                     top = min(j+vsmooth,nz)
                     bottom = max(1, j - (vsmooth - (top-j)) )
 
@@ -1023,32 +1174,20 @@ contains
                 end do
             endif
         end do
-        ! !$omp end do
-        ! !$omp end parallel
 
-
-        ! smooth array has it's own parallelization, so this probably can't go in a critical section
         if (smooth_nsq) then
             call smooth_array(nsquared, winsz, ydim=3)
         endif
 
-        !$omp parallel firstprivate(ims, ime, jms, jme, ims_u, ime_u, jms_v, jme_v, kms, kme, nx,nxu,ny,nyv,nz), &
-        !$omp firstprivate(reverse, vsmooth, winsz), default(none), &
-        !$omp private(i,j,k,step, uk, vi, east, west, north, south, top, bottom, u1d, v1d), &
-        !$omp private(spos, dpos, npos, nexts,nextd, nextn,n, smoothz, u, v), &
-        !$omp private(wind_first, wind_second, curspd, curdir, curnsq, sweight,dweight, nweight), &
-        !$omp shared(domain, u3d,v3d, nsquared, spd_values, dir_values, nsq_values, hi_u_LUT, hi_v_LUT), &
-        !$omp shared(u_perturbation, v_perturbation, linear_update_fraction, linear_contribution), &
-        !$omp shared(min_stability, max_stability, n_dir_values, n_spd_values, n_nsq_values, smooth_nsq)
+        ! ---- Interpolate LUT and apply perturbations ----
         allocate(u1d(nxu), v1d(nxu))
-        !$omp do
         do k=1, nyv
 
             uk = min(k,ny)
             do i=1,nxu
                 vi = min(i,nx)
-                u1d(i)  = sum(u3d(i+ims_u-1,:,uk+jms-1)) / nz
-                v1d(i)  = sum(v3d(vi+ims-1, :,k+jms_v-1)) / nz
+                u1d(i) = sum(u_data(i+ims_u-1,:,uk+jms-1)) / nz
+                v1d(i) = sum(v_data(vi+ims-1, :,k+jms_v-1)) / nz
             enddo
 
             do j=1, nz
@@ -1056,73 +1195,44 @@ contains
                         uk = min(k,ny)
                         vi = min(i,nx)
 
-                        !   First find the bounds of the region to average over
-                        west  = max(i - winsz, 1)
-                        east  = min(i + winsz,nx)
                         bottom= max(j - winsz, 1)
                         top   = min(j + winsz,nz)
-                        south = max(k - winsz, 1)
-                        north = min(k + winsz,ny)
 
-                        n = (((east-west)+1) * ((north-south)+1))
                         if (reverse) then
-                            u = u3d(i+ims_u-1,j,uk+jms-1 ) ! u3d(i,j,uk)
-                            v = v3d(vi+ims-1, j,k+jms_v-1) ! v3d(vi,j,k)
-                            ! WARNING: see below for why this does not work (yet)
-                            ! u = sum( domain%u(west:east,j,south:north) ) / n
-                            ! v = sum( domain%v(west:east,j,south:north) ) / n
+                            u = u_data(i+ims_u-1,j,uk+jms-1)
+                            v = v_data(vi+ims-1, j,k+jms_v-1)
                         else
-                            ! smooth the winds vertically first
                             u = u1d(i)
                             v = v1d(i)
-                            ! WARNING for now domain%u,v are updated inside the loop, so the code below will end
-                            ! up using u and v values that have had the linear theory applied already (not good)
-                            ! eventually this should be pulled out and only the pertubration should be updated in the
-                            ! parallel region
-                            ! u = sum(domain%u( i, bottom:top,uk)) / (top-bottom+1)
-                            ! v = sum(domain%v(vi, bottom:top, k)) / (top-bottom+1)
                         endif
-                        n = n * ((top-bottom)+1)
 
-                        ! Calculate the direction of the current grid cell wind
+                        ! Find LUT position for wind direction
                         dpos = 1
                         curdir = calc_direction( u, v )
-                        ! and find the corresponding position in the Look up Table
                         do step=1, n_dir_values
-                            if (curdir > dir_values(step)) then
-                                dpos = step
-                            endif
+                            if (curdir > dir_values(step)) dpos = step
                         end do
 
-                        ! Calculate the wind speed of the current grid cell
+                        ! Find LUT position for wind speed
                         spos = 1
                         curspd = calc_speed( u, v )
-                        ! and find the corresponding position in the Look up Table
                         do step=1, n_spd_values
-                            if (curspd > spd_values(step)) then
-                                spos = step
-                            endif
+                            if (curspd > spd_values(step)) spos = step
                         end do
 
-                        ! Calculate the Brunt-Vaisalla frequency of the current grid cell
-                        !   Then compute the mean in log space
-                        ! curnsq = log(2.75e-5)
+                        ! Find LUT position for N² (mean in log space)
                         curnsq = sum(nsquared(vi+ims-1,bottom+kms-1:top+kms-1,uk+jms-1)) / (top - bottom + 1)
-                        !   and find the corresponding position in the Look up Table
                         npos = 1
                         do step=1, n_nsq_values
-                            if (curnsq > nsq_values(step)) then
-                                npos = step
-                            endif
+                            if (curnsq > nsq_values(step)) npos = step
                         end do
 
-                        ! Calculate the weights and the "next" u/v position
-                        ! "next" usually = pos+1 but for edge cases next = 1 or n
+                        ! Interpolation weights
                         dweight = calc_weight(dir_values, dpos, nextd, curdir)
                         sweight = calc_weight(spd_values, spos, nexts, curspd)
                         nweight = calc_weight(nsq_values, npos, nextn, curnsq)
 
-                        ! perform linear interpolation between LUT values
+                        ! Trilinear interpolation of LUT and apply perturbation to u
                         if (k<=ny) then
                             wind_first =      nweight  * (dweight * hi_u_LUT(spos, dpos,npos, i,j,k) + (1-dweight) * hi_u_LUT(spos, nextd,npos, i,j,k))   &
                                         +  (1-nweight) * (dweight * hi_u_LUT(spos, dpos,nextn,i,j,k) + (1-dweight) * hi_u_LUT(spos, nextd,nextn,i,j,k))
@@ -1133,12 +1243,14 @@ contains
                             u_perturbation(i,j,k) = u_perturbation(i,j,k) * (1-linear_update_fraction) &
                                         + linear_update_fraction * (sweight*wind_first + (1-sweight)*wind_second)
 
-                            ! if (reverse) then
-                            !     u3d(i,j,k) = u3d(i,j,k) - u_perturbation(i,j,k) * linear_contribution
-                            ! else
-                                ! domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
-                            ! endif
+                            if (update) then
+                                u_dqdt(i+ims_u-1,j,k+jms-1) = u_dqdt(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) * linear_contribution
+                            else
+                                u_data(i+ims_u-1,j,k+jms-1) = u_data(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) * linear_contribution
+                            endif
                         endif
+
+                        ! Trilinear interpolation of LUT and apply perturbation to v
                         if (i<=nx) then
                             wind_first =      nweight  * (dweight * hi_v_LUT(spos, dpos,npos, i,j,k) + (1-dweight) * hi_v_LUT(spos, nextd,npos, i,j,k))    &
                                         +  (1-nweight) * (dweight * hi_v_LUT(spos, dpos,nextn,i,j,k) + (1-dweight) * hi_v_LUT(spos, nextd,nextn,i,j,k))
@@ -1149,29 +1261,29 @@ contains
                             v_perturbation(i,j,k) = v_perturbation(i,j,k) * (1-linear_update_fraction) &
                                         + linear_update_fraction * (sweight*wind_first + (1-sweight)*wind_second)
 
-                            ! if (reverse) then
-                            !     v3d(i,j,k) = v3d(i,j,k) - v_perturbation(i,j,k) * linear_contribution
-                            ! else
-                                ! for the high res domain, linear_mask should incorporate linear_contribution
-                                ! domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
-                            ! endif
+                            if (update) then
+                                v_dqdt(i+ims-1,j,k+jms_v-1) = v_dqdt(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) * linear_contribution
+                            else
+                                v_data(i+ims-1,j,k+jms_v-1) = v_data(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) * linear_contribution
+                            endif
                         endif
                 end do
             end do
         end do
-        !$omp end do
         deallocate(u1d, v1d)
-        !$omp end parallel
 
-        do k=1, nyv
-            do j=1, nz
-                do i=1, nxu
-                    if (i<=nx) domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i+ims-1,j,k+jms_v-1) = v3d(i+ims-1,j,k+jms_v-1) + v_perturbation(i,j,k) *linear_contribution! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
-                    if (k<=ny) domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i+ims_u-1,j,k+jms-1) = u3d(i+ims_u-1,j,k+jms-1) + u_perturbation(i,j,k) *linear_contribution ! * linear_mask(min(nx,i),min(ny,k)) * (1-blocked)
-                enddo
-            enddo
-        enddo
-        domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d = exp(domain%vars_3d(domain%var_indx(kVARS%nsquared)%v)%data_3d)
+        ! Convert nsquared back from log-space to linear (LUT interpolation works in log-space)
+        nsquared = exp(nsquared)
+
+        ! Copy modified fields back to device
+        if (update) then
+            !$acc update device(u_dqdt, v_dqdt)
+        else
+            !$acc update device(u_data, v_data)
+        endif
+        !$acc update device(nsquared)
+
+        end associate
 
     end subroutine spatial_winds
 
@@ -1185,23 +1297,14 @@ contains
         type(options_t), intent(in) :: options
 
         original_buffer       = options%lt%buffer
-        variable_N            = options%lt%variable_N
         smooth_nsq            = options%lt%smooth_nsq
 
-        stability_window_size = options%lt%stability_window_size        ! window to average nsq over
-        max_stability         = options%lt%max_stability                ! limits on the calculated Brunt Vaisala Frequency
-        min_stability         = options%lt%min_stability                ! these may need to be a little narrower.
-        linear_contribution   = options%lt%linear_contribution          ! multiplier on uhat,vhat before adding to u,v
-                                                                                ! =fractional contribution of linear perturbation to wind field
-        ! these are defined per call to permit different values for low res and high res domains
-        ! N_squared              = options%lt%N_squared                 ! static Brunt Vaisala Frequency (N^2) to use
-        ! rm_N_squared           = options%lt%rm_N_squared              ! static BV Frequency (N^2) to use in removing linear wind field
-        ! rm_linear_contribution = options%lt%rm_linear_contribution    ! fractional contribution of linear perturbation to remove wind field
-        ! remove_lowres_linear   = options%lt%remove_lowres_linear      ! remove the linear mountain wave from low res forcing model
+        stability_window_size = options%lt%stability_window_size
+        max_stability         = options%lt%max_stability
+        min_stability         = options%lt%min_stability
+        linear_contribution   = options%lt%linear_contribution
+        linear_update_fraction = options%lt%linear_update_fraction
 
-        linear_update_fraction    = options%lt%linear_update_fraction   ! controls the rate at which the linearfield updates
-                                                                                ! =fraction of linear perturbation to add each time step
-        ! Look up table generation parameters, range for each parameter, and number of steps to cover that range
         dirmax = options%lt%dirmax
         dirmin = options%lt%dirmin
         spdmax = options%lt%spdmax
@@ -1230,8 +1333,6 @@ contains
         complex(C_DOUBLE_COMPLEX), allocatable  :: complex_terrain(:,:)
         type(C_PTR) :: plan
         integer     :: nx, ny, nz
-        real        :: saved_linear_contribution ! temporary variable to save the linear contribution state so we can restore
-        integer     :: save_buffer
 
         ! store module level variables so we don't have to pass options through everytime
         ! lots of these things probably need to be moved to the linearizable class so they
@@ -1241,33 +1342,31 @@ contains
         call set_module_options(options)
 
         if (STD_OUT_PE) write(*,*) "Initializing linear winds"
-        if (.not.(allocated(domain%terrain_frequency))) then
+        if (allocated(terrain_frequency)) deallocate(terrain_frequency)
 
+        ! Create a buffer zone around the topography to smooth the edges
+        buffer = original_buffer
+        ! first create it including a 5 grid cell smoothing function
+        call add_buffer_topo(domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, complex_terrain_firstpass, 5, buffer)
+        buffer = 2
+        ! then further add a small (~2) grid cell buffer where all cells have the same value
+        call add_buffer_topo(real(real(complex_terrain_firstpass)), complex_terrain, 0, buffer, debug=options%general%debug)
+        buffer = buffer + original_buffer
 
-            ! Create a buffer zone around the topography to smooth the edges
-            buffer = original_buffer
-            ! first create it including a 5 grid cell smoothing function
-            call add_buffer_topo(domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, complex_terrain_firstpass, 5, buffer)
-            buffer = 2
-            ! then further add a small (~2) grid cell buffer where all cells have the same value
-            call add_buffer_topo(real(real(complex_terrain_firstpass)), complex_terrain, 0, buffer, debug=options%general%debug)
-            buffer = buffer + original_buffer
+        nx = size(complex_terrain, 1)
+        ny = size(complex_terrain, 2)
 
-            nx = size(complex_terrain, 1)
-            ny = size(complex_terrain, 2)
+        allocate(terrain_frequency(nx,ny))
 
-            allocate(domain%terrain_frequency(nx,ny))
-
-            ! calculate the fourier transform of the terrain for use in linear winds
-            plan = fftw_plan_dft_2d(ny, nx, complex_terrain, domain%terrain_frequency, FFTW_FORWARD, FFTW_ESTIMATE)
-            call fftw_execute_dft(plan, complex_terrain, domain%terrain_frequency)
-            call fftw_destroy_plan(plan)
-            ! normalize FFT by N - grid cells
-            domain%terrain_frequency = domain%terrain_frequency / (nx * ny)
-            ! shift the grid cell quadrants
-            ! need to test what effect all of the related shifts actually have...
-            call fftshift(domain%terrain_frequency)
-        endif
+        ! calculate the fourier transform of the terrain for use in linear winds
+        plan = fftw_plan_dft_2d(ny, nx, complex_terrain, terrain_frequency, FFTW_FORWARD, FFTW_ESTIMATE)
+        call fftw_execute_dft(plan, complex_terrain, terrain_frequency)
+        call fftw_destroy_plan(plan)
+        ! normalize FFT by N - grid cells
+        terrain_frequency = terrain_frequency / (nx * ny)
+        ! shift the grid cell quadrants
+        ! need to test what effect all of the related shifts actually have...
+        call fftshift(terrain_frequency)
 
         if (linear_contribution/=1) then
             if (STD_OUT_PE) write(*,*) "  Using a fraction of the linear perturbation:",linear_contribution
@@ -1276,48 +1375,6 @@ contains
         nx = size(domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, 1)
         nz = size(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d,       2)
         ny = size(domain%vars_2d(domain%var_indx(kVARS%global_terrain)%v)%data_2d, 2)
-
-
-        ! set up linear_mask variable
-        !if (.not.reverse) then
-            !if (allocated(linear_mask)) deallocate(linear_mask)
-            !allocate(linear_mask(nx,ny))
-            !linear_mask = linear_contribution
-
-            ! if (use_linear_mask) then
-            !     if (STD_OUT_PE) write(*,*) "  Reading Linear Mask"
-            !     if (STD_OUT_PE) write(*,*) "    from file: " // trim(options%init_conditions_file)
-            !     if (STD_OUT_PE) write(*,*) "    with var: "  // trim(options%linear_mask_var)
-            !     call io_read(options%init_conditions_file, options%linear_mask_var, domain%linear_mask)
-            !
-            !     linear_mask = domain%linear_mask * linear_contribution
-            ! endif
-
-            ! Stupidly simple adjustment to the linear wind field to account for using density.
-            ! If we are using density in the advection calculations, modify the linear perturbation
-            ! to get the vertical velocities closer to what they would be without density (boussinesq)
-            ! need to check if this makes the most sense when close to the surface
-            ! if (useDensity) then
-                ! linear_mask = linear_mask * 2
-            ! endif
-        !endif
-
-        ! set up nsq_calibration variable
-        !if ( (.not.reverse) .and. (.not.allocated(nsq_calibration)) ) then
-            !allocate(nsq_calibration(nx,ny))
-            !nsq_calibration = 1
-
-            ! if (use_nsq_calibration) then
-            !     if (STD_OUT_PE) write(*,*) "  Reading Linear Mask"
-            !     if (STD_OUT_PE) write(*,*) "    from file: " // trim(options%init_conditions_file)
-            !     if (STD_OUT_PE) write(*,*) "    with var: "  // trim(options%nsq_calibration_var)
-            !     call io_read(options%init_conditions_file, options%nsq_calibration_var, domain%nsq_calibration)
-            !     nsq_calibration = domain%nsq_calibration
-            !
-            !     where(nsq_calibration<1) nsq_calibration = 1 + 1/( (1-1/nsq_calibration)/100 )
-            !     where(nsq_calibration>1) nsq_calibration = 1 + (nsq_calibration-1)/100
-            ! endif
-        !endif
 
         ! allocate the fields that will hold the perturbation only so we can update it
         ! slowly and add the total to the domain%u,v
@@ -1341,13 +1398,8 @@ contains
             v_perturbation=>hi_v_perturbation
         endif
 
-        ! if    ((.not.allocated(hi_u_LUT)  .and. (.not.reverse)) &
-        !  .or.  (.not.allocated(rev_u_LUT) .and. reverse)) then
-
-            if (STD_OUT_PE) write(*,*) "  Generating a spatially variable linear perturbation look up table"
-            call initialize_spatial_winds(domain, options, reverse)
-
-        ! endif
+        if (STD_OUT_PE) write(*,*) "  Generating a spatially variable linear perturbation look up table"
+        call initialize_spatial_winds(domain, options, reverse)
 
         module_initialized = .True.
 
@@ -1367,41 +1419,23 @@ contains
         logical,            intent(in),  optional :: reverse, useDensity, update
 
         logical :: rev, useD, updt
-        ! logical, save :: debug=.True.
-        real :: stability
 
-        ! these probably need to get moved to options...
-        rev = reverse
-        if (present(reverse)) rev = .False.
+        rev = .False.
+        if (present(reverse)) rev = reverse
 
         useD = .False.
-        if (present(useDensity)) useD=useDensity
+        if (present(useDensity)) useD = useDensity
 
         updt = .False.
         if (present(update)) updt = update
 
-        ! this is a little trickier, because it does have to be domain dependant... could at least be stored in the domain though...
         if (rev) then
             linear_contribution = options%lt%rm_linear_contribution
-            !N_squared = options%lt%rm_N_squared
         else
             linear_contribution = options%lt%linear_contribution
-            !N_squared = options%lt%N_squared
         endif
 
-        ! add the spatially variable linear field
-        ! if we are reverseing the effects, that means we are in the low-res domain
-        ! that domain does not have a spatial LUT calculated, so it can not be performed
-
-        ! if (use_spatial_linear_fields)then
-            call spatial_winds(domain,rev, vsmooth, stability_window_size, update=updt)
-        ! else
-        !     ! Nsq = squared Brunt Vaisalla frequency (1/s) typically from dry static stability
-        !     stability = calc_domain_stability(domain)
-        !     ! This should probably be called twice, once for dry, and once or moist regions
-        !     call linear_winds(domain,stability,vsmooth,rev,useD,debug)
-        ! endif
-        ! debug=.False.
+        call spatial_winds(domain, rev, vsmooth, stability_window_size, update=updt)
 
     end subroutine linear_perturb
 end module linear_theory_winds

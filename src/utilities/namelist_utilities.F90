@@ -1,12 +1,15 @@
 module namelist_utils
     use netcdf
-    use string,           only  : str
+    use string,           only  : str, as_string, to_lower
     use ieee_arithmetic
-    use icar_constants,    only : STD_OUT_PE, MAXLEVELS, kMAX_NESTS, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH, kVERSION_STRING, &
-                                  kREAL_NO_VAL, kINT_NO_VAL, kCHAR_NO_VAL
+    use icar_constants
     use mod_wrf_constants, only : piconst
     use options_types,     only : forcing_options_type, domain_options_type
-    use io_routines,       only : check_file_exists, check_variable_present, io_getdims, io_newunit
+    use io_routines,       only : check_file_exists, check_variable_present, io_getdims, io_getdimnames, io_newunit
+    use time_io,           only : var_has_time_dim
+    use options_interface, only : options_t
+    use time_delta_object,          only : time_delta_t
+    use time_object,                only : Time_type
 
     implicit none
 
@@ -27,10 +30,134 @@ module namelist_utils
 
     interface set_nml_var
         module procedure set_real_nml_var, set_integer_nml_var, set_logical_nml_var, set_char_nml_var, &
-            set_char_forcing_nml_var, set_char_domain_nml_var, set_real_list_nml_var
+            set_char_forcing_nml_var, set_char_domain_nml_var, set_real_list_nml_var, set_decode_phys_nml_var
     end interface
 
 contains
+
+    !> -------------------------------
+    !! Check options for consistency among different nests
+    !!
+    !! -------------------------------
+    subroutine inter_nest_namelist_check(options)
+        implicit none
+        type(options_t), intent(inout) :: options(:)
+
+        integer :: i, n, child_nest_indx
+        integer :: new_restartinterval
+        type(Time_type) :: parent_restart_time, child_restart_time, new_child_restart_time, loop_strt_time, child_strt_time, parent_offset_time
+        type(time_delta_t) :: nest_start_offset, helper_delta, new_restart_delta, tmp_delta
+
+        do i = 1, size(options)
+            !See if we are the head of a nest chain, and if we have children
+            if (options(i)%general%parent_nest == 0 .and. size(options(i)%general%child_nests) > 0) then
+                call helper_delta%set(options(i)%restart%restart_count*options(i)%output%outputinterval)
+
+                loop_strt_time = options(i)%general%start_time
+                if (options(i)%restart%restart) loop_strt_time = options(i)%restart%restart_time
+
+                call parent_restart_time%set(loop_strt_time%mjd() + helper_delta%days())
+
+                !Loop through all child nests in the chain
+                do n = i+1, size(options)
+
+                    child_nest_indx = n
+                    child_strt_time = options(child_nest_indx)%general%start_time
+                    if (options(child_nest_indx)%restart%restart) child_strt_time = options(child_nest_indx)%restart%restart_time
+
+                    ! If we have hit another root nest, then we are done with this chain
+                    if (options(child_nest_indx)%general%parent_nest == 0) exit
+
+                    if (child_nest_indx <= i) then
+                        if (STD_OUT_PE) write(*,*) "  ERROR: Child nest index ",child_nest_indx," is less than the parent nest index ",i
+                        stop
+                    endif
+
+                    !! All forcing%inputinterval should be the same
+                    if (.not.(options(i)%forcing%inputinterval == options(child_nest_indx)%forcing%inputinterval)) then
+                        if (STD_OUT_PE) write(*,*) "  ERROR: Forcing dt for nest ", child_nest_indx, " does not match the parent nest"
+                        stop
+                    endif
+
+                    !! Start and end times of a nest should be within the span of the parent nest run time
+                    if (loop_strt_time > child_strt_time) then
+                        if (STD_OUT_PE) write(*,*) "  ERROR: Start time of nest ", child_nest_indx, " is before the start time of the parent nest"
+                        stop
+                    endif
+                    if (options(i)%general%end_time < options(child_nest_indx)%general%end_time) then
+                        if (STD_OUT_PE) write(*,*) "  ERROR: End time of nest ", child_nest_indx, " is after the end time of the parent nest"
+                        stop
+                    endif
+
+                    !! Ensure that the child nest dx is actually smaller than the parent nest
+                    if (options(i)%domain%dx <= options(child_nest_indx)%domain%dx) then
+                        if (STD_OUT_PE) write(*,*) "  ERROR: dx of nest ", child_nest_indx, " is not smaller than the parent nest."
+                        if (STD_OUT_PE) write(*,*) "  ERROR: This is sort of useless, so it was probably done in error"
+                        stop
+                    endif
+
+                    ! from here on, we just want the given simulation start times, not the restart times
+                    child_strt_time = options(child_nest_indx)%general%start_time
+                    loop_strt_time = options(i)%general%start_time
+                    call parent_restart_time%set(loop_strt_time%mjd() + helper_delta%days())
+
+                    !! Check that, for a given chain of nests, the time at which restart files are output is the same for all nests
+                    !Compute when the first restart time is for the child nest
+                    call helper_delta%set(options(child_nest_indx)%restart%restart_count*options(child_nest_indx)%output%outputinterval)
+                    call child_restart_time%set(child_strt_time%mjd() + helper_delta%days())
+
+                    nest_start_offset = child_strt_time - loop_strt_time
+
+                    ! If the two times are different, warn the user
+                    call parent_offset_time%set(parent_restart_time%mjd() + nest_start_offset%days())
+                    if (parent_offset_time /= child_restart_time) then
+                        !Try to set the restart interval for the child nest to match the parent nest restart output time
+                        new_restart_delta = parent_offset_time-child_strt_time
+                        new_restartinterval = (new_restart_delta%seconds())/options(child_nest_indx)%output%outputinterval
+                        
+                        call helper_delta%set(new_restartinterval*options(child_nest_indx)%output%outputinterval)
+                        call child_restart_time%set(child_strt_time%mjd() + helper_delta%days())
+
+                        if (parent_offset_time == child_restart_time) then
+                            call set_nml_var(options(child_nest_indx)%restart%restart_count, new_restartinterval, 'restartinterval')
+                            if (STD_OUT_PE) write(*,*) "  ATTENTION: Restart interval for nest ", child_nest_indx, " has been set to match the"
+                            if (STD_OUT_PE) write(*,*) "  ATTENTION: first restart date of the parent nest."
+                            if (STD_OUT_PE) write(*,*) "  ATTENTION: Restart interval for nest ", child_nest_indx, " is now: ", new_restartinterval
+                            if (STD_OUT_PE) write(*,*) "  ATTENTION: First restart time for nest ", child_nest_indx, " is now: ", trim(as_string(child_restart_time))
+                        else
+                            !If this does not work, error out and report to the user
+                            if (STD_OUT_PE) write(*,*) "  ERROR: Restart interval for nest ", child_nest_indx, " does not match the parent nest"
+                            if (STD_OUT_PE) write(*,*) "  ERROR: Restart interval for nest ", child_nest_indx, " is: ", options(child_nest_indx)%restart%restart_count
+                            if (STD_OUT_PE) write(*,*) "  ERROR: First restart time for nest ", child_nest_indx, " is: ", trim(as_string(child_restart_time))
+                            if (STD_OUT_PE) write(*,*) "  ERROR: This time is calculated as start_time + restartinterval*outputinterval"
+                            child_restart_time = parent_offset_time
+                            if (STD_OUT_PE) write(*,*) "  ERROR: First restart time for nest ", child_nest_indx, " should be: ", trim(as_string(child_restart_time))
+                            if (STD_OUT_PE) write(*,*) "  ERROR: Please adjust the restartinterval and outputinterval for this nest to match the parent nest"
+                            stop
+                        end if
+                    end if
+
+                    !! Check that, for a given chain of nests, the start times for all nests are separated by an integer
+                    ! multiple of the input interval
+
+                    ! Should take the difference between child and parent start times, and divide by the input interval
+                    ! If this is not an integer, then the start times are not separated by an integer multiple of the input interval
+                    tmp_delta = options(child_nest_indx)%general%start_time - options(i)%general%start_time
+                    if (min(mod(tmp_delta%seconds(), options(child_nest_indx)%forcing%inputinterval), &
+                            options(child_nest_indx)%forcing%inputinterval - mod(tmp_delta%seconds(), options(child_nest_indx)%forcing%inputinterval)) >= 1) then
+                        if (STD_OUT_PE) write(*,*) "  ERROR: Start time for nest ", child_nest_indx, " is not an integer multiple"
+                        if (STD_OUT_PE) write(*,*) "  ERROR: of the inputinterval from the start time of the parent nest"
+                        if (STD_OUT_PE) write(*,*) "  ERROR: Start time for nest: ", child_nest_indx, " is: ", trim(as_string(options(child_nest_indx)%general%start_time))
+                        if (STD_OUT_PE) write(*,*) "  ERROR: inputinterval is: ", options(child_nest_indx)%forcing%inputinterval
+                        if (STD_OUT_PE) write(*,*) "  ERROR: time delta calculated to be: ", trim(as_string(tmp_delta))
+                        stop
+                    endif
+                enddo
+            endif
+        enddo
+
+    end subroutine inter_nest_namelist_check
+
 
     subroutine set_namelist(namelist_file)
         implicit none
@@ -267,11 +394,12 @@ contains
 
         character(len=(kMAX_STRING_LENGTH*8)) :: group, default, description, units
         real :: min, max
-        integer, allocatable :: values(:), var_dims(:), t_var_dims(:)
-        integer :: p, dim_indx, dim_len, type
+        integer, allocatable :: values(:), var_dims(:), sanitized_dims(:), ref_var_dims(:)
+        integer :: p, dim_indx, dim_len, type, n, cnt, varid, san_dim_indx
         character(len=kMAX_STRING_LENGTH) :: dim_name
-        character(len=1), allocatable :: dimensions(:), t_dimensions(:), dimensions_tmp(:), t_dimensions_tmp(:)
-        logical :: no_check_flag, is_latlon
+        character(len=kMAX_STRING_LENGTH), allocatable :: dim_names(:)
+        character(len=3), allocatable :: dimensions(:), dimensions_original(:), ref_dimensions(:), dimensions_tmp(:), ref_dimensions_tmp(:)
+        logical :: no_check_flag, is_latlon, has_time, input_var_has_time, not_time_mask(10)
 
         if (present(no_check)) then
             no_check_flag = no_check
@@ -283,54 +411,128 @@ contains
 
         ! see if user wants to use this variable anyways
         if (.not.(trim(var_val) == "") .and. .not.(no_check_flag) .and. .not.(trim(var_val) == kCHAR_NO_VAL)) then
+            
+            !initialize array which will hold sanitized dimensions used to setup forcing variables in the model
+            allocate(dimensions_original,source=dimensions)
+            allocate(sanitized_dims(size(dimensions_original)))
+            sanitized_dims = 0
+
+            has_time = (trim(dimensions(1)) == 'T' .or. trim(dimensions(1)) == '(T)')
+
             ! first check if variable is present in the domain file
             call check_variable_present(options%boundary_files(1), var_val)
             ! then get the number of dimensions for the variable
             call io_getdims(options%boundary_files(1), var_val, var_dims)
             ! test if the number of dimensions matches the number of dimensions required
+
+            !detect presence of time dimension options%time_var in var_dims
+            input_var_has_time = var_has_time_dim(options%boundary_files(1), var_val, options%time_var)
+
+            ! ensure that time dimension is the first dimension
+            if (input_var_has_time) then
+                !get dimension name of time variable
+                call io_getdimnames(options%boundary_files(1), options%time_var, dim_names)
+                if (size(dim_names) == 0) then
+                    dim_name = options%time_var
+                else
+                    !get the first dimension name
+                    dim_name = dim_names(1)
+                endif
+                call io_getdimnames(options%boundary_files(1), var_val, dim_names)
+
+                if (trim(dim_name) /= trim(dim_names(size(dim_names)))) then
+                    if (STD_OUT_PE) write(*,*) "Error: Forcing variable ", trim(name), " has a time dimension, but it is not the first dimension."
+                    if (STD_OUT_PE) write(*,*) "Error: Time dimension name is: ", trim(dim_name), " but the first dimension of ", trim(name), " is: ", trim(dim_names(size(dim_names)))
+                    if (STD_OUT_PE) write(*,*) "Error: Forcing variables are required to have the time dimension as the first dimension, if present."
+                    if (STD_OUT_PE) write(*,*) "Error: Dimension ordering is assumed to be (T, Z, Y, X) if a given dimension is present."
+                    stop
+                endif
+            endif
+
             if (.not.(size(dimensions) == size(var_dims))) then
 
                 is_latlon =  ( (index(name,'lat') > 0) .or. (index(name,'lon') > 0))
 
-                if ( (size(dimensions)-1) == size(var_dims) .and. (dimensions(1) == 'T' .or. is_latlon)) then
+                if (has_time) then 
                     allocate(dimensions_tmp,source=dimensions)
                     deallocate(dimensions)
                     allocate(dimensions(size(dimensions_tmp)-1))
 
-                    if (.not.is_latlon) then
-                        if (STD_OUT_PE) write(*,*) "Forcing variable ", trim(name), " possibly missing the time dimension."
-                        if (STD_OUT_PE) write(*,*) "Proceeding, assuming that the forcing data does not contain a time dimension."
-                        dimensions = dimensions_tmp(2:size(dimensions_tmp))
-                    else
-                        if (STD_OUT_PE) write(*,*) "Forcing variable ", trim(name), " is 1D."
+                    dimensions = dimensions_tmp(2:size(dimensions_tmp))
 
-                        if (index(name,'lat') > 0) then
-                            dimensions = dimensions_tmp(1:size(dimensions_tmp)-1)
+                    deallocate(dimensions_tmp)
+                endif
+
+                if (is_latlon .and. ( (size(var_dims)==1) .or. (size(var_dims)==2 .and. input_var_has_time) ) ) then
+                    if (STD_OUT_PE) write(*,*) "Forcing variable ", trim(name), " is 1D."
+
+                    if (index(name,'lat') > 0) then
+                        if (input_var_has_time) then
+                            dimensions = [' T ',' Y ']
                         else
-                            dimensions = dimensions_tmp(2:size(dimensions_tmp))
+                            dimensions = [' Y ']
+                        endif
+                    else
+                        if (input_var_has_time) then
+                            dimensions = [' T ',' X ']
+                        else
+                            dimensions = [' X ']
                         endif
                     endif
-                    deallocate(dimensions_tmp)
-                else
-                    if (STD_OUT_PE) write(*,*) "Error: ", trim(name), " has the wrong number of dimensions, should be: ", size(dimensions)
-                    error stop
+                endif
+
+                if ( (size(dimensions)/=size(var_dims)) .or. (input_var_has_time .and. (size(dimensions)==size(var_dims)) ) ) then
+                    if (STD_OUT_PE) write(*,*) "ATTENTION: ", trim(name), " does not have the standard number of spatial dimensions: ", size(dimensions)
+                    if (STD_OUT_PE) write(*,*) "ATTENTION: we will assume the shape of the forcing data: ",trim(name)
+
+                    if (size(dimensions) == 3) then
+                        if (size(var_dims) == 3) then
+                            if (input_var_has_time) then
+                                dimensions = [' T ',' Y ',' X ']
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (T,Y,X)"
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a horizontal map varying in time"
+                            endif
+                        else if (size(var_dims) == 2) then
+                            if (input_var_has_time) then
+                                dimensions = [' T ',' Z ']
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (T,Z)"
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a vertical profile varying in time"
+                            else
+                                dimensions = [' Y ',' X ']
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (Y,X)"
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a horizontal map"
+                            endif
+                        else if (size(var_dims) == 1) then
+                            if (.not.(input_var_has_time)) then
+                                dimensions = [' Z ']
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " has dimensions (Z)"
+                                if (STD_OUT_PE) write(*,*) "ATTENTION: Assuming that the forcing variable: ", trim(name), " is a vertical profile"
+                            else
+                                if (STD_OUT_PE) write(*,*) "Error: Forcing variable ", trim(name), " has 1 dimension, and it appears to be the time dimension"
+                                error stop
+                            endif
+                        else
+                            if (STD_OUT_PE) write(*,*) "Error: Forcing variable ", trim(name), " has 3 dimensions, but we were expecting 2 or less"
+                            error stop
+                        endif
+                    endif
                 endif
             endif
 
             ! pointless if this is the temperature variable, which is used as the reference
-            if (.not.(name=='tvar')) then
+            if (.not.(name=='qvvar')) then
                 ! now get the dimension lengths of the temperature variable
-                call check_variable_present(options%boundary_files(1), options%tvar)
+                call check_variable_present(options%boundary_files(1), options%qvvar)
                 !! then get the number of dimensions for the variable
-                call io_getdims(options%boundary_files(1), options%tvar, t_var_dims)
+                call io_getdims(options%boundary_files(1), options%qvvar, ref_var_dims)
         
-                call get_nml_var_metadata('tvar',group,description,default,min,max,type,values,units,t_dimensions)
+                call get_nml_var_metadata('qvvar',group,description,default,min,max,type,values,units,ref_dimensions)
 
                 ! reverse ordering of dimensions -- needed since fortran netCDF uses reverse ordering relative to python/nco
-                allocate(t_dimensions_tmp(size(t_dimensions)))
-                t_dimensions_tmp = t_dimensions
-                do p=1,size(t_dimensions)
-                    t_dimensions(p) = t_dimensions_tmp(size(t_dimensions_tmp)-p+1)
+                allocate(ref_dimensions_tmp(size(ref_dimensions)))
+                ref_dimensions_tmp = ref_dimensions
+                do p=1,size(ref_dimensions)
+                    ref_dimensions(p) = ref_dimensions_tmp(size(ref_dimensions_tmp)-p+1)
                 end do
 
                 ! reverse ordering of dimensions -- needed since fortran netCDF uses reverse ordering relative to python/nco
@@ -341,24 +543,27 @@ contains
                 end do
 
                 !! now see if any of the shared dimensions (will be x and y) have the same length
-                do p=1,size(t_var_dims)
-                    dim_name = t_dimensions(p)
+                do p=1,size(ref_var_dims)
+
+                    dim_name = ref_dimensions(p)
                     dim_indx = findloc(dimensions,dim_name,dim=1)
                     ! check if the dimension is present in the variable
                     if (dim_indx > 0) then
                         ! check if the dimension length matches the terrain height variable
+                        san_dim_indx = findloc(dimensions_original,dim_name,dim=1)
+                        sanitized_dims(san_dim_indx) = var_dims(dim_indx)
                         dim_len = var_dims(dim_indx)
                         if (name=='ulat' .and. dim_name=='X') dim_len = dim_len - 1
                         if (name=='ulon' .and. dim_name=='X') dim_len = dim_len - 1
                         if (name=='vlat' .and. dim_name=='Y') dim_len = dim_len - 1
                         if (name=='vlon' .and. dim_name=='Y') dim_len = dim_len - 1
-                        if (name=='vvar' .and. dim_name=='Y' .and. dim_len == t_var_dims(p)+1) dim_len = dim_len - 1
-                        if (name=='uvar' .and. dim_name=='X' .and. dim_len == t_var_dims(p)+1) dim_len = dim_len - 1
-                        if (dim_name=='Z' .and. dim_len == t_var_dims(p)+1) then
+                        if (name=='vvar' .and. dim_name=='Y' .and. dim_len == ref_var_dims(p)+1) dim_len = dim_len - 1
+                        if (name=='uvar' .and. dim_name=='X' .and. dim_len == ref_var_dims(p)+1) dim_len = dim_len - 1
+                        if (dim_name=='Z' .and. dim_len == ref_var_dims(p)+1) then
                             if (STD_OUT_PE) write(*,*) "--------------------------------------------------------------------------------"
                             if (STD_OUT_PE) write(*,*) "ATTENTION: vertical dimension ",trim(dim_name)," on forcing variable ", trim(name)
                             if (STD_OUT_PE) write(*,*) "ATTENTION: has dimension length:",var_dims(dim_indx)
-                            if (STD_OUT_PE) write(*,*) "ATTENTION: variable: ",trim(options%tvar)," has length: ", t_var_dims(p), "for the same dimension"
+                            if (STD_OUT_PE) write(*,*) "ATTENTION: variable: ",trim(options%qvvar)," has length: ", ref_var_dims(p), "for the same dimension"
                             if (STD_OUT_PE) write(*,*) "ATTENTION: We are interpreting this as variable ",trim(name), " being on"
                             if (STD_OUT_PE) write(*,*) "ATTENTION: the k-level interfaces, and will automatically linearly interpolate"
                             if (STD_OUT_PE) write(*,*) "ATTENTION: it to the mass-points"
@@ -366,41 +571,48 @@ contains
                             dim_len = dim_len - 1
                         endif
 
-                        if (dim_len /= t_var_dims(p)) then
+                        if (dim_len /= ref_var_dims(p)) then
                             if (STD_OUT_PE) write(*,*) "Error: dimension ",trim(dim_name)," on forcing variable ", trim(name)
                             if (STD_OUT_PE) write(*,*) "has dimension length:",var_dims(dim_indx)
-                            if (STD_OUT_PE) write(*,*) "But variable: ",trim(options%tvar)," has length: ", t_var_dims(p), "for the same dimension"
+                            if (STD_OUT_PE) write(*,*) "But variable: ",trim(options%qvvar)," has length: ", ref_var_dims(p), "for the same dimension"
                             ! output special warning if it is a staggered variable
-                            if (STD_OUT_PE .and. .not.(dim_len == var_dims(dim_indx))) write(*,*) "should be ",t_var_dims(p)+1," for staggered vars"
+                            if (STD_OUT_PE .and. .not.(dim_len == var_dims(dim_indx))) write(*,*) "should be ",ref_var_dims(p)+1," for staggered vars"
                             error stop
                         endif
                     endif
                 end do
             endif
         ! Check if the variable was not set. In this case, we just set it to be blank ("")
-        elseif (trim(var_val) == "" .or. trim(var_val) == kCHAR_NO_VAL) then
+        elseif (trim(var_val) == kCHAR_NO_VAL .or. trim(var_val) == "") then
             var = ""
             return
         endif
-
-
-
-        ! if (var == kCHAR_NO_VAL) then
-        !     var = ""
-            ! if (STD_OUT_PE) write(*,*) "Error: '", trim(name), "' is not set to any value (i.e. is still ",(kCHAR_NO_VAL),")"
-            ! error stop
-        ! endif
 
         ! if i is present, then we want to add this variable to the vars-to-read list
         if (present(i)) then
             options%vars_to_read(i) = var_val
             ! only count spatial dimensions
-            options%dim_list(i)%num_dims = count(.not.(dimensions=='T'))
+
+            ! get original dimensions again. We only cleaned them above so that we wouldn't
+            ! try to compare the extent of a dimension that isn't present in the input file
+            call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions)
+
+            not_time_mask = .False.
+            do n = 1,size(dimensions)
+                if (trim(dimensions(n)) /= 'T' .and. trim(dimensions(n)) /= '(T)') not_time_mask(n) = .True.
+            end do
+
+            options%dim_list(i)%num_dims = count(not_time_mask(:size(dimensions)))
+
+            if (.not.(allocated(sanitized_dims))) then
+                allocate(sanitized_dims(size(dimensions)))
+                sanitized_dims = 0
+            endif
 
             if (options%dim_list(i)%num_dims /= size(dimensions)) then
-                options%dim_list(i)%dims = pack(var_dims, .not.(dimensions=='T'))
+                options%dim_list(i)%dims(1:options%dim_list(i)%num_dims) = pack(sanitized_dims, not_time_mask(:size(dimensions)))
             else
-                options%dim_list(i)%dims = var_dims
+                options%dim_list(i)%dims(1:options%dim_list(i)%num_dims) = var_dims
             endif
             i = i + 1
         endif
@@ -573,6 +785,116 @@ contains
         endif
 
     end subroutine set_char_nml_var
+
+    ! This subroutine works like set_char_nml_var, but decodes the strings
+    ! used as physics options into model constants, the mapping of which
+    ! is supplied by get_nml_var_mapping
+    subroutine set_decode_phys_nml_var(var, var_val, name, usr_default)
+        implicit none
+        integer,   intent(out) :: var
+        character(len=*),    intent(in) :: var_val
+        character(len=*), intent(in) :: name
+        character(len=*), optional, intent(in) :: usr_default
+
+        character(len=kMAX_STRING_LENGTH) :: default, tmp_val
+        character(len=kMAX_NAME_LENGTH), allocatable :: mapping(:)
+        
+        integer :: i, mapped_val, default_val
+
+        if (present(usr_default)) then
+            call set_char_nml_var(tmp_val, to_lower(trim(var_val)), name, to_lower(trim(usr_default)))
+        else
+            call set_char_nml_var(tmp_val, to_lower(trim(var_val)), name)
+        endif
+
+        !convert tmp_val to lowercase for case-insensitive matching
+        tmp_val = to_lower(trim(tmp_val))
+
+        ! check that value conforms to the rules for the nml option type
+        if (present(usr_default)) then
+            if (trim(usr_default) /= kCHAR_NO_VAL) then
+                call check_var_entry_type(to_lower(usr_default),tmp_val,name)
+            else
+                default = trim(get_nml_var_default(name))
+
+                call check_var_entry_type(default,tmp_val,name)
+            endif
+        endif
+
+        mapping = get_nml_var_mapping(name)
+
+        ! check that mapping has an even number of entries
+        if (mod(size(mapping),2) /= 0) then
+            if (STD_OUT_PE) write(*,*) "DEVELOPER Error: mapping for namelist variable '", trim(name), "' does not have an even number of entries"
+            error stop
+        endif
+
+        ! get index of tmp_val in mapping
+        mapped_val = -1
+        do i = 1, size(mapping)
+            if (trim(tmp_val) == trim(to_lower(mapping(i)))) then
+                ! mapped values are stored at the index after the string values
+                ! cast to integer
+                read(mapping(i+1), *) mapped_val
+                exit
+            endif
+        end do
+
+        if (mapped_val == -1) then
+            if (STD_OUT_PE) write(*,*) "Error: '", trim(tmp_val), "' is not a valid option for '", trim(name), "'"
+            if (STD_OUT_PE) then
+                write(*,'(A)', advance='no') "Valid options are: "
+                do i = 1, size(mapping), 2
+                    if (i < size(mapping) - 1) then
+                        write(*,'(A)', advance='no') trim(mapping(i)) // ", "
+                    else
+                        write(*,'(A)') trim(mapping(i))
+                    endif
+                end do
+            endif
+            error stop
+        endif
+
+        var = mapped_val
+
+
+    end subroutine set_decode_phys_nml_var
+
+    function translate_numeric_mapping(var_name, var_value) result(translated_value)
+        implicit none
+        character(len=*), intent(in) :: var_name
+        integer, intent(in) :: var_value
+        character(len=kMAX_NAME_LENGTH) :: translated_value
+
+        character(len=kMAX_NAME_LENGTH), allocatable :: mapping(:)
+        integer :: i, mapped_val
+
+        mapping = get_nml_var_mapping(trim(var_name))
+
+        ! check that mapping has an even number of entries
+        if (mod(size(mapping),2) /= 0) then
+            if (STD_OUT_PE) write(*,*) "DEVELOPER Error: mapping for namelist variable '", trim(var_name), "' does not have an even number of entries"
+            error stop
+        endif
+
+        translated_value = ""
+
+        ! get string value corresponding to var_value
+        do i = 2, size(mapping), 2
+            read(mapping(i), *) mapped_val
+            if (var_value == mapped_val) then
+                translated_value = mapping(i-1)
+                exit
+            endif
+        end do
+
+        if (translated_value == "") then
+            if (STD_OUT_PE) write(*,*) "Error: '", str(var_value), "' is not a valid mapped value for '", trim(var_name), "'"
+            error stop
+        endif
+
+    end function translate_numeric_mapping
+
 
     subroutine set_real_nml_var_default(var, name, info, gen_nml)
         implicit none
@@ -917,12 +1239,29 @@ contains
 
     end function get_nml_var_values
 
+    function get_nml_var_mapping(name) result(mapping)
+        implicit none
+        character(len=*), intent(in) :: name
+
+        character(len=kMAX_STRING_LENGTH) :: group, default, description, units
+        character(len=1), allocatable :: dimensions(:)
+        real :: min, max
+        integer :: type
+        integer, allocatable :: values(:)
+        character(len=kMAX_NAME_LENGTH), allocatable :: mapping(:)
+        integer :: i
+
+        call get_nml_var_metadata(name,group,description,default,min,max,type,values,units,dimensions,mapping)
+
+    end function get_nml_var_mapping
+
     function get_nml_var_default(name,info,gen_nml) result(default)
         implicit none
         character(len=*), intent(in) :: name
         logical,          intent(in), optional :: info, gen_nml
 
-        character(len=(kMAX_STRING_LENGTH*8)) :: group, default, description, units
+        character(len=kMAX_STRING_LENGTH) :: group, default, units
+        character(len=10000) :: description
         character(len=1), allocatable :: dimensions(:)
         real :: min, max
         integer :: type
@@ -993,7 +1332,7 @@ contains
         ! Three cases: description is formatted with newlines, description is too long for one line, or description is short enough for one line
 
         ! calculate the number of blank characters to write for the first comment 
-        num_blnks = NML_BLNK_LEN - len(trim(var_string))
+        num_blnks = max(1,NML_BLNK_LEN - len(trim(var_string)))
 
         ! see if is formatted with newlines
         indx = index(trim(description),achar(10))
@@ -1151,7 +1490,7 @@ contains
                 write(nml_unit,*) "&lsm_parameters"
             case ("SM_Parameters")
                 write(nml_unit,*) "! ---------------------------------------------------------------------------------------------------"
-                write(nml_unit,*) "!   Optionally specified snow model parameters (mostly for FSM2trans, at the moment)"
+                write(nml_unit,*) "!   Optionally specified snow model parameters"
                 write(nml_unit,*) "! ---------------------------------------------------------------------------------------------------"
                 write(nml_unit,*) "&sm_parameters"
             case ("CU_Parameters")
@@ -1206,7 +1545,7 @@ contains
         if (STD_OUT_PE .and. is_minmax) write(*,*)        "    Maximum Allowed Value:..|", str(max)
         if (STD_OUT_PE .and. is_units) write(*,*)         "    Units:..................|", trim(units)
         if (STD_OUT_PE .and. is_dimensions) then
-            write(*,'(A$)', advance="no")      "     Dimensions:.............|["
+            write(*,'(A)', advance="no")      "     Dimensions:.............|["
             do i = 1, size(dimensions)
                 if (i==size(dimensions)) then
                     WRITE(*, '(A1, A)', ADVANCE='NO') dimensions(i), "]"
@@ -1217,7 +1556,7 @@ contains
             write(*,*)
         endif
         if (STD_OUT_PE .and. is_values) then
-            write(*,'(A$)', advance="no")                   "    Allowed Values:..........|"
+            write(*,'(A)', advance="no")                   "    Allowed Values:..........|"
             do i = 1, size(values)
                 if (i==size(values)) then
                     WRITE(*, '(I1)', ADVANCE='NO') values(i)
@@ -1231,7 +1570,7 @@ contains
     end subroutine write_nml_var_info
 
 
-    subroutine get_nml_var_metadata(name, group, description, default, min, max, type, values, units, dimensions)
+    subroutine get_nml_var_metadata(name, group, description, default, min, max, type, values, units, dimensions, val_keys)
         implicit none
         character(len=*), intent(in) :: name
         character(len=*), intent(out) :: group, description, default, units
@@ -1239,6 +1578,7 @@ contains
         real,    intent(out) :: min, max
         integer, intent(out) :: type
         integer, allocatable, intent(out) :: values(:)
+        character(len=*), allocatable, optional, intent(out) :: val_keys(:)
 
         group = ""
         description = ""
@@ -1578,6 +1918,27 @@ contains
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Domain"
+            case ("surface_temp_var")
+                description = "Name of 2D surface temperature variable in domain file."//achar(10)//BLNK_CHR_N// &
+                    "If provided, used to initialize skin/canopy/ground/leaf temperatures instead of init_surf_temp scalar"
+                units = "K"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("init_surf_temp")
+                description = "Fallback initial surface temperature used when surface_temp_var is not provided"
+                units = "K"
+                min = 200
+                max = 310
+                default = "280"
+                group = "Domain"
+            case ("init_sst")
+                description = "Initial sea surface temperature"
+                units = "K"
+                min = 260
+                max = 300
+                default = "280"
+                group = "Domain"
             case ("vegtype_var")
                 description = "Name of the vegetation type variable in domain file"
                 allocate(dimensions(2))
@@ -1619,11 +1980,6 @@ contains
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Domain"
-            case ("slope_var")
-                description = "Name of the slope variable (0-1) in domain file"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
-                group = "Domain"
             case ("aspect_angle_var")
                 description = "Name of the aspect angle variable in domain file"
                 allocate(dimensions(2))
@@ -1637,20 +1993,116 @@ contains
                 units = "radians"
                 group = "Domain"
             case ("svf_var")
-                description = "Name of the sky view factor variable in domain file, used for radiation_downscaling=1"
+                description = "Name of the sky view factor variable in domain file, used for terrain_shading=.True."
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Domain"
             case ("hlm_var")
-                description = "Name of the horizon line matrix variable in domain file, used for radiation_downscaling=1"
+                description = "Name of the horizon line matrix variable in domain file, used for terrain_shading=.True."
                 allocate(dimensions(3))
                 dimensions = ["a", "Y", "X"]
                 group = "Domain"
             case ("shd_var")
-                description = "Name of the snow holding depth variable in domain file, used for SLIDE=1 when running FSM2trans"
+                description = "Name of the snow holding depth variable in domain file, used for snowslide"
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 units = "m"
+                group = "Domain"
+            case ("snowpack_nlayers_var")
+                description = "Name of the number of snow layers variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(2))
+                dimensions = ["Y", "X"]
+                group = "Domain"
+            case ("snowpack_deposition_var")
+                description = "Name of the snow deposition date variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfi_var")
+                description = "Name of the snow void fraction ice variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfw_var")
+                description = "Name of the snow void fraction water variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfa_var")
+                description = "Name of the snow void fraction air variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfs_var")
+                description = "Name of the snow void fraction solid variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_vfwp_var")
+                description = "Name of the snow void fraction water preferential flow variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_ds_var")
+                description = "Name of the snow layer thickness variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                units = "mm"
+                group = "Domain"
+            case ("snowpack_tsnow_var")
+                description = "Name of the snow temperature variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                units = "K"
+                group = "Domain"
+            case ("snowpack_tsnow_i_var")
+                description = "Name of the snow interface temperature variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["Si", "Y ", "X "]
+                units = "K"
+                group = "Domain"
+            case ("snowpack_rg_var")
+                description = "Name of the snow grain radius variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                units = "mm"
+                group = "Domain"
+            case ("snowpack_rb_var")
+                description = "Name of the snow bond radius variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                units = "mm"
+                group = "Domain"
+            case ("snowpack_dd_var")
+                description = "Name of the snow dendricity variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                units = "kg/m^3"
+                group = "Domain"
+            case ("snowpack_sp_var")
+                description = "Name of the snow sphericity variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_mk_var")
+                description = "Name of the snow marker variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_cdot_var")
+                description = "Name of the snow cdot variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_snow_stress_var")
+                description = "Name of the snow stress variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
+                group = "Domain"
+            case ("snowpack_n3_var")
+                description = "Name of the snow coordination variable in domain file (used by SNOWPACK)"
+                allocate(dimensions(3))
+                dimensions = ["S", "Y", "X"]
                 group = "Domain"
             ! --------------------------------------
             ! --------------------------------------
@@ -1667,6 +2119,13 @@ contains
                 min = -500
                 max = 500
                 default = "0.0"
+                group = "Forcing"
+                type = 1
+            case ("p_multiplier")
+                description = "Multiplier to apply to pressure forcing data. Useful if pressure is in hPa instead of Pa."
+                min = 0
+                max = 100000
+                default = "1.0"
                 group = "Forcing"
                 type = 1
             case ("inputinterval")
@@ -1711,25 +2170,32 @@ contains
                 default = ".False."
                 group = "Forcing"
                 type = 1
+            case("forcing_longitude_system")
+                description = "Longitude system, values: (0=Maintain Logitude, 1=Prime Centered, 2=Dateline Centered, 3=Guess Lon)"
+                allocate(values(4))
+                values = (/0, 1, 2, 3/)
+                default = "0"
+                group = "Forcing"
+                type = 1
             case ("hgtvar")
                 description = "Name of the terrain height variable in forcing file (REQUIRED)"
                 units = "meters"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("latvar")
                 description = "Name of the latitude variable in forcing file (REQUIRED)"
                 units = "degrees"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("lonvar")
                 description = "Name of the longitude variable in forcing file (REQUIRED)"
                 units = "degrees"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("time_var")
@@ -1748,15 +2214,15 @@ contains
             case ("ulat")
                 description = "Name of the latitude variable on the staggered U-grid in forcing file"
                 units = "degrees"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("ulon")
                 description = "Name of the longitude variable on the staggered U-grid in forcing file"
                 units = "degrees"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("vvar")
@@ -1769,15 +2235,15 @@ contains
             case ("vlat")
                 description = "Name of the latitude variable on the staggered V-grid in forcing file"
                 units = "degrees"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("vlon")
                 description = "Name of the longitude variable on the staggered V-grid in forcing file"
                 units = "degrees"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
+                allocate(dimensions(3))
+                dimensions = ["(T)", " Y ", " X "]
                 group = "Forcing"
                 type = 1
             case ("wvar")
@@ -1976,6 +2442,20 @@ contains
                 dimensions = ["T", "Z", "Y", "X"]
                 group = "Forcing"
                 type = 1
+            case ("qs_fmvar")
+                description = "Name of the blowing-snow fine-mesh mass mixing ratio variable in forcing file (parent nest)"
+                units = "kg/kg"
+                allocate(dimensions(4))
+                dimensions = ["T", "Z", "Y", "X"]
+                group = "Forcing"
+                type = 1
+            case ("ns_fmvar")
+                description = "Name of the blowing-snow fine-mesh number concentration variable in forcing file (parent nest)"
+                units = "kg-1"
+                allocate(dimensions(4))
+                dimensions = ["T", "Z", "Y", "X"]
+                group = "Forcing"
+                type = 1
             case ("zvar")
                 description = "Name of the vertical height variable in forcing file"
                 units = "m"
@@ -2032,6 +2512,11 @@ contains
             ! --------------------------------------
             case ("restart_run")
                 description = "Flag to control if this is a restart run or not (T/F)"
+                default = '.False.'
+                group = "Restart"
+                type = 1
+            case ("override_check")
+                description = "Flag to override a stop on a failed comparison between a restart file and this namelist"
                 default = '.False.'
                 group = "Restart"
                 type = 1
@@ -2095,112 +2580,112 @@ contains
             ! --------------------------------------
             case ("pbl")
                 description = "Planetary boundary layer scheme to use: "//achar(10)//BLNK_CHR_N// &
-                                                                       "0 = no PBL,"//achar(10)//BLNK_CHR_N// &
-                                                                       "1 = YSU PBL"
-                allocate(values(2))
-                values = [0, 1]
-                default = "0"
+                                                                       "'none' = no PBL,"//achar(10)//BLNK_CHR_N// &
+                                                                       "'ysu'  = YSU PBL"
+                default = "none"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "ysu", trim(str(kPBL_YSU))]
+                endif
                 group = "Physics"
             case ("lsm")
                 description = "Land surface model to use:"//achar(10)//BLNK_CHR_N// &
-                                                        "0 = no LSM,"//achar(10)//BLNK_CHR_N// &
-                                                        "1 = Fluxes from forcing data,"//achar(10)//BLNK_CHR_N// &
-                                                        "2 = Noah LSM"//achar(10)//BLNK_CHR_N// &
-                                                        "3 = Noah MP"
+                                                        "'none'   = no LSM,"//achar(10)//BLNK_CHR_N// &
+                                                        "'fluxes' = Fluxes from forcing data,"//achar(10)//BLNK_CHR_N// &
+                                                        "'noahmp' = Noah MP"
 
-                allocate(values(4))
-                values = [0, 1, 2, 3]
-                default = "0"
+                default = "none"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kLSM_BASIC)), "noahmp", trim(str(kLSM_NOAHMP))]
+                endif
                 group = "Physics"
-                type = 1
+                ! type = 1
             case ("rad")
                 description = "Radiation scheme to use: "//achar(10)//BLNK_CHR_N// &
-                                                       "0 = no RAD,"//achar(10)//BLNK_CHR_N// &
-                                                       "1 = Surface fluxes from forcing data"//achar(10)//BLNK_CHR_N// &
-                                                       "2 = cloud fraction based radiation + radiative cooling"//achar(10)//BLNK_CHR_N// &
-                                                       "3 = RRTMG"
+                                                       "'none'   = no RAD,"//achar(10)//BLNK_CHR_N// &
+                                                       "'fluxes' = Surface fluxes from forcing data"//achar(10)//BLNK_CHR_N// &
+                                                       "'simple' = cloud fraction based radiation + radiative cooling (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
+                                                       "'RRTMG'  = RRTMG"//achar(10)//BLNK_CHR_N// &
+                                                       "'RRTMGP' = RRTMGP"
 
-                allocate(values(4))
-                values = [0, 1, 2, 3]
-                default = "0"
+                default = "none"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "fluxes", trim(str(kRA_BASIC)), "simple", trim(str(kRA_SIMPLE)), "RRTMG", trim(str(kRA_RRTMG)), "RRTMGP", trim(str(kRA_RRTMGP))]
+                endif
                 group = "Physics"
             case ("conv")
                 description = "Cumulus scheme to use: "//achar(10)//BLNK_CHR_N// &
-                                                     "0 = no CONV,"//achar(10)//BLNK_CHR_N// &
-                                                     "1 = Tiedke scheme"//achar(10)//BLNK_CHR_N// &
-                                                     "2 = NSAS scheme"//achar(10)//BLNK_CHR_N// &
-                                                     "3 = BMJ scheme"
-                allocate(values(4))
-                values = [0, 1, 2, 3]
-                default = "0"
+                                                     "'none'   = no CONV,"//achar(10)//BLNK_CHR_N// &
+                                                     "'Tiedke' = Tiedke scheme"//achar(10)//BLNK_CHR_N// &
+                                                     "'NSAS'   = NSAS scheme"//achar(10)//BLNK_CHR_N// &
+                                                     "'BMJ'    = BMJ scheme"
+                default = "none"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "tiedke", trim(str(kCU_TIEDTKE)), "nsas", trim(str(kCU_NSAS)), "bmj", trim(str(kCU_BMJ))]
+                endif
                 group = "Physics"
             case ("mp")
                 description = "Microphysics scheme to use: "//achar(10)//BLNK_CHR_N// &
-                                                          "0 = no MP,"//achar(10)//BLNK_CHR_N// &
-                                                          "1 = Thompson et al (2008),"//achar(10)//BLNK_CHR_N// &
-                                                          "2 = 'Linear' microphysics"//achar(10)//BLNK_CHR_N// &
-                                                          "3 = Morrison"//achar(10)//BLNK_CHR_N// &
-                                                          "4 = WSM6"//achar(10)//BLNK_CHR_N// &
-                                                          "5 = Thompson Aerosol"//achar(10)//BLNK_CHR_N// &
-                                                          "6 = WSM3"//achar(10)//BLNK_CHR_N// &
-                                                          "7 = ISHMAEL"
-                allocate(values(8))
-                values = [0, 1, 2, 3, 4, 5, 6, 7]
-                default = "0"
+                                                          "'none'             = no MP,"//achar(10)//BLNK_CHR_N// &
+                                                          "'Morrison'         = Morrison"//achar(10)//BLNK_CHR_N// &
+                                                          "'ISHMAEL'          = ISHMAEL,"//achar(10)//BLNK_CHR_N// &
+                                                          "'Thompson'         = Thompson et al (2008),"//achar(10)//BLNK_CHR_N// &
+                                                          "'Linear'           = 'Linear' microphysics (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
+                                                          "'WSM6'             = WSM6 (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
+                                                          "'Thompson Aerosol' = Thompson Aerosol (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
+                                                          "'WSM3'             = WSM3 (NOT SUPPORTED)"
+                default = "none"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "thompson", trim(str(kMP_THOMPSON)), "linear", trim(str(kMP_SB04)), "morrison", trim(str(kMP_MORRISON)), "wsm6", trim(str(kMP_WSM6)), "thompson_aerosol", trim(str(kMP_THOMP_AER)), "wsm3", trim(str(kMP_WSM3)), "ishmael", trim(str(kMP_ISHMAEL))]
+                endif
                 group = "Physics"
                 type = 1
             case ("water")
                 description = "Water model to use:  "//achar(10)//BLNK_CHR_N// &
-                                                   "0 = no open water fluxes,"//achar(10)//BLNK_CHR_N// &
-                                                   "1 = Simple fluxes (needs SST in forcing data)"//achar(10)//BLNK_CHR_N// &
-                                                   "2 = WRF's lake model (needs lake depth in hi-res data))"
-                allocate(values(3))
-                values = [0, 1, 2]
-                default = "0"
+                                                   "'none'   = no open water fluxes,"//achar(10)//BLNK_CHR_N// &
+                                                   "'simple' = Simple fluxes (uses SST in forcing data, otherwise SST=280°C)"//achar(10)//BLNK_CHR_N// &
+                                                   "'lake'   = WRF's lake model (needs lake depth in hi-res data))"
+                default = "none"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "simple", trim(str(kWATER_SIMPLE)), "lake", trim(str(kWATER_LAKE))]
+                endif
                 group = "Physics"
             case ("wind")
                 description = "Wind solver to use: "//achar(10)//BLNK_CHR_N// &
-                                                   "0 = no LT,"//achar(10)//BLNK_CHR_N// &
-                                                   "1 = linear theory wind perturbations"//achar(10)//BLNK_CHR_N// &
-                                                   "2 = Adjustment to horizontal winds to reduce divergence, based on technique from O'brien et al., 1970"//achar(10)//BLNK_CHR_N// &
-                                                   "3 = Mass-conserving wind solver based on variational calculus technique, requires PETSc"//achar(10)//BLNK_CHR_N// &
-                                                   "4 = Combination of options 1 & 2"//achar(10)//BLNK_CHR_N// &
-                                                   "5 = Combination of options 1 & 3"
-                allocate(values(6))
-                values = [0, 1, 2, 3, 4, 5]
-                default = "0"
-                group = "Physics"
-            case ("radiation_downscaling")
-                description = "0 = no downcaling"//achar(10)//BLNK_CHR_N//      &
-                              "1 = terrain shading effect is considered in the radiation calculation"
-                default = "0"
-                allocate(values(2))
-                values = [0, 1]
+                                                   "'none'               = no wind solver,"//achar(10)//BLNK_CHR_N// &
+                                                   "'variational solver' = Mass-conserving wind solver based on variational calculus technique, requires PETSc(cpu) or AMGX(gpu)"
+                default = "variational solver"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "variational solver", trim(str(kITERATIVE_WINDS))]
+                endif
                 group = "Physics"
             case ("adv")
                 description = "Advection scheme to use:  "//achar(10)//BLNK_CHR_N// &
-                                                        "0 = no ADV,"//achar(10)//BLNK_CHR_N// &
-                                                        "1 = standard advection scheme"//achar(10)//BLNK_CHR_N// &
-                                                        "2 = MPDATA"
-                allocate(values(3))
-                values = [0, 1, 2]
-                default = "0"
+                                                        "'none'     = no ADV,"//achar(10)//BLNK_CHR_N// &
+                                                        "'standard' = standard advection scheme"//achar(10)//BLNK_CHR_N// &
+                                                        "'MPDATA'   = MPDATA (NOT SUPPORTED)"
+                default = "standard"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "standard", trim(str(kADV_STD)), "MPDATA", trim(str(kADV_MPDATA))]
+                endif
                 group = "Physics"
             case ("sfc")
                 description = "Surface model to use: "//achar(10)//BLNK_CHR_N// &
-                                                    "0 = no surface layer"//achar(10)//BLNK_CHR_N// &
-                                                    "1 = Revised MM5 Monin-Obukhov scheme"
-                allocate(values(2))
-                values = [0, 1]
-                default = "0"
+                                                    "'none'   = no surface layer"//achar(10)//BLNK_CHR_N// &
+                                                    "'RevMM5' = Revised MM5 Monin-Obukhov scheme"
+                default = "none"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "RevMM5", trim(str(kSFC_MM5REV))]
+                endif
                 group = "Physics"
             case ("sm")
                 description = "Snow model to use: "//achar(10)//BLNK_CHR_N// &
-                                                 "0 = no snow model"//achar(10)//BLNK_CHR_N// &
-                                                 "1 = FSM2trans snow model (must be compiled, see docs/compiling.md)"
-                allocate(values(2))
-                values = [0, 1]
-                default = "0"
+                                                 "'none'      = no snow model"//achar(10)//BLNK_CHR_N// &
+                                                 "'snowpack'  = SNOWPACK snow model"//achar(10)//BLNK_CHR_N// &
+                                                 "'FSM2trans' = FSM2trans snow model (must be compiled, see docs/compiling.md)"
+                default = "none"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "snowpack", trim(str(kSM_SNOWPACK)), "FSM2trans", trim(str(kSM_FSM))]
+                endif
                 group = "Physics"
             ! --------------------------------------
             ! --------------------------------------
@@ -2587,7 +3072,7 @@ contains
             ! --------------------------------------
             case ("isfflx")
                 description = "Use surface fluxes calculated by LSM scheme."//achar(10)//BLNK_CHR_N// &
-                    "If lsm is turned on, this will be changed to 1. 0=off, 1=on"
+                    "If lsm or a snow model is turned on, this will be changed to 0. 0=off, 1=on"
                 allocate(values(2))
                 values = [0, 1]
                 default = "1"
@@ -2683,10 +3168,6 @@ contains
                 description = "Use monthly vegetation fraction data (T/F)"
                 default = ".False."
                 group = "LSM_Parameters"
-            case ("monthly_albedo")
-                description = "Use monthly albedo data (T/F)"
-                default = ".False."
-                group = "LSM_Parameters"
             case ("num_soil_layers")
                 description = "Number of soil layers in the LSM"
                 default = "4"
@@ -2725,7 +3206,7 @@ contains
                 description = "Urban physics parameterization to use for Noah LSM (not enabled in code)."
                 allocate(values(3))
                 values = [0, 1, 2]
-                default = "1"
+                default = "0"
                 group = "LSM_Parameters"
             case ("nmp_dveg")
                 description = "Dynamic vegetation type for Noah MP of vegetation types in the LSM."//achar(10)//BLNK_CHR_N// &
@@ -2768,15 +3249,52 @@ contains
                 values = [1, 2, 3]
                 default = "2"
                 group = "LSM_Parameters"
-            case ("nmp_opt_run")
-                description = "Noah-MP Runoff and Groundwater option"//achar(10)//BLNK_CHR_N// &
-                                                     "1 = TOPMODEL with groundwater"//achar(10)//BLNK_CHR_N// &
-                                                     "2 = TOPMODEL with equilibrium water table"//achar(10)//BLNK_CHR_N// &
-                                                     "3 = original surface and subsurface runoff (free drainage)"//achar(10)//BLNK_CHR_N// &
-                                                     "4 = BATS surface and subsurface runoff (free drainage)"//achar(10)//BLNK_CHR_N// &
-                                                     "5 = Miguez-Macho&Fan groundwater scheme (Miguez-Macho et al. 2007 JGR; Fan et al. 2007 JGR)"
+            case ("nmp_opt_runsrf")
+                description = "Noah-MP Runoff option"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = SIMGM"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = SIMTOP"//achar(10)//BLNK_CHR_N// &
+                                                     "3 = Schaake96"//achar(10)//BLNK_CHR_N// &
+                                                     "4 = BATS"//achar(10)//BLNK_CHR_N// &
+                                                     "5 = MMF (Miguez-Macho et al. 2007 JGR; Fan et al. 2007 JGR)"//achar(10)//BLNK_CHR_N// &
+                                                     "6 = VIC"//achar(10)//BLNK_CHR_N// &
+                                                     "7 = XianAnJiang"//achar(10)//BLNK_CHR_N// &
+                                                     "8 = DynVIC"
+                allocate(values(8))
+                values = [1, 2, 3, 4, 5, 6, 7, 8]
+                default = "1"
+                group = "LSM_Parameters"
+            case ("nmp_opt_runsub")
+                description = "Noah-MP Subsurface Runoff option"//achar(10)//BLNK_CHR_N// &
+                                                     "same options as nmp_opt_runsrf"
+                allocate(values(8))
+                values = [1, 2, 3, 4, 5, 6, 7, 8]
+                default = "1"
+                group = "LSM_Parameters"
+            case ("nmp_opt_tksno")
+                description = "Noah-MP Snow Thermal Conductivity option"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = Stieglitz(yen,1965)"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = Anderson, 1976"//achar(10)//BLNK_CHR_N// &
+                                                     "3 = Constant value"//achar(10)//BLNK_CHR_N// &
+                                                     "4 = Verseghy (1991)"//achar(10)//BLNK_CHR_N// &
+                                                     "5 = Douvill (Yen, 1981)"
                 allocate(values(5))
                 values = [1, 2, 3, 4, 5]
+                default = "1"
+                group = "LSM_Parameters"
+            case ("nmp_opt_compact")
+                description = "Noah-MP Snow Compaction option"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = Anderson1976"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = Abolafia-Rosenzweig2024"
+                allocate(values(2))
+                values = [1, 2]
+                default = "1"
+                group = "LSM_Parameters"
+            case ("nmp_opt_scf")
+                description = "Noah-MP Snow Cover Fraction option"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = NiuYang07"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = Abolafia-Rosenzweig2025"
+                allocate(values(2))
+                values = [1, 2]
                 default = "1"
                 group = "LSM_Parameters"
             case ("nmp_opt_frz")
@@ -2811,6 +3329,15 @@ contains
                 allocate(values(2))
                 values = [1, 2]
                 default = "2"
+                group = "LSM_Parameters"
+            case ("nmp_opt_wet")
+                description = "Noah-MP Wetland option"//achar(10)//BLNK_CHR_N// &
+                                                     "0 = No wetland model"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = use Zhang et al., 2022 wetland model; fixed parameter"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = use Zhang et al., 2022 wetland model; read in 2D parameter"
+                allocate(values(3))
+                values = [0, 1, 2]
+                default = "0"
                 group = "LSM_Parameters"
             case ("nmp_opt_snf")
                 description = "Noah-MP Precipitation Partitioning between snow and rain"//achar(10)//BLNK_CHR_N// &
@@ -2867,9 +3394,9 @@ contains
                 group = "LSM_Parameters"
             case ("nmp_opt_pedo")
                 description = "Noah-MP options for pedotransfer functions (used when OPT_SOIL = 3; not implemented in code)"
-                allocate(values(1))
-                values = [1]
-                default = "1"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
                 group = "LSM_Parameters"
             case ("nmp_opt_crop")
                 description = "options for crop model"//achar(10)//BLNK_CHR_N// &
@@ -2945,10 +3472,10 @@ contains
             ! Snow Model parameters namelist variables
             ! --------------------------------------
             ! --------------------------------------
-            case ("fsm_nsnow_max")
-                description = "Maximum number of snow layers to allow for a FSM simulation"
-                min = 4
-                max = 20
+            case ("sm_nsnow_max")
+                description = "Maximum number of snow layers to store in domain arrays (used by FSM and SNOWPACK)"
+                min = 3
+                max = 500
                 default = "6"
                 group = "SM_Parameters"
             case ("fsm_ds_min")
@@ -3052,13 +3579,6 @@ contains
                 values = [0, 1]
                 default = "0"
                 group = "SM_Parameters"
-            case ("fsm_snslid")
-                description = "Flag to turn on SnowSlide in an FSM simulation"//achar(10)//BLNK_CHR_N// &
-                    "(0 = OFF, 1 = ON)"
-                allocate(values(2))
-                values = [0, 1]
-                default = "0"
-                group = "SM_Parameters"
             case ("fsm_snolay")
                 description = "Snow layering scheme to use in an FSM simulation"//achar(10)//BLNK_CHR_N// &
                     "(0 = Original Layering routine, 1 = Density-dependant layering)"
@@ -3108,12 +3628,166 @@ contains
                     "(.False. = OFF, .True. = ON)"
                 default = ".False."
                 group = "SM_Parameters"
+            case("snicar_snowoptics_opt")
+                description = "Option for SNICAR snow optics used in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = Warren (1984) "//achar(10)//BLNK_CHR_N// &
+                    "2 = Warren and Brandt (2008) "//achar(10)//BLNK_CHR_N// &
+                    "3 = Picard et al (2016)"
+                allocate(values(3))
+                values = [1, 2, 3]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_dustoptics_opt")
+                description = "Option for SNICAR dust optics used in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = Saharan dust (Balkanski et al., 2007, central hematite)"//achar(10)//BLNK_CHR_N// &
+                    "2 = San Juan Mountains, CO (Skiles et al, 2017)"//achar(10)//BLNK_CHR_N// &
+                    "3 = Greenland (Polashenski et al., 2015, central absorptivity)"
+                allocate(values(3))
+                values = [1, 2, 3]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_solarspec_opt")
+                description = "Option for SNICAR solar spectrum used in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = mid-latitude winter"//achar(10)//BLNK_CHR_N// &
+                    "2 = mid-latitude summer"//achar(10)//BLNK_CHR_N// &
+                    "3 = sub-Arctic winter"//achar(10)//BLNK_CHR_N// &
+                    "4 = sub-Arctic summer"//achar(10)//BLNK_CHR_N// &
+                    "5 = Summit,Greenland,summer"//achar(10)//BLNK_CHR_N// &
+                    "6 = High Mountain summer"
+                allocate(values(6))
+                values = [1, 2, 3, 4, 5, 6]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_bandnumber_opt")
+                description = "Option for SNICAR band number used in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = 5 bands, 2 = 480 bands"
+                allocate(values(2))
+                values = [1, 2]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_rtsolver_opt")
+                description = "option for two different SNICAR radiative transfer solver in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = Toon et al. solver, 2 = Adding-doubling solver"
+                allocate(values(2))
+                values = [1, 2]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_snowshape_opt")
+                description = "option for snow grain shape in SNICAR in NoahMP (nmp_opt_alb=3)"//achar(10)//BLNK_CHR_N// &
+                    "1 = Spheres"//achar(10)//BLNK_CHR_N// &
+                    "2 = Spheroid"//achar(10)//BLNK_CHR_N// &
+                    "3 = Hexagonal Plate"//achar(10)//BLNK_CHR_N// &
+                    "4 = Koch Snowflake"
+                allocate(values(4))
+                values = [1, 2, 3, 4]
+                default = "1"
+                group = "SM_Parameters"
+            case("snicar_use_aerosol")
+                description = "option to turn on/off aerosol deposition flux effect in snow in SNICAR"
+                default = ".False."
+                group = "SM_Parameters"
+            case("snicar_snowbc_intmix")
+                description = "option to activate BC-snow internal mixing in SNICAR"
+                default = ".False."
+                group = "SM_Parameters"
+            case("snicar_snowdust_intmix")
+                description = "option to activate dust-snow internal mixing in SNICAR"
+                default = ".False."
+                group = "SM_Parameters"
+            case("snicar_use_oc")
+                description = "option to activate organic carbon in snow in SNICAR"
+                default = ".False."
+                group = "SM_Parameters"
+            case("snicar_aerosol_readtable")
+                description = "option to read aerosol deposition fluxes from table (on) or NetCDF forcing file (off)"
+                default = ".True."
+                group = "SM_Parameters"
+            case("snowpack_atmospheric_stability")
+                description = "which atmospheric stability calculation method to use in SnowPack model"//achar(10)//BLNK_CHR_N// &
+                    "'MO_HOLTSLAG' = Holtslag and DeBruin (1988). Should be better than MO_MICHLMAYR during melt periods"//achar(10)//BLNK_CHR_N// &
+                    "'MO_MICHLMAYR' = Stearns and Weidner (1993) modified by Michlmayr (2008)"
+                default = "MO_HOLTSLAG"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "NEUTRAL", trim(str(kSNOWPACK_ATMOS_STAB_NEUTRAL)), "MO_HOLTSLAG", trim(str(kSNOWPACK_ATMOS_STAB_MO_HOLTSLAG)), "MO_MICHLMAYR", trim(str(kSNOWPACK_ATMOS_STAB_MO_MICHLMAYR))]
+                endif
+                group = "SM_Parameters"
+            case("snowslide")
+                description = "SNOWSLIDE gravitational snow redistribution (Bernhardt & Schulz, 2010)"//achar(10)//BLNK_CHR_N// &
+                    "0 = off (default), 1 = on"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
+                group = "SM_Parameters"
+            case("saltation_model")
+                description = "saltation mass flux model used by SNOWPACK / snow drift"//achar(10)//BLNK_CHR_N// &
+                    "'SORENSEN' (default CRYOWRF suspension model) based on Sorensen (2004)"//achar(10)//BLNK_CHR_N// &
+                    "'DOORSCHOT' = Doorschot & Lehning (2002) iterative trajectory model"
+                default = "SORENSEN"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: &
+                        "SORENSEN",  trim(str(kSALTATION_SORENSEN)),  &
+                        "DOORSCHOT", trim(str(kSALTATION_DOORSCHOT))]
+                endif
+                group = "SM_Parameters"
+            case("snowpack_albedo_parameterization")
+                description = "which albedo parameterization to use in SnowPack model"//achar(10)//BLNK_CHR_N// &
+                    "'LEHNING_2' = default SnowPack albedo parameterization"//achar(10)//BLNK_CHR_N// &
+                    "'SCHMUCKI_OGS' = from SCHMUCKI_ALLX32 regression with optical grain size"
+                default = "LEHNING_2"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "LEHNING_2", trim(str(kSNOWPACK_ALBEDO_PARAM_LEHNING_2)), "SCHMUCKI", trim(str(kSNOWPACK_ALBEDO_PARAM_SCHMUCKI))]
+                endif
+                group = "SM_Parameters"
+            case("snowpack_enable_vapour_transport")
+                description = "Enable mass transport by vapour flow (default: FALSE). See https://doi.org/10.3389/feart.2020.00249 Jafari et al. (2020) for details"
+                default = ".False."
+                group = "SM_Parameters"
+            case("snowpack_variant")
+                description = "which SnowPack model variant to use"//achar(10)//BLNK_CHR_N// &
+                    "'antarctica' = SnowPack model suited for Antarctica simulations"//achar(10)//BLNK_CHR_N// &
+                    "'alps' = SnowPack model suited for Alps simulations"
+                if (present(val_keys)) then
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "default", "0", "antarctica", trim(str(kSNOWPACK_VARIANT_ANTARCTICA)), "alps", trim(str(kSNOWPACK_VARIANT_ALPS))]
+                endif
+                default = "default"
+                group = "SM_Parameters"
+            case("snowpack_reduce_n_elements")
+                description = "Level of SNOWPACK layer combining"//achar(10)//BLNK_CHR_N// &
+                    "(0 = OFF, 1 = standard, 2 = aggressive depth-dependent combining)"
+                min = 0
+                max = 2
+                default = "2"
+                group = "SM_Parameters"
+            case("suspension_layer")
+                description = "Blowing snow drift model selection"//achar(10)//BLNK_CHR_N// &
+                    "(0 = OFF, 1 = CRYOWRF-style)"
+                allocate(values(2))
+                values = [0, 1]
+                default = "0"
+                group = "SM_Parameters"
+            case("suspension_fine_mesh_levels")
+                description = "Number of fine mesh levels for near-surface suspension (CRYOWRF-style drift)"
+                default = "15"
+                min = 0
+                max = 30
+                group = "SM_Parameters"
+                type = 1
+            case("bs_atm_feedback")
+                description = "Enable atmospheric feedback from blowing snow sublimation"//achar(10)//BLNK_CHR_N// &
+                    "(.False. = OFF, .True. = ON)"
+                default = ".True."
+                group = "SM_Parameters"
             ! --------------------------------------
             ! --------------------------------------
             ! Radiation parameters namelist variables
             ! --------------------------------------
             ! --------------------------------------
-            case ("update_interval_rrtmg")
+            case ("terrain_shading")
+                description = "Applies terrain shading to radiation. Requires supplying the relevant domain"//achar(10)//BLNK_CHR_N// &
+                              "with 'hlm' and 'svf' variables in the input files."
+                default = ".False."
+                group = "RAD_Parameters"
+            case ("update_interval_rad")
                 description = "Time interval for updating the radiation. If = 0, update every time step."
                 min = 0
                 max = 86400
@@ -3143,6 +3817,22 @@ contains
                 max = 12
                 default = "0"
                 group = "RAD_Parameters"
+            case ("terrain_refl_radius")
+                description = "Radius for terrain reflected shortwave neighborhood averaging."//achar(10)//BLNK_CHR_N// &
+                              "Only used when terrain_shading=.True. Set to 0 to disable terrain reflected SW."
+                min = 0
+                max = 10000
+                units = "meters"
+                default = "1500.0"
+                group = "RAD_Parameters"
+            case ("rrtmgp_block_N")
+                description = "minimum block size (N) for batching rrtmgp calculations, espressed as NxN grid cells."//achar(10)//BLNK_CHR_N// &
+                              "Smaller blocks will be slower but use less GPU memory. This setting can allow for less memory usage for large domains on few GPUs."
+                min = 10
+                max = 2000
+                default = "150"
+                group = "RAD_Parameters"
+
             ! --------------------------------------
             ! --------------------------------------
             ! Wind parameters namelist variables
@@ -3150,6 +3840,10 @@ contains
             ! --------------------------------------
             case ("Sx")
                 description = "Use Sx-terrain sheltering to modify wind field (T/F)"
+                default = ".False."
+                group = "Wind"
+            case ("linear_theory")
+                description = "Use linear theory wind perturbations"
                 default = ".False."
                 group = "Wind"
             case ("thermal")
@@ -3161,13 +3855,19 @@ contains
                 min = 0
                 max = 10000
                 units = "m"
-                default = "-9999"
+                default = "0"
                 group = "Wind"
             case ("wind_iterations")
-                description = "Number of iterations to use for the O'Brien iterative wind solver (wind=2)"
+                description = "Number of iterations to use for the iterative wind solver (wind='variational solver')"
                 min = 0
-                max = 1000
-                default = "800"
+                max = 10
+                default = "2"
+                group = "Wind"
+            case ("wind_solver_iterations")
+                description = "Number of iterations for the actual wind solver(AMGX/PETSc) to use (wind='variational solver')"
+                min = 100
+                max = 5000
+                default = "1500"
                 group = "Wind"
             case ("Sx_dmax")
                 description = "Maximum lateral distance over which to calculate the Sx parameter"
@@ -3185,7 +3885,9 @@ contains
                 group = "Wind"
             case ("alpha_const")
                 description = "Option for setting the alpha parameter in the wind=3 euqtions to a constant"//achar(10)//BLNK_CHR_N// &
-                              "(between 0.2 and 2). Default of -1.0 allows for dynamic alpha. For more information, see Reynolds et al., 2023."
+                              "(between 0.2 and 2). Default of -1.0 allows for dynamic alpha."//achar(10)//BLNK_CHR_N// &
+                              "larger values allow for more adjustment of vertical winds (less stable)"//achar(10)//BLNK_CHR_N// &
+                              "smaller values allow for less adjustment of vertical winds (more stable)"
                 min = 0.2
                 max = 2.0
                 default = "-1.0"
@@ -3249,5 +3951,207 @@ contains
         endif
 
     end subroutine get_nml_var_metadata
+
+
+    !> -------------------------------
+    !! Extract variable names from a namelist section in a user's namelist file.
+    !! Finds the &nml_name section, reads lines until '/', and extracts
+    !! tokens before '=' as variable names.
+    !! -------------------------------
+    subroutine extract_nml_varnames_from_file(filename, nml_name, varnames, nvar)
+        implicit none
+        character(len=*), intent(in) :: filename, nml_name
+        character(len=kMAX_NAME_LENGTH), intent(out) :: varnames(:)
+        integer, intent(out) :: nvar
+
+        integer :: funit, ios, eq_pos, paren_pos, i
+        character(len=1024) :: line, trimmed
+        character(len=kMAX_NAME_LENGTH) :: varname, nml_lower, section_name
+        logical :: in_section, in_quotes
+
+        nvar = 0
+        in_section = .false.
+        nml_lower = to_lower(trim(nml_name))
+
+        open(newunit=funit, file=filename, status='old', action='read', iostat=ios)
+        if (ios /= 0) return
+
+        do
+            read(funit, '(A)', iostat=ios) line
+            if (ios /= 0) exit
+
+            trimmed = adjustl(line)
+
+            ! Check for start of a namelist section
+            if (trimmed(1:1) == '&') then
+                if (in_section) exit  ! hit next section, done
+                section_name = to_lower(trim(trimmed(2:)))
+                ! Strip trailing whitespace/comments from section name
+                do i = 1, len_trim(section_name)
+                    if (section_name(i:i) == ' ' .or. section_name(i:i) == '!') then
+                        section_name = section_name(1:i-1)
+                        exit
+                    endif
+                end do
+                if (trim(section_name) == trim(nml_lower)) in_section = .true.
+                cycle
+            endif
+
+            if (.not. in_section) cycle
+
+            ! Check for end of namelist section
+            if (trimmed(1:1) == '/') exit
+
+            ! Strip inline comments (quote-aware)
+            in_quotes = .false.
+            do i = 1, len_trim(trimmed)
+                if (trimmed(i:i) == "'") in_quotes = .not. in_quotes
+                if (trimmed(i:i) == '!' .and. .not. in_quotes) then
+                    trimmed = trimmed(1:i-1)
+                    exit
+                endif
+            end do
+
+            ! Skip blank lines
+            if (len_trim(trimmed) == 0) cycle
+
+            ! Look for '=' to identify a variable assignment
+            eq_pos = index(trimmed, '=')
+            if (eq_pos == 0) cycle  ! continuation line, skip
+
+            ! Extract variable name (token before '=')
+            varname = adjustl(trim(trimmed(1:eq_pos-1)))
+
+            ! Strip array indices: take part before '('
+            paren_pos = index(varname, '(')
+            if (paren_pos > 0) varname = varname(1:paren_pos-1)
+
+            varname = to_lower(trim(varname))
+            if (len_trim(varname) == 0) cycle
+
+            ! Add if not already present and array not full
+            if (nvar >= size(varnames)) cycle
+            nvar = nvar + 1
+            varnames(nvar) = varname
+        end do
+
+        close(funit)
+
+    end subroutine extract_nml_varnames_from_file
+
+
+    !> -------------------------------
+    !! Extract valid variable names from WRITE(NML=) scratch file output.
+    !! Parses compiler-generated namelist output to get the set of valid names.
+    !! -------------------------------
+    subroutine extract_nml_varnames_from_scratch(scratch_unit, varnames, nvar)
+        implicit none
+        integer, intent(in) :: scratch_unit
+        character(len=kMAX_NAME_LENGTH), intent(out) :: varnames(:)
+        integer, intent(out) :: nvar
+
+        integer :: ios, eq_pos, paren_pos
+        character(len=1024) :: line, trimmed
+        character(len=kMAX_NAME_LENGTH) :: varname
+
+        nvar = 0
+        rewind(scratch_unit)
+
+        do
+            read(scratch_unit, '(A)', iostat=ios) line
+            if (ios /= 0) exit
+
+            trimmed = adjustl(line)
+
+            ! Skip the &group_name header line
+            if (trimmed(1:1) == '&') cycle
+            ! Stop at end of namelist
+            if (trimmed(1:1) == '/') exit
+
+            ! Look for '=' to identify a variable entry
+            eq_pos = index(trimmed, '=')
+            if (eq_pos == 0) cycle
+
+            ! Extract variable name (token before '=')
+            varname = adjustl(trim(trimmed(1:eq_pos-1)))
+
+            ! Strip array indices
+            paren_pos = index(varname, '(')
+            if (paren_pos > 0) varname = varname(1:paren_pos-1)
+
+            varname = to_lower(trim(varname))
+            if (len_trim(varname) == 0) cycle
+
+            ! Add if not already present
+            if (.not. any(varnames(1:nvar) == varname) .and. nvar < size(varnames)) then
+                nvar = nvar + 1
+                varnames(nvar) = varname
+            endif
+        end do
+
+    end subroutine extract_nml_varnames_from_scratch
+
+
+    !> -------------------------------
+    !! After a namelist read error, identify which user-supplied variable names
+    !! are not valid members of the namelist group. Prints the invalid names.
+    !!
+    !! nml_name:       name of the namelist group (e.g. 'domain')
+    !! nml_file:       path to the user's namelist file
+    !! valid_nml_unit: scratch file unit containing WRITE(NML=) output with defaults
+    !! -------------------------------
+    subroutine find_invalid_nml_vars(nml_name, nml_file, valid_nml_unit)
+        implicit none
+        character(len=*), intent(in) :: nml_name, nml_file
+        integer, intent(in) :: valid_nml_unit
+
+        integer, parameter :: MAX_VARS = 200
+        character(len=kMAX_NAME_LENGTH) :: user_vars(MAX_VARS), valid_vars(MAX_VARS)
+        character(len=kMAX_NAME_LENGTH) :: invalid_vars(MAX_VARS)
+        integer :: n_user, n_valid, n_invalid
+        integer :: i, j
+        logical :: found
+
+        call extract_nml_varnames_from_file(nml_file, nml_name, user_vars, n_user)
+        call extract_nml_varnames_from_scratch(valid_nml_unit, valid_vars, n_valid)
+
+        ! If we couldn't parse either file, skip the comparison
+        if (n_user == 0 .or. n_valid == 0) return
+
+        ! Find user variables that are not in the valid set
+        n_invalid = 0
+        do i = 1, n_user
+            found = .false.
+            do j = 1, n_valid
+                if (trim(user_vars(i)) == trim(valid_vars(j))) then
+                    found = .true.
+                    exit
+                endif
+            end do
+            if (.not. found) then
+                n_invalid = n_invalid + 1
+                invalid_vars(n_invalid) = user_vars(i)
+            endif
+        end do
+
+        if (n_invalid == 0) return
+
+        if (STD_OUT_PE) then
+            write(*,*) "    The following variable(s) are not valid in the '", &
+                trim(nml_name), "' namelist:"
+            do i = 1, n_invalid
+                write(*,*) "      - ", trim(invalid_vars(i))
+            end do
+            write(*,*)
+            write(*,*) "    To see all valid namelist variables, generate a default namelist file using:"
+            write(*,*) "        ./HICAR --gen-nml default.nml"
+            write(*,*)
+            write(*,*) "    To check if a variable is valid namelist variable use:"
+            write(*,*) "        ./HICAR -v [YOUR_VAR]"
+            write(*,*)
+        endif
+
+    end subroutine find_invalid_nml_vars
+
 
 end module namelist_utils

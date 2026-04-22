@@ -3,14 +3,15 @@ submodule(output_interface) output_implementation
   use debug_module,             only : check_ncdf
   use iso_fortran_env,          only : output_unit
   use time_io,                  only : get_output_time, find_timestep_in_filelist
-  use string,                   only : str, split_str
-  use io_routines,              only : io_newunit
+  use string,                   only : str, split_str, as_string
+  use io_routines,              only : io_newunit, check_file_exists, can_file_parallel
+
   implicit none
 
 contains
 
 
-    module subroutine init(this, options, its, ite, kts, kte, jts, jte, ide, kde, jde)
+    module subroutine init_output(this, options, its, ite, kts, kte, jts, jte, ide, kde, jde)
         implicit none
         class(output_t),  intent(inout)  :: this
         type(options_t),  intent(in)     :: options
@@ -21,7 +22,8 @@ contains
         character(len=kMAX_STRING_LENGTH) :: tmp_str
 
         allocate(this%variables(kINITIAL_VAR_SIZE))
-        
+        allocate(this%var_meta(kINITIAL_VAR_SIZE))
+
         this%n_vars = 0
         this%n_dims      = 0
         this%is_initialized = .True.
@@ -29,7 +31,7 @@ contains
         this%output_counter = 1
         
         this%its = its; this%ite = ite; this%kts = kts; this%kte = kte; this%jts = jts; this%jte = jte
-        this%global_dim_len = (/ide, jde, kde/)
+        this%file_dim_len = (/ide, jde, kde/)
 
         call set_attrs(this, options)
         
@@ -49,11 +51,11 @@ contains
         
         write(this%output_fn, '(A,A,".nc")')    &
                 trim(this%base_out_file_name),   &
-                trim(options%general%start_time%as_string(this%file_date_format))
+                trim(as_string(options%general%start_time,this%file_date_format))
 
         call this%add_variables(options%output%vars_for_output + options%vars_for_restart)
         
-    end subroutine init
+    end subroutine init_output
     
     !If this is a restart run, set output counter and filename to pick up
     !where we left off
@@ -70,13 +72,13 @@ contains
         !Expect the worse
         error = 1
 
-        call get_outputfiles(this,file_list)
-        
+        call get_outputfiles(this, file_list, options)
+
         if (size(file_list) > 0) then
             !Find output file and step in output filelist
             this%output_counter = find_timestep_in_filelist(file_list, 'time', options%restart%restart_time,this%output_fn,error=error)
         endif
-        
+
         !If there was no error getting output step, then a file already exists which contains our time step
         if (error == 0) then
             !Open output file, setting out_ncfile_id
@@ -84,64 +86,65 @@ contains
             this%out_ncfile_id = this%active_nc_id
 
             ! if this is a restart run, then there will be no initial call to save_out_file, meaning
-            ! that the output counter should be auto-incremented to 2 (1 + 1) here 
+            ! that the output counter should be auto-incremented to 2 (1 + 1) here
             this%output_counter = this%output_counter + 1
         ! if there was an error getting the output step, then we assume that there is no file for the current output time step
         else
-            write(*,*) "No existing output file found for restart run. Technically, this should never happen."
-            write(*,*) "If you wanted to restart on purpose without any existing output files, just be aware."
-            write(*,*) "We will set the output counter to 1 and start producing a new output file."
+            write(*,*) "No existing output file found for restart time. A new output file will be created."
 
             ! set back to 1, in case this was set when calling find_timestep_in_filelist
             this%output_counter = 1
             write(this%output_fn, '(A,A,".nc")')    &
                 trim(this%base_out_file_name),   &
-                trim(options%restart%restart_time%as_string(this%file_date_format))
+                trim(as_string(options%restart%restart_time,this%file_date_format))
         endif
 
     end subroutine init_restart
     
-    subroutine get_outputfiles(this,file_list)
+    subroutine get_outputfiles(this, file_list, options)
         implicit none
-        class(output_t),  intent(in)   :: this
-        character(len=*), allocatable, intent(inout):: file_list(:)
-        
-        integer :: i, error, nfiles, unit, PE_RANK_GLOBAL
-        character(len=kMAX_FILE_LENGTH)  :: file
+        class(output_t),  intent(in)    :: this
+        character(len=*), allocatable, intent(inout) :: file_list(:)
+        type(options_t),  intent(in)    :: options
+
+        integer :: nfiles
         character(len=kMAX_FILE_LENGTH), allocatable :: temp_list(:)
-        character(len=kMAX_FILE_LENGTH) :: temp_file
-        character(len=kMAX_FILE_LENGTH) :: cmd_str
-        
+        character(len=kMAX_FILE_LENGTH) :: candidate
+        type(Time_type) :: t_candidate
+        real(kind=8) :: file_interval_days
+        logical :: exists
+
+        ! Time between file starts (in days) = outputinterval * frames_per_outfile / 86400
+        file_interval_days = dble(options%output%outputinterval) &
+                           * dble(options%output%frames_per_outfile) / 86400.0d0
+        ! Guard against zero interval
+        if (file_interval_days <= 0.0d0) file_interval_days = 1.0d0
+
         allocate(temp_list(MAX_NUMBER_FILES))
-        call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
+        nfiles = 0
 
-        temp_file = '.tmp_outfiles'//trim(str(PE_RANK_GLOBAL))//'.txt'
-        cmd_str = 'ls '//trim(this%base_out_file_name)//'*.nc > '//trim(temp_file)
+        ! Enumerate candidate filenames by stepping through time from start to
+        ! end (or restart time, whichever is later). For each candidate file-start
+        ! time, construct the expected filename and check if it exists on disk.
+        t_candidate = options%general%start_time
+        do while (t_candidate%mjd() <= max(options%general%end_time%mjd(), &
+                                            options%restart%restart_time%mjd()) + file_interval_days)
+            write(candidate, '(A,A,".nc")') &
+                trim(this%base_out_file_name), &
+                trim(as_string(t_candidate, this%file_date_format))
 
-        call EXECUTE_COMMAND_LINE( cmd_str, EXITSTAT=error )
-
-        if (error /= 0) then
-            return
-        endif
-        
-        open( io_newunit(unit), file = trim(temp_file) )
-        i=0
-        error=0
-        do while (error==0)
-            read(unit, '(A)', iostat=error) file
-            if (error==0) then
-                i=i+1
-                temp_list(i) = trim(file)
+            inquire(file=trim(candidate), exist=exists)
+            if (exists) then
+                nfiles = nfiles + 1
+                if (nfiles <= MAX_NUMBER_FILES) temp_list(nfiles) = candidate
             endif
-        enddo
-        close(unit)
-        
-        cmd_str = 'rm '//trim(temp_file)
-        call system( cmd_str )
-        
-        nfiles = i
+
+            ! Advance by one file's worth of time
+            call t_candidate%set(t_candidate%mjd() + file_interval_days)
+        end do
+
         allocate(file_list(nfiles))
-        file_list(1:nfiles) = temp_list(1:nfiles)
+        if (nfiles > 0) file_list(1:nfiles) = temp_list(1:min(nfiles, MAX_NUMBER_FILES))
         deallocate(temp_list)
     end subroutine
 
@@ -153,94 +156,85 @@ contains
         class(output_t),  intent(inout)  :: this
         type(options_t), intent(in)    :: options
         character*60 :: a_string
+        character(len=kMAX_CONFIG_STRING_LENGTH) :: config_str
+        character(len=512) :: line
+        character(len=256) :: attr_name
+        integer :: i, line_start, str_len, eq_pos, slash_pos
 
         call this%add_attribute("comment",options%general%comment)
-        call this%add_attribute("source","ICAR version:"//trim(options%general%version))
+        call this%add_attribute("source","HICAR version:"//trim(options%general%version))
 
-        ! Add info on grid setting:
-        write(a_string,*) options%domain%sleve
-        call this%add_attribute("sleve",a_string)
-        if (options%domain%sleve) then
-          write(a_string,*) options%domain%terrain_smooth_windowsize
-          call this%add_attribute("terrain_smooth_windowsize",a_string )
-          write(a_string,*) options%domain%terrain_smooth_cycles
-          call this%add_attribute("terrain_smooth_cycles",a_string )
-          write(a_string,*) options%domain%decay_rate_L_topo
-          call this%add_attribute("decay_rate_L_topo",a_string )
-          write(a_string,*) options%domain%decay_rate_s_topo
-          call this%add_attribute("decay_rate_S_topo",a_string )
-          write(a_string,*) options%domain%sleve_n
-          call this%add_attribute("sleve_n",a_string )
-        endif
-        ! Add some more info on physics settings:
-        write(a_string,*) options%physics%boundarylayer
-        call this%add_attribute("pbl", a_string )
-        write(a_string,*) options%physics%landsurface
-        call this%add_attribute("lsm", a_string )
-        write(a_string,*) options%physics%watersurface
-        call this%add_attribute("water", a_string )
-        write(a_string,*) options%physics%microphysics
-        call this%add_attribute("mp", a_string )
-        write(a_string,*) options%physics%radiation
-        call this%add_attribute("rad", a_string )
-        write(a_string,*) options%physics%convection
-        call this%add_attribute("conv", a_string )
-        write(a_string,*) options%physics%advection
-        call this%add_attribute("adv", a_string )
-        write(a_string,*) options%physics%windtype
-        call this%add_attribute("wind", a_string )
 
 
         call this%add_attribute("ids",str(1))
-        call this%add_attribute("ide",str(this%global_dim_len(1)))
+        call this%add_attribute("ide",str(this%file_dim_len(1)))
         call this%add_attribute("jds",str(1))
-        call this%add_attribute("jde",str(this%global_dim_len(2)))
+        call this%add_attribute("jde",str(this%file_dim_len(2)))
         call this%add_attribute("kds",str(1))
-        call this%add_attribute("kde",str(this%global_dim_len(3)))
+        call this%add_attribute("kde",str(this%file_dim_len(3)))
 
-        !call this%add_attribute("ims",str(this%grid%ims))
-        !call this%add_attribute("ime",str(this%grid%ime))
-        !call this%add_attribute("jms",str(this%grid%jms))
-        !call this%add_attribute("jme",str(this%grid%jme))
-        !call this%add_attribute("kms",str(this%grid%kms))
-        !call this%add_attribute("kme",str(this%grid%kme))
+        ! Store config as individual NetCDF attributes for restart validation
+        call options%generate_config_string(config_str)
 
-        !call this%add_attribute("its",str(this%grid%its))
-        !call this%add_attribute("ite",str(this%grid%ite))
-        !call this%add_attribute("jts",str(this%grid%jts))
-        !call this%add_attribute("jte",str(this%grid%jte))
-        !call this%add_attribute("kts",str(this%grid%kts))
-        !call this%add_attribute("kte",str(this%grid%kte))
+        ! Parse config string line by line (newline-delimited "group/key=value" lines)
+        line_start = 1
+        str_len = len_trim(config_str)
+        do i = 1, str_len
+            if (config_str(i:i) == char(10) .or. i == str_len) then
+                if (config_str(i:i) == char(10)) then
+                    line = config_str(line_start:i-1)
+                else
+                    line = config_str(line_start:i)
+                endif
+                line_start = i + 1
+
+                if (len_trim(line) == 0) cycle
+
+                eq_pos = index(line, '=')
+                if (eq_pos > 0) then
+                    attr_name = adjustl(line(1:eq_pos-1))
+                    ! Replace '/' with '.' for NetCDF-safe attribute names
+                    slash_pos = index(attr_name, '/')
+                    if (slash_pos > 0) attr_name(slash_pos:slash_pos) = '.'
+                    call this%add_attribute(trim(attr_name), &
+                                            trim(adjustl(line(eq_pos+1:))))
+                endif
+            endif
+        end do
 
     end subroutine
 
     module subroutine add_to_output(this, in_variable)
         class(output_t),   intent(inout) :: this
-        type(variable_t),  intent(in) :: in_variable
+        type(meta_data_t),  intent(in) :: in_variable
         
         type(variable_t) :: variable
+        type(meta_data_t) :: var_meta
         integer :: n, nx, ny, nz
         
         nx = this%ite - this%its + 1 + in_variable%xstag
         ny = this%jte - this%jts + 1 + in_variable%ystag
         nz = this%kte - this%kts ! no "+1" since the writer nz bounds are domain%kts to domain%kte+1 by default
-        variable = in_variable
+        var_meta = in_variable
 
-        if (variable%three_d) then
-            if (in_variable%dimensions(2)== "level_i") nz = nz+1
+        if (var_meta%three_d) then
+            if (var_meta%dimensions(2)== "level_i") nz = nz+1
 
-            if (in_variable%dim_len(2)>0) nz = in_variable%dim_len(2)
+            if (var_meta%dim_len(2)>0) nz = var_meta%dim_len(2)
 
-            call variable%initialize((/nx, nz, ny/))
+            call variable%initialize(var_meta%id, (/nx, nz, ny/))
             variable%data_3d = kEMPT_BUFF
+            var_meta%dim_len = (/ nx, nz, ny /)
         else
-            call variable%initialize((/nx, ny/))
+            call variable%initialize(var_meta%id, (/nx, ny/))
             variable%data_2d = kEMPT_BUFF
+            var_meta%dim_len = (/ nx, ny /)
         endif
         if (this%n_vars == size(this%variables)) call this%increase_var_capacity()
 
         this%n_vars = this%n_vars + 1
         this%variables(this%n_vars) = variable
+        this%var_meta(this%n_vars) = var_meta
 
     end subroutine
 
@@ -250,12 +244,11 @@ contains
         type(MPI_Comm),   intent(in)     :: par_comms
         integer,          intent(in)  :: out_var_indices(:)
 
-
         !Check if we should change the file
         if (this%output_counter > this%output_count) then
             write(this%output_fn, '(A,A,".nc")')    &
                 trim(this%base_out_file_name),   &
-                trim(time%as_string(this%file_date_format))
+                trim(as_string(time,this%file_date_format))
 
             this%output_counter = 1
             if (this%out_ncfile_id > 0) then
@@ -289,21 +282,30 @@ contains
 
     end subroutine
     
-    module subroutine save_rst_file(this, time, par_comms, rst_var_indices)
+    module subroutine save_rst_file(this, time, par_comms, rst_var_indices, dt_seconds)
         class(output_t),  intent(inout) :: this
         type(Time_type),  intent(in)  :: time
         type(MPI_Comm),   intent(in)     :: par_comms
         integer,          intent(in)  :: rst_var_indices(:)
+        real,             intent(in), optional :: dt_seconds
 
         this%active_nc_id = this%rst_ncfile_id
         
         if (this%active_nc_id < 0) then
             write(this%restart_fn, '(A,A,".nc")')    &
                 trim(this%base_rst_file_name),   &
-                trim(time%as_string(this%file_date_format))
+                trim(as_string(time,this%file_date_format))
 
             call open_file(this, this%restart_fn, time, par_comms,rst_var_indices)
             this%rst_ncfile_id = this%active_nc_id
+        endif
+
+        ! Write dt as a global attribute for restart reproducibility
+        if (present(dt_seconds)) then
+            call check_ncdf(nf90_redef(this%rst_ncfile_id), "Entering redef for dt_seconds attribute")
+            call check_ncdf(nf90_put_att(this%rst_ncfile_id, NF90_GLOBAL, "dt_seconds", dt_seconds), &
+                            "Writing dt_seconds global attribute")
+            call check_ncdf(nf90_enddef(this%rst_ncfile_id), "Leaving redef after dt_seconds attribute")
         endif
 
         ! store output
@@ -444,18 +446,35 @@ contains
         type(Time_type),                 intent(in)    :: time
         type(MPI_Comm),                  intent(in)    :: par_comms
         integer,                         intent(in)    :: var_indx_list(:)
-
+        type(MPI_Info) :: par_comm_info
         integer :: err
+        logical :: is_file_parallel
         
         ! open file
-        err = nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), this%active_nc_id, &
-                comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL)
+        call MPI_Comm_get_info(par_comms, par_comm_info)
+
+        is_file_parallel = .True.!can_file_parallel(filename)
+
+        if (is_file_parallel) then
+            err = nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), this%active_nc_id, &
+                    comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL)
+        else
+            err = nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), this%active_nc_id)
+        endif
         if (err /= NF90_NOERR) then
-            call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id, &
-                    comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL), "Opening:"//trim(filename))
+            if (is_file_parallel) then
+                call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id, &
+                    comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL), "Opening:"//trim(filename))
+            else
+                call check_ncdf( nf90_create(filename, IOR(NF90_CLOBBER,NF90_NETCDF4), this%active_nc_id), "Opening:"//trim(filename))
+            endif
+            ! add global attributes such as the image number, domain dimension, creation time
+            call add_global_attributes(this)
         else
             ! in case we need to add a new variable when setting up variables
             call check_ncdf(nf90_redef(this%active_nc_id), "Setting redefine mode for: "//trim(filename))
+            ! Always update global attributes (e.g. git version, history) even on existing files
+            call add_global_attributes(this)
         endif
 
         !This command cuts down on write time and must be done once the file is opened
@@ -464,12 +483,8 @@ contains
         ! define variables or find variable IDs (and dimensions)
         call setup_variables(this, time, var_indx_list)
 
-        if (this%creating) then
-            ! add global attributes such as the image number, domain dimension, creation time
-            call add_global_attributes(this)
-        endif
 
-        !Set creatint to true, so that we will output any static variables on the first pass.
+        !Set creating to true, so that we will output any static variables on the first pass.
         this%creating=.True.
 
         ! End define mode. This tells netCDF we are done defining metadata.
@@ -483,12 +498,15 @@ contains
         integer, dimension(:), intent(in):: vars_to_out
 
         integer :: i
+        type(meta_data_t) :: tmp_var
 
         !Loop through domain vars_to_out, get the var index for the given variable name, and add that var's meta data to local list
         do i = 1,kMAX_STORAGE_VARS
             if (vars_to_out(i)>0) then
                 !i should equal the kVARS index of the variable we want to output
-                call this%add_to_output(get_varmeta(i))
+                tmp_var = get_varmeta(i)
+                if (tmp_var%name == "") cycle
+                call this%add_to_output(tmp_var)
             endif
         enddo
     end subroutine
@@ -509,12 +527,11 @@ contains
 
         err="Creating global attributes"
         call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"Conventions","CF-1.6"), trim(err))
-        call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"title","Intermediate Complexity Atmospheric Research (ICAR) model output"), trim(err))
-        call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"institution","National Center for Atmospheric Research"), trim(err))
+        call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"title","High-Resolution Intermediate Complexity Atmospheric Research (HICAR) model output"), trim(err))
         call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"history","Created:"//todays_date_time//UTCoffset), trim(err))
         call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"references", &
-                    "Gutmann et al. 2016: The Intermediate Complexity Atmospheric Model (ICAR). J.Hydrometeor. doi:10.1175/JHM-D-15-0155.1, 2016."), trim(err))
-        call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"contact","Ethan Gutmann : gutmann@ucar.edu"), trim(err))
+                    "Gutmann et al. 2016: The Intermediate Complexity Atmospheric Model (ICAR). J.Hydrometeor. doi:10.1175/JHM-D-15-0155.1, 2016.\n"//&
+                    "Reynolds et al. 2023: The High-resolution Intermediate Complexity Atmospheric Research (HICAR v1.1) model enables fast dynamic downscaling to the hectometer scale. GMD. https://doi.org/10.5194/gmd-16-5049-2023, 2023"), trim(err))
         call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"git",VERSION), trim(err))
 
         if (this%n_attrs > 0) then
@@ -532,7 +549,6 @@ contains
         write(todays_date_time,date_format) date_time(1:3),date_time(5:7)
 
         call check_ncdf(nf90_put_att(ncid, NF90_GLOBAL,"history","Created:"//todays_date_time//UTCoffset), "global attr")
-        !call check_ncdf(nf90_put_att(ncid, NF90_GLOBAL, "image", this_image()))
 
     end subroutine add_global_attributes
 
@@ -545,8 +561,8 @@ contains
 
         ! iterate through variables creating or setting up variable IDs if they exist, also dimensions
         do i=1,size(var_indx_list)            
-            call setup_dims_for_var(this, this%variables(var_indx_list(i)))
-            call setup_variable(this, this%variables(var_indx_list(i)))
+            call setup_dims_for_var(this, this%var_meta(var_indx_list(i)))
+            call setup_variable(this, this%var_meta(var_indx_list(i)))
         end do
 
         call setup_time_variable(this, time)
@@ -563,7 +579,6 @@ contains
         associate(var => this%time)
         var%name = "time"
         var%dimensions = [ "time" ]
-        var%n_dimensions = 1
 
         select case (time%calendar)
             case(GREGORIAN)
@@ -577,7 +592,7 @@ contains
         end select
 
 
-        err = nf90_inq_varid(this%active_nc_id, var%name, var%var_id)
+        err = nf90_inq_varid(this%active_nc_id, var%name, var%file_var_id)
 
         ! if the variable was not found in the netcdf file then we will define it.
         if (err /= NF90_NOERR) then
@@ -594,15 +609,16 @@ contains
                             var%dim_ids(1) ), "def_dim"//var%dimensions(1) )
             endif
 
-            call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_DOUBLE, var%dim_ids(1), var%var_id), "Defining time" )
-            call check_ncdf( nf90_put_att(this%active_nc_id, var%var_id,"standard_name","time"))
-            call check_ncdf( nf90_put_att(this%active_nc_id, var%var_id,"calendar",trim(calendar)))
-            call check_ncdf( nf90_put_att(this%active_nc_id, var%var_id,"units",time%units()))
-            call check_ncdf( nf90_put_att(this%active_nc_id, var%var_id,"UTCoffset","0"))
+            write(this%time_units,kOUTPUT_FMT) time%year_zero,time%month_zero,time%day_zero,time%hour_zero
 
-            this%time_units = time%units()
+            call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_DOUBLE, var%dim_ids(1), var%file_var_id), "Defining time" )
+            call check_ncdf( nf90_put_att(this%active_nc_id, var%file_var_id,"standard_name","time"))
+            call check_ncdf( nf90_put_att(this%active_nc_id, var%file_var_id,"calendar",trim(calendar)))
+            call check_ncdf( nf90_put_att(this%active_nc_id, var%file_var_id,"units",this%time_units))
+            call check_ncdf( nf90_put_att(this%active_nc_id, var%file_var_id,"UTCoffset","0"))
+
         else
-            err = nf90_get_att(this%active_nc_id, var%var_id, "units", this%time_units)
+            err = nf90_get_att(this%active_nc_id, var%file_var_id, "units", this%time_units)
         endif
         end associate
 
@@ -619,6 +635,7 @@ contains
         type(Time_type) :: output_time
         real, allocatable :: var_3d(:,:,:)
         integer :: i, k_s, k_e
+        logical :: is_file_parallel
         
         integer :: start_three_D_t(4), start_three_D_t_b(4), start_three_D_t_b2(4)
         integer :: start_two_D_t(3), start_two_D_t_b(3), start_two_D_t_b2(3)
@@ -628,9 +645,10 @@ contains
         integer :: v_i_s_b, v_i_e_b, v_j_s_b, v_j_e_b
         integer :: v_i_s_b2, v_i_e_b2, v_j_s_b2, v_j_e_b2
     
+        is_file_parallel = .True.!can_file_parallel(this%output_fn)
 
         do i=1,size(var_indx_list)
-            associate(var => this%variables(var_indx_list(i)))                
+            associate(var => this%var_meta(var_indx_list(i)))                
                 k_s = this%kts
                 k_e = var%dim_len(2)
                 
@@ -647,13 +665,13 @@ contains
                 start_two_D_t_b = (/ this%start_3d_b(1), this%start_3d_b(2), current_step /)
                 start_two_D_t_b2 = (/ this%start_3d_b2(1), this%start_3d_b2(2), current_step /)
 
-                if (this%ite == this%global_dim_len(1)  .and. cnt_3d(1) > 0) cnt_3d(1) = cnt_3d(1) + var%xstag
-                if ((this%start_3d_b(1) - this%its + cnt_3d_b(1)) == this%global_dim_len(1)) cnt_3d_b(1) = cnt_3d_b(1) + var%xstag
-                if ((this%start_3d_b2(1) - this%its + cnt_3d_b2(1)) == this%global_dim_len(1)) cnt_3d_b2(1) = cnt_3d_b2(1) + var%xstag
+                if (this%ite == this%file_dim_len(1)  .and. cnt_3d(1) > 0) cnt_3d(1) = cnt_3d(1) + var%xstag
+                if ((this%start_3d_b(1) - this%its + cnt_3d_b(1)) == this%file_dim_len(1)) cnt_3d_b(1) = cnt_3d_b(1) + var%xstag
+                if ((this%start_3d_b2(1) - this%its + cnt_3d_b2(1)) == this%file_dim_len(1)) cnt_3d_b2(1) = cnt_3d_b2(1) + var%xstag
                 
-                if (this%jte == this%global_dim_len(2) .and. cnt_3d(2) > 0) cnt_3d(2) = cnt_3d(2) + var%ystag
-                if ((this%start_3d_b(2) - this%its + cnt_3d_b(2)) == this%global_dim_len(2)) cnt_3d_b(2) = cnt_3d_b(2) + var%ystag
-                if ((this%start_3d_b2(2) - this%jts + cnt_3d_b2(2)) == this%global_dim_len(2)) cnt_3d_b2(2) = cnt_3d_b2(2) + var%ystag
+                if (this%jte == this%file_dim_len(2) .and. cnt_3d(2) > 0) cnt_3d(2) = cnt_3d(2) + var%ystag
+                if ((this%start_3d_b(2) - this%its + cnt_3d_b(2)) == this%file_dim_len(2)) cnt_3d_b(2) = cnt_3d_b(2) + var%ystag
+                if ((this%start_3d_b2(2) - this%jts + cnt_3d_b2(2)) == this%file_dim_len(2)) cnt_3d_b2(2) = cnt_3d_b2(2) + var%ystag
 
                 v_i_s = this%start_3d(1) - this%its + 1
                 v_i_e = v_i_s + cnt_3d(1) - 1
@@ -691,86 +709,86 @@ contains
 
                 v_j_s_b2 = max(v_j_s_b2,1)
                 v_j_e_b2 = max(v_j_e_b2,1)
-                call check_ncdf( nf90_var_par_access(this%active_nc_id, var%var_id, nf90_collective))
+                if (is_file_parallel) call check_ncdf( nf90_var_par_access(this%active_nc_id, var%file_var_id, nf90_collective))
 
                 if (var%three_d) then
-                    var_3d = reshape(var%data_3d, &
-                        shape=(/ ubound(var%data_3d,1), ubound(var%data_3d,3), ubound(var%data_3d,2) /), order=[1,3,2])
+                    var_3d = reshape(this%variables(var_indx_list(i))%data_3d, &
+                        shape=(/ ubound(this%variables(var_indx_list(i))%data_3d,1), ubound(this%variables(var_indx_list(i))%data_3d,3), ubound(this%variables(var_indx_list(i))%data_3d,2) /), order=[1,3,2])
                     if (var%unlimited_dim) then
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, &
                             var_3d(v_i_s:v_i_e,v_j_s:v_j_e,k_s:k_e), start_three_D_t, count=(/cnt_3d(1), cnt_3d(2), cnt_3d(3), 1/)), "saving:"//trim(var%name) )
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, &
                             var_3d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b,k_s:k_e), start_three_D_t_b, count=(/cnt_3d_b(1), cnt_3d_b(2), cnt_3d_b(3), 1/)), "saving LL block:"//trim(var%name) )
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, &
                             var_3d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2,k_s:k_e), start_three_D_t_b2, count=(/cnt_3d_b2(1), cnt_3d_b2(2), cnt_3d_b2(3), 1/)), "saving UR block:"//trim(var%name) )
                     elseif (this%creating) then
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, var_3d(v_i_s:v_i_e,v_j_s:v_j_e,k_s:k_e), &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, var_3d(v_i_s:v_i_e,v_j_s:v_j_e,k_s:k_e), &
                             start=this%start_3d,count=cnt_3d ), "saving:"//trim(var%name) )
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, var_3d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b,k_s:k_e), &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, var_3d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b,k_s:k_e), &
                             start=this%start_3d_b,count=cnt_3d_b ), "saving LL block:"//trim(var%name) )
-                        call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id, &
+                        call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id, &
                             var_3d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2,k_s:k_e), start=this%start_3d_b2,&
                             count=cnt_3d_b2 ), "saving UR block:"//trim(var%name) )
                     endif
                 elseif (var%two_d) then
                     if (var%dtype == kREAL) then
                         if (var%unlimited_dim) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s:v_i_e,v_j_s:v_j_e), &
                                     start_two_D_t,count=(/ cnt_3d(1), cnt_3d(2), 1/)), "saving:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
                                 start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
                                 start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
                         elseif (this%creating) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s:v_i_e,v_j_s:v_j_e), &
                                         start=(/ this%start_3d(1), this%start_3d(2) /), &
                                         count=(/ cnt_3d(1), cnt_3d(2) /)), "saving:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
                                     start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
                                     count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  this%variables(var_indx_list(i))%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
                                     start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
                                     count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
                         endif    
                     else if (var%dtype == kINTEGER) then
                         if (var%unlimited_dim) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s:v_i_e,v_j_s:v_j_e)), &
                                     start_two_D_t,count=(/ cnt_3d(1), cnt_3d(2), 1/)), "saving:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
                                 start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
                                 start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
                         elseif (this%creating) then
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s:v_i_e,v_j_s:v_j_e)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s:v_i_e,v_j_s:v_j_e)), &
                                         start=(/ this%start_3d(1), this%start_3d(2) /), &
                                         count=(/ cnt_3d(1), cnt_3d(2) /)), "saving:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b)), &
                                     start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
                                     count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
-                            call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  INT(var%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
+                            call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  INT(this%variables(var_indx_list(i))%data_2d(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2)), &
                                     start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
                                     count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
                         endif    
     
                     ! elseif (var%dtype == kDOUBLE) then
                     !     if (var%unlimited_dim) then
-                    !         call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
+                    !         call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
                     !                 start_two_D_t,count=(/ cnt_3d(1), cnt_3d(2), 1/)), "saving:"//trim(var%name) )
                     !         if (this%blocked_UR .or. this%blocked_LL) then
-                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
                     !                 start_two_D_t_b,count=(/ cnt_3d_b(1), cnt_3d_b(2), 1/)), "saving LL block:"//trim(var%name) )
-                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
                     !                 start_two_D_t_b2,count=(/ cnt_3d_b2(1), cnt_3d_b2(2), 1/)), "saving UR block:"//trim(var%name) )
                     !         endif
                     !     elseif (this%creating) then
-                    !         call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
+                    !         call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s:v_i_e,v_j_s:v_j_e), &
                     !                     start=(/ this%start_3d(1), this%start_3d(2) /), &
                     !                     count=(/ cnt_3d(1), cnt_3d(2) /)), "saving:"//trim(var%name) )
                     !         if (this%blocked_UR .or. this%blocked_LL) then
-                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s_b:v_i_e_b,v_j_s_b:v_j_e_b), &
                     !                     start=(/ this%start_3d_b(1), this%start_3d_b(2) /), &
                     !                     count=(/ cnt_3d_b(1), cnt_3d_b(2) /)), "saving LL block:"//trim(var%name) )
-                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
+                    !             call check_ncdf( nf90_put_var(this%active_nc_id, var%file_var_id,  var%data_2dd(v_i_s_b2:v_i_e_b2,v_j_s_b2:v_j_e_b2), &
                     !                     start=(/ this%start_3d_b2(1), this%start_3d_b2(2) /), &
                     !                     count=(/ cnt_3d_b2(1), cnt_3d_b2(2) /)), "saving UR block:"//trim(var%name) )
                     !         endif
@@ -780,86 +798,85 @@ contains
             end associate
         end do
         
-        call check_ncdf( nf90_var_par_access(this%active_nc_id, this%time%var_id, nf90_collective))
+        if (is_file_parallel) call check_ncdf( nf90_var_par_access(this%active_nc_id, this%time%file_var_id, nf90_collective))
 
         output_time = get_output_time(time, units=this%time_units, round_seconds=.False.)
-
-        call check_ncdf( nf90_put_var(this%active_nc_id, this%time%var_id, dble(output_time%mjd()), [current_step] ),   &
+        call check_ncdf( nf90_put_var(this%active_nc_id, this%time%file_var_id, dble(output_time%mjd()+5d-6), [current_step] ),   &
                     "saving:"//trim(this%time%name) )
 
     end subroutine save_data
 
-    subroutine setup_dims_for_var(this, var)
+    subroutine setup_dims_for_var(this, var_meta)
         implicit none
         class(output_t),    intent(inout) :: this
-        type(variable_t),   intent(inout) :: var
+        type(meta_data_t),   intent(inout) :: var_meta
         integer :: i, err, dim_len
         character(len=kMAX_DIM_LENGTH), allocatable :: dimensions(:)
         character(len=kMAX_DIM_LENGTH) :: tmp_dim
 
-        if (allocated(var%dim_ids)) deallocate(var%dim_ids)
+        if (allocated(var_meta%dim_ids)) deallocate(var_meta%dim_ids)
 
-        allocate(var%dim_ids(size(var%dimensions)))
+        allocate(var_meta%dim_ids(size(var_meta%dimensions)))
 
-        dimensions = var%dimensions
-        if (var%three_d .or. var%four_d) then
+        dimensions = var_meta%dimensions
+        if (var_meta%three_d .or. var_meta%four_d) then
             tmp_dim = dimensions(2)
             dimensions(2) = dimensions(3)
             dimensions(3) = tmp_dim
         endif
-        do i = 1, size(var%dim_ids)
+        do i = 1, size(var_meta%dim_ids)
 
             ! Try to find the dimension ID if it exists already.
-            err = nf90_inq_dimid(this%active_nc_id, trim(dimensions(i)), var%dim_ids(i))
+            err = nf90_inq_dimid(this%active_nc_id, trim(dimensions(i)), var_meta%dim_ids(i))
 
             ! probably the dimension doesn't exist in the file, so we will create it.
             if (err/=NF90_NOERR) then
                 ! assume that the last dimension should be the unlimited dimension (generally a good idea...)
-                if (var%unlimited_dim .and. (i==size(var%dim_ids)) .and. trim(dimensions(i))=="time") then
+                if (var_meta%unlimited_dim .and. (i==size(var_meta%dim_ids)) .and. trim(dimensions(i))=="time") then
                     call check_ncdf( nf90_def_dim(this%active_nc_id, trim(dimensions(i)), NF90_UNLIMITED, &
-                                var%dim_ids(i) ), "def_dim"//dimensions(i) )
+                                var_meta%dim_ids(i) ), "def_dim"//dimensions(i) )
                 else
-                    if (i == 1) dim_len = this%global_dim_len(1)+var%xstag
-                    if (i == 2) dim_len = this%global_dim_len(2)+var%ystag
-                    if (i == 3) dim_len = var%dim_len(2)
+                    if (i == 1) dim_len = this%file_dim_len(1)+var_meta%xstag
+                    if (i == 2) dim_len = this%file_dim_len(2)+var_meta%ystag
+                    if (i == 3) dim_len = var_meta%dim_len(2)
 
                     call check_ncdf( nf90_def_dim(this%active_nc_id, dimensions(i), dim_len,       &
-                                var%dim_ids(i) ), "def_dim"//dimensions(i) )
+                                var_meta%dim_ids(i) ), "def_dim"//dimensions(i) )
                 endif
             endif
         end do
 
     end subroutine setup_dims_for_var
 
-    subroutine setup_variable(this, var)
+    subroutine setup_variable(this, var_meta)
         implicit none
         class(output_t),   intent(inout) :: this
-        type(variable_t),  intent(inout) :: var
+        type(meta_data_t),  intent(inout) :: var_meta
         integer :: i, n, err
 
-        err = nf90_inq_varid(this%active_nc_id, var%name, var%var_id)
+        err = nf90_inq_varid(this%active_nc_id, var_meta%name, var_meta%file_var_id)
 
         ! if the variable was not found in the netcdf file then we will define it.
         if (err /= NF90_NOERR) then
         
-            if (var%dtype == kREAL) then
-                call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_REAL, var%dim_ids, var%var_id), &
-                        "Defining variable:"//trim(var%name) )
-            elseif (var%dtype == kINTEGER) then
-                call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_INT, var%dim_ids, var%var_id), &
-                        "Defining variable:"//trim(var%name) )
-            elseif (var%dtype == kDOUBLE) then
-                call check_ncdf( nf90_def_var(this%active_nc_id, var%name, NF90_DOUBLE, var%dim_ids, var%var_id), &
-                        "Defining variable:"//trim(var%name) )
+            if (var_meta%dtype == kREAL) then
+                call check_ncdf( nf90_def_var(this%active_nc_id, var_meta%name, NF90_REAL, var_meta%dim_ids, var_meta%file_var_id), &
+                        "Defining variable:"//trim(var_meta%name) )
+            elseif (var_meta%dtype == kINTEGER) then
+                call check_ncdf( nf90_def_var(this%active_nc_id, var_meta%name, NF90_INT, var_meta%dim_ids, var_meta%file_var_id), &
+                        "Defining variable:"//trim(var_meta%name) )
+            elseif (var_meta%dtype == kDOUBLE) then
+                call check_ncdf( nf90_def_var(this%active_nc_id, var_meta%name, NF90_DOUBLE, var_meta%dim_ids, var_meta%file_var_id), &
+                        "Defining variable:"//trim(var_meta%name) )
             endif
 
             ! setup attributes
-            do i=1,size(var%attributes)
+            do i=1,size(var_meta%attributes)
                 call check_ncdf( nf90_put_att(this%active_nc_id,                &
-                                         var%var_id,                    &
-                                         trim(var%attributes(i)%name),        &
-                                         trim(var%attributes(i)%value)),      &
-                            "saving attribute "//trim(var%attributes(i)%name)//" for "//trim(var%name))
+                                         var_meta%file_var_id,                    &
+                                         trim(var_meta%attributes(i)%name),        &
+                                         trim(var_meta%attributes(i)%value)),      &
+                            "saving attribute "//trim(var_meta%attributes(i)%name)//" for "//trim(var_meta%name))
             enddo
         endif
         
@@ -870,21 +887,28 @@ contains
         implicit none
         class(output_t),   intent(inout)  :: this
         type(variable_t),  allocatable :: new_variables(:)
+        type(meta_data_t), allocatable :: new_meta_data(:)
 
         ! assert allocated(this%variables)
         allocate(new_variables, source=this%variables)
+        allocate(new_meta_data, source=this%var_meta)
         ! new_variables = this%variables
 
         deallocate(this%variables)
+        deallocate(this%var_meta)
 
         allocate(this%variables(size(new_variables)*2))
         this%variables(:size(new_variables)) = new_variables
 
+        allocate(this%var_meta(size(new_meta_data)*2))
+        this%var_meta(:size(new_meta_data)) = new_meta_data
+
         deallocate(new_variables)
+        deallocate(new_meta_data)
 
     end subroutine
 
-    module subroutine close_files(this)
+    module subroutine close_output_files(this)
         implicit none
         class(output_t),   intent(inout)  :: this
 
@@ -897,6 +921,6 @@ contains
             this%rst_ncfile_id = -1
         endif
 
-    end subroutine
+    end subroutine close_output_files
 
 end submodule

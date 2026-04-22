@@ -12,15 +12,11 @@
 !!------------------------------------------------------------
 module time_object
     use time_delta_object, only : time_delta_t
-    use iso_fortran_env, only: real128
-
+    use iso_fortran_env, only: real64
+    use icar_constants, only: NOCALENDAR, kDEFAULT_CALENDAR, GREGORIAN, NOLEAP, THREESIXTY
     implicit none
 
     private
-
-    integer, parameter :: kMAX_STRING_LENGTH = 1024
-    integer, parameter, public :: GREGORIAN=0, NOLEAP=1, THREESIXTY=2, NOCALENDAR=-1
-    integer, parameter, public :: NON_VALID_YEAR = -9999
 
     !>------------------------------------------------------------
     !!  date / time Object
@@ -35,11 +31,11 @@ module time_object
         integer :: month_zero= 1
         integer :: day_zero  = 1
         integer :: hour_zero = 0
-        integer :: calendar
+        integer :: calendar  = NOCALENDAR
         integer, dimension(13) :: month_start
         integer :: year, month, day, hour, minute, second
 
-        real(real128) :: current_date_time = 0
+        real(real64) :: current_date_time = 0
 
 
       contains
@@ -48,11 +44,12 @@ module time_object
         procedure, public  :: seconds     => get_seconds
         procedure, public  :: day_of_year => calc_day_of_year
         procedure, public  :: year_fraction=>calc_year_fraction
+        procedure, public  :: TOD_hours
         procedure, public  :: date_to_mjd => date_to_mjd
         procedure, public  :: date_to_jd => date_to_jd
-        procedure, public  :: as_string   => as_string
+        ! procedure, public  :: as_string   => as_string
         procedure, public  :: equals      => equals_with_precision
-        procedure, public  :: units       => units
+        ! procedure, public  :: units       => units
         procedure, public  :: get_calendar=> get_calendar
         procedure, public  :: get_month   => get_month
 
@@ -83,11 +80,11 @@ module time_object
         procedure, private :: less_or_eq
         generic,   public  :: operator(<=)   => less_or_eq
 
-        procedure, private :: addition
-        generic,   public  :: operator(+)    => addition
-        procedure, private :: difference_time_delta
+        ! procedure, private :: addition
+        ! generic,   public  :: operator(+)    => addition
+        ! procedure, private :: difference_time_delta
         procedure, private :: difference_times
-        generic,   public  :: operator(-)    => difference_time_delta, difference_times
+        generic,   public  :: operator(-)    => difference_times
 
     end type Time_type
 
@@ -151,7 +148,7 @@ interface
     module function get_seconds(this) result(seconds)
         implicit none
         class(Time_type) :: this
-        real(real128) :: seconds
+        real(real64) :: seconds
 
     end function get_seconds
 
@@ -178,7 +175,7 @@ interface
     module function get_mjd(this) result(mjd)
         implicit none
         class(Time_type) :: this
-        real(real128) :: mjd
+        real(real64) :: mjd
 
     end function get_mjd
 
@@ -207,7 +204,7 @@ interface
         implicit none
         class(Time_type), intent(in) :: this
         integer, intent(in) :: year, month, day, hour, minute, second
-        real(real128) :: date_to_mjd
+        real(real64) :: date_to_mjd
 
     end function date_to_mjd
     
@@ -218,11 +215,10 @@ interface
     !!  
     !!  MJ added
     !!------------------------------------------------------------
-    module function date_to_jd(this, year, month, day, hour, minute, second)
+    module function date_to_jd(this)
         implicit none
         class(Time_type), intent(in) :: this
-        integer, intent(in) :: year, month, day, hour, minute, second
-        real(real128) :: date_to_jd
+        real(real64) :: date_to_jd
 
     end function date_to_jd
     
@@ -272,6 +268,16 @@ interface
 
     end function calc_year_fraction
 
+    !>------------------------------------------------------------
+    !!  Return the time of day in hours as a floating point
+    !!
+    !!------------------------------------------------------------
+    module function TOD_hours(this)
+        implicit none
+        real                        :: TOD_hours
+        class(Time_type)            :: this
+
+    end function TOD_hours
 
 
     !>------------------------------------------------------------
@@ -310,7 +316,7 @@ interface
     module subroutine set_from_mjd(this, days)
         implicit none
         class(Time_type), intent(inout) :: this
-        real(real128), intent(in) :: days
+        real(real64), intent(in) :: days
 
     end subroutine set_from_mjd
 
@@ -320,25 +326,25 @@ interface
     !!  For example "days since 1858-11-17 00:00:00"
     !!
     !!------------------------------------------------------------
-    module function units(this)
-        implicit none
-        class(Time_type), intent(in)   :: this
-        character(len=kMAX_STRING_LENGTH) :: units
+    ! module function units(this)
+    !     implicit none
+    !     class(Time_type), intent(in)   :: this
+    !     character(len=kMAX_STRING_LENGTH) :: units
 
-    end function units
+    ! end function units
 
 
     !>------------------------------------------------------------
     !!  Convert the date object into a string in the 0-filled format : "YYYY/MM/DD hh:mm:ss"
     !!
     !!------------------------------------------------------------
-    module function as_string(this, input_format) result(pretty_string)
-        implicit none
-        class(Time_type), intent(in) :: this
-        character(len=*), intent(in), optional :: input_format
-        character(len=kMAX_STRING_LENGTH) :: pretty_string
+    ! module function as_string(this, input_format) result(pretty_string)
+    !     implicit none
+    !     class(Time_type), intent(in) :: this
+    !     character(len=*), intent(in), optional :: input_format
+    !     character(len=kMAX_STRING_LENGTH) :: pretty_string
 
-    end function as_string
+    ! end function as_string
 
     !>------------------------------------------------------------
     !!  Test that time 1 is greater than time 2
@@ -467,27 +473,27 @@ interface
     !!  Subtract two times and return a time_delta object
     !!
     !!------------------------------------------------------------
-    module function difference_time_delta(t1, dt) result(t2)
-        implicit none
-        class(Time_type),   intent(in) :: t1
-        type(time_delta_t), intent(in) :: dt
-        type(Time_type) :: t2
+    ! module function difference_time_delta(t1, dt) result(t2)
+    !     implicit none
+    !     class(Time_type),   intent(in) :: t1
+    !     type(time_delta_t), intent(in) :: dt
+    !     type(Time_type) :: t2
 
-    end function difference_time_delta
+    ! end function difference_time_delta
 
-    !>------------------------------------------------------------
-    !!  Add a given time delta to a time object
-    !!
-    !!  returns a new time object
-    !!
-    !!------------------------------------------------------------
-    module function addition(t1, dt) result(t2)
-        implicit none
-        class(Time_type),   intent(in) :: t1
-        type(time_delta_t), intent(in) :: dt
-        type(Time_type) :: t2
+    ! !>------------------------------------------------------------
+    ! !!  Add a given time delta to a time object
+    ! !!
+    ! !!  returns a new time object
+    ! !!
+    ! !!------------------------------------------------------------
+    ! module function addition(t1, dt) result(t2)
+    !     implicit none
+    !     class(Time_type),   intent(in) :: t1
+    !     type(time_delta_t), intent(in) :: dt
+    !     type(Time_type) :: t2
 
-    end function addition
+    ! end function addition
 
 end interface
 end module time_object

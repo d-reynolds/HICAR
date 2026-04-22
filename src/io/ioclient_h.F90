@@ -17,7 +17,6 @@ module ioclient_interface
   use boundary_interface, only : boundary_t
   use domain_interface,   only : domain_t
   use options_interface,  only : options_t
-  use options_types,      only : forcing_options_type
 
 !  use time_object,        only : Time_type, THREESIXTY, GREGORIAN, NOCALENDAR, NOLEAP
 
@@ -25,6 +24,15 @@ module ioclient_interface
 
   private
   public :: ioclient_t
+
+  ! Pair of variable-name lists used to describe one direction of the
+  ! init-only nest transfer (parent -> children or children <- parent).
+  ! 2D variables and init-only 3D restart variables live in the same struct
+  ! because the two lists are always populated, consumed, and freed together.
+  type :: nest_init_var_list_t
+      character(len=kMAX_NAME_LENGTH) :: vars_2d(kMAX_STORAGE_VARS) = ''
+      character(len=kMAX_NAME_LENGTH) :: vars_3d(kMAX_STORAGE_VARS) = ''
+  end type nest_init_var_list_t
 
   !>----------------------------------------------------------
   !! Output type definition
@@ -48,26 +56,53 @@ module ioclient_interface
       integer, public :: server
       
       integer, public ::  i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, n_w, i_s_r, i_e_r, k_s_r, k_e_r, j_s_r, j_e_r, n_r, i_s_re, i_e_re, j_s_re, j_e_re, ide, kde, jde
+      integer, public :: nz_init_3d = 0
       integer :: restart_counter = 0
       integer :: output_counter = 0
       integer :: frames_per_outfile, restart_count
 
+      ! Restart variable classification counts
+      logical :: first_push = .true.
+      integer :: vars_for_output(kMAX_STORAGE_VARS) = 0
+      integer :: vars_for_restart(kMAX_STORAGE_VARS) = 0
+
       logical :: written = .False.
       logical :: nest_updated = .False.
 
-      real, dimension(:,:,:,:), pointer :: read_buffer, write_buffer_3d, forcing_buffer
-      real, dimension(:,:,:),   pointer :: write_buffer_2d
-      type(MPI_Win) :: write_win_3d, write_win_2d, read_win, forcing_win
-      type(MPI_Group) :: parent_group
+      real, dimension(:,:,:,:), pointer :: read_buffer => null()
+      real, dimension(:,:,:,:), pointer :: write_buffer_3d => null()
+      real, dimension(:,:,:,:), pointer :: forcing_buffer => null()
+      real, dimension(:,:,:),   pointer :: write_buffer_2d => null()
+      real, dimension(:,:,:),   pointer :: forcing_buffer_2d => null()
+      real, dimension(:,:,:,:), pointer :: forcing_buffer_3d_init => null()
+
+      ! Outstanding Irecv on read_buffer (kIO_TAG_READ). Posted early in
+      ! init_ioclient so the server-side Isend from parent scatter_forcing
+      ! during our wake does not race ahead of our reaching receive().
+      type(MPI_Request) :: read_req
+
+      ! Outstanding Irecvs for restart read (only if options%restart%restart).
+      ! Allocated + posted in init_ioclient, waited on in receive_rst.
+      type(MPI_Request) :: rst_req_3d, rst_req_2d
+      real, allocatable :: rst_scratch_3d(:,:,:,:)
+      real, allocatable :: rst_scratch_2d(:,:,:)
+      logical :: rst_posted = .false.
+
       character(len=kMAX_NAME_LENGTH) :: vars_for_nest(kMAX_STORAGE_VARS)
+
+      ! Init-only nest transfer: 2D + extra 3D restart vars (not in atmospheric forcing)
+      type(nest_init_var_list_t) :: send_init_vars  ! parent -> children (this node is parent)
+      type(nest_init_var_list_t) :: recv_init_vars  ! child  <- parent   (this node is child)
+      logical :: initial_nest_done = .false.
 
   contains
 
       procedure, public  :: push
       procedure, public  :: receive
       procedure, public  :: receive_rst
+      procedure, public  :: receive_nest_init
       procedure, public  :: update_nest
-      procedure, public  :: init
+      procedure, public  :: init => init_ioclient
   end type
 
   interface
@@ -76,14 +111,14 @@ module ioclient_interface
       !! Initialize the object (e.g. allocate the variables array)
       !!
       !!----------------------------------------------------------
-    module subroutine init(this, domain, forcing, options, n_indx)
+    module subroutine init_ioclient(this, domain, forcing, options, n_indx)
         implicit none
         class(ioclient_t),  intent(inout)  :: this
         type(domain_t),     intent(inout)  :: domain
         type(boundary_t),   intent(in)     :: forcing
         type(options_t),    intent(in)     :: options(:)
         integer,            intent(in)     :: n_indx
-    end subroutine
+    end subroutine init_ioclient
 
       !>----------------------------------------------------------
       !! Push output data to IO buffer
@@ -119,6 +154,18 @@ module ioclient_interface
       end subroutine
 
         !>----------------------------------------------------------
+        !! Receive initial 2D+3D restart state from parent nest
+        !! (one-time transfer at child wake-up)
+        !!
+        !!----------------------------------------------------------
+        module subroutine receive_nest_init(this, domain, forcing)
+            implicit none
+            class(ioclient_t), intent(inout) :: this
+            type(domain_t),    intent(inout) :: domain
+            type(boundary_t),  intent(in)    :: forcing
+        end subroutine
+
+        !>----------------------------------------------------------
         !! Update the nest
         !!
         !!----------------------------------------------------------
@@ -128,9 +175,5 @@ module ioclient_interface
             type(domain_t),    intent(in) :: domain
         end subroutine
 
-      module subroutine close_files(this)
-          class(ioclient_t), intent(inout) :: this
-      end subroutine
-      
   end interface
 end module

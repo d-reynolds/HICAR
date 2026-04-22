@@ -5,9 +5,6 @@ module domain_interface
   use boundary_interface,       only : boundary_t
   use grid_interface,           only : grid_t
   use variable_interface,       only : variable_t
-  use variable_dict_interface,  only : var_dict_t
-  use time_object,              only : Time_type
-  use time_delta_object,        only : time_delta_t
   use data_structures,          only : interpolable_type, tendencies_type, index_type
   use halo_interface,           only : halo_t
   use timer_interface,          only : timer_t
@@ -25,7 +22,7 @@ module domain_interface
     type(grid_t)         :: neighbor_grid_2d, neighbor_grid, neighbor_grid8w
     type(grid_t)         :: grid2d, u_grid2d, v_grid2d
     type(grid_t)         :: grid_monthly, grid_soil
-    type(grid_t)         :: grid_snow, grid_snowsoil
+    type(grid_t)         :: grid_snow, grid_snow_i, grid_snowsoil, grid_fm
     type(grid_t)         :: grid_soilcomp, grid_gecros, grid_croptype
     type(grid_t)         :: grid_hlm, grid_Sx !! MJ added
     type(grid_t)         :: grid_lake , grid_lake_soisno, grid_lake_soi, grid_lake_soisno_1
@@ -54,7 +51,7 @@ module domain_interface
     real :: smooth_height, dx
     integer :: nsmooth
 
-    complex(C_DOUBLE_COMPLEX),  allocatable :: terrain_frequency(:,:) ! FFT(terrain)
+    ! complex(C_DOUBLE_COMPLEX),  allocatable :: terrain_frequency(:,:) ! FFT(terrain)
 
     type(variable_t), allocatable :: forcing_hi(:)
 
@@ -73,7 +70,7 @@ module domain_interface
                         output_timer, physics_timer, wind_timer, mp_timer, &
                         adv_timer, rad_timer, lsm_timer, pbl_timer, exch_timer, &
                         send_timer, ret_timer, wait_timer, forcing_timer, diagnostic_timer, wind_bal_timer, &
-                        flux_timer, flux_up_timer, flux_corr_timer, sum_timer, adv_wind_timer
+                        flux_timer, flux_corr_timer, sum_timer, adv_wind_timer, cpu_gpu_timer, nest_timer
 
     ! contains the size of the domain (or the local tile?)
     integer :: nx, ny, nz, nx_global, ny_global
@@ -82,6 +79,7 @@ module domain_interface
     logical :: south_boundary = .True.
     logical :: east_boundary = .True.
     logical :: west_boundary = .True.
+    integer :: FILTER_WIDTH = 7
 
     ! store the start (s) and end (e) for the i,j,k dimensions
     integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
@@ -91,26 +89,27 @@ module domain_interface
 
     integer :: neighborhood_max ! The maximum neighborhood radius in indices
     
-    !! MJ added new vars needed for FSM
-    !real,allocatable :: FSM_slopemu
-
 
   contains
-    procedure :: init
+    procedure :: init => init_domain
     procedure :: release
     procedure :: enforce_limits
 
     procedure :: batch_exch
-    procedure :: halo_3d_send_batch
-    procedure :: halo_3d_retrieve_batch
-    procedure :: halo_2d_send_batch
-    procedure :: halo_2d_retrieve_batch
+    procedure :: halo_3d_send
+    procedure :: halo_3d_retrieve
+    procedure :: halo_2d_send
+    procedure :: halo_2d_retrieve
 
     procedure :: get_initial_conditions
     procedure :: diagnostic_update
     procedure :: interpolate_forcing
     procedure :: update_delta_fields
     procedure :: apply_forcing
+    procedure :: read_land_variables
+
+    procedure :: update_device
+    procedure :: update_host
 
   end type
 
@@ -119,12 +118,12 @@ module domain_interface
   interface
 
     ! Set default component values
-    module subroutine init(this, options, nest_indx)
+    module subroutine init_domain(this, options, nest_indx)
         implicit none
         class(domain_t), intent(inout) :: this
         type(options_t), intent(inout) :: options
         integer,         intent(in)    :: nest_indx
-    end subroutine
+    end subroutine init_domain
 
     ! finalize domain object, freeing halo mpi windows
     module subroutine release(this)
@@ -138,24 +137,24 @@ module domain_interface
         logical, optional,   intent(in) :: two_d, exch_only
   end subroutine
 
-    module subroutine halo_3d_send_batch(this, exch_only)
+    module subroutine halo_3d_send(this, exch_only)
         implicit none
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: exch_only
     end subroutine
     
-    module subroutine halo_3d_retrieve_batch(this, exch_only)
+    module subroutine halo_3d_retrieve(this, exch_only)
       implicit none
       class(domain_t), intent(inout) :: this
       logical, optional,   intent(in) :: exch_only
   end subroutine
 
-  module subroutine halo_2d_send_batch(this)
+  module subroutine halo_2d_send(this)
     implicit none
     class(domain_t), intent(inout) :: this
   end subroutine
 
-  module subroutine halo_2d_retrieve_batch(this)
+  module subroutine halo_2d_retrieve(this)
     implicit none
     class(domain_t), intent(inout) :: this
   end subroutine
@@ -205,6 +204,22 @@ module domain_interface
         class(domain_t),    intent(inout) :: this
         type(options_t), intent(in)       :: options
         real, intent(in)                  :: dt
+    end subroutine
+
+    module subroutine read_land_variables(this, options)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        type(options_t), intent(in)    :: options
+    end subroutine
+
+    module subroutine update_device(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
+    end subroutine
+
+    module subroutine update_host(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
     end subroutine
 
   end interface

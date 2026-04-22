@@ -12,23 +12,19 @@ submodule(domain_interface) domain_implementation
     use mod_atm_utilities,    only : exner_function, update_pressure, compute_ivt, compute_iq
     use icar_constants
     use string,               only : str
+    use meta_data_interface,  only : meta_data_t
     use io_routines,          only : io_write, io_read
-    use geo,                  only : geo_lut, geo_interp, geo_interp2d, standardize_coordinates
+    use geo,                  only : geo_lut, geo_interp, geo_interp2d, standardize_geo
     use array_utilities,      only : array_offset_x, array_offset_y, smooth_array, smooth_array_2d, make_2d_x, make_2d_y
     use vertical_interpolation,only : vinterp, vLUT
     use output_metadata,            only : get_varname, get_varmeta, get_varindx
-    use mod_wrf_constants,    only : gravity, R_d, KARMAN
+    use mod_wrf_constants,    only : gravity, R_d, KARMAN, cp, DEGRAD
     use iso_fortran_env
+    use debug_module,       only : domain_check
 
     implicit none
-
-    interface setup
-        module procedure setup_var
-    end interface
     
     real, parameter::deg2rad=0.017453293 !2*pi/360
-    integer :: FILTER_WIDTH = 7
-
     ! primary public routines : init, get_initial_conditions, halo_send, halo_retrieve, or halo_exchange
 contains
 
@@ -37,7 +33,7 @@ contains
     !! Initialize the size of the domain
     !!
     !! -------------------------------
-    module subroutine init(this, options, nest_indx)
+    module subroutine init_domain(this, options, nest_indx)
         class(domain_t), intent(inout) :: this
         type(options_t), intent(inout) :: options
         integer, intent(in) :: nest_indx
@@ -51,45 +47,126 @@ contains
         
         call create_variables(this, options)
         
-        call initialize_core_variables(this, options)  ! split into several subroutines?
-
-        call read_land_variables(this, options)
+        call init_relax_filters(this,options)
 
         call set_var_lists(this, options)
 
-        call init_relax_filters(this,options)
-
         call init_batch_exch(this)
 
-    end subroutine
+        call initialize_core_variables(this, options)  ! split into several subroutines?
 
-    module subroutine init_batch_exch(this)
+        call init_land_variables(this, options)
+
+        
+        !$acc enter data copyin(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
+        !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
+        !$acc                   this%ihs, this%ihe, this%jhs, this%jhe, &
+        !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, this%filter_width, &
+        !$acc                   this%vars_2d, this%vars_3d, this%var_indx, this%forcing_var_indx, this%forcing_hi, &
+        !$acc                   this%adv_vars, this%exch_vars, this%tend, this%halo)
+        
+        !update all relevant data_2d/data_3d fields of vars_2d/vars_3d to device
+        call this%update_device()
+    end subroutine init_domain
+
+    module subroutine update_device(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        integer :: i
+
+        do i = 1, size(this%vars_2d)
+            if (allocated(this%vars_2d(i)%data_2d)) then
+                !$acc update device(this%vars_2d(i)%data_2d)
+            endif
+            if (allocated(this%vars_2d(i)%data_2di)) then
+                !$acc update device(this%vars_2d(i)%data_2di)
+            endif
+        end do
+        do i = 1, size(this%vars_3d)
+            if (allocated(this%vars_3d(i)%data_3d)) then
+                !$acc update device(this%vars_3d(i)%data_3d)
+            endif
+        end do
+
+        !$acc update device(this%tend%u)
+        !$acc update device(this%tend%v)
+        !$acc update device(this%tend%th_pbl)
+        !$acc update device(this%tend%qv_pbl)
+        !$acc update device(this%tend%qc_pbl)
+        !$acc update device(this%tend%qi_pbl)
+
+    end subroutine update_device
+
+    module subroutine update_host(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        integer :: i
+
+        do i = 1, size(this%vars_2d)
+            if (allocated(this%vars_2d(i)%data_2d)) then
+                !$acc update host(this%vars_2d(i)%data_2d)
+            endif
+            if (allocated(this%vars_2d(i)%data_2di)) then
+                !$acc update host(this%vars_2d(i)%data_2di)
+            endif
+        end do
+
+        do i = 1, size(this%vars_3d)
+            if (allocated(this%vars_3d(i)%data_3d)) then
+                !$acc update host(this%vars_3d(i)%data_3d)
+            endif
+        end do
+
+        !$acc update host(this%tend%u)
+        !$acc update host(this%tend%v)
+        !$acc update host(this%tend%th_pbl)
+        !$acc update host(this%tend%qv_pbl)
+        !$acc update host(this%tend%qc_pbl)
+        !$acc update host(this%tend%qi_pbl)
+
+
+    end subroutine update_host
+
+
+    subroutine init_batch_exch(this)
         implicit none
         class(domain_t), intent(inout) :: this
 
-        type(variable_t) :: tmp_var
-        integer :: i
+        type(meta_data_t) :: tmp_var
+        integer :: i, n, ierr
 
-
+        n = size(this%adv_vars)
+        ! MPI Reduce to check that size of adv_vars is the same on all PEs
+        call MPI_Allreduce(MPI_IN_PLACE, n, 1, MPI_INTEGER, MPI_MIN, this%compute_comms, ierr)
+        if (n /= size(this%adv_vars)) then
+            write(*,*) "ERROR: Different number of advected variables on different PEs!"
+        end if
         ! pack adv_vars with the variables to advect
-        do i = 1,size(this%adv_vars)
-            tmp_var = get_varmeta(get_varindx(this%adv_vars(i)%n))
+        do i = 1,n
+            tmp_var = get_varmeta(this%adv_vars(i)%id)
             if (tmp_var%three_d) then
                 this%n_adv_3d = this%n_adv_3d + 1
             end if
         end do
-        this%n_adv_2d = size(this%adv_vars) - this%n_adv_3d
+        this%n_adv_2d = n - this%n_adv_3d
+
+        n = size(this%exch_vars)
+        ! MPI Reduce to check that size of adv_vars is the same on all PEs
+        call MPI_Allreduce(MPI_IN_PLACE, n, 1, MPI_INTEGER, MPI_MIN, this%compute_comms, ierr)
+        if (n /= size(this%exch_vars)) then
+            write(*,*) "ERROR: Different number of advected variables on different PEs!"
+        end if
 
         ! pack adv_vars with the variables to advect
-        do i = 1,size(this%exch_vars)
-            tmp_var = get_varmeta(get_varindx(this%exch_vars(i)%n))
+        do i = 1,n
+            tmp_var = get_varmeta(this%exch_vars(i)%id)
             if (tmp_var%three_d) then
                 this%n_exch_3d = this%n_exch_3d + 1
             end if
         end do
-        this%n_exch_2d = size(this%exch_vars) - this%n_exch_3d
+        this%n_exch_2d = n - this%n_exch_3d
 
-        call this%halo%init(this%exch_vars, this%adv_vars, this%grid, this%compute_comms)
+        call this%halo%init(this%exch_vars, this%grid, this%compute_comms)
 
     end subroutine init_batch_exch
 
@@ -98,70 +175,72 @@ contains
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: two_d, exch_only
 
-
         if (present(two_d)) then
             if (two_d) then
-                call this%halo_2d_send_batch()
-                call this%halo_2d_retrieve_batch()    
+                call this%halo_2d_send()
+                call this%halo_2d_retrieve()    
             endif
         else
             if (present(exch_only)) then
-                call this%halo_3d_send_batch(exch_only=exch_only)
-                call this%halo_3d_retrieve_batch(exch_only=exch_only)
+                call this%halo_3d_send(exch_only=exch_only)
+                call this%halo_3d_retrieve(exch_only=exch_only)
             else
-                call this%halo_3d_send_batch()
-                call this%halo_3d_retrieve_batch()    
+                call this%halo_3d_send()
+                call this%halo_3d_retrieve()    
             end if
         end if
 
     end subroutine batch_exch
 
-    module subroutine halo_3d_send_batch(this, exch_only)
+    module subroutine halo_3d_send(this, exch_only)
         implicit none
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: exch_only
 
+        logical :: exch_v_only = .False.
+        type(index_type), allocatable :: vars_to_send(:)
 
-        if (present(exch_only)) then
-            call this%halo%halo_3d_send_batch(this%exch_vars, this%adv_vars, this%vars_3d, exch_var_only=exch_only)
-        else
-            call this%halo%halo_3d_send_batch(this%exch_vars, this%adv_vars, this%vars_3d)
-        end if
+        if (present(exch_only)) exch_v_only = exch_only
 
-    end subroutine halo_3d_send_batch
+        call this%halo%halo_3d_send_batch(this%exch_vars, this%vars_3d)
 
-    module subroutine halo_3d_retrieve_batch(this, exch_only)
+    end subroutine halo_3d_send
+
+    module subroutine halo_3d_retrieve(this, exch_only)
         implicit none
         class(domain_t), intent(inout) :: this
         logical, optional,   intent(in) :: exch_only
 
-        if (present(exch_only)) then
-            call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_3d, exch_var_only=exch_only)
-        else
-            call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_3d)
-        end if
+        logical :: exch_v_only = .False.
+        type(index_type), allocatable :: vars_to_ret(:)
 
-    end subroutine halo_3d_retrieve_batch
+        if (present(exch_only)) exch_v_only = exch_only
 
-    module subroutine halo_2d_send_batch(this)
+        call this%halo%halo_3d_retrieve_batch(this%exch_vars, this%vars_3d, wait_timer=this%wait_timer)
+
+    end subroutine halo_3d_retrieve
+
+    module subroutine halo_2d_send(this)
         implicit none
         class(domain_t), intent(inout) :: this
 
+        type(index_type), allocatable :: vars_to_send(:)
+
         if (this%n_exch_2d + this%n_adv_2d == 0) return
 
-        call this%halo%halo_2d_send_batch(this%exch_vars, this%adv_vars, this%vars_2d)
+        call this%halo%halo_2d_send_batch(this%exch_vars, this%vars_2d)
+    end subroutine halo_2d_send
 
-    end subroutine halo_2d_send_batch
-
-    module subroutine halo_2d_retrieve_batch(this)
+    module subroutine halo_2d_retrieve(this)
         implicit none
         class(domain_t), intent(inout) :: this
 
+        type(index_type), allocatable :: vars_to_ret(:)
+
         if (this%n_exch_2d + this%n_adv_2d == 0) return
 
-        call this%halo%halo_2d_retrieve_batch(this%exch_vars, this%adv_vars, this%vars_2d)
-
-    end subroutine halo_2d_retrieve_batch
+        call this%halo%halo_2d_retrieve_batch(this%exch_vars, this%vars_2d)
+    end subroutine halo_2d_retrieve
 
     !> -------------------------------
     !! Release memory associated with the domain
@@ -170,7 +249,70 @@ contains
     module subroutine release(this)
         class(domain_t), intent(inout) :: this
 
+        integer :: i
+
+        ! Clean up halo MPI windows and GPU data (must happen before removing halo from device)
         call this%halo%finalize()
+
+        ! Clean up domain geo%z GPU copy (entered in setup_geo_interpolation)
+        if (allocated(this%geo%z)) then
+            !$acc exit data delete(this%geo%z)
+        endif
+
+        !$acc exit data finalize delete(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
+        !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
+        !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, &
+        !$acc                   this%vars_2d, this%vars_3d, this%var_indx, this%forcing_var_indx, this%forcing_hi, &
+        !$acc                   this%adv_vars, this%exch_vars, this%tend, this%halo)
+        
+        do i = 1, size(this%vars_2d)
+            if (allocated(this%vars_2d(i)%data_2d)) then
+                !$acc exit data finalize delete(this%vars_2d(i)%data_2d)
+                deallocate(this%vars_2d(i)%data_2d)
+            endif
+            if (allocated(this%vars_2d(i)%dqdt_2d)) then
+                !$acc exit data finalize delete(this%vars_2d(i)%dqdt_2d)
+                deallocate(this%vars_2d(i)%dqdt_2d)
+            endif
+            if (allocated(this%vars_2d(i)%data_2di)) then
+                !$acc exit data finalize delete(this%vars_2d(i)%data_2di)
+                deallocate(this%vars_2d(i)%data_2di)
+            endif
+        end do
+        do i = 1, size(this%vars_3d)
+            if (allocated(this%vars_3d(i)%data_3d)) then
+                !$acc exit data finalize delete(this%vars_3d(i)%data_3d)
+                deallocate(this%vars_3d(i)%data_3d)
+            endif
+            if (allocated(this%vars_3d(i)%dqdt_3d)) then
+                !$acc exit data finalize delete(this%vars_3d(i)%dqdt_3d)
+                deallocate(this%vars_3d(i)%dqdt_3d)
+            endif
+        end do
+        do i = 1, size(this%vars_4d)
+            if (allocated(this%vars_4d(i)%data_4d)) then
+                deallocate(this%vars_4d(i)%data_4d)
+            endif
+        end do
+
+        do i = 1, size(this%forcing_hi)
+            if (allocated(this%forcing_hi(i)%data_2d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%data_2d)
+                deallocate(this%forcing_hi(i)%data_2d)
+            endif
+            if (allocated(this%forcing_hi(i)%dqdt_2d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%dqdt_2d)
+                deallocate(this%forcing_hi(i)%dqdt_2d)
+            endif
+            if (allocated(this%forcing_hi(i)%data_3d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%data_3d)
+                deallocate(this%forcing_hi(i)%data_3d)
+            endif
+            if (allocated(this%forcing_hi(i)%dqdt_3d)) then
+                !$acc exit data finalize delete(this%forcing_hi(i)%dqdt_3d)
+                deallocate(this%forcing_hi(i)%dqdt_3d)
+            endif
+        end do
 
     end subroutine
     
@@ -178,41 +320,108 @@ contains
         class(domain_t), intent(inout) :: this
         type(options_t), intent(in)    :: options
 
-        type(variable_t) :: tmp_var
-        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx
+        type(meta_data_t) :: tmp_var
+        integer :: var_list(kMAX_STORAGE_VARS), i, n_vars, var_indx, kADV_VARS(22)
+        integer, allocatable :: kEXCH_VARS(:)
+
+        kADV_VARS = (/kVARS%potential_temperature,&
+                      kVARS%water_vapor,&
+                      kVARS%cloud_water_mass,&
+                      kVARS%cloud_number,&
+                      kVARS%rain_mass,&
+                      kVARS%rain_number,&
+                      kVARS%snow_mass,&
+                      kVARS%snow_number,&
+                      kVARS%graupel_mass,&
+                      kVARS%graupel_number,&
+                      kVARS%ice_mass,&
+                      kVARS%ice_number,&
+                      kVARS%ice1_a,&
+                      kVARS%ice1_c,&
+                      kVARS%ice2_mass,&
+                      kVARS%ice2_number,&
+                      kVARS%ice2_a,&
+                      kVARS%ice2_c,&
+                      kVARS%ice3_mass,&
+                      kVARS%ice3_number,&
+                      kVARS%ice3_a,&
+                      kVARS%ice3_c/)
+
+        if (options%sm%sm_nsnow_max > this%kme) then
+            allocate(kEXCH_VARS(3))
+            kEXCH_VARS = (/kVARS%density,&
+                        kVARS%sensible_heat,&
+                        kVARS%skin_temperature/)
+        else
+            allocate(kEXCH_VARS(9))
+            kEXCH_VARS = (/kVARS%density,&
+                        kVARS%sensible_heat,&
+                        kVARS%skin_temperature,&
+                        kVARS%Ds,&
+                        kVARS%fsnow,&
+                        kVARS%Sice,&
+                        kVARS%Sliq,&
+                        kVARS%snow_temperature,&
+                        kVARS%snow_nlayers/)
+        endif
 
         !Advection variables -- these are exchanged AND advected
         n_vars = 0
         do i = 1, size(kADV_VARS)
-            var_indx = get_varindx(trim(kADV_VARS(i)))
-            if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
+            var_indx = kADV_VARS(i)
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
+            endif
         enddo
         allocate(this%adv_vars(n_vars))
         n_vars = 0
 
         do i = 1, size(kADV_VARS)
-            var_indx = get_varindx(trim(kADV_VARS(i)))
-            if (this%var_indx(var_indx)%v > 0) then
-                n_vars = n_vars + 1
-                this%adv_vars(n_vars)%n = this%var_indx(var_indx)%n
-                this%adv_vars(n_vars)%v = this%var_indx(var_indx)%v
+            var_indx = kADV_VARS(i)
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) then
+                    n_vars = n_vars + 1
+                    this%adv_vars(n_vars)%id = this%var_indx(var_indx)%id
+                    this%adv_vars(n_vars)%v = this%var_indx(var_indx)%v
+                endif
             endif
         enddo
 
         n_vars = 0
         do i = 1, size(kEXCH_VARS)
-            var_indx = get_varindx(trim(kEXCH_VARS(i)))
-            if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
+            var_indx = kEXCH_VARS(i)
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
+            endif
         enddo
+        do i = 1, size(kADV_VARS)
+            var_indx = kADV_VARS(i)
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) n_vars = n_vars + 1
+            endif
+        enddo
+
         allocate(this%exch_vars(n_vars))
         n_vars = 0
 
         do i = 1, size(kEXCH_VARS)
-            var_indx = get_varindx(trim(kEXCH_VARS(i)))
-            if (this%var_indx(var_indx)%v > 0) then
-                n_vars = n_vars + 1
-                this%exch_vars(n_vars)%n = this%var_indx(var_indx)%n
-                this%exch_vars(n_vars)%v = this%var_indx(var_indx)%v
+            var_indx = kEXCH_VARS(i)
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) then
+                    n_vars = n_vars + 1
+                    this%exch_vars(n_vars)%id = this%var_indx(var_indx)%id
+                    this%exch_vars(n_vars)%v = this%var_indx(var_indx)%v
+                endif
+            endif
+        enddo
+        do i = 1, size(kADV_VARS)
+            var_indx = kADV_VARS(i)
+            if (var_indx > 0) then
+                if (this%var_indx(var_indx)%v > 0) then
+                    n_vars = n_vars + 1
+                    this%exch_vars(n_vars)%id = this%var_indx(var_indx)%id
+                    this%exch_vars(n_vars)%v = this%var_indx(var_indx)%v
+                endif
             endif
         enddo
 
@@ -226,7 +435,7 @@ contains
                 
                 if (tmp_var%name == "") cycle
                 n_vars = n_vars + 1
-                this%vars_to_out(i)%n = this%var_indx(i)%n
+                this%vars_to_out(i)%id = this%var_indx(i)%id
                 this%vars_to_out(i)%v = this%var_indx(i)%v
             endif
         enddo
@@ -257,8 +466,7 @@ contains
         ! for all variables with a forcing_var /= "", get forcing, interpolate to local domain
       call this%interpolate_forcing(forcing)
 
-      call this%enforce_limits()
-
+      !call this%enforce_limits()
     end subroutine
 
 
@@ -276,7 +484,6 @@ contains
         class(domain_t),  intent(inout)   :: this
         logical, intent(in), optional    :: forcing_update
         integer :: i, j, k
-        real :: qsum
         logical :: forcing_update_only
         real, dimension(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme) :: mod_temp_3d
         real, dimension(this%ims:this%ime, this%jms:this%jme) :: surf_temp_1, surf_temp_2, surf_temp_3
@@ -293,6 +500,7 @@ contains
                   jts => this%jts, jte => this%jte,                             &
                   exner                 => this%vars_3d(this%var_indx(kVARS%exner)%v)%data_3d,                  &
                   pressure              => this%vars_3d(this%var_indx(kVARS%pressure)%v)%data_3d,               &
+                  future_pressure       => this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d,               &
                   pressure_i            => this%vars_3d(this%var_indx(kVARS%pressure_interface)%v)%data_3d,     &
                   dz_i                  => this%vars_3d(this%var_indx(kVARS%dz_interface)%v)%data_3d,           &
                   dz_mass               => this%vars_3d(this%var_indx(kVARS%dz)%v)%data_3d,                &
@@ -306,210 +514,272 @@ contains
                   u_mass                => this%vars_3d(this%var_indx(kVARS%u_mass)%v)%data_3d,                 &
                   v_mass                => this%vars_3d(this%var_indx(kVARS%v_mass)%v)%data_3d,                 &
                   potential_temperature => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d )
+        ! !$acc data present(exner, pressure, future_pressure, pressure_i, dz_i, dz_mass, psfc, density, temperature, temperature_i, qv, u, v, u_mass, v_mass, potential_temperature) create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3)
+        !$acc data create(mod_temp_3d, surf_temp_1, surf_temp_2, surf_temp_3)
+        !Calculation of density
 
-                !Calculation of density
-                if (forcing_update_only) then
-                    exner = exner_function(this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d)
-                    temperature = potential_temperature * exner
-                    density =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d / (R_d * temperature*(1+qv)) ! kg/m^3
-                else
-                    exner = exner_function(pressure)
-                    temperature = potential_temperature * exner
-                    density =  pressure / (R_d * temperature*(1+qv)) ! kg/m^3
-                endif
-        
+        if (forcing_update_only) then
+            !$acc parallel loop gang vector collapse(3) async(1)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                exner(i,k,j) = exner_function(future_pressure(i,k,j))
+                temperature(i,k,j) = potential_temperature(i,k,j) * exner(i,k,j)
+                density(i,k,j) =  future_pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,j))) ! kg/m^3
+            enddo
+            enddo
+            enddo
+        else
+            !$acc parallel loop gang vector collapse(3) async(1)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                exner(i,k,j) =  exner_function(pressure(i,k,j))
+                temperature(i,k,j) = potential_temperature(i,k,j) * exner(i,k,j)
+                density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,j))) ! kg/m^3
+            enddo
+            enddo
+            enddo
+
+            if (this%var_indx(kVARS%u_mass)%v > 0) then
+                !$acc parallel loop gang vector collapse(3) async(2)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                            u_mass(i,k,j) = (u(i+1,k,j) + u(i,k,j)) * 0.5
+                            v_mass(i,k,j) = (v(i,k,j+1) + v(i,k,j)) * 0.5
+                        enddo
+                    enddo
+                enddo
+            endif
+
+            ! temporary constant
+            if (this%var_indx(kVARS%roughness_z0)%v > 0) then
+                associate(z            => this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d, &
+                          roughness_z0 => this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+                          terrain      => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d)
+
+                !$acc parallel loop gang vector collapse(2) async(3) present(z,roughness_z0,terrain)
+                do j = jms,jme
+                    do i = ims,ime
+                        ! use log-law of the wall to convert from first model level to surface
+                        surf_temp_1(i,j) = karman / log((z(i,kms,j) - terrain(i,j)) / roughness_z0(i,j))
+                        ! use log-law of the wall to convert from surface to 10m height
+                        surf_temp_2(i,j) = log(10.0 / roughness_z0(i,j)) / karman
+                    enddo
+                enddo
+
+                end associate
+            endif
+
+            if (this%var_indx(kVARS%u_10m)%v > 0) then
+                associate(v_10m => this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d, &
+                          u_10m => this%vars_2d(this%var_indx(kVARS%u_10m)%v)%data_2d)
+
+                !$acc parallel loop gang vector collapse(2) wait(2,3) async(4) present(u_10m, v_10m)
+                do j = jms,jme
+                    do i = ims,ime
+                        surf_temp_3(i,j)                         = u_mass      (i,kms,j) * surf_temp_1(i,j)
+                        u_10m(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
+                        surf_temp_3(i,j)                         = v_mass      (i,kms,j) * surf_temp_1(i,j)
+                        v_10m(i,j) = surf_temp_3(i,j)     * surf_temp_2(i,j)
+                    enddo
+                enddo
+
+                end associate
+            endif
+
+        endif
+
 
         ! differences between forcing data at the boudnary and the internal model state can lead to strong discontinuities in temperature and qv
         ! these then affect density, leading to discontinuities in density, and thus winds. So, here we set the density for points on the "frame"
         ! to be the same as the density in the first cell within the physics region of the domain
-                if (ims==ids) then
-                    do j = jms,jme
-                        do k = kms,kme
-                            do i = ims,its-1
-                                temperature(i,k,j) = potential_temperature(its,k,j) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,j))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,j))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-                if (ime==ide) then
-                    do j = jms,jme
-                        do k = kms,kme
-                            do i = ite+1,ime
-                                temperature(i,k,j) = potential_temperature(ite,k,j) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,j))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,j))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-                if (jms==jds) then
-                    do j = jms,jts-1
-                        do k = kms,kme
-                            do i = ims,ime
-                                temperature(i,k,j) = potential_temperature(i,k,jts) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jts))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jts))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-                if (jme==jde) then
-                    do j = jte+1,jme
-                        do k = kms,kme
-                            do i = ims,ime
-                                temperature(i,k,j) = potential_temperature(i,k,jte) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jte))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jte))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-
-                if (ims==ids .and. jms==jds) then
-                    do j = jms,jts-1
-                        do k = kms,kme
-                            do i = ims,its-1
-                                temperature(i,k,j) = potential_temperature(its,k,jts) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jts))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jts))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-
-                if (ims==ids .and. jme==jde) then
-                    do j = jte+1,jme
-                        do k = kms,kme
-                            do i = ims,its-1
-                                temperature(i,k,j) = potential_temperature(its,k,jte) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jte))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jte))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-
-                if (ime==ide .and. jms==jds) then
-                    do j = jms,jts-1
-                        do k = kms,kme
-                            do i = ite+1,ime
-                                temperature(i,k,j) = potential_temperature(ite,k,jts) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jts))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jts))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-
-                if (ime==ide .and. jme==jde) then
-                    do j = jte+1,jme
-                        do k = kms,kme
-                            do i = ite+1,ime
-                                temperature(i,k,j) = potential_temperature(ite,k,jte) * exner(i,k,j)
-                                if (forcing_update_only) then
-                                    density(i,k,j) =  this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jte))) ! kg/m^3
-                                else
-                                    density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jte))) ! kg/m^3
-                                endif
-                            enddo
-                        enddo
-                    enddo
-                endif
-        
-                if (forcing_update_only) return
-
-        
-        temperature_i(ims:ime,kms,jms:jme) = temperature(ims:ime,kms,jms:jme) + (temperature(ims:ime,kms,jms:jme) - temperature(ims:ime,kms+1,jms:jme)) * 0.5
-        pressure_i(ims:ime,kms,jms:jme) = pressure(ims:ime,kms,jms:jme) + (pressure(ims:ime,kms,jms:jme) - pressure(ims:ime,kms+1,jms:jme)) * 0.5
-
-        do j = jms,jme
-            do k = kms+1,kme
-                do i = ims,ime
-                    pressure_i(i,k,j) = (dz_i(i,k,j)*pressure(i,k-1,j)+dz_i(i,k-1,j)*pressure(i,k,j))/((dz_i(i,k-1,j)+dz_i(i,k,j)))
-                    temperature_i(i,k,j) = (dz_i(i,k,j)*temperature(i,k-1,j)+dz_i(i,k-1,j)*temperature(i,k,j))/((dz_i(i,k-1,j)+dz_i(i,k,j)))
-                enddo
-            enddo
-        enddo
-        temperature_i(ims:ime,kme+1,jms:jme) = temperature(ims:ime,kme,jms:jme) + (temperature(ims:ime,kme,jms:jme) - temperature(ims:ime,kme-1,jms:jme)) * 0.5
-        pressure_i(ims:ime,kme+1,jms:jme) = pressure(ims:ime,kme,jms:jme) + (pressure(ims:ime,kme,jms:jme) - pressure(ims:ime,kme-1,jms:jme)) * 0.5
-
-        if (this%var_indx(kVARS%u_mass)%v > 0) then
+        if (ims==ids) then
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
             do j = jms,jme
                 do k = kms,kme
-                    do i = ims,ime
-                        u_mass(i,k,j) = (u(i+1,k,j) + u(i,k,j)) * 0.5
-                        v_mass(i,k,j) = (v(i,k,j+1) + v(i,k,j)) * 0.5
+                    do i = ims,its-1
+                        temperature(i,k,j) = potential_temperature(its,k,j) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  future_pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,j))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,j))) ! kg/m^3
+                        endif
                     enddo
                 enddo
             enddo
         endif
-                
-        if (this%var_indx(kVARS%surface_pressure)%v > 0) then
-            psfc = pressure_i(ims:ime, kms, jms:jme)
+        if (ime==ide) then
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
+            do j = jms,jme
+                do k = kms,kme
+                    do i = ite+1,ime
+                        temperature(i,k,j) = potential_temperature(ite,k,j) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  future_pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,j))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,j))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
         endif
-        if (this%var_indx(kVARS%ivt)%v > 0) then
-            call compute_ivt(this%vars_2d(this%var_indx(kVARS%ivt)%v)%data_2d, qv, u_mass, v_mass, pressure_i(:,kms:kme,:))
+        if (jms==jds) then
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
+            do j = jms,jts-1
+                do k = kms,kme
+                    do i = ims,ime
+                        temperature(i,k,j) = potential_temperature(i,k,jts) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  future_pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jts))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jts))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
         endif
-        if (this%var_indx(kVARS%iwv)%v > 0) then
-            call compute_iq(this%vars_2d(this%var_indx(kVARS%iwv)%v)%data_2d, qv, pressure_i(:,kms:kme,:))
-        endif
-        if (this%var_indx(kVARS%iwl)%v > 0) then
-            mod_temp_3d = 0
-            if (this%var_indx(kVARS%cloud_water_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%cloud_water_mass)%v)%data_3d(i,k,j)
-            if (this%var_indx(kVARS%rain_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%rain_mass)%v)%data_3d(i,k,j)
-            call compute_iq(this%vars_2d(this%var_indx(kVARS%iwl)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
-        endif
-        if (this%var_indx(kVARS%iwi)%v > 0) then
-            mod_temp_3d = 0
-            if (this%var_indx(kVARS%ice_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%ice_mass)%v)%data_3d(i,k,j)
-            if (this%var_indx(kVARS%snow_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%snow_mass)%v)%data_3d(i,k,j)
-            if (this%var_indx(kVARS%graupel_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%graupel_mass)%v)%data_3d(i,k,j)
-            call compute_iq(this%vars_2d(this%var_indx(kVARS%iwi)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
-        endif
-        
-        ! temporary constant
-        if (this%var_indx(kVARS%roughness_z0)%v > 0) then
-            ! use log-law of the wall to convert from first model level to surface
-            surf_temp_1 = karman / log((this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d(ims:ime,kms,jms:jme) - this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d(ims:ime,jms:jme)) / this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d(ims:ime,jms:jme))
-            ! use log-law of the wall to convert from surface to 10m height
-            surf_temp_2 = log(10.0 / this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d(ims:ime,jms:jme)) / karman
+        if (jme==jde) then 
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
+            do j = jte+1,jme
+                do k = kms,kme
+                    do i = ims,ime
+                        temperature(i,k,j) = potential_temperature(i,k,jte) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  future_pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jte))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(i,k,jte))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
         endif
 
-        if (this%var_indx(kVARS%u_10m)%v > 0) then
-            surf_temp_3                         = u_mass      (ims:ime,kms,jms:jme) * surf_temp_1
-            this%vars_2d(this%var_indx(kVARS%u_10m)%v)%data_2d(ims:ime,jms:jme) = surf_temp_3     * surf_temp_2
-            surf_temp_3                         = v_mass      (ims:ime,kms,jms:jme) * surf_temp_1
-            this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d(ims:ime,jms:jme) = surf_temp_3     * surf_temp_2
+        if (ims==ids .and. jms==jds) then
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
+            do j = jms,jts-1
+                do k = kms,kme
+                    do i = ims,its-1
+                        temperature(i,k,j) = potential_temperature(its,k,jts) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  future_pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jts))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jts))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
         endif
 
-        if (this%var_indx(kVARS%ustar)%v > 0) then
-            ! now calculate master ustar based on U and V combined in quadrature
-            this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d(its:ite,jts:jte) = sqrt(u_mass(its:ite,kms,jts:jte)**2 + v_mass(its:ite,kms,jts:jte)**2) * surf_temp_1(its:ite,jts:jte)
+        if (ims==ids .and. jme==jde) then
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
+            do j = jte+1,jme
+                do k = kms,kme
+                    do i = ims,its-1
+                        temperature(i,k,j) = potential_temperature(its,k,jte) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  future_pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jte))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(its,k,jte))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
         endif
-        
+
+        if (ime==ide .and. jms==jds) then
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
+            do j = jms,jts-1
+                do k = kms,kme
+                    do i = ite+1,ime
+                        temperature(i,k,j) = potential_temperature(ite,k,jts) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  future_pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jts))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jts))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
+        endif
+
+        if (ime==ide .and. jme==jde) then
+            !$acc parallel loop gang vector collapse(3) async(6) wait(1)
+            do j = jte+1,jme
+                do k = kms,kme
+                    do i = ite+1,ime
+                        temperature(i,k,j) = potential_temperature(ite,k,jte) * exner(i,k,j)
+                        if (forcing_update_only) then
+                            density(i,k,j) =  future_pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jte))) ! kg/m^3
+                        else
+                            density(i,k,j) =  pressure(i,k,j) / (R_d * temperature(i,k,j)*(1+qv(ite,k,jte))) ! kg/m^3
+                        endif
+                    enddo
+                enddo
+            enddo
+        endif
+
+        if (.not.(forcing_update_only)) then
+            !$acc parallel loop gang vector collapse(2) wait(6) async(7)
+            do j = jms,jme
+                do i = ims,ime
+                    temperature_i(i,kms,j) = temperature(i,kms,j) + (temperature(i,kms,j) - temperature(i,kms+1,j)) * 0.5
+                    pressure_i(i,kms,j) = pressure(i,kms,j) + (pressure(i,kms,j) - pressure(i,kms+1,j)) * 0.5
+                enddo
+            enddo
+
+            !$acc parallel loop gang vector collapse(3)  wait(7) async(8)
+            do j = jms,jme
+                do k = kms+1,kme
+                    do i = ims,ime
+                        pressure_i(i,k,j) = (dz_i(i,k,j)*pressure(i,k-1,j)+dz_i(i,k-1,j)*pressure(i,k,j))/((dz_i(i,k-1,j)+dz_i(i,k,j)))
+                        temperature_i(i,k,j) = (dz_i(i,k,j)*temperature(i,k-1,j)+dz_i(i,k-1,j)*temperature(i,k,j))/((dz_i(i,k-1,j)+dz_i(i,k,j)))
+                    enddo
+                enddo
+            enddo
+
+            !$acc parallel loop gang vector collapse(2)  wait(8) async(9)
+            do j = jms,jme
+                do i = ims,ime
+                    temperature_i(i,kme+1,j) = temperature(i,kme,j) + (temperature(i,kme,j) - temperature(i,kme-1,j)) * 0.5
+                    pressure_i(i,kme+1,j) = pressure(i,kme,j) + (pressure(i,kme,j) - pressure(i,kme-1,j)) * 0.5
+                enddo
+            enddo
+
+            if (this%var_indx(kVARS%surface_pressure)%v > 0) then
+                !$acc parallel loop gang vector collapse(2) wait(9)
+                do j = jms,jme
+                    do i = ims,ime
+                        psfc(i,j) = pressure_i(i, kms, j)
+                    enddo
+                enddo
+            endif
+
+            !$acc wait
+
+            if (this%var_indx(kVARS%ivt)%v > 0) then
+                call compute_ivt(this%vars_2d(this%var_indx(kVARS%ivt)%v)%data_2d, qv, u_mass, v_mass, pressure_i(:,kms:kme,:))
+            endif
+            if (this%var_indx(kVARS%iwv)%v > 0) then
+                call compute_iq(this%vars_2d(this%var_indx(kVARS%iwv)%v)%data_2d, qv, pressure_i(:,kms:kme,:))
+            endif
+            if (this%var_indx(kVARS%iwl)%v > 0) then
+                mod_temp_3d = 0
+                if (this%var_indx(kVARS%cloud_water_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%cloud_water_mass)%v)%data_3d(i,k,j)
+                if (this%var_indx(kVARS%rain_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%rain_mass)%v)%data_3d(i,k,j)
+                call compute_iq(this%vars_2d(this%var_indx(kVARS%iwl)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
+            endif
+            if (this%var_indx(kVARS%iwi)%v > 0) then
+                mod_temp_3d = 0
+                if (this%var_indx(kVARS%ice_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%ice_mass)%v)%data_3d(i,k,j)
+                if (this%var_indx(kVARS%snow_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%snow_mass)%v)%data_3d(i,k,j)
+                if (this%var_indx(kVARS%graupel_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%graupel_mass)%v)%data_3d(i,k,j)
+                call compute_iq(this%vars_2d(this%var_indx(kVARS%iwi)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
+            endif
+        endif
+
+        !$acc end data
         end associate
 
     end subroutine diagnostic_update
@@ -525,9 +795,10 @@ contains
         integer :: i,j
 
         integer :: ims, ime, jms, jme, kms, kme
-        type(variable_t) :: tmp_var, forcing_var_hi
+        type(meta_data_t) :: var_meta
         type(grid_t)     :: grid
-        integer :: n_dims, n_one_d, n_two_d, n_three_d, n_four_d, n_forcing_var
+        integer :: n_one_d, n_two_d, n_three_d, n_four_d, n_forcing_var
+        logical :: is_forcing_var
 
         if (STD_OUT_PE) print *,"  Initializing variables"
         if (STD_OUT_PE) flush(output_unit)
@@ -540,19 +811,19 @@ contains
         do i = 1, kMAX_STORAGE_VARS
             if (0<opt%vars_to_allocate(i)) then
                 ! get the variable meta data defined in var_defs.F90
-                tmp_var = get_varmeta(i,opt)
+                var_meta = get_varmeta(i,opt,forcing_var=is_forcing_var)
 
-                if (tmp_var%one_d) then
+                if (var_meta%one_d) then
                     n_one_d = n_one_d + 1
-                else if (tmp_var%two_d) then
+                else if (var_meta%two_d) then
                     n_two_d = n_two_d + 1
-                else if (tmp_var%three_d) then
+                else if (var_meta%three_d) then
                     n_three_d = n_three_d + 1
-                else if (tmp_var%four_d) then
+                else if (var_meta%four_d) then
                     n_four_d = n_four_d + 1
                 endif
                                         
-                if (tmp_var%forcing_var /= "") then
+                if (is_forcing_var) then
                     n_forcing_var = n_forcing_var + 1
                 endif
 
@@ -574,50 +845,52 @@ contains
         do i = 1, kMAX_STORAGE_VARS
             if (0<opt%vars_to_allocate(i)) then
                 ! get the variable meta data defined in var_defs.F90
-                tmp_var = get_varmeta(i,opt)
+                var_meta = get_varmeta(i,opt,forcing_var=is_forcing_var)
                 
                 ! test if variable even has an entry
-                if (tmp_var%name == "") cycle 
+                if (var_meta%name == "") cycle 
 
-                n_dims = size(tmp_var%dimensions)
-
-                if (tmp_var%one_d) then
+                if (var_meta%one_d) then
                     grid = this%column_grid
-                else if (tmp_var%two_d) then
-                    if (tmp_var%dimensions(1) == "lon_x_global") then
+                else if (var_meta%two_d) then
+                    if (var_meta%dimensions(1) == "lon_x_global") then
                         grid = this%global_grid_2d
-                    elseif (tmp_var%dimensions(1) == "lon_x_neighbor") then
+                    elseif (var_meta%dimensions(1) == "lon_x_neighbor") then
                         grid = this%neighbor_grid_2d
                     else
                         grid = this%grid2d
-                        if (tmp_var%xstag > 0) grid = this%u_grid2d
-                        if (tmp_var%ystag > 0) grid = this%v_grid2d
+                        if (var_meta%xstag > 0) grid = this%u_grid2d
+                        if (var_meta%ystag > 0) grid = this%v_grid2d
                     endif
-                else if (tmp_var%three_d) then
-                    if (tmp_var%dimensions(1) == "lon_x_global") then
-                        if (tmp_var%dimensions(2) == "level_i") then
+                else if (var_meta%three_d) then
+                    if (var_meta%dimensions(1) == "lon_x_global") then
+                        if (var_meta%dimensions(2) == "level_i") then
                             grid = this%global_grid8w
-                        else if (tmp_var%dimensions(2) == "level") then
+                        else if (var_meta%dimensions(2) == "level") then
                             grid = this%global_grid
                         endif
-                    elseif (tmp_var%dimensions(1) == "lon_x_neighbor") then
-                        if (tmp_var%dimensions(2) == "level_i") then
+                    elseif (var_meta%dimensions(1) == "lon_x_neighbor") then
+                        if (var_meta%dimensions(2) == "level_i") then
                             grid = this%neighbor_grid8w
-                        else if (tmp_var%dimensions(2) == "level") then
+                        else if (var_meta%dimensions(2) == "level") then
                             grid = this%neighbor_grid
                         endif
                     else
-                        select case (tmp_var%dimensions(2))
+                        select case (var_meta%dimensions(2))
                             case ("level")
                                 grid = this%grid
-                                if (tmp_var%xstag > 0) grid = this%u_grid
-                                if (tmp_var%ystag > 0) grid = this%v_grid
+                                if (var_meta%xstag > 0) grid = this%u_grid
+                                if (var_meta%ystag > 0) grid = this%v_grid
                             case ("level_i")
                                 grid = this%grid8w
+                            case ("level_fm")
+                                grid = this%grid_fm
                             case ("nsoil")
                                 grid = this%grid_soil
                             case ("nsnow")
                                 grid = this%grid_snow
+                            case ("nsnow_i")
+                                grid = this%grid_snow_i
                             case ("nsnowsoil")
                                 grid = this%grid_snowsoil
                             case ("nsoil_composition")
@@ -640,14 +913,13 @@ contains
                                 grid = this%grid_hlm
                         end select
                     endif
-                else if (tmp_var%four_d) then
+                else if (var_meta%four_d) then
                     grid = this%grid_Sx
                 endif            
 
                 ! if we are using the linear wind solver, we need dz and z information for the global grid. 
                 ! but to save memory, global_z/dz is setup by default for the neighbor grid. Change here
-                if ( (opt%physics%windtype == kWIND_LINEAR) .or. (opt%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-                     (opt%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+                if (opt%wind%linear_theory)  then
                     if (i==kVARS%h1 .or. i==kVARS%h2) then
                         grid = this%global_grid_2d
                     else if (i==kVARS%global_z_interface) then
@@ -657,95 +929,94 @@ contains
                     endif
                 endif
 
+
                 ! test if forcing var is empty
-                if (trim(tmp_var%forcing_var) == '') then
-                    call setup(tmp_var, grid, dtype=tmp_var%dtype)
-                else
-                    call setup(tmp_var, grid, forcing_var=trim(tmp_var%forcing_var), force_boundaries=tmp_var%force_boundaries, dtype=tmp_var%dtype)
+                if (is_forcing_var) then
 
                     n_forcing_var = n_forcing_var + 1
-                    call forcing_var_hi%initialize( grid, forcing_var=trim(tmp_var%forcing_var))
-                    forcing_var_hi%name = trim(tmp_var%name)
-
-                    this%forcing_var_indx(i)%n = trim(tmp_var%name)
+                    this%forcing_var_indx(i)%id = i
                     this%forcing_var_indx(i)%v = n_forcing_var
 
-                    this%forcing_hi(this%forcing_var_indx(i)%v) = forcing_var_hi
+                    call this%forcing_hi(this%forcing_var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
                 endif
 
-                this%var_indx(i)%n = trim(tmp_var%name)
-                if (tmp_var%one_d) then
+                this%var_indx(i)%id = i
+                if (var_meta%one_d) then
                     n_one_d = n_one_d + 1
                     this%var_indx(i)%v = n_one_d
-                    this%vars_1d(this%var_indx(i)%v) = tmp_var
-                else if (tmp_var%two_d) then
+                    call this%vars_1d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                else if (var_meta%two_d) then
                     n_two_d = n_two_d + 1
                     this%var_indx(i)%v = n_two_d
-                    this%vars_2d(this%var_indx(i)%v) = tmp_var
-                else if (tmp_var%three_d) then
+                    call this%vars_2d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                else if (var_meta%three_d) then
                     n_three_d = n_three_d + 1
                     this%var_indx(i)%v = n_three_d
-                    this%vars_3d(this%var_indx(i)%v) = tmp_var
-                else if (tmp_var%four_d) then
+                    call this%vars_3d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                else if (var_meta%four_d) then
                     n_four_d = n_four_d + 1
                     this%var_indx(i)%v = n_four_d
-                    this%vars_4d(this%var_indx(i)%v) = tmp_var
+                    call this%vars_4d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
                 endif
             endif
         enddo
 
 
-        if (0<opt%vars_to_allocate( kVARS%tend_qv_adv) )                allocate(this%tend%qv_adv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qv_pbl) )                allocate(this%tend%qv_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qv) )                    allocate(this%tend%qv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_th) )                    allocate(this%tend%th(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_th_pbl) )                allocate(this%tend%th_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qc_pbl) )                allocate(this%tend%qc_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qi_pbl) )                allocate(this%tend%qi_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qc) )                    allocate(this%tend%qc(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qi) )                    allocate(this%tend%qi(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qs) )                    allocate(this%tend%qs(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_qr) )                    allocate(this%tend%qr(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_u) )                     allocate(this%tend%u(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
-        if (0<opt%vars_to_allocate( kVARS%tend_v) )                     allocate(this%tend%v(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
-
-    end subroutine
-
-    !> -------------------------------
-    !! Setup a regular variable.
-    !!
-    !! Initializes the variable
-    !! including the forcing_variable if it was set
-    !! and adds that variable to the list of variables that has forcing data if the list is supplied
-    !! and the forcing_var is both present and not blank ("")
-    !!
-    !! -------------------------------
-    subroutine setup_var(var, grid, forcing_var, force_boundaries, dtype)
-        implicit none
-        type(variable_t),   intent(inout) :: var
-        type(grid_t),       intent(in)    :: grid
-        character(len=*),   intent(in),   optional :: forcing_var
-        logical,            intent(in),   optional :: force_boundaries
-        integer,            intent(in),   optional :: dtype
-
-        if (present(forcing_var)) then
-            if (present(dtype)) then
-                call var%initialize(grid, forcing_var=forcing_var, dtype=dtype)
-            else
-                call var%initialize(grid, forcing_var=forcing_var)
-            endif
-            var%forcing_var = forcing_var
-            if (present(force_boundaries)) var%force_boundaries = force_boundaries
-        else
-
-            if (present(dtype)) then
-                call var%initialize(grid, dtype=dtype)
-            else
-                call var%initialize(grid)
-            endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qv_adv) )   then
+            allocate(this%tend%qv_adv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
+            !$acc enter data copyin(this%tend%qv_adv)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qv_pbl) )   then
+            allocate(this%tend%qv_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),   source=0.0)
+            !$acc enter data copyin(this%tend%qv_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qv) )       then
+            allocate(this%tend%qv(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qv)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_th) )       then
+            allocate(this%tend%th(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%th)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_th_pbl) )   then
+            allocate(this%tend%th_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%th_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qc_pbl) )   then
+            allocate(this%tend%qc_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qc_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qi_pbl) )   then
+            allocate(this%tend%qi_pbl(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qi_pbl)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qc) )       then
+            allocate(this%tend%qc(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qc)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qi) )       then
+            allocate(this%tend%qi(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qi)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qs) )       then
+            allocate(this%tend%qs(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qs)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_qr) )       then
+            allocate(this%tend%qr(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),       source=0.0)
+            !$acc enter data copyin(this%tend%qr)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_u) )        then
+            allocate(this%tend%u(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+            !$acc enter data copyin(this%tend%u)
+        endif
+        if (0<opt%vars_to_allocate( kVARS%tend_v) )        then
+            allocate(this%tend%v(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
+            !$acc enter data copyin(this%tend%v)
         endif
 
     end subroutine
+
 
     !> ---------------------------------
     !! Read the core model variables from disk
@@ -770,8 +1041,7 @@ contains
 
         allocate(temp_offset(1:this%grid%ide+1,1:this%grid%jde+1))
 
-        if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-             (options%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+        if (options%wind%linear_theory) then
                 this%vars_2d(this%var_indx(kVARS%global_terrain)%v)%data_2d = temporary_data
         end if
 
@@ -890,10 +1160,10 @@ contains
     subroutine setup_geo(geo, latitude, longitude, longitude_system, z)
         implicit none
         type(interpolable_type),  intent(inout) :: geo
-        real,                     intent(in)    :: latitude(:,:)
-        real,                     intent(in)    :: longitude(:,:)
+        real, allocatable,        intent(in)    :: latitude(:,:)
+        real, allocatable,        intent(in)    :: longitude(:,:)
         integer,                  intent(in)    :: longitude_system
-        real, optional,           intent(in)    :: z(:,:,:)
+        real, allocatable , optional, intent(in)    :: z(:,:,:)
         if (allocated(geo%lat)) deallocate(geo%lat)
         allocate( geo%lat, source=latitude)
 
@@ -908,7 +1178,7 @@ contains
         ! This also puts the longitudes onto a 0-360 if they are -180-180 (important for Alaska)
         ! Though if working in Europe the -180-180 grid is better ideally the optimal value should be checked.
         ! and good luck if you want to work over the poles...
-        call standardize_coordinates(geo, longitude_system)
+        call standardize_geo(geo, longitude_system)
 
     end subroutine
 
@@ -1211,8 +1481,7 @@ contains
 
             ! use temp to store global z-interface so that global-jacobian can be calculated
 
-            if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-                 (options%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+            if (options%wind%linear_theory) then
                  
                 allocate(temp(this%ids:this%ide, this%kds:this%kde+1, this%jds:this%jde))
                 temp(:,kms,:)   = this%vars_2d(this%var_indx(kVARS%global_terrain)%v)%data_2d
@@ -1337,16 +1606,6 @@ contains
                 dzdy(:,i,jms)   = (-neighbor_z(ims:ime,i,jms+2) + 4*neighbor_z(ims:ime,i,jms+1) - 3*neighbor_z(ims:ime,i,jms) )/(2*this%dx)
                 dzdy(:,i,jme)   = (neighbor_z(ims:ime,i,jme-2) - 4*neighbor_z(ims:ime,i,jme-1) + 3*neighbor_z(ims:ime,i,jme) )/(2*this%dx)
                 
-                dzdx_u(ims+1:ime,i,:) = (b1_mass*(h1(ims+1:ime,jms:jme)-h1(ims:ime-1,jms:jme))   + b2_mass*(h2(ims+1:ime,jms:jme)-h2(ims:ime-1,jms:jme)))/(this%dx)
-                dzdy_v(:,i,jms+1:jme) = (b1_mass*(h1(ims:ime,jms+1:jme)-h1(ims:ime,jms:jme-1))   + b2_mass*(h2(ims:ime,jms+1:jme)-h2(ims:ime,jms:jme-1)))/(this%dx)
-
-                dzdx_u(ims+1:ime,i,:) = (dzdx(ims:ime-1,i,:)+dzdx(ims+1:ime,i,:))*0.5
-                dzdx_u(ims,i,:)   = dzdx(ims,i,:)*1.5 - dzdx(ims+1,i,:)*0.5
-                dzdx_u(ime+1,i,:)   = dzdx(ime,i,:)*1.5 - dzdx(ime-1,i,:)*0.5
-
-                dzdy_v(:,i,jms+1:jme) = (dzdy(:,i,jms:jme-1)+dzdy(:,i,jms+1:jme))*0.5
-                dzdy_v(:,i,jms)   = dzdy(:,i,jms)*1.5 - dzdy(:,i,jms+1)*0.5
-                dzdy_v(:,i,jme+1)   = dzdy(:,i,jme)*1.5 - dzdy(:,i,jme-1)*0.5
                 
             enddo
             
@@ -1363,9 +1622,22 @@ contains
             z            = neighbor_z(ims:ime,:,jms:jme)
             jacobian     = neighbor_jacobian(ims:ime,:,jms:jme)
 
-            deallocate(dz)
+
+        !$acc update device(dzdx, dzdy)
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdx)%v),corners=.True.)
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdy)%v),corners=.True.)
+        !$acc update host(dzdx, dzdy)
+
+        dzdx_u(this%ims+1:this%ime,:,:) = (dzdx(this%ims:this%ime-1,:,:)+dzdx(this%ims+1:this%ime,:,:))*0.5
+        dzdy_v(:,:,this%jms+1:this%jme) = (dzdy(:,:,this%jms:this%jme-1)+dzdy(:,:,this%jms+1:this%jme))*0.5
+
+        !$acc update device(dzdx_u, dzdy_v)
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdx_u)%v),corners=.True.)
+        call this%halo%exch_var(this%vars_3d(this%var_indx(kVARS%dzdy_v)%v),corners=.True.)
+        !$acc update host(dzdx_u, dzdy_v)
 
         end associate
+
         ! call array_offset_x(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
         ! this%vars_3d(this%var_indx(kVARS%jacobian_u)%v)%data_3d(this%ims:this%ime+1,:,this%jms:this%jme) = temp
         ! call array_offset_y(neighbor_jacobian(this%ims:this%ime,:,this%jms:this%jme), temp)
@@ -1418,8 +1690,7 @@ contains
             i = this%grid%kms
             
             
-            if ( (options%physics%windtype == kWIND_LINEAR) .or. (options%physics%windtype == kLINEAR_OBRIEN_WINDS) .or. &
-                 (options%physics%windtype == kLINEAR_ITERATIVE_WINDS) ) then
+            if (options%wind%linear_theory) then
                 global_z_interface(:,i,:)   = global_terrain
                 allocate(global_jacobian(this%ids:this%ide, this%kds:this%kde, this%jds:this%jde))
             else
@@ -1619,10 +1890,8 @@ contains
             !Smooth cos/sin in case there are jumps from the lat/lon grids (more likely at low resolutions)
             smooth_loops = int(1000/this%dx)
             
-            do i=1,smooth_loops
-             call smooth_array_2d( costheta , windowsize  =  4)!int((ime-ims)/5))
-             call smooth_array_2d( sintheta , windowsize  =  4)!int((ime-ims)/5))
-            enddo
+            call smooth_array_2d( costheta , windowsize  =  4, nsmooths=smooth_loops)!int((ime-ims)/5))
+            call smooth_array_2d( sintheta , windowsize  =  4, nsmooths=smooth_loops)!int((ime-ims)/5))
             this%vars_2d(this%var_indx(kVARS%costheta)%v)%data_2d(this%ims:this%ime,this%jms:this%jme) = costheta(this%ims:this%ime,this%jms:this%jme)
             this%vars_2d(this%var_indx(kVARS%sintheta)%v)%data_2d(this%ims:this%ime,this%jms:this%jme) = sintheta(this%ims:this%ime,this%jms:this%jme)
              
@@ -1740,8 +2009,7 @@ contains
                   h1_u                  => this%vars_2d(this%var_indx(kVARS%h1_u)%v)%data_2d,                           &
                   h2_u                  => this%vars_2d(this%var_indx(kVARS%h2_u)%v)%data_2d,                           &
                   h1_v                  => this%vars_2d(this%var_indx(kVARS%h1_v)%v)%data_2d,                           &
-                  h2_v                  => this%vars_2d(this%var_indx(kVARS%h2_v)%v)%data_2d,                           &
-                  terrain               => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d)
+                  h2_v                  => this%vars_2d(this%var_indx(kVARS%h2_v)%v)%data_2d)
 
 
         if ((STD_OUT_PE)) then
@@ -1757,9 +2025,7 @@ contains
         temp =  global_terr
 
         ! Smooth the terrain to attain the large-scale contribution h1 (_u/v):
-        do i =1,options%domain%terrain_smooth_cycles
-          call smooth_array( temp, windowsize  =  options%domain%terrain_smooth_windowsize)
-        enddo
+        call smooth_array( temp, windowsize  =  options%domain%terrain_smooth_windowsize, nsmooths=options%domain%terrain_smooth_cycles)
         
         if (this%var_indx(kVARS%global_terrain)%v > 0) then
                 h1   =  temp
@@ -1776,9 +2042,7 @@ contains
         !temp(this%ide+1,this%jds:this%jde) = temp(this%ide,this%jds:this%jde)
         
         h2_u = temp(this%u_grid2d%ims:this%u_grid2d%ime, this%u_grid2d%jms:this%u_grid2d%jme)
-        do i =1,options%domain%terrain_smooth_cycles
-          call smooth_array( temp, windowsize = options%domain%terrain_smooth_windowsize)
-        enddo
+        call smooth_array( temp, windowsize  =  options%domain%terrain_smooth_windowsize, nsmooths=options%domain%terrain_smooth_cycles)
         
         h1_u = temp(this%u_grid2d%ims:this%u_grid2d%ime, this%u_grid2d%jms:this%u_grid2d%jme)
         h2_u =  h2_u  - h1_u
@@ -1792,9 +2056,7 @@ contains
         !temp(this%ids:this%ide,this%jde+1) = temp(this%ids:this%ide,this%jde)
         h2_v = temp(this%v_grid2d%ims:this%v_grid2d%ime, this%v_grid2d%jms:this%v_grid2d%jme)
         
-        do i =1,options%domain%terrain_smooth_cycles
-          call smooth_array( temp, windowsize = options%domain%terrain_smooth_windowsize)
-        enddo
+        call smooth_array( temp, windowsize  =  options%domain%terrain_smooth_windowsize, nsmooths=options%domain%terrain_smooth_cycles)
         
         h1_v = temp(this%v_grid2d%ims:this%v_grid2d%ime, this%v_grid2d%jms:this%v_grid2d%jme)
         h2_v =  h2_v  - h1_v
@@ -1810,26 +2072,108 @@ contains
     end subroutine split_topography
 
 
-    
-
-
-
-    subroutine read_land_variables(this, options)
+    subroutine init_land_variables(this,options)
         implicit none
         class(domain_t), intent(inout)  :: this
         type(options_t), intent(in)     :: options
 
-        integer :: i, nsoil
-        real, allocatable :: temporary_data(:,:), temporary_data_3d(:,:,:)
-        real :: soil_thickness(20)
-        real :: init_surf_temp
+        if (this%var_indx(kVARS%vegetation_fraction_max)%v > 0) then
+            if (STD_OUT_PE) write(*,*) "    VEGMAX not specified; using default value of 0.8"
+            this%vars_2d(this%var_indx(kVARS%vegetation_fraction_max)%v)%data_2d = 80.
+        endif
+        if (this%var_indx(kVARS%lai)%v > 0) then
+            if (STD_OUT_PE) write(*,*) "    LAI not specified; using default value of 1"
+            this%vars_2d(this%var_indx(kVARS%lai)%v)%data_2d = 1
+        endif
 
-        soil_thickness = 1.0
-        soil_thickness(1:4) = [0.1, 0.2, 0.5, 1.0]
-        init_surf_temp = 280
+        if (this%var_indx(kVARS%land_mask)%v > 0) this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di = kLC_LAND
+        if (this%var_indx(kVARS%soil_type)%v > 0) this%vars_2d(this%var_indx(kVARS%soil_type)%v)%data_2di = 3
+        if (this%var_indx(kVARS%soil_water_content)%v > 0) this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d = 0.4
+        if (this%var_indx(kVARS%veg_type)%v > 0) this%vars_2d(this%var_indx(kVARS%veg_type)%v)%data_2di = 7
+        if (this%var_indx(kVARS%albedo)%v > 0) this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d = 0.17
+        if (this%var_indx(kVARS%vegetation_fraction)%v > 0) this%vars_3d(this%var_indx(kVARS%vegetation_fraction)%v)%data_3d = 60.
+
+
+        ! Initialize surface temperature fields from scalar fallback
+        ! These will be further updated by the land model, but need sensible initial values
+        if (this%var_indx(kVARS%skin_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%skin_temperature)%v)%data_2d = options%domain%init_surf_temp
+        if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = options%domain%init_surf_temp
+        if (this%var_indx(kVARS%temperature_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d = options%domain%init_surf_temp
+        if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d = options%domain%init_surf_temp
+        if (this%var_indx(kVARS%ground_surf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%ground_surf_temperature)%v)%data_2d = options%domain%init_surf_temp
+        if (this%var_indx(kVARS%canopy_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d = options%domain%init_surf_temp
+
+        ! SST uses its own option (separate from land surface temperature)
+        if (this%var_indx(kVARS%sst)%v > 0) this%vars_2d(this%var_indx(kVARS%sst)%v)%data_2d = options%domain%init_sst
+
+        if (this%var_indx(kVARS%roughness_z0)%v > 0) this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d = 0.001
+        if (this%var_indx(kVARS%humidity_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%humidity_2m)%v)%data_2d=0.001
+        if (this%var_indx(kVARS%surface_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%surface_pressure)%v)%data_2d=102000
+        if (this%var_indx(kVARS%land_emissivity)%v > 0) this%vars_2d(this%var_indx(kVARS%land_emissivity)%v)%data_2d=0.95
+
+        if (this%var_indx(kVARS%canopy_vapor_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_vapor_pressure)%v)%data_2d=2000
+        if (this%var_indx(kVARS%coeff_momentum_drag)%v > 0) this%vars_2d(this%var_indx(kVARS%coeff_momentum_drag)%v)%data_2d=0.01
+        if (this%var_indx(kVARS%chs)%v > 0) this%vars_2d(this%var_indx(kVARS%chs)%v)%data_2d=0.01
+        if (this%var_indx(kVARS%chs2)%v > 0) this%vars_2d(this%var_indx(kVARS%chs2)%v)%data_2d=0.01
+        if (this%var_indx(kVARS%cqs2)%v > 0) this%vars_2d(this%var_indx(kVARS%cqs2)%v)%data_2d=0.01
+
+        if (this%var_indx(kVARS%hpbl)%v > 0) this%vars_2d(this%var_indx(kVARS%hpbl)%v)%data_2d=100.0
+        if (this%var_indx(kVARS%coeff_heat_exchange_3d)%v > 0) this%vars_3d(this%var_indx(kVARS%coeff_heat_exchange_3d)%v)%data_3d=0.01
+        if (this%var_indx(kVARS%coeff_momentum_exchange_3d)%v > 0) this%vars_3d(this%var_indx(kVARS%coeff_momentum_exchange_3d)%v)%data_3d=0.01
+        if (this%var_indx(kVARS%snow_albedo_prev)%v > 0) this%vars_2d(this%var_indx(kVARS%snow_albedo_prev)%v)%data_2d=0.65
+        if (this%var_indx(kVARS%ustar)%v > 0)                  this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d=0.1
+        if (this%var_indx(kVARS%snow_temperature)%v > 0)    this%vars_3d(this%var_indx(kVARS%snow_temperature)%v)%data_3d=273.15
+
+    end subroutine init_land_variables
+
+    module subroutine read_land_variables(this, options)
+        implicit none
+        class(domain_t), intent(inout)  :: this
+        type(options_t), intent(in)     :: options
+
+        integer :: i, j, nsoil
+        real, allocatable :: surf_temp(:,:), temporary_data(:,:), temporary_data_3d(:,:,:)
+        real :: soil_thickness(20)
+        real :: dzdx_val, dzdy_val, slope_rad_val, slope_deg_val, shd_norm, cos_slope_thresh
 
         if (STD_OUT_PE) write (*,*) "Reading Land Variables"
         if (STD_OUT_PE) flush(output_unit)
+
+        call this%update_host()
+        
+        ! Read optional 2D surface temperature field from domain file
+        if (options%domain%surface_temp_var /= "") then
+            call io_read(options%domain%init_conditions_file, options%domain%surface_temp_var, surf_temp)
+            if (STD_OUT_PE) write(*,*) "  Read surface temperature field from: ", trim(options%domain%surface_temp_var)
+
+            if (this%var_indx(kVARS%skin_temperature)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%skin_temperature)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+
+            if (this%var_indx(kVARS%temperature_2m)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+
+            if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+            if (this%var_indx(kVARS%ground_surf_temperature)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%ground_surf_temperature)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+
+            if (this%var_indx(kVARS%canopy_temperature)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+        else
+            allocate(surf_temp(this%grid%ims:this%grid%ime,this%grid%jms:this%grid%jme))
+            surf_temp = options%domain%init_surf_temp
+        endif
+
 
         if (this%var_indx(kVARS%soil_water_content)%v > 0) then
             nsoil = size(this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d, 2)
@@ -1844,10 +2188,6 @@ contains
             if (this%var_indx(kVARS%land_mask)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
                 where(this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di==0) this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di = kLC_WATER  ! To ensure conisitency. land_mask can be 0 or 2 for water, enforce a single value.
-            else 
-                if (this%var_indx(kVARS%land_mask)%v > 0) then
-                    this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di = kLC_LAND
-                endif
             endif
         endif
 
@@ -1870,10 +2210,6 @@ contains
             if (this%var_indx(kVARS%soil_type)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%soil_type)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
-        else
-            if (this%var_indx(kVARS%soil_type)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%soil_type)%v)%data_2di = 3
-            endif
         endif
 
         if (options%domain%cropcategory_var /= "") then
@@ -1882,10 +2218,6 @@ contains
                            temporary_data)
             if (this%var_indx(kVARS%crop_category)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%crop_category)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-            endif
-        else
-            if (this%var_indx(kVARS%crop_category)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%crop_category)%v)%data_2di = 0
             endif
         endif
 
@@ -1902,12 +2234,14 @@ contains
                     if (STD_OUT_PE) write(*,*) trim(options%domain%init_conditions_file),"  ",trim(options%domain%soil_deept_var)
                 endif
                 if (minval(this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d)< 200) then
-                    where(this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d<200) this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d=init_surf_temp ! <200 is just broken, set to mean annual air temperature at mid-latidudes
+                    where(this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d<200) &
+                        this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = options%domain%init_surf_temp
                 endif
             endif
         else
             if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = init_surf_temp
+                this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         endif
 
@@ -1925,7 +2259,6 @@ contains
                     endif
                 endif
             endif
-
         else
             if (this%var_indx(kVARS%soil_temperature)%v > 0) then
                 if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) then
@@ -1944,10 +2277,6 @@ contains
             if (this%var_indx(kVARS%snow_water_equivalent)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
-        else
-            if (this%var_indx(kVARS%snow_water_equivalent)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = 0
-            endif
         endif
 
         if (options%domain%snowh_var /= "") then
@@ -1956,10 +2285,6 @@ contains
                            temporary_data)
             if (this%var_indx(kVARS%snow_height)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%snow_height)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-            endif
-        else
-            if (this%var_indx(kVARS%snow_height)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%snow_height)%v)%data_2d = 0
             endif
         endif
         
@@ -1986,11 +2311,6 @@ contains
                     this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d(:,i,:) = temporary_data_3d(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme, i)
                 enddo
             endif
-
-        else
-            if (this%var_indx(kVARS%soil_water_content)%v > 0) then
-                this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d = 0.4
-            endif
         endif
 
         if (options%domain%vegtype_var /= "") then
@@ -2000,53 +2320,25 @@ contains
             if (this%var_indx(kVARS%veg_type)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%veg_type)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
-        else
-            if (this%var_indx(kVARS%veg_type)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%veg_type)%v)%data_2di = 7
-            endif
         endif
 
         if (options%domain%albedo_var /= "") then
-            if (options%lsm%monthly_albedo) then
-                call io_read(options%domain%init_conditions_file,   &
+            call io_read(options%domain%init_conditions_file,   &
                             options%domain%albedo_var,          &
-                            temporary_data_3d)
-
-                if (this%var_indx(kVARS%albedo)%v > 0) then
-                    do i=1,size(this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d, 2)
-                        this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d(:,i,:) = temporary_data_3d(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme,i)
-                    enddo
-
-                    if (maxval(temporary_data_3d) > 1) then
-                        if (STD_OUT_PE) write(*,*) "Changing input ALBEDO % to fraction"
-                        this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d = this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d / 100
-                    endif
-                endif
-            else
-                call io_read(options%domain%init_conditions_file,   &
-                               options%domain%albedo_var,          &
-                               temporary_data)
-                if (this%var_indx(kVARS%albedo)%v > 0) then
-                    do i=1,size(this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d, 2)
-                        this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d(:,i,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-                    enddo
-
-                    if (maxval(temporary_data) > 1) then
-                        if (STD_OUT_PE) write(*,*) "Changing input ALBEDO % to fraction"
-                        this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d = this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d / 100
-                    endif
-                endif
-            endif
-
-        else
+                            temporary_data)
             if (this%var_indx(kVARS%albedo)%v > 0) then
-                this%vars_3d(this%var_indx(kVARS%albedo)%v)%data_3d = 0.17
+                this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+
+                if (maxval(temporary_data) > 1) then
+                    if (STD_OUT_PE) write(*,*) "Changing input ALBEDO % to fraction"
+                    this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d = this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d / 100
+                endif
             endif
         endif
 
 
         if (options%domain%vegfrac_var /= "") then
-            if (options%lsm%monthly_albedo) then
+            if (options%lsm%monthly_vegfrac) then
                 call io_read(options%domain%init_conditions_file,   &
                             options%domain%vegfrac_var,          &
                             temporary_data_3d)
@@ -2066,11 +2358,6 @@ contains
                     enddo
                 endif
             endif
-
-        else
-            if (this%var_indx(kVARS%vegetation_fraction)%v > 0) then
-                this%vars_3d(this%var_indx(kVARS%vegetation_fraction)%v)%data_3d = 60.
-            endif
         endif
 
         if (this%var_indx(kVARS%soil_totalmoisture)%v > 0) then
@@ -2089,11 +2376,6 @@ contains
             if (this%var_indx(kVARS%vegetation_fraction_max)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%vegetation_fraction_max)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
-        else
-            if (this%var_indx(kVARS%vegetation_fraction_max)%v > 0) then
-                if (STD_OUT_PE) write(*,*) "    VEGMAX not specified; using default value of 0.8"
-                this%vars_2d(this%var_indx(kVARS%vegetation_fraction_max)%v)%data_2d = 80.
-            endif
         endif
 
         if (options%domain%lai_var /= "") then
@@ -2102,11 +2384,6 @@ contains
                            temporary_data)
             if (this%var_indx(kVARS%lai)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%lai)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-            endif
-        else
-            if (this%var_indx(kVARS%lai)%v > 0) then
-                if (STD_OUT_PE) write(*,*) "    LAI not specified; using default value of 1"
-                this%vars_2d(this%var_indx(kVARS%lai)%v)%data_2d = 1
             endif
         endif
 
@@ -2117,12 +2394,118 @@ contains
             if (this%var_indx(kVARS%canopy_water)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%canopy_water)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
-        else
-            if (this%var_indx(kVARS%canopy_water)%v > 0) then
-                if (STD_OUT_PE) write(*,*) "    CANWAT not specified; using default value of 0"
-                this%vars_2d(this%var_indx(kVARS%canopy_water)%v)%data_2d = 0
-            endif
         endif
+
+        !!
+        if (options%domain%slope_angle_var /= "") then
+            call io_read(options%domain%init_conditions_file,   &
+                            options%domain%slope_angle_var,         &
+                            temporary_data)
+            if (maxval(temporary_data) > 10.0) then
+                if (STD_OUT_PE) write(*,*) "WARNING: detected slope angles > 10 radians in domain input data."
+                if (STD_OUT_PE) write(*,*) "         Check units of slope angle variable in ", trim(options%domain%init_conditions_file), " ", trim(options%domain%slope_angle_var)
+                if (STD_OUT_PE) write(*,*) "         and ensure they are in radians (not degrees or percent slope)"
+                if (STD_OUT_PE) write(*,*) "         Auto-converting slope angle to radians assuming input was in degrees."
+                temporary_data = temporary_data * DEGRAD
+            endif
+            if (this%var_indx(kVARS%slope_angle)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+            if (this%var_indx(kVARS%neighbor_slope_angle)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d = &
+                    temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
+            endif
+        else ! calculate manually
+            associate(terrain => this%vars_2d(this%var_indx(kVARS%neighbor_terrain)%v)%data_2d)
+                do j = this%jhs, this%jhe
+                    do i = this%ihs, this%ihe
+                        ! Compute dz/dx via centered differences, forward/backward at boundaries
+                        if (i == this%ihs) then
+                            dzdx_val = (terrain(i+1,j) - terrain(i,j)) / this%dx
+                        elseif (i == this%ihe) then
+                            dzdx_val = (terrain(i,j) - terrain(i-1,j)) / this%dx
+                        else
+                            dzdx_val = (terrain(i+1,j) - terrain(i-1,j)) / (2.0 * this%dx)
+                        endif
+                        if (j == this%jhs) then
+                            dzdy_val = (terrain(i,j+1) - terrain(i,j)) / this%dx
+                        elseif (j == this%jhe) then
+                            dzdy_val = (terrain(i,j) - terrain(i,j-1)) / this%dx
+                        else
+                            dzdy_val = (terrain(i,j+1) - terrain(i,j-1)) / (2.0 * this%dx)
+                        endif
+
+                        if (this%var_indx(kVARS%neighbor_slope_angle)%v > 0) then
+                            this%vars_2d(this%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d(i,j) = atan(sqrt(dzdx_val**2 + dzdy_val**2))
+                        endif
+
+                        if (this%var_indx(kVARS%slope_angle)%v > 0 &
+                                .and. i <= this%grid%ime .and. j <= this%grid%jme &
+                                .and. i >= this%grid%ims .and. j >= this%grid%jms) then
+                            this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d(i,j) = atan(sqrt(dzdx_val**2 + dzdy_val**2))
+                        endif
+                    enddo
+                enddo
+            end associate
+        endif
+
+        !!
+        if (options%domain%aspect_angle_var /= "") then
+            call io_read(options%domain%init_conditions_file,   &
+                            options%domain%aspect_angle_var,         &
+                            temporary_data)
+            if (maxval(temporary_data) > 10.0) then
+                if (STD_OUT_PE) write(*,*) "WARNING: detected aspect angles > 10 radians in domain input data."
+                if (STD_OUT_PE) write(*,*) "         Check units of aspect angle variable in ", trim(options%domain%init_conditions_file), " ", trim(options%domain%aspect_angle_var)
+                if (STD_OUT_PE) write(*,*) "         and ensure they are in radians (not degrees or percent slope)"
+                if (STD_OUT_PE) write(*,*) "         Auto-converting aspect angle to radians assuming input was in degrees."
+                temporary_data = temporary_data * DEGRAD
+            endif
+            if (this%var_indx(kVARS%aspect_angle)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+            if (this%var_indx(kVARS%neighbor_aspect_angle)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d = &
+                    temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
+            endif
+        else ! calculate manually
+            ! Calculate neighbor aspect angle first from the DEM using centered differences
+            ! Aspect angle is the direction of steepest slope: atan2(dz/dy, dz/dx)
+            associate(terrain => this%vars_2d(this%var_indx(kVARS%neighbor_terrain)%v)%data_2d)
+                do j = this%jhs, this%jhe
+                    do i = this%ihs, this%ihe
+                        ! Compute dz/dx via centered differences, forward/backward at boundaries
+                        if (i == this%ihs) then
+                            dzdx_val = (terrain(i+1,j) - terrain(i,j)) / this%dx
+                        elseif (i == this%ihe) then
+                            dzdx_val = (terrain(i,j) - terrain(i-1,j)) / this%dx
+                        else
+                            dzdx_val = (terrain(i+1,j) - terrain(i-1,j)) / (2.0 * this%dx)
+                        endif
+                        if (j == this%jhs) then
+                            dzdy_val = (terrain(i,j+1) - terrain(i,j)) / this%dx
+                        elseif (j == this%jhe) then
+                            dzdy_val = (terrain(i,j) - terrain(i,j-1)) / this%dx
+                        else
+                            dzdy_val = (terrain(i,j+1) - terrain(i,j-1)) / (2.0 * this%dx)
+                        endif
+
+                        ! Aspect angle in radians: atan2(dzdy, dzdx)
+                        ! This gives direction perpendicular to contour lines (0 = E, π/2 = N, π = W, -π/2 = S)
+                        if (this%var_indx(kVARS%neighbor_aspect_angle)%v > 0) then
+                            this%vars_2d(this%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d(i,j) = atan2(dzdy_val, dzdx_val)
+                        endif
+
+                        if (this%var_indx(kVARS%aspect_angle)%v > 0 &
+                                .and. i <= this%grid%ime .and. j <= this%grid%jme &
+                                .and. i >= this%grid%ims .and. j >= this%grid%jms) then
+                            this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d(i,j) = atan2(dzdy_val, dzdx_val)
+                        endif
+                    enddo
+                enddo
+            end associate
+        endif
+
         if (options%domain%shd_var /= "") then
             call io_read(options%domain%init_conditions_file,   &
                            options%domain%shd_var,       &
@@ -2130,9 +2513,26 @@ contains
             if (this%var_indx(kVARS%shd)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%shd)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
+        else
+            if (this%var_indx(kVARS%shd)%v > 0) then
+                if (STD_OUT_PE) write(*,*) "    SHD not specified; computing from DEM..."
+                ! The following code comes from the SLF OSHD pre-processing code, written by Louis Quéno 2022
+                ! Shd (Snow holding depth) is needed by the Snowslide parameterization (Bernhardt and Schulz 2010)
+                ! Values for the parameterization of Shd come from (Marsh) et al., 2022
+
+                do j = this%jms, this%jme
+                    do i = this%ims, this%ime
+                        slope_deg_val = max(this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d(i,j) / deg2rad, 10.0)
+
+                        shd_norm = 3178.4 * slope_deg_val**(-1.998)
+                        cos_slope_thresh = max(cos(slope_deg_val * deg2rad), 0.001)
+                        this%vars_2d(this%var_indx(kVARS%shd)%v)%data_2d(i,j) = shd_norm * cos_slope_thresh
+                    enddo
+                enddo
+            endif
         endif
 
-        if (options%physics%radiation_downScaling==1) then
+        if (options%rad%terrain_shading) then
             !!
             if (options%domain%hlm_var /= "") then
                 call io_read(options%domain%init_conditions_file,   &
@@ -2141,11 +2541,10 @@ contains
                 if (this%var_indx(kVARS%hlm)%v > 0) then
                     do i=1,90
                         this%vars_3d(this%var_indx(kVARS%hlm)%v)%data_3d(:,i,:) = temporary_data_3d(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme, i)
-                        !if (STD_OUT_PE) write(*,*),"hlm ", i, this%vars_3d(this%var_indx(kVARS%hlm)%v)%data_3d(this%grid%its,i,this%grid%jts)
                     enddo
                 endif
             else  
-                stop "hlm_var not specified in domain file, but required for radiation downscaling"
+                stop "hlm_var not specified in domain file, but required for terrain shading"
             endif
             !!
             if (options%domain%svf_var /= "") then
@@ -2156,108 +2555,12 @@ contains
                     this%vars_2d(this%var_indx(kVARS%svf)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
                 endif
             else
-                stop "svf_var not specified in domain file, but required for radiation downscaling"
+                stop "svf_var not specified in domain file, but required for terrain shading"
             endif            
             !!
-            if (options%domain%slope_var /= "") then
-                call io_read(options%domain%init_conditions_file,   &
-                               options%domain%slope_var,         &
-                               temporary_data)
-                if (this%var_indx(kVARS%slope)%v > 0) then
-                    this%vars_2d(this%var_indx(kVARS%slope)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-                endif
-            else
-                stop "slope_var not specified in domain file, but required for radiation downscaling"
-            endif            
-            !!
-            if (options%domain%slope_angle_var /= "") then
-                call io_read(options%domain%init_conditions_file,   &
-                               options%domain%slope_angle_var,         &
-                               temporary_data)
-                if (this%var_indx(kVARS%slope_angle)%v > 0) then
-                    this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-                endif
-            else
-                stop "slope_angle_var not specified in domain file, but required for radiation downscaling"
-            endif
-            !!
-            if (options%domain%aspect_angle_var /= "") then
-                call io_read(options%domain%init_conditions_file,   &
-                               options%domain%aspect_angle_var,         &
-                               temporary_data)
-                if (this%var_indx(kVARS%aspect_angle)%v > 0) then
-                    this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-                endif
-            else
-                stop "aspect_angle_var not specified in domain file, but required for radiation downscaling"
-            endif
         endif
 
-        ! these will all be udpated by either forcing data or the land model, but initialize to sensible values to avoid breaking other initialization routines
-        if (this%var_indx(kVARS%skin_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%skin_temperature)%v)%data_2d = init_surf_temp
-        if (this%var_indx(kVARS%sst)%v > 0) this%vars_2d(this%var_indx(kVARS%sst)%v)%data_2d = init_surf_temp
-        if (this%var_indx(kVARS%roughness_z0)%v > 0) this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d = 0.001
-        if (this%var_indx(kVARS%sensible_heat)%v > 0) this%vars_2d(this%var_indx(kVARS%sensible_heat)%v)%data_2d=0
-        if (this%var_indx(kVARS%latent_heat)%v > 0) this%vars_2d(this%var_indx(kVARS%latent_heat)%v)%data_2d=0
-        if (this%var_indx(kVARS%u_10m)%v > 0) this%vars_2d(this%var_indx(kVARS%u_10m)%v)%data_2d=0
-        if (this%var_indx(kVARS%v_10m)%v > 0) this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d=0
-
-        if (this%var_indx(kVARS%windspd_10m)%v > 0) this%vars_2d(this%var_indx(kVARS%windspd_10m)%v)%data_2d=0
-        if (this%var_indx(kVARS%temperature_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d=init_surf_temp
-        if (this%var_indx(kVARS%humidity_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%humidity_2m)%v)%data_2d=0.001
-        if (this%var_indx(kVARS%surface_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%surface_pressure)%v)%data_2d=102000
-        if (this%var_indx(kVARS%longwave_up)%v > 0) this%vars_2d(this%var_indx(kVARS%longwave_up)%v)%data_2d=0
-        if (this%var_indx(kVARS%ground_heat_flux)%v > 0) this%vars_2d(this%var_indx(kVARS%ground_heat_flux)%v)%data_2d=0
-        if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d=init_surf_temp
-        if (this%var_indx(kVARS%ground_surf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%ground_surf_temperature)%v)%data_2d=init_surf_temp
-        if (this%var_indx(kVARS%canopy_vapor_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_vapor_pressure)%v)%data_2d=2000
-        if (this%var_indx(kVARS%canopy_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d=init_surf_temp
-        if (this%var_indx(kVARS%coeff_momentum_drag)%v > 0) this%vars_2d(this%var_indx(kVARS%coeff_momentum_drag)%v)%data_2d=0.01
-        if (this%var_indx(kVARS%chs)%v > 0) this%vars_2d(this%var_indx(kVARS%chs)%v)%data_2d=0.01
-        if (this%var_indx(kVARS%chs2)%v > 0) this%vars_2d(this%var_indx(kVARS%chs2)%v)%data_2d=0.01
-        if (this%var_indx(kVARS%cqs2)%v > 0) this%vars_2d(this%var_indx(kVARS%cqs2)%v)%data_2d=0.01
-
-        if (this%var_indx(kVARS%QFX)%v > 0) this%vars_2d(this%var_indx(kVARS%QFX)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%br)%v > 0) this%vars_2d(this%var_indx(kVARS%br)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%mol)%v > 0) this%vars_2d(this%var_indx(kVARS%mol)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%psim)%v > 0) this%vars_2d(this%var_indx(kVARS%psim)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%psih)%v > 0) this%vars_2d(this%var_indx(kVARS%psih)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%fm)%v > 0) this%vars_2d(this%var_indx(kVARS%fm)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%fh)%v > 0) this%vars_2d(this%var_indx(kVARS%fh)%v)%data_2d=0.0
-
-        if (this%var_indx(kVARS%hpbl)%v > 0) this%vars_2d(this%var_indx(kVARS%hpbl)%v)%data_2d=100.0
-        if (this%var_indx(kVARS%coeff_heat_exchange_3d)%v > 0) this%vars_3d(this%var_indx(kVARS%coeff_heat_exchange_3d)%v)%data_3d=0.01
-        if (this%var_indx(kVARS%coeff_momentum_exchange_3d)%v > 0) this%vars_3d(this%var_indx(kVARS%coeff_momentum_exchange_3d)%v)%data_3d=0.01
-        if (this%var_indx(kVARS%canopy_fwet)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_fwet)%v)%data_2d=0
-        if (this%var_indx(kVARS%snow_water_eq_prev)%v > 0) this%vars_2d(this%var_indx(kVARS%snow_water_eq_prev)%v)%data_2d=0
-        if (this%var_indx(kVARS%snow_albedo_prev)%v > 0) this%vars_2d(this%var_indx(kVARS%snow_albedo_prev)%v)%data_2d=0.65
-        if (this%var_indx(kVARS%storage_lake)%v > 0) this%vars_2d(this%var_indx(kVARS%storage_lake)%v)%data_2d=0
-
-        if (this%var_indx(kVARS%ustar)%v > 0)                  this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d=0.1
-        if (this%var_indx(kVARS%irr_eventno_sprinkler)%v > 0)  this%vars_2d(this%var_indx(kVARS%irr_eventno_sprinkler)%v)%data_2di=0
-        if (this%var_indx(kVARS%irr_eventno_micro)%v > 0)      this%vars_2d(this%var_indx(kVARS%irr_eventno_micro)%v)%data_2di=0
-        if (this%var_indx(kVARS%irr_eventno_flood)%v > 0)      this%vars_2d(this%var_indx(kVARS%irr_eventno_flood)%v)%data_2di=0
-        if (this%var_indx(kVARS%plant_growth_stage)%v > 0)     this%vars_2d(this%var_indx(kVARS%plant_growth_stage)%v)%data_2di=0
-        if (this%var_indx(kVARS%kpbl)%v > 0)                   this%vars_2d(this%var_indx(kVARS%kpbl)%v)%data_2di=0
-
-        if (this%var_indx(kVARS%runoff_tstep)%v > 0)        this%vars_2d(this%var_indx(kVARS%runoff_tstep)%v)%data_2d=0.
-        if (this%var_indx(kVARS%snow_temperature)%v > 0)    this%vars_3d(this%var_indx(kVARS%snow_temperature)%v)%data_3d=273.15
-        if (this%var_indx(kVARS%Sice)%v > 0)                this%vars_3d(this%var_indx(kVARS%Sice)%v)%data_3d=0.
-        if (this%var_indx(kVARS%Sliq)%v > 0)                this%vars_3d(this%var_indx(kVARS%Sliq)%v)%data_3d=0.
-        if (this%var_indx(kVARS%Ds)%v > 0)                  this%vars_3d(this%var_indx(kVARS%Ds)%v)%data_3d=0.
-        if (this%var_indx(kVARS%fsnow)%v > 0)               this%vars_2d(this%var_indx(kVARS%fsnow)%v)%data_2d=0.
-        if (this%var_indx(kVARS%Nsnow)%v > 0)               this%vars_2d(this%var_indx(kVARS%Nsnow)%v)%data_2d=0.
-        if (this%var_indx(kVARS%dSWE_salt)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_salt)%v)%data_2d=0.
-        if (this%var_indx(kVARS%dSWE_susp)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_susp)%v)%data_2d=0.
-        if (this%var_indx(kVARS%dSWE_subl)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_subl)%v)%data_2d=0.
-        if (this%var_indx(kVARS%dSWE_slide)%v > 0)            this%vars_2d(this%var_indx(kVARS%dSWE_slide)%v)%data_2d=0.
-
-        !!
-        if (this%var_indx(kVARS%meltflux_out_tstep)%v > 0)  this%vars_2d(this%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d=0.
-        if (this%var_indx(kVARS%shortwave_direct)%v > 0)  this%vars_2d(this%var_indx(kVARS%shortwave_direct)%v)%data_2d=0.
-        if (this%var_indx(kVARS%shortwave_diffuse)%v > 0)  this%vars_2d(this%var_indx(kVARS%shortwave_diffuse)%v)%data_2d=0.
-        if (this%var_indx(kVARS%shortwave_direct_above)%v > 0)  this%vars_2d(this%var_indx(kVARS%shortwave_direct_above)%v)%data_2d=0.
-        if (this%var_indx(kVARS%Sliq_out)%v > 0)  this%vars_2d(this%var_indx(kVARS%Sliq_out)%v)%data_2d=0.
+        call this%update_device()
 
     end subroutine read_land_variables
 
@@ -2272,6 +2575,7 @@ contains
 
         real, allocatable :: temporary_data(:,:)
         integer :: nx_global, ny_global, nz_global, nsmooth, adv_order, my_index
+        integer :: max_halo_nz
 
         nsmooth = max(1, int(options%wind%smooth_wind_distance / options%domain%dx))
         if (options%wind%smooth_wind_distance == 0.0) nsmooth = 0
@@ -2305,37 +2609,49 @@ contains
             my_index = my_index + 1
         endif
 
-        call this%grid%set_grid_dimensions(     nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, adv_order=adv_order)
-        call this%grid8w%set_grid_dimensions(   nx_global, ny_global, nz_global+1, image=my_index, comms=this%compute_comms, adv_order=adv_order)
+        ! Unified halo-window depth: every grid's halo MPI types and the
+        ! halo's _in_win windows are sized to this, so any grid whose nz
+        ! exceeds nz_global (e.g. kSNOW_GRID_Z in SNOWPACK builds) can be
+        ! halo-exchanged without hitting the old MPI_DATATYPE_NULL branch.
+        max_halo_nz = max(nz_global + 1, kSNOW_GRID_Z + 1, kSNOWSOIL_GRID_Z, &
+                          kSOIL_GRID_Z, kFM_GRID_Z, kSOILCOMP_GRID_Z,        &
+                          kGECROS_GRID_Z, kCROP_GRID_Z, kMONTH_GRID_Z,       &
+                          kLAKE_Z, kLAKE_SOISNO_Z, kLAKE_SOI_Z,              &
+                          kLAKE_SOISNO_1_Z, 90)
 
-        call this%u_grid%set_grid_dimensions( nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, adv_order=adv_order, nx_extra = 1)
-        call this%v_grid%set_grid_dimensions( nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, adv_order=adv_order, ny_extra = 1)
+        call this%grid%set_grid_dimensions(     nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid8w%set_grid_dimensions(   nx_global, ny_global, nz_global+1, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+
+        call this%u_grid%set_grid_dimensions( nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order, nx_extra = 1)
+        call this%v_grid%set_grid_dimensions( nx_global, ny_global, nz_global, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order, ny_extra = 1)
 
         ! for 2D mass variables
-        call this%grid2d%set_grid_dimensions( nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
+        call this%grid2d%set_grid_dimensions( nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
 
         ! setup a 2D lat/lon grid extended by nsmooth grid cells so that smoothing can take place "across" images
         ! This just sets up the fields to interpolate u and v to so that the input data are handled on an extended
         ! grid.  They are then subset to the u_grid and v_grids above before actual use.
-        call this%u_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order, nx_extra = 1)
+        call this%u_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order, nx_extra = 1)
 
         ! handle the v-grid too
-        call this%v_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order, ny_extra = 1)
-        
-        call this%column_grid%set_grid_dimensions(               0,         0, nz_global, image=my_index, comms=this%compute_comms, adv_order=adv_order) !! MJ added
-        call this%grid_soil%set_grid_dimensions(         nx_global, ny_global, kSOIL_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_snow%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_snowsoil%set_grid_dimensions(     nx_global, ny_global, kSNOWSOIL_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_soilcomp%set_grid_dimensions(     nx_global, ny_global, kSOILCOMP_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_gecros%set_grid_dimensions(       nx_global, ny_global, kGECROS_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_croptype%set_grid_dimensions(     nx_global, ny_global, kCROP_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_monthly%set_grid_dimensions(      nx_global, ny_global, kMONTH_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake%set_grid_dimensions(         nx_global, ny_global, kLAKE_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake_soisno%set_grid_dimensions(  nx_global, ny_global, kLAKE_SOISNO_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake_soi%set_grid_dimensions(     nx_global, ny_global, kLAKE_SOI_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_lake_soisno_1%set_grid_dimensions(nx_global, ny_global, kLAKE_SOISNO_1_Z, image=my_index, comms=this%compute_comms, global_nz=nz_global, adv_order=adv_order)
-        call this%grid_hlm%set_grid_dimensions(     nx_global, ny_global, 90, image=my_index, comms=this%compute_comms, adv_order=adv_order) !! MJ added
-        call this%grid_Sx%set_grid_dimensions(     nx_global, ny_global, nz_global, 72, image=my_index, comms=this%compute_comms, adv_order=adv_order) !! MJ added
+        call this%v_grid2d%set_grid_dimensions(     nx_global, ny_global, 0, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order, ny_extra = 1)
+
+        call this%column_grid%set_grid_dimensions(               0,         0, nz_global, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order) !! MJ added
+        call this%grid_soil%set_grid_dimensions(         nx_global, ny_global, kSOIL_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_snow%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_snow_i%set_grid_dimensions(         nx_global, ny_global, kSNOW_GRID_Z+1, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_snowsoil%set_grid_dimensions(     nx_global, ny_global, kSNOWSOIL_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_fm%set_grid_dimensions(           nx_global, ny_global, kFM_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_soilcomp%set_grid_dimensions(     nx_global, ny_global, kSOILCOMP_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_gecros%set_grid_dimensions(       nx_global, ny_global, kGECROS_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_croptype%set_grid_dimensions(     nx_global, ny_global, kCROP_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_monthly%set_grid_dimensions(      nx_global, ny_global, kMONTH_GRID_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_lake%set_grid_dimensions(         nx_global, ny_global, kLAKE_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_lake_soisno%set_grid_dimensions(  nx_global, ny_global, kLAKE_SOISNO_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_lake_soi%set_grid_dimensions(     nx_global, ny_global, kLAKE_SOI_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_lake_soisno_1%set_grid_dimensions(nx_global, ny_global, kLAKE_SOISNO_1_Z, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order)
+        call this%grid_hlm%set_grid_dimensions(     nx_global, ny_global, 90, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order) !! MJ added
+        call this%grid_Sx%set_grid_dimensions(     nx_global, ny_global, nz_global, 72, image=my_index, comms=this%compute_comms, global_nz=max_halo_nz, adv_order=adv_order) !! MJ added
 
         call this%global_grid_2d%set_grid_dimensions(   nx_global, ny_global, 0)
         call this%global_grid%set_grid_dimensions(   nx_global, ny_global, nz_global)
@@ -2350,6 +2666,8 @@ contains
         this%ximages = this%grid%ximages
         this%yimg = this%grid%yimg
         this%yimages = this%grid%yimages
+
+        if (STD_OUT_PE) write(*,*) 'Domain decomposed into (',this%ximages,'x',this%yimages,') compute processes.'
 
         this%north_boundary = (this%grid%yimg == this%grid%yimages)
         this%south_boundary = (this%grid%yimg == 1)
@@ -2367,7 +2685,7 @@ contains
         this%neighborhood_max = max(nsmooth,8)
         
         !Considering blocking terrain...
-        if (options%physics%windtype == kLINEAR_ITERATIVE_WINDS .or. options%physics%windtype ==  kITERATIVE_WINDS) then
+        if (options%physics%windtype == kITERATIVE_WINDS) then
             this%neighborhood_max = int(max(4000.0/this%dx,1.0))
         endif
         
@@ -2376,6 +2694,12 @@ contains
             this%neighborhood_max = max(this%neighborhood_max,floor(max(1.0,(options%wind%TPI_dmax+options%wind%Sx_dmax)/this%dx)))
         endif
         
+        !Considering terrain reflected shortwave radius...
+        if (options%rad%terrain_shading .and. options%rad%terrain_refl_radius > 0) then
+            this%neighborhood_max = max(this%neighborhood_max, &
+                nint(options%rad%terrain_refl_radius / this%dx))
+        endif
+
         this%ihs=max(this%grid%ims-this%neighborhood_max,this%grid%ids); this%ihe=min(this%grid%ime+this%neighborhood_max,this%grid%ide)
         this%jhs=max(this%grid%jms-this%neighborhood_max,this%grid%jds); this%jhe=min(this%grid%jme+this%neighborhood_max,this%grid%jde)
         this%khs=this%grid%kms;                                          this%khe=this%grid%kme
@@ -2563,11 +2887,17 @@ contains
         ! this%geo and forcing%geo have to be of class interpolable
         ! which means they must contain lat, lon, z, geolut, and vLUT components
 
-        call geo_LUT(this%geo,    forcing%geo)
-        call geo_LUT(this%geo_agl,forcing%geo_agl)
-        call geo_LUT(this%geo_u,  forcing%geo_u)
-        call geo_LUT(this%geo_v,  forcing%geo_v)
-
+        if (options%general%debug) then
+            call geo_LUT(this%geo,    forcing%geo, err_msg='Hi-res: domain%geo   Low-res: forcing%geo')
+            call geo_LUT(this%geo_agl,forcing%geo_agl, err_msg='Hi-res: domain%geo_agl   Low-res: forcing%geo_agl')
+            call geo_LUT(this%geo_u,  forcing%geo_u, err_msg='Hi-res: domain%geo_u   Low-res: forcing%geo_u')
+            call geo_LUT(this%geo_v,  forcing%geo_v, err_msg='Hi-res: domain%geo_v   Low-res: forcing%geo_v')
+        else
+            call geo_LUT(this%geo,    forcing%geo)
+            call geo_LUT(this%geo_agl,forcing%geo_agl)
+            call geo_LUT(this%geo_u,  forcing%geo_u)
+            call geo_LUT(this%geo_v,  forcing%geo_v)
+        end if
         if (allocated(forcing%z)) then  ! In case of external 2D forcing data, skip the VLUTs.
 
             ! This function will do any necessary interpolation of z if it is on interface, or
@@ -2578,10 +2908,14 @@ contains
             forc_v_from_mass%lat = forcing%geo%lat
             forc_v_from_mass%lon = forcing%geo%lon
 
-            call geo_LUT(this%geo_u, forc_u_from_mass)
-            
-            call geo_LUT(this%geo_v, forc_v_from_mass)
-            
+            if (options%general%debug) then
+                call geo_LUT(this%geo_u, forc_u_from_mass, err_msg='Hi-res: domain%geo_u   Low-res: forc_u_from_mass')
+                call geo_LUT(this%geo_v, forc_v_from_mass, err_msg='Hi-res: domain%geo_v   Low-res: forc_v_from_mass')
+            else
+                call geo_LUT(this%geo_u, forc_u_from_mass)
+                call geo_LUT(this%geo_v, forc_v_from_mass)
+            end if
+
             nz = ubound(forcing%z,  2)
             ims = lbound(this%geo_u%z,1)
             ime = ubound(this%geo_u%z,1)
@@ -2676,7 +3010,18 @@ contains
             call vLUT(this%geo_agl,   forcing%geo_agl)
             call vLUT(this%geo_u, forcing%geo_u)
             call vLUT(this%geo_v, forcing%geo_v)
-                        
+
+            ! Enter LUT and z data on device for GPU-accelerated forcing interpolation
+            !$acc enter data copyin(forcing%geo%geolut%x, forcing%geo%geolut%y, forcing%geo%geolut%w)
+            !$acc enter data copyin(forcing%geo_u%geolut%x, forcing%geo_u%geolut%y, forcing%geo_u%geolut%w)
+            !$acc enter data copyin(forcing%geo_v%geolut%x, forcing%geo_v%geolut%y, forcing%geo_v%geolut%w)
+            !$acc enter data copyin(forcing%geo%vert_lut%z, forcing%geo%vert_lut%w)
+            !$acc enter data copyin(forcing%geo_agl%vert_lut%z, forcing%geo_agl%vert_lut%w)
+            !$acc enter data copyin(forcing%geo_u%vert_lut%z, forcing%geo_u%vert_lut%w)
+            !$acc enter data copyin(forcing%geo_v%vert_lut%z, forcing%geo_v%vert_lut%w)
+            !$acc enter data copyin(forcing%geo%z)
+            !$acc enter data copyin(this%geo%z)
+
             ! check that the forcing z is higher than the domain z
             ! if ( maxval(forcing%z) < maxval(this%geo%z) ) then
             !     write(*,*) "ERROR: Forcing or parent-nest z is lower than domain z."
@@ -2690,14 +3035,14 @@ contains
         end if
         
 
-    end subroutine
+    end subroutine setup_geo_interpolation
 
     subroutine init_relax_filters(this,options)
         implicit none
         class(domain_t),    intent(inout) :: this
         type(options_t),    intent(in)     :: options
         integer :: hs, k, i
-        real, dimension(FILTER_WIDTH) :: rs, rs_r
+        real, dimension(this%FILTER_WIDTH) :: rs, rs_r
         logical :: corner
         !Setup relaxation filters, start with 2D then expand for 3D version
         
@@ -2709,7 +3054,7 @@ contains
         hs = this%grid%halo_size
 
         !relaxation boundary -- set to be 7 for default
-        FILTER_WIDTH = min(FILTER_WIDTH,(this%ime-this%ims-hs),(this%jme-this%jms-hs))
+        this%FILTER_WIDTH = min(this%FILTER_WIDTH,(this%ime-this%ims-hs),(this%jme-this%jms-hs))
         
         if (options%forcing%relax_filters) then
             rs = (/0.9, 0.75, 0.6, 0.5, 0.4, 0.25, 0.1 /)
@@ -2724,33 +3069,33 @@ contains
         if (this%west_boundary) then
             relax_filter(this%ims:this%ims+hs-1,this%jms:this%jme) = 1.0
             do k=this%jms,this%jme
-                relax_filter(this%ims+hs:this%ims+hs+FILTER_WIDTH-1,k) = rs(1:FILTER_WIDTH)
+                relax_filter(this%ims+hs:this%ims+hs+this%FILTER_WIDTH-1,k) = rs(1:this%FILTER_WIDTH)
             enddo
         endif
         if (this%east_boundary) then
             relax_filter(this%ime-hs+1:this%ime,this%jms:this%jme) = 1.0
             do k=this%jms,this%jme
-                relax_filter(this%ime-hs-FILTER_WIDTH+1:this%ime-hs,k) = rs_r(1:FILTER_WIDTH)        
+                relax_filter(this%ime-hs-this%FILTER_WIDTH+1:this%ime-hs,k) = rs_r(1:this%FILTER_WIDTH)        
             enddo
         endif
         if (this%north_boundary) then
             relax_filter(this%ims:this%ime,this%jme-hs+1:this%jme) = 1.0
             do k=this%ims,this%ime
-                relax_filter(k,this%jme-hs-FILTER_WIDTH+1:this%jme-hs) = rs_r(1:FILTER_WIDTH)
+                relax_filter(k,this%jme-hs-this%FILTER_WIDTH+1:this%jme-hs) = rs_r(1:this%FILTER_WIDTH)
             enddo
         endif
         if (this%south_boundary) then
             relax_filter(this%ims:this%ime,this%jms:this%jms+hs-1) = 1.0
             do k=this%ims,this%ime
-                relax_filter(k,this%jms+hs:this%jms+hs+FILTER_WIDTH-1) = rs(1:FILTER_WIDTH)
+                relax_filter(k,this%jms+hs:this%jms+hs+this%FILTER_WIDTH-1) = rs(1:this%FILTER_WIDTH)
             enddo
         endif
         if (this%north_boundary .and. this%west_boundary) then
             relax_filter(this%ims:this%ims+hs-1,this%jms:this%jme) = 1.0
             relax_filter(this%ims:this%ime,this%jme-hs+1:this%jme) = 1.0
 
-            do i = 1, FILTER_WIDTH
-                do k = 1, FILTER_WIDTH
+            do i = 1, this%FILTER_WIDTH
+                do k = 1, this%FILTER_WIDTH
                     relax_filter(this%ims+hs+i-1,this%jme-hs-k+1) = rs(min(i,k))
                 enddo
             enddo
@@ -2759,8 +3104,8 @@ contains
             relax_filter(this%ime-hs+1:this%ime,this%jms:this%jme) = 1.0
             relax_filter(this%ims:this%ime,this%jme-hs+1:this%jme) = 1.0
 
-            do i = 1, FILTER_WIDTH
-                do k = 1, FILTER_WIDTH
+            do i = 1, this%FILTER_WIDTH
+                do k = 1, this%FILTER_WIDTH
                     relax_filter(this%ime-hs-i+1,this%jme-hs-k+1) = rs(min(i,k))
                 enddo
             enddo
@@ -2770,8 +3115,8 @@ contains
             relax_filter(this%ims:this%ims+hs-1,this%jms:this%jme) = 1.0
             relax_filter(this%ims:this%ime,this%jms:this%jms+hs-1) = 1.0
 
-            do i = 1, FILTER_WIDTH
-                do k = 1, FILTER_WIDTH
+            do i = 1, this%FILTER_WIDTH
+                do k = 1, this%FILTER_WIDTH
                     relax_filter(this%ims+hs+i-1,this%jms+hs+k-1) = rs(min(i,k))
                 enddo
             enddo
@@ -2781,8 +3126,8 @@ contains
             relax_filter(this%ime-hs+1:this%ime,this%jms:this%jme) = 1.0
             relax_filter(this%ims:this%ime,this%jms:this%jms+hs-1) = 1.0
 
-            do i = 1, FILTER_WIDTH
-                do k = 1, FILTER_WIDTH
+            do i = 1, this%FILTER_WIDTH
+                do k = 1, this%FILTER_WIDTH
                     relax_filter(this%ime-hs-i+1,this%jms+hs+k-1) = rs(min(i,k))
                 enddo
             enddo
@@ -2810,45 +3155,100 @@ contains
         implicit none
         class(domain_t),    intent(inout) :: this
 
-        type(time_delta_t)  :: dt
         ! temporary to hold the variable to be interpolated to
-        type(variable_t) :: var_to_update
-        integer :: i, var_indx
+        integer :: i, k, j, n, var_indx
+        real :: dt_seconds, forcing_dt_seconds, forcing_elapsed_local
 
-        dt = this%next_input - this%sim_time
+        dt_seconds = this%next_input%seconds() - this%sim_time%seconds()
+        forcing_dt_seconds = dt_seconds
+        this%forcing_elapsed = 0.0
 
         ! check if the difference between the simulation time and next_input is less than an input_dt
-        ! if so, this signals that we are in between two input times, so advance the state of the variables%data_3d
-        ! to the simulation time
+        ! if so, this signals that we are in between two input times (restart scenario).
+        ! Forcing rates use full input_dt (actual interval between the two forcing states).
+        ! Domain variable rates use dt_seconds (remaining time to reach the target state).
+        ! After computing forcing rates, we advance forcing_hi%data by the elapsed time.
 
         !include "-1" to accomodate rounding errors
-        if (dt%seconds() < (this%input_dt%seconds()-1)) call dt%set(seconds= (this%input_dt%seconds() - dt%seconds()) )
+        if (dt_seconds < (this%input_dt%seconds()-1)) then
+            forcing_dt_seconds = this%input_dt%seconds()
+            this%forcing_elapsed = forcing_dt_seconds - dt_seconds
+        endif
 
+        if (dt_seconds <= 10.0) then
+            write(*,*) "WARNING: In domain_obj::update_delta_fields, dt_seconds <= 10.0"
+        endif
+        
         ! Now iterate through the dictionary as long as there are more elements present
-        do i = 1,size(this%forcing_hi)
+        forcing_elapsed_local = this%forcing_elapsed
+        do n = 1,size(this%forcing_hi)
+            associate(forcing_hi => this%forcing_hi(n))
             !Update delta fields on the high-resolution forcing varaibles...
-
-            if (this%forcing_hi(i)%two_d) then
-                this%forcing_hi(i)%dqdt_2d = (this%forcing_hi(i)%dqdt_2d - this%forcing_hi(i)%data_2d) / dt%seconds()
-            else if (this%forcing_hi(i)%three_d) then
-                this%forcing_hi(i)%dqdt_3d = (this%forcing_hi(i)%dqdt_3d - this%forcing_hi(i)%data_3d) / dt%seconds()
+            ! Use forcing_dt_seconds (full input_dt) so rates are correct even on restart between forcing times.
+            ! Then advance data_*d by elapsed time so the base state matches the current sim_time.
+            if (this%forcing_hi(n)%two_d) then
+                associate(fh_dqdt => forcing_hi%dqdt_2d, fh_data => forcing_hi%data_2d)
+                !$acc kernels present(fh_dqdt, fh_data)
+                fh_dqdt = (fh_dqdt - fh_data) / forcing_dt_seconds
+                !$acc end kernels
+                if (forcing_elapsed_local > 0.0) then
+                    !$acc kernels present(fh_data, fh_dqdt)
+                    fh_data = fh_data + fh_dqdt * forcing_elapsed_local
+                    !$acc end kernels
+                endif
+                end associate
+            else if (this%forcing_hi(n)%three_d) then
+                associate(fh_dqdt => forcing_hi%dqdt_3d, fh_data => forcing_hi%data_3d)
+                !$acc kernels present(fh_dqdt, fh_data)
+                fh_dqdt = (fh_dqdt - fh_data) / forcing_dt_seconds
+                !$acc end kernels
+                if (forcing_elapsed_local > 0.0) then
+                    !$acc kernels present(fh_data, fh_dqdt)
+                    fh_data = fh_data + fh_dqdt * forcing_elapsed_local
+                    !$acc end kernels
+                endif
+                end associate
             endif
 
             ! now update delta fields for domain variables
-            var_indx = get_varindx(trim(this%forcing_hi(i)%name))
-            var_to_update = get_varmeta(var_indx)
-
-            if (var_to_update%force_boundaries) cycle
-
-            if (var_to_update%two_d) then
-                this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d = (this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d - this%vars_2d(this%var_indx(var_indx)%v)%data_2d) / dt%seconds()
-            else if (var_to_update%three_d) then
-                this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d = (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d - this%vars_3d(this%var_indx(var_indx)%v)%data_3d) / dt%seconds()
+            var_indx = forcing_hi%id
+            if (.not.(forcing_hi%force_boundaries)) then
+                if (forcing_hi%two_d) then
+                    associate(v2d_dqdt => this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d, &
+                              v2d_data => this%vars_2d(this%var_indx(var_indx)%v)%data_2d, &
+                              ims => this%vars_2d(this%var_indx(var_indx)%v)%grid%ims, &
+                              ime => this%vars_2d(this%var_indx(var_indx)%v)%grid%ime, &
+                              jms => this%vars_2d(this%var_indx(var_indx)%v)%grid%jms, &
+                              jme => this%vars_2d(this%var_indx(var_indx)%v)%grid%jme)
+                    !$acc parallel loop gang vector collapse(2) present(v2d_dqdt, v2d_data, ims, ime, jms, jme)
+                    do j = jms, jme
+                        do i = ims, ime
+                            v2d_dqdt(i,j) = (v2d_dqdt(i,j) - v2d_data(i,j)) / dt_seconds
+                        enddo
+                    enddo
+                    end associate
+                else if (this%forcing_hi(n)%three_d) then
+                    associate(v3d_dqdt => this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d, &
+                              v3d_data => this%vars_3d(this%var_indx(var_indx)%v)%data_3d, &
+                              ims => this%vars_3d(this%var_indx(var_indx)%v)%grid%ims, &
+                              ime => this%vars_3d(this%var_indx(var_indx)%v)%grid%ime, &
+                              kms => this%vars_3d(this%var_indx(var_indx)%v)%grid%kms, &
+                              kme => this%vars_3d(this%var_indx(var_indx)%v)%grid%kme, &
+                              jms => this%vars_3d(this%var_indx(var_indx)%v)%grid%jms, &
+                              jme => this%vars_3d(this%var_indx(var_indx)%v)%grid%jme)
+                    !$acc parallel loop gang vector collapse(3) present(v3d_dqdt, v3d_data, ims, ime, kms, kme, jms, jme)
+                    do j = jms, jme
+                        do k = kms, kme
+                            do i = ims, ime
+                                v3d_dqdt(i,k,j) = (v3d_dqdt(i,k,j) - v3d_data(i,k,j)) / dt_seconds
+                            enddo
+                        enddo
+                    enddo
+                    end associate
+                endif
             endif
-            
+            end associate
         enddo
-
-
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
         ! this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d = (this%vars_3d(this%var_indx(kVARS%w)%v)%dqdt_3d - this%vars_3d(this%var_indx(kVARS%w)%v)%data_3d) / dt%seconds()
@@ -2869,106 +3269,163 @@ contains
         class(domain_t),    intent(inout) :: this
         type(options_t), intent(in)       :: options
         real, intent(in)                  :: dt
-        integer :: ims, ime, jms, jme
+        integer :: ims, ime, jms, jme, kms, kme
         ! temporary to hold the variable to be interpolated to
-        type(variable_t) :: var_to_update
-        integer :: i, k, j, var_indx, n
+        type(meta_data_t) :: var_to_update
+        integer :: i, k, j, p, var_indx, n
+        integer, dimension(4) :: ims_b, ime_b, jms_b, jme_b
         real    :: dt_h
-        logical :: do_boundary, is_wind, is_w_real
-        
+        logical :: do_boundary, do_west, do_east, do_north, do_south, is_wind, is_w_real
+
         !calculate dt in units of hours
         dt_h = dt/3600.0
 
+        do_west = (this%ims < this%ids+this%grid%halo_size+this%FILTER_WIDTH)
+        do_east = (this%ime > this%ide-this%grid%halo_size-this%FILTER_WIDTH)
+        do_south = (this%jms < this%jds+this%grid%halo_size+this%FILTER_WIDTH)
+        do_north = (this%jme > this%jde-this%grid%halo_size-this%FILTER_WIDTH)
+
+        do_boundary = (do_west .or. do_east .or. do_north .or. do_south)
+
+        associate( ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, halo_size => this%grid%halo_size, filter_width => this%FILTER_WIDTH)
+        ims_b = 0; ime_b = 0; jms_b = 0; jme_b = 0
+
+        if (do_boundary) then
+            if (do_west) ims_b(1) = ims; ime_b(1) = ims+filter_width+halo_size-1; jms_b(1) = jms; jme_b(1) = jme;
+            if (do_east) ims_b(2) = ime-filter_width-halo_size+1; ime_b(2) = ime; jms_b(2) = jms; jme_b(2) = jme;
+            if (do_north) ims_b(3) = ims; ime_b(3) = ime; jms_b(3) = jme-filter_width-halo_size+1; jme_b(3) = jme;
+            if (do_south) ims_b(4) = ims; ime_b(4) = ime; jms_b(4) = jms; jme_b(4) = jms+filter_width+halo_size-1;
+
+            ! limit vertical extent of west and east boundaries to the extent of the north/south indices
+            ! this prevents double-calculating points in the corners
+            if (do_west .and. do_south) jms_b(1) = max(jms_b(1),jme_b(4)+1)
+            if (do_east .and. do_south) jms_b(2) = max(jms_b(2),jme_b(4)+1)
+
+            if (do_west .and. do_north) jme_b(1) = min(jme_b(1),jms_b(3)-1)
+            if (do_east .and. do_north) jme_b(2) = min(jme_b(2),jms_b(3)-1)
+        endif
+        end associate
+        !$acc data copyin(ims_b, ime_b, jms_b, jme_b)
+
         do n = 1,size(this%forcing_hi)
 
-            var_indx = get_varindx(trim(this%forcing_hi(n)%name))
-            var_to_update = get_varmeta(var_indx)            
+            var_indx = this%forcing_hi(n)%id
             is_w_real = (this%var_indx(var_indx)%v == this%var_indx(kVARS%w_real)%v)
             is_wind = (this%var_indx(var_indx)%v == this%var_indx(kVARS%u)%v) .or. (this%var_indx(var_indx)%v == this%var_indx(kVARS%v)%v) .or. is_w_real
-
-            if (var_to_update%two_d) then
+            if (this%forcing_hi(n)%two_d) then
                 ims = this%vars_2d(this%var_indx(var_indx)%v)%grid%ims
                 ime = this%vars_2d(this%var_indx(var_indx)%v)%grid%ime
                 jms = this%vars_2d(this%var_indx(var_indx)%v)%grid%jms
                 jme = this%vars_2d(this%var_indx(var_indx)%v)%grid%jme
     
-                do_boundary = (ims < this%ids+this%grid%halo_size+FILTER_WIDTH) .or. (ime > this%ide-this%grid%halo_size-FILTER_WIDTH) .or. &
-                    (jms < this%jds+this%grid%halo_size+FILTER_WIDTH) .or. (jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
+                associate( var_data => this%vars_2d(this%var_indx(var_indx)%v)%data_2d, &
+                           var_dqdt => this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d, &
+                           f_data => this%forcing_hi(n)%data_2d, &
+                           f_dqdt => this%forcing_hi(n)%dqdt_2d, &
+                           relax_filter => this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d)
 
                 ! apply forcing throughout the domain for 2D diagnosed variables (e.g. SST, SW)
-                if (.not.(var_to_update%force_boundaries)) then
-                    do concurrent (j = jms:jme, i = ims:ime)
-                        this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) + (this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d(i,j) * dt)
-                        this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = max(this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j),0.0)
+                if (.not.(this%forcing_hi(n)%force_boundaries)) then
+                    !$acc parallel loop gang vector collapse(2) present(var_data, var_dqdt, f_data, f_dqdt)
+                    do j = jms,jme
+                        do i = ims,ime
+                            var_data(i,j) = var_data(i,j) + (var_dqdt(i,j) * dt)
+                            var_data(i,j) = max(var_data(i,j),0.0)
+                        enddo
                     enddo
                 else if (do_boundary) then
-                    if (any(this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d > 0.0)) then
+                    !$acc parallel present(var_data, f_data, f_dqdt, relax_filter, ims_b, ime_b, jms_b, jme_b)
+                    do p = 1,4
+                        if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
-                        do concurrent (j = jms:jme, i = ims:ime)
-                            if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) > 0.0) then
-                                this%forcing_hi(n)%data_2d(i,j) = this%forcing_hi(n)%data_2d(i,j) + (this%forcing_hi(n)%dqdt_2d(i,j) * dt)
-                                this%forcing_hi(n)%data_2d(i,j) = max(this%forcing_hi(n)%data_2d(i,j),0.0)
+                        !$acc loop gang vector collapse(2)
+                        do j = jms_b(p),jme_b(p)
+                            do i = ims_b(p),ime_b(p)
+                                if (relax_filter(i,j) > 0.0) then
+                                    f_data(i,j) = f_data(i,j) + (f_dqdt(i,j) * dt)
+                                    f_data(i,j) = max(f_data(i,j),0.0)
 
-                                if (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) == 1.0) then
-                                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%forcing_hi(n)%data_2d(i,j)
-                                else
-                                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) + &
-                                                    (this%vars_2d(this%var_indx(kVARS%relax_filter_2d)%v)%data_2d(i,j) * dt_h) * &
-                                                    (this%forcing_hi(n)%data_2d(i,j) - this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j))
+                                    if (relax_filter(i,j) == 1.0) then
+                                        var_data(i,j) = f_data(i,j)
+                                    else
+                                        var_data(i,j) = var_data(i,j) + &
+                                                        (relax_filter(i,j) * dt_h) * &
+                                                        (f_data(i,j) - var_data(i,j))
 
-                                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j) = max(this%vars_2d(this%var_indx(var_indx)%v)%data_2d(i,j),0.0)
+                                        var_data(i,j) = max(var_data(i,j),0.0)
+                                    endif
                                 endif
-                            endif
+                            enddo
                         enddo
-                    endif
-                endif 
-
-            else if (var_to_update%three_d) then
+                    enddo
+                    !$acc end parallel
+                endif
+                end associate
+            else if (this%forcing_hi(n)%three_d) then
                 ims = this%vars_3d(this%var_indx(var_indx)%v)%grid%ims
                 ime = this%vars_3d(this%var_indx(var_indx)%v)%grid%ime
+                kms = this%vars_3d(this%var_indx(var_indx)%v)%grid%kms
+                kme = this%vars_3d(this%var_indx(var_indx)%v)%grid%kme
                 jms = this%vars_3d(this%var_indx(var_indx)%v)%grid%jms
                 jme = this%vars_3d(this%var_indx(var_indx)%v)%grid%jme
 
-                !see if we are on the boundary of the domain
-                do_boundary = (ims < this%ids+this%grid%halo_size+FILTER_WIDTH) .or. (ime > this%ide-this%grid%halo_size-FILTER_WIDTH) .or. &
-                               (jms < this%jds+this%grid%halo_size+FILTER_WIDTH) .or. (jme > this%jde-this%grid%halo_size-FILTER_WIDTH)
+                associate( var_data => this%vars_3d(this%var_indx(var_indx)%v)%data_3d, &
+                           var_dqdt => this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d, &
+                           f_data => this%forcing_hi(n)%data_3d, &
+                           f_dqdt => this%forcing_hi(n)%dqdt_3d, &
+                           relax_filter => this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d)
 
                 ! only apply forcing data on the boundaries for advected scalars (e.g. temperature, humidity)
                 ! applying forcing to the edges has already been handeled when updating dqdt using the relaxation filter
-                if (.not.(var_to_update%force_boundaries)) then
-                    do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
-                        this%forcing_hi(n)%data_3d(i,k,j)    = this%forcing_hi(n)%data_3d(i,k,j) + (this%forcing_hi(n)%dqdt_3d(i,k,j) * dt)
-                        if (.not.(is_wind)) this%forcing_hi(n)%data_3d(i,k,j) = max(this%forcing_hi(n)%data_3d(i,k,j),0.0)
+                if (.not.(this%forcing_hi(n)%force_boundaries)) then
+                    !$acc parallel loop gang vector collapse(3) present(var_data, var_dqdt, f_data, f_dqdt)
+                    do j = jms,jme
+                        do k = kms, kme
+                            do i = ims,ime
+                                f_data(i,k,j)    = f_data(i,k,j) + (f_dqdt(i,k,j) * dt)
+                                if (.not.(is_wind)) f_data(i,k,j) = max(f_data(i,k,j),0.0)
 
-                        if (.not.(is_w_real)) this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
-                                                        (this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d(i,k,j) * dt)
-                                                        
-                        if (.not.(is_wind)) this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = max(this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j),0.0)
+                                if (.not.(is_w_real)) var_data(i,k,j) = var_data(i,k,j) + &
+                                                                (var_dqdt(i,k,j) * dt)
+
+                                if (.not.(is_wind)) var_data(i,k,j) = max(var_data(i,k,j),0.0)
+                            enddo
+                        enddo
                     enddo
                 else if (do_boundary) then
-                    if (any(this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d > 0.0)) then
+                    !$acc parallel present(var_data, f_data, f_dqdt, relax_filter, ims_b, ime_b, jms_b, jme_b)
+                    do p = 1,4
+                        if (ims_b(p)*ime_b(p)*jms_b(p)*jme_b(p) == 0) cycle
                         !Update forcing data to current time step
-                        do concurrent (j = jms:jme, k = this%kms:this%kme, i = ims:ime)
-                            if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) > 0.0) then
-                                this%forcing_hi(n)%data_3d(i,k,j) = this%forcing_hi(n)%data_3d(i,k,j) + (this%forcing_hi(n)%dqdt_3d(i,k,j) * dt)
-                                this%forcing_hi(n)%data_3d(i,k,j) = max(this%forcing_hi(n)%data_3d(i,k,j),0.0)
+                        !$acc loop gang vector collapse(3)
+                        do j = jms_b(p),jme_b(p)
+                            do k = kms, kme
+                                do i = ims_b(p),ime_b(p)
+                                    if (relax_filter(i,k,j) > 0.0) then
+                                        f_data(i,k,j) = f_data(i,k,j) + (f_dqdt(i,k,j) * dt)
+                                        f_data(i,k,j) = max(f_data(i,k,j),0.0)
 
-                                if (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) == 1.0) then
-                                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%forcing_hi(n)%data_3d(i,k,j)
-                                else
-                                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) + &
-                                                    (this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d(i,k,j) * dt_h) * &
-                                                    (this%forcing_hi(n)%data_3d(i,k,j) - this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j))
+                                        if (relax_filter(i,k,j) == 1.0) then
+                                            var_data(i,k,j) = f_data(i,k,j)
+                                        else
+                                            var_data(i,k,j) = var_data(i,k,j) + &
+                                                            (relax_filter(i,k,j) * dt_h) * &
+                                                            (f_data(i,k,j) - var_data(i,k,j))
 
-                                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j) = max(this%vars_3d(this%var_indx(var_indx)%v)%data_3d(i,k,j),0.0)
-                                endif
-                            endif
+                                            var_data(i,k,j) = max(var_data(i,k,j),0.0)
+                                        endif
+                                    endif
+                                enddo
+                            enddo
                         enddo
-                    endif
+                    enddo
+                    !$acc end parallel
+
                 endif
+                end associate
             endif
         enddo
-
+        !$acc end data
         ! w has to be handled separately because it is the only variable that can be updated using the delta fields but is not
         ! actually read from disk. Note that if we move to balancing winds every timestep, then it doesn't matter.
         ! if (.not.(options%adv%advect_density)) then
@@ -2994,90 +3451,151 @@ contains
         ! internal field always present for value of optional "update"
         logical :: update_only
         ! temporary to hold the variable to be interpolated to
-        type(variable_t) :: var_to_interpolate
-        ! temporary to hold the forcing variable to be interpolated from
-        type(variable_t) :: input_data
+        type(meta_data_t) :: var_to_interpolate
+        ! index into forcing variable list for the variable to be interpolated from
+        integer :: input_idx
 
         ! number of layers has to be used when subsetting for update_pressure (for now)
-        integer :: nz, i, var_indx, pressure_indx, pot_temp_indx
-        logical :: var_is_u, var_is_v, var_is_pressure, var_is_potential_temp, agl_interp
+        integer :: nz, p, var_indx, pressure_indx, pot_temp_indx, i, j, k, dict_indx
+        logical :: var_is_u, var_is_v, var_is_pressure, var_is_potential_temp, agl_interp, force_boundaries, var_is_fm
 
         update_only = .False.
         if (present(update)) update_only = update
 
-
         ! Now iterate through the dictionary as long as there are more elements present
-        do i = 1,size(this%forcing_hi)
+        do p = 1,size(this%forcing_hi)
 
-            var_indx = get_varindx(trim(this%forcing_hi(i)%name))
-            var_to_interpolate = get_varmeta(var_indx)
+            ! var_indx = get_varindx(trim(this%forcing_hi(p)%name))
+            var_indx = this%forcing_hi(p)%id
 
-            if (var_to_interpolate%two_d) then
-                var_to_interpolate = this%vars_2d(this%var_indx(var_indx)%v)
-            else if (var_to_interpolate%three_d) then
-                var_to_interpolate = this%vars_3d(this%var_indx(var_indx)%v)
-            endif
+            var_to_interpolate = get_varmeta(var_indx, force_boundaries=force_boundaries)
 
-            ! get the associated forcing data
-            input_data = forcing%variables%get_var(var_to_interpolate%forcing_var)
+            
+            ! get the index of the associated forcing data (zero-copy)
+            input_idx = forcing%variables%get_var_idx(var_indx)
             ! interpolate
-            if (var_to_interpolate%two_d) then
+            if (forcing%variables%var_list(input_idx)%var%two_d) then
+                associate(var_data => this%vars_2d(this%var_indx(var_indx)%v)%data_2d, &
+                          var_dqdt => this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d, &
+                          fh_data => this%forcing_hi(p)%data_2d, &
+                          fh_dqdt => this%forcing_hi(p)%dqdt_2d)
                 if (update_only) then
-                    call geo_interp2d(this%forcing_hi(i)%dqdt_2d, input_data%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(this%forcing_hi(p)%dqdt_2d, forcing%variables%var_list(input_idx)%var%data_2d, forcing%geo%geolut)
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    if (.not.(var_to_interpolate%force_boundaries)) this%vars_2d(this%var_indx(var_indx)%v)%dqdt_2d = this%forcing_hi(i)%dqdt_2d
+                     if (.not.(force_boundaries)) then
+                    !$acc kernels present(fh_dqdt, var_dqdt)
+                    var_dqdt = fh_dqdt
+                    !$acc end kernels
+                    endif
                 else
-                    call geo_interp2d(this%forcing_hi(i)%data_2d, input_data%data_2d, forcing%geo%geolut)
+                    call geo_interp2d(this%forcing_hi(p)%data_2d, forcing%variables%var_list(input_idx)%var%data_2d, forcing%geo%geolut)
                     !If this is an initialization step, copy high res directly over to domain
-                    this%vars_2d(this%var_indx(var_indx)%v)%data_2d = this%forcing_hi(i)%data_2d
+                    !$acc kernels present(fh_data, var_data)
+                    var_data = fh_data
+                    !$acc end kernels
                 endif
+                end associate
             else
-
-                var_is_pressure = (trim(var_to_interpolate%forcing_var) == trim(this%vars_3d(this%var_indx(kVARS%pressure)%v)%forcing_var))
-                var_is_potential_temp = (trim(var_to_interpolate%forcing_var) == trim(this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%forcing_var))
-                var_is_u = (trim(var_to_interpolate%forcing_var) == trim(this%vars_3d(this%var_indx(kVARS%u)%v)%forcing_var))
-                var_is_v = (trim(var_to_interpolate%forcing_var) == trim(this%vars_3d(this%var_indx(kVARS%v)%v)%forcing_var))
+                var_is_pressure = (forcing%variables%var_list(input_idx)%var%id == kVARS%pressure)
+                var_is_potential_temp = (forcing%variables%var_list(input_idx)%var%id == kVARS%potential_temperature)
+                var_is_u = (forcing%variables%var_list(input_idx)%var%id == kVARS%u)
+                var_is_v = (forcing%variables%var_list(input_idx)%var%id == kVARS%v)
+                var_is_fm = .False.
+                if (size(var_to_interpolate%dimensions) >= 2) then
+                    var_is_fm = (trim(var_to_interpolate%dimensions(2)) == "level_fm")
+                endif
                 !If we are dealing with anything but pressure and temperature (basically mass/number species), consider height above ground
                 !for interpolation. If the user has not selected AGL interpolation in the namelist, this will result in standard z-interpolation
                 agl_interp = .not.(var_is_pressure .or. var_is_potential_temp)
 
+                associate(var_data => this%vars_3d(this%var_indx(var_indx)%v)%data_3d, &
+                          var_dqdt => this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d, &
+                          fh_data => this%forcing_hi(p)%data_3d, &
+                          fh_dqdt => this%forcing_hi(p)%dqdt_3d)
+
                 ! if just updating, use the dqdt variable otherwise use the 3D variable
                 if (update_only) then
-                    call interpolate_variable(this%forcing_hi(i)%dqdt_3d, input_data, forcing, this, &
-                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
+                    call interpolate_variable(this%forcing_hi(p)%dqdt_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
+                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth, is_fm_var=var_is_fm)
+                    ! Parallel-consistent post-interpolation smoothing of u/v wind tendencies
+                    if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
+                        call smooth_array(this%forcing_hi(p), windowsize=1, ydim=3, &
+                                          nsmooths=this%nsmooth, halo=this%halo, do_dqdt=.true.)
+                    endif
                     !If this variable is forcing the whole domain, we can copy the next forcing step directly over to domain
-                    if (.not.(var_to_interpolate%force_boundaries).and..not.var_is_u.and..not.var_is_v) this%vars_3d(this%var_indx(var_indx)%v)%dqdt_3d = this%forcing_hi(i)%dqdt_3d
+                    if (.not.(force_boundaries).and..not.var_is_u.and..not.var_is_v) then
+                        !$acc kernels present(fh_dqdt, var_dqdt)
+                        var_dqdt = fh_dqdt
+                        !$acc end kernels
+                    endif
                 else
-                    call interpolate_variable(this%forcing_hi(i)%data_3d, input_data, forcing, this, &
-                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth)
+                    call interpolate_variable(this%forcing_hi(p)%data_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
+                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth, is_fm_var=var_is_fm)
+                    ! Parallel-consistent post-interpolation smoothing of u/v wind fields
+                    if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
+                        call smooth_array(this%forcing_hi(p), windowsize=1, ydim=3, &
+                                          nsmooths=this%nsmooth, halo=this%halo)
+                    endif
                     !If this is an initialization step, copy high res directly over to domain
-                    this%vars_3d(this%var_indx(var_indx)%v)%data_3d = this%forcing_hi(i)%data_3d
+                    !$acc kernels present(fh_data, var_data)
+                    var_data = fh_data
+                    !$acc end kernels
                 endif
-                if (var_is_pressure) pressure_indx = i
-                if (var_is_potential_temp) pot_temp_indx = i
+                end associate
+                if (var_is_pressure) pressure_indx = p
+                if (var_is_potential_temp) pot_temp_indx = p
             endif
-            call forcing%variables%add_var(var_to_interpolate%forcing_var, input_data)
         enddo
 
         !Adjust potential temperature (first) and pressure (second) to account for points below forcing grid
         !Only domain-wide-forced variables are updated with the domain dqdt_3d
+        
+        associate( fp_dqdt => this%forcing_hi(pressure_indx)%dqdt_3d, &
+                   fp_data => this%forcing_hi(pressure_indx)%data_3d, &
+                   ft_dqdt => this%forcing_hi(pot_temp_indx)%dqdt_3d, &
+                   ft_data => this%forcing_hi(pot_temp_indx)%data_3d, &
+                   p_dqdt  => this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d, &
+                   p_data  => this%vars_3d(this%var_indx(kVARS%pressure)%v)%data_3d, &
+                   t_dqdt  => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%dqdt_3d, &
+                   t_data  => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d, &
+                   ims => this%ims, ime => this%ime, jms => this%jms, jme => this%jme, kms => this%kms, kme => this%kme )
         if (update_only) then
-            call adjust_pressure_temp(this%forcing_hi(pressure_indx)%dqdt_3d,this%forcing_hi(pot_temp_indx)%dqdt_3d, forcing%geo%z, this%geo%z)
-            this%vars_3d(this%var_indx(kVARS%pressure)%v)%dqdt_3d = this%forcing_hi(pressure_indx)%dqdt_3d
-            this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%dqdt_3d = this%forcing_hi(pot_temp_indx)%dqdt_3d
+            call adjust_pressure_temp(fp_dqdt, ft_dqdt, forcing%geo%z, this%geo%z)
+            !$acc parallel loop gang vector collapse(3) &
+            !$acc present(fp_dqdt, ft_dqdt, p_dqdt, t_dqdt, &
+            !$acc          jms, jme, kms, kme, ims, ime)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                p_dqdt(i,k,j) = fp_dqdt(i,k,j)
+                t_dqdt(i,k,j) = ft_dqdt(i,k,j)
+            enddo
+            enddo
+            enddo
         else
-            call adjust_pressure_temp(this%forcing_hi(pressure_indx)%data_3d,this%forcing_hi(pot_temp_indx)%data_3d, forcing%geo%z, this%geo%z)
-            this%vars_3d(this%var_indx(kVARS%pressure)%v)%data_3d = this%forcing_hi(pressure_indx)%data_3d
-            this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d = this%forcing_hi(pot_temp_indx)%data_3d
+            call adjust_pressure_temp(fp_data, ft_data, forcing%geo%z, this%geo%z)
+            !$acc parallel loop gang vector collapse(3) &
+            !$acc present(fp_data, ft_data, p_data, t_data, &
+            !$acc          jms, jme, kms, kme, ims, ime)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                p_data(i,k,j) = fp_data(i,k,j)
+                t_data(i,k,j) = ft_data(i,k,j)
+            enddo
+            enddo
+            enddo
         endif
+        end associate
 
         !Ensure that input data for hydrometeors after interpolation have been forced to 0-minimum
-        call this%enforce_limits(update_in=update_only)
+        !call this%enforce_limits(update_in=update_only)
 
         !Perform a diagnostic_update to ensure that all diagnostic variables are set for the new forcing data
         !This will be overwriten as soon as we enter the physics loop, but it is necesery to compute density
         !For the future step so that the wind solver uses both future winds, and future density.
         call this%diagnostic_update(forcing_update=update_only)
+        ! call domain_check(this, error_msg="domain_obj::end_interpolate_forcing")
 
     end subroutine
 
@@ -3094,6 +3612,8 @@ contains
         nz = size(potential_temp, 2)
         ny = size(potential_temp, 3)
 
+        !$acc data present_or_copy(pressure, potential_temp) present_or_copyin(input_z, output_z)
+        !$acc parallel loop gang vector collapse(3) private(dz, p_guess)
         do j = 1, ny
             do i = 1, nx
                 do k = 1, nz
@@ -3103,20 +3623,18 @@ contains
                         !So the current values at these below-indices reflect the temp/pressure of the closest forcing grid cell
                     
                         dz = input_z(i,1,j)-output_z(i,k,j)
-                        
-                        !Assume lapse rate of -6.5ºC/1km
-                        potential_temp(i,k,j) = potential_temp(i,k,j) + 6.5*dz/1000.0
+                                                
+                        !estimate pressure difference 1100 Pa for each 100m difference for exner function
+                        p_guess = pressure(i,k,j) + 1100*dz/100.0
                         
                         !estimate pressure difference 1100 Pa for each 100m difference for exner function
-                        H = 29.3 * (potential_temp(i,k,j) * exner_function(pressure(i,k,j)))
-                        pressure(i,k,j) = pressure(i,k,j) * exp(dz/H)
-                        !pressure(i,k,j) = pressure(i,k,j) * exp( ((gravity/R_d) * dz) / t )
-                    else
-                        exit
+                        pressure(i,k,j) = pressure(i,k,j) * exp( ((gravity/R_d) * dz) / &
+                                                    (potential_temp(i,k,j) * exner_function(p_guess)))
                     endif
                 end do
             enddo
         enddo
+        !$acc end data
 
 
     end subroutine adjust_pressure_temp
@@ -3185,20 +3703,21 @@ contains
     !! calling the appropriate interpolation routine (2D vs 3D) with the appropriate grid (mass, u, v)
     !!
     !! -------------------------------
-    subroutine interpolate_variable(var_data, input_data, forcing, dom, interpolate_agl_in, var_is_u, var_is_v, nsmooth)
+    subroutine interpolate_variable(var_data, input_data, forcing, dom, interpolate_agl_in, var_is_u, var_is_v, nsmooth, is_fm_var)
         implicit none
-        real,            intent(inout) :: var_data(:,:,:)
+        real,  allocatable, intent(inout) :: var_data(:,:,:)
         type(variable_t),   intent(inout) :: input_data
         type(boundary_t),   intent(in)    :: forcing
         type(domain_t),     intent(in)    :: dom
         logical,            intent(in),   optional :: interpolate_agl_in
         logical,            intent(in),   optional :: var_is_u, var_is_v
         integer,            intent(in),   optional :: nsmooth
+        logical,            intent(in),   optional :: is_fm_var
 
         ! note that 3D variables have a different number of vertical levels, so they have to first be interpolated
         ! to the high res horizontal grid, then vertically interpolated to the actual icar domain
         real, allocatable :: temp_3d(:,:,:)
-        logical :: interpolate_agl, uvar, vvar
+        logical :: interpolate_agl, uvar, vvar, fm_var
         integer :: nx, ny, nz, ims, ime, jms, jme
         integer :: windowsize, z
 
@@ -3210,6 +3729,17 @@ contains
         if (present(var_is_v)) vvar = var_is_v
         windowsize = 0
         if (present(nsmooth)) windowsize = nsmooth
+        fm_var = .False.
+        if (present(is_fm_var)) fm_var = is_fm_var
+
+        ! Fine-mesh tracers (qs_fm, ns_fm) share the atmospheric horizontal grid but live on
+        ! their own log-spaced AGL vertical stack. Parent and child both carry kFM_GRID_Z
+        ! levels with the same fractional spacing, so level k maps 1:1 — only the horizontal
+        ! bilinear interpolation is needed.
+        if (fm_var) then
+            call geo_interp(var_data, input_data%data_3d, forcing%geo%geolut)
+            return
+        endif
 
         ims = lbound(var_data,1)
         ime = ubound(var_data,1)
@@ -3218,6 +3748,7 @@ contains
 
         ! allocate a temporary variable to hold the horizontally interpolated data before vertical interpolation
         allocate(temp_3d(ims:ime, size(input_data%data_3d,2), jms:jme ))
+        !$acc enter data create(temp_3d)
 
         ! Sequence of if statements to test if this variable needs to be interpolated onto the staggared grids
         ! This could all be combined by passing in the geo data to use, along with a smoothing flag.
@@ -3241,8 +3772,6 @@ contains
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_u%geolut)
 
             call vinterp(var_data, temp_3d, forcing%geo_u%vert_lut)
-            ! temp_3d = pre_smooth(:,:nz,:) ! no vertical interpolation option
-            if (windowsize > 0) call smooth_array(var_data, windowsize=windowsize, ydim=3)
                         
         ! Interpolate to the v staggered grid
         else if (vvar) then
@@ -3252,10 +3781,11 @@ contains
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_v%geolut)
             
             call vinterp(var_data, temp_3d, forcing%geo_v%vert_lut)
-            ! temp_3d = pre_smooth(:,:nz,:) ! no vertical interpolation option
-            if (windowsize > 0) call smooth_array(var_data, windowsize=windowsize, ydim=3)
         endif
-        
+
+        !$acc exit data delete(temp_3d)
+        deallocate(temp_3d)
+
     end subroutine
 
 

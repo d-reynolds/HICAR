@@ -49,7 +49,7 @@ if [ ! -d ./input ]; then
 fi
 cd input
 
-if [ ! -f ./VEGPARM.TBL ]; then
+if [ ! -f ./NoahmpTable.TBL ]; then
 	echo 'Copying .TBL files needed by NoahMP, which are found in'
 	echo $HICAR_dir/run
 	echo 'to ./input'

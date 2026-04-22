@@ -1,9 +1,12 @@
 module array_utilities
 
+    use variable_interface, only : variable_t
+    use halo_interface,     only : halo_t
+
     implicit none
 
     interface smooth_array
-        module procedure smooth_array_2d, smooth_array_3d
+        module procedure smooth_array_2d, smooth_array_3d, smooth_array_var
     end interface
 
     interface array_offset_x
@@ -189,20 +192,12 @@ contains
         jme = ubound(input_array,2)
 
         if (allocated(output_array)) deallocate(output_array)
-        if (jme > 1) then
-            allocate(output_array(ims:ime,jms:jme+1))
+        allocate(output_array(ims:ime,jms:jme+1))
+        
+        output_array(ims:ime,jms)    = (1.5 * input_array(ims:ime,jms)  - 0.5 * input_array(ims:ime,jms+1))    ! extrapolate past the end
+        output_array(ims:ime,jms+1:jme) = (input_array(ims:ime,jms:jme-1) + input_array(ims:ime,jms+1:jme) ) * 0.5 ! interpolate between points
+        output_array(ims:ime,jme+1) = (1.5 * input_array(ims:ime,jme)  - 0.5 * input_array(ims:ime,jme-1))! extrapolate past the end
 
-            output_array(ims:ime,jms)    = (1.5 * input_array(ims:ime,jms)  - 0.5 * input_array(ims:ime,jms+1))    ! extrapolate past the end
-            output_array(ims:ime,jms+1:jme) = (input_array(ims:ime,jms:jme-1) + input_array(ims:ime,jms+1:jme) ) * 0.5 ! interpolate between points
-            output_array(ims:ime,jme+1) = (1.5 * input_array(ims:ime,jme)  - 0.5 * input_array(ims:ime,jme-1))! extrapolate past the end
-            
-        else ! this came in as essentially a 1D array with y really being in the x position as a result
-            allocate(output_array(ims:ime+1,jms:jme))
-
-        output_array(ims,jms:jme)    = (1.5 * input_array(ims,jms:jme)  - 0.5 * input_array(ims+1,jms:jme))    ! extrapolate past the end
-        output_array(ims+1:ime,jms:jme) = (input_array(ims:ime-1,jms:jme) + input_array(ims+1:ime,jms:jme) ) * 0.5    ! interpolate between points
-        output_array(ime+1,jms:jme) = (1.5 * input_array(ime,jms:jme)  - 0.5 * input_array(ime-1,jms:jme))! extrapolate past the end
-        endif
     end subroutine
 
     subroutine array_offset_y_3d(input_array, output_array)
@@ -332,7 +327,8 @@ contains
         integer,intent(in)::ydim                        !> the dimension to use for the y coordinate
                                                         ! It can be 2, or 3 (but not 1)
         real,allocatable,dimension(:,:,:)::inputwind    !> temporary array to store the input data in
-        integer::i,j,k,nx,ny,nz,startx,endx,starty,endy ! various array indices/bounds
+        integer::i,j,k,nx,ny,nz,startx,endx,starty,endy,ii,jj ! various array indices/bounds
+        integer::di,dk,kk ! stencil loop indices for GPU direct-computation path
 
         ! Intermediate sums to speed up the computation
         ! Because these are accumulating values over the domain, use double precision
@@ -348,88 +344,138 @@ contains
 
         allocate(inputwind(nx,ny,nz)) ! Can't be module level because nx,ny,nz could change between calls,
 
-        inputwind = wind !make a copy so we always use the unsmoothed data when computing the smoothed data
-        ! if (( ( (windowsize*2+1)>nz) .or. ((windowsize*2+1)>nx) ) .and. (ydim==3)) then
-        !     write(*,*) "It is OK to ignore this warning for most idealized (e.g. maybe ~2D) simulations"
-        !     write(*,*) "WARNING smoothing windowsize*2+1 is larger than nx or ny."
-        !     write(*,*) "  This might lead to artifacts in the wind field especially near the borders."
-        !     write(*,*) "  NX         = ", nx
-        !     write(*,*) "  NY         = ", nz
-        !     write(*,*) "  windowsize = ", windowsize
-        !     print*, "Image = ",this_image()
-        ! endif
+        ! GPU path: O(w^2) direct computation — embarrassingly parallel, full GPU occupancy
+        ! CPU path: O(1) sliding window — efficient for large windowsize (e.g. linear_winds)
+#ifdef _OPENACC
+        !$acc data present_or_copy(wind) create(inputwind)
+        !$acc kernels
+        inputwind = wind
+        !$acc end kernels
 
-        !parallelize over a slower dimension (not the slowest because it is MUCH easier this way)
-        ! as long as the inner loops (the array operations) are over the fastest dimension we are mostly OK
+        if (ydim==3) then
+            !$acc parallel loop gang collapse(2) private(cursum, dk, di, kk, ii)
+            do k = 1, nz
+                do j = 1, ny
+                    !$acc loop vector private(cursum)
+                    do i = 1, nx
+                        cursum = 0.0d0
+                        !$acc loop seq
+                        do dk = -windowsize, windowsize
+                            kk = max(1, min(nz, k + dk))
+                            !$acc loop seq
+                            do di = -windowsize, windowsize
+                                ii = max(1, min(nx, i + di))
+                                cursum = cursum + inputwind(ii, j, kk)
+                            enddo
+                        enddo
+                        wind(i,j,k) = cursum / (ncols * ncols)
+                    enddo
+                enddo
+            enddo
+        else ! ydim==2
+            !$acc parallel loop gang collapse(2)
+            do j = 1, ny
+                do k = 1, nz
+                    !$acc loop vector private(startx, endx, starty, endy, cursum, ii, jj)
+                    do i = 1, nx
+                        startx = max(1, i - windowsize)
+                        endx   = min(nx, i + windowsize)
+                        starty = max(1, j - windowsize)
+                        endy   = min(ny, j + windowsize)
+                        cursum = 0.0d0
+                        !$acc loop seq
+                        do jj = starty, endy
+                            !$acc loop seq
+                            do ii = startx, endx
+                                cursum = cursum + inputwind(ii, jj, k)
+                            enddo
+                        enddo
+                        wind(i,j,k) = cursum / ((endx-startx+1)*(endy-starty+1))
+                    enddo
+                enddo
+            enddo
+        endif
+        !$acc end data
+#else
+        inputwind = wind
+
         !$omp parallel firstprivate(windowsize,nx,ny,nz,ydim), &
-        !$omp private(i,j,k,startx,endx,starty,endy, rowsums,rowmeans,nrows,ncols,cursum), &
+        !$omp private(i,j,k,ii,jj,startx,endx,starty,endy, rowsums,rowmeans,nrows,ncols,cursum), &
         !$omp shared(wind,inputwind)
 
-        allocate(rowsums(nx)) !this is only used when ydim=3, so nz is really ny
-        allocate(rowmeans(nx)) !this is only used when ydim=3, so nz is really ny
+        allocate(rowsums(nx))
+        allocate(rowmeans(nx))
         nrows = windowsize * 2 + 1
         ncols = windowsize * 2 + 1
 
         !$omp do schedule(static)
         do j=1,ny
 
-            ! so we pre-compute the sum over rows for each column in the current window
             if (ydim==3) then
-                ! start by adding the outer row n+2 times
-                ! effectively assumes it was set up for the grid cell before the first grid cell
-                ! the first time through the loop will remove one iteration of outer row grid cells
-                rowsums = inputwind(1:nx,j,1) * (windowsize+2)
-                do i=2, min(windowsize,nz)
-                    rowsums = rowsums + inputwind(1:nx, j, i)
+                do i=1,nx
+                    rowsums(i) = inputwind(i,j,1) * (windowsize+2)
+                enddo
+                do ii=2, min(windowsize,nz)
+                    do i=1,nx
+                        rowsums(i) = rowsums(i) + inputwind(i, j, ii)
+                    enddo
                 enddo
                 if (windowsize > nz) then
-                    rowsums = rowsums + inputwind(1:nx,j,nz) * (windowsize-nz)
+                    do i=1,nx
+                        rowsums(i) = rowsums(i) + inputwind(i,j,nz) * (windowsize-nz)
+                    enddo
                 endif
             endif
 
-            ! don't parallelize over this loop because it is much more efficient to be able to assume
-            ! that you ran the previous row in serial for the slow (ydim=3) case
-            do k=1,nz ! note this is y for ydim=3
-                ! ydim=3 for the main model grid which is large and takes a long time
+            do k=1,nz
                 if (ydim==3) then
                     starty  = max(2, k - windowsize)
                     endy    = min(nz, k + windowsize)
-                    rowsums = rowsums - inputwind(1:nx, j, starty-1) + inputwind(1:nx, j, endy)
+                    do i=1,nx
+                        rowsums(i) = rowsums(i) - inputwind(i, j, starty-1) + inputwind(i, j, endy)
+                    enddo
 
-                    ! start by adding the outer row n+2 times
-                    ! effectively assumes it was set up for the grid cell before the first grid cell
-                    ! the first time through the loop will remove one iteration of outer row grid cells
-                    rowmeans = rowsums / nrows
-                    cursum = sum(rowmeans(2:windowsize)) + rowmeans(1) * (windowsize+2)
+                    do i=1,nx
+                        rowmeans(i) = rowsums(i) / nrows
+                    enddo
+                    cursum = rowmeans(1) * (windowsize+2)
+                    do i=2,windowsize
+                        cursum = cursum + rowmeans(i)
+                    enddo
                 endif
 
-                do i=1,nx
-                    if (ydim==3) then
+                if (ydim==3) then
+                    do i=1,nx
                         startx = max(2, i - windowsize)
                         endx   = min(nx, i + windowsize)
                         cursum = cursum - rowmeans(startx-1) + rowmeans(endx)
 
                         wind(i,j,k) = cursum / ncols
+                    enddo
 
-                    else ! ydim==2
-                        ! ydim=2 for the input data which is a small grid, thus cheap so we still use the slow method
-                        !first find the current window bounds
+                else ! ydim==2
+                    do i=1,nx
                         startx=max(1, i - windowsize)
                         endx  =min(nx,i + windowsize)
                         starty=max(1, j - windowsize)
                         endy  =min(ny,j + windowsize)
-                        ! then compute the mean within that window (sum/n)
-                        ! note, artifacts near the borders (mentioned in ydim==3) don't affect this
-                        ! because the borders *should* be well away from the domain
-                        ! if the forcing data are not much larger than the model domain this *could* create issues
-                        wind(i,j,k) = sum(inputwind(startx:endx,starty:endy,k)) &
-                                       / ((endx-startx+1)*(endy-starty+1))
-                    endif
-                enddo
+                        cursum = 0.0d0
+                        do jj=starty,endy
+                            do ii=startx,endx
+                                cursum = cursum + inputwind(ii,jj,k)
+                            enddo
+                        enddo
+                        wind(i,j,k) = cursum / ((endx-startx+1)*(endy-starty+1))
+                    enddo
+                endif
             enddo
         enddo
         !$omp end do
+        deallocate(rowsums)
+        deallocate(rowmeans)
         !$omp end parallel
+#endif
+        deallocate(inputwind)
 
     end subroutine smooth_array_3d
 
@@ -446,39 +492,54 @@ contains
     !!   > call smooth_array_2d(my_array, 1)
     !!     This will smooth the 2D array "my_array" using a 3x3 moving window.
     !!     The result will be stored in "my_array".
-    subroutine smooth_array_2d(input, windowsize)
+    subroutine smooth_array_2d(input, windowsize,nsmooths)
         implicit none
         real, intent(inout), dimension(:,:):: input
         integer, intent(in):: windowsize
+        integer, optional, intent(in) :: nsmooths
         real, dimension(:,:), allocatable:: temp
-        integer:: i, j, nx, ny, starti, endi, startj, endj
-        real:: runningsum, count
+        integer:: i, j, nx, ny, n, starti, endi, startj, endj, iters
+        real:: inv_count
     
+        iters = 1
+        if (present(nsmooths)) iters = nsmooths
+
         nx = size(input, 1)
         ny = size(input, 2)
         allocate(temp(nx, ny))
-    
-        temp = input
-    
-        !$omp parallel private(i, j, starti, endi, startj, endj, runningsum, count)
-        !$omp do schedule(static)
-        do j = 1, ny
-            do i = 1, nx
-                runningsum = 0.0
-                count = 0.0
-                starti = max(1, i - windowsize)
-                endi = min(nx, i + windowsize)
-                startj = max(1, j - windowsize)
-                endj = min(ny, j + windowsize)
-                runningsum = sum(temp(starti:endi, startj:endj)) / ((endi - starti + 1) * (endj - startj + 1))
-                input(i, j) = runningsum
+
+        !$acc data copy(input) create(temp)
+        do n = 1, iters
+            !$omp parallel do collapse(2) private(i, j, starti, endi, startj, endj, inv_count) schedule(static)
+            !$acc parallel loop gang vector collapse(2)
+            do j = 1, ny
+                do i = 1, nx
+                    starti = max(1, i - windowsize)
+                    endi = min(nx, i + windowsize)
+                    startj = max(1, j - windowsize)
+                    endj = min(ny, j + windowsize)
+                    
+                    inv_count = 1.0 / real((endi - starti + 1) * (endj - startj + 1))
+                    temp(i, j) = sum(input(starti:endi, startj:endj)) * inv_count
+                end do
             end do
+            !$omp end parallel do
+            !$acc end parallel loop
+            
+            !$omp parallel do collapse(2)
+            !$acc parallel loop gang vector collapse(2)
+            do j = 1, ny
+                do i = 1, nx
+                    input(i, j) = temp(i, j)
+                end do
+            end do
+            !$omp end parallel do
+            !$acc end parallel loop
         end do
-        !$omp end do
-        !$omp end parallel
-    
+        !$acc end data
+
         deallocate(temp)
-    
+        
     end subroutine smooth_array_2d
 
     ! subroutine smooth_array_2d(input,windowsize)
@@ -606,6 +667,89 @@ contains
         data=temporary_data
 
     end subroutine swap_y_z_dimensions
+
+
+    !>------------------------------------------------------------
+    !! Smooth a variable_t with optional halo exchange between iterations
+    !! for MPI-consistent results across domain decompositions.
+    !!
+    !! When a halo is supplied, an exchange is performed before the first
+    !! smoothing pass (to guarantee consistent halos after independent
+    !! per-process interpolation) and after every subsequent pass.
+    !!
+    !! IMPORTANT: windowsize must be <= var%grid%halo_size.  smooth_array_3d
+    !! uses edge-replication at the memory boundary.  On interior process
+    !! boundaries that edge is inside the halo region, so the replicated
+    !! values are overwritten by the post-pass halo exchange.  But if
+    !! windowsize exceeds the halo width, interior (tile) cells within
+    !! windowsize of the tile boundary will read edge-replicated values
+    !! that *cannot* be corrected by the exchange — producing results
+    !! that depend on the domain decomposition.  To apply a larger
+    !! effective smoothing radius, use multiple iterations of a small
+    !! windowsize (nsmooths > 1, windowsize <= halo_size) with halo
+    !! exchanges between passes.
+    !!
+    !! @param var          variable_t to be smoothed (data_3d/2d or dqdt_3d/2d)
+    !! @param windowsize   halfwidth of smoothing window in grid cells
+    !!                     (must be <= var%grid%halo_size when halo is present)
+    !! @param ydim         axis the y dimension is on (2 or 3) — only used for 3D
+    !! @param nsmooths     number of smoothing iterations (default 1)
+    !! @param halo         optional halo_t for MPI exchange between iterations
+    !! @param do_dqdt      if .true., smooth the dqdt field instead of data field
+    !!------------------------------------------------------------
+    subroutine smooth_array_var(var, windowsize, ydim, nsmooths, halo, do_dqdt)
+        implicit none
+        type(variable_t), intent(inout) :: var
+        integer,          intent(in)    :: windowsize
+        integer,          intent(in)    :: ydim
+        integer, optional, intent(in)   :: nsmooths
+        type(halo_t), intent(inout), optional :: halo
+        logical, optional, intent(in)   :: do_dqdt
+
+        integer :: iters, n, windowsize_use
+        logical :: dqdt
+
+        iters = 1
+        if (present(nsmooths)) iters = nsmooths
+        dqdt = .false.
+        if (present(do_dqdt)) dqdt = do_dqdt
+
+        ! Guard: windowsize must fit within the halo so that every tile-
+        ! interior cell's smoothing window is backed by real neighbor data.
+        if (present(halo) .and. windowsize > var%grid%halo_size) then
+            write(*,*) "ERROR smooth_array_var: windowsize (", windowsize, &
+                       ") exceeds halo_size (", var%grid%halo_size, ")."
+            write(*,*) "  Use nsmooths > 1 with a smaller windowsize instead."
+            write(*,*) "  continuing, clamping window size to halo_size: ", var%grid%halo_size, "."
+            windowsize_use = var%grid%halo_size
+        else
+            windowsize_use = windowsize
+        endif
+
+        ! Ensure halos are consistent before the first smoothing pass.
+        ! Each process fills its memory extent (including halos) independently
+        ! via interpolation, so halo values may not exactly match the
+        ! neighbor's interior.  Exchanging up front guarantees the first
+        ! smooth pass reads correct neighbor data.
+        if (present(halo)) call halo%exch_var(var, do_dqdt=dqdt)
+
+        do n = 1, iters
+            if (var%three_d) then
+                if (dqdt) then
+                    call smooth_array_3d(var%dqdt_3d, windowsize_use, ydim)
+                else
+                    call smooth_array_3d(var%data_3d, windowsize_use, ydim)
+                endif
+            else if (var%two_d) then
+                if (dqdt) then
+                    call smooth_array_2d(var%dqdt_2d, windowsize_use)
+                else
+                    call smooth_array_2d(var%data_2d, windowsize_use)
+                endif
+            endif
+            if (present(halo)) call halo%exch_var(var, do_dqdt=dqdt)
+        enddo
+    end subroutine smooth_array_var
 
 
 end module array_utilities

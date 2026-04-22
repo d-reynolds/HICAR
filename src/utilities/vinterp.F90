@@ -10,7 +10,7 @@
 !!
 !!------------------------------------------------------------
 module vertical_interpolation
-    use data_structures
+    use data_structures, only: vert_look_up_table, interpolable_type
     implicit none
 
     private
@@ -46,7 +46,7 @@ contains
         real, intent(in) :: zin
         real, intent(in),dimension(:) :: z
         integer, optional, intent(inout)::guess
-        real,dimension(2) :: find_match
+        integer,dimension(2) :: find_match
         integer::n,i,endpt
 
         n=size(z)
@@ -301,14 +301,18 @@ contains
             ny=size(hi,3)
             ims = lbound(vlut%z,2)-1
             jms = lbound(vlut%z,4)-1
+            associate( z => vlut%z, w => vlut%w )
+            !$acc data present_or_copyin(lo, z, w) present_or_copy(hi)
+            !$acc parallel loop gang vector collapse(3)
             do j=1,ny
                 do k=1,nz
                     do i=1,nx
-                        hi(i,k,j)=lo(i,vlut%z(1,i+ims,k,j+jms),j)*vlut%w(1,i+ims,k,j+jms) + lo(i,vlut%z(2,i+ims,k,j+jms),j)*vlut%w(2,i+ims,k,j+jms)
+                        hi(i,k,j)=lo(i,z(1,i+ims,k,j+jms),j)*w(1,i+ims,k,j+jms) + lo(i,z(2,i+ims,k,j+jms),j)*w(2,i+ims,k,j+jms)
                     enddo
                 enddo
             enddo
-
+            !$acc end data
+            end associate
         elseif (zaxis==3) then
             ! Wind arrays often have different x and y dimensions from the mass grid
             ! so use the lesser of the two (not a perfect interpolation for wind, but should capture most of it)
@@ -319,13 +323,18 @@ contains
             ims = lbound(vlut%z,2)-1
             jms = lbound(vlut%z,4)-1
             
+            associate( z => vlut%z, w => vlut%w )
+            !$acc data present_or_copyin(lo, z, w) present_or_copy(hi)
+            !$acc parallel loop gang vector collapse(3)
             do j=1,nz
                 do k=1,ny
                     do i=1,nx
-                        hi(i,k,j)=lo(i,k,vlut%z(1,i+ims,k,j+jms))*vlut%w(1,i+ims,k,j+jms) + lo(i,k,vlut%z(2,i+ims,k,j+jms))*vlut%w(2,i+ims,k,j+jms)
+                        hi(i,k,j)=lo(i,k,z(1,i+ims,k,j+jms))*w(1,i+ims,k,j+jms) + lo(i,k,z(2,i+ims,k,j+jms))*w(2,i+ims,k,j+jms)
                     enddo
                 enddo
             enddo
+            !$acc end data
+            end associate
         else
             write(*,*) "Vertical interpolation over the first axis not supported yet"
             write(*,*) "  if needed, update vinterp.f90"

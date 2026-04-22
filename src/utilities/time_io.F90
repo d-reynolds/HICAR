@@ -2,10 +2,11 @@ module time_io
 
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
-    use string,             only : get_integer
-    use io_routines,        only : io_read, io_read_attribute
-    use iso_fortran_env,    only: real64, real128
-    use icar_constants,     only: kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, STD_OUT_PE
+    use string,             only : get_integer, as_string
+    use io_routines,        only : io_read, io_read_attribute, io_dimension_is_present, check
+    use iso_fortran_env,    only: real64, real64
+    use icar_constants,     only: kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, STD_OUT_PE, kOUTPUT_FMT
+    use netcdf
 
     implicit none
 
@@ -61,11 +62,11 @@ contains
             if (present(error)) then
                 error = 1
             else
-                if (STD_OUT_PE) write(*,*) "ERROR: Unable to find requested date in file."
-                if (STD_OUT_PE) write(*,*) "Filename: ",trim(filename)
-                if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
-                if (STD_OUT_PE) write(*,*) "First time in file : ", trim(times_in_file(1)%as_string())
-                if (STD_OUT_PE) write(*,*) " Last time in file : ", trim(times_in_file(n)%as_string())
+                 write(*,*) "ERROR: Unable to find requested date in file."
+                 write(*,*) "Filename: ",trim(filename)
+                 write(*,*) "  time  : ",trim(as_string(time))
+                write(*,*) "First time in file : ", trim(as_string(times_in_file(1)))
+                write(*,*) " Last time in file : ", trim(as_string(times_in_file(n)))
                 stop "Unable to find date in file"
             endif
         endif
@@ -80,18 +81,18 @@ contains
     function time_gain_from_units(units) result(gain)
         implicit none
         character(len=*), intent(in) :: units
-        real(real128) :: gain
+        real(real64) :: gain
 
         if ((units(1:4)=="days").or.(units(1:4)=="Days")) then
-            gain = 1.0Q0
+            gain = 1.0D0
         else if ((units(1:4)=="hour").or.(units(1:4)=="Hour")) then
-            gain = 24.0Q0
+            gain = 24.0D0
         else if ((units(1:3)=="min").or.(units(1:3)=="Min")) then
-            gain = 1440.0Q0
+            gain = 1440.0D0
         else if ((units(1:3)=="sec").or.(units(1:3)=="Sec")) then
-            gain = 86400.0Q0
+            gain = 86400.0D0
         else if ((units(1:11)=="nanoseconds").or.(units(1:11)=="Nanoseconds")) then
-            gain = 86400000000000.0Q0
+            gain = 86400000000000.0D0
         else
             if (STD_OUT_PE) write(*,*) 'unknown units for input time: ', trim(units)
             stop "Error: unknown units"
@@ -99,12 +100,49 @@ contains
 
     end function time_gain_from_units
 
+    !> Validate that a time units string has the expected YYYY-MM-DD format
+    !! with zero-padded month and day. Prints a helpful error if not.
+    subroutine validate_time_units_format(units)
+        implicit none
+        character(len=*), intent(in) :: units
+        integer :: since_loc, date_start
+        character(len=10) :: date_str
+
+        since_loc = index(units, "since")
+        if (since_loc == 0) then
+            write(*,*) "ERROR: time units attribute missing 'since' keyword: ", trim(units)
+            stop "Error: malformed time units attribute"
+        end if
+
+        date_start = since_loc + index(units(since_loc:), " ")
+        if (date_start <= since_loc .or. date_start + 9 > len(units)) then
+            write(*,*) "ERROR: cannot find date in time units: ", trim(units)
+            stop "Error: malformed time units attribute"
+        end if
+
+        date_str = units(date_start:date_start+9)
+
+        ! Check for YYYY-MM-DD format (hyphens at positions 5 and 8)
+        if (date_str(5:5) /= '-' .or. date_str(8:8) /= '-') then
+            write(*,*) "ERROR: time units date is not in YYYY-MM-DD format: '", trim(date_str), "'"
+            write(*,*) "  Full units string: ", trim(units)
+            write(*,*) "  Expected format: '<units> since YYYY-MM-DD HH:MM:SS'"
+            write(*,*) "  This can happen when tools like CDO write non-zero-padded dates"
+            write(*,*) "  (e.g. '2017-2-14' instead of '2017-02-14')."
+            write(*,*) "  Fix with: ncatted -a units,time,o,c,'hours since YYYY-MM-DD HH:MM:SS' file.nc"
+            stop "Error: time units date must use zero-padded YYYY-MM-DD format"
+        end if
+
+    end subroutine validate_time_units_format
+
     function year_from_units(units) result(year)
         implicit none
         character(len=*), intent(in) :: units
         integer :: year
 
         integer :: since_loc, year_loc
+
+        call validate_time_units_format(units)
 
         since_loc = index(units,"since")
 
@@ -122,6 +160,8 @@ contains
 
         integer :: since_loc, month_loc
 
+        call validate_time_units_format(units)
+
         since_loc = index(units,"since")
 
         month_loc = index(units(since_loc:)," ") + 5
@@ -137,6 +177,8 @@ contains
         integer :: day
 
         integer :: since_loc, day_loc
+
+        call validate_time_units_format(units)
 
         since_loc = index(units,"since")
 
@@ -155,6 +197,8 @@ contains
 
         integer :: since_loc, hour_loc
         if (present(error)) error = 0
+
+        call validate_time_units_format(units)
 
         since_loc = index(units,"since")
 
@@ -186,6 +230,7 @@ contains
 
         type(Time_type), allocatable :: times_in_file_up(:), times_in_file_down(:)
         type(time_delta_t) :: max_dt
+        type(Time_type) :: tmp_time
         integer :: i, n_t_down, n_t_up, nup, ndown, nup_o, ndown_o, ierr
         logical :: found, fileExists, limit_loop
 
@@ -222,16 +267,17 @@ contains
         call read_times(filelist(nup), time_var, times_in_file_up)
 
         !Quick check that time is bounded by min and max existing files in list
-        if (times_in_file_down(1) > time .or. times_in_file_up(size(times_in_file_up)) < time) then
+        if ( (times_in_file_down(1) > time .and. .not.(times_in_file_down(1)%equals(time, precision=max_dt))) .or. &
+             (times_in_file_up(size(times_in_file_up)) < time .and. .not.(times_in_file_up(size(times_in_file_up))%equals(time, precision=max_dt))) ) then
             if (present(error)) then
                 error = 1
                 found = .True.
             else
-                if (STD_OUT_PE) write(*,*) "ERROR: Requested date lays outside of filelist"
-                if (STD_OUT_PE) write(*,*) "First filename:           ",trim(filelist(1))
-                if (STD_OUT_PE) write(*,*) "Last (existing) filename: ",trim(filelist(nup))
-                if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
-                if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
+                write(*,*) "ERROR: Requested date lays outside of filelist"
+                write(*,*) "First filename:           ",trim(filelist(1))
+                write(*,*) "Last (existing) filename: ",trim(filelist(nup))
+                write(*,*) "  last attempted step  : ",step
+                write(*,*) "  time  : ",trim(as_string(time))
                 stop "Unable to find date in file"
             endif
         endif
@@ -287,23 +333,23 @@ contains
 
                 !Handle the limiting case
                 if (ndown==nup) then
-                    ndown=nup-1
+                    ndown=max(nup-1,1)
                     if (limit_loop) then
                         if (present(forward)) then
-                            if (STD_OUT_PE) write(*,*) "ERROR: Unable to find requested date in filelist."
-                            if (STD_OUT_PE) write(*,*) "We have collapsed onto two files, but no time was found."
-                            if (STD_OUT_PE) write(*,*) "This, despite a non-exact time search. Gnarly bug."
-                            if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
-                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
-                            if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
+                            write(*,*) "ERROR: Unable to find requested date in filelist."
+                            write(*,*) "We have collapsed onto two files, but no time was found."
+                            write(*,*) "This, despite a non-exact time search. Gnarly bug."
+                            write(*,*) "First filename: ",trim(filelist(1))
+                            write(*,*) "  time  : ",trim(as_string(time))
+                            write(*,*) "  last attempted step  : ",step
                             stop "Unable to find date in file"
                         else
-                            if (STD_OUT_PE) write(*,*) "WARNING: Unable to find requested date in filelist."
-                            if (STD_OUT_PE) write(*,*) "We have collapsed onto two files, but no time was found."
-                            if (STD_OUT_PE) write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
-                            if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
-                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
-                            if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
+                            write(*,*) "WARNING: Unable to find requested date in filelist."
+                            write(*,*) "We have collapsed onto two files, but no time was found."
+                            write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
+                            write(*,*) "First filename: ",trim(filelist(1))
+                            write(*,*) "  time  : ",trim(as_string(time))
+                            write(*,*) "  last attempted step  : ",step
                             stop "Unable to find date in file"
                         endif
                     endif    
@@ -313,6 +359,22 @@ contains
 
                     call read_times(filelist(nup), time_var, times_in_file_up)
                     call read_times(filelist(ndown), time_var, times_in_file_down)
+
+                    tmp_time = times_in_file_down(size(times_in_file_down))
+                    if (tmp_time%equals(time, precision=max_dt)) then
+                        step = size(times_in_file_down)
+                        filename = filelist(ndown)
+                        found = .True.
+                        cycle
+                    endif
+
+                    tmp_time = times_in_file_up(1)
+                    if (tmp_time%equals(time, precision=max_dt)) then
+                        step = 1
+                        filename = filelist(nup)
+                        found = .True.
+                        cycle
+                    endif
 
                     if (times_in_file_down(size(times_in_file_down)) < time .and. times_in_file_up(1) > time) then
                         !Time is between the two
@@ -327,12 +389,15 @@ contains
                                 found = .True.
                             endif
                         else
-                            if (STD_OUT_PE) write(*,*) "WARNING: Unable to find requested date in filelist."
-                            if (STD_OUT_PE) write(*,*) "Time appears to lay between two files."
-                            if (STD_OUT_PE) write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
-                            if (STD_OUT_PE) write(*,*) "First filename: ",trim(filelist(1))
-                            if (STD_OUT_PE) write(*,*) "  time  : ",trim(time%as_string())
-                            if (STD_OUT_PE) write(*,*) "  last attempted step  : ",step
+                            write(*,*) "WARNING: Unable to find requested date in filelist."
+                            write(*,*) "Time appears to lay between two files."
+                            write(*,*) "An exact time search was requested. Perhaps you want a non-exact search?"
+                            write(*,*) "'Lower' filename: ",trim(filelist(ndown))
+                            write(*,*) "'Upper' filename: ",trim(filelist(nup))
+                            write(*,*) "Last time in 'Upper' file: ",trim(as_string(times_in_file_up(size(times_in_file_up))))
+                            write(*,*) "First time in 'Lower' file: ",trim(as_string(times_in_file_down(1)))
+                            write(*,*) "  searched for time  : ",trim(as_string(time))
+                            write(*,*) "  last attempted step  : ",step
                             stop "Unable to find date in file"
                         endif
                     endif
@@ -350,15 +415,15 @@ contains
         implicit none
         character(len=*),   intent(in) :: filename, varname
         type(Time_type),    intent(inout), allocatable, dimension(:) :: times
-        real(real128),      intent(in), optional :: timezone_offset
+        real(real64),      intent(in), optional :: timezone_offset
         integer,            intent(in), optional :: curstep
 
         real(real64),  allocatable, dimension(:) :: temp_times_64
-        real(real128), allocatable, dimension(:) :: temp_times_128
+        real(real64), allocatable, dimension(:) :: temp_times_128
         integer :: time_idx, error
         integer :: start_year, start_month, start_day, start_hour
         character(len=kMAX_STRING_LENGTH) :: calendar, units
-        real(real128) :: calendar_gain
+        real(real64) :: calendar_gain
 
         ! first read the time variable (presumebly a 1D real(real64) array)
         if (present(curstep)) then
@@ -428,7 +493,7 @@ contains
         if (present(units)) then
             use_units = units
         else
-            use_units = time%units()
+            write(use_units,kOUTPUT_FMT) time%year_zero,time%month_zero,time%day_zero,time%hour_zero
         endif
 
         call time%date(year, month, day, hour, minute, seconds)
@@ -446,7 +511,8 @@ contains
                 if (seconds > 30) then
                     call output_time%set(year, month, day, hour, minute, seconds)
                     call half_minute%set(seconds=30)
-                    output_time = output_time + half_minute
+                    call output_time%set(output_time%mjd() + half_minute%days())
+
                     ! get a new date after adding 30 seconds
                     call output_time%date(year, month, day, hour, minute, seconds)
                     ! use that date after setting seconds to 0 this rounds the old date up by up to 30s
@@ -463,4 +529,35 @@ contains
 
     end function get_output_time
 
+
+    function var_has_time_dim(filename, varname, time_var) result(has_time)
+        implicit none
+        character(len=*), intent(in) :: filename, varname, time_var
+        logical :: has_time
+
+        integer :: ncid, varid, ndims, dimids(10), i
+        character(len=kMAX_NAME_LENGTH) :: time_dim_name
+
+        call check( nf90_open(trim(filename), nf90_nowrite, ncid), "Opening file "//trim(filename))
+        call check( nf90_inq_varid(ncid, trim(varname), varid), "Getting varid for "//trim(varname))
+
+        call check( nf90_open(filename, IOR(NF90_NOWRITE,NF90_NETCDF4), ncid), " Opening file "//trim(filename))
+        !get the dimension name for the single dimension on the variable this%time_var
+        call check( nf90_inq_varid(ncid, trim(time_var), varid), "Getting varid for "//trim(time_var))
+        call check( nf90_inquire_variable(ncid, varid, ndims=ndims, dimids=dimids), " Getting dim length for "//trim(time_var))
+        if (ndims==1) then
+            call check(nf90_inquire_dimension(ncid, dimids(1), name=time_dim_name), " Getting time dim name")
+        elseif (ndims==0) then
+            ! scalar variable, use name of time variable as dimension name
+            time_dim_name = trim(time_var)
+        else
+            write(*,*) "ERROR: time variable "//trim(time_var)//" has more than one dimension"
+            stop "Error in var_has_time_dim"
+        endif
+
+        call check( nf90_close(ncid), "Closing file "//trim(filename))
+
+        has_time = io_dimension_is_present(trim(filename), varname, trim(time_dim_name))
+
+    end function var_has_time_dim
 end module time_io

@@ -27,7 +27,7 @@ contains
     !! Typically assumes lazy instantiation, e.g. not initialized until used
     !!
     !!------------------------------------------------
-    module subroutine init(this)
+    module subroutine init_var_dict(this)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
 
@@ -38,27 +38,27 @@ contains
         endif
 
         allocate(this%var_list(kMIN_VAR_DICT_SIZE))
-
+        !$acc enter data create(this%var_list)
         this%max_vars = kMIN_VAR_DICT_SIZE
         this%n_vars = 0
         this%current_variable = 1
 
         this%initialized = .True.
 
-    end subroutine
+    end subroutine init_var_dict
 
 
     !>------------------------------------------------
     !! Retrieve a variable for a given key
     !!
-    !! @param varname : The key to look for in the dictionary
+    !! @param in_id   : The key to look for in the dictionary
     !! @param err     : optional, if available this will be set to indicate if the key is not found
     !!
     !!------------------------------------------------
-    module function get_var(this, varname, err, indx) result(var_data)
+    module function get_var(this, in_id, err, indx) result(var_data)
         implicit none
         class(var_dict_t),   intent(in) :: this
-        character(len=*),    intent(in) :: varname
+        integer,             intent(in) :: in_id
         integer,             intent(out),  optional :: err, indx
 
         type(variable_t)                :: var_data
@@ -85,7 +85,7 @@ contains
         do i = 1, this%n_vars
 
             ! if this key matches the supplied key, return the variable
-            if (trim(this%var_list(i)%name) == trim(varname)) then
+            if (this%var_list(i)%id == in_id) then
                 var_data = this%var_list(i)%var
                 if (present(indx)) indx = i
                 return
@@ -97,32 +97,74 @@ contains
             err = 1
         else
             ! if the user did not request an error code, then we have to stop
-            write(*,*) "Searching for : "//trim(varname)
+            write(*,*) "Searching for variable of id: ",in_id
             stop "ERROR: var not found in dictionary"
         endif
 
     end function
 
+
+    !>------------------------------------------------
+    !! Retrieve the index of a variable for a given key (zero-copy access)
+    !!
+    !! @param in_id   : The key to look for in the dictionary
+    !! @param err     : optional, if available this will be set to indicate if the key is not found
+    !!
+    !!------------------------------------------------
+    module function get_var_idx(this, in_id, err) result(idx)
+        implicit none
+        class(var_dict_t), intent(in) :: this
+        integer,           intent(in) :: in_id
+        integer,           intent(out), optional :: err
+        integer :: idx
+        integer :: i
+
+        idx = 0
+        if (present(err)) err = 0
+
+        if (.not.this%initialized) then
+            if (present(err)) then
+                err = 2
+                return
+            endif
+            stop "variable_dictionary read before being initialized"
+        endif
+
+        do i = 1, this%n_vars
+            if (this%var_list(i)%id == in_id) then
+                idx = i
+                return
+            endif
+        end do
+
+        if (present(err)) then
+            err = 1
+        else
+            write(*,*) "Searching for variable of id: ", in_id
+            stop "ERROR: var not found in dictionary"
+        endif
+    end function
+
     !>------------------------------------------------
     !! Add a supplied variable to the dictionary using the key supplied
     !!
-    !! @param varname       key to store for the var_data supplied
+    !! @param in_id         key to store for the var_data supplied
     !! @param var_data      variable to store associated with key
     !! @param save_state    optional store the input array data in a locally allocated array instead of just pointing to it
     !! @param err           optional value to store an error code in so execution doesn't have to stop
     !!
     !!------------------------------------------------
-    module subroutine add_var(this, varname, var_data, save_state, err)
+    module subroutine add_var(this, in_id, var_data, save_state, err)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
-        character(len=*),    intent(in)     :: varname
+        integer,             intent(in)     :: in_id
         type(variable_t),    intent(in)     :: var_data
         logical,             intent(in), optional :: save_state
         integer,             intent(out),optional :: err
 
-        type(variable_t) :: var
         logical :: save_data
-        integer :: ims,ime, jms,jme, kms,kme, indx, error
+        integer :: ims,ime, jms,jme, kms,kme, indx, i
+        logical :: found
 
         save_data = .False.
         if (present(save_state)) save_data=save_state
@@ -140,55 +182,82 @@ contains
             stop "Ran out of space in var_dict"
         endif
 
-        ! check if an entry with varname is already in dictionary
-        var = this%get_var(trim(varname),err=error, indx=indx)
+        found = .False.
+        do i = 1, this%n_vars
+            ! if this key matches the supplied key, return the variable
+            if (this%var_list(i)%id == in_id) then
+                found = .True.
+                indx = i
+                exit
+            endif
+        end do
 
         ! if we get an error, then we need to add a new entry
-        if (error == 0) then
+        if (found) then
             ! if (STD_OUT_PE) write(*,*) "WARNING: Overwriting existing variable in var_dict: ", trim(var_data%name)
             if (this%var_list(indx)%var%two_d) then
                 this%var_list(indx)%var%data_2d(:,:)  = var_data%data_2d(:,:)
-                if (allocated(this%var_list(indx)%var%dqdt_2d)) this%var_list(indx)%var%dqdt_2d(:,:)  = var_data%dqdt_2d(:,:)
+                ! !$acc update device(this%var_list(indx)%var%data_2d)
+                if (allocated(this%var_list(indx)%var%dqdt_2d)) then
+                    this%var_list(indx)%var%dqdt_2d(:,:)  = var_data%dqdt_2d(:,:)
+                    ! !$acc update device(this%var_list(indx)%var%dqdt_2d)
+                endif
             else if (this%var_list(indx)%var%three_d) then
                 this%var_list(indx)%var%data_3d(:,:,:)  = var_data%data_3d(:,:,:)
-                if (allocated(this%var_list(indx)%var%dqdt_3d)) this%var_list(indx)%var%dqdt_3d(:,:,:)  = var_data%dqdt_3d(:,:,:)
+                ! !$acc update device(this%var_list(indx)%var%data_3d)
+                if (allocated(this%var_list(indx)%var%dqdt_3d)) then
+                    this%var_list(indx)%var%dqdt_3d(:,:,:)  = var_data%dqdt_3d(:,:,:)
+                    ! !$acc update device(this%var_list(indx)%var%dqdt_3d)
+                endif
             endif
         else
             ! if (STD_OUT_PE) write(*,*) "WARNING: Adding var to var dict: ", trim(var_data%name)
             this%n_vars = this%n_vars + 1
             indx = this%n_vars
 
-            this%var_list(indx)%name = varname
+            this%var_list(indx)%id = in_id
 
             ! warning, this copies all information directly from the var_data into the dict, including the POINTER to the data
             this%var_list(indx)%var  = var_data
-            ! this%var_list(indx)%var%name = varname
-
-            ! If we want to assume that the data arrays may be deallocated outside of the dict, we can do this...
-            if (save_data) then
-
-                if (var_data%two_d) then
-                    ims = lbound(var_data%data_2d,1)
-                    ime = ubound(var_data%data_2d,1)
-                    jms = lbound(var_data%data_2d,2)
-                    jme = ubound(var_data%data_2d,2)
-
-                    deallocate( this%var_list(indx)%var%data_2d)
-                    allocate(this%var_list(indx)%var%data_2d(ims:ime, jms:jme))
-                    this%var_list(indx)%var%data_2d(:,:)  = var_data%data_2d(:,:)
-                else
-                    ims = lbound(var_data%data_3d,1)
-                    ime = ubound(var_data%data_3d,1)
-                    jms = lbound(var_data%data_3d,2)
-                    jme = ubound(var_data%data_3d,2)
-                    kms = lbound(var_data%data_3d,3)
-                    kme = ubound(var_data%data_3d,3)
-
-                    deallocate( this%var_list(indx)%var%data_3d)
-                    allocate(this%var_list(indx)%var%data_3d(ims:ime, jms:jme, kms:kme))
-                    this%var_list(indx)%var%data_3d(:,:,:)  = var_data%data_3d(:,:,:)
+            if (this%var_list(indx)%var%two_d) then
+                !$acc enter data copyin(this%var_list(indx)%var%data_2d)
+                if (allocated(this%var_list(indx)%var%dqdt_2d)) then
+                    !$acc enter data copyin(this%var_list(indx)%var%dqdt_2d)
+                endif
+            else if (this%var_list(indx)%var%three_d) then
+                !$acc enter data copyin(this%var_list(indx)%var%data_3d)
+                if (allocated(this%var_list(indx)%var%dqdt_3d)) then
+                    !$acc enter data copyin(this%var_list(indx)%var%dqdt_3d)
                 endif
             endif
+
+            ! this%var_list(indx)%var%name = varname
+
+            ! ! If we want to assume that the data arrays may be deallocated outside of the dict, we can do this...
+            ! if (save_data) then
+
+            !     if (var_data%two_d) then
+            !         ims = lbound(var_data%data_2d,1)
+            !         ime = ubound(var_data%data_2d,1)
+            !         jms = lbound(var_data%data_2d,2)
+            !         jme = ubound(var_data%data_2d,2)
+
+            !         deallocate( this%var_list(indx)%var%data_2d)
+            !         allocate(this%var_list(indx)%var%data_2d(ims:ime, jms:jme))
+            !         this%var_list(indx)%var%data_2d(:,:)  = var_data%data_2d(:,:)
+            !     else
+            !         ims = lbound(var_data%data_3d,1)
+            !         ime = ubound(var_data%data_3d,1)
+            !         jms = lbound(var_data%data_3d,2)
+            !         jme = ubound(var_data%data_3d,2)
+            !         kms = lbound(var_data%data_3d,3)
+            !         kme = ubound(var_data%data_3d,3)
+
+            !         deallocate( this%var_list(indx)%var%data_3d)
+            !         allocate(this%var_list(indx)%var%data_3d(ims:ime, jms:jme, kms:kme))
+            !         this%var_list(indx)%var%data_3d(:,:,:)  = var_data%data_3d(:,:,:)
+            !     endif
+            ! endif
         endif
 
 
@@ -211,8 +280,8 @@ contains
         
         do i = 1,kMAX_STORAGE_VARS
             !Get the data for the variable name. Returns 1 if not found
-            var = this%get_var(trim(get_varname(i)),err=err)
-            if (err==0) call sorted%add_var(trim(get_varname(i)),var)
+            var = this%get_var(i,err=err)
+            if (err==0) call sorted%add_var(i,var)
         enddo
 
         this%var_list = sorted%var_list
@@ -256,10 +325,10 @@ contains
     !! @param err      optional, returns an error if there are no variables left to iterate
     !!
     !!------------------------------------------------
-    module function next(this, name, err) result(var_data)
+    module function next(this, id, err) result(var_data)
         implicit none
         class(var_dict_t),   intent(inout)  :: this
-        character(len=*),    intent(out),   optional :: name
+        integer,             intent(out),   optional :: id
         integer,             intent(out),   optional :: err
         type(variable_t)                    :: var_data
 
@@ -270,7 +339,7 @@ contains
             var_data = this%var_list(this%current_variable)%var
 
             ! if requested, get the variable name too
-            if (present(name)) name = this%var_list(this%current_variable)%name
+            if (present(id)) id = this%var_list(this%current_variable)%id
 
             ! step the iterator forward
             this%current_variable = this%current_variable + 1

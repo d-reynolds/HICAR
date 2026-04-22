@@ -3,15 +3,12 @@ module boundary_interface
     use mpi_f08
     use netcdf
     use options_interface,        only : options_t
-    use options_types,            only : dim_arrays_type, forcing_options_type
+    use options_types,            only : forcing_options_type
     use variable_dict_interface,  only : var_dict_t
-    use variable_interface,       only : variable_t
     use time_object,              only : Time_type
     use time_delta_object,        only : time_delta_t
     use data_structures,          only : interpolable_type, dim_arrays_type
-    use icar_constants,           only : kMAX_NAME_LENGTH, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH
-    use grid_interface,           only : grid_t
-    use flow_object_interface,     only : flow_obj_t
+    use icar_constants,           only : kMAX_NAME_LENGTH, kMAX_STRING_LENGTH, kMAX_FILE_LENGTH, kVARS
     implicit none
 
     private
@@ -60,7 +57,7 @@ module boundary_interface
 
     contains
 
-        procedure :: init
+        procedure :: init => init_boundary
 
         ! procedure :: find_start_time
         procedure :: init_local
@@ -68,34 +65,37 @@ module boundary_interface
         procedure :: update_computed_vars
         procedure :: interpolate_original_levels
         procedure :: setup_z
+        procedure :: release => release_boundary
     end type
 
     interface
 
     ! Set default component values
-    module subroutine init(this, options, domain_lat, domain_lon, parent_options)
+    module subroutine init_boundary(this, options, domain_lat, domain_lon, parent_options)
         class(boundary_t),    intent(inout) :: this
         type(options_t),      intent(inout) :: options
         real, dimension(:,:), intent(in)    :: domain_lat
         real, dimension(:,:), intent(in)    :: domain_lon
         type(options_t), optional, intent(in)    :: parent_options
-    end subroutine
+    end subroutine init_boundary
 
-    module subroutine init_local(this, options, var_list, dim_list, start_time, domain_lat, domain_lon)
+    module subroutine init_local(this, options, var_list, dim_list, var_indx, start_time, domain_lat, domain_lon)
         implicit none
         class(boundary_t),               intent(inout)  :: this
         type(forcing_options_type),      intent(inout)  :: options
         character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
         type(dim_arrays_type),           intent(in)     :: dim_list (:)
+        integer,                         intent(in)     :: var_indx (:)
         type(Time_type),                 intent(in)     :: start_time
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
     end subroutine
 
-    module subroutine init_local_asnest(this, var_list, dim_list, domain_lat, domain_lon, parent_options)
+    module subroutine init_local_asnest(this, var_list, dim_list, var_indx, domain_lat, domain_lon, parent_options)
         class(boundary_t),               intent(inout)  :: this
         character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
         type(dim_arrays_type),           intent(in)     :: dim_list (:)
+        integer,                         intent(in)     :: var_indx (:)
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
         type(options_t),                 intent(in)     :: parent_options
@@ -118,7 +118,12 @@ module boundary_interface
         class(boundary_t),   intent(inout)   :: this
         type(options_t),     intent(in)      :: options
     end subroutine
-    
+
+    module subroutine release_boundary(this)
+        implicit none
+        class(boundary_t), intent(inout) :: this
+    end subroutine
+
   end interface
 
 end module

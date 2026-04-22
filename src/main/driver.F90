@@ -17,49 +17,41 @@
 !!
 !!-----------------------------------------
 program icar
-    use iso_fortran_env
-    use mpi_f08
+    use iso_fortran_env, only: output_unit
+    use mpi_f08, only: MPI_initialized, MPI_INIT, MPI_Comm_Rank, MPI_COMM_WORLD, MPI_Finalize
     use options_interface,  only : options_t
-    use flow_object_interface, only : flow_obj_t, comp_arr_t
-    use domain_interface,   only : domain_t
+    use flow_object_interface, only : comp_arr_t
     use boundary_interface, only : boundary_t
-    use output_interface,   only : output_t
-    use time_step,          only : step                ! Advance the model forward in time
-    use initialization,     only : split_processes, welcome_message, init_options, init_model
-    use timer_interface,    only : timer_t
-    use time_object,        only : Time_type
-    use time_delta_object,  only : time_delta_t
-    use icar_constants
-    use ioserver_interface, only : ioserver_t
     use ioclient_interface, only : ioclient_t
-    use io_routines,        only : io_write
+
+    use initialization,     only : split_processes, init_options
+    use icar_constants, only: kMAX_NESTS, kMAX_FILE_LENGTH, STD_OUT_PE
     use namelist_utils,     only : get_nml_var_default
-    use land_surface,               only : lsm_init
-    use output_metadata,    only : list_output_vars
+    use output_metadata,    only : list_output_vars, initialize_var_constants
     use flow_events,        only : component_init, component_loop, component_program_end
+#ifdef _OPENACC
+    use openacc, only: acc_shutdown, acc_device_nvidia
+#endif
     implicit none
 
     type(options_t), allocatable :: options(:)
-    ! type(domain_t) :: domain(kMAX_NESTS) ! Currently hard-coded, could be dynamic, but compile time on 
-    !                                      ! the Cray compiler is very slow for dynamically allocating large, derrived type arrays
     type(boundary_t), allocatable :: boundary(:)
     type(comp_arr_t)  :: components(kMAX_NESTS)
     type(ioclient_t), allocatable  :: ioclient(:)
     
-    integer :: i, ierr, exec_team, n_nests, n, old_nest, PE_RANK_GLOBAL
+    integer :: i, n_nests, PE_RANK_GLOBAL
     real :: t_val, t_val2, t_val3
-    logical :: init_flag, info_only, gen_nml, only_namelist_check
-    logical :: start_time_match = .False.
+    logical :: init_flag
     character(len=kMAX_FILE_LENGTH) :: namelist_file
 
     ! Read command line options to determine what kind of run this is
-    call read_co(namelist_file, info_only, gen_nml, only_namelist_check)
+    call read_co(namelist_file)
 
     !Initialize MPI if needed
     init_flag = .False.
-    call MPI_initialized(init_flag, ierr)
+    call MPI_initialized(init_flag)
     if (.not.(init_flag)) then
-        call MPI_INIT(ierr)
+        call MPI_INIT()
         init_flag = .True.
     endif
 
@@ -68,19 +60,9 @@ program icar
 
     !-----------------------------------------
     !  Model Initialization
-    
-
-    if (STD_OUT_PE .and. .not.(gen_nml .or. only_namelist_check .or. info_only)) then
-        call welcome_message()
-        write(*,'(/ A)') "--------------------------------------------------------"
-        write(*,'(A)')   "Initializing Options"
-        write(*,'(A /)') "--------------------------------------------------------"
-        flush(output_unit)
-
-    endif
 
     ! Reads user supplied model options
-    call init_options(options, namelist_file, info_only=info_only, gen_nml=gen_nml, only_namelist_check=only_namelist_check)
+    call init_options(options, namelist_file)
 
     if (STD_OUT_PE) write(*,'(/ A)') "--------------------------------------------------------"
     if (STD_OUT_PE) write(*,'(A)')   "Finished reading options, beginning processor assignment"
@@ -116,17 +98,21 @@ program icar
     call component_program_end(components(1:n_nests), options)
 
     CALL MPI_Finalize()
+#ifdef _OPENACC
+    call acc_shutdown(acc_device_nvidia)
+#endif
 
 contains
-    subroutine read_co(nml_file, info, gen_nml, only_namelist_check)
+    subroutine read_co(nml_file)
         implicit none
         character(len=kMAX_FILE_LENGTH), intent(out) :: nml_file
-        logical, intent(out) :: info, gen_nml, only_namelist_check
 
+        logical :: info, gen_nml, only_namelist_check
         integer :: cnt, p
         character(len=kMAX_FILE_LENGTH) :: first_arg, arg, default
         character(len=kMAX_FILE_LENGTH), allocatable :: keywords(:)
         logical :: file_exists
+        type(options_t), allocatable :: options(:)
 
         nml_file = ""
         info = .False.
@@ -137,6 +123,8 @@ contains
         !Turn this on to enable output by default -- likely that we are only running as a single process
         !If we do any output from this subroutine
         STD_OUT_PE = .True.
+
+        call initialize_var_constants()
 
         cnt = command_argument_count()
 
@@ -159,7 +147,7 @@ contains
             write(*,*) "    Example to generate a namelist with default values:                ./HICAR --gen-nml namelist_file.nml"
             write(*,*) "    Example to check namelist:                                         ./HICAR --check-nml namelist_file.nml"
             write(*,*) "    Example to run model:                                              ./HICAR namelist_file.nml"
-            write(*,*) "    Example to list all output variables related to wind or snow:      ./HICAR --out-vars wind snow"
+            write(*,*) "    Example to list all output variables related to wind:              ./HICAR --out-vars wind"
             write(*,*) "    Example to learn about a namelist variable:                        ./HICAR -v mp"
             write(*,*) "    Example to generate namelist variable documentation:               ./HICAR -v --all > namelist_doc.txt"
             write(*,*)
@@ -228,6 +216,11 @@ contains
                 if (STD_OUT_PE) write(*,*) "Using options file = ", trim(nml_file)
                 stop "Options file does not exist. "
             endif
+        endif
+
+        if (gen_nml .or. only_namelist_check .or. info) then
+            call init_options(options, namelist_file, info_only=info, gen_nml=gen_nml, only_namelist_check=only_namelist_check)
+            stop
         endif
         STD_OUT_PE = .False.
     end subroutine

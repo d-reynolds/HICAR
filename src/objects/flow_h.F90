@@ -3,16 +3,11 @@ module flow_object_interface
     use time_object,        only : Time_type
     use time_delta_object,  only : time_delta_t
     use options_interface,     only : options_t
-    use icar_constants,     only : STD_OUT_PE
-    use iso_fortran_env,    only : output_unit
 implicit none
 
 private
 public :: flow_obj_t, comp_arr_t
 
-type comp_arr_t
-    class(flow_obj_t), allocatable :: comp
-end type comp_arr_t
 
 type flow_obj_t
 !   private
@@ -23,6 +18,9 @@ type flow_obj_t
     logical :: started = .false.
     logical :: ended = .false.
     integer :: nest_indx = 0
+    real :: forcing_elapsed = 0.0  ! Seconds from previous forcing base to sim_time (nonzero only on restart between forcing times)
+    real :: restart_dt = 0.0  ! Numerical timestep (seconds) saved for restart reproducibility
+    real :: dt = 0.0  ! Numerical timestep (seconds) saved for restart reproducibility
 
     type(time_delta_t), public :: small_time_delta
 
@@ -37,7 +35,11 @@ type flow_obj_t
         procedure, public :: next_flow_event
         procedure, public :: dead_or_asleep
         procedure, public :: check_ended
-    end type
+end type flow_obj_t
+
+type comp_arr_t
+    class(flow_obj_t), allocatable :: comp
+end type comp_arr_t
 
     interface
 

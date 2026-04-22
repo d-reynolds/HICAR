@@ -14,18 +14,20 @@
 !! 
 !!----------------------------------------------------------
 submodule(reader_interface) reader_implementation
-  use debug_module,           only : check_ncdf
-  use variable_interface,     only : variable_t
+  use iso_fortran_env,    only : output_unit
+  use debug_module,       only : check_ncdf
   use timer_interface,    only : timer_t
-  use array_utilities,        only : interpolate_in_z
-  use time_io,                only : read_times, find_timestep_in_filelist
-  use io_routines,            only : io_read
+  use string,             only : as_string
+  use time_io,            only : read_times, find_timestep_in_filelist, var_has_time_dim
+  use array_utilities,    only : interpolate_in_z
+  use io_routines,        only : io_getdims, io_var_reversed, can_file_parallel
   implicit none
 
 contains
 
 
-    module subroutine init(this, its, ite, kts, kte, jts, jte, options)
+    module subroutine init_reader(this, its, ite, kts, kte, jts, jte, options)
+        implicit none
         class(reader_t), intent(inout) :: this
         integer, intent(in) :: its, ite, kts, kte, jts, jte
         type(options_t), intent(in) :: options
@@ -33,13 +35,19 @@ contains
         
         type(dim_arrays_type), allocatable           :: var_dimensions(:)
         character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
-        type(variable_t) :: new_variable
-        integer :: i, nx, ny, nz
+        type(meta_data_t) :: var_meta
+        type(Time_type), allocatable :: last_file_times(:)
+        type(Time_type) :: last_forcing_time
+        character(len=kMAX_FILE_LENGTH) :: last_file
+        integer :: i, nx, ny, nz, my_rank, comm_size, ierr
+        integer, allocatable :: qv_dims(:)
         real, dimension(:,:,:), allocatable :: tmp_read_var
         
 
         this%file_list = options%forcing%boundary_files
         this%time_var  = options%forcing%time_var
+        this%lat_var  = options%forcing%latvar
+
         this%model_end_time = options%general%end_time
         this%input_dt   = options%forcing%input_dt
 
@@ -50,22 +58,69 @@ contains
         else
             call set_curfile_curstep(this, options%general%start_time, this%file_list, this%time_var, options%restart%restart)
         endif
+
+        ! Validate that the forcing files cover the requested simulation
+        ! end_time. Without this check, the reader silently hits EOF during
+        ! the run and the two-sided IO plumbing deadlocks (compute's
+        ! pre-posted Irecv on read_buffer never finds a matching Isend once
+        ! scatter_forcing is skipped).
+        last_file = this%file_list(size(this%file_list))
+        call read_times(last_file, this%time_var, last_file_times)
+
+        if (size(last_file_times) == 0) then
+            call MPI_Comm_Rank(MPI_COMM_WORLD, my_rank, ierr)
+            call MPI_Comm_Size(MPI_COMM_WORLD, comm_size, ierr)
+            if (my_rank == comm_size-1) then
+                write(*,*) ""
+                write(*,*) "================================================================"
+                write(*,*) "ERROR: forcing file contains no timestamps."
+                write(*,*) "================================================================"
+                write(*,*) "  File : ", trim(last_file)
+                write(*,*) "================================================================"
+                flush(output_unit)
+            endif
+            call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+        endif
+
+        last_forcing_time = last_file_times(size(last_file_times))
+
+        if (last_forcing_time < options%general%end_time) then
+            call MPI_Comm_Rank(MPI_COMM_WORLD, my_rank, ierr)
+            call MPI_Comm_Size(MPI_COMM_WORLD, comm_size, ierr)
+
+            if (my_rank == comm_size-1) then
+                write(*,*) ""
+                write(*,*) "================================================================"
+                write(*,*) "ERROR: forcing data does not cover the requested simulation end."
+                write(*,*) "================================================================"
+                write(*,*) "  Simulation end time    : ", trim(as_string(options%general%end_time))
+                write(*,*) "  Last forcing timestamp : ", trim(as_string(last_forcing_time))
+                write(*,*) "  Last forcing file      : ", trim(last_file)
+                write(*,*) ""
+                write(*,*) "Either shorten the namelist end_time or extend the forcing file list."
+                write(*,*) "================================================================"
+                flush(output_unit)
+            endif
+            call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+        endif
+
         !Now setup dimensions of reader_object so we know what part of input file that we should read
         this%its = its; this%ite = ite
         this%kts = kts; this%kte = kte
         this%jts = jts; this%jte = jte
 
         !get global input file dimensions
-        call io_read(this%file_list(this%curfile), options%forcing%tvar,   tmp_read_var,   this%curstep)
+        call io_getdims(this%file_list(this%curfile), options%forcing%qvvar, qv_dims)
 
-        this%ids = 1; this%ide = ubound(tmp_read_var, 1)
-        this%jds = 1; this%jde = ubound(tmp_read_var, 2)
+        this%ids = 1; this%ide = qv_dims(1)
+        this%jds = 1; this%jde = qv_dims(2)
 
         ! the parameters option type can't contain allocatable arrays because it is a coarray
         ! so we need to allocate the vars_to_read and var_dimensions outside of the options type
         call setup_variable_lists(options%forcing%vars_to_read, options%forcing%dim_list, vars_to_read, var_dimensions)
 
         this%n_vars = size(vars_to_read)
+        allocate(this%var_meta(this%n_vars))
 
         do i=1, this%n_vars
             nx = (this%ite-this%its+1)
@@ -75,16 +130,27 @@ contains
             if (var_dimensions(i)%dims(1) == this%ide+1) nx = nx+1
             if (var_dimensions(i)%dims(2) == this%jde+1) ny = ny+1
 
+            var_meta%name = trim(vars_to_read(i))
+            if (allocated(var_meta%dim_len)) deallocate(var_meta%dim_len)
+
             if (var_dimensions(i)%num_dims==2) then
-                call new_variable%initialize( [nx, ny] )
-                call this%variables%add_var(vars_to_read(i), new_variable)
-            else if (var_dimensions(i)%num_dims==3) then
-                call new_variable%initialize( [nx, nz, ny] )
-                call this%variables%add_var(vars_to_read(i), new_variable)
+                allocate(var_meta%dim_len(2))
+                var_meta%dim_len(1) = nx
+                var_meta%dim_len(2) = ny
+                var_meta%three_d = .False.
+                var_meta%two_d = .True.
+            elseif (var_dimensions(i)%num_dims==3) then
+                allocate(var_meta%dim_len(3))
+                var_meta%dim_len(1) = nx
+                var_meta%dim_len(2) = nz
+                var_meta%dim_len(3) = ny
+                var_meta%three_d = .True.
+                var_meta%two_d = .False.
             endif
+            this%var_meta(i) = var_meta
         end do
         
-    end subroutine init
+    end subroutine init_reader
 
     !>------------------------------------------------------------
     !! Reads a new set of forcing data for the next time step
@@ -94,98 +160,269 @@ contains
         class(reader_t), intent(inout) :: this
         real, allocatable, intent(inout) :: buffer(:,:,:,:)
         type(MPI_Comm), intent(in)              :: par_comms
+        type(MPI_Info) :: par_comm_info
 
-        real, allocatable :: data3d_t(:,:,:,:), data3d(:,:,:)
-        type(variable_t)  :: var
-        character(len=kMAX_NAME_LENGTH) :: name
-        integer :: nx, ny, nz, err, varid, n, ndims, start_3d_t(4), cnt_3d_t(4), start_2d_t(3), cnt_2d_t(3), start_3d(3), cnt_3d(3), start_2d(2), cnt_2d(2)
+        real, allocatable :: data4d(:,:,:,:), data3d(:,:,:), data2d(:,:), data1d(:)
+        type(meta_data_t)  :: var
+        integer :: nx, ny, nz, data_nz, err, varid, n, ndims, i, k, j
+        integer, dimension(4) :: start_3d_t, cnt_3d_t
+        integer, dimension(3) :: start_2d_t, cnt_2d_t, start_3d, cnt_3d
+        integer, dimension(2) :: start_2d, cnt_2d, start_1d_t, cnt_1d_t
+        integer, dimension(1) :: start_1d, cnt_1d
+        integer :: var_id, y_s, mid_y_local, mid_y_global
+        integer, allocatable :: dims(:)
+        character(len=kMAX_DIM_LENGTH) :: time_dim_name, attr_val
+        logical :: has_time, flip_y, is_reversed, is_file_parallel
 
-        if (allocated(buffer)) deallocate(buffer)
-        allocate(buffer(this%n_vars,this%its:this%ite+1,this%kts:this%kte,this%jts:this%jte+1))
-
+        buffer = 0.0
         !See if we must open the file
+
+        is_file_parallel = .True.!can_file_parallel(this%file_list(this%curfile))
         if (this%ncfile_id < 0) then
-            call check_ncdf( nf90_open(this%file_list(this%curfile), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id, &
-                    comm = par_comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL), " Opening file "//trim(this%file_list(this%curfile)))
+            if (.not.(is_file_parallel)) then
+                call check_ncdf( nf90_open(trim(this%file_list(this%curfile)), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id), " Opening file "//trim(this%file_list(this%curfile)))
+            else
+                par_comm_info = MPI_INFO_NULL
+                call MPI_Comm_get_info(par_comms, par_comm_info)
+                call check_ncdf( nf90_open(trim(this%file_list(this%curfile)), IOR(NF90_NOWRITE,NF90_NETCDF4), this%ncfile_id, &
+                        comm = par_comms%MPI_VAL, info = par_comm_info%MPI_VAL), " Opening file "//trim(this%file_list(this%curfile)))
+            endif
         endif
         
+        flip_y = io_var_reversed(this%file_list(this%curfile), this%lat_var)
 
+        !if flip_y, then the y index for starting needs to be flipped about the midpoint of the y dimension
+        if (flip_y) then
+            !first get midpoint of this y read 
+            ny = this%jte - this%jts + 1
+            mid_y_local = ny/2 + this%jts - 1
+            y_s = this%jde - mid_y_local - ny/2
+            ! mid_y_global = (this%jde - this%jds+1)/2
+            ! if (mid_y_local <= mid_y_global) y_s = mid_y_global + (mid_y_global-mid_y_local) - ny/2
+            ! if (mid_y_local > mid_y_global) y_s = mid_y_global - (mid_y_local-mid_y_global) - ny/2
+        else
+            y_s = this%jts
+        endif
         ! setup start/count arrays accordingly
-        start_3d_t = (/ this%its,this%jts,this%kts,this%curstep /)
-        start_2d_t = (/ this%its,this%jts,this%curstep /)
-        start_3d = (/ this%its,this%jts,this%kts /)
-        start_2d = (/ this%its,this%jts /)
+        start_3d_t = (/ this%its,y_s,this%kts,this%curstep /)
+        start_2d_t = (/ this%its,y_s,this%curstep /)
+        start_1d_t = (/ this%kts,this%curstep /)
 
-        associate(list => this%variables)
-            
+        start_3d = (/ this%its,y_s,this%kts /)
+        start_2d = (/ this%its,y_s /)
+        start_1d = (/ this%kts /)
+
+        cnt_3d_t = (/ (this%ite-this%its+1),(this%jte-this%jts+1),(this%kte-this%kts+1),1 /)
+        cnt_2d_t = (/ (this%ite-this%its+1),(this%jte-this%jts+1),1 /)
+        cnt_1d_t = (/ (this%kte-this%kts+1),1 /)
+
+        cnt_3d = (/ (this%ite-this%its+1),(this%jte-this%jts+1),(this%kte-this%kts+1) /)
+        cnt_2d = (/ (this%ite-this%its+1),(this%jte-this%jts+1) /)
+        cnt_1d = (/ (this%kte-this%kts+1) /)
+
+        ! determine if we need to flip the y dimension. We will determine this by looking for the
+        ! latitude variable and checking for the attributes stored_direction = "decreasing" or "down" or
+        ! positive = "down"
+
+
         ! loop through the list of variables that need to be read in
-        call list%reset_iterator()
-        n = 1
-        do while (list%has_more_elements())
+        do n = 1, size(this%var_meta)
             ! get the next variable in the structure
-            var = list%next(name)
-            if (var%var_id < 0) call check_ncdf( nf90_inq_varid(this%ncfile_id, name, var%var_id), " Getting var ID for "//trim(name))
-            call check_ncdf( nf90_var_par_access(this%ncfile_id, var%var_id, nf90_collective))
+            var = this%var_meta(n)
+            if (var%file_var_id < 0) call check_ncdf( nf90_inq_varid(this%ncfile_id, var%name, var%file_var_id), " Getting var ID for "//trim(var%name))
+            if (is_file_parallel) call check_ncdf( nf90_var_par_access(this%ncfile_id, var%file_var_id, nf90_collective))
 
             !get number of dimensions
-            call check_ncdf( nf90_inquire_variable(this%ncfile_id, var%var_id, ndims = ndims), " Getting dim length for "//trim(name))
+            call check_ncdf( nf90_inquire_variable(this%ncfile_id, var%file_var_id, ndims = ndims), " Getting dim length for "//trim(var%name))
+
+            !see if one of the dimensions is unlimited (time)
+            has_time = var_has_time_dim(this%file_list(this%curfile), var%name, this%time_var)
 
             if (var%three_d) then
-                nx = size(var%data_3d, 1)
-                ny = size(var%data_3d, 3)
-                nz = size(var%data_3d, 2)
+                nx = var%dim_len(1)
+                ny = var%dim_len(3)
+                nz = var%dim_len(2)
 
-                cnt_3d_t = (/ nx, ny, nz,1 /)
-                cnt_3d = (/ nx, ny, nz /)
+                if (ndims == 4) then
+                    if (allocated(data4d)) deallocate(data4d)
+                    if (has_time) then
 
-                if (ndims > 3) then
-                    if (allocated(data3d_t)) deallocate(data3d_t)
-                    allocate(data3d_t(nx,ny,nz,1))
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, data3d_t, start=start_3d_t, count=cnt_3d_t), " Getting 3D var with time "//trim(name))
+                        !get dimension length of 3rd dimension to see if it is staggered in vertical
+                        call io_getdims(this%file_list(this%curfile), var%name, dims)
+                        data_nz = dims(3)
 
-                    !check if variable is staggered in vertical
-                    ! if so, we need to interpolate it to the mass levels
-                    if (nz == (this%kte-this%kts+2)) then
-                        data3d = data3d_t(:,:,:,1)
-                        call interpolate_in_z(data3d,zdim=3)
-                        data3d_t(:,:,:,1) = data3d
-                        nz = nz-1
+                        cnt_3d_t = (/ nx, ny, data_nz,1 /)
+                        allocate(data4d(nx,ny,data_nz,1))
+
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data4d, start=start_3d_t, count=cnt_3d_t), " Getting 3D var with time dim: "//trim(var%name))
+
+                        !check if variable is staggered in vertical
+                        ! if so, we need to interpolate it to the mass levels
+                        if (data_nz == nz+1) then
+                            if (allocated(data3d)) deallocate(data3d)
+                            allocate(data3d(nx,ny,data_nz))
+                            data3d = data4d(:,:,:,1)
+                            call interpolate_in_z(data3d,zdim=3)
+                            deallocate(data4d)
+                            allocate(data4d(nx,ny,nz,1))
+                            data4d(:,:,:,1) = data3d(:,:,:)
+                            deallocate(data3d)
+                        endif
+
+                        buffer(n,this%its:this%its+nx-1,this%kts:this%kts+nz-1,this%jts:this%jts+ny-1) = reshape(data4d(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
+                    else
+                        write(*,*) "Error: ", trim(var%name), " is spatially 3D, but forcing data is spatially 4D"
+                        stop "Internal variable is spatially 3D, but forcing data is spatially 4D"
                     endif
-
-                    buffer(n,this%its:this%its+nx-1,this%kts:this%kts+nz-1,this%jts:this%jts+ny-1) = reshape(data3d_t(:,:,1:nz,1), shape=[nx,nz,ny], order=[1,3,2])
-                else
+                elseif (ndims==3) then
                     if (allocated(data3d)) deallocate(data3d)
-                    allocate(data3d(nx,ny,nz))
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, data3d, start=start_3d, count=cnt_3d), " Getting 3D var "//trim(name))
+                    if (has_time) then
 
-                    !check if variable is staggered in vertical
-                    ! if so, we need to interpolate it to the mass levels
-                    if (nz == (this%kte-this%kts+2)) then
-                        call interpolate_in_z(data3d,zdim=3)
-                        nz = nz-1
+                        cnt_2d_t = (/ nx, ny, 1 /)
+
+                        !if 2D spatial data has been provided for a 3D variable, assume that we are given a 2D plane and should replicate it in the vertical
+                        allocate(data3d(nx,ny,1))
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d, start=start_2d_t, count=cnt_2d_t), " Getting 2D var with time dim for 3D var: "//trim(var%name))
+                        ! Broadcast the 2D data across all vertical levels
+                        do k = this%kts, this%kte
+                            buffer(n,this%its:this%its+nx-1,k,this%jts:this%jts+ny-1) = data3d(:,:,1)
+                        enddo
+                    else
+
+                        !get dimension length of 3rd dimension to see if it is staggered in vertical
+                        call io_getdims(this%file_list(this%curfile), var%name, dims)
+                        data_nz = dims(3)
+
+                        cnt_3d = (/ nx, ny, data_nz /)
+                        allocate(data3d(nx,ny,data_nz))
+                        
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data3d, start=start_3d, count=cnt_3d), " Getting 3D var: "//trim(var%name))
+
+                        !check if variable is staggered in vertical
+                        ! if so, we need to interpolate it to the mass levels
+                        if (data_nz == nz+1) then
+                            call interpolate_in_z(data3d,zdim=3)
+                        endif
+
+                        buffer(n,this%its:this%its+nx-1,this%kts:this%kts+nz-1,this%jts:this%jts+ny-1) = reshape(data3d(:,:,:), shape=[nx,nz,ny], order=[1,3,2])
                     endif
+                elseif (ndims==2) then
+                    if (allocated(data2d)) deallocate(data2d)
+                    if (has_time) then
 
-                    buffer(n,this%its:this%its+nx-1,this%kts:this%kts+nz-1,this%jts:this%jts+ny-1) = reshape(data3d(:,:,:), shape=[nx,nz,ny], order=[1,3,2])
+                        !get dimension length of 1st dimension to see if it is staggered in vertical
+                        call io_getdims(this%file_list(this%curfile), var%name, dims)
+                        data_nz = dims(1)
+
+                        cnt_1d_t = (/ data_nz, 1 /)
+                        allocate(data2d(data_nz,1))
+
+                        !if 1D spatial data has been provided for a 3D variable, assume that we are given a 1D line and should fill each z level with it
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data2d, start=start_1d_t, count=cnt_1d_t), " Getting 1D var with time dim for 3D var: "//trim(var%name))
+
+                        !check if variable is staggered in vertical
+                        ! if so, we need to interpolate it to the mass levels
+                        if (data_nz == nz+1) then
+                            if (allocated(data1d)) deallocate(data1d)
+                            allocate(data1d(nz))
+                            data1d = (data2d(2:nz+1,1)+data2d(1:nz,1))/2.0
+                            deallocate(data2d)
+                            allocate(data2d(nz,1))
+                            data2d(:,1) = data1d
+                        endif
+
+                        !reverse the order of the 1D data if needed
+                        is_reversed = io_var_reversed(this%file_list(this%curfile), var%name)
+                        if (is_reversed) data2d(:,1) = data2d(size(data2d,1):1:-1,1)
+
+                        ! Broadcast the 1D data across all horizontal levels
+                        do j = this%jts, this%jts+ny-1
+                            do i = this%its, this%its+nx-1
+                                buffer(n,i,this%kts:this%kte,j) = data2d(:,1)
+                            enddo
+                        enddo
+                    else
+
+                        cnt_2d = (/ nx, ny /)
+
+                        !if 2D spatial data has been provided for a 3D variable, assume that we are given a 2D plane and should replicate it in the vertical
+                        allocate(data2d(nx,ny))
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data2d, start=start_2d, count=cnt_2d), " Getting 2D var for 3D var: "//trim(var%name))
+                        ! Broadcast the 2D data across all vertical levels
+                        do k = this%kts, this%kte
+                            buffer(n,this%its:this%its+nx-1,k,this%jts:this%jts+ny-1) = data2d(:,:)
+                        enddo
+                    endif
+                elseif (ndims==1) then
+                    if (allocated(data1d)) deallocate(data1d)
+                    if (.not.(has_time)) then
+
+                        !get dimension length of 1st dimension to see if it is staggered in vertical
+                        call io_getdims(this%file_list(this%curfile), var%name, dims)
+                        data_nz = dims(1)
+
+                        cnt_1d = (/ data_nz /)
+                        allocate(data1d(data_nz))
+
+                        !if 1D spatial data has been provided for a 3D variable, assume that we are given a 1D line and should fill each z level with it
+                        call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, data1d, start=start_1d, count=cnt_1d), " Getting 1D var for 3D var: "//trim(var%name))
+                        
+                        !check if variable is staggered in vertical
+                        ! if so, we need to interpolate it to the mass levels
+                        if (data_nz == nz+1) then
+                            if (allocated(data2d)) deallocate(data2d)
+                            allocate(data2d(nz,1))
+                            data2d(:,1) = (data1d(2:nz+1)+data1d(1:nz))/2.0
+                            deallocate(data1d)
+                            allocate(data1d(nz))
+                            data1d = data2d(:,1)
+                        endif
+
+                        !reverse the order of the 1D data if needed
+                        is_reversed = io_var_reversed(this%file_list(this%curfile), var%name)
+                        if (is_reversed) data1d = data1d(size(data1d):1:-1)
+
+                        ! Broadcast the 1D data across all horizontal levels
+                        do j = this%jts, this%jts+ny-1
+                            do i = this%its, this%its+nx-1
+                                buffer(n,i,this%kts:this%kte,j) = data1d(this%kts:this%kte)
+                            enddo
+                        enddo
+                    endif
+                endif
+
+                if (flip_y) then
+                    !invert buffer about the y axis using a temporary array to avoid overlap
+                    if (allocated(data3d)) deallocate(data3d)
+                    allocate(data3d(nx,nz,ny))
+                    data3d = buffer(n,this%its:this%its+nx-1,this%kts:this%kte,this%jts:this%jts+ny-1)
+                    buffer(n,this%its:this%its+nx-1,this%kts:this%kte,this%jts:this%jts+ny-1) = data3d(:,:,ny:1:-1)
+                    deallocate(data3d)
                 endif
             else if (var%two_d) then
-                nx = size(var%data_2d, 1)
-                ny = size(var%data_2d, 2)
+                nx = var%dim_len(1)
+                ny = var%dim_len(2)
 
                 cnt_2d_t = (/ nx, ny, 1 /)
                 cnt_2d = (/ nx, ny /)
 
-                if (ndims > 2) then
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, buffer(n,:,1,:), start=start_2d_t, count=cnt_2d_t), " Getting 2D with time "//trim(name))
-                else
-                    call check_ncdf( nf90_get_var(this%ncfile_id, var%var_id, buffer(n,:,1,:), start=start_2d, count=cnt_2d), " Getting 2D "//trim(name))
+                if (ndims == 3) then
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, buffer(n,this%its:this%its+nx-1,1,this%jts:this%jts+ny-1), start=start_2d_t, count=cnt_2d_t), " Getting 2D var with time dim: "//trim(var%name))
+                elseif (ndims==2) then
+                    call check_ncdf( nf90_get_var(this%ncfile_id, var%file_var_id, buffer(n,this%its:this%its+nx-1,1,this%jts:this%jts+ny-1), start=start_2d, count=cnt_2d), " Getting 2D var: "//trim(var%name))
+                endif
+                if (flip_y) then
+                    !invert buffer about the y axis using a temporary array to avoid overlap
+                    if (allocated(data2d)) deallocate(data2d)
+                    allocate(data2d(nx,ny))
+                    data2d = buffer(n,this%its:this%its+nx-1,1,this%jts:this%jts+ny-1)
+                    buffer(n,this%its:this%its+nx-1,1,this%jts:this%jts+ny-1) = data2d(:,ny:1:-1)
+                    deallocate(data2d)
                 endif
             endif
 
-            n = n+1
         end do
         
-        end associate
-
         call update_forcing_step(this)
 
     end subroutine
@@ -201,16 +438,18 @@ contains
 
         integer :: steps_in_file
         type(Time_type), allocatable :: times_in_file(:)
+        type(Time_type) :: time_tmp
+
 
         this%curstep = this%curstep + 1 ! this may be all we have to do most of the time
         ! check that we haven't stepped passed the end of the current file
         steps_in_file = get_n_timesteps(this, this%time_var, 0)
-        this%input_time = this%input_time + this%input_dt
+
+        call this%input_time%set(this%input_time%mjd() + this%input_dt%days())
 
         if (steps_in_file < this%curstep) then
             ! close current file
-            call check_ncdf(nf90_close(this%ncfile_id), "Closing file "//trim(this%file_list(this%curfile)))
-            this%ncfile_id = -1
+            call this%close_file()
             
             ! if we have, use the next file
             this%curfile = this%curfile + 1
@@ -230,14 +469,16 @@ contains
         if (.not.(this%eof)) then
             !Get time step of the next input step
             call read_times(this%file_list(this%curfile), this%time_var, times_in_file)
+            
+            call time_tmp%set(times_in_file(this%curstep)%mjd() - this%input_dt%days())
 
-            if ((times_in_file(this%curstep) - this%input_dt) >= this%model_end_time) then
+            if (time_tmp >= this%model_end_time) then
                 this%eof = .True.
             !Check if the next time step in the file is equal to the input time 
             else if (.not.(times_in_file(this%curstep) == this%input_time)) then
                 ! warn the user and exit
-                write(*,*) "Warning: The next time step in the file is not equal to the input time.  The next time step in the file is: ", times_in_file(this%curstep)%as_string()
-                write(*,*) "The input time is: ", this%input_time%as_string()
+                write(*,*) "Warning: The next time step in the file is not equal to the input time.  The next time step in the file is: ", as_string(times_in_file(this%curstep))
+                write(*,*) "The input time is: ", as_string(this%input_time)
                 write(*,*) "The current file is: ", this%file_list(this%curfile)
                 write(*,*) "The current step is: ", this%curstep
                 stop
@@ -343,6 +584,8 @@ contains
         n_valid_vars = 0
         do i=1, size(master_var_list)
             if (trim(master_var_list(i)) /= '') then
+                !check if "_computed" is in the variable name, if so skip it
+                if (index(trim(master_var_list(i)), '_computed') > 0) cycle
                 n_valid_vars = n_valid_vars + 1
             endif
         enddo
@@ -356,9 +599,11 @@ contains
         curvar = 1
         do i=1, size(master_var_list)
             if (trim(master_var_list(i)) /= '') then
+                !check if "_computed" is in the variable name, if so skip it
+                if (index(trim(master_var_list(i)), '_computed') > 0) cycle
                 vars_to_read(curvar) = master_var_list(i)
                 var_dimensions(curvar)%num_dims = master_dim_list(i)%num_dims
-                var_dimensions(curvar)%dims = master_dim_list(i)%dims
+                var_dimensions(curvar)%dims(1:master_dim_list(i)%num_dims) = master_dim_list(i)%dims(1:master_dim_list(i)%num_dims)
                 ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)
                 curvar = curvar + 1
             endif
@@ -370,7 +615,7 @@ contains
         class(reader_t),   intent(inout)  :: this
 
         if (this%ncfile_id > 0) then
-            call check_ncdf(nf90_close(this%ncfile_id), "Closing file ")
+            call check_ncdf(nf90_close(this%ncfile_id), "Closing file: " // trim(this%file_list(this%curfile)))
             this%ncfile_id = -1
         endif
 

@@ -28,7 +28,7 @@ module timer_interface
       contains
         procedure :: start
         procedure :: stop
-        procedure :: as_string
+        ! procedure :: as_string
         procedure :: get_time
         procedure :: reset
         procedure :: mean => timer_mean
@@ -81,7 +81,7 @@ interface
     !! ------------------------------------
     module function get_time(this) result(time)
         implicit none
-        class(timer_t),    intent(inout)        :: this
+        class(timer_t),    intent(in)        :: this
         real :: time
     end function get_time
 
@@ -92,12 +92,12 @@ interface
     !! If the timer is running, it includes the current time in the total reported
     !!
     !! ------------------------------------
-    module function as_string(this, format) result(time)
-        implicit none
-        class(timer_t),   intent(inout)        :: this
-        character(len=*), intent(in), optional :: format
-        character(len=25) :: time ! return value
-    end function as_string
+    ! module function as_string(this, format) result(time)
+    !     implicit none
+    !     class(timer_t),   intent(inout)        :: this
+    !     character(len=*), intent(in), optional :: format
+    !     character(len=25) :: time ! return value
+    ! end function as_string
 
     !> -----------------------------------
     !! Return the mean time as a real

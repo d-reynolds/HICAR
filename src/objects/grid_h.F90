@@ -15,6 +15,10 @@ module grid_interface
         integer :: jms, jme
         integer :: kms, kme
         integer :: ns_halo_nx, ew_halo_ny, halo_nz, halo_size
+        integer :: halo_win_nz  ! = max(nz, global_nz). Used only for single-var
+                                ! exch_var windows/buffers so grids with nz >
+                                ! nz_global (e.g. snow) can still be exchanged.
+                                ! Batch halo (atm-only) keeps using halo_nz.
         integer :: nx_e, ny_e
         integer :: nx_global, ny_global
         integer :: nx = 0
@@ -29,8 +33,6 @@ module grid_interface
         integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
                     its,ite, jts,jte, kts,kte    ! for the data tile to process   (t)
 
-        character(len=kMAX_DIM_LENGTH), allocatable :: dimensions(:)
-
         type(MPI_Datatype) :: NS_halo
         type(MPI_Datatype) :: NS_win_halo
 
@@ -38,8 +40,7 @@ module grid_interface
         type(MPI_Datatype) :: EW_win_halo
 
         type(MPI_Datatype) :: corner_halo
-        type(MPI_Datatype) :: corner_NS_win_halo
-        type(MPI_Datatype) :: corner_EW_win_halo
+        type(MPI_Datatype) :: corner_win_halo
     contains
         procedure :: get_dims
         procedure :: domain_decomposition

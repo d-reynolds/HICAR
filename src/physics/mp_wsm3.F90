@@ -1,6 +1,6 @@
-#ifdef _ACCEL
-#  include "module_mp_wsm3_accel.F"
-#else
+!#ifdef _ACCEL
+!#  include "module_mp_wsm3_accel.F"
+!#else
 ! #if ( RWORDSIZE == 4 )
 ! #  define VREC vsrec
 ! #  define VSQRT vssqrt
@@ -34,6 +34,10 @@ MODULE module_mp_wsm3
 !
    USE mod_wrf_constants, only : RE_QC_BG, RE_QI_BG, RE_QS_BG
 !
+  implicit none
+
+  private
+  public :: wsm3, wsm3init
    REAL, PARAMETER, PRIVATE :: dtcldcr     = 120. ! maximum time step for minor loops
    REAL, PARAMETER, PRIVATE :: n0r = 8.e6         ! intercept parameter rain
    REAL, PARAMETER, PRIVATE :: avtr = 841.9       ! a constant for terminal velocity of rain
@@ -1600,4 +1604,4 @@ CONTAINS
       end subroutine effectRad_wsm3
 !-----------------------------------------------------------------------
 END MODULE module_mp_wsm3
-#endif
+!#endif

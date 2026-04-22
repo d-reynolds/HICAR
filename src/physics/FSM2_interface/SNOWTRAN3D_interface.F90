@@ -11,6 +11,8 @@
 !-----------------------------------------------------------------------
 module SNOWTRAN3D_interface
 
+    use, intrinsic :: IEEE_ARITHMETIC
+
     use GRID, only: &
       Nx,Ny               ! Grid dimensions
 
@@ -193,7 +195,7 @@ module SNOWTRAN3D_interface
     do j = 1, Ny
       do i = 1, Nx
 
-        if (isnan(dem(i,j))) goto 1 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 1 ! Exclude points outside of the domain
 
         windspd_flag = max(windspd_flag,Ua(i,j))
         snowthickness(i,j) = sum(Ds(:,i,j))
@@ -324,7 +326,7 @@ module SNOWTRAN3D_interface
     do i = 1, Nx
       do j = 1, Ny
 
-        if (isnan(dem(i,j))) goto 2 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 2 ! Exclude points outside of the domain
 
         k = 1
         do while (k <= Nsnow(i,j))
@@ -373,7 +375,7 @@ module SNOWTRAN3D_interface
     do i = 1, Nx
       do j = 1, Ny
 
-        if (isnan(dem(i,j))) goto 3 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 3 ! Exclude points outside of the domain
 
         Ds_soft_old = Ds_soft(i,j)
         Ds_soft(i,j) = 0.0
@@ -467,7 +469,7 @@ module SNOWTRAN3D_interface
       do i = 2, Nx-1
         do j = 2, Ny-1
 
-          if (isnan(dem(i,j))) goto 4 ! Exclude points outside of the domain
+          if (ieee_is_nan(dem(i,j))) goto 4 ! Exclude points outside of the domain
 
           ! Make adjustments for the case where there is no snow available
           ! on the ground (or captured within the vegetation) to be
@@ -522,7 +524,7 @@ module SNOWTRAN3D_interface
     do i = 2, Nx-1
       do j = 2, Ny-1
 
-        if (isnan(dem(i,j))) goto 5 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 5 ! Exclude points outside of the domain
 
         ! Fill summing arrays of the sublimation and transport quantities.
         dSWE_tot_subl(i,j) = dSWE_tot_subl(i,j) + dSWE_subl(i,j)
@@ -678,7 +680,7 @@ module SNOWTRAN3D_interface
     do i = 1, Nx
       do j = 1, Ny
       
-        if (isnan(dem(i,j))) goto 6 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 6 ! Exclude points outside of the domain
         
         Qsusp = 0.0
         
@@ -790,7 +792,7 @@ module SNOWTRAN3D_interface
     do i = 1, Nx
       do j = 1, Ny
 
-        if (isnan(dem(i,j))) goto 8 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 8 ! Exclude points outside of the domain
 
         ! For a given wind speed, find Qsalt_max.
         Qsalt_max(i,j) = 0.68 * rho_air / grav * &
@@ -820,7 +822,7 @@ module SNOWTRAN3D_interface
       do i = 1, Nx
         do j = 1, Ny
 
-          if (isnan(dem(i,j))) goto 9 ! Exclude points outside of the domain
+          if (ieee_is_nan(dem(i,j))) goto 9 ! Exclude points outside of the domain
 
           ! Zero incoming flux at the boundaries.
           Qsalt_u(i,j) = 0.0
@@ -834,7 +836,7 @@ module SNOWTRAN3D_interface
       do i = 1, Nx
         do j = 1, Ny
 
-          if (isnan(dem(i,j))) goto 10 ! Exclude points outside of the domain
+          if (ieee_is_nan(dem(i,j))) goto 10 ! Exclude points outside of the domain
 
           ! Steady-state (maximum) incoming flux at the boundaries.
           Qsalt_u(i,j) = Qsalt_maxu(i,j)
@@ -869,7 +871,7 @@ module SNOWTRAN3D_interface
     do i = 1, Nx
       do j = 1, Ny
 
-        if (isnan(dem(i,j))) goto 12 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 12 ! Exclude points outside of the domain
 
         ! This statement below has been handeled in the SNOWTRAN3D_fluxes function now
         !if ((snowthickness(i,j) <= vegsnowd_xy(i,j)) .or. (Ds_soft(i,j) <= epsilon(Ds_soft))) then
@@ -1252,7 +1254,7 @@ module SNOWTRAN3D_interface
     do i = 1, Nx
       do j = 1, Ny
 
-        if (isnan(dem(i,j))) goto 13 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 13 ! Exclude points outside of the domain
 
         ! Determine whether snow is saltating (this influences how Utau
         ! and z_0 are computed).
@@ -1549,7 +1551,7 @@ module SNOWTRAN3D_interface
 
       do j = 2, Ny
 
-        if (isnan(dem(i,j))) goto 16 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 16 ! Exclude points outside of the domain
 
         if (uwind(i,j-1) <= 0.0) then
           sign1 = -1.0
@@ -1610,7 +1612,7 @@ module SNOWTRAN3D_interface
 
       do j = 2, Ny
 
-        if (isnan(dem(i,j))) goto 17 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 17 ! Exclude points outside of the domain
 
         if (uwind(i,j-1) <= 0.0) then
           sign1 = -1.0
@@ -1671,7 +1673,7 @@ module SNOWTRAN3D_interface
 
       do i = 2, Nx
 
-        if (isnan(dem(i,j))) goto 18 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 18 ! Exclude points outside of the domain
 
         if (vwind(i-1,j) <= 0.0) then
           sign1 = -1.0
@@ -1732,7 +1734,7 @@ module SNOWTRAN3D_interface
 
       do i = 2, Nx
 
-        if (isnan(dem(i,j))) goto 19 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 19 ! Exclude points outside of the domain
 
         if (vwind(i-1,j) <= 0.0) then
           sign1 = -1.0
@@ -2027,7 +2029,7 @@ module SNOWTRAN3D_interface
     eps = 1e-6
     do i = 2, Nx-1
       do j = 2, Ny-1
-        if (isnan(dem(i,j))) goto 21 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 21 ! Exclude points outside of the domain
 
         ! LQ: I can't understand the meaning of this weighting, I keep it as original SNOWTRAN3D though
         !weight_u = abs(dh_s_u(i,j)) / &
@@ -2138,7 +2140,7 @@ module SNOWTRAN3D_interface
     do j = 1, Ny
       do i = 1, Nx
 
-        if (isnan(dem(i,j))) goto 24 ! Exclude points outside of the domain
+        if (ieee_is_nan(dem(i,j))) goto 24 ! Exclude points outside of the domain
 
         ! Calculate the 2-m wind speed.
         windspd_2m = Ua(i,j) * log(2.0/z0_snow(i,j))/log(zU/z0_snow(i,j))

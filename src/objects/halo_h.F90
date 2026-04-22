@@ -2,9 +2,11 @@ module halo_interface
         
     use grid_interface,           only : grid_t
     use variable_interface,       only : variable_t
-    use variable_dict_interface,  only : var_dict_t
     use timer_interface,          only : timer_t
     use data_structures,          only : index_type
+#ifdef USE_NCCL
+    use iso_c_binding, only: c_ptr, c_null_ptr
+#endif
 
     use mpi_f08
     implicit none
@@ -22,6 +24,10 @@ module halo_interface
         type(MPI_Win)     :: south_in_win
         type(MPI_Win)     :: east_in_win
         type(MPI_Win)     :: west_in_win
+        type(MPI_Win)     :: northwest_in_win
+        type(MPI_Win)     :: southwest_in_win
+        type(MPI_Win)     :: northeast_in_win
+        type(MPI_Win)     :: southeast_in_win
 
         type(MPI_win)     :: north_3d_win
         type(MPI_win)     :: south_3d_win
@@ -47,38 +53,56 @@ module halo_interface
         type(MPI_Group)    :: north_neighbor_grp, south_neighbor_grp, east_neighbor_grp, west_neighbor_grp
         type(MPI_Group)    :: northwest_neighbor_grp, southwest_neighbor_grp, northeast_neighbor_grp, southeast_neighbor_grp
 
-        real, contiguous, pointer :: south_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: north_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: west_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: east_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: northwest_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: southwest_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: northeast_batch_in_3d(:,:,:,:)
-        real, contiguous, pointer :: southeast_batch_in_3d(:,:,:,:)
+        real, contiguous, pointer :: south_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: north_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: west_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: east_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northwest_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southwest_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northeast_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southeast_batch_in_3d(:,:,:,:) => null()
 
-        real, contiguous, pointer :: north_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: south_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: east_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: west_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: northwest_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: southwest_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: northeast_buffer_3d(:,:,:,:)
-        real, contiguous, pointer :: southeast_buffer_3d(:,:,:,:)
+        real, contiguous, pointer :: north_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: south_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: east_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: west_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northwest_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southwest_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northeast_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southeast_buffer_3d(:,:,:,:) => null()
 
-        real, pointer     :: south_in_3d(:,:,:)
-        real, pointer     :: north_in_3d(:,:,:)
-        real, pointer     :: west_in_3d(:,:,:)
-        real, pointer     :: east_in_3d(:,:,:)
+        real, pointer     :: south_in_3d(:,:,:) => null()
+        real, pointer     :: north_in_3d(:,:,:) => null()
+        real, pointer     :: west_in_3d(:,:,:) => null()
+        real, pointer     :: east_in_3d(:,:,:) => null()
+        real, pointer     :: southwest_in_3d(:,:,:) => null()
+        real, pointer     :: northwest_in_3d(:,:,:) => null()
+        real, pointer     :: southeast_in_3d(:,:,:) => null()
+        real, pointer     :: northeast_in_3d(:,:,:) => null()
 
-        real, contiguous, pointer :: south_batch_in_2d(:,:,:)
-        real, contiguous, pointer :: north_batch_in_2d(:,:,:)
-        real, contiguous, pointer :: west_batch_in_2d(:,:,:)
-        real, contiguous, pointer :: east_batch_in_2d(:,:,:)
+        real, contiguous, pointer :: south_batch_in_2d(:,:,:) => null()
+        real, contiguous, pointer :: north_batch_in_2d(:,:,:) => null()
+        real, contiguous, pointer :: west_batch_in_2d(:,:,:) => null()
+        real, contiguous, pointer :: east_batch_in_2d(:,:,:) => null()
 
-        real, contiguous, pointer :: north_buffer_2d(:,:,:)
-        real, contiguous, pointer :: south_buffer_2d(:,:,:)
-        real, contiguous, pointer :: east_buffer_2d(:,:,:)
-        real, contiguous, pointer :: west_buffer_2d(:,:,:)
+        real, contiguous, pointer :: north_buffer_2d(:,:,:) => null()
+        real, contiguous, pointer :: south_buffer_2d(:,:,:) => null()
+        real, contiguous, pointer :: east_buffer_2d(:,:,:) => null()
+        real, contiguous, pointer :: west_buffer_2d(:,:,:) => null()
+
+        real, contiguous, pointer :: north_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: south_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: east_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: west_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: north_in_buffer_2d(:,:) => null()
+        real, contiguous, pointer :: south_in_buffer_2d(:,:) => null()
+        real, contiguous, pointer :: east_in_buffer_2d(:,:) => null()
+        real, contiguous, pointer :: west_in_buffer_2d(:,:) => null()
+
+        real, contiguous, pointer :: ne_corner_send(:,:,:) => null()
+        real, contiguous, pointer :: nw_corner_send(:,:,:) => null()
+        real, contiguous, pointer :: se_corner_send(:,:,:) => null()
+        real, contiguous, pointer :: sw_corner_send(:,:,:) => null()
 
         integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor, halo_rank
         integer :: northwest_neighbor, southwest_neighbor, northeast_neighbor, southeast_neighbor
@@ -92,6 +116,8 @@ module halo_interface
         logical :: southwest_boundary = .True.
         logical :: northeast_boundary = .True.
         logical :: southeast_boundary = .True.
+
+        logical :: corner, interior
 
         ! store the start (s) and end (e) for the i,j,k dimensions
         integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
@@ -109,8 +135,13 @@ module halo_interface
         logical :: southeast_shared = .false.
         logical :: use_shared_windows = .false.
 
+#ifdef USE_NCCL
+        type(c_ptr) :: nccl_comm = c_null_ptr
+        type(c_ptr) :: nccl_stream = c_null_ptr
+#endif
+
     contains
-        procedure, public :: init
+        procedure, public :: init => init_halo 
         procedure, public :: finalize
         procedure, public :: exch_var
         ! procedure, public :: batch_exch
@@ -142,13 +173,13 @@ module halo_interface
 
 interface
 
-    module subroutine init(this, exch_vars, adv_vars, grid, comms)
+    module subroutine init_halo(this, exch_vars, grid, comms)
         implicit none
         class(halo_t), intent(inout) :: this
-        type(index_type), intent(in) :: adv_vars(:), exch_vars(:)
+        type(index_type), intent(in) :: exch_vars(:)
         type(grid_t), intent(in) :: grid
         type(MPI_comm), intent(inout) :: comms
-    end subroutine init
+    end subroutine init_halo
 
     module subroutine finalize(this)
         implicit none
@@ -158,8 +189,8 @@ interface
     module subroutine exch_var(this, var, do_dqdt, corners)
         implicit none
         class(halo_t),     intent(inout) :: this
-        type(variable_t),  intent(inout) :: var
-        logical,          intent(in), optional :: do_dqdt, corners
+        type(variable_t), intent(inout) :: var
+        logical, optional, intent(in) :: do_dqdt, corners
     end subroutine exch_var
 
 
@@ -170,35 +201,33 @@ interface
     !     logical, optional, intent(in) :: two_d,three_d,exch_var_only
     ! end subroutine
 
-    module subroutine halo_3d_send_batch(this, exch_vars, adv_vars, var_data, exch_var_only)
+    module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
         implicit none
         class(halo_t), intent(inout) :: this
-        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(index_type), intent(inout) :: vars_to_send(:)
         type(variable_t), intent(inout) :: var_data(:)
-            logical, optional, intent(in) :: exch_var_only
     end subroutine halo_3d_send_batch
 
-    module subroutine halo_3d_retrieve_batch(this, exch_vars, adv_vars, var_data, exch_var_only, wait_timer)
+    module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer)
         implicit none
         class(halo_t), intent(inout) :: this
-        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(index_type), intent(inout) :: vars_to_ret(:)
         type(variable_t), intent(inout) :: var_data(:)
-            logical, optional, intent(in) :: exch_var_only
         type(timer_t), optional,     intent(inout)   :: wait_timer
 
     end subroutine halo_3d_retrieve_batch
 
-    module subroutine halo_2d_send_batch(this, exch_vars, adv_vars, var_data)
+    module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
         implicit none
         class(halo_t), intent(inout) :: this
-        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(index_type), intent(inout) :: vars_to_send(:)
         type(variable_t), intent(inout) :: var_data(:)
         end subroutine halo_2d_send_batch
 
-    module subroutine halo_2d_retrieve_batch(this, exch_vars, adv_vars, var_data)
+    module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
         implicit none
         class(halo_t), intent(inout) :: this
-        type(index_type), intent(inout) :: adv_vars(:), exch_vars(:)
+        type(index_type), intent(inout) :: vars_to_ret(:)
         type(variable_t), intent(inout) :: var_data(:)
         end subroutine halo_2d_retrieve_batch
 

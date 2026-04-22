@@ -31,6 +31,7 @@ module surface_layer
     use mod_wrf_constants,   only : KARMAN, gravity, cp, R_d, rcp, EP_1, EP_2, SVPT0, SVP1, SVP2, SVP3, EOMEG, STBOLT, p1000mb, XLV
     use ieee_arithmetic ! for debugging
     use icar_constants
+    use mod_atm_utilities, only : calc_Richardson_nr
 
     implicit none
     real,allocatable, dimension(:,:)    ::  windspd, gz1oz0, th2d, regime, flhc, flqc, &
@@ -60,8 +61,6 @@ contains
                          kVARS%land_mask, kVARS%br, kVARS%mol, kVARS%ustar,                      &
                          kVARS%chs, kVARS%chs2, kVARS%cqs2,                           &
                          kVARS%u, kVARS%v, kVARS%psim, kVARS%psih, kVARS%fm, kVARS%fh])
-
-             call options%advect_vars([kVARS%potential_temperature, kVARS%water_vapor])
 
              call options%restart_vars( &
                          [kVARS%water_vapor, kVARS%temperature, kVARS%potential_temperature, kVARS%surface_pressure, &
@@ -98,18 +97,54 @@ contains
         if (options%physics%surfacelayer==kSFC_MM5REV) then
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Revised MM5"
             
-            if (allocated(windspd)) deallocate(windspd)
-            if (allocated(rmol)) deallocate(rmol)
-            if (allocated(zol)) deallocate(zol)
-            if (allocated(qgh)) deallocate(qgh)
-            if (allocated(qsfc)) deallocate(qsfc)
-            if (allocated(cpm)) deallocate(cpm)
-            if (allocated(flhc)) deallocate(flhc)
-            if (allocated(flqc)) deallocate(flqc)
-            if (allocated(regime)) deallocate(regime)
-            if (allocated(mavail)) deallocate(mavail)
-            if (allocated(th2d)) deallocate(th2d)
-            if (allocated(gz1oz0)) deallocate(gz1oz0)
+            if (allocated(windspd)) then
+                !$acc exit data delete(windspd)
+                deallocate(windspd)
+            endif
+            if (allocated(rmol)) then
+                !$acc exit data delete(rmol)
+                deallocate(rmol)
+            endif
+            if (allocated(zol)) then
+                !$acc exit data delete(zol)
+                deallocate(zol)
+            endif
+            if (allocated(qgh)) then
+                !$acc exit data delete(qgh)
+                deallocate(qgh)
+            endif
+            if (allocated(qsfc)) then
+                !$acc exit data delete(qsfc)
+                deallocate(qsfc)
+            endif
+            if (allocated(cpm)) then
+                !$acc exit data delete(cpm)
+                deallocate(cpm)
+            endif
+            if (allocated(flhc)) then
+                !$acc exit data delete(flhc)
+                deallocate(flhc)
+            endif
+            if (allocated(flqc)) then
+                !$acc exit data delete(flqc)
+                deallocate(flqc)
+            endif
+            if (allocated(regime)) then
+                !$acc exit data delete(regime)
+                deallocate(regime)
+            endif
+            if (allocated(mavail)) then
+                !$acc exit data delete(mavail)
+                deallocate(mavail)
+            endif
+            if (allocated(th2d)) then
+                !$acc exit data delete(th2d)
+                deallocate(th2d)
+            endif
+            if (allocated(gz1oz0)) then
+                !$acc exit data delete(gz1oz0)
+                deallocate(gz1oz0)
+            endif
             
             allocate(windspd(ims:ime, jms:jme))
             allocate(rmol(ims:ime, jms:jme))
@@ -136,7 +171,8 @@ contains
             th2d = 0.0
 
             gz1oz0 = log((domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(:,kts,:) - domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d) / domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)
-            
+            !$acc enter data copyin(windspd,rmol,zol,qgh,qsfc,cpm,flhc,flqc,regime,mavail,th2d,gz1oz0)
+
             if (context_change) return
 
             call sfclayrevinit(ims,ime,jms,jme,                    &
@@ -156,10 +192,18 @@ contains
 
         if (options%physics%surfacelayer==kSFC_MM5REV) then
         
-            windspd = sqrt(domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d(ims:ime,kms,jms:jme)**2 + domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d(ims:ime,kms,jms:jme)**2)
-            where(windspd==0) windspd=1e-5            
+            associate(u_mass => domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d, &
+                      v_mass => domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d)
+            !$acc parallel loop gang vector collapse(2) present(u_mass, v_mass,windspd)
+            do j = jms, jme
+                do i = ims, ime
+                    windspd(i,j) = sqrt(u_mass(i,kms,j)**2 + v_mass(i,kms,j)**2)
+                    if (windspd(i,j) < 1e-5) windspd(i,j) = 1e-5
+                end do
+            end do
+            end associate
 
-            call sfclayrev(u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d   & !-- u3d         3d u-velocity interpolated to theta points (m/s)
+            call SFCLAYREV(u3d=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d   & !-- u3d         3d u-velocity interpolated to theta points (m/s)
                ,v3d=domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d              & !-- v3d         3d v-velocity interpolated to theta points (m/s)
                ,t3d=domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d         &
                ,qv3d=domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d        &
@@ -170,7 +214,7 @@ contains
                ,rovcp=rcp                              & ! rovcp = Rd/cp
                ,r=R_d                                  &  ! J/(kg K) specific gas constant for dry air
                ,xlv=XLV                                & !-- xlv         latent heat of vaporization (j/kg)
-               ,psfc=domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d   &
+               ,psfcpa=domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d   &
                ,chs=domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d                 &
                ,chs2=domain%vars_2d(domain%var_indx(kVARS%chs2)%v)%data_2d               &
                ,cqs2=domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d               &
@@ -193,7 +237,7 @@ contains
                ,ust=domain%vars_2d(domain%var_indx(kVARS%ustar)%v)%data_2d                       & ! i/o -- ust		u* in similarity theory (m/s)
                ,zol=zol                                & ! i/o -- zol		z/l height over monin-obukhov length - intent(inout) - but appears to not be used really?
                ,pblh=domain%vars_2d(domain%var_indx(kVARS%hpbl)%v)%data_2d               & ! i/o -- hpbl	pbl height (m) - intent(inout)
-               ,xland=real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di)           &
+               ,xland=domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di           &
                ,hfx=domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d       & !  HFX  - net upward heat flux at the surface (W/m^2)
                ,qfx=domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d                 & !  QFX  - net upward moisture flux at the surface (kg/m^2/s)
                ,lh=domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d          & !  LH  - net upward latent flux at the surface (W/m^2/s)
@@ -225,16 +269,59 @@ contains
                ,iz0tlnd=options%sfc%iz0tlnd    &
                ,isftcflx=options%sfc%isftcflx  &
                ,scm_force_flux=options%sfc%scm_force_flux)
-                                             
+            
+            else if (options%physics%surfacelayer==0 .and. (options%physics%landsurface > 0 .or. options%physics%watersurface > 0)) then
+                call calc_exchange_coefficient(domain)
             endif
+
     end subroutine sfc
 
-!    subroutine sfc_finalize(options)
-!        implicit none
-!        type(options_t), intent(in) :: options
-!
-!        if (options%physics%surfacelayer==kSFC_MM5REV) then
-!        endif
-!
-!    end subroutine sfc_finalize
+    ! --------------------------------------------------
+    ! Quick and dirty implementation of exchange coefficient calculation
+    ! DR -- Moved from lsm_driver to here for modularity Jan 2026
+    ! --------------------------------------------------
+    subroutine calc_exchange_coefficient(domain)
+        implicit none
+        type(domain_t),  intent(inout)  :: domain
+        
+        real, dimension(ims:ime,jms:jme)  :: lnz_atm_term, base_exchange_term, windspd, Ri, z_atm
+        real, parameter :: MAX_EXCHANGE_C = 0.5
+        real, parameter :: MIN_EXCHANGE_C = 0.004
+
+        windspd = sqrt(domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d**2 + domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d**2)
+        where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
+
+        z_atm = domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(:,kts,:) - domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d
+
+        lnz_atm_term = log((z_atm+domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)/domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)
+        base_exchange_term=(75*karman**2 * sqrt((z_atm+domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)/domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)) / (lnz_atm_term**2)
+        lnz_atm_term=(karman/lnz_atm_term)**2
+
+        ! Ri now is a function in atm_utlilities:
+        call calc_Richardson_nr(Ri, domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d, &
+                                domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                                z_atm, &
+                                windspd)
+
+        !  "Surface Richardson number"
+        where(Ri<0)  domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d = lnz_atm_term * (1.0-(15.0*Ri)/(1.0+(base_exchange_term * sqrt((-1.0)*Ri))))
+        where(Ri>=0) domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d = lnz_atm_term * 1.0/((1.0+15.0*Ri)*sqrt(1.0+5.0*Ri))
+
+        where(domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d > MAX_EXCHANGE_C) domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d=MAX_EXCHANGE_C
+        where(domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d < MIN_EXCHANGE_C) domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d=MIN_EXCHANGE_C
+
+        domain%vars_2d(domain%var_indx(kVARS%chs2)%v)%data_2d = domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d
+        domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d = domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d
+
+    end subroutine calc_exchange_coefficient
+
+   subroutine sfc_finalize(options)
+       implicit none
+       type(options_t), intent(in) :: options
+
+       if (options%physics%surfacelayer==kSFC_MM5REV) then
+            !$acc exit data delete(windspd,rmol,zol,qgh,qsfc,cpm,flhc,flqc,regime,mavail,th2d,gz1oz0)
+       endif
+
+   end subroutine sfc_finalize
 end module surface_layer

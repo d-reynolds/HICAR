@@ -7,8 +7,6 @@ module test_control_flow
 
     use mpi_f08
     use options_interface, only: options_t
-    use time_object, only: Time_type
-    use time_delta_object, only: time_delta_t
     use flow_object_interface, only: flow_obj_t, comp_arr_t
     use ioclient_interface, only: ioclient_t
     use boundary_interface, only: boundary_t

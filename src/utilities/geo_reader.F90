@@ -28,7 +28,7 @@ module geo
     public::geo_LUT      ! Create a geographic Look up table
     public::geo_interp   ! apply geoLUT to interpolate in 2d for a 3d grid
     public::geo_interp2d ! apply geoLUT to interpolate in 2d for a 2d grid
-    public::standardize_coordinates
+    public::standardize_geo, standardize_latlon
 
 contains
     !>------------------------------------------------------------
@@ -221,7 +221,8 @@ contains
     integer function minxw(xw,longrid,xpos,ypos,lon)
         implicit none
         integer, intent(in) :: xw, xpos, ypos
-        real,    intent(in) :: longrid(:,:), lon
+        real,    intent(in) :: lon
+        real, allocatable, intent(in) :: longrid(:,:)
         real    :: curdist, dx
         integer :: ime
 
@@ -248,7 +249,8 @@ contains
     !!------------------------------------------------------------
     integer function minyw(yw,latgrid,xpos,ypos,lat)
         integer, intent(in) :: yw, xpos, ypos
-        real,    intent(in) :: latgrid(:,:), lat
+        real,    intent(in) :: lat
+        real, allocatable, intent(in) :: latgrid(:,:)
         real    :: curdist, dx
         integer :: jme
 
@@ -781,7 +783,7 @@ contains
 
         if (find_surrounding%x(1) > -999) return
 
-        write(*,*) '   ERROR: Failed to find point", lon, lat, " in a quadrant near:'
+        write(*,*) '   ERROR: Failed to find point', lon, lat, ' in a quadrant near:'
         write(*,*) lo%lon(pos%x, pos%y), lo%lat(pos%x, pos%y)
         write(*,*) search_point%x
         write(*,*) search_point%y
@@ -798,10 +800,11 @@ contains
     !!  Compute the geographic look up table from LOw resolution grid to HIgh resolution grid
     !!
     !!------------------------------------------------------------
-    subroutine geo_LUT(hi, lo)
+    subroutine geo_LUT(hi, lo, err_msg)
         implicit none
         type(interpolable_type), intent(in)    :: hi
         type(interpolable_type), intent(inout) :: lo
+        character(len=*), optional, intent(in) :: err_msg
         type(fourpos) :: xy
         type(position) :: curpos, lastpos
         integer :: nx, ny, i, j, k, lo_nx, lo_ny
@@ -819,6 +822,34 @@ contains
         jms = lbound(hi%lat,2)
         jme = ubound(hi%lat,2)
 
+        if (present(err_msg)) then
+            if (.not.(trim(err_msg)=='')) then
+                if (minval(hi%lat) < minval(lo%lat)) then
+                    if (present(err_msg)) write(*,*) trim(err_msg)
+                    write(*,*) "WARNING : geo_LUT : Minimum latitude of high resolution data is less than that of low resolution data, extrapolating..."
+                    write(*,*) "  Min latitude of high resolution data: ", minval(hi%lat)
+                    write(*,*) "  Min latitude of low resolution data:  ", minval(lo%lat)
+                endif
+                if (maxval(hi%lat) > maxval(lo%lat)) then
+                    if (present(err_msg)) write(*,*) trim(err_msg)
+                    write(*,*) "WARNING : geo_LUT : Maximum latitude of high resolution data is greater than that of low resolution data, extrapolating..."
+                    write(*,*) "  Max latitude of high resolution data: ", maxval(hi%lat)
+                    write(*,*) "  Max latitude of low resolution data:  ", maxval(lo%lat)
+                endif
+                if (minval(hi%lon) < minval(lo%lon)) then
+                    if (present(err_msg)) write(*,*) trim(err_msg)
+                    write(*,*) "WARNING : geo_LUT : Minimum longitude of high resolution data is less than that of low resolution data, extrapolating..."
+                    write(*,*) "  Min longitude of high resolution data: ", minval(hi%lon)
+                    write(*,*) "  Min longitude of low resolution data:  ", minval(lo%lon)
+                endif
+                if (maxval(hi%lon) > maxval(lo%lon)) then
+                    if (present(err_msg)) write(*,*) trim(err_msg)
+                    write(*,*) "WARNING : geo_LUT : Maximum longitude of high resolution data is greater than that of low resolution data, extrapolating..."
+                    write(*,*) "  Max longitude of high resolution data: ", maxval(hi%lon)
+                    write(*,*) "  Max longitude of low resolution data:  ", maxval(lo%lon)
+                endif
+            endif
+        endif
         allocate(lo%geolut%x(4,ims:ime, jms:jme))
         allocate(lo%geolut%y(4,ims:ime, jms:jme))
         allocate(lo%geolut%w(4,ims:ime, jms:jme))
@@ -880,8 +911,8 @@ contains
     !!------------------------------------------------------------
     subroutine boundary_interpolate(fieldout, fieldin, geolut)
         implicit none
-        real,intent(inout)::fieldout(:,:,:)
-        real,intent(in)::fieldin(:,:,:)
+        real, allocatable, intent(inout)::fieldout(:,:,:)
+        real, allocatable, intent(in)::fieldin(:,:,:)
         type(geo_look_up_table),intent(in)::geolut
         integer::nx,nz,ny
         integer :: ims,ime,jms,jme,kms,kme
@@ -967,8 +998,8 @@ contains
     !!------------------------------------------------------------
     subroutine geo_interp(fieldout, fieldin, geolut, boundary_only)
         implicit none
-        real,                   intent(inout) :: fieldout(:,:,:)
-        real,                   intent(in)    :: fieldin(:,:,:)
+        real,  allocatable,     intent(inout) :: fieldout(:,:,:)
+        real,  allocatable,     intent(in)    :: fieldin(:,:,:)
         type(geo_look_up_table),intent(in)    :: geolut
         logical,                intent(in),   optional :: boundary_only
 
@@ -999,6 +1030,9 @@ contains
         ! use the geographic lookup table generated earlier to
         ! compute a bilinear interpolation from lo to hi
         ! if we are doing the interior too, just iterate over all x and y
+            associate( x => geolut%x, y => geolut%y, w => geolut%w )
+            !$acc data present_or_copyin(fieldin, x, y, w) present_or_copy(fieldout)
+            !$acc parallel loop gang vector collapse(3) private(l, localx, localy, localw, local_center)
             do k=kms,kme
                 do j=jms,jme
                     do i=ims,ime
@@ -1007,18 +1041,18 @@ contains
                         ! This loop is used if doing a triangular bi-linear interpolation on the grid
                         ! Need to see all 4 points to compute the "local_center" value for the triangulation
                         do l=1,4
-                            localx=geolut%x(l,i,k)
-                            localy=geolut%y(l,i,k)
+                            localx=x(l,i,k)
+                            localy=y(l,i,k)
                             local_center = local_center + fieldin(localx, min(j,nz_input), localy)
                             ! This is the actual interpolation adding the value from the two raw grid points
                             if (l < 3) then
 
-                                localw=geolut%w(l,i,k)
+                                localw=w(l,i,k)
                                 fieldout(i,j,k) = fieldout(i,j,k) + fieldin(localx, min(j,nz_input), localy) * localw
                             endif
                         enddo
                         ! This is the actual interpolation adding the value from the center average of all four grid points
-                        localw = geolut%w(3,i,k)
+                        localw = w(3,i,k)
                         fieldout(i,j,k) = fieldout(i,j,k) + local_center/4 * localw
 
                         ! This loop is used if doing a straight bi-linear interpolation on the grid
@@ -1031,6 +1065,8 @@ contains
                     enddo
                 enddo
             enddo
+            !$acc end data
+            end associate
         endif
     end subroutine geo_interp
 
@@ -1040,8 +1076,8 @@ contains
     !!------------------------------------------------------------
     subroutine geo_interp2d(fieldout, fieldin, geolut)
         implicit none
-        real, dimension(:,:),   intent(inout) :: fieldout
-        real, dimension(:,:),   intent(in)    :: fieldin
+        real, allocatable, dimension(:,:),   intent(inout) :: fieldout
+        real, allocatable, dimension(:,:),   intent(in)    :: fieldin
         type(geo_look_up_table),intent(in)    :: geolut
 
         integer :: i,k,l,ny,nx,localx,localy
@@ -1059,6 +1095,9 @@ contains
 
         ! use the geographic lookup table generated earlier to
         ! compute a bilinear interpolation from lo to hi
+        associate( x => geolut%x, y => geolut%y, w => geolut%w )
+        !$acc data present_or_copyin(fieldin, x, y, w) present_or_copy(fieldout)
+        !$acc parallel loop gang vector collapse(2) private(l, localx, localy, localw, local_center)
         do k = jms, jme
             do i = ims, ime
                 fieldout(i,k)=0
@@ -1066,17 +1105,17 @@ contains
                 ! This loop is used if doing a triangular bi-linear interpolation on the grid
                 ! Need to see all 4 points to compute the "local_center" value for the triangulation
                 do l = 1, 4
-                    localx = geolut%x(l,i,k)
-                    localy = geolut%y(l,i,k)
+                    localx = x(l,i,k)
+                    localy = y(l,i,k)
                     local_center = local_center + fieldin(localx,localy)
                     ! This is the actual interpolation adding the value from the two raw grid points
                     if (l < 3) then
-                        localw = geolut%w(l,i,k)
+                        localw = w(l,i,k)
                         fieldout(i,k) = fieldout(i,k) + fieldin(localx,localy) * localw
                     endif
                 enddo
                 ! This is the actual interpolation adding the value from the center average of all four grid points
-                localw = geolut%w(3,i,k)
+                localw = w(3,i,k)
                 fieldout(i,k) = fieldout(i,k) + local_center/4 * localw
 
                 ! This loop is used if doing a straight bi-linear interpolation on the grid
@@ -1088,6 +1127,8 @@ contains
                 ! enddo
             enddo
         enddo
+        !$acc end data
+        end associate
 
     end subroutine
 
@@ -1095,13 +1136,14 @@ contains
     !> ----------------------------------------------------------------------------
     !!  Conver longitudes into a common format for geographic interpolation
     !!
-    !!  First convert longitudes that may be -180-180 into 0-360 range first.
+    !!  First convert lat/lon data into a 2d format
+    !!  Then convert longitudes that may be -180-180 into 0-360 range first.
     !!  If data straddle the 0 degree longitude, convert back to -180-180 so interpolation will be smooth
     !!
     !!  @param[inout]   long_data  2D array of longitudes (either -180 - 180 or 0 - 360)
     !!
     !! ----------------------------------------------------------------------------
-    subroutine standardize_coordinates(domain, longitude_system)
+    subroutine standardize_geo(domain, longitude_system)
         implicit none
         type(interpolable_type), intent(inout) :: domain
         integer,                  intent(in), optional :: longitude_system
@@ -1138,30 +1180,45 @@ contains
 
         endif
 
-        if (present(longitude_system)) then
-            if (longitude_system == kMAINTAIN_LON) then
-                ! break
-            elseif (longitude_system == kDATELINE_CENTERED) then
-                where(domain%lon<0) domain%lon = 360+domain%lon
-            elseif (longitude_system == kPRIME_CENTERED) then
-                where(domain%lon>180) domain%lon = domain%lon - 360
-            elseif (longitude_system == kGUESS_LON) then
-                ! try to guess which coordinate system to use
-                ! first convert all domains into -180 to +180 coordinates
-                where(domain%lon>180) domain%lon = domain%lon - 360
-                ! also convert from a -180 to 180 coordinate system into a 0-360 coordinate system if closer to the dateline
-                if ((minval(domain%lon) < -150) .or. (maxval(domain%lon) > 150)) then
-                    where(domain%lon<0) domain%lon = 360+domain%lon
-                endif
-            else
-                write(*,*) "Unknown longitude system of coordinates:", longitude_system
-                write(*,*) " Set options%domain%longitude_system to either:"
-                write(*,*) " Prime meridian centered (0 to 360): ", kPRIME_CENTERED
-                write(*,*) " Dateline meridian centered (-180 to 180): ", kDATELINE_CENTERED
-                error stop
+        if (present(longitude_system)) call standardize_latlon(domain%lat, domain%lon, longitude_system)
+
+    end subroutine standardize_geo
+
+    !! ----------------------------------------------------------------------------
+    !!  Conver longitudes into a common format for geographic interpolation
+    !!
+    !!  First convert longitudes that may be -180-180 into 0-360 range first.
+    !!  If data straddle the 0 degree longitude, convert back to -180-180 so interpolation will be smooth
+    !!
+    !!  @param[inout]   long_data  2D array of longitudes (either -180 - 180 or 0 - 360)
+    !!
+    !! ----------------------------------------------------------------------------
+    subroutine standardize_latlon(lat, lon, longitude_system)
+        implicit none
+        real, dimension(:,:), intent(inout) :: lat, lon
+        integer,                 intent(in) :: longitude_system
+
+        if (longitude_system == kMAINTAIN_LON) then
+            ! break
+        elseif (longitude_system == kDATELINE_CENTERED) then
+            where(lon<0) lon = 360+lon
+        elseif (longitude_system == kPRIME_CENTERED) then
+            where(lon>180) lon = lon - 360
+        elseif (longitude_system == kGUESS_LON) then
+            ! try to guess which coordinate system to use
+            ! first convert all domains into -180 to +180 coordinates
+            where(lon>180) lon = lon - 360
+            ! also convert from a -180 to 180 coordinate system into a 0-360 coordinate system if closer to the dateline
+            if ((minval(lon) < -150) .or. (maxval(lon) > 150)) then
+                where(lon<0) lon = 360+lon
             endif
+        else
+            write(*,*) "Unknown longitude system of coordinates:", longitude_system
+            write(*,*) " Set longitude_system to either:"
+            write(*,*) " Prime meridian centered (0 to 360): ", kPRIME_CENTERED
+            write(*,*) " Dateline meridian centered (-180 to 180): ", kDATELINE_CENTERED
+            error stop
         endif
 
-    end subroutine standardize_coordinates
-
+    end subroutine standardize_latlon
 end module geo

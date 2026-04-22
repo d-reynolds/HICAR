@@ -17,7 +17,21 @@ endif (FFTW_INCLUDES)
 
 find_path (FFTW_INCLUDES fftw3.h)
 
-find_library (FFTW_LIBRARIES NAMES fftw3)
+# First try to find cuFFTW (CUDA FFT Wrapper) in NVIDIA HPC SDK installation
+find_library (FFTW_LIBRARIES NAMES cufftw 
+		HINTS $ENV{NVHPC_ROOT}/math_libs/lib64
+		      $ENV{NCCL_DIR}/math_libs/lib
+    NO_DEFAULT_PATH)
+
+# If cuFFTW not found in HPC SDK, try system paths
+if (NOT FFTW_LIBRARIES)
+  find_library (FFTW_LIBRARIES NAMES cufftw)
+endif (NOT FFTW_LIBRARIES)
+
+# If cuFFTW still not found, fall back to regular FFTW
+if (NOT FFTW_LIBRARIES)
+  find_library (FFTW_LIBRARIES NAMES fftw3)
+endif (NOT FFTW_LIBRARIES)
 
 # handle the QUIETLY and REQUIRED arguments and set FFTW_FOUND to TRUE if
 # all listed variables are TRUE

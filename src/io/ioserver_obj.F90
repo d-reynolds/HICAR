@@ -16,29 +16,41 @@ submodule(ioserver_interface) ioserver_implementation
   use debug_module,             only : check_ncdf
   use iso_fortran_env
   use iso_c_binding
-  use output_metadata,          only : get_varindx
-  use string,                   only : split_str
-  use io_routines,              only : check_file_exists
-  use time_io,                    only : find_timestep_in_file
+  use output_metadata,          only : get_varindx, get_varmeta
+  use meta_data_interface,      only : meta_data_t
+  use time_object,              only : Time_type
+  use string,                   only : split_str, as_string
+  use io_routines,              only : check_file_exists, io_write
+  use string,                   only : str
+  use time_io,                  only : find_timestep_in_file
+  use mpi_utils_module,         only : get_mpi_global_rank
   implicit none
 
 contains
 
 
-    module subroutine init(this, options, nest_indx)
+    module subroutine init_ioserver(this, options, nest_indx)
         class(ioserver_t),  intent(inout)  :: this
         type(options_t), intent(in)     :: options(:)
         integer,            intent(in)     :: nest_indx
 
-        type(variable_t) :: var
         integer ::  n, n_3d, n_2d, var_indx, out_i, rst_i, some_child_id, ierr
-        
+        integer :: out_ord_i, rst_ord_i
+        logical :: is_output, is_rst_only
+        type(meta_data_t) :: tmp_meta
+        integer :: v
+
         ! Call the parent type's init procedure
         call this%init_flow_obj(options(nest_indx),nest_indx)
 
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
+        if (STD_OUT_PE_IO) write(*,*) "IOServer: initializing with clients"
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
         ! Perform a series of MPI Gather/reduction to communicate the grid dimensions of the children clients to the parent server
         call init_with_clients(this)
-
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
+        if (STD_OUT_PE_IO) write(*,*) "IOServer: After init with clients in ioserver init"
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------" 
         !Determine number of IOServers in the this%IO_Comms communicator, i.e. size of communicator
         call MPI_Comm_size(this%IO_Comms, this%n_servers, ierr)
 
@@ -48,6 +60,8 @@ contains
             !this%n_children = size(this%children)
             this%n_r = this%reader%n_vars
             this%files_to_read = .not.(this%reader%eof)
+
+            allocate(this%forcing_buffer(this%n_r,this%i_s_r:this%i_e_r+1,this%k_s_r:this%k_e_r, this%j_s_r:this%j_e_r+1))
         else
             this%n_r = count(options(nest_indx)%forcing%vars_to_read /= "")
             this%files_to_read = .False.
@@ -55,22 +69,8 @@ contains
 
         this%n_child_ioservers = size(options(nest_indx)%general%child_nests)
         this%n_f = 0
-        
-        if (size(options(nest_indx)%general%child_nests) > 0) then
-            some_child_id = options(nest_indx)%general%child_nests(1)
-            this%n_f = count(options(some_child_id)%forcing%vars_to_read /= "")
-            if (this%n_f > 0) then
-                allocate(this%gather_buffer(this%n_f,this%i_s_w:this%i_e_w+1,this%k_s_w:this%k_e_w,this%j_s_w:this%j_e_w+1))
-            endif
-
-            allocate(this%send_nest_types(this%n_child_ioservers,this%n_servers))
-            allocate(this%buffer_nest_types(this%n_child_ioservers,this%n_servers))    
-            allocate(this%nest_types_initialized(this%n_child_ioservers))
-            this%nest_types_initialized = .false.
-        endif
-
-        !Setup writing capability
-        call this%outputer%init(options(nest_indx),this%i_s_w,this%i_e_w,this%k_s_w,this%k_e_w,this%j_s_w,this%j_e_w,this%ide,this%kde,this%jde)
+        this%n_f_2d = 0
+        this%n_f_3d_init = 0
 
         !determine if we need to increase our k index due to some very large soil field
         this%n_w_3d = 0
@@ -78,26 +78,97 @@ contains
         ! Save the number of vertical levels in the domain, since this is what our child ioserver will expect as the z-dimension for forcing data
         this%k_e_f = options(nest_indx)%domain%nz
 
+        if (size(options(nest_indx)%general%child_nests) > 0) then
+            some_child_id = options(nest_indx)%general%child_nests(1)
+            this%n_f = count(options(some_child_id)%forcing%vars_to_read /= "")
+            if (this%n_f > 0) then
+                allocate(this%gather_buffer(this%n_f,this%i_s_w:this%i_e_w+1,this%k_s_w:this%k_e_f,this%j_s_w:this%j_e_w+1))
+            endif
+
+            allocate(this%send_nest_types(this%n_child_ioservers,this%n_servers))
+            allocate(this%buffer_nest_types(this%n_child_ioservers,this%n_servers))
+            allocate(this%nest_types_initialized(this%n_child_ioservers))
+            this%nest_types_initialized = .false.
+
+            ! Shared per-child geometry cache for the three setup_nest_types_* variants
+            allocate(this%nest_geometry(this%n_child_ioservers))
+
+            ! Count init-only restart vars (2D + extra 3D not in atmospheric forcing)
+            do v = 1, kMAX_STORAGE_VARS
+                if (options(some_child_id)%vars_to_allocate(v) <= 0) cycle
+                if (options(some_child_id)%vars_for_restart(v) <= 0) cycle
+                tmp_meta = get_varmeta(v)
+                if (len_trim(tmp_meta%name) == 0) cycle
+                if (any(options(some_child_id)%forcing%vars_to_read == tmp_meta%name)) cycle
+                if (tmp_meta%two_d)   this%n_f_2d = this%n_f_2d + 1
+                if (tmp_meta%three_d) this%n_f_3d_init = this%n_f_3d_init + 1
+            enddo
+
+            if (this%n_f_2d > 0) then
+                allocate(this%gather_buffer_2d(this%n_f_2d, this%i_s_w:this%i_e_w+1, this%j_s_w:this%j_e_w+1))
+                allocate(this%send_nest_types_2d(this%n_child_ioservers, this%n_servers))
+                allocate(this%buffer_nest_types_2d(this%n_child_ioservers, this%n_servers))
+                allocate(this%nest_types_2d_initialized(this%n_child_ioservers))
+                this%nest_types_2d_initialized = .false.
+            endif
+            if (this%n_f_3d_init > 0) then
+                ! gather_buffer_3d_init is allocated later, after outputter init, so that
+                ! its k extent can cover snow/soil vars whose dim_len(2) exceeds atm nz.
+                allocate(this%send_nest_types_3d_init(this%n_child_ioservers, this%n_servers))
+                allocate(this%buffer_nest_types_3d_init(this%n_child_ioservers, this%n_servers))
+                allocate(this%nest_types_3d_init_initialized(this%n_child_ioservers))
+                this%nest_types_3d_init_initialized = .false.
+            endif
+        endif
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
+        if (STD_OUT_PE_IO) write(*,*) "IOServer: Setting up outputter..."
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------" 
+
+        !Setup writing capability
+        call this%outputer%init(options(nest_indx),this%i_s_w,this%i_e_w,this%k_s_w,this%k_e_w,this%j_s_w,this%j_e_w,this%ide,this%kde,this%jde)
+
+
         do n = 1,this%outputer%n_vars
-            if (this%outputer%variables(n)%three_d) then
+            if (this%outputer%var_meta(n)%three_d) then
                 this%n_w_3d = this%n_w_3d+1
-        !         if(this%outputer%variables(n)%dim_len(2) > this%k_e_w) this%k_e_w = this%outputer%variables(n)%dim_len(2)
+                if(this%outputer%var_meta(n)%dim_len(2) > this%k_e_w) this%k_e_w = this%outputer%var_meta(n)%dim_len(2)
             endif
         enddo
 
         this%n_w_2d = this%outputer%n_vars - this%n_w_3d
 
+        ! Init-3D transport buffers: size their k extent to the max dim_len(2) across
+        ! output vars (= k_e_w), so snow/soil restart vars (nsnow/nsoil layers) fit
+        ! instead of being truncated to the atmospheric k_e_f.
+        if (this%n_f_3d_init > 0) then
+            this%nz_init_3d = this%k_e_w
+            allocate(this%gather_buffer_3d_init(this%n_f_3d_init, this%i_s_w:this%i_e_w+1, &
+                     1:this%nz_init_3d, this%j_s_w:this%j_e_w+1))
+        endif
+
         if (this%n_w_2d == 0) write(*,*) 'Warning: No 2D variables set for output, this should never happen'
         if (this%n_w_3d == 0) write(*,*) 'Warning: No 3D variables set for output, this should never happen'
 
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
+        if (STD_OUT_PE_IO) write(*,*) "IOServer: Setting up MPI Windows..."
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------" 
+
         call setup_MPI_windows(this)
-        call setup_MPI_types(this)
 
 
 
         !Setup arrays for information about accessing variables from write buffer
-        allocate(this%out_var_indices(count(options(nest_indx)%output%vars_for_output > 0)))
-        allocate(this%rst_var_indices(count(options(nest_indx)%vars_for_restart > 0)))
+        ! Count actual output/restart vars from the outputer to ensure allocation matches fill
+        out_i = 0
+        rst_i = 0
+        do n=1,this%outputer%n_vars
+            var_indx = get_varindx(this%outputer%var_meta(n)%name)
+            if (options(nest_indx)%output%vars_for_output(var_indx) > 0) out_i = out_i + 1
+            if (options(nest_indx)%vars_for_restart(var_indx) > 0) rst_i = rst_i + 1
+        enddo
+
+        allocate(this%out_var_indices(out_i))
+        allocate(this%rst_var_indices(rst_i))
 
         this%restart_counter = 1
         this%restart_count = options(nest_indx)%restart%restart_count
@@ -106,7 +177,7 @@ contains
         rst_i = 1
         
         do n=1,this%outputer%n_vars
-            var_indx = get_varindx(this%outputer%variables(n)%name)
+            var_indx = get_varindx(this%outputer%var_meta(n)%name)
             if (options(nest_indx)%output%vars_for_output(var_indx) > 0) then
                 this%out_var_indices(out_i) = n
                 out_i = out_i + 1
@@ -117,37 +188,82 @@ contains
             endif
         enddo
 
+        ! Change 2: Compute classification counts and build ordered index arrays
+        ! Count output vs restart-only for 3D and 2D
+        this%n_out_3d = 0; this%n_out_2d = 0
+        this%n_rst_only_3d = 0; this%n_rst_only_2d = 0
+        do n = 1, this%outputer%n_vars
+            var_indx = get_varindx(this%outputer%var_meta(n)%name)
+            is_output = (options(nest_indx)%output%vars_for_output(var_indx) > 0)
+            is_rst_only = (.not. is_output) .and. (options(nest_indx)%vars_for_restart(var_indx) > 0)
+            if (this%outputer%var_meta(n)%three_d) then
+                if (is_output) this%n_out_3d = this%n_out_3d + 1
+                if (is_rst_only) this%n_rst_only_3d = this%n_rst_only_3d + 1
+            else if (this%outputer%var_meta(n)%two_d) then
+                if (is_output) this%n_out_2d = this%n_out_2d + 1
+                if (is_rst_only) this%n_rst_only_2d = this%n_rst_only_2d + 1
+            endif
+        enddo
+
+        ! Build ordered index arrays mapping buffer position -> outputer var index
+        allocate(this%out_ordered_indices(this%n_out_3d + this%n_out_2d))
+        allocate(this%rst_only_ordered_indices(this%n_rst_only_3d + this%n_rst_only_2d))
+        out_ord_i = 1
+        rst_ord_i = 1
+        do n = 1, this%outputer%n_vars
+            var_indx = get_varindx(this%outputer%var_meta(n)%name)
+            is_output = (options(nest_indx)%output%vars_for_output(var_indx) > 0)
+            is_rst_only = (.not. is_output) .and. (options(nest_indx)%vars_for_restart(var_indx) > 0)
+            if (is_output) then
+                this%out_ordered_indices(out_ord_i) = n
+                out_ord_i = out_ord_i + 1
+            else if (is_rst_only) then
+                this%rst_only_ordered_indices(rst_ord_i) = n
+                rst_ord_i = rst_ord_i + 1
+            endif
+        enddo
+
         if (options(nest_indx)%restart%restart) then
             call this%outputer%init_restart(options(nest_indx), this%IO_Comms, this%out_var_indices)
             ! if this is a restart run, then there will be no initial call to save_out_file, meaning
             ! that the restart counter should be auto-incremented to 2 (1 + 1) here 
             this%restart_counter = this%restart_counter + 1
         endif
-    end subroutine
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------"
+        if (STD_OUT_PE_IO) write(*,*) "IOServer: Initialization finished"
+        if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------" 
 
-    ! This subroutine creates MPI datatypes which are used to collect domain data from all parent ioserver processes
-    ! which our child ioserver process needs
-    subroutine setup_nest_types(this, child_ioserver, send_nest_types, buffer_nest_types)
-        class(ioserver_t), intent(inout) :: this
-        type(ioserver_t), intent(in)    :: child_ioserver
-        type(MPI_Datatype), intent(out) :: send_nest_types(:), buffer_nest_types(:)
+    end subroutine init_ioserver
 
+    ! Build the per-child nest geometry: for each peer ioserver n, the list of
+    ! (i,j) cells that participate in sends (this's write buffer -> n) and the
+    ! list that participate in the receive (n -> child's read buffer). The
+    ! geometry is invariant in the k axis and in n_vars, so it is reused across
+    ! the 3D-per-step, 2D-init, and 3D-init datatype variants.
+    !
+    ! This is the shared first half of the old setup_nest_types routines: the
+    ! Allreduces, the test_write_buffer_2d construction, and the per-server
+    ! mask broadcasts. Only the cell enumeration is split off from the
+    ! displacement arithmetic.
+    module subroutine build_nest_geometry(this, child_ioserver, geom)
+        class(ioserver_t),     intent(inout) :: this
+        type(ioserver_t),      intent(in)    :: child_ioserver
+        type(nest_geometry_t), intent(inout) :: geom
 
-        integer :: n, my_rank, i, j, k, v, mask_size
-        integer :: ierr, i_start, i_end, j_start, j_end, counter
-
+        integer :: n, my_rank, i, j, ierr, i_start, i_end, j_start, j_end, mask_size, cnt, c
         integer, allocatable, dimension(:) :: parent_ims, parent_ime, parent_jms, parent_jme
-        integer, allocatable, dimension(:) :: child_isr, child_ier, child_jsr, child_jer, block_lengths, displacements
+        integer, allocatable, dimension(:) :: child_isr, child_ier, child_jsr, child_jer
         real,    allocatable, dimension(:,:) :: mask, test_write_buffer_2d
-        !Determine our rank in the this%IO_Comms communicator
+
+        if (geom%built) return
+
         call MPI_Comm_rank(this%IO_Comms, my_rank, ierr)
-        !Determine number of IOServers in the this%IO_Comms communicator, i.e. size of communicator
 
         allocate(parent_ims(this%n_servers), parent_ime(this%n_servers), parent_jms(this%n_servers), parent_jme(this%n_servers))
-        allocate(child_isr(this%n_servers), child_ier(this%n_servers), child_jsr(this%n_servers), child_jer(this%n_servers))
+        allocate(child_isr(this%n_servers),  child_ier(this%n_servers),  child_jsr(this%n_servers),  child_jer(this%n_servers))
 
         parent_ims = 0; parent_ime = 0; parent_jms = 0; parent_jme = 0
-        child_isr = 0; child_ier = 0; child_jsr = 0; child_jer = 0
+        child_isr  = 0; child_ier  = 0; child_jsr  = 0; child_jer  = 0
 
         parent_ims(my_rank+1) = this%i_s_w
         parent_ime(my_rank+1) = this%i_e_w
@@ -159,133 +275,474 @@ contains
         child_jsr(my_rank+1) = child_ioserver%j_s_r
         child_jer(my_rank+1) = child_ioserver%j_e_r
 
-        !Need access to all children ioservers -- then I can construct the send_nest_types based on my domain extent and their domain extents
         call MPI_Allreduce(MPI_IN_PLACE,child_isr,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,child_ier,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,child_jsr,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,child_jer,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
 
-        !Need access to all ioservers -- then I can construct the buffer_nest_types, based on my child ioserver domain extents and all the parent domain extents
         call MPI_Allreduce(MPI_IN_PLACE,parent_ims,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,parent_ime,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,parent_jms,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,parent_jme,this%n_servers,MPI_INT,MPI_MAX,this%IO_Comms,ierr)
 
-        !Fill write buffer with fake values to simulate a write
-        if (allocated(test_write_buffer_2d)) deallocate(test_write_buffer_2d)
-        allocate(test_write_buffer_2d(this%i_s_re:this%i_e_re+1, this%j_s_re:this%j_e_re+1))
-
+        ! Designate all cells for which this ioserver is responsible for gathering data.
+        ! Only at the domain edge do we also include the staggered cells, since no other
+        ! ioserver will cover them.
+        allocate(test_write_buffer_2d(this%i_s_w:this%i_e_w+1, this%j_s_w:this%j_e_w+1))
         test_write_buffer_2d = kEMPT_BUFF
         do i=1,this%n_children
-            test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)) = 1.0
+            if (this%iewc(i)==this%ide .and. this%jewc(i)==this%jde) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i)+1,this%jswc(i):this%jewc(i)+1) = 1.0
+            else if (this%iewc(i)==this%ide) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i)+1,this%jswc(i):this%jewc(i)) = 1.0
+            else if (this%jewc(i)==this%jde) then
+                test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)+1) = 1.0
+            else
+                test_write_buffer_2d(this%iswc(i):this%iewc(i),this%jswc(i):this%jewc(i)) = 1.0
+            endif
         enddo
 
-        ! call MPI_Allreduce(MPI_IN_PLACE,parent_ims,this%n_servers,MPI_INT,MPI_MIN,this%IO_Comms,ierr)
-        do n = 1,this%n_servers
-            ! find where we have a "block" (hole) in the domain, since the child ioclients may not give us a perfect rectangle
-            
+        allocate(geom%send_cells(this%n_servers))
+        allocate(geom%buff_cells(this%n_servers))
+
+        do n = 1, this%n_servers
+            ! ---------- send side: this's write buffer -> peer server n ----------
             i_start = max(child_isr(n),this%i_s_w)
-            i_end = min(child_ier(n),this%i_e_w)
+            i_end   = min(child_ier(n),this%i_e_w)+1
             j_start = max(child_jsr(n),this%j_s_w)
-            j_end = min(child_jer(n),this%j_e_w)
+            j_end   = min(child_jer(n),this%j_e_w)+1
 
-            ! See if any of the child ioserver domain is within the parent ioserver domain
-            if (i_end > i_start .and. j_end > j_start) then
-                counter = count(test_write_buffer_2d(i_start:i_end,j_start:j_end)/=kEMPT_BUFF)*this%n_f*(this%k_e_f-this%k_s_w+1)
-
-                if (counter > 0) then
-                    if (allocated(block_lengths)) deallocate(block_lengths)
-                    if (allocated(displacements)) deallocate(displacements)
-                    allocate(block_lengths(counter))
-                    allocate(displacements(counter))
-
-                    block_lengths = 1
-
-                    counter = 0
-                    do j = j_start, j_end
-                        do k = this%k_s_w, this%k_e_f
-                            do i = i_start, i_end
-                                do v = 1,this%n_f
-                                    if (test_write_buffer_2d(i,j) /= kEMPT_BUFF) then
-                                        counter = counter + 1
-                                        displacements(counter) = (v-1) + ((i-this%i_s_w) + (k-this%k_s_w) * (this%i_e_w-this%i_s_w+2) + &
-                                                                        (j-this%j_s_w) * (this%i_e_w-this%i_s_w+2) * (this%k_e_w-this%k_s_w+1))*this%n_f
-                                    endif
-                                enddo
-                            enddo
-                        enddo
-                    enddo
-                    call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, send_nest_types(n))
-                else
-                    send_nest_types(n) = MPI_REAL
-                endif
+            if (i_end >= i_start .and. j_end >= j_start) then
+                cnt = count(test_write_buffer_2d(i_start:i_end,j_start:j_end) /= kEMPT_BUFF)
             else
-                send_nest_types(n) = MPI_REAL
+                cnt = 0
             endif
-            call MPI_Type_commit(send_nest_types(n))
+            geom%send_cells(n)%n = cnt
+            allocate(geom%send_cells(n)%i(cnt))
+            allocate(geom%send_cells(n)%j(cnt))
+            if (cnt > 0) then
+                c = 0
+                ! Enumerate in j-outer, i-inner order so that downstream displacement
+                ! builders can walk the cell list as a grouped-by-j loop and reproduce
+                ! the legacy do j; do k; do i; do v traversal byte-for-byte.
+                do j = j_start, j_end
+                    do i = i_start, i_end
+                        if (test_write_buffer_2d(i,j) /= kEMPT_BUFF) then
+                            c = c + 1
+                            geom%send_cells(n)%i(c) = i
+                            geom%send_cells(n)%j(c) = j
+                        endif
+                    enddo
+                enddo
+            endif
 
-            i_start = max(parent_ims(n),child_ioserver%i_s_r)
-            i_end = min(parent_ime(n),child_ioserver%i_e_r)
-            j_start = max(parent_jms(n),child_ioserver%j_s_r)
-            j_end = min(parent_jme(n),child_ioserver%j_e_r)
-
-            ! To calculate the receive buffer, we need to know the mask of the sending IO process
-            ! Do a MPI_Scatter here to get the mask of the sending IO process
+            ! ---------- buffer side: peer server n -> child's read buffer ----------
+            ! We need the mask of the sending server to know which cells it actually owns.
+            ! Each peer broadcasts its own test_write_buffer_2d in turn.
             if (allocated(mask)) deallocate(mask)
             allocate(mask(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1))
             mask_size = (parent_ime(n)-parent_ims(n)+2)*(parent_jme(n)-parent_jms(n)+2)
-
+            mask = kEMPT_BUFF
             if (my_rank == n-1) then
-                mask = test_write_buffer_2d(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1)
+                mask(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1) = &
+                    test_write_buffer_2d(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1)
             endif
             call MPI_Bcast(mask, mask_size, MPI_REAL, n-1, this%IO_Comms, ierr)
 
-            ! See if any of the child ioserver domain is within the parent ioserver domain
-            if (i_end > i_start .and. j_end > j_start) then
-                counter = count(mask(i_start:i_end,j_start:j_end)/=kEMPT_BUFF)*this%n_f*(child_ioserver%k_e_r-child_ioserver%k_s_r+1)
+            i_start = max(parent_ims(n),child_ioserver%i_s_r)
+            i_end   = min(parent_ime(n),child_ioserver%i_e_r)+1
+            j_start = max(parent_jms(n),child_ioserver%j_s_r)
+            j_end   = min(parent_jme(n),child_ioserver%j_e_r)+1
 
-                if (counter > 0) then
-                    if (allocated(block_lengths)) deallocate(block_lengths)
-                    if (allocated(displacements)) deallocate(displacements)
-                    allocate(block_lengths(counter))
-                    allocate(displacements(counter))
-
-                    block_lengths = 1
-
-                    counter = 0
-                    do j = j_start, j_end
-                        do k = child_ioserver%k_s_r, child_ioserver%k_e_r
-                            do i = i_start, i_end
-                                do v = 1,this%n_f
-                                    if (mask(i,j) /= kEMPT_BUFF) then
-                                        counter = counter + 1
-                                        displacements(counter) = (v-1) + ((i-child_ioserver%i_s_r) + (k-child_ioserver%k_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+2) + &
-                                                                        (j-child_ioserver%j_s_r) * (child_ioserver%i_e_r-child_ioserver%i_s_r+2) * (child_ioserver%k_e_r-child_ioserver%k_s_r+1))*this%n_f
-                                    endif
-                                enddo
-                            enddo
-                        enddo
-                    enddo
-                    call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, buffer_nest_types(n))
-                else
-                    buffer_nest_types(n) = MPI_REAL
-                endif
+            if (i_end >= i_start .and. j_end >= j_start) then
+                cnt = count(mask(i_start:i_end,j_start:j_end) /= kEMPT_BUFF)
             else
-                buffer_nest_types(n) = MPI_REAL
+                cnt = 0
             endif
-            call MPI_Type_commit(buffer_nest_types(n))
+            geom%buff_cells(n)%n = cnt
+            allocate(geom%buff_cells(n)%i(cnt))
+            allocate(geom%buff_cells(n)%j(cnt))
+            if (cnt > 0) then
+                c = 0
+                do j = j_start, j_end
+                    do i = i_start, i_end
+                        if (mask(i,j) /= kEMPT_BUFF) then
+                            c = c + 1
+                            geom%buff_cells(n)%i(c) = i
+                            geom%buff_cells(n)%j(c) = j
+                        endif
+                    enddo
+                enddo
+            endif
         enddo
 
+        geom%built = .true.
+    end subroutine build_nest_geometry
+
+    ! Build a committed MPI_Type_Indexed from a cached (i,j) cell list.
+    !
+    ! Displacement formula (matches the layout of a (v, i, k, j) Fortran array):
+    !     disp = (v-1) + ((i - i_origin) + (k - k_s)*ni + (j - j_origin)*ni*nk) * n_vars
+    !
+    ! The legacy routines used a do j; do k; do i; do v loop order. Because the
+    ! cell list is filled in j-outer/i-inner order by build_nest_geometry, we
+    ! reproduce the legacy order exactly by walking the list in runs of equal j,
+    ! and nesting (k, within-j-run, v) inside. This makes the emitted
+    ! displacements array bit-identical to the legacy routines' output for the
+    ! same inputs, which is important because the MPI datatype fixes the order
+    ! of memory traversal inside MPI_Alltoallw.
+    !
+    ! For the 2D variant, pass k_s = k_e = 1 (nk = 1). The k-term then collapses
+    ! to zero and the formula reduces to the 2D (v, i, j) layout.
+    subroutine build_indexed_type_from_cells(cells, n_vars, i_origin, j_origin, ni, k_s, k_e, mpi_type)
+        type(nest_cell_list_t), intent(in)  :: cells
+        integer,                intent(in)  :: n_vars, i_origin, j_origin, ni, k_s, k_e
+        type(MPI_Datatype),     intent(out) :: mpi_type
+
+        integer :: total, nk, counter, c_start, c_end, cc, k, v, j_cur
+        integer, allocatable :: block_lengths(:), displacements(:)
+
+        nk = k_e - k_s + 1
+        total = cells%n * n_vars * nk
+
+        if (total == 0) then
+            mpi_type = MPI_REAL
+            call MPI_Type_commit(mpi_type)
+            return
+        endif
+
+        allocate(block_lengths(total))
+        allocate(displacements(total))
+        block_lengths = 1
+
+        counter = 0
+        c_start = 1
+        do while (c_start <= cells%n)
+            ! Advance c_end to cover the full run of cells sharing this j value.
+            j_cur = cells%j(c_start)
+            c_end = c_start
+            do while (c_end < cells%n)
+                if (cells%j(c_end + 1) /= j_cur) exit
+                c_end = c_end + 1
+            enddo
+
+            ! Legacy loop order: do j (fixed at j_cur here); do k; do i; do v
+            do k = k_s, k_e
+                do cc = c_start, c_end
+                    do v = 1, n_vars
+                        counter = counter + 1
+                        displacements(counter) = (v-1) + &
+                            ((cells%i(cc) - i_origin) + &
+                             (k - k_s) * ni + &
+                             (j_cur   - j_origin) * ni * nk) * n_vars
+                    enddo
+                enddo
+            enddo
+
+            c_start = c_end + 1
+        enddo
+
+        call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, mpi_type)
+        call MPI_Type_commit(mpi_type)
+    end subroutine build_indexed_type_from_cells
+
+    ! Release the cached (i,j) cell lists for a given child after all three
+    ! datatype variants have been committed. The MPI datatypes themselves live
+    ! on in this%send_nest_types* / this%buffer_nest_types*.
+    subroutine free_nest_geometry(geom)
+        type(nest_geometry_t), intent(inout) :: geom
+        integer :: n
+
+        if (allocated(geom%send_cells)) then
+            do n = 1, size(geom%send_cells)
+                if (allocated(geom%send_cells(n)%i)) deallocate(geom%send_cells(n)%i)
+                if (allocated(geom%send_cells(n)%j)) deallocate(geom%send_cells(n)%j)
+            enddo
+            deallocate(geom%send_cells)
+        endif
+        if (allocated(geom%buff_cells)) then
+            do n = 1, size(geom%buff_cells)
+                if (allocated(geom%buff_cells(n)%i)) deallocate(geom%buff_cells(n)%i)
+                if (allocated(geom%buff_cells(n)%j)) deallocate(geom%buff_cells(n)%j)
+            enddo
+            deallocate(geom%buff_cells)
+        endif
+        geom%built = .false.
+    end subroutine free_nest_geometry
+
+    ! Set up the per-timestep 3D nest datatypes. Delegates cell enumeration to
+    ! build_nest_geometry (cached) and displacement arithmetic to
+    ! build_indexed_type_from_cells.
+    module subroutine setup_nest_types(this, child_ioserver, child_indx, send_nest_types, buffer_nest_types)
+        class(ioserver_t), intent(inout) :: this
+        type(ioserver_t),  intent(in)    :: child_ioserver
+        integer,           intent(in)    :: child_indx
+        type(MPI_Datatype),intent(out)   :: send_nest_types(:), buffer_nest_types(:)
+
+        integer :: n, ni_send, ni_buff
+
+        call this%build_nest_geometry(child_ioserver, this%nest_geometry(child_indx))
+
+        ni_send = this%i_e_w - this%i_s_w + 2
+        ni_buff = child_ioserver%i_e_r - child_ioserver%i_s_r + 2
+
+        associate (geom => this%nest_geometry(child_indx))
+            do n = 1, this%n_servers
+                call build_indexed_type_from_cells(geom%send_cells(n), this%n_f,       &
+                    this%i_s_w, this%j_s_w, ni_send, this%k_s_w, this%k_e_f,           &
+                    send_nest_types(n))
+                call build_indexed_type_from_cells(geom%buff_cells(n), this%n_f,       &
+                    child_ioserver%i_s_r, child_ioserver%j_s_r, ni_buff,               &
+                    child_ioserver%k_s_r, child_ioserver%k_e_r,                        &
+                    buffer_nest_types(n))
+            enddo
+        end associate
     end subroutine setup_nest_types
+
+    ! 2D variant: no k dimension. Buffer is (n_f_2d, i, j). We pass k_s = k_e = 1
+    ! so the k-term in the displacement formula collapses to zero.
+    module subroutine setup_nest_types_2d(this, child_ioserver, child_indx, send_nest_types, buffer_nest_types)
+        class(ioserver_t), intent(inout) :: this
+        type(ioserver_t),  intent(in)    :: child_ioserver
+        integer,           intent(in)    :: child_indx
+        type(MPI_Datatype),intent(out)   :: send_nest_types(:), buffer_nest_types(:)
+
+        integer :: n, ni_send, ni_buff
+
+        call this%build_nest_geometry(child_ioserver, this%nest_geometry(child_indx))
+
+        ni_send = this%i_e_w - this%i_s_w + 2
+        ni_buff = child_ioserver%i_e_r - child_ioserver%i_s_r + 2
+
+        associate (geom => this%nest_geometry(child_indx))
+            do n = 1, this%n_servers
+                call build_indexed_type_from_cells(geom%send_cells(n), this%n_f_2d,    &
+                    this%i_s_w, this%j_s_w, ni_send, 1, 1,                             &
+                    send_nest_types(n))
+                call build_indexed_type_from_cells(geom%buff_cells(n), this%n_f_2d,    &
+                    child_ioserver%i_s_r, child_ioserver%j_s_r, ni_buff, 1, 1,         &
+                    buffer_nest_types(n))
+            enddo
+        end associate
+    end subroutine setup_nest_types_2d
+
+    ! 3D init variant: same (v, i, k, j) layout as setup_nest_types but with
+    ! n_f_3d_init variables instead of n_f.
+    module subroutine setup_nest_types_3d_init(this, child_ioserver, child_indx, send_nest_types, buffer_nest_types)
+        class(ioserver_t), intent(inout) :: this
+        type(ioserver_t),  intent(in)    :: child_ioserver
+        integer,           intent(in)    :: child_indx
+        type(MPI_Datatype),intent(out)   :: send_nest_types(:), buffer_nest_types(:)
+
+        integer :: n, ni_send, ni_buff
+
+        call this%build_nest_geometry(child_ioserver, this%nest_geometry(child_indx))
+
+        ni_send = this%i_e_w - this%i_s_w + 2
+        ni_buff = child_ioserver%i_e_r - child_ioserver%i_s_r + 2
+
+        associate (geom => this%nest_geometry(child_indx))
+            do n = 1, this%n_servers
+                ! Both sides share the same k extent after distribute_init_forcing
+                ! resolves the per-family nz_init_3d and writes it to both
+                ! this%nz_init_3d and each child%nz_init_3d on this rank.
+                ! Using this%nz_init_3d for send and child_ioserver%nz_init_3d
+                ! for buff makes the "nk matches the physical buffer stride on
+                ! its side" invariant obvious at each call site.
+                call build_indexed_type_from_cells(geom%send_cells(n), this%n_f_3d_init, &
+                    this%i_s_w, this%j_s_w, ni_send, 1, this%nz_init_3d,                 &
+                    send_nest_types(n))
+                call build_indexed_type_from_cells(geom%buff_cells(n), this%n_f_3d_init, &
+                    child_ioserver%i_s_r, child_ioserver%j_s_r, ni_buff,                 &
+                    1, child_ioserver%nz_init_3d,                                        &
+                    buffer_nest_types(n))
+            enddo
+        end associate
+    end subroutine setup_nest_types_3d_init
+
+    subroutine test_nest_types(ioserver, child_ioserver, child_indx)
+        implicit none
+        class(ioserver_t), intent(in) :: ioserver
+        class(ioserver_t), intent(in) :: child_ioserver
+        integer, intent(in) :: child_indx
+
+        integer :: i,j, nx, ny, n, ierr, msg_size, real_size
+        integer :: ix, jy, k, v
+        real :: forcing_buffer_init, gather_buffer_init
+        integer, allocatable :: send_msg_size_alltoall(:), buff_msg_size_alltoall(:), disp_alltoall(:)
+        INTEGER(KIND=MPI_ADDRESS_KIND) :: lowerbound, extent
+        real, allocatable, dimension(:,:,:,:) :: forcing_buffer_test, gather_buffer_test
+        logical :: tripped = .False.
+        integer :: PE_rank_global
+
+        allocate(send_msg_size_alltoall(ioserver%n_servers))
+        allocate(buff_msg_size_alltoall(ioserver%n_servers))
+        allocate(disp_alltoall(ioserver%n_servers))
+
+        PE_rank_global = get_mpi_global_rank()
+
+        disp_alltoall = 0
+        forcing_buffer_init = -1000.0*PE_rank_global
+        gather_buffer_init = 1e30
+        allocate(forcing_buffer_test(ioserver%n_f,child_ioserver%i_s_r:child_ioserver%i_e_r+1,child_ioserver%k_s_r:child_ioserver%k_e_r, child_ioserver%j_s_r:child_ioserver%j_e_r+1))
+        allocate(gather_buffer_test(ioserver%n_f, ioserver%i_s_w:ioserver%i_e_w+1,ioserver%k_s_w:ioserver%k_e_f,ioserver%j_s_w:ioserver%j_e_w+1))
+
+        forcing_buffer_test = forcing_buffer_init
+        gather_buffer_test = gather_buffer_init
+        ! Loop through child images and get chunks of buffer array from each one
+        do i=1,ioserver%n_children
+            do jy = ioserver%jswc(i), ioserver%jewc(i)+1
+                do k = ioserver%k_s_w, ioserver%k_e_f
+                    do ix = ioserver%iswc(i), ioserver%iewc(i)+1
+                        gather_buffer_test(1,ix,k,jy) = ix + (k-1)*(ioserver%ide+1) + (jy-1)*(ioserver%ide+1)*(ioserver%kde)
+                    enddo
+                enddo
+            enddo
+            do jy = ioserver%jswc(i), ioserver%jewc(i)
+                do k = ioserver%k_s_w, ioserver%k_e_f
+                    do ix = ioserver%iswc(i), ioserver%iewc(i)+1
+                        gather_buffer_test(2,ix,k,jy) = ix + (k-1)*(ioserver%ide+1) + (jy-1)*(ioserver%ide+1)*(ioserver%kde)
+                    enddo
+                enddo
+            enddo
+            do jy = ioserver%jswc(i), ioserver%jewc(i)+1
+                do k = ioserver%k_s_w, ioserver%k_e_f
+                    do ix = ioserver%iswc(i), ioserver%iewc(i)
+                        gather_buffer_test(3,ix,k,jy) = ix + (k-1)*(ioserver%ide+1) + (jy-1)*(ioserver%ide+1)*(ioserver%kde)
+                    enddo
+                enddo
+            enddo
+            do jy = ioserver%jswc(i), ioserver%jewc(i)
+                do k = ioserver%k_s_w, ioserver%k_e_f
+                    do ix = ioserver%iswc(i), ioserver%iewc(i)
+                        gather_buffer_test(4,ix,k,jy) = ix + (k-1)*(ioserver%ide+1) + (jy-1)*(ioserver%ide+1)*(ioserver%kde)
+                    enddo
+                enddo
+            enddo
+        enddo
+
+        ! Get size of an MPI_REAL
+        call MPI_Type_size(MPI_REAL, real_size, ierr)
+        do n = 1, ioserver%n_servers
+            call MPI_Type_get_extent(ioserver%send_nest_types(child_indx,n), lowerbound, extent)
+            if (extent > real_size) then
+                send_msg_size_alltoall(n) = 1
+            else
+                send_msg_size_alltoall(n) = 0
+            endif
+            call MPI_Type_get_extent(ioserver%buffer_nest_types(child_indx,n), lowerbound, extent)
+            if (extent > real_size) then
+                buff_msg_size_alltoall(n) = 1
+            else
+                buff_msg_size_alltoall(n) = 0
+            endif
+        enddo
+
+        call MPI_Alltoallw(gather_buffer_test,  send_msg_size_alltoall, disp_alltoall, ioserver%send_nest_types(child_indx,:), &
+                          forcing_buffer_test,  buff_msg_size_alltoall, disp_alltoall, ioserver%buffer_nest_types(child_indx,:), ioserver%IO_Comms)
+
+
+        ! check that the whole of the forcing buffer has been filled correctly
+        do j = child_ioserver%j_s_r, child_ioserver%j_e_r+1
+            do k = child_ioserver%k_s_r, child_ioserver%k_e_r
+                do i = child_ioserver%i_s_r, child_ioserver%i_e_r+1
+                    if (forcing_buffer_test(1,i,k,j) /= i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)) then
+                        write(*,*) 'Error in test_nest_types: Mismatch in forcing buffer at (', 1, ',', i, ',', k, ',', j, ') : ', &
+                                    ' expected ', (i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)), &
+                                    ' but got ', forcing_buffer_test(1,i,k,j)
+                        write(*,*) 'child_ioserver%i_s_r: ', child_ioserver%i_s_r, ' child_ioserver%i_e_r: ', child_ioserver%i_e_r
+                        write(*,*) 'child_ioserver%j_s_r: ', child_ioserver%j_s_r, ' child_ioserver%j_e_r: ', child_ioserver%j_e_r
+                        
+                        if (forcing_buffer_test(1,i,k,j) < 0) then
+                            forcing_buffer_test(1,i,k,j) = forcing_buffer_init
+                            write(*,*) ' (Buffer value indicates that alltoall was done incorrectly for x and y stagger)'
+                        endif
+                        if (forcing_buffer_test(1,i,k,j) == gather_buffer_init) then
+                            write(*,*) ' (Buffer value indicates that gather operation was done incorrectly)'
+                        endif
+                        write(*,*) '------------------------------------------------------------------------'
+                        tripped = .True.
+                    endif
+                enddo
+            enddo
+        enddo
+        do j = child_ioserver%j_s_r, child_ioserver%j_e_r
+            do k = child_ioserver%k_s_r, child_ioserver%k_e_r
+                do i = child_ioserver%i_s_r, child_ioserver%i_e_r+1
+                    if (forcing_buffer_test(2,i,k,j) /= i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)) then
+                        write(*,*) 'Error in test_nest_types: Mismatch in forcing buffer at (', 2, ',', i, ',', k, ',', j, ') : ', &
+                                    ' expected ', (i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)), &
+                                    ' but got ', forcing_buffer_test(2,i,k,j)
+                        write(*,*) 'child_ioserver%i_s_r: ', child_ioserver%i_s_r, ' child_ioserver%i_e_r: ', child_ioserver%i_e_r
+                        write(*,*) 'child_ioserver%j_s_r: ', child_ioserver%j_s_r, ' child_ioserver%j_e_r: ', child_ioserver%j_e_r
+                        if (forcing_buffer_test(2,i,k,j) < 0) then
+                            forcing_buffer_test(2,i,k,j) = forcing_buffer_init
+                            write(*,*) ' (Buffer value indicates that alltoall was done incorrectly for x)'
+                        endif
+                        if (forcing_buffer_test(2,i,k,j) == gather_buffer_init) then
+                            write(*,*) ' (Buffer value indicates that gather operation was done incorrectly)'
+                        endif
+                        write(*,*) '------------------------------------------------------------------------'
+                        tripped = .True.
+                    endif
+                enddo
+            enddo
+        enddo
+        do j = child_ioserver%j_s_r, child_ioserver%j_e_r+1
+            do k = child_ioserver%k_s_r, child_ioserver%k_e_r
+                do i = child_ioserver%i_s_r, child_ioserver%i_e_r
+                    if (forcing_buffer_test(3,i,k,j) /= i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)) then
+                        write(*,*) 'Error in test_nest_types: Mismatch in forcing buffer at (', 3, ',', i, ',', k, ',', j, ') : ', &
+                                    ' expected ', (i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)), &
+                                    ' but got ', forcing_buffer_test(3,i,k,j)
+                        write(*,*) 'child_ioserver%i_s_r: ', child_ioserver%i_s_r, ' child_ioserver%i_e_r: ', child_ioserver%i_e_r
+                        write(*,*) 'child_ioserver%j_s_r: ', child_ioserver%j_s_r, ' child_ioserver%j_e_r: ', child_ioserver%j_e_r
+                        if (forcing_buffer_test(3,i,k,j) < 0) then
+                            forcing_buffer_test(3,i,k,j) = forcing_buffer_init
+                            write(*,*) ' (Buffer value indicates that alltoall was done incorrectly for y stagger)'
+                        endif
+                        if (forcing_buffer_test(3,i,k,j) == gather_buffer_init) then
+                            write(*,*) ' (Buffer value indicates that gather operation was done incorrectly)'
+                        endif
+                        write(*,*) '------------------------------------------------------------------------'
+                        tripped = .True.
+                    endif
+                enddo
+            enddo
+        enddo
+        do j = child_ioserver%j_s_r, child_ioserver%j_e_r
+            do k = child_ioserver%k_s_r, child_ioserver%k_e_r
+                do i = child_ioserver%i_s_r, child_ioserver%i_e_r
+                    if (forcing_buffer_test(4,i,k,j) /= i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)) then
+                        write(*,*) 'Error in test_nest_types: Mismatch in forcing buffer at (', 4, ',', i, ',', k, ',', j, ') : ', &
+                                    ' expected ', (i + (k-1)*(ioserver%ide+1) + (j-1)*(ioserver%ide+1)*(ioserver%kde)), &
+                                    ' but got ', forcing_buffer_test(4,i,k,j)
+                        write(*,*) 'child_ioserver%i_s_r: ', child_ioserver%i_s_r, ' child_ioserver%i_e_r: ', child_ioserver%i_e_r
+                        write(*,*) 'child_ioserver%j_s_r: ', child_ioserver%j_s_r, ' child_ioserver%j_e_r: ', child_ioserver%j_e_r
+                        if (forcing_buffer_test(4,i,k,j) < 0) then
+                            forcing_buffer_test(4,i,k,j) = forcing_buffer_init
+                            write(*,*) ' (Buffer value indicates that alltoall was done incorrectly)'
+                        endif
+                        if (forcing_buffer_test(4,i,k,j) == gather_buffer_init) then
+                            write(*,*) ' (Buffer value indicates that gather operation was done incorrectly)'
+                        endif
+                        write(*,*) '------------------------------------------------------------------------'
+                        tripped = .True.
+                    endif
+                enddo
+            enddo
+        enddo
+
+        if (tripped) then
+            !get rank of this MPI process on the global communicator
+            call io_write('debug/buffer_'//trim(str(PE_rank_global))//".nc",'buffer',forcing_buffer_test)
+        endif
+    end subroutine test_nest_types
     
     subroutine setup_MPI_windows(this)
         class(ioserver_t),   intent(inout)  :: this
 
-        type(c_ptr) :: tmp_ptr
-        integer(KIND=MPI_ADDRESS_KIND) :: win_size
-        integer :: ierr, real_size, n, size_out
-
-        CALL MPI_Type_size(MPI_REAL, real_size)
+        integer :: ierr, n
 
         ! +1 added to handle variables on staggered grids
         this%nx_w = maxval(this%iewc-this%iswc+1)+1
@@ -314,6 +771,9 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,this%n_w_3d,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,this%n_w_2d,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,this%n_f,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,this%n_f_2d,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,this%n_f_3d_init,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,this%nz_init_3d,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
 
         call MPI_Allreduce(MPI_IN_PLACE,this%n_r,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
 
@@ -322,131 +782,52 @@ contains
         allocate(this%read_buffer(this%n_children))
         allocate(this%child_gather_buffers(this%n_children))
 
-
-        win_size = this%n_w_3d*this%nx_re*this%nz_w*this%ny_re
-        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_3d)
+        ! Plain per-child receive buffers — filled by Irecv in write_file
         do n = 1,this%n_children
-            call MPI_WIN_SHARED_QUERY(this%write_win_3d, (n-1), win_size, size_out, tmp_ptr)
-            call C_F_POINTER(tmp_ptr, this%write_buffer_3d(n)%buff, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re])
+            allocate(this%write_buffer_3d(n)%buff(this%n_w_3d, this%nx_re, this%nz_w, this%ny_re))
+            this%write_buffer_3d(n)%buff = kEMPT_BUFF
+            allocate(this%write_buffer_2d(n)%buff(this%n_w_2d, this%nx_re, this%ny_re))
+            this%write_buffer_2d(n)%buff = kEMPT_BUFF
         enddo
 
-        win_size = this%n_w_2d*this%nx_re*this%ny_re
-        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%write_win_2d)
-        do n = 1,this%n_children
-            call MPI_WIN_SHARED_QUERY(this%write_win_2d, (n-1), win_size, size_out, tmp_ptr)
-            call C_F_POINTER(tmp_ptr, this%write_buffer_2d(n)%buff, [this%n_w_2d, this%nx_re, this%ny_re])
-        enddo
-
+        ! Plain per-child receive buffers for nest forcing — filled by
+        ! Irecv in gather_forcing / gather_forcing_2d / gather_forcing_3d_init.
         if (this%n_f > 0) then
-            win_size = this%n_f*this%nx_w*this%ny_w*this%nz_w
-            call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%nest_win)
             do n = 1,this%n_children
-                call MPI_WIN_SHARED_QUERY(this%nest_win, (n-1), win_size, size_out, tmp_ptr)
-                call C_F_POINTER(tmp_ptr, this%child_gather_buffers(n)%buff, [this%n_f, this%nx_w, this%nz_w, this%ny_w])
+                allocate(this%child_gather_buffers(n)%buff(this%n_f, this%nx_w, this%nz_w, this%ny_w))
+                this%child_gather_buffers(n)%buff = kEMPT_BUFF
             enddo
         endif
 
-        win_size = this%n_r*this%nx_r*this%nz_r*this%ny_r
-        call MPI_WIN_ALLOCATE_SHARED(win_size*real_size, real_size, MPI_INFO_NULL, this%client_comms, tmp_ptr, this%read_win)
+        if (this%n_f_2d > 0) then
+            allocate(this%child_gather_buffers_2d(this%n_children))
+            do n = 1,this%n_children
+                allocate(this%child_gather_buffers_2d(n)%buff(this%n_f_2d, this%nx_w, this%ny_w))
+                this%child_gather_buffers_2d(n)%buff = kEMPT_BUFF
+            enddo
+        endif
+
+        if (this%n_f_3d_init > 0) then
+            allocate(this%child_gather_buffers_3d_init(this%n_children))
+            do n = 1,this%n_children
+                allocate(this%child_gather_buffers_3d_init(n)%buff(this%n_f_3d_init, this%nx_w, this%nz_w, this%ny_w))
+                this%child_gather_buffers_3d_init(n)%buff = kEMPT_BUFF
+            enddo
+        endif
+
+        ! read_buffer: plain per-child send buffers used by scatter_forcing
+        ! (one MPI_Isend per child, kIO_TAG_READ).  No shared-memory window.
         do n = 1,this%n_children
-            call MPI_WIN_SHARED_QUERY(this%read_win, (n-1), win_size, size_out, tmp_ptr)
-            call C_F_POINTER(tmp_ptr, this%read_buffer(n)%buff, [this%n_r, this%nx_r, this%nz_r, this%ny_r])
+            allocate(this%read_buffer(n)%buff(this%n_r, this%nx_r, this%nz_r, this%ny_r))
+            this%read_buffer(n)%buff = kEMPT_BUFF
         enddo
-    
+
     end subroutine setup_MPI_windows
-
-    subroutine setup_MPI_types(this)
-        class(ioserver_t),   intent(inout)  :: this
-
-        integer :: i
-
-        ! allocate(this%get_types_3d(this%n_children))
-        ! allocate(this%get_types_2d(this%n_children))
-        allocate(this%rst_types_3d(this%n_children))
-        allocate(this%rst_types_2d(this%n_children))
-        ! allocate(this%put_types(this%n_children))
-        allocate(this%force_types(this%n_children))
-
-        ! allocate(this%child_get_types_3d(this%n_children))
-        ! allocate(this%child_get_types_2d(this%n_children))
-        allocate(this%child_rst_types_3d(this%n_children))
-        allocate(this%child_rst_types_2d(this%n_children))
-        ! allocate(this%child_put_types(this%n_children))
-        allocate(this%child_force_types(this%n_children))
-
-        do i = 1,this%n_children
-            ! +2 included to account for staggered grids for output variables
-            ! call MPI_Type_create_subarray(4, [this%n_w_3d, (this%i_e_re-this%i_s_re+2), (this%k_e_w-this%k_s_w+1), (this%j_e_re-this%j_s_re+2)], &
-            !     [this%n_w_3d, (this%iewc(i)-this%iswc(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jewc(i)-this%jswc(i)+2)], &
-            !     [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%get_types_3d(i))
-                
-            ! call MPI_Type_create_subarray(3, [this%n_w_2d, (this%i_e_re-this%i_s_re+2), (this%j_e_re-this%j_s_re+2)], &
-            !     [this%n_w_2d, (this%iewc(i)-this%iswc(i)+2), (this%jewc(i)-this%jswc(i)+2)], &
-            !     [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%get_types_2d(i))
-
-            call MPI_Type_create_subarray(4, [this%n_w_3d, (this%i_e_re-this%i_s_re+2), (this%k_e_w-this%k_s_w+1), (this%j_e_re-this%j_s_re+2)], &
-                [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jerec(i)-this%jsrec(i)+2)], &
-                [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%rst_types_3d(i))
-        
-            call MPI_Type_create_subarray(3, [this%n_w_2d, (this%i_e_re-this%i_s_re+2), (this%j_e_re-this%j_s_re+2)], &
-                [this%n_w_2d, (this%ierec(i)-this%isrec(i)+2), (this%jerec(i)-this%jsrec(i)+2)], &
-                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%rst_types_2d(i))
-
-            ! call MPI_Type_create_subarray(4, [this%n_r, (this%i_e_r-this%i_s_r+1), (this%k_e_r-this%k_s_r+1), (this%j_e_r-this%j_s_r+1)], &
-            !     [this%n_r, (this%ierc(i)-this%isrc(i)+1), (this%kerc(i)-this%ksrc(i)+1), (this%jerc(i)-this%jsrc(i)+1)], &
-            !     [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%put_types(i))
-
-            ! call MPI_Type_create_subarray(4, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re], &
-            !     [this%n_w_3d, (this%iewc(i)-this%iswc(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jewc(i)-this%jswc(i)+2)], &
-            !     [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_get_types_3d(i))
-
-            ! call MPI_Type_create_subarray(3, [this%n_w_2d, this%nx_re, this%ny_re], &
-            !     [this%n_w_2d, (this%iewc(i)-this%iswc(i)+2), (this%jewc(i)-this%jswc(i)+2)], &
-            !     [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_get_types_2d(i))
-
-            call MPI_Type_create_subarray(4, [this%n_w_3d, this%nx_re, this%nz_w, this%ny_re], &
-                [this%n_w_3d, (this%ierec(i)-this%isrec(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jerec(i)-this%jsrec(i)+2)], &
-                [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_rst_types_3d(i))
-
-            call MPI_Type_create_subarray(3, [this%n_w_2d, this%nx_re, this%ny_re], &
-                [this%n_w_2d, (this%ierec(i)-this%isrec(i)+2), (this%jerec(i)-this%jsrec(i)+2)], &
-                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_rst_types_2d(i))
-
-            ! call MPI_Type_create_subarray(4, [this%n_r, this%nx_r, this%nz_r, this%ny_r], &
-            !     [this%n_r, (this%ierc(i)-this%isrc(i)+1), (this%kerc(i)-this%ksrc(i)+1), (this%jerc(i)-this%jsrc(i)+1)], &
-            !     [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_put_types(i))
-
-            ! if (this%n_f > 0) then
-            !     call MPI_Type_create_subarray(4, [this%n_f, (this%i_e_w-this%i_s_w+2), (this%k_e_w-this%k_s_w+1), (this%j_e_w-this%j_s_w+2)], &
-            !         [this%n_f, (this%iewc(i)-this%iswc(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jewc(i)-this%jswc(i)+2)], &
-            !         [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%force_types(i))
-            !     call MPI_Type_commit(this%force_types(i))
-
-            !     call MPI_Type_create_subarray(4, [this%n_f, this%nx_w, this%nz_w, this%ny_w], &
-            !         [this%n_f, (this%iewc(i)-this%iswc(i)+2), (this%kewc(i)-this%kswc(i)+1), (this%jewc(i)-this%jswc(i)+2)], &
-            !         [0,0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, this%child_force_types(i))
-            !     call MPI_Type_commit(this%child_force_types(i))
-
-            ! endif
-            ! call MPI_Type_commit(this%get_types_3d(i))
-            ! call MPI_Type_commit(this%get_types_2d(i))
-            call MPI_Type_commit(this%rst_types_3d(i))
-            call MPI_Type_commit(this%rst_types_2d(i))
-            ! call MPI_Type_commit(this%put_types(i))
-            ! call MPI_Type_commit(this%child_get_types_3d(i))
-            ! call MPI_Type_commit(this%child_get_types_2d(i))
-            call MPI_Type_commit(this%child_rst_types_3d(i))
-            call MPI_Type_commit(this%child_rst_types_2d(i))
-            ! call MPI_Type_commit(this%child_put_types(i))
-        enddo
-    end subroutine setup_MPI_types
 
     subroutine init_with_clients(this)
         class(ioserver_t),   intent(inout)  :: this
         integer :: n, comm_size, ierr, i
         integer, allocatable, dimension(:) :: cnts, disps
-                        
-        type(MPI_Group) :: family_group
 
         !get number of clients on this communicator
         call MPI_Comm_size(this%client_comms, comm_size)
@@ -508,11 +889,6 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,this%kde,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,this%jde,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
 
-        call MPI_Comm_Group(this%client_comms,family_group)
-        call MPI_Comm_rank(this%client_comms,n)
-
-        call MPI_Group_Excl(family_group,1,[n],this%children_group)
-
         allocate(this%children_ranks(this%n_children))
 
         do n = 1,this%n_children
@@ -546,10 +922,12 @@ contains
         implicit none
         class(ioserver_t), intent(inout)  :: this
 
-        integer :: i, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, msg_size
-        integer :: n, n_3d, n_2d, n_vars, var_indx, x_stag, y_stag
+        integer :: i, msg_size, ierr, cc
+        integer :: n, n_3d, n_2d, x_stag, y_stag, oi
         logical :: should_write_restart
         INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+        type(MPI_Request) :: reqs(2 * this%n_children)
+
         msg_size = 1
         disp = 0
 
@@ -561,44 +939,68 @@ contains
         if (STD_OUT_PE_IO) write(*,*) "Fetching data from child images for output"
         if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",this%nest_indx," --------------"
 
-        ! Do MPI_Win_Start on write_win to initiate get
-        call MPI_Win_Start(this%children_group,0,this%write_win_3d)
-        call MPI_Win_Start(this%children_group,0,this%write_win_2d)
+        ! Receive dt from compute rank 0 for restart file
+        if (should_write_restart .or. this%first_write) then
+            call MPI_Recv(this%dt, 1, MPI_REAL, 0, kIO_TAG_DT_RESTART, this%client_comms, MPI_STATUS_IGNORE, ierr)
+        endif
 
-        
+        ! Gather packed buffers from every child.  Matching Isend pairs are
+        ! posted in ioclient_obj::push (tags kIO_TAG_WRITE_3D / _2D).
+        do cc = 1, this%n_children
+            call MPI_Irecv(this%write_buffer_3d(cc)%buff, &
+                            size(this%write_buffer_3d(cc)%buff), MPI_REAL, &
+                            cc - 1, kIO_TAG_WRITE_3D, this%client_comms, &
+                            reqs(2*cc - 1), ierr)
+            call MPI_Irecv(this%write_buffer_2d(cc)%buff, &
+                            size(this%write_buffer_2d(cc)%buff), MPI_REAL, &
+                            cc - 1, kIO_TAG_WRITE_2D, this%client_comms, &
+                            reqs(2*cc), ierr)
+        enddo
+        call MPI_Waitall(2 * this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
 
-        ! Loop through child images and get chunks of buffer array from each one
+        ! Unpack into outputer buffers (two-pass)
+        ! Pass 1: output variables
         do i=1,this%n_children
-            n_2d = 0
-            n_3d = 0
-            do n = 1,this%outputer%n_vars 
-
-                if (this%outputer%variables(n)%two_d) n_2d = n_2d + 1
-                if (this%outputer%variables(n)%three_d) n_3d = n_3d + 1
-
-                ! If this variable is not in the output list, and this is not a restart write, and this is not the first write, skip it
-                if (.not.(should_write_restart) .and. .not.(ANY(this%out_var_indices==n)) .and. .not.(this%first_write) ) cycle
-
-                x_stag = this%outputer%variables(n)%xstag
-                y_stag = this%outputer%variables(n)%ystag
-
-                if (this%outputer%variables(n)%two_d) then
+            n_3d = 0; n_2d = 0
+            do oi = 1, size(this%out_ordered_indices)
+                n = this%out_ordered_indices(oi)
+                x_stag = this%outputer%var_meta(n)%xstag
+                y_stag = this%outputer%var_meta(n)%ystag
+                if (this%outputer%var_meta(n)%two_d) then
+                    n_2d = n_2d + 1
                     this%outputer%variables(n)%data_2d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
                         this%write_buffer_2d(i)%buff(n_2d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
-                elseif (this%outputer%variables(n)%three_d) then
+                elseif (this%outputer%var_meta(n)%three_d) then
+                    n_3d = n_3d + 1
                     this%outputer%variables(n)%data_3d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),:,(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
-                        this%write_buffer_3d(i)%buff(n_3d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:this%outputer%variables(n)%dim_len(2),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
+                        this%write_buffer_3d(i)%buff(n_3d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:this%outputer%var_meta(n)%dim_len(2),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
                 endif
             enddo
+
+            ! Pass 2: restart-only variables (only if restart step or first write)
+            if (should_write_restart .or. this%first_write) then
+                do oi = 1, size(this%rst_only_ordered_indices)
+                    n = this%rst_only_ordered_indices(oi)
+                    x_stag = this%outputer%var_meta(n)%xstag
+                    y_stag = this%outputer%var_meta(n)%ystag
+                    if (this%outputer%var_meta(n)%two_d) then
+                        n_2d = n_2d + 1
+                        this%outputer%variables(n)%data_2d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
+                            this%write_buffer_2d(i)%buff(n_2d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
+                    elseif (this%outputer%var_meta(n)%three_d) then
+                        n_3d = n_3d + 1
+                        this%outputer%variables(n)%data_3d((this%iswc(i)-this%i_s_w+1):(this%iewc(i)-this%i_s_w+1+x_stag),:,(this%jswc(i)-this%j_s_w+1):(this%jewc(i)-this%j_s_w+1+y_stag)) = &
+                            this%write_buffer_3d(i)%buff(n_3d,1:(this%iewc(i)-this%iswc(i)+1+x_stag),1:this%outputer%var_meta(n)%dim_len(2),1:(this%jewc(i)-this%jswc(i)+1+y_stag))
+                    endif
+                enddo
+            endif
         enddo
-        ! Do MPI_Win_Complete on write_win to end get
-        call MPI_Win_Complete(this%write_win_3d)
-        call MPI_Win_Complete(this%write_win_2d)
         if (STD_OUT_PE_IO) write(*,"(/ A23,I2,A16)") "-------------- IOserver",this%nest_indx," --------------"
         if (STD_OUT_PE_IO) write(*,*) "Done data from child images for output"
         if (STD_OUT_PE_IO) write(*,"(A23,I2,A16 /)") "-------------- IOserver",this%nest_indx," --------------"
 
-        if (ALL(this%write_buffer_3d(1)%buff==kEMPT_BUFF) .or. ALL(this%write_buffer_2d(1)%buff==kEMPT_BUFF))then
+        if (ALL(this%write_buffer_3d(1)%buff(1:this%n_out_3d,:,:,:)==kEMPT_BUFF) .or. &
+            ALL(this%write_buffer_2d(1)%buff(1:this%n_out_2d,:,:)==kEMPT_BUFF)) then
             stop 'Error, all of write buffer used for output was still set to empty buffer flag at time of writing.'
         endif
 
@@ -613,7 +1015,7 @@ contains
 
 
         if (should_write_restart) then
-            call this%outputer%save_rst_file(this%sim_time,this%IO_Comms,this%rst_var_indices)
+            call this%outputer%save_rst_file(this%sim_time,this%IO_Comms,this%rst_var_indices,this%dt)
             this%restart_counter = 1
         endif
 
@@ -629,16 +1031,14 @@ contains
     module subroutine read_file(this)
         class(ioserver_t), intent(inout) :: this
 
-        real, allocatable, dimension(:,:,:,:) :: parent_read_buffer
-
         !See if we even have files to read
         if (this%files_to_read) then
             ! read file into buffer array
-            call this%reader%read_next_step(parent_read_buffer,this%IO_Comms)
+            call this%reader%read_next_step(this%forcing_buffer,this%IO_Comms)
             this%files_to_read = .not.(this%reader%eof)
 
             ! Loop through child images and send chunks of buffer array to each one
-            call this%scatter_forcing(parent_read_buffer)
+            call this%scatter_forcing()
         endif
 
         ! increment input time whether we have files to read or not
@@ -651,33 +1051,79 @@ contains
     module subroutine gather_forcing(this)
         class(ioserver_t), intent(inout) :: this
 
-        integer :: i, msg_size
-        INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
-
-        msg_size = 1
-        disp = 0
+        integer :: i, ierr
+        type(MPI_Request), allocatable :: reqs(:)
 
         if (this%n_f <= 0) then
             if (STD_OUT_PE) write(*,*) 'No forcing fields to gather, but we entered gather_forcing. This is a bug.'
             return
         endif
-        
-        ! Do MPI_Win_Start on nest_win to initiate get
-        call MPI_Win_Start(this%children_group,0,this%nest_win)
 
-        ! Loop through child images and get chunks of buffer array from each one
+        ! Irecv child-packed forcing buffers into server-side per-child
+        ! receive buffers.  Matching Isend is in ioclient::update_nest.
+        allocate(reqs(this%n_children))
+        do i = 1, this%n_children
+            call MPI_Irecv(this%child_gather_buffers(i)%buff, &
+                           size(this%child_gather_buffers(i)%buff), MPI_REAL, &
+                           i - 1, kIO_TAG_NEST_3D, this%client_comms, reqs(i), ierr)
+        enddo
+        call MPI_Waitall(this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
+        deallocate(reqs)
+
+        ! Unpack received child buffers into the server's gather buffer
         do i=1,this%n_children
-            ! call MPI_Get(this%gather_buffer(1,this%iswc(i),1,this%jswc(i)), msg_size, &
-            !     this%force_types(i), this%children_ranks(i), disp, msg_size, this%child_force_types(i), this%nest_win)
-            this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,:,this%jswc(i):this%jewc(i)+1) = &
-                    this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+2),:,1:(this%jewc(i)-this%jswc(i)+2))
-
+            this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,this%k_s_w:this%k_e_f,this%jswc(i):this%jewc(i)+1) = &
+                this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+2),this%k_s_w:this%k_e_f,1:(this%jewc(i)-this%jswc(i)+2))
         enddo
 
-        ! Do MPI_Win_Complete on read_win to end put
-        call MPI_Win_Complete(this%nest_win)
-
     end subroutine gather_forcing
+
+    module subroutine gather_forcing_2d(this)
+        class(ioserver_t), intent(inout) :: this
+        integer :: i, ierr
+        type(MPI_Request), allocatable :: reqs(:)
+
+        if (this%n_f_2d <= 0) return
+
+        allocate(reqs(this%n_children))
+        do i = 1, this%n_children
+            call MPI_Irecv(this%child_gather_buffers_2d(i)%buff, &
+                           size(this%child_gather_buffers_2d(i)%buff), MPI_REAL, &
+                           i - 1, kIO_TAG_NEST_2D, this%client_comms, reqs(i), ierr)
+        enddo
+        call MPI_Waitall(this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
+        deallocate(reqs)
+
+        do i = 1, this%n_children
+            this%gather_buffer_2d(:, this%iswc(i):this%iewc(i)+1, this%jswc(i):this%jewc(i)+1) = &
+                this%child_gather_buffers_2d(i)%buff(:, 1:(this%iewc(i)-this%iswc(i)+2), 1:(this%jewc(i)-this%jswc(i)+2))
+        enddo
+
+    end subroutine gather_forcing_2d
+
+    module subroutine gather_forcing_3d_init(this)
+        class(ioserver_t), intent(inout) :: this
+        integer :: i, ierr
+        type(MPI_Request), allocatable :: reqs(:)
+
+        if (this%n_f_3d_init <= 0) return
+
+        allocate(reqs(this%n_children))
+        do i = 1, this%n_children
+            call MPI_Irecv(this%child_gather_buffers_3d_init(i)%buff, &
+                           size(this%child_gather_buffers_3d_init(i)%buff), MPI_REAL, &
+                           i - 1, kIO_TAG_NEST_3D_INIT, this%client_comms, reqs(i), ierr)
+        enddo
+        call MPI_Waitall(this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
+        deallocate(reqs)
+
+        ! The parent's own init-3D data only extends to nz_w k-levels.
+        do i = 1, this%n_children
+            this%gather_buffer_3d_init(:, this%iswc(i):this%iewc(i)+1, 1:this%nz_w, this%jswc(i):this%jewc(i)+1) = &
+                this%child_gather_buffers_3d_init(i)%buff(:, 1:(this%iewc(i)-this%iswc(i)+2), 1:this%nz_w, 1:(this%jewc(i)-this%jswc(i)+2))
+        enddo
+
+    end subroutine gather_forcing_3d_init
 
     module subroutine distribute_forcing(this, child_ioserver, child_indx)
         class(ioserver_t), intent(inout) :: this
@@ -687,20 +1133,22 @@ contains
         integer :: i, nx, ny, n, ierr, msg_size, real_size
         integer, allocatable :: send_msg_size_alltoall(:), buff_msg_size_alltoall(:), disp_alltoall(:)
         INTEGER(KIND=MPI_ADDRESS_KIND) :: lowerbound, extent
-        real, allocatable, dimension(:,:,:,:) :: forcing_buffer
 
         allocate(send_msg_size_alltoall(this%n_servers))
         allocate(buff_msg_size_alltoall(this%n_servers))
         allocate(disp_alltoall(this%n_servers))
 
         disp_alltoall = 0
-    
-        allocate(forcing_buffer(this%n_f,child_ioserver%i_s_r:child_ioserver%i_e_r+1,child_ioserver%k_s_r:child_ioserver%k_e_r, child_ioserver%j_s_r:child_ioserver%j_e_r+1))
 
         ! If this is the first time calling gather_forcing, we are still in initialization. Call setup_nest_types now, passing in the child ioserver
         if (this%nest_types_initialized(child_indx) .eqv. .False.) then
-            call this%setup_nest_types(child_ioserver, this%send_nest_types(child_indx,:), this%buffer_nest_types(child_indx,:))
+            if (allocated(child_ioserver%forcing_buffer))  deallocate(child_ioserver%forcing_buffer)
+
+            allocate(child_ioserver%forcing_buffer(this%n_f,child_ioserver%i_s_r:child_ioserver%i_e_r+1,child_ioserver%k_s_r:child_ioserver%k_e_r, child_ioserver%j_s_r:child_ioserver%j_e_r+1))
+            call this%setup_nest_types(child_ioserver, child_indx, &
+                this%send_nest_types(child_indx,:), this%buffer_nest_types(child_indx,:))
             this%nest_types_initialized(child_indx) = .true.
+            call test_nest_types(this, child_ioserver, child_indx)
         endif
 
         ! What would be smart here, is to send our forcing buffer to only the processes, on which the child ioservers need the data
@@ -725,35 +1173,183 @@ contains
         enddo
 
         call MPI_Alltoallw(this%gather_buffer,  send_msg_size_alltoall, disp_alltoall, this%send_nest_types(child_indx,:), &
-                        forcing_buffer, buff_msg_size_alltoall, disp_alltoall, this%buffer_nest_types(child_indx,:), this%IO_Comms)
+                        child_ioserver%forcing_buffer, buff_msg_size_alltoall, disp_alltoall, this%buffer_nest_types(child_indx,:), this%IO_Comms)
+
         ! This call will scatter the forcing fields to the ioclients of the nest child
-        call child_ioserver%scatter_forcing(forcing_buffer)
-        ! call child_ioserver%increment_input_time()
+        call child_ioserver%scatter_forcing()
     end subroutine
 
-    module subroutine scatter_forcing(this, forcing_buffer)
+    ! One-time init transfer for a parent nest. Resolves the per-family
+    ! nz_init_3d (max across this parent and its children) on this rank,
+    ! grows this%gather_buffer_3d_init if needed, drives gather_forcing_2d
+    ! and gather_forcing_3d_init, then pushes the init 2D + 3D restart vars
+    ! to every child via MPI_Alltoallw + MPI_Send. Called once per parent
+    ! from flow_events.component_read, guarded by initial_nest_done.
+    module subroutine distribute_init_forcing(this, components, child_nests)
         class(ioserver_t), intent(inout) :: this
-        real, dimension(:,:,:,:), intent(in) :: forcing_buffer
+        type(comp_arr_t),  intent(inout) :: components(:)
+        integer,           intent(in)    :: child_nests(:)
 
-        integer :: i, msg_size
-        INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+        integer :: n, ci, nx_c, ny_c, nz_c, msg_size_2d, msg_size_3d
+        integer :: family_nz, ierr, real_size
+        integer, allocatable :: send_2d_sizes(:), buff_2d_sizes(:), disp_2d(:)
+        integer, allocatable :: send_3d_sizes(:), buff_3d_sizes(:), disp_3d(:)
+        INTEGER(KIND=MPI_ADDRESS_KIND) :: lowerbound, extent
 
-        msg_size = 1
-        disp = 0
+        if (this%initial_nest_done) return
 
-        ! Do MPI_Win_Start on read_win to initiate put
-        call MPI_Win_Start(this%children_group,0,this%read_win)
-
-        ! Loop through child images and send chunks of buffer array to each one
-        do i=1,this%n_children
-            ! call MPI_Put(forcing_buffer(1,(this%isrc(i)-this%i_s_r+1),1,(this%jsrc(i)-this%j_s_r+1)), msg_size, &
-            !     this%put_types(i), this%children_ranks(i), disp, msg_size, this%child_put_types(i), this%read_win)
-            this%read_buffer(i)%buff(:,1:(this%ierc(i)-this%isrc(i)+1)+1,:,1:(this%jerc(i)-this%jsrc(i)+1)+1) = &
-                forcing_buffer(:,(this%isrc(i)-this%i_s_r+1):(this%ierc(i)-this%i_s_r+1)+1,:,(this%jsrc(i)-this%j_s_r+1):(this%jerc(i)-this%j_s_r+1)+1)
+        ! 1. Per-family max across this parent and its children.
+        family_nz = this%nz_init_3d
+        do n = 1, size(child_nests)
+            select type (child => components(child_nests(n))%comp)
+            type is (ioserver_t)
+                if (child%nz_init_3d > family_nz) family_nz = child%nz_init_3d
+            end select
         enddo
 
-        ! Do MPI_Win_Complete on read_win to end put
-        call MPI_Win_Complete(this%read_win)
+        ! 2. Grow this%gather_buffer_3d_init to family_nz if needed. Safe:
+        ! this runs before the first gather_forcing_3d_init, so no data
+        ! would be lost.
+        if (family_nz > this%nz_init_3d .and. this%n_f_3d_init > 0) then
+            if (allocated(this%gather_buffer_3d_init)) deallocate(this%gather_buffer_3d_init)
+            allocate(this%gather_buffer_3d_init(this%n_f_3d_init, &
+                     this%i_s_w:this%i_e_w+1, 1:family_nz, this%j_s_w:this%j_e_w+1))
+            this%gather_buffer_3d_init = 0.0
+        endif
+
+        ! 3. Write family_nz into this parent and every child's ioserver on
+        ! this rank. Direct struct access is sufficient: every IO rank runs
+        ! this same code over the same components array and arrives at the
+        ! same result, so all IO ranks stay consistent without an MPI
+        ! reduction. Compute ranks learn the size from the actual incoming
+        ! message in unpack_init_vars_3d (MPI_Probe), not from this field.
+        this%nz_init_3d = family_nz
+        do n = 1, size(child_nests)
+            select type (child => components(child_nests(n))%comp)
+            type is (ioserver_t)
+                child%nz_init_3d = family_nz
+            end select
+        enddo
+
+        ! 4+5. One-time init gathers.
+        call this%gather_forcing_2d()
+        call this%gather_forcing_3d_init()
+
+        ! 6. Distribute init 2D + 3D to each child.
+        call MPI_Type_size(MPI_REAL, real_size, ierr)
+
+        do n = 1, size(child_nests)
+            select type (child_ioserver => components(child_nests(n))%comp)
+            type is (ioserver_t)
+                ! 2D init distribute
+                if (this%n_f_2d > 0) then
+                    if (.not. this%nest_types_2d_initialized(n)) then
+                        if (allocated(child_ioserver%forcing_buffer_2d)) deallocate(child_ioserver%forcing_buffer_2d)
+                        allocate(child_ioserver%forcing_buffer_2d(this%n_f_2d, &
+                            child_ioserver%i_s_r:child_ioserver%i_e_r+1, child_ioserver%j_s_r:child_ioserver%j_e_r+1))
+                        call this%setup_nest_types_2d(child_ioserver, n, &
+                            this%send_nest_types_2d(n,:), this%buffer_nest_types_2d(n,:))
+                        this%nest_types_2d_initialized(n) = .true.
+                    endif
+
+                    allocate(send_2d_sizes(this%n_servers), buff_2d_sizes(this%n_servers), disp_2d(this%n_servers))
+                    disp_2d = 0
+                    do ci = 1, this%n_servers
+                        call MPI_Type_get_extent(this%send_nest_types_2d(n,ci), lowerbound, extent)
+                        send_2d_sizes(ci) = merge(1, 0, extent > real_size)
+                        call MPI_Type_get_extent(this%buffer_nest_types_2d(n,ci), lowerbound, extent)
+                        buff_2d_sizes(ci) = merge(1, 0, extent > real_size)
+                    enddo
+
+                    call MPI_Alltoallw(this%gather_buffer_2d, send_2d_sizes, disp_2d, this%send_nest_types_2d(n,:), &
+                        child_ioserver%forcing_buffer_2d, buff_2d_sizes, disp_2d, this%buffer_nest_types_2d(n,:), this%IO_Comms)
+                    deallocate(send_2d_sizes, buff_2d_sizes, disp_2d)
+
+                    ! MPI_Send 2D data to each child ioclient
+                    do ci = 1, child_ioserver%n_children
+                        nx_c = child_ioserver%ierc(ci) - child_ioserver%isrc(ci) + 2
+                        ny_c = child_ioserver%jerc(ci) - child_ioserver%jsrc(ci) + 2
+                        msg_size_2d = this%n_f_2d * nx_c * ny_c
+                        call MPI_Send(child_ioserver%forcing_buffer_2d(:, &
+                            child_ioserver%isrc(ci):child_ioserver%ierc(ci)+1, &
+                            child_ioserver%jsrc(ci):child_ioserver%jerc(ci)+1), &
+                            msg_size_2d, MPI_REAL, ci-1, 98, child_ioserver%client_comms, ierr)
+                    enddo
+                endif
+
+                ! 3D init distribute. Step 3 above ensures this%nz_init_3d ==
+                ! child_ioserver%nz_init_3d, so send/buff derived types and
+                ! both physical buffers share the same k extent.
+                if (this%n_f_3d_init > 0) then
+                    if (.not. this%nest_types_3d_init_initialized(n)) then
+                        if (allocated(child_ioserver%forcing_buffer_3d_init)) deallocate(child_ioserver%forcing_buffer_3d_init)
+                        allocate(child_ioserver%forcing_buffer_3d_init(this%n_f_3d_init, &
+                            child_ioserver%i_s_r:child_ioserver%i_e_r+1, 1:child_ioserver%nz_init_3d, &
+                            child_ioserver%j_s_r:child_ioserver%j_e_r+1))
+                        call this%setup_nest_types_3d_init(child_ioserver, n, &
+                            this%send_nest_types_3d_init(n,:), this%buffer_nest_types_3d_init(n,:))
+                        this%nest_types_3d_init_initialized(n) = .true.
+                    endif
+
+                    allocate(send_3d_sizes(this%n_servers), buff_3d_sizes(this%n_servers), disp_3d(this%n_servers))
+                    disp_3d = 0
+                    do ci = 1, this%n_servers
+                        call MPI_Type_get_extent(this%send_nest_types_3d_init(n,ci), lowerbound, extent)
+                        send_3d_sizes(ci) = merge(1, 0, extent > real_size)
+                        call MPI_Type_get_extent(this%buffer_nest_types_3d_init(n,ci), lowerbound, extent)
+                        buff_3d_sizes(ci) = merge(1, 0, extent > real_size)
+                    enddo
+
+                    call MPI_Alltoallw(this%gather_buffer_3d_init, send_3d_sizes, disp_3d, this%send_nest_types_3d_init(n,:), &
+                        child_ioserver%forcing_buffer_3d_init, buff_3d_sizes, disp_3d, this%buffer_nest_types_3d_init(n,:), this%IO_Comms)
+                    deallocate(send_3d_sizes, buff_3d_sizes, disp_3d)
+
+                    ! MPI_Send 3D init data to each child ioclient. Use the full
+                    ! k extent (1:nz_init_3d) so variables with per-var nz_v larger
+                    ! than atmospheric (snow/soil) are transmitted in their entirety.
+                    do ci = 1, child_ioserver%n_children
+                        nx_c = child_ioserver%ierc(ci) - child_ioserver%isrc(ci) + 2
+                        nz_c = child_ioserver%nz_init_3d
+                        ny_c = child_ioserver%jerc(ci) - child_ioserver%jsrc(ci) + 2
+                        msg_size_3d = this%n_f_3d_init * nx_c * nz_c * ny_c
+                        call MPI_Send(child_ioserver%forcing_buffer_3d_init(:, &
+                            child_ioserver%isrc(ci):child_ioserver%ierc(ci)+1, &
+                            1:child_ioserver%nz_init_3d, &
+                            child_ioserver%jsrc(ci):child_ioserver%jerc(ci)+1), &
+                            msg_size_3d, MPI_REAL, ci-1, 99, child_ioserver%client_comms, ierr)
+                    enddo
+                endif
+
+                ! All three datatype variants for this child have now been
+                ! committed (main forcing in distribute_forcing before this
+                ! call, plus init 2D and init 3D just above). The cached
+                ! (i,j) cell lists are no longer needed.
+                call free_nest_geometry(this%nest_geometry(n))
+            end select
+        enddo
+
+        this%initial_nest_done = .true.
+    end subroutine distribute_init_forcing
+
+    module subroutine scatter_forcing(this)
+        class(ioserver_t), intent(inout) :: this
+
+        integer :: i, ierr
+        type(MPI_Request) :: reqs(this%n_children)
+
+        ! Pack each child's slice into its send buffer and post one Isend
+        ! per child on kIO_TAG_READ.  Children post matching Irecv in
+        ! ioclient::receive.
+        do i = 1, this%n_children
+            this%read_buffer(i)%buff(:, 1:(this%ierc(i)-this%isrc(i)+1)+1, &
+                                      :, 1:(this%jerc(i)-this%jsrc(i)+1)+1) = &
+                this%forcing_buffer(:, this%isrc(i):this%ierc(i)+1, &
+                                     :, this%jsrc(i):this%jerc(i)+1)
+            call MPI_Isend(this%read_buffer(i)%buff, &
+                           size(this%read_buffer(i)%buff), MPI_REAL, &
+                           i - 1, kIO_TAG_READ, this%client_comms, reqs(i), ierr)
+        enddo
+        call MPI_Waitall(this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
 
     end subroutine
 
@@ -764,22 +1360,23 @@ contains
         type(options_t),     intent(in)    :: options
 
         integer :: i, n_3d, n_2d, nx, ny, i_s_re, i_e_re, j_s_re, j_e_re
-        integer :: ncid, var_id, dimid_3d(4), nz, err, varid, start_3d(4), cnt_3d(4), start_2d(3), cnt_2d(3), msg_size
-        INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+        integer :: ncid, file_var_id, dimid_3d(4), nz, err, varid, start_3d(4), cnt_3d(4), start_2d(3), cnt_2d(3)
+        integer :: nx_c, ny_c, nz_c, ierr
+
+        type(MPI_Info) :: IO_Comms_info
         real, allocatable :: data3d(:,:,:,:), restart_data_3d(:,:,:,:), restart_data_2d(:,:,:)
-        type(variable_t)  :: var
+        type(meta_data_t)  :: var_meta
         character(len=kMAX_NAME_LENGTH) :: name
         character(len=kMAX_FILE_LENGTH) :: base_rst_file_name, tmp_str, restart_in_file
         character(len=kMAX_STRING_LENGTH), allocatable :: tokens(:)
 
         integer :: restart_step                         ! time step relative to the start of the restart file
-        type(Time_type) :: time_at_step   ! restart date as a modified julian day        
+        type(Time_type) :: time_at_step   ! restart date as a modified julian day
+        type(MPI_Request), allocatable :: reqs(:)
+        type(rst_pack_t), allocatable :: packs(:)
 
         allocate(restart_data_3d(this%n_w_3d,this%i_s_re:this%i_e_re+1,this%k_s_w:this%k_e_w,this%j_s_re:this%j_e_re+1))
         allocate(restart_data_2d(this%n_w_2d,this%i_s_re:this%i_e_re+1,                      this%j_s_re:this%j_e_re+1))
-
-        msg_size = 1
-        disp = 0
 
         tokens = split_str(trim(options%domain%init_conditions_file), "/")
 
@@ -791,7 +1388,7 @@ contains
 
         write(restart_in_file, '(A,A,".nc")')    &
                 trim(base_rst_file_name),   &
-                trim(options%restart%restart_time%as_string('(I4,"-",I0.2,"-",I0.2,"_",I0.2,"-",I0.2,"-",I0.2)'))
+                trim(as_string(options%restart%restart_time,'(I4,"-",I0.2,"-",I0.2,"_",I0.2,"-",I0.2,"-",I0.2)'))
 
         call check_file_exists(restart_in_file, message='Restart file does not exist.')
 
@@ -802,15 +1399,24 @@ contains
             write(*,*) " ------------------ "
             write(*,*) "RESTART INFORMATION"
             write(*,*) "mjd",         options%restart%restart_time%mjd()
-            write(*,*) "date:",       trim(options%restart%restart_time%as_string())
+            write(*,*) "date:",       trim(as_string(options%restart%restart_time))
             write(*,*) "file:",   trim(restart_in_file)
             write(*,*) "forcing step",options%restart%restart_step_in_file
             write(*,*) " ------------------ "
         endif
 
-        err = nf90_open(restart_in_file, IOR(nf90_nowrite,NF90_NETCDF4), ncid, &
-                comm = this%IO_Comms%MPI_VAL, info = MPI_INFO_NULL%MPI_VAL)
-        
+        call MPI_Comm_get_info(this%IO_Comms, IO_Comms_info)
+
+        call check_ncdf(nf90_open(restart_in_file, IOR(nf90_nowrite,NF90_NETCDF4), ncid, &
+                comm = this%IO_Comms%MPI_VAL, info = IO_Comms_info%MPI_VAL), " Opening file "//trim(restart_in_file))
+
+        ! Validate that the restart file config matches the current config
+        call compare_restart_config(ncid, options)
+
+        ! Read saved dt for restart reproducibility (graceful fallback for old restart files)
+        err = nf90_get_att(ncid, NF90_GLOBAL, "dt_seconds", this%restart_dt)
+        if (err /= NF90_NOERR) this%restart_dt = 0.0
+
         ! setup start/count arrays accordingly. k_s_w and k_e_w forseen to always cover the bounds of what k_s_re and k_e_re would be
         ! This is because the domain is only decomposed in 2D.
         start_3d = (/ this%i_s_re,this%j_s_re,this%k_s_w,restart_step /)
@@ -822,17 +1428,17 @@ contains
         n_3d = 1
 
         do i = 1,size(this%rst_var_indices)
-            var = this%outputer%variables(this%rst_var_indices(i))
-            name = var%name
-            call check_ncdf( nf90_inq_varid(ncid, name, var_id), " Getting var ID for "//trim(name))
-            call check_ncdf( nf90_var_par_access(ncid, var_id, nf90_collective))
+            var_meta = this%outputer%var_meta(this%rst_var_indices(i))
+            name = var_meta%name
+            call check_ncdf( nf90_inq_varid(ncid, name, file_var_id), " Getting var ID for "//trim(name))
+            call check_ncdf( nf90_var_par_access(ncid, file_var_id, nf90_collective))
             
-            nx = cnt_3d(1) + var%xstag
-            ny = cnt_3d(2) + var%ystag
+            nx = cnt_3d(1) + var_meta%xstag
+            ny = cnt_3d(2) + var_meta%ystag
 
-            if (var%three_d) then
+            if (var_meta%three_d) then
                 ! Get length of z dim
-                call check_ncdf( nf90_inquire_variable(ncid, var_id, dimids = dimid_3d), " Getting dim IDs for "//trim(name))
+                call check_ncdf( nf90_inquire_variable(ncid, file_var_id, dimids = dimid_3d), " Getting dim IDs for "//trim(name))
                 call check_ncdf( nf90_inquire_dimension(ncid, dimid_3d(3), len = nz), " Getting z dim len for "//trim(name))
 
                 !clip nz to be the extent needed, or the full extent of the variable in the file. This clip is a dummy check in case
@@ -842,36 +1448,46 @@ contains
                 
                 if (allocated(data3d)) deallocate(data3d)
                 allocate(data3d(nx,ny,nz,1))
-                call check_ncdf( nf90_get_var(ncid, var_id, data3d, start=start_3d, count=(/ nx, ny, nz /)), " Getting 3D var "//trim(name))
+                call check_ncdf( nf90_get_var(ncid, file_var_id, data3d, start=start_3d, count=(/ nx, ny, nz /)), " Getting 3D var "//trim(name))
 
-                restart_data_3d(n_3d,this%i_s_re:this%i_e_re+var%xstag,1:nz,this%j_s_re:this%j_e_re+var%ystag) = &
+                restart_data_3d(n_3d,this%i_s_re:this%i_e_re+var_meta%xstag,1:nz,this%j_s_re:this%j_e_re+var_meta%ystag) = &
                         reshape(data3d(:,:,:,1), shape=[nx,nz,ny], order=[1,3,2])
                 n_3d = n_3d+1
-            else if (var%two_d) then
-                call check_ncdf( nf90_get_var(ncid, var_id, restart_data_2d(n_2d,this%i_s_re:this%i_e_re+var%xstag,this%j_s_re:this%j_e_re+var%ystag), &
+            else if (var_meta%two_d) then
+                call check_ncdf( nf90_get_var(ncid, file_var_id, restart_data_2d(n_2d,this%i_s_re:this%i_e_re+var_meta%xstag,this%j_s_re:this%j_e_re+var_meta%ystag), &
                         start=start_2d, count=(/ nx, ny /)), " Getting 2D "//trim(name))
                         n_2d = n_2d+1
             endif
         end do
         
         call check_ncdf(nf90_close(ncid), "Closing file "//trim(restart_in_file))
-        
-        ! Because this is for reading restart data, performance is not critical, and 
-        ! we use a simple MPI_fence syncronization
-        call MPI_Win_fence(0,this%write_win_3d)
-        call MPI_Win_fence(0,this%write_win_2d)
 
-        ! Loop through child images and send chunks of buffer array to each one
-        do i=1,this%n_children
-            !Note that the MPI datatypes here are reversed since we are working with the write window
-            call MPI_Put(restart_data_3d(1,this%isrec(i),1,this%jsrec(i)), msg_size, &
-                this%rst_types_3d(i), this%children_ranks(i), disp, msg_size, this%child_rst_types_3d(i), this%write_win_3d)
-
-            call MPI_Put(restart_data_2d(1,this%isrec(i),this%jsrec(i)), msg_size, &
-                this%rst_types_2d(i), this%children_ranks(i), disp, msg_size, this%child_rst_types_2d(i), this%write_win_2d)
+        ! Scatter restart slices to each child via flat Isend. One
+        ! per-child pack holds a contiguous copy of that child's
+        ! restart_data_{3d,2d} sub-block; clients post matching Irecv in
+        ! ioclient_obj::receive_rst (tags kIO_TAG_RST_3D / kIO_TAG_RST_2D).
+        allocate(packs(this%n_children))
+        allocate(reqs(2 * this%n_children))
+        nz_c = this%k_e_w - this%k_s_w + 1
+        do i = 1, this%n_children
+            nx_c = this%ierec(i) - this%isrec(i) + 2
+            ny_c = this%jerec(i) - this%jsrec(i) + 2
+            allocate(packs(i)%buff_3d(this%n_w_3d, nx_c, nz_c, ny_c))
+            allocate(packs(i)%buff_2d(this%n_w_2d, nx_c,       ny_c))
+            packs(i)%buff_3d = restart_data_3d(1:this%n_w_3d, &
+                                                this%isrec(i):this%isrec(i) + nx_c - 1, &
+                                                this%k_s_w:this%k_e_w, &
+                                                this%jsrec(i):this%jsrec(i) + ny_c - 1)
+            packs(i)%buff_2d = restart_data_2d(1:this%n_w_2d, &
+                                                this%isrec(i):this%isrec(i) + nx_c - 1, &
+                                                this%jsrec(i):this%jsrec(i) + ny_c - 1)
+            call MPI_Isend(packs(i)%buff_3d, size(packs(i)%buff_3d), MPI_REAL, &
+                            i - 1, kIO_TAG_RST_3D, this%client_comms, reqs(2*i - 1), ierr)
+            call MPI_Isend(packs(i)%buff_2d, size(packs(i)%buff_2d), MPI_REAL, &
+                            i - 1, kIO_TAG_RST_2D, this%client_comms, reqs(2*i),     ierr)
         enddo
-        call MPI_Win_fence(0,this%write_win_3d)
-        call MPI_Win_fence(0,this%write_win_2d)
+        call MPI_Waitall(2 * this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
+        ! packs + reqs auto-deallocate on block exit
 
     end subroutine 
 
@@ -883,8 +1499,121 @@ contains
                 
         ! close files
         call this%reader%close_file()
-        call this%outputer%close_files()
+        call this%outputer%close_output_files()
 
-    end subroutine 
-    
+    end subroutine
+
+
+    ! =========================================================================
+    ! Restart config validation
+    ! =========================================================================
+    subroutine compare_restart_config(ncid, options)
+        integer,         intent(in) :: ncid
+        type(options_t), intent(in) :: options
+
+        character(len=kMAX_CONFIG_STRING_LENGTH) :: config_str
+        character(len=512) :: line
+        character(len=256) :: key, current_val, attr_name
+        character(len=kMAX_ATTR_LENGTH) :: stored_val
+        character(len=2512) :: diff_report(500)
+        integer :: i, line_start, str_len, eq_pos, n_diffs, slash_pos
+        integer :: status, attr_len
+        logical :: first_key
+        integer :: j
+
+        ! Generate current config (excluding restart-specific fields)
+        call options%generate_config_string(config_str, exclude_restart_fields=.true.)
+
+        ! Parse config string and compare each key against stored attributes
+        n_diffs = 0
+        line_start = 1
+        str_len = len_trim(config_str)
+        first_key = .true.
+
+        do i = 1, str_len
+            if (config_str(i:i) == char(10) .or. i == str_len) then
+                if (config_str(i:i) == char(10)) then
+                    line = config_str(line_start:i-1)
+                else
+                    line = config_str(line_start:i)
+                endif
+                line_start = i + 1
+
+                if (len_trim(line) == 0) cycle
+
+                eq_pos = index(line, '=')
+                if (eq_pos <= 0) cycle
+
+                key = adjustl(line(1:eq_pos-1))
+                current_val = adjustl(line(eq_pos+1:))
+
+                ! Build NetCDF-safe attribute name (replace '/' with '.')
+                attr_name = key
+                slash_pos = index(attr_name, '/')
+                if (slash_pos > 0) attr_name(slash_pos:slash_pos) = '.'
+
+                ! Check if this key should be excluded from comparison
+                ! do j = 1, N_EXCLUDE
+                !     if (index(trim(key), trim(exclude_prefixes(j))) == 1) cycle
+                ! end do
+
+                ! On the first key, check if cfg.* attributes exist at all (backward compat)
+                if (first_key) then
+                    first_key = .false.
+                    status = nf90_inquire_attribute(ncid, NF90_GLOBAL, trim(attr_name), len=attr_len)
+                    if (status == NF90_ENOTATT) then
+                        write(*,*) "  WARNING: Restart file does not contain config attributes."
+                        write(*,*) "           Unable to verify configuration consistency. Continuing..."
+                        return
+                    endif
+                endif
+
+                ! Read stored attribute value
+                status = nf90_inquire_attribute(ncid, NF90_GLOBAL, trim(attr_name), len=attr_len)
+                if (status /= NF90_NOERR) then
+                    ! Attribute missing from restart file
+                    n_diffs = n_diffs + 1
+                    if (n_diffs <= 500) then
+                        write(diff_report(n_diffs), '(A,A,A,A,A)') &
+                            "  ", trim(key), ": restart=<missing>, current='", &
+                            trim(current_val), "'"
+                    endif
+                    cycle
+                endif
+
+                stored_val = ''
+                call check_ncdf(nf90_get_att(ncid, NF90_GLOBAL, trim(attr_name), stored_val), &
+                        " Reading " // trim(attr_name) // " from restart file")
+
+                if (trim(stored_val) /= trim(current_val)) then
+                    n_diffs = n_diffs + 1
+                    if (n_diffs <= 500) then
+                        write(diff_report(n_diffs), '(A,A,A,A,A,A,A)') &
+                            "  ", trim(key), ": restart='", trim(stored_val), &
+                            "', current='", trim(current_val), "'"
+                    endif
+                endif
+            endif
+        end do
+
+        if ( (n_diffs > 0) .and. (options%restart%override_check .eqv. .False.)) then
+            write(*,*) ""
+            write(*,*) "ERROR: Configuration mismatch between restart file and current namelist"
+            write(*,*) "  Number of differences: ", n_diffs
+            do i = 1, min(n_diffs, 500)
+                write(*,*) trim(diff_report(i))
+            end do
+            if (n_diffs > 500) then
+                write(*,*) "  ... and ", n_diffs - 500, " more differences"
+            endif
+            write(*,*) ""
+            write(*,*) "-------------------------------------------------------------------------------------------"
+            write(*,*) "To ignore and continue, set override_check = .True. in restart section of the namelist"
+            write(*,*) "-------------------------------------------------------------------------------------------"
+            error stop "Configuration mismatch: restart file was generated with different options than current namelist"
+        endif
+
+    end subroutine compare_restart_config
+
+
 end submodule

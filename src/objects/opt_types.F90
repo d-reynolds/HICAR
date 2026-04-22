@@ -1,6 +1,6 @@
 module options_types
 
-    use icar_constants,             only : kMAX_STRING_LENGTH, MAXLEVELS, kMAX_FILE_LENGTH, MAX_NUMBER_FILES, kMAX_NAME_LENGTH, kMAX_STORAGE_VARS, kMAX_NAME_LENGTH
+    use icar_constants,             only : MAXLEVELS, kMAX_FILE_LENGTH, MAX_NUMBER_FILES, kMAX_NAME_LENGTH, kMAX_STORAGE_VARS, kMAX_NAME_LENGTH
     use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
     use data_structures,            only : dim_arrays_type
@@ -24,7 +24,6 @@ module options_types
         integer::radiation
         integer::convection
         integer::windtype
-        integer::radiation_downScaling        
     end type physics_type
     
     
@@ -34,6 +33,7 @@ module options_types
     type wind_type
         logical :: Sx
         logical :: thermal
+        logical :: linear_theory
         real    :: TPI_scale
         real    :: TPI_dmax
         real    :: Sx_dmax
@@ -42,7 +42,8 @@ module options_types
         integer :: roughness
         logical :: wind_only
         type(time_delta_t) :: update_dt  ! how often winds are updated
-        integer :: wind_iterations      ! number of time to iterate for wind=3 option
+        integer :: wind_iterations      ! number of time to iterate for option
+        integer :: wind_solver_iterations ! number of iterations for the actual wind solver(AMGX/PETSc) to use (wind='variational solver')
         real :: smooth_wind_distance    ! distance over which to smooth the forcing wind field (m)
 
     end type wind_type
@@ -169,7 +170,6 @@ module options_types
         ! integer :: snow_category ! = ice cat
         ! use monthly vegetation fraction data, not just a single value
         logical :: monthly_vegfrac
-        logical :: monthly_albedo
         integer :: sf_urban_phys
         integer :: num_soil_layers
         
@@ -177,13 +177,18 @@ module options_types
         integer :: nmp_opt_crs
         integer :: nmp_opt_sfc
         integer :: nmp_opt_btr
-        integer :: nmp_opt_run
+        integer :: nmp_opt_runsrf
+        integer :: nmp_opt_runsub
         integer :: nmp_opt_infdv
         integer :: nmp_opt_frz
         integer :: nmp_opt_inf
         integer :: nmp_opt_rad
         integer :: nmp_opt_alb
+        integer :: nmp_opt_wet
         integer :: nmp_opt_snf
+        integer :: nmp_opt_tksno
+        integer :: nmp_opt_compact
+        integer :: nmp_opt_scf
         integer :: nmp_opt_tbot
         integer :: nmp_opt_stc
         integer :: nmp_opt_gla
@@ -203,8 +208,7 @@ module options_types
     ! store Snow Model options
     ! ------------------------------------------------
     type sm_options_type
-        integer :: fsm_nsnow_max                        ! maximum number of snow layers for FSM2 to use. Set here, since it will
-                                                        ! change the size of arrays elsewhere in domain_obj 
+        integer :: sm_nsnow_max                         ! maximum number of snow layers to store in domain arrays (used by FSM and SNOWPACK)
         real    :: fsm_ds_min, fsm_ds_surflay
         integer :: fsm_albedo
         integer :: fsm_canmod
@@ -216,7 +220,6 @@ module options_types
         integer :: fsm_radsbg
         integer :: fsm_snfrac
         integer :: fsm_snolay
-        integer :: fsm_snslid
         integer :: fsm_sntran
         integer :: fsm_zoffst
         integer :: fsm_oshdtn
@@ -229,18 +232,50 @@ module options_types
         logical :: fsm_alpert
         logical :: fsm_slpert
 
+        ! Options for SNICAR albedo model
+        integer :: snicar_snowoptics_opt
+        integer :: snicar_dustoptics_opt
+        integer :: snicar_solarspec_opt
+        integer :: snicar_bandnumber_opt
+        integer :: snicar_rtsolver_opt
+        integer :: snicar_snowshape_opt
+        logical :: snicar_use_aerosol
+        logical :: snicar_snowbc_intmix
+        logical :: snicar_snowdust_intmix
+        logical :: snicar_use_oc
+        logical :: snicar_aerosol_readtable
+
+        ! Options for SNOWPACK model
+        integer :: snowpack_atmospheric_stability  ! option to include atmospheric stability effects in SNOWPACK
+        integer :: snowpack_variant                     ! choice of SNOWPACK variant (standard, glacier, tundra, etc.)
+        integer :: snowpack_albedo_parameterization  ! choice of albedo parameterization in SNOWPACK
+        integer :: snowpack_reduce_n_elements      ! level of SNOWPACK layer combining (0=off, 1=standard, 2=aggressive)
+        logical :: snowpack_enable_vapour_transport  ! option to enable vapour transport between snow layers in SNOWPACK
+
+        ! Options for CRYOWRF-style blowing snow drift
+        integer :: suspension_layer    ! 0=off, 1=CRYOWRF-style
+        integer :: suspension_fine_mesh_levels               ! Fine mesh levels for near-surface suspension (default 15)
+        logical :: bs_atm_feedback     ! Atmospheric feedback from blowing snow sublimation
+        integer :: saltation_model     ! kSALTATION_SORENSEN (0, default) or kSALTATION_DOORSCHOT (1)
+
+        ! SNOWSLIDE gravitational redistribution (works with any snow model)
+        integer :: snowslide           ! 0=off, 1=on
+
     end type sm_options_type
 
     ! ------------------------------------------------
     ! store Radiation options
     ! ------------------------------------------------
     type rad_options_type
-       real    :: update_interval_rrtmg                ! how ofen to update the radiation in seconds.
+       logical :: terrain_shading                      ! whether to use terrain shading
+       real    :: update_interval_rad                  ! how ofen to update the radiation in seconds.
                                                        ! RRTMG scheme is expensive. Default is 1800s (30 minutes)
        integer :: icloud                               ! How RRTMG interact with clouds
        integer :: cldovrlp                             ! how RRTMG considers cloud overlapping (1 = random, 2 = maximum-random, 3 = maximum, 4 = exponential, 5 = exponential-random)
        logical :: read_ghg                             ! Eihter use default green house gas mixing ratio, or read the in from file
        real    :: tzone !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
+       real    :: terrain_refl_radius                  ! Radius for terrain reflected SW neighborhood (m), default 1500
+       integer :: rrtmgp_block_N                       ! minimum block size (N) for batching rrtmgp calculations, espressed as NxN grid cells. Smaller blocks will be slower but use less GPU memory. This setting can allow for less memory usage for large domains on few GPUs.
     end type rad_options_type
 
     ! ------------------------------------------------
@@ -269,7 +304,8 @@ module options_types
 
         logical :: restart              ! this is a restart run, read model conditions from a restart file
         integer :: restart_count        ! the frequency, in number of output timesteps, that we write out a restart file
-
+        logical :: override_check       ! flag to determine if we error out on a failed restart check
+        
         ! file names
         character (len=kMAX_FILE_LENGTH) :: restart_folder !, restart_in_file
 
@@ -314,6 +350,7 @@ module options_types
 
     end type general_options_type
 
+
     ! ------------------------------------------------
     ! store forcing related options
     ! ------------------------------------------------
@@ -327,16 +364,21 @@ module options_types
         logical :: relax_filters       ! should use smoothly varying relaxation filters to nudge forcing at the boundaries
 
         real :: t_offset                ! offset to temperature because WRF outputs potential temperature-300
+        real :: p_multiplier            ! multiplier to apply to pressure forcing data. Useful if pressure is in hPa instead of Pa.
         logical :: limit_rh                ! impose a limit on relative humidity in the forcing data to be <=1
 
         real :: inputinterval           ! time between forcing steps [s]
 
+        integer :: forcing_longitude_system     ! specify center for longitude system
+                                        ! 0 = kPRIME_CENTERED    (-180 - 180)
+                                        ! 1 = kDATELINE_CENTERED (0 - 360)        
 
         ! variable names from init/BC/wind/... files
         character (len=kMAX_NAME_LENGTH) :: latvar="",lonvar="",uvar="",ulat="",ulon="",vvar="",vlat="",vlon="",wvar="", &
                         pvar="",pbvar="",phbvar="",tvar="",qvvar="",qcvar="",qivar="",qrvar="",qsvar="",qgvar="",i2mvar="",i3mvar="",&
                         qncvar="",qnivar="",qnrvar="",qnsvar="",qngvar="",i2nvar="",i3nvar="",&
-                        i1avar="",i1cvar="",i2avar="",i2cvar="",i3avar="",i3cvar="",hgtvar="", &
+                        i1avar="",i1cvar="",i2avar="",i2cvar="",i3avar="",i3cvar="", &
+                        qs_fmvar="",ns_fmvar="",hgtvar="", &
                         pslvar="", psvar="", sst_var="", pblhvar="", &
                         shvar="",lhvar="",zvar="", &
                         swdown_var="", lwdown_var="", &
@@ -394,10 +436,21 @@ module options_types
         character (len=kMAX_NAME_LENGTH) :: hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,landvar,lakedepthvar, &
                                         snowh_var, soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var, &
                                         vegtype_var,vegfrac_var, albedo_var, vegfracmax_var, lai_var, canwat_var, &
-                                        sinalpha_var, cosalpha_var
+                                        sinalpha_var, cosalpha_var, surface_temp_var
 
-        character(len=kMAX_NAME_LENGTH) :: svf_var, hlm_var, slope_var, slope_angle_var, aspect_angle_var, shd_var !!MJ added
+        character(len=kMAX_NAME_LENGTH) :: svf_var, hlm_var, slope_angle_var, aspect_angle_var, shd_var !!MJ added
 
+        ! SNOWPACK initial state variable names from domain file
+        character(len=kMAX_NAME_LENGTH) :: snowpack_nlayers_var, snowpack_deposition_var, &
+                                        snowpack_vfi_var, snowpack_vfw_var, snowpack_vfa_var, &
+                                        snowpack_vfs_var, snowpack_vfwp_var, snowpack_ds_var, &
+                                        snowpack_tsnow_var, snowpack_tsnow_i_var, &
+                                        snowpack_rg_var, snowpack_rb_var, snowpack_dd_var, snowpack_sp_var, &
+                                        snowpack_mk_var, snowpack_cdot_var, snowpack_snow_stress_var, snowpack_n3_var
+
+        ! Initial surface temperature options
+        real    :: init_surf_temp               ! fallback initial surface temperature [K] (default 280)
+        real    :: init_sst                     ! initial sea surface temperature [K] (default 280)
 
     end type domain_options_type
 

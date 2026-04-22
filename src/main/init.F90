@@ -17,11 +17,11 @@
 !!
 !! ----------------------------------------------------------------------------
 module initialization
-    use options_interface,  only : options_t, general_namelist, inter_nest_options_check
-    use options_types,      only : general_options_type
+    use options_interface,  only : options_t
     use domain_interface,   only : domain_t
     use boundary_interface, only : boundary_t
-    use flow_object_interface, only : flow_obj_t, comp_arr_t
+    use namelist_utils,     only : inter_nest_namelist_check
+    use flow_object_interface, only : comp_arr_t
     use microphysics,               only : mp_init, mp_var_request
     use advection,                  only : adv_init, adv_var_request
     use radiation,                  only : radiation_init, ra_var_request
@@ -29,27 +29,22 @@ module initialization
     use planetary_boundary_layer,   only : pbl_init, pbl_var_request
     use land_surface,               only : lsm_init, lsm_var_request
     use surface_layer,              only : sfc_init, sfc_var_request
-    use io_routines,                only : io_read, io_write, io_newunit
     use wind,                       only : update_winds, init_winds, wind_var_request
+    use io_routines,                only : io_newunit
     use omp_lib,                    only : omp_get_max_threads
-    use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
+    use icar_constants
     use ioserver_interface,         only : ioserver_t
     use ioclient_interface,         only : ioclient_t
-    use iso_fortran_env
+    use iso_fortran_env,            only : output_unit
     use mpi_f08
-
-    ! use io_routines,                only : io_read, &
-    !                                        io_write3d,io_write3di, io_write
-    ! use geo,                        only : geo_LUT, geo_interp, geo_interp2d, standardize_coordinates
-    ! use vertical_interpolation,     only : vLUT, vinterp
-    ! use wind,                       only : init_winds
-    ! use initialize_options,         only : init_options
-    ! use string,                     only : str
+#ifdef _OPENACC
+    use openacc
+#endif
 
 
     implicit none
     private
-    public::split_processes, welcome_message, init_options, init_model, init_physics, init_model_state
+    public::split_processes, init_options, init_model, init_physics, init_model_state
 
 contains
 
@@ -63,9 +58,15 @@ contains
 
         integer :: n, k, name_len, color, IOcolor, ierr, num_PE
         integer :: num_threads, found, PE_RANK_GLOBAL, NUM_SERVERS, NUM_COMPUTE, NUM_IO_PER_NODE, NUM_PROC_PER_NODE
-
         character(len=MPI_MAX_PROCESSOR_NAME) :: ENV_IO_PER_NODE
         type(MPI_Comm) :: globalComm, shared_comm, mainComms, IOComms
+        type(MPI_Info) :: host_only_info
+
+#ifdef _OPENACC
+        integer :: dev, local_rank, comm_size, NUM_GPU_PER_NODE
+        type(MPI_Comm) :: local_comm
+        integer(acc_device_kind) :: devtype
+#endif
 
 #if defined(_OPENMP)
         num_threads = omp_get_max_threads()
@@ -95,6 +96,25 @@ contains
         call MPI_Comm_free(shared_comm, ierr)
         ! call MPI_Comm_free(globalComm, ierr)
 
+
+        !limit NUM_IO_PER_NODE to be less than or equal to NUM_PROC_PER_NODE
+        if (NUM_IO_PER_NODE > NUM_PROC_PER_NODE) then
+            NUM_IO_PER_NODE = NUM_PROC_PER_NODE
+            if (STD_OUT_PE) write(*,*) "WARNING: NUM_IO_PER_NODE was set greater than the number of processing elements per node. Setting NUM_IO_PER_NODE to ",NUM_IO_PER_NODE
+        endif
+
+        !Ensure that NUM_PROC_PER_NODE is evenly divisible by NUM_IO_PER_NODE. If not, decrement
+        ! NUM_IO_PER_NODE until this is true
+        if (mod(NUM_PROC_PER_NODE, NUM_IO_PER_NODE) /= 0) then
+            do while (mod(NUM_PROC_PER_NODE, NUM_IO_PER_NODE) /= 0)
+                NUM_IO_PER_NODE = NUM_IO_PER_NODE - 1
+                if (NUM_IO_PER_NODE < 1) then
+                    write(*,*) "ERROR: NUM_IO_PER_NODE has been reduced to zero."
+                    stop
+                endif
+            end do
+            if (STD_OUT_PE) write(*,*) "WARNING: NUM_PROC_PER_NODE was not evenly divisible by NUM_IO_PER_NODE. Setting NUM_IO_PER_NODE to ",NUM_IO_PER_NODE
+        endif
 
         !Assign one io process per node, this results in best co-array transfer times
         NUM_SERVERS = ceiling(num_PE*NUM_IO_PER_NODE*1.0/NUM_PROC_PER_NODE)
@@ -136,28 +156,70 @@ contains
             endif
         enddo
 
+        ! MPI-4.1 hint: the IO comms only carry host buffers, so MPI can skip
+        ! the CUDA pointer-attribute probe on Isend/Irecv and on HDF5's
+        ! internal collectives. compute_comms is deliberately left untouched
+        ! because halo%exch_var passes device pointers on GPU builds
+        ! (see halo_obj.F90 `!$acc host_data use_device`). Ignored silently
+        ! by OpenMPI < 5.0.
+        call MPI_Info_create(host_only_info, ierr)
+        call MPI_Info_set(host_only_info, "mpi_memory_alloc_kinds", "system", ierr)
+
         do n = 1, n_nests
             associate(comp => components(n)%comp)
             select type (comp)
                 type is (domain_t)
                     CALL MPI_Comm_dup( mainComms, comp%compute_comms, ierr )
                     CALL MPI_Comm_dup( IOComms, ioclient(n)%parent_comms, ierr )
+                    call MPI_Comm_set_info(ioclient(n)%parent_comms, host_only_info, ierr)
 
                 type is (ioserver_t)
                     CALL MPI_Comm_dup( mainComms, comp%IO_comms, ierr )
                     CALL MPI_Comm_dup( IOComms, comp%client_comms, ierr )
+                    call MPI_Comm_set_info(comp%IO_comms,     host_only_info, ierr)
+                    call MPI_Comm_set_info(comp%client_comms, host_only_info, ierr)
 
                 class default
                     ! some default behavior
             end select
             end associate
         enddo
+
+        call MPI_Info_free(host_only_info, ierr)
+
+#ifdef _OPENACC
+    !
+    ! ****** Set the Accelerator device number based on local rank
+    !
+    call MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, &
+        MPI_INFO_NULL, local_comm)
+    call MPI_Comm_rank(local_comm, local_rank)
+    call MPI_Comm_size(local_comm, comm_size)
+    
+    if (color == kCOMPUTE_TEAM) then
+        call acc_set_device_type(acc_device_nvidia)
+        devtype = acc_get_device_type()
+        NUM_GPU_PER_NODE = acc_get_num_devices(devtype)
+
+        !get our local rank, not counting IO processes
+        local_rank = local_rank - floor(1.0*local_rank/(comm_size/NUM_IO_PER_NODE))
+        !divy up GPUs according to local rank
+        dev = mod(local_rank,NUM_GPU_PER_NODE)
+
+        call acc_set_device_num(dev, devtype)
+        call acc_init(devtype)
+    endif
+# endif
+
         if (STD_OUT_PE) then
             write(*,*) "  Number of processing elements:          ",num_PE
             write(*,*) "  Number of compute elements:             ",NUM_COMPUTE
             write(*,*) "  Number of IO elements:                  ",NUM_SERVERS
             write(*,*) "  Number of processing elements per node: ",NUM_PROC_PER_NODE
             write(*,*) "  Number of IO processes per node:        ",NUM_IO_PER_NODE
+#if defined(_OPENACC)
+            write(*,*) "  Number of GPUs used per node: ", NUM_GPU_PER_NODE
+#endif
 
 #if defined(_OPENMP)
             write(*,*) "  Max number of OpenMP Threads:           ",num_threads
@@ -172,40 +234,70 @@ contains
         implicit none
         type(options_t), allocatable, intent(out) :: options(:)
         character(len=*), intent(in) :: namelist_file
-        logical, intent(in) :: info_only, gen_nml, only_namelist_check
+        logical, intent(in), optional :: info_only, gen_nml, only_namelist_check
 
-        type(general_options_type) :: dummy_general_options
-        integer :: nests, i
+        logical :: info = .False.
+        logical :: gennml = .False.
+        logical :: nml_check = .False.
+        integer :: num_nests, i, rc, name_unit, io_stat, equals_pos
+        character(len=200) :: line, text
 
-        ! We need at least one domain
-        nests = 1
+        if (present(info_only)) info = info_only
+        if (present(gen_nml)) gennml = gen_nml
+        if (present(only_namelist_check)) nml_check = only_namelist_check
 
-        ! If we are generating or printing namelist option information, we don't want to read anything, and only need to run the init routine once
-        if ( .not.(info_only .or. gen_nml) )then
-            ! First thing, read from options file how many nests we have
-            call general_namelist(namelist_file,   dummy_general_options, 1, info_only=info_only, gen_nml=gen_nml)
-            nests = dummy_general_options%nests
+        if (STD_OUT_PE .and. .not.(gennml .or. nml_check .or. info)) then
+            call welcome_message()
+            write(*,'(/ A)') "--------------------------------------------------------"
+            write(*,'(A)')   "Initializing Options"
+            write(*,'(A /)') "--------------------------------------------------------"
+            flush(output_unit)
         endif
 
-        allocate(options(nests))
+
+        ! We need at least one domain
+        num_nests = 1
+
+        ! If we are generating or printing namelist option information, we don't want to read anything, and only need to run the init routine once
+        ! First thing, read from options file how many nests we have
+        if ( .not.(info .or. gennml) )then
+            open(io_newunit(name_unit), file=namelist_file, status='old')
+            do
+                read(name_unit, '(A)', iostat=io_stat) line
+                if (io_stat /= 0) exit
+
+                text = adjustl(line)
+                ! Look for the variable nests in the line
+                if (text(1:6) == "nests ") then
+                    equals_pos = index(line, "=")
+                    if (equals_pos > 0) then
+                        read(line(equals_pos+1:), *) num_nests
+                        exit
+                    endif
+                endif
+            end do
+            close(name_unit)
+        endif
+
+        allocate(options(num_nests))
 
         ! read in options file
-        do i = 1, nests
-            call options(i)%init(namelist_file, i, info_only=info_only, gen_nml=gen_nml)
+        do i = 1, num_nests
+            call options(i)%init(namelist_file, i, info_only=info, gen_nml=gennml)
             call collect_physics_requests(options(i))
 
             if (options(i)%general%parent_nest > 0) then
                 ! Setup options%forcing to expect synthetic forcing from parent domain
                 call options(i)%setup_synthetic_forcing()
             endif
-            call options(i)%check()
+            call options(i)%verify_options()
 
         enddo
 
-        call inter_nest_options_check(options)
+        call inter_nest_namelist_check(options)
 
         ! If this run was just done to check the namelist options, stop now
-        if (only_namelist_check) then
+        if (nml_check) then
             if (STD_OUT_PE) write(*,*) 'Namelist options check complete.'
             stop
         endif
@@ -220,8 +312,8 @@ contains
         type(ioclient_t),intent(inout) :: ioclient
         integer, intent(in) :: nest_indx
         
-        if (STD_OUT_PE .and. nest_indx == 1) write(*,*) "Initializing Domain"
-        if (STD_OUT_PE .and. nest_indx == 1) flush(output_unit)
+        if (STD_OUT_PE) write(*,*) "Initializing Domain ", nest_indx
+        if (STD_OUT_PE) flush(output_unit)
         call domain%init(options(nest_indx), nest_indx)
 
         if (options(nest_indx)%general%parent_nest == 0) then
@@ -255,7 +347,20 @@ contains
         call boundary%update_computed_vars(options)
 
         if (STD_OUT_PE) write(*,*) "Initializing forcing interpolation"
-        call domain%get_initial_conditions(boundary, options)    
+        call domain%get_initial_conditions(boundary, options)
+
+        ! Receive full restart state from parent nest (one-time, with geo-interpolation)
+        if (options%general%parent_nest > 0) then
+            if (STD_OUT_PE) write(*,*) "Receiving 2D+3D restart state from parent nest"
+            if (STD_OUT_PE) flush(output_unit)
+            call ioclient%receive_nest_init(domain, boundary)
+        endif
+
+        ! now read in any static land data. This way we do: 
+        ! 1) init via default values, 
+        ! 2) receive any parent state variables from a spin-up,
+        ! 3) any user-set variables get the last word
+        call domain%read_land_variables(options)
 
         if (options%restart%restart) then
             if (STD_OUT_PE) write(*,*) "Reading restart data"

@@ -17,9 +17,8 @@ module output_interface
   use icar_constants
   use variable_interface,       only : variable_t
   use meta_data_interface,      only : meta_data_t
-  use time_object,              only : Time_type, THREESIXTY, GREGORIAN, NOCALENDAR, NOLEAP
+  use time_object,              only : Time_type
   use options_interface,        only : options_t
-  use variable_dict_interface,  only : var_dict_t
 
   implicit none
 
@@ -39,9 +38,10 @@ module output_interface
       ! Note n_variables may be smaller then size(variables) so that it doesn't
       ! have to keep reallocating variables whenever something is added or removed
       integer, public :: n_vars = 0
+      type(meta_data_t), public, allocatable :: var_meta(:)
       type(variable_t), public, allocatable :: variables(:)
       ! time variable , publicis stored outside of the variable list... probably need to think about that some
-      type(variable_t) :: time
+      type(meta_data_t) :: time
 
       ! store status of the object
       logical :: is_initialized = .false.
@@ -75,12 +75,8 @@ module output_interface
 
       integer :: output_counter, output_count
 
-      integer :: global_dim_len(3)
+      integer :: file_dim_len(3)
 
-      ! list of netcdf dimension IDs
-      integer :: dim_ids(kMAX_DIMENSIONS)
-      ! name of the dimensions in the file
-      character(len=kMAX_DIM_LENGTH) :: dimensions(kMAX_DIMENSIONS)
       character(len=kMAX_NAME_LENGTH) :: time_units
 
   contains
@@ -88,9 +84,9 @@ module output_interface
       procedure, public  :: set_attrs
       procedure, public  :: save_out_file
       procedure, public  :: save_rst_file
-      procedure, public  :: close_files
+      procedure, public  :: close_output_files
 
-      procedure, public  :: init
+      procedure, public  :: init => init_output
       procedure, public  :: init_restart
       procedure, private :: increase_var_capacity
       procedure, private :: add_to_output
@@ -103,13 +99,13 @@ module output_interface
       !! Initialize the object (e.g. allocate the variables array)
       !!
       !!----------------------------------------------------------
-      module subroutine init(this, options, its, ite, kts, kte, jts, jte, ide, kde, jde)
+      module subroutine init_output(this, options, its, ite, kts, kte, jts, jte, ide, kde, jde)
         implicit none
         class(output_t),  intent(inout)  :: this
         type(options_t),  intent(in)     :: options
         integer,          intent(in)     :: its, ite, kts, kte, jts, jte, ide, kde, jde
 
-      end subroutine
+      end subroutine init_output
 
       !>----------------------------------------------------------
       !! Initialize the output counter and file after a restart
@@ -149,7 +145,7 @@ module output_interface
       module subroutine add_to_output(this, in_variable)
           implicit none
           class(output_t),   intent(inout)  :: this
-          type(variable_t),  intent(in)     :: in_variable
+          type(meta_data_t), intent(in)     :: in_variable
       end subroutine
       
       !>----------------------------------------------------------
@@ -176,15 +172,16 @@ module output_interface
       !! Save a new timestep (time) to the restart file 
       !!
       !!----------------------------------------------------------
-      module subroutine save_rst_file(this, time, par_comms, rst_var_indices)
+      module subroutine save_rst_file(this, time, par_comms, rst_var_indices, dt_seconds)
         implicit none
         class(output_t),  intent(inout) :: this
         type(Time_type),  intent(in)    :: time
         type(MPI_Comm),   intent(in)    :: par_comms
         integer,          intent(in)    :: rst_var_indices(:)
+        real,             intent(in), optional :: dt_seconds
     end subroutine
 
-      module subroutine close_files(this)
+      module subroutine close_output_files(this)
         implicit none
         class(output_t),   intent(inout)  :: this
       end subroutine

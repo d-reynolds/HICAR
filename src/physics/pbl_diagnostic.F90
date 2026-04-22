@@ -140,9 +140,9 @@ contains
             enddo
         enddo
 
-        if (domain%var_indx(kVARS%latent_heat)%v > 0) th_flux(ims:ime,jms:jme) = ((sh(ims:ime,jms:jme)) * dt/cp) / (pii(ims:ime,kts,jms:jme))    
+        if (domain%var_indx(kVARS%sensible_heat)%v > 0) th_flux(ims:ime,jms:jme) = ((sh(ims:ime,jms:jme)) * dt/cp) / (pii(ims:ime,kts,jms:jme))
         !Updated to include calculation of LHV based on T
-        if (domain%var_indx(kVARS%sensible_heat)%v > 0) qv_flux(ims:ime,jms:jme) = (lh(ims:ime,jms:jme) * dt / (3.1484E6-2370.*(th(ims:ime,kts,jms:jme)*pii(ims:ime,kts,jms:jme))) )
+        if (domain%var_indx(kVARS%latent_heat)%v > 0) qv_flux(ims:ime,jms:jme) = (lh(ims:ime,jms:jme) * dt / (3.1484E6-2370.*(th(ims:ime,kts,jms:jme)*pii(ims:ime,kts,jms:jme))) )
 
         end associate
 

@@ -8,29 +8,31 @@
 !!
 !! ----------------------------------------------------------------------------
 module time_step
-    use iso_fortran_env
-    use mpi_f08
+    use iso_fortran_env, only : output_unit
+    use mpi_f08, only: MPI_Allreduce, MPI_REAL, MPI_MIN
+    use string,                     only : as_string
     use microphysics,               only : mp
     use advection,                  only : advect
-    use mod_atm_utilities,          only : exner_function, compute_ivt, compute_iq
     use convection,                 only : convect
     use land_surface,               only : lsm, lsm_apply_fluxes
     use surface_layer,              only : sfc
     use planetary_boundary_layer,   only : pbl, pbl_apply_tend
     use radiation,                  only : rad, rad_apply_dtheta
+    use snow_drift,                 only : snow_drift_apply_feedback
     use wind,                       only : balance_uvw, update_winds, update_wind_dqdt
     use domain_interface,           only : domain_t
-    use boundary_interface,         only : boundary_t
     use options_interface,          only : options_t
     use debug_module,               only : domain_check
-    use string,                     only : str
     use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
     use icar_constants,             only : STD_OUT_PE, kVARS
+    use snow_drift,                 only : snow_drift_step
+
     implicit none
+
     private
-    double precision, parameter  :: DT_BIG = 36000.0
-    double precision  :: future_dt_seconds = DT_BIG
+    real, parameter  :: DT_BIG = 36000.0
+    real  :: future_dt_seconds = DT_BIG
     integer :: max_i, max_j, max_k
 
     public :: step, compute_dt
@@ -53,60 +55,53 @@ contains
     !! @return dt [ scalar ]        Maximum stable time step    [s]
     !!
     !!------------------------------------------------------------
-    function compute_dt(dx, u, v, w, rho, dz, ims, ime, kms, kme, jms, jme, its, ite, jts, jte, CFL, use_density) result(dt)
+    function compute_dt(dx, u, v, w, rho, dz, ims, ime, kms, kme, jms, jme, its, ite, jts, jte, CFL, err_msg) result(dt)
         real,       intent(in)                   :: dx
         real,       intent(in), dimension(ims:ime+1,kms:kme,jms:jme) :: u 
         real,       intent(in), dimension(ims:ime,kms:kme,jms:jme+1) :: v
-        real,       intent(in), dimension(ims:ime,kms:kme,jms:jme)   :: w, rho
-        real,       intent(in), dimension(kms:kme)     :: dz
+        real,       intent(in), dimension(ims:ime,kms:kme,jms:jme)   :: w, rho, dz
         integer,    intent(in)                   :: ims, ime, kms, kme, jms, jme, its, ite, jts, jte
         real,       intent(in)                   :: CFL
-        logical,    intent(in)                   :: use_density
+        character(len=*), intent(in), optional  :: err_msg
         
         ! output value
         real :: dt
 
         ! locals
-        integer :: i, j, k, zoffset
-        real :: maxwind3d, maxwind1d, current_wind3d, current_wind1d, sqrt3
+        integer :: i, j, k, indx(3)
+        real :: maxwind3d, maxwind1d, maxwind, sqrt3
+        real, dimension(its:ite, kms:kme, jts:jte) :: CFL_wind3d, CFL_wind1d
 
         sqrt3 = sqrt(3.0)
 
-        maxwind1d = 0
-        maxwind3d = 0
+        CFL_wind3d = 0
+        CFL_wind1d = 0
+
         max_i = 1
         max_j = 1
         max_k = 1
 
         ! to ensure we are stable for 3D advection we'll use the average "max" wind speed
         ! but that average has to be divided by sqrt(3) for stability in 3 dimensional advection
+
+        !$acc parallel loop gang vector collapse(3) present(u, v, w, rho, dz, dx) copy(CFL_wind3d, CFL_wind1d)
         do j=jts,jte
             do k=kms,kme
-                if (k==kms) then
-                    zoffset = 0
-                else
-                    zoffset = -1
-                endif
-
                 do i=its,ite
-                    current_wind3d = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
+                    CFL_wind3d(i,k,j) = max(abs(u(i,k,j)), abs(u(i+1,k,j))) / dx &
                                     +max(abs(v(i,k,j)), abs(v(i,k,j+1))) / dx &
-                                    +max(abs(w(i,k,j)), abs(w(i,k+zoffset,j))) / dz(k)
+                                    +max(abs(w(i,k,j)), abs(w(i,max(1,k-1),j))) / dz(i,k,j)
                                     
-                    current_wind1d = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
+                    CFL_wind1d(i,k,j) = max(( max( abs(u(i,k,j)), abs(u(i+1,k,j)) ) / dx), &
                                          ( max( abs(v(i,k,j)), abs(v(i,k,j+1)) ) / dx), &
-                                         ( max( abs(w(i,k,j)), abs(w(i,k+zoffset,j)) ) / dz(k) ))
-                    if (current_wind3d > maxwind3d) then
-                        max_i = i
-                        max_j = j
-                        max_k = k
-                    endif
-                    maxwind3d = max(maxwind3d, current_wind3d)
-                    maxwind1d = max(maxwind1d, current_wind1d)
+                                         ( max( abs(w(i,k,j)), abs(w(i,max(1,k-1),j)) ) / dz(i,k,j) ))
                 ENDDO
             ENDDO
         ENDDO
-                
+
+        maxwind3d = maxval(CFL_wind3d)
+        maxwind1d = maxval(CFL_wind1d)
+
         ! According to the WRF technical documentation, the CFL condition for 3D advection is
         ! obtained by taking the CFL criterion for the 1D case and dividing by sqrt(3).
         ! A more rigorous restriction is that CFL_x + CFL_y + CFL_z < CFL (Baldauf 2008), as calculated above.
@@ -114,20 +109,36 @@ contains
         ! relax to the 1D case for one-dimensional winds. Since the CFL constraint on vertical
         ! winds is often much less than 1, the criterion has a maximum of roughly 2x the 1D case.
 
-        ! In practical experience, the 1D CFL winds, multiplied by sqrt(3) (for 3 dimensions)
+        ! In practical experience, the WRF case
         ! is often sufficiently stable. So, to allow for faster time steps, we make this the
         ! maximum limiting wind speed condition.
-        maxwind3d = min(maxwind3d,maxwind1d*sqrt3)
+        maxwind = min(maxwind3d,maxwind1d*sqrt3)
 
-        dt = CFL / maxwind3d
+        if (maxwind == maxwind1d*sqrt3) then
+            !get index of maxval in maxwind1d, breaking into i, j, and k indices
+            indx = findloc(CFL_wind1d,maxwind1d)
+        else
+            !get index of maxval in maxwind3d, breaking into i, j, and k indices
+            indx = findloc(CFL_wind3d,maxwind3d)
+        endif
+
+        max_i = indx(1)+its-1
+        max_k = indx(2)
+        max_j = indx(3)+jts-1
+
+        dt = CFL / maxwind
 
         ! If we have too small a time step throw an error
         ! something is probably wrong in the physics or input data
         if (dt<1e-1) then
-            write(*,*) "dt   = ", dt
-            write(*,*) "Umax = ", maxval(abs(u))
-            write(*,*) "Vmax = ", maxval(abs(v))
-            write(*,*) "Wmax = ", maxval(abs(w))
+            if (STD_OUT_PE) then 
+                if (present(err_msg)) write(*,*) trim(err_msg)
+                write(*,*) "dt   = ", dt
+                !$acc update host(u, v, w)
+                write(*,*) "Umax = ", maxval(abs(u))
+                write(*,*) "Vmax = ", maxval(abs(v))
+                write(*,*) "Wmax = ", maxval(abs(w))
+            endif
             error stop "ERROR time step too small"
         endif
 
@@ -162,7 +173,7 @@ contains
         if (time_percent > (last_time + 5.0)) then
             last_time = last_time + 5.0
             ! this used to just use the nice $ (or advance="NO") trick, but at least with some mpi implementations, it buffers this output until it crashes
-            write(*,"(A2,f5.1,A,A)") "  ", max(0.0, time_percent)," %  dt=",trim(dt%as_string())
+            write(*,"(A2,f5.1,A,A)") "  ", max(0.0, time_percent)," %  dt=",trim(as_string(dt))
             flush(output_unit)
         endif
 
@@ -183,33 +194,41 @@ contains
         type(options_t),    intent(in)    :: options
         type(domain_t),     intent(in)    :: domain
 
-        double precision                  :: present_dt_seconds, seconds_out
+        real                  :: present_dt_seconds, seconds_out
+        integer :: max_i_loc, max_j_loc, max_k_loc
         ! compute internal timestep dt to maintain stability
         ! courant condition for 3D advection. 
                 
         ! If this is the first step (future_dt_seconds has not yet been set)
         !if (future_dt_seconds == DT_BIG) then
+
         present_dt_seconds = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
-                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, options%domain%dz_levels, &
-                        domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
-                        domain%its, domain%ite, domain%jts, domain%jte, &
+                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
+                        domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+                        domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
-                        use_density=.false.)
-        !else
-        !    present_dt_seconds = future_dt_seconds
-        !endif
-        
+                        err_msg="error computing dt for winds at the current time step")
+        max_i_loc = max_i
+        max_j_loc = max_j
+        max_k_loc = max_k
+
         future_dt_seconds = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
-                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, options%domain%dz_levels, &
-                        domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
-                        domain%its, domain%ite, domain%jts, domain%jte, &
+                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
+                        domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+                        domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
-                        use_density=.false.)
-                
+                        err_msg="error computing dt for winds at the future input timestep")
+
         !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
-        call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_DOUBLE, MPI_MIN, domain%compute_comms)
+        call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_REAL, MPI_MIN, domain%compute_comms)
         
         if (min(present_dt_seconds, future_dt_seconds)==seconds_out) then
+
+            if (future_dt_seconds>present_dt_seconds) then
+                max_i = max_i_loc
+                max_j = max_j_loc
+                max_k = max_k_loc
+            endif
             write(*,*) 'time_step determining i:      ',max_i
             write(*,*) 'time_step determining j:      ',max_j
             write(*,*) 'time_step determining k:      ',max_k
@@ -218,9 +237,9 @@ contains
                 write(*,*) 'time_step determining u: ',domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(max_i,max_k,max_j)
                 write(*,*) 'time_step determining v: ',domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(max_i,max_k,max_j)
             else
-                write(*,*) 'time_step determining w_grid: ',domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining u: ',domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining v: ',domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(max_i,max_k,max_j)
+                write(*,*) 'time_step determining w_grid: ',domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(max_i_loc,max_k_loc,max_j_loc)
+                write(*,*) 'time_step determining u: ',domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(max_i_loc,max_k_loc,max_j_loc)
+                write(*,*) 'time_step determining v: ',domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(max_i_loc,max_k_loc,max_j_loc)
             endif
             write(*,*) 'time_step determining w_real: ',domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(max_i,max_k,max_j)
             write(*,*) 'time_step determining jaco: ',domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(max_i,max_k,max_j)
@@ -230,7 +249,7 @@ contains
         endif
         ! Set dt to the outcome of reduce
         call dt%set(seconds=seconds_out)
-        if (STD_OUT_PE) write(*,*) 'time_step: ',trim(dt%as_string())
+        if (STD_OUT_PE) write(*,*) 'time_step: ',trim(as_string(dt))
         if (STD_OUT_PE) flush(output_unit)
 
     end subroutine update_dt
@@ -257,14 +276,14 @@ contains
 
         real            :: last_print_time
         real, save      :: last_wind_update
+        real            :: remaining_step_seconds
         logical         :: last_loop, force_update_winds
 
-        type(time_delta_t) :: time_step_size, dt_saver, max_dt
-        type(Time_type) :: next_input_tmp
+        type(time_delta_t) :: time_step_size, max_dt
+        type(Time_type) :: tmp_time
         type(time_delta_t), save      :: dt
 
         last_print_time = 0.0
-        call dt_saver%set(seconds=0.0)
         call max_dt%set(seconds=1.0)
 
         time_step_size = end_time - domain%sim_time
@@ -272,42 +291,58 @@ contains
         force_update_winds = domain%sim_time%equals(options%general%start_time, precision=max_dt)
         if (options%restart%restart) force_update_winds = domain%sim_time%equals(options%restart%restart_time, precision=max_dt)
 
-        next_input_tmp = domain%next_input - domain%input_dt
+        call tmp_time%set(domain%next_input%mjd() - domain%input_dt%days())
 
-        force_update_winds = (force_update_winds .or. domain%sim_time%equals(next_input_tmp, precision=max_dt) )
-        ! Initialize to just over update_dt to force an update on first loop after input ingestion
-        if  (force_update_winds) then
-            last_wind_update = options%wind%update_dt%seconds() + 1
-        endif
+        force_update_winds = (force_update_winds .or. domain%sim_time%equals(tmp_time, precision=max_dt) )
         
         last_loop = .False.
+
         ! now just loop over internal timesteps computing all physics in order (operator splitting...)
         do while (domain%sim_time < end_time .and. .not.(last_loop))
             
             !Determine dt
-            if (last_wind_update >= options%wind%update_dt%seconds() .or. options%wind%wind_only) then
+            remaining_step_seconds = real(end_time%seconds() - domain%sim_time%seconds())
+
+            if (force_update_winds .or. &
+                (last_wind_update >= options%wind%update_dt%seconds() .and. &
+                 remaining_step_seconds > domain%dt) .or. &
+                options%wind%wind_only) then
+
                 call domain%wind_timer%start()
-                call update_winds(domain, options, new_input=.True.)
+                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%density)%v),corners=.True.)
+                call update_winds(domain, options)
                 call domain%wind_timer%stop()
 
                 !Now that new winds have been calculated, get new time step in seconds, and see if they require adapting the time step
                 ! Note that there will currently be some discrepancy between using the current density and whatever density will be at 
                 ! the next time step, but we assume that it is negligable
                 ! and that using a CFL criterion < 1.0 will cover this
-                call update_dt(dt, options, domain)
-                call update_wind_dqdt(domain, options)
+                if (domain%restart_dt > 0.0) then
+                    call dt%set(seconds=domain%restart_dt)
+                    domain%restart_dt = 0.0
+                else
+                    call update_dt(dt, options, domain)
+                endif
+                domain%dt = real(dt%seconds())
 
+                call update_wind_dqdt(domain, real(options%wind%update_dt%seconds()) - domain%forcing_elapsed)
+
+                ! Reset forcing_elapsed after first wind update so subsequent wind updates
+                ! within the same step interval use the full wind_update_dt
+                domain%forcing_elapsed = 0.0
                 last_wind_update = 0.0
+                force_update_winds = .False.
 
                 if (options%wind%wind_only) then
                     domain%sim_time = end_time
-                    return
+                    exit
                 endif
             endif
-            !call update_dt(dt, options, domain, end_time)
+
             ! Make sure we don't over step the forcing or output period
-            if ((domain%sim_time + dt) > end_time) then
-                dt_saver = dt
+            call tmp_time%set(domain%sim_time%mjd() + dt%days())
+
+            if (tmp_time > end_time) then
                 dt = end_time - domain%sim_time
 
                 ! Sometimes, due to very small time differences, in the inequality controling the loop,
@@ -324,12 +359,6 @@ contains
             call domain%diagnostic_update()
             call domain%diagnostic_timer%stop()
 
-            ! if (options%adv%advect_density) then
-            ! if using advect_density winds need to be balanced at each update
-            call domain%wind_bal_timer%start()
-            call balance_uvw(domain,options)
-            call domain%wind_bal_timer%stop()
-            ! endif
 
             ! if an interactive run was requested than print status updates everytime at least 5% of the progress has been made
             if (options%general%interactive .and. (STD_OUT_PE)) then
@@ -342,10 +371,16 @@ contains
                 ! if (options%general%debug) call domain_check(domain, "init", fix=.True.)
 
                 call domain%send_timer%start()
-                call domain%halo_3d_send_batch()
-                call domain%halo_2d_send_batch()
+                call domain%halo_3d_send()
+                call domain%halo_2d_send()
                 call domain%send_timer%stop()
-    
+! #ifdef _OPENACC
+!                 call domain%ret_timer%start()
+!                 call domain%halo_3d_retrieve()
+!                 call domain%halo_2d_retrieve()
+!                 call domain%ret_timer%stop()
+! #endif
+
                 call domain%rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
                 if (options%general%debug) call domain_check(domain, "rad(domain")
@@ -362,30 +397,40 @@ contains
                 call pbl(domain, options, real(dt%seconds()))!, halo=1)
                 call domain%pbl_timer%stop()
 
+!#ifndef _OPENACC
                 call domain%ret_timer%start()
-                call domain%halo_3d_retrieve_batch()
-                call domain%halo_2d_retrieve_batch()
-                call integrate_physics_tendencies(domain, options, real(dt%seconds()))
-                !call domain%halo%batch_exch(exch_vars=domain%exch_vars, adv_vars=domain%adv_vars)
+                call domain%halo_3d_retrieve()
+                call domain%halo_2d_retrieve()
                 call domain%ret_timer%stop()
+!#endif
+
+                if (options%adv%advect_density) then
+                ! if using advect_density winds need to be balanced at each update
+                call domain%wind_bal_timer%start()
+                call balance_uvw(domain,options%adv%advect_density)
+                call domain%wind_bal_timer%stop()
+                endif
 
                 if (options%general%debug) call domain_check(domain, "pbl")
-
                 call convect(domain, options, real(dt%seconds()))!, halo=1)
                 if (options%general%debug) call domain_check(domain, "convect")
-
                 
 
                 call domain%adv_timer%start()
-                call advect(domain, options, real(dt%seconds()),domain%flux_timer, domain%flux_up_timer, domain%flux_corr_timer, domain%sum_timer, domain%adv_wind_timer)
+                call advect(domain, options, real(dt%seconds()),domain%flux_timer, domain%flux_corr_timer, domain%sum_timer, domain%adv_wind_timer)
                 !call domain%enforce_limits()
                 if (options%general%debug) call domain_check(domain, "advect(domain")
                 call domain%adv_timer%stop()
 
-                
+                call domain%lsm_timer%start()
+                call snow_drift_step(domain, options, real(dt%seconds()))!, halo=1)
+                if (options%general%debug) call domain_check(domain, "suspension")
+                call domain%lsm_timer%stop()
+
+                call integrate_physics_tendencies(domain, options, real(dt%seconds()))
+
                                 
                 call domain%mp_timer%start()
-
                 call mp(domain, options, real(dt%seconds()))
                 if (options%general%debug) call domain_check(domain, "mp_halo")
                 call domain%mp_timer%stop()
@@ -394,12 +439,11 @@ contains
             endif
             ! step model_time forward
             call domain%increment_sim_time(dt)
-            
             last_wind_update = last_wind_update + dt%seconds()
         enddo
 
         !If we overwrote dt to edge up to the next output/input step, revert here
-        if (dt_saver%seconds()>0.0) dt = dt_saver
+        call dt%set(seconds=domain%dt)
         
     end subroutine step
 
@@ -413,6 +457,7 @@ contains
         call rad_apply_dtheta(domain, options, dt)
         call lsm_apply_fluxes(domain,options,dt)
         call pbl_apply_tend(domain,options,dt)
+        call snow_drift_apply_feedback(domain, options, dt)
 
     end subroutine integrate_physics_tendencies
 

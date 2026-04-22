@@ -1,4 +1,7 @@
 submodule(flow_object_interface) flow_obj_implementation
+    use icar_constants,     only : STD_OUT_PE, STD_OUT_PE_IO
+    use iso_fortran_env,    only : output_unit
+    use string,             only : as_string
   implicit none
 
 contains
@@ -22,7 +25,7 @@ contains
         this%ended = .false.
         this%nest_indx = nest_indx
 
-        call this%small_time_delta%set(1)
+        call this%small_time_delta%set(1.0)
 
         if (options%restart%restart) then
             this%sim_time = options%restart%restart_time
@@ -33,11 +36,12 @@ contains
             ! and options%general%start_time            
             this%next_input = options%general%start_time
             do while(this%next_input < options%restart%restart_time)
-                this%next_input = this%next_input + this%input_dt
+                call this%next_input%set(this%next_input%mjd() + this%input_dt%days())
             end do
 
             !By definition, a restart time has to lay on an output time, so this is valid
-            this%next_output = options%restart%restart_time + this%output_dt
+            call this%next_output%set(options%restart%restart_time%mjd() + this%output_dt%days())
+
         endif
 
     end subroutine init_flow_obj
@@ -50,12 +54,12 @@ contains
         ! check if the next output time is greater than the end time
         if (.not.(this%time_for_output())) then
             if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to increment the output time."
-            if (STD_OUT_PE) write(*,*) "Currently, output_time is: ",trim(this%next_output%as_string()), " and sim_time is: ", trim(this%sim_time%as_string())
+            if (STD_OUT_PE) write(*,*) "Currently, output_time is: ",trim(as_string(this%next_output)), " and sim_time is: ", trim(as_string(this%sim_time))
             if (STD_OUT_PE) write(*,*) "At this step, they should be equal."
             stop "CONTROL FLOW ERROR, EXITING 1"
         end if
 
-        this%next_output = this%next_output + this%output_dt
+        call this%next_output%set(this%next_output%mjd() + this%output_dt%days())
 
         ! Because the output time also changes the end condition, we need to check if the end condition is now true
         call this%check_ended()
@@ -67,6 +71,7 @@ contains
         implicit none
         class(flow_obj_t), intent(inout) :: this
 
+        type(Time_type) :: time_tmp
         ! check if the next input time is greater than the end time
         ! if (.not.(this%time_for_input())) then
         !     if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to increment the input time."
@@ -75,8 +80,9 @@ contains
         !     stop "CONTROL FLOW ERROR, EXITING 2"
         ! end if
 
-        if (this%next_input <= (this%sim_time + this%small_time_delta))then
-            this%next_input = this%sim_time + this%input_dt
+        call time_tmp%set(this%sim_time%mjd() + this%small_time_delta%days())
+        if (this%next_input <= time_tmp) then
+            call this%next_input%set(this%sim_time%mjd() + this%input_dt%days())
         endif
 
     end subroutine increment_input_time
@@ -92,7 +98,7 @@ contains
             stop "CONTROL FLOW ERROR, EXITING 3"
         endif
 
-        this%sim_time = this%sim_time + dt
+        call this%sim_time%set(this%sim_time%mjd() + dt%days())
 
         call this%check_ended()
 
@@ -118,12 +124,16 @@ contains
     module subroutine check_ended(this)
         implicit none
         class(flow_obj_t), intent(inout) :: this
+        type(Time_type) :: time_tmp
 
         if (this%ended) return
+        
+        call time_tmp%set(this%sim_time%mjd() + this%small_time_delta%days())
 
-        if (this%sim_time + this%small_time_delta > this%end_time) then
+        if (time_tmp > this%end_time) then
             this%sim_time = this%end_time
-            if (this%next_output > this%end_time) then
+            call time_tmp%set(this%next_output%mjd() - this%small_time_delta%days())
+            if (time_tmp > this%end_time) then
                 this%ended = .true.
             end if
         end if
@@ -131,7 +141,7 @@ contains
     end subroutine check_ended
 
 
-    function dead_or_asleep(this) result(doa)
+    module function dead_or_asleep(this) result(doa)
         implicit none
         class(flow_obj_t), intent(inout) :: this
         logical :: doa
@@ -187,8 +197,9 @@ contains
         type(Time_type) :: next_flow_event
 
         if (this%ended) then
-            if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but this nest has ended."
-            stop "CONTROL FLOW ERROR, EXITING 5"
+            next_flow_event = this%end_time
+            ! if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but this nest has ended."
+            ! stop "CONTROL FLOW ERROR, EXITING 5"
         end if
 
 
@@ -201,13 +212,20 @@ contains
             next_flow_event = this%end_time
         end if
 
-        if (next_flow_event < this%sim_time) then
-            if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but the next flow event is less than the sim time."
-            stop "CONTROL FLOW ERROR, EXITING 7"
-        end if
+        ! if (next_flow_event < this%sim_time) then
+        !     write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but the next flow event is less than the sim time."
+        !     if (next_flow_event == this%next_output) then
+        !         write(*,*) "Next flow event was found to be an output, timestamp is: ", trim(as_string(this%next_output)), " and sim time is: ", trim(as_string(this%sim_time))
+        !     elseif (next_flow_event == this%next_input) then
+        !         write(*,*) "Next flow event was found to be an input, timestamp is: ", trim(as_string(this%next_input)), " and sim time is: ", trim(as_string(this%sim_time))
+        !     else
+        !         write(*,*) "Next flow event was found to be the end time, timestamp is: ", trim(as_string(this%end_time)), " and sim time is: ", trim(as_string(this%sim_time))
+        !     end if
+        !     stop "CONTROL FLOW ERROR, EXITING 7"
+        ! end if
         if (next_flow_event > this%end_time) then
             if (STD_OUT_PE) write(*,*) "For nest: ", this%nest_indx, " we were asked to check the next flow event, but the next flow event is greater than the end time."
-            stop "CONTROL FLOW ERROR, EXITING 8"
+            ! stop "CONTROL FLOW ERROR, EXITING 8"
         end if
     end function next_flow_event
 

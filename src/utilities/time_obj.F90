@@ -203,7 +203,7 @@ contains
     module function get_seconds(this) result(seconds)
         implicit none
         class(Time_type) :: this
-        real(real128) :: seconds
+        real(real64) :: seconds
 
         seconds = this%current_date_time * 86400.0D0
     end function get_seconds
@@ -219,7 +219,7 @@ contains
     module function get_mjd(this) result(mjd)
         implicit none
         class(Time_type) :: this
-        real(real128) :: mjd
+        real(real64) :: mjd
 
         mjd = this%current_date_time
     end function get_mjd
@@ -238,10 +238,10 @@ contains
     function gregorian_julian_day(year, month, day, hour, minute, second) result(julian_day)
         implicit none
         integer, intent(in) :: year, month, day, hour, minute, second
-        real(real128) :: julian_day
-        real(real128) :: d,m,y
+        real(real64) :: julian_day
+        real(real64) :: d,m,y
         integer :: a,b
-        real(real128) :: internal_seconds
+        real(real64) :: internal_seconds
 
         internal_seconds = second
         a = (14-month)/12
@@ -269,7 +269,7 @@ contains
         implicit none
         class(Time_type), intent(in) :: this
         integer, intent(in) :: year, month, day, hour, minute, second
-        real(real128) :: date_to_mjd, internal_seconds
+        real(real64) :: date_to_mjd, internal_seconds
 
         internal_seconds = second
         if (this%calendar==GREGORIAN) then
@@ -294,20 +294,19 @@ contains
     !!  
     !! MJ added  
     !!------------------------------------------------------------
-    module function date_to_jd(this, year, month, day, hour, minute, second)
+    module function date_to_jd(this)
         implicit none
         class(Time_type), intent(in) :: this
-        integer, intent(in) :: year, month, day, hour, minute, second
-        real(real128) :: date_to_jd
+        real(real64) :: date_to_jd
 
         if (this%calendar==GREGORIAN) then
-            date_to_jd = gregorian_julian_day(year, month, day, hour, minute, second)
+            date_to_jd = gregorian_julian_day(this%year, this%month, this%day, this%hour, this%minute, this%second)
 
         else if (this%calendar==NOLEAP) then
-            date_to_jd = (year*365 + this%month_start(month)-1 + day-1 + (hour + (minute+second/60d+0)/60d+0)/24d+0)
+            date_to_jd = (this%year*365 + this%month_start(this%month)-1 + this%day-1 + (this%hour + (this%minute+this%second/60d+0)/60d+0)/24d+0)
                          
         else if (this%calendar==THREESIXTY) then
-            date_to_jd = (year*360 + this%month_start(month)-1 + day-1 + (hour + (minute+second/60d+0)/60d+0)/24d+0)
+            date_to_jd = (this%year*360 + this%month_start(this%month)-1 + this%day-1 + (this%hour + (this%minute+this%second/60d+0)/60d+0)/24d+0)
         end if
 
     end function date_to_jd
@@ -327,7 +326,7 @@ contains
         integer :: y=4716,j=1401,m=2,n=12,r=4,p=1461
         integer :: v=3,u=5,s=153,w=2,B=274277,C=-38
         integer ::f,e,g,h, jday
-        real(real128) :: day_fraction, mjd
+        real(real64) :: day_fraction, mjd
 
         mjd = this%current_date_time+1d-5 ! add less than one second
 
@@ -463,7 +462,7 @@ contains
         real, intent(in), optional  :: lon
 
         real :: offset
-        real(real128) :: year_start
+        real(real64) :: year_start
 
         integer :: year, month, day, hour, minute, second
 
@@ -503,7 +502,18 @@ contains
     end function calc_year_fraction
 
 
+    !>------------------------------------------------------------
+    !!  Return the time of day in hours as a floating point
+    !!
+    !!------------------------------------------------------------
+    module function TOD_hours(this)
+        implicit none
+        real                        :: TOD_hours
+        class(Time_type)            :: this
 
+        TOD_hours = (real(this%hour) + real(this%minute)/60.0 + real(this%second)/3600.0) / 24.0
+
+    end function TOD_hours
     !>------------------------------------------------------------
     !!  Set the current date based on an input string
     !!
@@ -514,6 +524,10 @@ contains
         implicit none
         class(Time_type), intent(inout) :: this
         character (len=*), intent(in) :: date
+
+        if (this%get_calendar() == NOCALENDAR) then
+            call this%set_calendar(kDEFAULT_CALENDAR)
+        end if
 
         read(date(1:4), *) this%year
         read(date(6:7), *) this%month
@@ -545,6 +559,10 @@ contains
         integer, intent(in), optional :: hour, minute, second
         integer :: set_hour, set_minute, set_second
 
+        if (this%get_calendar() == NOCALENDAR) then
+            call this%set_calendar(kDEFAULT_CALENDAR)
+        end if
+
         set_hour=0; set_minute=0; set_second=0
         if (present(hour))   set_hour = hour
         if (present(minute)) set_minute = minute
@@ -569,8 +587,12 @@ contains
     module subroutine set_from_mjd(this, days)
         implicit none
         class(Time_type), intent(inout) :: this
-        real(real128), intent(in) :: days
+        real(real64), intent(in) :: days
         integer :: year, month, day, hour, minute, second
+
+        if (this%get_calendar() == NOCALENDAR) then
+            call this%set_calendar(kDEFAULT_CALENDAR)
+        end if
 
         this%current_date_time = days
 
@@ -584,56 +606,41 @@ contains
 
     end subroutine set_from_mjd
 
-    !>------------------------------------------------------------
-    !!  Create a formated "units" string for this object
-    !!
-    !!  For example "days since 1858-11-17 00:00:00"
-    !!
-    !!------------------------------------------------------------
-    module function units(this)
-        implicit none
-        class(Time_type), intent(in)   :: this
-        character(len=kMAX_STRING_LENGTH) :: units
-
-        write(units, '("days since ",i4,"-",i2.2,"-",i2.2," ",i2.2,":00:00")') &
-                this%year_zero,this%month_zero,this%day_zero,this%hour_zero
-
-    end function units
 
 
     !>------------------------------------------------------------
     !!  Convert the date object into a string in the 0-filled format : "YYYY/MM/DD hh:mm:ss"
     !!
     !!------------------------------------------------------------
-    module function as_string(this, input_format) result(pretty_string)
-        implicit none
-        class(Time_type), intent(in) :: this
-        character(len=*), intent(in), optional :: input_format
-        character(len=kMAX_STRING_LENGTH) :: pretty_string
-        character(len=kMAX_STRING_LENGTH) :: format
-        integer :: i
+    ! module function as_string(this, input_format) result(pretty_string)
+    !     implicit none
+    !     class(Time_type), intent(in) :: this
+    !     character(len=*), intent(in), optional :: input_format
+    !     character(len=kMAX_STRING_LENGTH) :: pretty_string
+    !     character(len=kMAX_STRING_LENGTH) :: format
+    !     integer :: i
 
-        associate(year  => this%year,   &
-                  month => this%month,  &
-                  day   => this%day,    &
-                  hour  => this%hour,   &
-                  minute=> this%minute, &
-                  second=> this%second  &
-                  )
+    !     associate(year  => this%year,   &
+    !               month => this%month,  &
+    !               day   => this%day,    &
+    !               hour  => this%hour,   &
+    !               minute=> this%minute, &
+    !               second=> this%second  &
+    !               )
 
-        if (present(input_format)) then
-            format = input_format
-        else
-            ! this is the default format string to generate "YYYY/MM/DD hh:mm:ss"
-            format = '(I4,"/",I0.2,"/",I0.2," ",I0.2,":",I0.2,":",I0.2)'
-        endif
+    !     if (present(input_format)) then
+    !         format = input_format
+    !     else
+    !         ! this is the default format string to generate "YYYY/MM/DD hh:mm:ss"
+    !         format = '(I4,"/",I0.2,"/",I0.2," ",I0.2,":",I0.2,":",I0.2)'
+    !     endif
 
-        ! this and the format statement above are the important bits
-        write(pretty_string, format) year, month, day, hour, minute, second
+    !     ! this and the format statement above are the important bits
+    !     write(pretty_string, format) year, month, day, hour, minute, second
 
-        end associate
+    !     end associate
 
-    end function as_string
+    ! end function as_string
 
     !>------------------------------------------------------------
     !!  Test that time 1 is greater than time 2
@@ -879,34 +886,34 @@ contains
     !!  Subtract a time_delta from a time object and return a time object
     !!
     !!------------------------------------------------------------
-    module function difference_time_delta(t1, dt) result(t2)
-        implicit none
-        class(Time_type),   intent(in) :: t1
-        type(time_delta_t), intent(in) :: dt
-        type(Time_type) :: t2
+    ! module function difference_time_delta(t1, dt) result(t2)
+    !     implicit none
+    !     class(Time_type),   intent(in) :: t1
+    !     type(time_delta_t), intent(in) :: dt
+    !     type(Time_type) :: t2
 
-        t2 = t1 ! set calendar startyear, etc.
+    !     t2 = t1 ! set calendar startyear, etc.
 
-        call t2%set(t1%mjd() - dt%days())
+    !     call t2%set(t1%mjd() - dt%days())
 
-    end function difference_time_delta
+    ! end function difference_time_delta
 
-    !>------------------------------------------------------------
-    !!  Add a given time delta to a time object
-    !!
-    !!  returns a new time object
-    !!
-    !!------------------------------------------------------------
-    module function addition(t1, dt) result(t2)
-        implicit none
-        class(Time_type),   intent(in) :: t1
-        type(time_delta_t), intent(in) :: dt
-        type(Time_type) :: t2
+    ! !>------------------------------------------------------------
+    ! !!  Add a given time delta to a time object
+    ! !!
+    ! !!  returns a new time object
+    ! !!
+    ! !!------------------------------------------------------------
+    ! module function addition(t1, dt) result(t2)
+    !     implicit none
+    !     class(Time_type),   intent(in) :: t1
+    !     type(time_delta_t), intent(in) :: dt
+    !     type(Time_type) :: t2
 
-        t2 = t1 ! set calendar startyear, etc.
+    !     t2 = t1 ! set calendar startyear, etc.
 
-        call t2%set(t1%mjd() + dt%days())
+    !     call t2%set(t1%mjd() + dt%days())
 
-    end function addition
+    ! end function addition
 
 end submodule time_implementation

@@ -25,7 +25,7 @@ module time_delta_object
         procedure, public :: hours
         procedure, public :: minutes
         procedure, public :: seconds
-        procedure, public :: as_string
+        ! procedure, public :: as_string
         generic,   public :: set         => set_time_delta_d
         generic,   public :: set         => set_time_delta_f
         generic,   public :: set         => set_time_delta_i
@@ -129,25 +129,25 @@ contains
 
     end function seconds
 
-    function as_string(self) result(pretty_string)
-        implicit none
-        class(time_delta_t), intent(in) :: self
-        character(len=kMAX_STRING_LENGTH)  :: pretty_string
+    ! function as_string(self) result(pretty_string)
+    !     implicit none
+    !     class(time_delta_t), intent(in) :: self
+    !     character(len=kMAX_STRING_LENGTH)  :: pretty_string
 
-        if (abs(self%seconds()) < 1) then
-            write(pretty_string,"(F8.4,A)") self%seconds(), " seconds"
-        elseif (abs(self%seconds()) <= 60) then
-            write(pretty_string,"(F6.2,A)") self%seconds(), " seconds"
-        elseif (abs(self%minutes()) <= 60) then
-            write(pretty_string,"(F6.2,A)") self%minutes(), " minutes"
-        elseif (abs(self%hours()) <= 24) then
-            write(pretty_string,"(F6.2,A)") self%hours(), " hours"
-        elseif (abs(self%days()) <= 365) then
-            write(pretty_string,"(F10.2,A)") self%days(), " days"
-        else
-            write(pretty_string,"(F10.2,A,F6.1,A)") self%days(), " days (roughly ",self%days()/365.25, " years)"
-        endif
+    !     if (abs(self%seconds()) < 1) then
+    !         write(pretty_string,"(F8.4,A)") self%seconds(), " seconds"
+    !     elseif (abs(self%seconds()) <= 60) then
+    !         write(pretty_string,"(F6.2,A)") self%seconds(), " seconds"
+    !     elseif (abs(self%minutes()) <= 60) then
+    !         write(pretty_string,"(F6.2,A)") self%minutes(), " minutes"
+    !     elseif (abs(self%hours()) <= 24) then
+    !         write(pretty_string,"(F6.2,A)") self%hours(), " hours"
+    !     elseif (abs(self%days()) <= 365) then
+    !         write(pretty_string,"(F10.2,A)") self%days(), " days"
+    !     else
+    !         write(pretty_string,"(F10.2,A,F6.1,A)") self%days(), " days (roughly ",self%days()/365.25, " years)"
+    !     endif
 
-    end function as_string
+    ! end function as_string
 
 end module time_delta_object

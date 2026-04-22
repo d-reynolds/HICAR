@@ -83,7 +83,7 @@ contains
     !!
     !------------------------------------
     module function get_time(this) result(time)
-        class(timer_t),    intent(inout)        :: this
+        class(timer_t),    intent(in)        :: this
 
         real :: time ! return value
 
@@ -115,40 +115,40 @@ contains
     !! If the timer is running, it includes the current time in the total reported
     !!
     !------------------------------------
-    module function as_string(this, format) result(time)
-        class(timer_t),    intent(inout)        :: this
-        character(len=*), intent(in), optional :: format
+    ! module function as_string(this, format) result(time)
+    !     class(timer_t),    intent(inout)        :: this
+    !     character(len=*), intent(in), optional :: format
 
-        character(len=25) :: time ! return value
+    !     character(len=25) :: time ! return value
 
-        real :: temporary_time
+    !     real :: temporary_time
 
-        ! if (this%is_running) then
-        !     if (this%use_cpu_time) then
-        !         call cpu_time(current_time)
-        !     else
-        !         call system_clock(count_end)
-        !         if (count_end<this%counter) then
-        !             current_time = (count_end + (this%count_max - this%counter)) / real(this%count_rate)
-        !         else
-        !             current_time = (count_end - this%counter) / real(this%count_rate)
-        !         endif
-        !     endif
-        !     temporary_time = this%total_time + (current_time - this%start_time)
-        ! else
-        !     temporary_time = this%total_time
-        ! endif
+    !     ! if (this%is_running) then
+    !     !     if (this%use_cpu_time) then
+    !     !         call cpu_time(current_time)
+    !     !     else
+    !     !         call system_clock(count_end)
+    !     !         if (count_end<this%counter) then
+    !     !             current_time = (count_end + (this%count_max - this%counter)) / real(this%count_rate)
+    !     !         else
+    !     !             current_time = (count_end - this%counter) / real(this%count_rate)
+    !     !         endif
+    !     !     endif
+    !     !     temporary_time = this%total_time + (current_time - this%start_time)
+    !     ! else
+    !     !     temporary_time = this%total_time
+    !     ! endif
 
-        temporary_time = this%get_time()
+    !     temporary_time = this%get_time()
 
-        ! if the user specified a format string, use that when creating the output
-        if (present(format)) then
-            write(time,format) temporary_time
-        else
-            write(time,*) temporary_time
-        endif
+    !     ! if the user specified a format string, use that when creating the output
+    !     if (present(format)) then
+    !         write(time,format) temporary_time
+    !     else
+    !         write(time,*) temporary_time
+    !     endif
 
-    end function as_string
+    ! end function as_string
 
     module function timer_mean(this,comms) result(mean_t)
         implicit none

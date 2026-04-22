@@ -16,13 +16,13 @@ module data_structures
 ! ------------------------------------------------
 
     type :: dim_arrays_type
-        integer, allocatable :: dims(:)
+        integer :: dims(10)
         integer :: num_dims
     end type dim_arrays_type
 
     type index_type
         integer :: v = -1
-        character(kMAX_NAME_LENGTH) :: n = ''
+        integer :: id = -1
     end type index_type
     ! contains the location of a specific grid point
     type position
@@ -78,13 +78,21 @@ module data_structures
         real,                       allocatable, dimension(:,:) :: sig, k, l, kl
         complex(C_DOUBLE_COMPLEX),  allocatable, dimension(:,:) :: denom, msq, mimag, m, ineta
 
-        complex(C_DOUBLE_COMPLEX),  pointer,     dimension(:,:) :: uhat, vhat
-        complex(C_DOUBLE_COMPLEX),  pointer,     dimension(:,:) :: u_perturb, v_perturb
-        complex(C_DOUBLE_COMPLEX),  pointer,     dimension(:,:) :: u_accumulator, v_accumulator
-        type(C_PTR) :: uh_aligned_data, up_aligned_data, ua_aligned_data
-        type(C_PTR) :: vh_aligned_data, vp_aligned_data, va_aligned_data
+        complex(C_DOUBLE_COMPLEX),  allocatable, dimension(:,:) :: uhat, vhat
+        complex(C_DOUBLE_COMPLEX),  allocatable, dimension(:,:) :: u_perturb, v_perturb
+        complex(C_DOUBLE_COMPLEX),  allocatable, dimension(:,:) :: u_accumulator, v_accumulator
 
         type(C_PTR) :: uplan, vplan
+
+        ! cuFFT plan handle (GPU path, unused on CPU)
+        integer :: cufft_plan = 0
+
+        ! Work arrays for linear_perturbation (allocated once, reused per call)
+        real, allocatable, dimension(:,:) :: layer_count, layer_fraction
+        real, allocatable, dimension(:,:) :: internal_z_top, internal_z_bottom
+
+        ! GPU ifftshift workspace (pre-allocated to avoid per-call allocation)
+        complex(C_DOUBLE_COMPLEX),  allocatable, dimension(:,:) :: fftshift_tmp
     end type linear_theory_type
 
     ! ------------------------------------------------
@@ -97,7 +105,6 @@ module data_structures
 
         ! advection and pbl tendencies that need to be saved for the cumulus/pbl scheme
         real, allocatable, dimension(:,:,:) :: qv_adv,qv_pbl, th_pbl, qi_pbl, qc_pbl
-        real, allocatable, dimension(:,:,:) :: th_lwrad, th_swrad
     end type tendencies_type
 
 end module data_structures

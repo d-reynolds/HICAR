@@ -27,7 +27,8 @@ module module_mp_jensen_ishmael
    use icar_constants,    only : STD_OUT_PE
 
   implicit none !.. You are welcome
-
+  private
+  public :: mp_jensen_ishmael, jensen_ishmael_init
   !.. Constants
   real, private, parameter ::     &
        PI          = 3.14159265,  &  !.. Pi = 3.14159265... until forever
