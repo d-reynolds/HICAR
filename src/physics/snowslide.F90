@@ -889,7 +889,7 @@ contains
         !$acc   private(deposit_depth, deposit_swe, csnow_k, fsnow_loc, fsnow_old, fsnow_new) &
         !$acc   private(snowdepth_loc, Dtemp_surflay, Ds_excess, frac) &
         !$acc   private(Ds_old, Sice_old, Sliq_old, U_old, rho_kmin, rho_kup, rho_kdown) &
-        !$acc   private(Ds_loc, Sice_loc, Sliq_loc, U_loc, Tsnow_loc, rho_k, diff_rho)
+        !$acc   private(Ds_loc, Sice_loc, Sliq_loc, U_loc, Tsnow_loc, rho_k, diff_rho) firstprivate(kSNOW_GRID_Z)
         do j = 2, Ny_local - 1
             do i = 2, Nx_local - 1
                 i_dom = its + (i - 2)
@@ -920,6 +920,7 @@ contains
                 ! --- Step 1: Add deposit as new surface layer (SNOLAY=1) ---
                 if (deposit_depth > 1.0e-6) then
                     Nsnow_loc = Nsnow_loc + 1
+                    !$acc loop seq
                     do k = Nsnow_loc, 2, -1
                         Ds_loc(k)   = Ds_loc(k-1)
                         Sice_loc(k) = Sice_loc(k-1)
@@ -957,6 +958,7 @@ contains
                 if (Nsnow_loc > 1) then
                     Dtemp_surflay = 0.0
                     k_surflay = 0
+                    !$acc loop seq
                     do k = 1, Nsnow_loc - 1
                         Dtemp_surflay = Dtemp_surflay + Ds_loc(k)
                         if (Dtemp_surflay > Ds_surflay) then
@@ -1006,6 +1008,7 @@ contains
                 ! --- Step 4: Merge thin layers (SNOLAY=1) ---
                 do while (Nsnow_loc > 1)
                     kmin_idx = 1
+                    !$acc loop seq
                     do k = 2, Nsnow_loc
                         if (Ds_loc(k) < Ds_loc(kmin_idx)) kmin_idx = k
                     end do
@@ -1049,13 +1052,16 @@ contains
 
                 ! --- Step 5: Merge excess layers (SNOLAY=1) ---
                 do while (Nsnow_loc > kSNOW_GRID_Z)
+                    !$acc loop seq
                     do k = 1, Nsnow_loc
                         rho_k(k) = (Sice_loc(k)+Sliq_loc(k)) / max(Ds_loc(k), 1.0e-10)
                     end do
+                    !$acc loop seq
                     do k = 1, Nsnow_loc - 1
                         diff_rho(k) = abs(rho_k(k) - rho_k(k+1))
                     end do
                     kmerge = 1
+                    !$acc loop seq
                     do k = 2, Nsnow_loc - 1
                         if (diff_rho(k) < diff_rho(kmerge)) kmerge = k
                     end do
@@ -1072,11 +1078,13 @@ contains
                 ! --- Step 6: Split thick layers (SNOLAY=1) ---
                 do while (Nsnow_loc > 0 .and. Nsnow_loc < kSNOW_GRID_Z)
                     kmax_idx = 1
+                    !$acc loop seq
                     do k = 2, Nsnow_loc
                         if (Ds_loc(k) > Ds_loc(kmax_idx)) kmax_idx = k
                     end do
                     if (Ds_loc(kmax_idx) < 2.0 * Ds_min_fsm) exit
                     Nsnow_loc = Nsnow_loc + 1
+                    !$acc loop seq
                     do k = Nsnow_loc, kmax_idx + 2, -1
                         Ds_loc(k) = Ds_loc(k-1); Sice_loc(k) = Sice_loc(k-1)
                         Sliq_loc(k) = Sliq_loc(k-1); U_loc(k) = U_loc(k-1)
@@ -1154,25 +1162,25 @@ contains
                                          VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,    &
                                          Rg_3d, Rb_3d, Dd_3d, Sp_3d,                 &
                                          mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d, &
-                                         i_dom, j_dom, k_dst, k_src, ims, ime, jms, jme, kSNOW_GRID_Z)
+                                         i_dom, j_dom, k_dst, k_src, ims, ime, jms, jme, k_max)
         !$acc routine seq
         implicit none
         ! Fully explicit bounds — matches HICAR's domain memory allocation
-        ! (ims:ime, 1:kSNOW_GRID_Z, jms:jme). Caller passes i_dom/j_dom in
+        ! (ims:ime, 1:k_max, jms:jme). Caller passes i_dom/j_dom in
         ! original domain coordinates; the dummy preserves that indexing
         ! directly. Fortran does not allow mixing explicit bounds with
         ! assumed-shape `:` in the same array declaration.
-        real, intent(inout) :: Tsn_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), Tsni_3d(ims:ime, 1:kSNOW_GRID_Z+1, jms:jme)
-        real, intent(inout) :: VFI_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), VFW_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: VFA_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), VFS_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: VFWP_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Rg_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), Rb_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Dd_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), Sp_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: mk_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), mh_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: CDot_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: sns_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), N3_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: dep_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        integer, intent(in) :: i_dom, j_dom, k_dst, k_src, ims, ime, jms, jme, kSNOW_GRID_Z
+        real, intent(inout) :: Tsn_3d(ims:ime, 1:k_max, jms:jme), Tsni_3d(ims:ime, 1:k_max+1, jms:jme)
+        real, intent(inout) :: VFI_3d(ims:ime, 1:k_max, jms:jme), VFW_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: VFA_3d(ims:ime, 1:k_max, jms:jme), VFS_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: VFWP_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: Rg_3d(ims:ime, 1:k_max, jms:jme), Rb_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: Dd_3d(ims:ime, 1:k_max, jms:jme), Sp_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: mk_3d(ims:ime, 1:k_max, jms:jme), mh_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: CDot_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: sns_3d(ims:ime, 1:k_max, jms:jme), N3_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: dep_3d(ims:ime, 1:k_max, jms:jme)
+        integer, value, intent(in) :: i_dom, j_dom, k_dst, k_src, ims, ime, jms, jme, k_max
 
         Tsn_3d(i_dom, k_dst, j_dom)  = Tsn_3d(i_dom, k_src, j_dom)
         Tsni_3d(i_dom, k_dst, j_dom) = Tsni_3d(i_dom, k_src, j_dom)
@@ -1203,20 +1211,20 @@ contains
                                         VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,    &
                                         Rg_3d, Rb_3d, Dd_3d, Sp_3d,                 &
                                         mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d, &
-                                        i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z)
+                                        i_dom, j_dom, k, ims, ime, jms, jme, k_max)
         !$acc routine seq
         implicit none
-        real, intent(inout) :: Tsn_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), Tsni_3d(ims:ime, 1:kSNOW_GRID_Z+1, jms:jme)
-        real, intent(inout) :: VFI_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), VFW_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: VFA_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), VFS_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: VFWP_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Rg_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), Rb_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Dd_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), Sp_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: mk_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), mh_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: CDot_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: sns_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), N3_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: dep_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        integer, intent(in) :: i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z
+        real, intent(inout) :: Tsn_3d(ims:ime, 1:k_max, jms:jme), Tsni_3d(ims:ime, 1:k_max+1, jms:jme)
+        real, intent(inout) :: VFI_3d(ims:ime, 1:k_max, jms:jme), VFW_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: VFA_3d(ims:ime, 1:k_max, jms:jme), VFS_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: VFWP_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: Rg_3d(ims:ime, 1:k_max, jms:jme), Rb_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: Dd_3d(ims:ime, 1:k_max, jms:jme), Sp_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: mk_3d(ims:ime, 1:k_max, jms:jme), mh_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: CDot_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: sns_3d(ims:ime, 1:k_max, jms:jme), N3_3d(ims:ime, 1:k_max, jms:jme)
+        real, intent(inout) :: dep_3d(ims:ime, 1:k_max, jms:jme)
+        integer, value, intent(in) :: i_dom, j_dom, k, ims, ime, jms, jme, k_max
 
         Tsn_3d(i_dom, k, j_dom)  = 0.0
         Tsni_3d(i_dom, k, j_dom) = 0.0
@@ -1238,167 +1246,6 @@ contains
     end subroutine zero_snowpack_layer_slot
 
 
-    !>----------------------------------------------------------
-    !! Write snow_3d_fresh_defaults into one SNOWPACK layer slot at cell
-    !! (i_dom, j_dom) across the 17 vars OTHER than Ds. The caller is
-    !! responsible for writing Ds = deposit_depth separately, since the
-    !! fresh-deposit Ds is always a per-cell value rather than a default.
-    !! The parallel table snow_3d_fresh_defaults is indexed by
-    !! snow_3d_vars order: (4)=Tsn, (5)=VFI, ..., (19)=N3, (20)=dep.
-    !!----------------------------------------------------------
-    subroutine set_fresh_snowpack_element_defaults(Tsn_3d, Tsni_3d,                    &
-                                                   VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d, &
-                                                   Rg_3d, Rb_3d, Dd_3d, Sp_3d,         &
-                                                   mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d, &
-                                                   i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z)
-        !$acc routine seq
-        implicit none
-        real, intent(inout) :: Tsn_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), Tsni_3d(ims:ime, 1:kSNOW_GRID_Z+1, jms:jme)
-        real, intent(inout) :: VFI_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), VFW_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: VFA_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), VFS_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: VFWP_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Rg_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), Rb_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Dd_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), Sp_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: mk_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), mh_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: CDot_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: sns_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), N3_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: dep_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        integer, intent(in) :: i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z
-
-        Tsn_3d(i_dom, k, j_dom)  = snow_3d_fresh_defaults(4)   ! snow_temperature (PATCH)
-        VFI_3d(i_dom, k, j_dom)  = snow_3d_fresh_defaults(5)   ! Vol_Frac_I (PATCH)
-        VFW_3d(i_dom, k, j_dom)  = snow_3d_fresh_defaults(6)   ! Vol_Frac_W
-        VFA_3d(i_dom, k, j_dom)  = snow_3d_fresh_defaults(7)   ! Vol_Frac_A (PATCH)
-        VFS_3d(i_dom, k, j_dom)  = snow_3d_fresh_defaults(8)   ! Vol_Frac_S
-        VFWP_3d(i_dom, k, j_dom) = snow_3d_fresh_defaults(9)   ! Vol_Frac_WP
-        Tsni_3d(i_dom, k, j_dom) = snow_3d_fresh_defaults(10)  ! snow_temperature_i (PATCH)
-        Rg_3d(i_dom, k, j_dom)   = snow_3d_fresh_defaults(11)  ! Rg
-        Rb_3d(i_dom, k, j_dom)   = snow_3d_fresh_defaults(12)  ! Rb
-        Dd_3d(i_dom, k, j_dom)   = snow_3d_fresh_defaults(13)  ! Dd
-        Sp_3d(i_dom, k, j_dom)   = snow_3d_fresh_defaults(14)  ! Sp
-        mk_3d(i_dom, k, j_dom)   = snow_3d_fresh_defaults(15)  ! mk
-        mh_3d(i_dom, k, j_dom)   = snow_3d_fresh_defaults(16)  ! mass_hoar
-        CDot_3d(i_dom, k, j_dom) = snow_3d_fresh_defaults(17)  ! CDot
-        sns_3d(i_dom, k, j_dom)  = snow_3d_fresh_defaults(18)  ! snow_stress
-        N3_3d(i_dom, k, j_dom)   = snow_3d_fresh_defaults(19)  ! N3 (PATCH)
-        dep_3d(i_dom, k, j_dom)  = snow_3d_fresh_defaults(20)  ! depositionDate (PATCH)
-    end subroutine set_fresh_snowpack_element_defaults
-
-
-    !>----------------------------------------------------------
-    !! Blend one 3D snow variable across two element positions using arbitrary
-    !! weights: arr(i, k_up, j) ← (a·arr(i, k_up, j) + b·arr(i, k_lo, j)) / (a + b).
-    !! No-op if a+b <= 0. Callers pass the concrete array directly (no
-    !! dynamic vidx lookup) so this routine is safe inside `!$acc parallel`.
-    !!----------------------------------------------------------
-    subroutine blend_var_3d(arr, i_dom, j_dom, k_up, k_lo, a, b, ims, ime, jms, jme, kSNOW_GRID_Z)
-        !$acc routine seq
-        implicit none
-        real, intent(inout) :: arr(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        integer, intent(in) :: i_dom, j_dom, k_up, k_lo
-        real, intent(in)    :: a, b
-        integer, intent(in) :: ims, ime, jms, jme, kSNOW_GRID_Z
-        real :: denom
-        denom = a + b
-        if (denom <= 0.0) return
-        arr(i_dom, k_up, j_dom) = &
-            (a * arr(i_dom, k_up, j_dom) + b * arr(i_dom, k_lo, j_dom)) / denom
-    end subroutine blend_var_3d
-
-
-    !>----------------------------------------------------------
-    !! Merge the bottom two SNOWPACK elements (k_lo into k_up) at domain cell
-    !! (i_dom, j_dom), following DataClasses.cc:mergeElements:
-    !!   - L_new = L_u + L_l
-    !!   - theta[ICE,WATER,WATER_PREF]: length-weighted averages
-    !!   - theta[AIR]: derived from conservation
-    !!   - snow_temperature, snow_temperature_i, snow_stress, N3: length-weighted
-    !!   - Dd, Sp, Rg, Rb, CDot: ice-mass-weighted (mass = theta_ICE · L)
-    !!   - mass_hoar: additive
-    !!   - mk, depositionDate: keep upper (newer) value — no action needed
-    !! Called when a fresh avalanche deposit must be inserted on a column that
-    !! is already at its max element count; frees position k_lo for the
-    !! subsequent shift-down-and-insert.
-    !!----------------------------------------------------------
-    subroutine merge_snowpack_bottom_elements(Ds_3d, Tsn_3d, Tsni_3d,                &
-                                              VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d, &
-                                              Rg_3d, Rb_3d, Dd_3d, Sp_3d,             &
-                                              mh_3d, CDot_3d, sns_3d, N3_3d,          &
-                                              i_dom, j_dom, ims, ime, jms, jme, kSNOW_GRID_Z)
-        !$acc routine seq
-        implicit none
-        real, intent(inout) :: Ds_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Tsn_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Tsni_3d(ims:ime, 1:kSNOW_GRID_Z+1, jms:jme)
-        real, intent(inout) :: VFI_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: VFW_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: VFA_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: VFS_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: VFWP_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Rg_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Rb_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Dd_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: Sp_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: mh_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: CDot_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: sns_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        real, intent(inout) :: N3_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        integer, intent(in) :: i_dom, j_dom, ims, ime, jms, jme, kSNOW_GRID_Z
-
-        real :: L_u, L_l, L_new
-        real :: theta_I_u, theta_I_l, wi_u, wi_l, air_frac
-        integer :: k_up, k_lo
-
-        k_lo = kSNOW_GRID_Z
-        k_up = k_lo - 1
-
-        L_u = Ds_3d(i_dom, k_up, j_dom)
-        L_l = Ds_3d(i_dom, k_lo, j_dom)
-        L_new = L_u + L_l
-        if (L_new <= 0.0) return
-
-        ! Capture ice content BEFORE Vol_Frac_I is blended (weights for microstructure)
-        theta_I_u = VFI_3d(i_dom, k_up, j_dom)
-        theta_I_l = VFI_3d(i_dom, k_lo, j_dom)
-        wi_u = theta_I_u * L_u
-        wi_l = theta_I_l * L_l
-
-        ! L-weighted averages: volume fractions (except AIR, derived below)
-        call blend_var_3d(VFI_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
-        call blend_var_3d(VFW_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
-        call blend_var_3d(VFWP_3d, i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
-        ! VFS (soil) unchanged — soil does not mix across snow elements
-
-        ! L-weighted: temperatures and length-scaled diagnostics
-        call blend_var_3d(Tsn_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
-        ! snow_temperature_i is node-based with +1 layer — blend inline rather than
-        ! via the (kSNOW_GRID_Z-shape) helper.
-        if (L_u + L_l > 0.0) &
-            Tsni_3d(i_dom, k_up, j_dom) = &
-                (L_u * Tsni_3d(i_dom, k_up, j_dom) + L_l * Tsni_3d(i_dom, k_lo, j_dom)) / (L_u + L_l)
-        call blend_var_3d(sns_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
-        call blend_var_3d(N3_3d,   i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
-
-        ! Ice-mass-weighted microstructure (no-op if both layers have zero ice)
-        call blend_var_3d(Dd_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l, ims, ime, jms, jme, kSNOW_GRID_Z)
-        call blend_var_3d(Sp_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l, ims, ime, jms, jme, kSNOW_GRID_Z)
-        call blend_var_3d(Rg_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l, ims, ime, jms, jme, kSNOW_GRID_Z)
-        call blend_var_3d(Rb_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l, ims, ime, jms, jme, kSNOW_GRID_Z)
-        call blend_var_3d(CDot_3d, i_dom, j_dom, k_up, k_lo, wi_u, wi_l, ims, ime, jms, jme, kSNOW_GRID_Z)
-
-        ! theta[AIR] derived: 1 - θ_I - θ_W - θ_WP - θ_S
-        air_frac = 1.0 - VFI_3d(i_dom, k_up, j_dom) &
-                       - VFW_3d(i_dom, k_up, j_dom) &
-                       - VFWP_3d(i_dom, k_up, j_dom) &
-                       - VFS_3d(i_dom, k_up, j_dom)
-        VFA_3d(i_dom, k_up, j_dom) = max(0.0, air_frac)
-
-        ! Additive: mass_hoar
-        mh_3d(i_dom, k_up, j_dom) = mh_3d(i_dom, k_up, j_dom) + mh_3d(i_dom, k_lo, j_dom)
-
-        ! Ds: combined length (assigned LAST — L_u was captured at the top)
-        Ds_3d(i_dom, k_up, j_dom) = L_new
-    end subroutine merge_snowpack_bottom_elements
 
 
     !>----------------------------------------------------------
@@ -1426,6 +1273,9 @@ contains
         integer :: vidx_mk, vidx_mh, vidx_CDot, vidx_sns, vidx_N3, vidx_dep
         integer :: vidx_skin, vidx_height, vidx_swe
         real :: deposit_depth, theta_i_new, t_surf, n3_fresh, julian_now
+        ! Scratch variables for inlined merge_snowpack_bottom_elements
+        integer :: k_up, k_lo
+        real    :: L_u, L_l, L_new, theta_I_u, theta_I_l, wi_u, wi_l, air_frac
 
         ! SNOWPACK fresh-element coordination number for rho_deposit = 300 kg/m³,
         ! evaluated from the piecewise polynomial in
@@ -1490,8 +1340,9 @@ contains
             jme         => domain%jme)
 
         !$acc parallel loop gang collapse(2) default(present) &
-        !$acc   firstprivate(kSNOW_GRID_Z) &
-        !$acc   private(i_dom, j_dom, k, nlay_new, deposit_depth, theta_i_new, t_surf)
+        !$acc   firstprivate(kSNOW_GRID_Z, ims, ime, jms, jme, n3_fresh, julian_now) &
+        !$acc   private(i_dom, j_dom, k, nlay_new, deposit_depth, theta_i_new, t_surf, &
+        !$acc           k_up, k_lo, L_u, L_l, L_new, theta_I_u, theta_I_l, wi_u, wi_l, air_frac)
         do j = 2, Ny_local - 1
             do i = 2, Nx_local - 1
                 i_dom = its + (i - 2)
@@ -1503,40 +1354,104 @@ contains
 
                     ! Edge case: column is full — merge the two deepest elements
                     ! to free a slot, then fall through to the regular shift+insert.
+                    ! Inlined from merge_snowpack_bottom_elements: passing arrays
+                    ! through `!$acc routine seq` boundaries corrupts device
+                    ! pointers (compute-sanitizer shows OOB at the call site).
                     if (nlay_new >= kSNOW_GRID_Z) then
-                        call merge_snowpack_bottom_elements( &
-                            Ds_3d, Tsn_3d, Tsni_3d,                      &
-                            VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,     &
-                            Rg_3d, Rb_3d, Dd_3d, Sp_3d,                  &
-                            mh_3d, CDot_3d, sns_3d, N3_3d,               &
-                            i_dom, j_dom, ims, ime, jms, jme, kSNOW_GRID_Z)
+                        k_lo = kSNOW_GRID_Z
+                        k_up = k_lo - 1
+                        L_u  = Ds_3d(i_dom, k_up, j_dom)
+                        L_l  = Ds_3d(i_dom, k_lo, j_dom)
+                        L_new = L_u + L_l
+                        if (L_new > 0.0) then
+                            ! Ice content captured before blending (microstructure weights)
+                            theta_I_u = VFI_3d(i_dom, k_up, j_dom)
+                            theta_I_l = VFI_3d(i_dom, k_lo, j_dom)
+                            wi_u = theta_I_u * L_u
+                            wi_l = theta_I_l * L_l
+
+                            ! L-weighted volume fractions + temperatures + diagnostics
+                            VFI_3d (i_dom, k_up, j_dom) = (L_u * VFI_3d (i_dom, k_up, j_dom) + L_l * VFI_3d (i_dom, k_lo, j_dom)) / L_new
+                            VFW_3d (i_dom, k_up, j_dom) = (L_u * VFW_3d (i_dom, k_up, j_dom) + L_l * VFW_3d (i_dom, k_lo, j_dom)) / L_new
+                            VFWP_3d(i_dom, k_up, j_dom) = (L_u * VFWP_3d(i_dom, k_up, j_dom) + L_l * VFWP_3d(i_dom, k_lo, j_dom)) / L_new
+                            Tsn_3d (i_dom, k_up, j_dom) = (L_u * Tsn_3d (i_dom, k_up, j_dom) + L_l * Tsn_3d (i_dom, k_lo, j_dom)) / L_new
+                            Tsni_3d(i_dom, k_up, j_dom) = (L_u * Tsni_3d(i_dom, k_up, j_dom) + L_l * Tsni_3d(i_dom, k_lo, j_dom)) / L_new
+                            sns_3d (i_dom, k_up, j_dom) = (L_u * sns_3d (i_dom, k_up, j_dom) + L_l * sns_3d (i_dom, k_lo, j_dom)) / L_new
+                            N3_3d  (i_dom, k_up, j_dom) = (L_u * N3_3d  (i_dom, k_up, j_dom) + L_l * N3_3d  (i_dom, k_lo, j_dom)) / L_new
+
+                            ! Ice-mass-weighted microstructure (no-op if both layers ice-free)
+                            if (wi_u + wi_l > 0.0) then
+                                Dd_3d  (i_dom, k_up, j_dom) = (wi_u * Dd_3d  (i_dom, k_up, j_dom) + wi_l * Dd_3d  (i_dom, k_lo, j_dom)) / (wi_u + wi_l)
+                                Sp_3d  (i_dom, k_up, j_dom) = (wi_u * Sp_3d  (i_dom, k_up, j_dom) + wi_l * Sp_3d  (i_dom, k_lo, j_dom)) / (wi_u + wi_l)
+                                Rg_3d  (i_dom, k_up, j_dom) = (wi_u * Rg_3d  (i_dom, k_up, j_dom) + wi_l * Rg_3d  (i_dom, k_lo, j_dom)) / (wi_u + wi_l)
+                                Rb_3d  (i_dom, k_up, j_dom) = (wi_u * Rb_3d  (i_dom, k_up, j_dom) + wi_l * Rb_3d  (i_dom, k_lo, j_dom)) / (wi_u + wi_l)
+                                CDot_3d(i_dom, k_up, j_dom) = (wi_u * CDot_3d(i_dom, k_up, j_dom) + wi_l * CDot_3d(i_dom, k_lo, j_dom)) / (wi_u + wi_l)
+                            end if
+
+                            ! Derived air fraction
+                            air_frac = 1.0 - VFI_3d(i_dom, k_up, j_dom) &
+                                           - VFW_3d(i_dom, k_up, j_dom) &
+                                           - VFWP_3d(i_dom, k_up, j_dom) &
+                                           - VFS_3d(i_dom, k_up, j_dom)
+                            VFA_3d(i_dom, k_up, j_dom) = max(0.0, air_frac)
+
+                            ! Additive: mass_hoar
+                            mh_3d(i_dom, k_up, j_dom) = mh_3d(i_dom, k_up, j_dom) + mh_3d(i_dom, k_lo, j_dom)
+
+                            ! Ds: combined length (assigned LAST)
+                            Ds_3d(i_dom, k_up, j_dom) = L_new
+                            ! mk and dep keep k_up value (no action needed)
+                        end if
                         nlay_new = kSNOW_GRID_Z - 1
                     end if
 
                     ! Shift existing elements down by 1 to make room at the top.
-                    ! Ds first (branch-agnostic — handled inline), then the 17
-                    ! SNOWPACK-specific per-layer vars via helper.
+                    ! Inlined from shift_snowpack_layer_slot for the same reason.
                     if (nlay_new > 0) then
+                        !$acc loop seq
                         do k = nlay_new + 1, 2, -1
-                            Ds_3d(i_dom, k, j_dom) = Ds_3d(i_dom, k-1, j_dom)
-                            call shift_snowpack_layer_slot(                    &
-                                Tsn_3d, Tsni_3d,                               &
-                                VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,       &
-                                Rg_3d, Rb_3d, Dd_3d, Sp_3d,                    &
-                                mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d,  &
-                                i_dom, j_dom, k, k-1, ims, ime, jms, jme, kSNOW_GRID_Z)
+                            Ds_3d  (i_dom, k, j_dom) = Ds_3d  (i_dom, k-1, j_dom)
+                            Tsn_3d (i_dom, k, j_dom) = Tsn_3d (i_dom, k-1, j_dom)
+                            Tsni_3d(i_dom, k, j_dom) = Tsni_3d(i_dom, k-1, j_dom)
+                            VFI_3d (i_dom, k, j_dom) = VFI_3d (i_dom, k-1, j_dom)
+                            VFW_3d (i_dom, k, j_dom) = VFW_3d (i_dom, k-1, j_dom)
+                            VFA_3d (i_dom, k, j_dom) = VFA_3d (i_dom, k-1, j_dom)
+                            VFS_3d (i_dom, k, j_dom) = VFS_3d (i_dom, k-1, j_dom)
+                            VFWP_3d(i_dom, k, j_dom) = VFWP_3d(i_dom, k-1, j_dom)
+                            Rg_3d  (i_dom, k, j_dom) = Rg_3d  (i_dom, k-1, j_dom)
+                            Rb_3d  (i_dom, k, j_dom) = Rb_3d  (i_dom, k-1, j_dom)
+                            Dd_3d  (i_dom, k, j_dom) = Dd_3d  (i_dom, k-1, j_dom)
+                            Sp_3d  (i_dom, k, j_dom) = Sp_3d  (i_dom, k-1, j_dom)
+                            mk_3d  (i_dom, k, j_dom) = mk_3d  (i_dom, k-1, j_dom)
+                            mh_3d  (i_dom, k, j_dom) = mh_3d  (i_dom, k-1, j_dom)
+                            CDot_3d(i_dom, k, j_dom) = CDot_3d(i_dom, k-1, j_dom)
+                            sns_3d (i_dom, k, j_dom) = sns_3d (i_dom, k-1, j_dom)
+                            N3_3d  (i_dom, k, j_dom) = N3_3d  (i_dom, k-1, j_dom)
+                            dep_3d (i_dom, k, j_dom) = dep_3d (i_dom, k-1, j_dom)
                         end do
                     end if
                     nlay_new = nlay_new + 1
 
-                    ! Set fresh surface element — defaults from table, then
-                    ! per-cell patches. Ds is patched below (always per-cell).
-                    call set_fresh_snowpack_element_defaults(                  &
-                        Tsn_3d, Tsni_3d,                                       &
-                        VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,               &
-                        Rg_3d, Rb_3d, Dd_3d, Sp_3d,                            &
-                        mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d,          &
-                        i_dom, j_dom, 1, ims, ime, jms, jme, kSNOW_GRID_Z)
+                    ! Set fresh surface element — defaults from table (inlined
+                    ! from set_fresh_snowpack_element_defaults), then per-cell
+                    ! patches. Ds is patched below (always per-cell).
+                    Tsn_3d (i_dom, 1, j_dom) = snow_3d_fresh_defaults(4)   ! snow_temperature (PATCH)
+                    VFI_3d (i_dom, 1, j_dom) = snow_3d_fresh_defaults(5)   ! Vol_Frac_I (PATCH)
+                    VFW_3d (i_dom, 1, j_dom) = snow_3d_fresh_defaults(6)   ! Vol_Frac_W
+                    VFA_3d (i_dom, 1, j_dom) = snow_3d_fresh_defaults(7)   ! Vol_Frac_A (PATCH)
+                    VFS_3d (i_dom, 1, j_dom) = snow_3d_fresh_defaults(8)   ! Vol_Frac_S
+                    VFWP_3d(i_dom, 1, j_dom) = snow_3d_fresh_defaults(9)   ! Vol_Frac_WP
+                    Tsni_3d(i_dom, 1, j_dom) = snow_3d_fresh_defaults(10)  ! snow_temperature_i (PATCH)
+                    Rg_3d  (i_dom, 1, j_dom) = snow_3d_fresh_defaults(11)  ! Rg
+                    Rb_3d  (i_dom, 1, j_dom) = snow_3d_fresh_defaults(12)  ! Rb
+                    Dd_3d  (i_dom, 1, j_dom) = snow_3d_fresh_defaults(13)  ! Dd
+                    Sp_3d  (i_dom, 1, j_dom) = snow_3d_fresh_defaults(14)  ! Sp
+                    mk_3d  (i_dom, 1, j_dom) = snow_3d_fresh_defaults(15)  ! mk
+                    mh_3d  (i_dom, 1, j_dom) = snow_3d_fresh_defaults(16)  ! mass_hoar
+                    CDot_3d(i_dom, 1, j_dom) = snow_3d_fresh_defaults(17)  ! CDot
+                    sns_3d (i_dom, 1, j_dom) = snow_3d_fresh_defaults(18)  ! snow_stress
+                    N3_3d  (i_dom, 1, j_dom) = snow_3d_fresh_defaults(19)  ! N3 (PATCH, overwritten below)
+                    dep_3d (i_dom, 1, j_dom) = snow_3d_fresh_defaults(20)  ! depositionDate (PATCH, overwritten below)
 
                     theta_i_new           = rho_deposit / rho_ice_c
                     Ds_3d (i_dom, 1, j_dom) = deposit_depth
@@ -1564,15 +1479,27 @@ contains
                 end if
 
                 ! Zero all 3D vars above nlay_new (defensive; ablate should
-                ! already have).
+                ! already have). Inlined from zero_snowpack_layer_slot.
+                !$acc loop seq
                 do k = nlay_new + 1, kSNOW_GRID_Z
-                    Ds_3d(i_dom, k, j_dom) = 0.0
-                    call zero_snowpack_layer_slot(                             &
-                        Tsn_3d, Tsni_3d,                                       &
-                        VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,               &
-                        Rg_3d, Rb_3d, Dd_3d, Sp_3d,                            &
-                        mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d,          &
-                        i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z)
+                    Ds_3d  (i_dom, k, j_dom) = 0.0
+                    Tsn_3d (i_dom, k, j_dom) = 0.0
+                    Tsni_3d(i_dom, k, j_dom) = 0.0
+                    VFI_3d (i_dom, k, j_dom) = 0.0
+                    VFW_3d (i_dom, k, j_dom) = 0.0
+                    VFA_3d (i_dom, k, j_dom) = 0.0
+                    VFS_3d (i_dom, k, j_dom) = 0.0
+                    VFWP_3d(i_dom, k, j_dom) = 0.0
+                    Rg_3d  (i_dom, k, j_dom) = 0.0
+                    Rb_3d  (i_dom, k, j_dom) = 0.0
+                    Dd_3d  (i_dom, k, j_dom) = 0.0
+                    Sp_3d  (i_dom, k, j_dom) = 0.0
+                    mk_3d  (i_dom, k, j_dom) = 0.0
+                    mh_3d  (i_dom, k, j_dom) = 0.0
+                    CDot_3d(i_dom, k, j_dom) = 0.0
+                    sns_3d (i_dom, k, j_dom) = 0.0
+                    N3_3d  (i_dom, k, j_dom) = 0.0
+                    dep_3d (i_dom, k, j_dom) = 0.0
                 end do
 
                 ! Recompute snow_height and SWE from layers. Inlined as a

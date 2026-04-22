@@ -1984,6 +1984,8 @@ contains
         if (STD_OUT_PE) write (*,*) "Reading Land Variables"
         if (STD_OUT_PE) flush(output_unit)
 
+        call this%update_host()
+        
         ! Read optional 2D surface temperature field from domain file
         if (options%domain%surface_temp_var /= "") then
             call io_read(options%domain%init_conditions_file, options%domain%surface_temp_var, surf_temp)

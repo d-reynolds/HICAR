@@ -1490,7 +1490,7 @@ contains
                 write(nml_unit,*) "&lsm_parameters"
             case ("SM_Parameters")
                 write(nml_unit,*) "! ---------------------------------------------------------------------------------------------------"
-                write(nml_unit,*) "!   Optionally specified snow model parameters (mostly for FSM2trans, at the moment)"
+                write(nml_unit,*) "!   Optionally specified snow model parameters"
                 write(nml_unit,*) "! ---------------------------------------------------------------------------------------------------"
                 write(nml_unit,*) "&sm_parameters"
             case ("CU_Parameters")
@@ -1963,7 +1963,7 @@ contains
                 dimensions = ["a", "Y", "X"]
                 group = "Domain"
             case ("shd_var")
-                description = "Name of the snow holding depth variable in domain file, used for SLIDE=1 when running FSM2trans"
+                description = "Name of the snow holding depth variable in domain file, used for snowslide"
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 units = "m"

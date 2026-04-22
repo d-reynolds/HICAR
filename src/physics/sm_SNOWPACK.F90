@@ -778,6 +778,45 @@ module module_sm_SNOWPACKdrv
         domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d,1.0),0.0)
         domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d,1.0),0.0)
 
+        ! Initialize N3 (coordination number) from density for any snow layer
+        ! whose N3 is missing/zero. N3 is never read from the init file (no
+        ! snowpack_n3_var namelist option, so try_read_snp_var is never called
+        ! for it), so it defaults to zero at allocation. The viscosity formula
+        ! in comp_snow_viscosity_default divides by (N3 * theta_ice): a tiny
+        ! nonzero N3 (which can appear after a merge-of-fresh-into-firn
+        ! weighted average) produces an unphysical viscosity that lets the
+        ! compaction cap saturate in one timestep. The piecewise below
+        ! matches snowpack_driver.F90's metamorphism block (~line 1841)
+        ! so the initial state is self-consistent with normal-running physics.
+        if (options%domain%snowpack_nlayers_var /= "") then
+            block
+                real :: rho_init
+                do j = jms, jme
+                    do i = ims, ime
+                        nz = domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(i,j)
+                        do k = 1, nz
+                            if (domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d(i,k,j) < 0.01) then
+                                rho_init = domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d(i,k,j) * 917.0 &
+                                         + domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d(i,k,j) * 1000.0
+                                if (rho_init >= 670.0) then
+                                    domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d(i,k,j) = 10.5
+                                else if (rho_init <= 100.0) then
+                                    domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d(i,k,j) = 1.75 * (rho_init / 100.0)
+                                else
+                                    domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d(i,k,j) = &
+                                        1.4153 - 7.5580e-5 * rho_init &
+                                        + 5.1495e-5 * rho_init**2 &
+                                        - 1.7345e-7 * rho_init**3 &
+                                        + 1.8082e-10 * rho_init**4
+                                endif
+                            endif
+                        enddo
+                    enddo
+                enddo
+            end block
+            if (STD_OUT_PE) write(*,*) "Initialized N3 from density for snow layers missing N3 in init."
+        endif
+
         if (options%domain%snowpack_tsnow_i_var == "" .and. options%domain%snowpack_nlayers_var /= "") then
             if (STD_OUT_PE) write(*,*) "Snow Temperature on interface not provided, filling in with snow temperature at elements..."
             do j = jms, jme

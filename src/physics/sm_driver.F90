@@ -87,7 +87,7 @@ contains
                          kVARS%runoff_tstep, kVARS%snow_temperature, kVARS%Sice, kVARS%Sliq, kVARS%Ds, kVARS%fsnow, kVARS%snow_nlayers,   &
                          kVARS%shd, kVARS%meltflux_out_tstep, kVARS%meltflux_out_cumul, kVARS%Sliq_out, &
                          kVARS%windspd_10m, kVARS%bs_saltation_flux, kVARS%bs_saltation_height, kVARS%bs_saltation_concentration, &
-                         kVARS%bs_suspension_flux, kVARS%dSWE_slide, &
+                         kVARS%bs_suspension_flux, kVARS%bs_sublimation_flux, kVARS%bs_drift_swe_salt, kVARS%bs_drift_swe_susp, kVARS%bs_drift_swe_subl, kVARS%dSWE_slide, &
                          kVARS%shortwave_direct, kVARS%shortwave_diffuse, kVARS%ground_surf_temperature])
              
              call options%restart_vars( &
