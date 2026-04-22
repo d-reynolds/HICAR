@@ -23,10 +23,6 @@ module snow_drift
     use icar_constants
     use data_structures, only : index_type
     use mod_atm_utilities, only : relative_humidity
-#ifdef SNOWPACK_FORTRAN
-    use snowpack_laws,   only : comp_drift_mass_flux, comp_drift_mass_flux_sorensen, comp_ustar_thresh
-    use snowpack_constants, only : dp
-#endif
     implicit none
     private
     public :: snow_drift_var_request, snow_drift_init, snow_drift_step, snow_drift_apply_feedback
@@ -261,10 +257,8 @@ contains
         ! self-limits once erosion exposes a harder layer.
         if (options%physics%snowmodel /= kSM_SNOWPACK) then
             call compute_threshold_ustar_generic(domain)
-#ifdef SNOWPACK_FORTRAN
         else
             call compute_threshold_ustar_snowpack(domain, options%sm%saltation_model)
-#endif
         endif
 
         ! saltation mass flux and concentration are computed by snowpack fortran driver
@@ -295,14 +289,8 @@ contains
 
         integer :: i, j, n_snow, k
         real :: Sp_top, Rg_top, Rb_top, N3_top
-        ! Temporary arrays for GPU kernel (contiguous memory for non-stride-1 slices)
-        real :: Ds_col(kSNOW_GRID_Z), VFI_col(kSNOW_GRID_Z)
-        real :: Sp_col(kSNOW_GRID_Z), Rg_col(kSNOW_GRID_Z), Rb_col(kSNOW_GRID_Z), N3_col(kSNOW_GRID_Z)
         real :: rho_air, rg_m
         real :: weight, binding, tau_thresh, ustar_t, ustar_t_out
-        ! DP temporaries for comp_drift_mass_flux outputs (callee signature is real(dp))
-        real(dp) :: Qsalt_dp, c_salt_dp, h_salt_dp, ustar_t_dp, ustar_dp
-        real(dp) :: Sphere_dp, rg_dp, rb_dp, N3_dp
 
         associate( &
             bs_ustar_t  => domain%vars_2d(domain%var_indx(kVARS%bs_threshold_ustar)%v)%data_2d, &
@@ -323,8 +311,7 @@ contains
             n_layers    => domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di &
         )
 
-        !$acc parallel loop gang vector collapse(2) &
-        !$acc   private(ustar_t_out, Sphere_dp, Rg_dp, Rb_dp, N3_dp, k)
+        !$acc parallel loop gang vector collapse(2)
         do j = jts, jte
             do i = its, ite
                 n_snow = n_layers(i,j)
@@ -334,34 +321,55 @@ contains
                     cycle
                 endif
 
-                Sphere_dp = real(Sp_3d(i,1,j), kind=dp)
-                Rg_dp = real(Rg_3d(i,1,j), kind=dp)
-                Rb_dp = real(Rb_3d(i,1,j), kind=dp)
-                N3_dp = real(N3_3d(i,1,j), kind=dp)
-                ustar_t_out = comp_ustar_thresh(Sphere_dp, Rg_dp, Rb_dp, N3_dp)
-                bs_ustar_t(i,j) = max(0.05, min(ustar_t_out, 5.0))
+                ! Top snow layer properties (layer index 1 = top in SNOWPACK)
+                Sp_top  = max(Sp_3d(i,1,j), 0.0)
+                Rg_top  = max(Rg_3d(i,1,j), 0.01)   ! min 0.05 mm (stored in mm)
+                Rb_top  = max(Rb_3d(i,1,j), 0.0)
+                N3_top  = max(N3_3d(i,1,j), 0.0)     ! coordination number from SNOWPACK
+
+                ! Air density at surface
+                rho_air = density(i,kts,j)
+
+                ! Grain radius in meters for weight term (Rg stored in mm)
+                rg_m = Rg_top * 1.0E-3
+
+                ! Threshold shear stress (Lehning et al. 2000, Eq. 15)
+                ! tau = At * rho_ice * (Sp+1) * g * rg  +  Bt * sigma_ref * N3 * (rb/rg)^2
+                weight  = AT_COEFF * RHO_ICE * (Sp_top + 1.0) * gravity * rg_m
+                binding = BT_COEFF * SIGMA_REF * N3_top * (Rb_top / max(Rg_top, 0.01))**2
+
+                tau_thresh = weight + binding
+
+                ! Threshold friction velocity: u*_t = sqrt(tau / rho_air)
+                ustar_t = sqrt(tau_thresh / rho_air)
+
+                ! Clamp to physical range
+                bs_ustar_t(i,j) = max(0.05, min(ustar_t, 5.0))
 
             enddo
         enddo
 
         if (salt_model==kSALTATION_SORENSEN) then
-            !$acc parallel loop gang vector collapse(2) firstprivate(salt_model) &
-            !$acc   private(Qsalt_dp, c_salt_dp, h_salt_dp, ustar_t_dp, ustar_dp)
+            !$acc parallel loop gang vector collapse(2)
             do j = jts, jte
                 do i = its, ite
                     if (n_layers(i,j) < 1) cycle
 
-                    ! Saltation uses top-layer grain properties only (surface process).
-                    ! Outputs flow through real(dp) temporaries since comp_drift_mass_flux
-                    ! has a real(dp) signature.
-                    ustar_t_dp = bs_ustar_t(i,j)
-                    ustar_dp = ustar(i,j)
+                    ! Code copied from snowpack_laws.F90
+                    bs_salt_height(i,j) = 0.15 ! hard coded based on Armin's analysis (See Viaro et al., 2026)
 
-                    call comp_drift_mass_flux_sorensen(ustar_t_dp, ustar_dp, Qsalt_dp, c_salt_dp, h_salt_dp)
-
-                    bs_salt_flux(i,j)   = real(Qsalt_dp)
-                    bs_salt_conc(i,j)   = real(c_salt_dp)
-                    bs_salt_height(i,j) = real(h_salt_dp)
+                    if (ustar(i,j) > bs_ustar_t(i,j)) then
+                        bs_salt_flux(i,j) = 0.0014 * density(i,kts,j) * ustar(i,j) &
+                            * (ustar(i,j) - bs_ustar_t(i,j)) &
+                            * (ustar(i,j) + 7.6 * bs_ustar_t(i,j) + 205.0)
+                        ! Concentration: arbitrary scaling chosen by C++ to match Doorschot
+                        ! magnitudes (Saltation.cc:411). Units are nominally kg/m^3 once the
+                        ! suspension scheme consumes c_salt / rho_air.
+                        if (ustar(i,j) > 0.0) bs_salt_conc(i,j) = bs_salt_flux(i,j) / ustar(i,j) * 0.001
+                    else
+                        bs_salt_flux(i,j) = 0.0
+                        bs_salt_conc(i,j) = 0.0
+                    endif
                 enddo
             enddo
         endif
