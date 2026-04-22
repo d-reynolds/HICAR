@@ -159,7 +159,7 @@ contains
         ! This ensures buffer cells see correct neighbor elevations at MPI boundaries.
         dem_local = 0.0
         slope_local = 0.0
-        shd_local = 0.05  ! Default: very large holding depth (no slides)
+        shd_local = 10000.0  ! Default: very large holding depth (no slides)
 
         dem_local(1:Nx_local, 1:Ny_local) = &
             domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d(its-1:ite+1, jts-1:jte+1)
@@ -169,6 +169,8 @@ contains
                 domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d(its-1:ite+1, jts-1:jte+1) &
                 * 180.0 / piconst   ! Convert radians to degrees
         endif
+
+        shd_local = min(shd_local, domain%vars_2d(domain%var_indx(kVARS%shd)%v)%data_2d(its-1:ite+1, jts-1:jte+1))
 
         call sort_dem_local()
 
@@ -242,6 +244,7 @@ contains
                                  snow_depo, .True.)
 
             ! ---- Step 2: Exchange domain Ds halos ----
+            call sync_snow_halo_to_device(domain)
             call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v),corners=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Ds)%v),corners=.True.)
             if (has_Sice) then
@@ -271,6 +274,7 @@ contains
         domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d(its:ite, jts:jte) = &
             domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d(its:ite, jts:jte) + &
             dSWE_slide_local(i_s:i_e, j_s:j_e)
+        !$acc update device(domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d(its:ite, jts:jte))
 
         ! ================================================================
         ! After all iterations: apply remaining deposits via SNOW_LAYERING
@@ -406,6 +410,24 @@ contains
         end if
     end subroutine sync_snow_halo_to_host
 
+    subroutine sync_snow_halo_to_device(domain)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+
+        !$acc update device( &
+        !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
+        !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d)
+        if (has_Sice) then
+            !$acc update device( &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d)
+        end if
+        if (has_VolFrac) then
+            !$acc update device( &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d)
+        end if
+    end subroutine sync_snow_halo_to_device
 
     !>----------------------------------------------------------
     !! Sync modified domain snow arrays from host back to device
@@ -670,15 +692,23 @@ contains
             if (depth_accum + Ds_k <= dhs) then
                 ! Whole layer consumed
                 swe_eroded  = swe_eroded  + Ds_k * rho_k
-                depth_accum = depth_accum + Ds_k
             else
-                ! Partial layer — take only (dhs - depth_accum) meters off the top
+                ! Partial layer — take only (dhs - depth_accum) meters off the top.
+                ! Advance depth_accum by the full Ds_k so the loop exits *and* the
+                ! residual thickness `depth_accum - dhs = Ds_k - (dhs - prev_accum)`
+                ! falls out of the formula below.
                 swe_eroded  = swe_eroded  + (dhs - depth_accum) * rho_k
-                depth_accum = dhs
             end if
+            depth_accum = depth_accum + Ds_k
         end do
-        k_eaten  = k - 1
-        nlay_new = nlay - k_eaten
+        ! If the partial branch fired, layer k has a residue (depth_accum > dhs).
+        ! Otherwise every touched layer was fully consumed.
+        if (depth_accum > dhs + 1.0e-10) then
+            k_eaten = k - 1
+        else
+            k_eaten = k
+        end if
+        nlay_new = max(nlay - k_eaten, 0)
 
         ! Partial erosion of the remaining top layer + shift up.
         !
@@ -687,28 +717,32 @@ contains
         ! fall through to the plain-copy branch. Microstructure vars (Rg, Rb,
         ! Dd, Sp, mk, ...) also travel with the layer — same copy branch. Only
         ! FSM's Sice/Sliq need extensive-mass scaling.
-        if (nlay_new >= 1) then
+        if (nlay_new > 0) then
             ds_old = domain%vars_3d(vidx_Ds)%data_3d(i_dom, 1+k_eaten, j_dom)
             ds_new = max(0.0, depth_accum - dhs)
             scale  = ds_new / max(ds_old, 1.0e-10)
 
-            ! Ds is shared by both snow models — always write.
             domain%vars_3d(vidx_Ds)%data_3d(i_dom, 1, j_dom) = ds_new
             do k = 2, nlay_new
                 domain%vars_3d(vidx_Ds)%data_3d(i_dom, k, j_dom) = &
                     domain%vars_3d(vidx_Ds)%data_3d(i_dom, k+k_eaten, j_dom)
             end do
-            do k = nlay_new + 1, kSNOW_GRID_Z
-                domain%vars_3d(vidx_Ds)%data_3d(i_dom, k, j_dom) = 0.0
-            end do
+        end if
 
-            if (has_Sice) then
-                ! FSM: Sice/Sliq are extensive (mass per unit area) and must
-                ! be rescaled for the partial top layer; snow_temperature
-                ! is intensive (plain copy).
-                associate(Sice_3d => domain%vars_3d(vidx_Sice)%data_3d, &
-                          Sliq_3d => domain%vars_3d(vidx_Sliq)%data_3d, &
-                          Tsn_3d  => domain%vars_3d(vidx_Tsn )%data_3d)
+        ! Tail: always zero every slot above nlay_new (covers k=1..kSNOW_GRID_Z
+        ! when the full column was consumed).
+        do k = nlay_new + 1, kSNOW_GRID_Z
+            domain%vars_3d(vidx_Ds)%data_3d(i_dom, k, j_dom) = 0.0
+        end do
+
+        if (has_Sice) then
+            ! FSM: Sice/Sliq are extensive (mass per unit area) and must
+            ! be rescaled for the partial top layer; snow_temperature
+            ! is intensive (plain copy).
+            associate(Sice_3d => domain%vars_3d(vidx_Sice)%data_3d, &
+                        Sliq_3d => domain%vars_3d(vidx_Sliq)%data_3d, &
+                        Tsn_3d  => domain%vars_3d(vidx_Tsn )%data_3d)
+                if (nlay_new > 0) then
                     Sice_3d(i_dom, 1, j_dom) = Sice_3d(i_dom, 1+k_eaten, j_dom) * scale
                     Sliq_3d(i_dom, 1, j_dom) = Sliq_3d(i_dom, 1+k_eaten, j_dom) * scale
                     Tsn_3d (i_dom, 1, j_dom) = Tsn_3d (i_dom, 1+k_eaten, j_dom)
@@ -717,66 +751,68 @@ contains
                         Sliq_3d(i_dom, k, j_dom) = Sliq_3d(i_dom, k+k_eaten, j_dom)
                         Tsn_3d (i_dom, k, j_dom) = Tsn_3d (i_dom, k+k_eaten, j_dom)
                     end do
-                    do k = nlay_new + 1, kSNOW_GRID_Z
-                        Sice_3d(i_dom, k, j_dom) = 0.0
-                        Sliq_3d(i_dom, k, j_dom) = 0.0
-                        Tsn_3d (i_dom, k, j_dom) = 0.0
-                    end do
-                end associate
-            end if
+                endif
+                do k = nlay_new + 1, kSNOW_GRID_Z
+                    Sice_3d(i_dom, k, j_dom) = 0.0
+                    Sliq_3d(i_dom, k, j_dom) = 0.0
+                    Tsn_3d (i_dom, k, j_dom) = 0.0
+                end do
+            end associate
+        end if
 
 #ifdef SNOWPACK
-            if (has_VolFrac) then
-                ! SNOWPACK: Vol_Frac_* and microstructure are intensive and
-                ! ride along with the layer — plain copy via the 17-var
-                ! helpers. No rescale needed for a partial top layer because
-                ! density is independent of element thickness. Ds is already
-                ! handled by the branch-agnostic block above.
-                associate( &
-                    Tsn_3d  => domain%vars_3d(vidx_Tsn  )%data_3d, &
-                    Tsni_3d => domain%vars_3d(vidx_Tsni )%data_3d, &
-                    VFI_3d  => domain%vars_3d(vidx_VFI  )%data_3d, &
-                    VFW_3d  => domain%vars_3d(vidx_VFW  )%data_3d, &
-                    VFA_3d  => domain%vars_3d(vidx_VFA  )%data_3d, &
-                    VFS_3d  => domain%vars_3d(vidx_VFS  )%data_3d, &
-                    VFWP_3d => domain%vars_3d(vidx_VFWP )%data_3d, &
-                    Rg_3d   => domain%vars_3d(vidx_Rg   )%data_3d, &
-                    Rb_3d   => domain%vars_3d(vidx_Rb   )%data_3d, &
-                    Dd_3d   => domain%vars_3d(vidx_Dd   )%data_3d, &
-                    Sp_3d   => domain%vars_3d(vidx_Sp   )%data_3d, &
-                    mk_3d   => domain%vars_3d(vidx_mk   )%data_3d, &
-                    mh_3d   => domain%vars_3d(vidx_mh   )%data_3d, &
-                    CDot_3d => domain%vars_3d(vidx_CDot )%data_3d, &
-                    sns_3d  => domain%vars_3d(vidx_sns  )%data_3d, &
-                    N3_3d   => domain%vars_3d(vidx_N3   )%data_3d, &
-                    dep_3d  => domain%vars_3d(vidx_dep  )%data_3d)
+        if (has_VolFrac) then
+            ! SNOWPACK: Vol_Frac_* and microstructure are intensive and
+            ! ride along with the layer — plain copy via the 17-var
+            ! helpers. No rescale needed for a partial top layer because
+            ! density is independent of element thickness. Ds is already
+            ! handled by the branch-agnostic block above.
+            associate( &
+                Tsn_3d  => domain%vars_3d(vidx_Tsn  )%data_3d, &
+                Tsni_3d => domain%vars_3d(vidx_Tsni )%data_3d, &
+                VFI_3d  => domain%vars_3d(vidx_VFI  )%data_3d, &
+                VFW_3d  => domain%vars_3d(vidx_VFW  )%data_3d, &
+                VFA_3d  => domain%vars_3d(vidx_VFA  )%data_3d, &
+                VFS_3d  => domain%vars_3d(vidx_VFS  )%data_3d, &
+                VFWP_3d => domain%vars_3d(vidx_VFWP )%data_3d, &
+                Rg_3d   => domain%vars_3d(vidx_Rg   )%data_3d, &
+                Rb_3d   => domain%vars_3d(vidx_Rb   )%data_3d, &
+                Dd_3d   => domain%vars_3d(vidx_Dd   )%data_3d, &
+                Sp_3d   => domain%vars_3d(vidx_Sp   )%data_3d, &
+                mk_3d   => domain%vars_3d(vidx_mk   )%data_3d, &
+                mh_3d   => domain%vars_3d(vidx_mh   )%data_3d, &
+                CDot_3d => domain%vars_3d(vidx_CDot )%data_3d, &
+                sns_3d  => domain%vars_3d(vidx_sns  )%data_3d, &
+                N3_3d   => domain%vars_3d(vidx_N3   )%data_3d, &
+                dep_3d  => domain%vars_3d(vidx_dep  )%data_3d, &
+                ims => domain%ims, ime => domain%ime, jms => domain%jms, jme => domain%jme)
+                if (nlay_new > 0) then
                     call shift_snowpack_layer_slot(                        &
                         Tsn_3d, Tsni_3d,                                   &
                         VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,           &
                         Rg_3d, Rb_3d, Dd_3d, Sp_3d,                        &
                         mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d,      &
-                        i_dom, j_dom, 1, 1+k_eaten)
+                        i_dom, j_dom, 1, 1+k_eaten, ims, ime, jms, jme, kSNOW_GRID_Z)
                     do k = 2, nlay_new
                         call shift_snowpack_layer_slot(                    &
                             Tsn_3d, Tsni_3d,                               &
                             VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,       &
                             Rg_3d, Rb_3d, Dd_3d, Sp_3d,                    &
                             mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d,  &
-                            i_dom, j_dom, k, k+k_eaten)
+                            i_dom, j_dom, k, k+k_eaten, ims, ime, jms, jme, kSNOW_GRID_Z)
                     end do
-                    do k = nlay_new + 1, kSNOW_GRID_Z
-                        call zero_snowpack_layer_slot(                     &
-                            Tsn_3d, Tsni_3d,                               &
-                            VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,       &
-                            Rg_3d, Rb_3d, Dd_3d, Sp_3d,                    &
-                            mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d,  &
-                            i_dom, j_dom, k)
-                    end do
-                end associate
-            end if
-#endif
+                endif
+                do k = nlay_new + 1, kSNOW_GRID_Z
+                    call zero_snowpack_layer_slot(                     &
+                        Tsn_3d, Tsni_3d,                               &
+                        VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,       &
+                        Rg_3d, Rb_3d, Dd_3d, Sp_3d,                    &
+                        mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d,  &
+                        i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z)
+                end do
+            end associate
         end if
-
+#endif
         domain%vars_2d(vidx_nlay)%data_2di(i_dom, j_dom) = nlay_new
 
     end subroutine ablate_snow_layers
@@ -1104,8 +1140,6 @@ contains
     end subroutine snowslide_reconcile_fsm
 #endif
 
-
-#ifdef SNOWPACK
     !>----------------------------------------------------------
     !! Copy one SNOWPACK layer slot (k_src → k_dst) at cell (i_dom, j_dom),
     !! across the 17 SNOWPACK per-layer variables OTHER than Ds. Replaces
@@ -1120,7 +1154,7 @@ contains
                                          VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,    &
                                          Rg_3d, Rb_3d, Dd_3d, Sp_3d,                 &
                                          mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d, &
-                                         i_dom, j_dom, k_dst, k_src)
+                                         i_dom, j_dom, k_dst, k_src, ims, ime, jms, jme, kSNOW_GRID_Z)
         !$acc routine seq
         implicit none
         ! Fully explicit bounds — matches HICAR's domain memory allocation
@@ -1138,7 +1172,7 @@ contains
         real, intent(inout) :: CDot_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
         real, intent(inout) :: sns_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), N3_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
         real, intent(inout) :: dep_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        integer, intent(in) :: i_dom, j_dom, k_dst, k_src
+        integer, intent(in) :: i_dom, j_dom, k_dst, k_src, ims, ime, jms, jme, kSNOW_GRID_Z
 
         Tsn_3d(i_dom, k_dst, j_dom)  = Tsn_3d(i_dom, k_src, j_dom)
         Tsni_3d(i_dom, k_dst, j_dom) = Tsni_3d(i_dom, k_src, j_dom)
@@ -1169,7 +1203,7 @@ contains
                                         VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,    &
                                         Rg_3d, Rb_3d, Dd_3d, Sp_3d,                 &
                                         mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d, &
-                                        i_dom, j_dom, k)
+                                        i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z)
         !$acc routine seq
         implicit none
         real, intent(inout) :: Tsn_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), Tsni_3d(ims:ime, 1:kSNOW_GRID_Z+1, jms:jme)
@@ -1182,7 +1216,7 @@ contains
         real, intent(inout) :: CDot_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
         real, intent(inout) :: sns_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), N3_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
         real, intent(inout) :: dep_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        integer, intent(in) :: i_dom, j_dom, k
+        integer, intent(in) :: i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z
 
         Tsn_3d(i_dom, k, j_dom)  = 0.0
         Tsni_3d(i_dom, k, j_dom) = 0.0
@@ -1216,7 +1250,7 @@ contains
                                                    VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d, &
                                                    Rg_3d, Rb_3d, Dd_3d, Sp_3d,         &
                                                    mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d, &
-                                                   i_dom, j_dom, k)
+                                                   i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z)
         !$acc routine seq
         implicit none
         real, intent(inout) :: Tsn_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), Tsni_3d(ims:ime, 1:kSNOW_GRID_Z+1, jms:jme)
@@ -1229,7 +1263,7 @@ contains
         real, intent(inout) :: CDot_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
         real, intent(inout) :: sns_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme), N3_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
         real, intent(inout) :: dep_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        integer, intent(in) :: i_dom, j_dom, k
+        integer, intent(in) :: i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z
 
         Tsn_3d(i_dom, k, j_dom)  = snow_3d_fresh_defaults(4)   ! snow_temperature (PATCH)
         VFI_3d(i_dom, k, j_dom)  = snow_3d_fresh_defaults(5)   ! Vol_Frac_I (PATCH)
@@ -1257,12 +1291,13 @@ contains
     !! No-op if a+b <= 0. Callers pass the concrete array directly (no
     !! dynamic vidx lookup) so this routine is safe inside `!$acc parallel`.
     !!----------------------------------------------------------
-    subroutine blend_var_3d(arr, i_dom, j_dom, k_up, k_lo, a, b)
+    subroutine blend_var_3d(arr, i_dom, j_dom, k_up, k_lo, a, b, ims, ime, jms, jme, kSNOW_GRID_Z)
         !$acc routine seq
         implicit none
         real, intent(inout) :: arr(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
         integer, intent(in) :: i_dom, j_dom, k_up, k_lo
         real, intent(in)    :: a, b
+        integer, intent(in) :: ims, ime, jms, jme, kSNOW_GRID_Z
         real :: denom
         denom = a + b
         if (denom <= 0.0) return
@@ -1289,7 +1324,7 @@ contains
                                               VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d, &
                                               Rg_3d, Rb_3d, Dd_3d, Sp_3d,             &
                                               mh_3d, CDot_3d, sns_3d, N3_3d,          &
-                                              i_dom, j_dom)
+                                              i_dom, j_dom, ims, ime, jms, jme, kSNOW_GRID_Z)
         !$acc routine seq
         implicit none
         real, intent(inout) :: Ds_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
@@ -1308,7 +1343,7 @@ contains
         real, intent(inout) :: CDot_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
         real, intent(inout) :: sns_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
         real, intent(inout) :: N3_3d(ims:ime, 1:kSNOW_GRID_Z, jms:jme)
-        integer, intent(in) :: i_dom, j_dom
+        integer, intent(in) :: i_dom, j_dom, ims, ime, jms, jme, kSNOW_GRID_Z
 
         real :: L_u, L_l, L_new
         real :: theta_I_u, theta_I_l, wi_u, wi_l, air_frac
@@ -1329,27 +1364,27 @@ contains
         wi_l = theta_I_l * L_l
 
         ! L-weighted averages: volume fractions (except AIR, derived below)
-        call blend_var_3d(VFI_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l)
-        call blend_var_3d(VFW_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l)
-        call blend_var_3d(VFWP_3d, i_dom, j_dom, k_up, k_lo, L_u, L_l)
+        call blend_var_3d(VFI_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
+        call blend_var_3d(VFW_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
+        call blend_var_3d(VFWP_3d, i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
         ! VFS (soil) unchanged — soil does not mix across snow elements
 
         ! L-weighted: temperatures and length-scaled diagnostics
-        call blend_var_3d(Tsn_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l)
+        call blend_var_3d(Tsn_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
         ! snow_temperature_i is node-based with +1 layer — blend inline rather than
         ! via the (kSNOW_GRID_Z-shape) helper.
         if (L_u + L_l > 0.0) &
             Tsni_3d(i_dom, k_up, j_dom) = &
                 (L_u * Tsni_3d(i_dom, k_up, j_dom) + L_l * Tsni_3d(i_dom, k_lo, j_dom)) / (L_u + L_l)
-        call blend_var_3d(sns_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l)
-        call blend_var_3d(N3_3d,   i_dom, j_dom, k_up, k_lo, L_u, L_l)
+        call blend_var_3d(sns_3d,  i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
+        call blend_var_3d(N3_3d,   i_dom, j_dom, k_up, k_lo, L_u, L_l, ims, ime, jms, jme, kSNOW_GRID_Z)
 
         ! Ice-mass-weighted microstructure (no-op if both layers have zero ice)
-        call blend_var_3d(Dd_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l)
-        call blend_var_3d(Sp_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l)
-        call blend_var_3d(Rg_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l)
-        call blend_var_3d(Rb_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l)
-        call blend_var_3d(CDot_3d, i_dom, j_dom, k_up, k_lo, wi_u, wi_l)
+        call blend_var_3d(Dd_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l, ims, ime, jms, jme, kSNOW_GRID_Z)
+        call blend_var_3d(Sp_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l, ims, ime, jms, jme, kSNOW_GRID_Z)
+        call blend_var_3d(Rg_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l, ims, ime, jms, jme, kSNOW_GRID_Z)
+        call blend_var_3d(Rb_3d,   i_dom, j_dom, k_up, k_lo, wi_u, wi_l, ims, ime, jms, jme, kSNOW_GRID_Z)
+        call blend_var_3d(CDot_3d, i_dom, j_dom, k_up, k_lo, wi_u, wi_l, ims, ime, jms, jme, kSNOW_GRID_Z)
 
         ! theta[AIR] derived: 1 - θ_I - θ_W - θ_WP - θ_S
         air_frac = 1.0 - VFI_3d(i_dom, k_up, j_dom) &
@@ -1377,6 +1412,7 @@ contains
     !! philosophy: protect the top, coarsen the bottom) before the shift +
     !! insert runs. This guarantees the fresh deposit always lands at k=1.
     !!----------------------------------------------------------
+#ifdef SNOWPACK
     subroutine snowslide_reconcile_snowpack(domain, SD_0, Sice_0)
         implicit none
         type(domain_t), intent(inout) :: domain
@@ -1447,9 +1483,14 @@ contains
             nlay_2di    => domain%vars_2d(vidx_nlay  )%data_2di, &
             skin_2d     => domain%vars_2d(vidx_skin  )%data_2d,  &
             height_2d   => domain%vars_2d(vidx_height)%data_2d,  &
-            swe_2d      => domain%vars_2d(vidx_swe   )%data_2d)
+            swe_2d      => domain%vars_2d(vidx_swe   )%data_2d,  &
+            ims         => domain%ims, &
+            ime         => domain%ime, &
+            jms         => domain%jms, &
+            jme         => domain%jme)
 
         !$acc parallel loop gang collapse(2) default(present) &
+        !$acc   firstprivate(kSNOW_GRID_Z) &
         !$acc   private(i_dom, j_dom, k, nlay_new, deposit_depth, theta_i_new, t_surf)
         do j = 2, Ny_local - 1
             do i = 2, Nx_local - 1
@@ -1468,7 +1509,7 @@ contains
                             VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,     &
                             Rg_3d, Rb_3d, Dd_3d, Sp_3d,                  &
                             mh_3d, CDot_3d, sns_3d, N3_3d,               &
-                            i_dom, j_dom)
+                            i_dom, j_dom, ims, ime, jms, jme, kSNOW_GRID_Z)
                         nlay_new = kSNOW_GRID_Z - 1
                     end if
 
@@ -1483,7 +1524,7 @@ contains
                                 VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,       &
                                 Rg_3d, Rb_3d, Dd_3d, Sp_3d,                    &
                                 mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d,  &
-                                i_dom, j_dom, k, k-1)
+                                i_dom, j_dom, k, k-1, ims, ime, jms, jme, kSNOW_GRID_Z)
                         end do
                     end if
                     nlay_new = nlay_new + 1
@@ -1495,7 +1536,7 @@ contains
                         VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,               &
                         Rg_3d, Rb_3d, Dd_3d, Sp_3d,                            &
                         mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d,          &
-                        i_dom, j_dom, 1)
+                        i_dom, j_dom, 1, ims, ime, jms, jme, kSNOW_GRID_Z)
 
                     theta_i_new           = rho_deposit / rho_ice_c
                     Ds_3d (i_dom, 1, j_dom) = deposit_depth
@@ -1531,7 +1572,7 @@ contains
                         VFI_3d, VFW_3d, VFA_3d, VFS_3d, VFWP_3d,               &
                         Rg_3d, Rb_3d, Dd_3d, Sp_3d,                            &
                         mk_3d, mh_3d, CDot_3d, sns_3d, N3_3d, dep_3d,          &
-                        i_dom, j_dom, k)
+                        i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z)
                 end do
 
                 ! Recompute snow_height and SWE from layers. Inlined as a
