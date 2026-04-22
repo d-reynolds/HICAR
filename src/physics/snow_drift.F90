@@ -24,13 +24,12 @@ module snow_drift
     use data_structures, only : index_type
     use mod_atm_utilities, only : relative_humidity
 #ifdef SNOWPACK_FORTRAN
-    use snowpack_laws,   only : ustar_thresh_from_exch
+    use snowpack_laws,   only : comp_drift_mass_flux, comp_drift_mass_flux_sorensen, comp_ustar_thresh
+    use snowpack_constants, only : dp
 #endif
     implicit none
     private
     public :: snow_drift_var_request, snow_drift_init, snow_drift_step, snow_drift_apply_feedback
-
-    integer, parameter :: sp_dp = selected_real_kind(15, 307)  ! double precision
 
     ! -----------------------------------------------
     ! Physical parameters
@@ -114,7 +113,6 @@ contains
              kVARS%bs_saltation_height, &
              kVARS%bs_saltation_concentration, &
              kVARS%bs_swe_exchange,    &
-             kVARS%bs_swe_erode_max,   &
              kVARS%bs_sublimation_flux, &
              kVARS%bs_suspension_flux, &
              kVARS%bs_drift_swe_salt,   &
@@ -259,18 +257,17 @@ contains
 
         ! 2. Compute threshold friction velocity from the currently-exposed
         ! snowpack layer. Works for both FSM (generic Li & Pomeroy) and
-        ! SNOWPACK (Schmidt/Lehning). With SNOWPACK the threshold is
-        ! recomputed every snow_drift_step based on the cumulative
-        ! bs_swe_exch + bs_swe_erode_max so that the saltation flux
+        ! SNOWPACK (Schmidt/Lehning).
         ! self-limits once erosion exposes a harder layer.
         if (options%physics%snowmodel /= kSM_SNOWPACK) then
             call compute_threshold_ustar_generic(domain)
-#ifndef SNOWPACK_FORTRAN
+#ifdef SNOWPACK_FORTRAN
         else
-            call compute_threshold_ustar_snowpack(domain)
+            call compute_threshold_ustar_snowpack(domain, options%sm%saltation_model)
 #endif
         endif
 
+        ! saltation mass flux and concentration are computed by snowpack fortran driver
 #ifndef SNOWPACK_FORTRAN
         ! 3. Saltation concentration calculation
         call saltation_step(domain, dt, dx)
@@ -288,28 +285,28 @@ contains
     !>----------------------------------------------------------
     !! Compute threshold friction velocity from SNOWPACK grain properties.
     !!
-    !! When built with SNOWPACK_FORTRAN, the threshold is evaluated against
-    !! the layer that is currently exposed given the cumulative erosion /
-    !! deposition balance tracked through `bs_swe_exch` and
-    !! `bs_swe_erode_max`. This lets the saltation flux self-limit as
-    !! erosion reaches sintered deeper layers — without modifying the
-    !! snowpack state mid-LSM-step.
-    !!
     !! Lehning et al. (2000) Eq. 15 / SNOWPACK SnowDrift.cc
     !! (Sharma et al. 2023, GMD — CRYOWRF).
     !!----------------------------------------------------------
-    subroutine compute_threshold_ustar_snowpack(domain)
+    subroutine compute_threshold_ustar_snowpack(domain, salt_model)
         implicit none
         type(domain_t), intent(inout) :: domain
+        integer, intent(in) :: salt_model
 
-        integer :: i, j, n_snow
+        integer :: i, j, n_snow, k
         real :: Sp_top, Rg_top, Rb_top, N3_top
+        ! Temporary arrays for GPU kernel (contiguous memory for non-stride-1 slices)
+        real :: Ds_col(kSNOW_GRID_Z), VFI_col(kSNOW_GRID_Z)
+        real :: Sp_col(kSNOW_GRID_Z), Rg_col(kSNOW_GRID_Z), Rb_col(kSNOW_GRID_Z), N3_col(kSNOW_GRID_Z)
         real :: rho_air, rg_m
-        real :: weight, binding, tau_thresh, ustar_t
-        real(sp_dp) ::ustar_t_dp
+        real :: weight, binding, tau_thresh, ustar_t, ustar_t_out
+        ! DP temporaries for comp_drift_mass_flux outputs (callee signature is real(dp))
+        real(dp) :: Qsalt_dp, c_salt_dp, h_salt_dp, ustar_t_dp, ustar_dp
+        real(dp) :: Sphere_dp, rg_dp, rb_dp, N3_dp
 
         associate( &
             bs_ustar_t  => domain%vars_2d(domain%var_indx(kVARS%bs_threshold_ustar)%v)%data_2d, &
+            ustar       => domain%vars_2d(domain%var_indx(kVARS%ustar)%v)%data_2d, &
             swe         => domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
             land_mask   => domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
             density     => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
@@ -319,12 +316,15 @@ contains
             Rg_3d       => domain%vars_3d(domain%var_indx(kVARS%Rg)%v)%data_3d, &
             Rb_3d       => domain%vars_3d(domain%var_indx(kVARS%Rb)%v)%data_3d, &
             N3_3d       => domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d, &
+            bs_salt_conc => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_concentration)%v)%data_2d, &
+            bs_salt_flux => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d, &
+            bs_salt_height => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_height)%v)%data_2d, &
             bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d, &
-            bs_swe_erode_max => domain%vars_2d(domain%var_indx(kVARS%bs_swe_erode_max)%v)%data_2d, &
             n_layers    => domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di &
         )
 
-        !$acc parallel loop gang vector collapse(2) private(ustar_t_dp)
+        !$acc parallel loop gang vector collapse(2) &
+        !$acc   private(ustar_t_out, Sphere_dp, Rg_dp, Rb_dp, N3_dp, k)
         do j = jts, jte
             do i = its, ite
                 n_snow = n_layers(i,j)
@@ -334,24 +334,37 @@ contains
                     cycle
                 endif
 
-                ! Depth-walk threshold: u*_t is computed from the layer that
-                ! would be exposed by the historical deepest erosion, or the
-                ! precomputed fresh-snow value if a deposit sits above that line.
-                call ustar_thresh_from_exch(n_snow,                                 &
-                    real(Ds_3d (i, 1:n_snow, j), sp_dp),                            &
-                    real(VFI_3d(i, 1:n_snow, j), sp_dp),                            &
-                    real(Sp_3d (i, 1:n_snow, j), sp_dp),                            &
-                    real(Rg_3d (i, 1:n_snow, j), sp_dp),                            &
-                    real(Rb_3d (i, 1:n_snow, j), sp_dp),                            &
-                    real(N3_3d (i, 1:n_snow, j), sp_dp),                            &
-                    real(bs_swe_exch(i,j),       sp_dp),                            &
-                    real(bs_swe_erode_max(i,j),  sp_dp),                            &
-                    ustar_t_dp)
-                bs_ustar_t(i,j) = max(0.05, min(real(ustar_t_dp), 5.0))
+                Sphere_dp = real(Sp_3d(i,1,j), kind=dp)
+                Rg_dp = real(Rg_3d(i,1,j), kind=dp)
+                Rb_dp = real(Rb_3d(i,1,j), kind=dp)
+                N3_dp = real(N3_3d(i,1,j), kind=dp)
+                ustar_t_out = comp_ustar_thresh(Sphere_dp, Rg_dp, Rb_dp, N3_dp)
+                bs_ustar_t(i,j) = max(0.05, min(ustar_t_out, 5.0))
 
             enddo
         enddo
 
+        if (salt_model==kSALTATION_SORENSEN) then
+            !$acc parallel loop gang vector collapse(2) firstprivate(salt_model) &
+            !$acc   private(Qsalt_dp, c_salt_dp, h_salt_dp, ustar_t_dp, ustar_dp)
+            do j = jts, jte
+                do i = its, ite
+                    if (n_layers(i,j) < 1) cycle
+
+                    ! Saltation uses top-layer grain properties only (surface process).
+                    ! Outputs flow through real(dp) temporaries since comp_drift_mass_flux
+                    ! has a real(dp) signature.
+                    ustar_t_dp = bs_ustar_t(i,j)
+                    ustar_dp = ustar(i,j)
+
+                    call comp_drift_mass_flux_sorensen(ustar_t_dp, ustar_dp, Qsalt_dp, c_salt_dp, h_salt_dp)
+
+                    bs_salt_flux(i,j)   = real(Qsalt_dp)
+                    bs_salt_conc(i,j)   = real(c_salt_dp)
+                    bs_salt_height(i,j) = real(h_salt_dp)
+                enddo
+            enddo
+        endif
         end associate
 
     end subroutine compute_threshold_ustar_snowpack
@@ -574,7 +587,6 @@ contains
             swe        => domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
             skin_temp  => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
             bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d, &
-            bs_swe_erode_max => domain%vars_2d(domain%var_indx(kVARS%bs_swe_erode_max)%v)%data_2d, &
             z0         => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
             psfc       => domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d, &
             ustar_2d   => domain%vars_2d(domain%var_indx(kVARS%ustar)%v)%data_2d, &
@@ -738,7 +750,7 @@ contains
                     n_salt_val = 0.0
                     if (using_snowpack .and. saltation_doorschot) then
                         h_salt_loc = bs_salt_height(i,j)
-                        if (bs_salt_conc(i,j) > 0.0 .and. &
+                        if (ustar_2d(i,j) > bs_ustar_t(i,j) .and. bs_salt_conc(i,j) > 0.0 .and. &
                             swe(i,j) >= 0.5 .and. skin_temp(i,j) < 272.15) then
                             q_salt_val = bs_salt_conc(i,j) / rho_air
                                 n_salt_val = 0.45 * q_salt_val &
@@ -748,7 +760,7 @@ contains
                         bs_salt_height(i,j) = 0.15   ! [m] fixed saltation reference height
 
                         ! Safety gates (CRYOWRF Coupler.cpp lines 969-975)
-                        if (bs_salt_mass(i,j) > 0.0 .and. swe(i,j) >= 0.5 &
+                        if (ustar_2d(i,j) > bs_ustar_t(i,j) .and. bs_salt_mass(i,j) > 0.0 .and. swe(i,j) >= 0.5 &
                             .and. skin_temp(i,j) < 272.15) then
                             ! Particle speed: 75% of log-law wind at h_salt (Nishimura 2014)
                             upart = 0.75 * ustar_2d(i,j) / 0.4 * log(bs_salt_height(i,j) / 0.002)
@@ -1052,12 +1064,6 @@ contains
                 ! Positive = deposition (mass added to snowpack), negative = erosion.
                 ! Applied to SNOWPACK elements at the NEXT snowpack_fortran_step call.
                 bs_swe_exch(i,j) = bs_swe_exch(i,j) + bs_susp_flux(i,j) * dt + dep_mass_salt
-
-                ! Track historical deepest erosion for this LSM step. Used by
-                ! the u*_thresh depth-walk helper so that a deposit landing
-                ! on top of an exposed hard layer uses fresh-snow grain
-                ! properties rather than the (already-eroded) original top.
-                bs_swe_erode_max(i,j) = max(bs_swe_erode_max(i,j), -bs_swe_exch(i,j))
 
             enddo
         enddo

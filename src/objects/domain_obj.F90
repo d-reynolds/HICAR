@@ -3143,8 +3143,8 @@ contains
                               v3d_data => this%vars_3d(this%var_indx(var_indx)%v)%data_3d, &
                               ims => this%vars_3d(this%var_indx(var_indx)%v)%grid%ims, &
                               ime => this%vars_3d(this%var_indx(var_indx)%v)%grid%ime, &
-                              kms => this%kms, &
-                              kme => this%kme, &
+                              kms => this%vars_3d(this%var_indx(var_indx)%v)%grid%kms, &
+                              kme => this%vars_3d(this%var_indx(var_indx)%v)%grid%kme, &
                               jms => this%vars_3d(this%var_indx(var_indx)%v)%grid%jms, &
                               jme => this%vars_3d(this%var_indx(var_indx)%v)%grid%jme)
                     !$acc parallel loop gang vector collapse(3) present(v3d_dqdt, v3d_data, ims, ime, kms, kme, jms, jme)
@@ -3275,8 +3275,8 @@ contains
             else if (this%forcing_hi(n)%three_d) then
                 ims = this%vars_3d(this%var_indx(var_indx)%v)%grid%ims
                 ime = this%vars_3d(this%var_indx(var_indx)%v)%grid%ime
-                kms = this%kms
-                kme = this%kme
+                kms = this%vars_3d(this%var_indx(var_indx)%v)%grid%kms
+                kme = this%vars_3d(this%var_indx(var_indx)%v)%grid%kme
                 jms = this%vars_3d(this%var_indx(var_indx)%v)%grid%jms
                 jme = this%vars_3d(this%var_indx(var_indx)%v)%grid%jme
 

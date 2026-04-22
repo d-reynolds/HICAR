@@ -421,7 +421,6 @@ module icar_constants
         integer :: bs_drift_swe_susp      ! 2D: accumulated suspension SWE change
         integer :: bs_drift_swe_subl      ! 2D: accumulated sublimation SWE change
         integer :: bs_swe_exchange       ! 2D: mass exchanged with snowpack (kg/m^2)
-        integer :: bs_swe_erode_max      ! 2D: historical deepest cumulative erosion this LSM step (kg/m^2)
 
         integer :: last_var
     end type var_constants_type

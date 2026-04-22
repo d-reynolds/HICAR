@@ -4131,16 +4131,6 @@ contains
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
-        !!  Blowing snow historical deepest erosion this LSM step
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%bs_swe_erode_max) then
-            var_meta%name        = "bs_swe_erode_max"
-            var_meta%dimensions  = two_d_t_dimensions
-            var_meta%attributes  = [attribute_t("long_name", "Blowing snow deepest cumulative erosion this LSM step"), &
-                               attribute_t("units",         "kg m-2"),                        &
-                               attribute_t("coordinates",   "lat lon")]
-
-        !>------------------------------------------------------------
         !!  Blowing snow sublimation flux
         !!------------------------------------------------------------
         else if (var_idx==kVARS%bs_sublimation_flux) then
