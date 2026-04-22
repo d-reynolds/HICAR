@@ -106,6 +106,7 @@ module domain_interface
     procedure :: interpolate_forcing
     procedure :: update_delta_fields
     procedure :: apply_forcing
+    procedure :: read_land_variables
 
     procedure :: update_device
     procedure :: update_host
@@ -203,6 +204,12 @@ module domain_interface
         class(domain_t),    intent(inout) :: this
         type(options_t), intent(in)       :: options
         real, intent(in)                  :: dt
+    end subroutine
+
+    module subroutine read_land_variables(this, options)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        type(options_t), intent(in)    :: options
     end subroutine
 
     module subroutine update_device(this)

@@ -55,7 +55,7 @@ contains
 
         call initialize_core_variables(this, options)  ! split into several subroutines?
 
-        call read_land_variables(this, options)
+        call init_land_variables(this, options)
 
         
         !$acc enter data copyin(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
@@ -1917,11 +1917,61 @@ contains
     end subroutine split_topography
 
 
-    
+    subroutine init_land_variables(this,options)
+        implicit none
+        class(domain_t), intent(inout)  :: this
+        type(options_t), intent(in)     :: options
+
+        if (this%var_indx(kVARS%vegetation_fraction_max)%v > 0) then
+            if (STD_OUT_PE) write(*,*) "    VEGMAX not specified; using default value of 0.8"
+            this%vars_2d(this%var_indx(kVARS%vegetation_fraction_max)%v)%data_2d = 80.
+        endif
+        if (this%var_indx(kVARS%lai)%v > 0) then
+            if (STD_OUT_PE) write(*,*) "    LAI not specified; using default value of 1"
+            this%vars_2d(this%var_indx(kVARS%lai)%v)%data_2d = 1
+        endif
+
+        if (this%var_indx(kVARS%land_mask)%v > 0) this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di = kLC_LAND
+        if (this%var_indx(kVARS%soil_type)%v > 0) this%vars_2d(this%var_indx(kVARS%soil_type)%v)%data_2di = 3
+        if (this%var_indx(kVARS%soil_water_content)%v > 0) this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d = 0.4
+        if (this%var_indx(kVARS%veg_type)%v > 0) this%vars_2d(this%var_indx(kVARS%veg_type)%v)%data_2di = 7
+        if (this%var_indx(kVARS%albedo)%v > 0) this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d = 0.17
+        if (this%var_indx(kVARS%vegetation_fraction)%v > 0) this%vars_3d(this%var_indx(kVARS%vegetation_fraction)%v)%data_3d = 60.
 
 
+        ! Initialize surface temperature fields from scalar fallback
+        ! These will be further updated by the land model, but need sensible initial values
+        if (this%var_indx(kVARS%skin_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%skin_temperature)%v)%data_2d = options%domain%init_surf_temp
+        if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = options%domain%init_surf_temp
+        if (this%var_indx(kVARS%temperature_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d = options%domain%init_surf_temp
+        if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d = options%domain%init_surf_temp
+        if (this%var_indx(kVARS%ground_surf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%ground_surf_temperature)%v)%data_2d = options%domain%init_surf_temp
+        if (this%var_indx(kVARS%canopy_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d = options%domain%init_surf_temp
 
-    subroutine read_land_variables(this, options)
+        ! SST uses its own option (separate from land surface temperature)
+        if (this%var_indx(kVARS%sst)%v > 0) this%vars_2d(this%var_indx(kVARS%sst)%v)%data_2d = options%domain%init_sst
+
+        if (this%var_indx(kVARS%roughness_z0)%v > 0) this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d = 0.001
+        if (this%var_indx(kVARS%humidity_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%humidity_2m)%v)%data_2d=0.001
+        if (this%var_indx(kVARS%surface_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%surface_pressure)%v)%data_2d=102000
+        if (this%var_indx(kVARS%land_emissivity)%v > 0) this%vars_2d(this%var_indx(kVARS%land_emissivity)%v)%data_2d=0.95
+
+        if (this%var_indx(kVARS%canopy_vapor_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_vapor_pressure)%v)%data_2d=2000
+        if (this%var_indx(kVARS%coeff_momentum_drag)%v > 0) this%vars_2d(this%var_indx(kVARS%coeff_momentum_drag)%v)%data_2d=0.01
+        if (this%var_indx(kVARS%chs)%v > 0) this%vars_2d(this%var_indx(kVARS%chs)%v)%data_2d=0.01
+        if (this%var_indx(kVARS%chs2)%v > 0) this%vars_2d(this%var_indx(kVARS%chs2)%v)%data_2d=0.01
+        if (this%var_indx(kVARS%cqs2)%v > 0) this%vars_2d(this%var_indx(kVARS%cqs2)%v)%data_2d=0.01
+
+        if (this%var_indx(kVARS%hpbl)%v > 0) this%vars_2d(this%var_indx(kVARS%hpbl)%v)%data_2d=100.0
+        if (this%var_indx(kVARS%coeff_heat_exchange_3d)%v > 0) this%vars_3d(this%var_indx(kVARS%coeff_heat_exchange_3d)%v)%data_3d=0.01
+        if (this%var_indx(kVARS%coeff_momentum_exchange_3d)%v > 0) this%vars_3d(this%var_indx(kVARS%coeff_momentum_exchange_3d)%v)%data_3d=0.01
+        if (this%var_indx(kVARS%snow_albedo_prev)%v > 0) this%vars_2d(this%var_indx(kVARS%snow_albedo_prev)%v)%data_2d=0.65
+        if (this%var_indx(kVARS%ustar)%v > 0)                  this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d=0.1
+        if (this%var_indx(kVARS%snow_temperature)%v > 0)    this%vars_3d(this%var_indx(kVARS%snow_temperature)%v)%data_3d=273.15
+
+    end subroutine init_land_variables
+
+    module subroutine read_land_variables(this, options)
         implicit none
         class(domain_t), intent(inout)  :: this
         type(options_t), intent(in)     :: options
@@ -1931,20 +1981,42 @@ contains
         real :: soil_thickness(20)
         real :: dzdx_val, dzdy_val, slope_rad_val, slope_deg_val, shd_norm, cos_slope_thresh
 
-        soil_thickness = 1.0
-        soil_thickness(1:4) = [0.1, 0.2, 0.5, 1.0]
+        if (STD_OUT_PE) write (*,*) "Reading Land Variables"
+        if (STD_OUT_PE) flush(output_unit)
 
         ! Read optional 2D surface temperature field from domain file
         if (options%domain%surface_temp_var /= "") then
             call io_read(options%domain%init_conditions_file, options%domain%surface_temp_var, surf_temp)
             if (STD_OUT_PE) write(*,*) "  Read surface temperature field from: ", trim(options%domain%surface_temp_var)
+
+            if (this%var_indx(kVARS%skin_temperature)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%skin_temperature)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+
+            if (this%var_indx(kVARS%temperature_2m)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+
+            if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+            if (this%var_indx(kVARS%ground_surf_temperature)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%ground_surf_temperature)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+
+            if (this%var_indx(kVARS%canopy_temperature)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
         else
             allocate(surf_temp(this%grid%ims:this%grid%ime,this%grid%jms:this%grid%jme))
             surf_temp = options%domain%init_surf_temp
         endif
 
-        if (STD_OUT_PE) write (*,*) "Reading Land Variables"
-        if (STD_OUT_PE) flush(output_unit)
 
         if (this%var_indx(kVARS%soil_water_content)%v > 0) then
             nsoil = size(this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d, 2)
@@ -1959,10 +2031,6 @@ contains
             if (this%var_indx(kVARS%land_mask)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
                 where(this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di==0) this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di = kLC_WATER  ! To ensure conisitency. land_mask can be 0 or 2 for water, enforce a single value.
-            else 
-                if (this%var_indx(kVARS%land_mask)%v > 0) then
-                    this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di = kLC_LAND
-                endif
             endif
         endif
 
@@ -1985,10 +2053,6 @@ contains
             if (this%var_indx(kVARS%soil_type)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%soil_type)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
-        else
-            if (this%var_indx(kVARS%soil_type)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%soil_type)%v)%data_2di = 3
-            endif
         endif
 
         if (options%domain%cropcategory_var /= "") then
@@ -1997,10 +2061,6 @@ contains
                            temporary_data)
             if (this%var_indx(kVARS%crop_category)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%crop_category)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-            endif
-        else
-            if (this%var_indx(kVARS%crop_category)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%crop_category)%v)%data_2di = 0
             endif
         endif
 
@@ -2042,7 +2102,6 @@ contains
                     endif
                 endif
             endif
-
         else
             if (this%var_indx(kVARS%soil_temperature)%v > 0) then
                 if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) then
@@ -2061,10 +2120,6 @@ contains
             if (this%var_indx(kVARS%snow_water_equivalent)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
-        else
-            if (this%var_indx(kVARS%snow_water_equivalent)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = 0
-            endif
         endif
 
         if (options%domain%snowh_var /= "") then
@@ -2073,10 +2128,6 @@ contains
                            temporary_data)
             if (this%var_indx(kVARS%snow_height)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%snow_height)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-            endif
-        else
-            if (this%var_indx(kVARS%snow_height)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%snow_height)%v)%data_2d = 0
             endif
         endif
         
@@ -2103,11 +2154,6 @@ contains
                     this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d(:,i,:) = temporary_data_3d(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme, i)
                 enddo
             endif
-
-        else
-            if (this%var_indx(kVARS%soil_water_content)%v > 0) then
-                this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d = 0.4
-            endif
         endif
 
         if (options%domain%vegtype_var /= "") then
@@ -2116,10 +2162,6 @@ contains
                            temporary_data)
             if (this%var_indx(kVARS%veg_type)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%veg_type)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-            endif
-        else
-            if (this%var_indx(kVARS%veg_type)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%veg_type)%v)%data_2di = 7
             endif
         endif
 
@@ -2134,10 +2176,6 @@ contains
                     if (STD_OUT_PE) write(*,*) "Changing input ALBEDO % to fraction"
                     this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d = this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d / 100
                 endif
-            endif
-        else
-            if (this%var_indx(kVARS%albedo)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d = 0.17
             endif
         endif
 
@@ -2163,11 +2201,6 @@ contains
                     enddo
                 endif
             endif
-
-        else
-            if (this%var_indx(kVARS%vegetation_fraction)%v > 0) then
-                this%vars_3d(this%var_indx(kVARS%vegetation_fraction)%v)%data_3d = 60.
-            endif
         endif
 
         if (this%var_indx(kVARS%soil_totalmoisture)%v > 0) then
@@ -2186,11 +2219,6 @@ contains
             if (this%var_indx(kVARS%vegetation_fraction_max)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%vegetation_fraction_max)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
-        else
-            if (this%var_indx(kVARS%vegetation_fraction_max)%v > 0) then
-                if (STD_OUT_PE) write(*,*) "    VEGMAX not specified; using default value of 0.8"
-                this%vars_2d(this%var_indx(kVARS%vegetation_fraction_max)%v)%data_2d = 80.
-            endif
         endif
 
         if (options%domain%lai_var /= "") then
@@ -2200,11 +2228,6 @@ contains
             if (this%var_indx(kVARS%lai)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%lai)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
-        else
-            if (this%var_indx(kVARS%lai)%v > 0) then
-                if (STD_OUT_PE) write(*,*) "    LAI not specified; using default value of 1"
-                this%vars_2d(this%var_indx(kVARS%lai)%v)%data_2d = 1
-            endif
         endif
 
         if (options%domain%canwat_var /= "") then
@@ -2213,11 +2236,6 @@ contains
                            temporary_data)
             if (this%var_indx(kVARS%canopy_water)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%canopy_water)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-            endif
-        else
-            if (this%var_indx(kVARS%canopy_water)%v > 0) then
-                if (STD_OUT_PE) write(*,*) "    CANWAT not specified; using default value of 0"
-                this%vars_2d(this%var_indx(kVARS%canopy_water)%v)%data_2d = 0
             endif
         endif
 
@@ -2366,7 +2384,6 @@ contains
                 if (this%var_indx(kVARS%hlm)%v > 0) then
                     do i=1,90
                         this%vars_3d(this%var_indx(kVARS%hlm)%v)%data_3d(:,i,:) = temporary_data_3d(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme, i)
-                        !if (STD_OUT_PE) write(*,*),"hlm ", i, this%vars_3d(this%var_indx(kVARS%hlm)%v)%data_3d(this%grid%its,i,this%grid%jts)
                     enddo
                 endif
             else  
@@ -2386,92 +2403,7 @@ contains
             !!
         endif
 
-        ! Initialize surface temperature fields from 2D field (if provided) or scalar fallback
-        ! These will be further updated by the land model, but need sensible initial values
-        if (this%var_indx(kVARS%skin_temperature)%v > 0) then
-            this%vars_2d(this%var_indx(kVARS%skin_temperature)%v)%data_2d = &
-                surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-        endif
-
-        ! SST uses its own option (separate from land surface temperature)
-        if (this%var_indx(kVARS%sst)%v > 0) this%vars_2d(this%var_indx(kVARS%sst)%v)%data_2d = options%domain%init_sst
-
-        if (this%var_indx(kVARS%roughness_z0)%v > 0) this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d = 0.001
-        if (this%var_indx(kVARS%sensible_heat)%v > 0) this%vars_2d(this%var_indx(kVARS%sensible_heat)%v)%data_2d=0
-        if (this%var_indx(kVARS%latent_heat)%v > 0) this%vars_2d(this%var_indx(kVARS%latent_heat)%v)%data_2d=0
-        if (this%var_indx(kVARS%u_10m)%v > 0) this%vars_2d(this%var_indx(kVARS%u_10m)%v)%data_2d=0
-        if (this%var_indx(kVARS%v_10m)%v > 0) this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d=0
-
-        if (this%var_indx(kVARS%windspd_10m)%v > 0) this%vars_2d(this%var_indx(kVARS%windspd_10m)%v)%data_2d=0
-        if (this%var_indx(kVARS%temperature_2m)%v > 0) then
-            this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d = &
-                surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-        endif
-        if (this%var_indx(kVARS%humidity_2m)%v > 0) this%vars_2d(this%var_indx(kVARS%humidity_2m)%v)%data_2d=0.001
-        if (this%var_indx(kVARS%surface_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%surface_pressure)%v)%data_2d=102000
-        if (this%var_indx(kVARS%land_emissivity)%v > 0) this%vars_2d(this%var_indx(kVARS%land_emissivity)%v)%data_2d=0.95
-        if (this%var_indx(kVARS%longwave_up)%v > 0) this%vars_2d(this%var_indx(kVARS%longwave_up)%v)%data_2d=0
-        if (this%var_indx(kVARS%ground_heat_flux)%v > 0) this%vars_2d(this%var_indx(kVARS%ground_heat_flux)%v)%data_2d=0
-
-        if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) then
-            this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d = &
-                surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-        endif
-        if (this%var_indx(kVARS%ground_surf_temperature)%v > 0) then
-            this%vars_2d(this%var_indx(kVARS%ground_surf_temperature)%v)%data_2d = &
-                surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-        endif
-        if (this%var_indx(kVARS%canopy_vapor_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_vapor_pressure)%v)%data_2d=2000
-        if (this%var_indx(kVARS%canopy_temperature)%v > 0) then
-            this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d = &
-                surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-        endif
-        if (this%var_indx(kVARS%coeff_momentum_drag)%v > 0) this%vars_2d(this%var_indx(kVARS%coeff_momentum_drag)%v)%data_2d=0.01
-        if (this%var_indx(kVARS%chs)%v > 0) this%vars_2d(this%var_indx(kVARS%chs)%v)%data_2d=0.01
-        if (this%var_indx(kVARS%chs2)%v > 0) this%vars_2d(this%var_indx(kVARS%chs2)%v)%data_2d=0.01
-        if (this%var_indx(kVARS%cqs2)%v > 0) this%vars_2d(this%var_indx(kVARS%cqs2)%v)%data_2d=0.01
-
-        if (this%var_indx(kVARS%QFX)%v > 0) this%vars_2d(this%var_indx(kVARS%QFX)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%br)%v > 0) this%vars_2d(this%var_indx(kVARS%br)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%mol)%v > 0) this%vars_2d(this%var_indx(kVARS%mol)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%psim)%v > 0) this%vars_2d(this%var_indx(kVARS%psim)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%psih)%v > 0) this%vars_2d(this%var_indx(kVARS%psih)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%fm)%v > 0) this%vars_2d(this%var_indx(kVARS%fm)%v)%data_2d=0.0
-        if (this%var_indx(kVARS%fh)%v > 0) this%vars_2d(this%var_indx(kVARS%fh)%v)%data_2d=0.0
-
-        if (this%var_indx(kVARS%hpbl)%v > 0) this%vars_2d(this%var_indx(kVARS%hpbl)%v)%data_2d=100.0
-        if (this%var_indx(kVARS%coeff_heat_exchange_3d)%v > 0) this%vars_3d(this%var_indx(kVARS%coeff_heat_exchange_3d)%v)%data_3d=0.01
-        if (this%var_indx(kVARS%coeff_momentum_exchange_3d)%v > 0) this%vars_3d(this%var_indx(kVARS%coeff_momentum_exchange_3d)%v)%data_3d=0.01
-        if (this%var_indx(kVARS%canopy_fwet)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_fwet)%v)%data_2d=0
-        if (this%var_indx(kVARS%snow_water_eq_prev)%v > 0) this%vars_2d(this%var_indx(kVARS%snow_water_eq_prev)%v)%data_2d=0
-        if (this%var_indx(kVARS%snow_albedo_prev)%v > 0) this%vars_2d(this%var_indx(kVARS%snow_albedo_prev)%v)%data_2d=0.65
-        if (this%var_indx(kVARS%storage_lake)%v > 0) this%vars_2d(this%var_indx(kVARS%storage_lake)%v)%data_2d=0
-
-        if (this%var_indx(kVARS%ustar)%v > 0)                  this%vars_2d(this%var_indx(kVARS%ustar)%v)%data_2d=0.1
-        if (this%var_indx(kVARS%irr_eventno_sprinkler)%v > 0)  this%vars_2d(this%var_indx(kVARS%irr_eventno_sprinkler)%v)%data_2di=0
-        if (this%var_indx(kVARS%irr_eventno_micro)%v > 0)      this%vars_2d(this%var_indx(kVARS%irr_eventno_micro)%v)%data_2di=0
-        if (this%var_indx(kVARS%irr_eventno_flood)%v > 0)      this%vars_2d(this%var_indx(kVARS%irr_eventno_flood)%v)%data_2di=0
-        if (this%var_indx(kVARS%plant_growth_stage)%v > 0)     this%vars_2d(this%var_indx(kVARS%plant_growth_stage)%v)%data_2di=0
-        if (this%var_indx(kVARS%kpbl)%v > 0)                   this%vars_2d(this%var_indx(kVARS%kpbl)%v)%data_2di=0
-
-        if (this%var_indx(kVARS%runoff_tstep)%v > 0)        this%vars_2d(this%var_indx(kVARS%runoff_tstep)%v)%data_2d=0.
-        if (this%var_indx(kVARS%snow_temperature)%v > 0)    this%vars_3d(this%var_indx(kVARS%snow_temperature)%v)%data_3d=273.15
-        if (this%var_indx(kVARS%Sice)%v > 0)                this%vars_3d(this%var_indx(kVARS%Sice)%v)%data_3d=0.
-        if (this%var_indx(kVARS%Sliq)%v > 0)                this%vars_3d(this%var_indx(kVARS%Sliq)%v)%data_3d=0.
-        if (this%var_indx(kVARS%Ds)%v > 0)                  this%vars_3d(this%var_indx(kVARS%Ds)%v)%data_3d=0.
-        if (this%var_indx(kVARS%fsnow)%v > 0)               this%vars_2d(this%var_indx(kVARS%fsnow)%v)%data_2d=0.
-        if (this%var_indx(kVARS%snow_nlayers)%v > 0)        this%vars_2d(this%var_indx(kVARS%snow_nlayers)%v)%data_2di=0
-        if (this%var_indx(kVARS%bs_saltation_flux)%v > 0)   this%vars_2d(this%var_indx(kVARS%bs_saltation_flux)%v)%data_2d=0.
-        if (this%var_indx(kVARS%bs_suspension_flux)%v > 0)  this%vars_2d(this%var_indx(kVARS%bs_suspension_flux)%v)%data_2d=0.
-        if (this%var_indx(kVARS%dSWE_subl)%v > 0)             this%vars_2d(this%var_indx(kVARS%dSWE_subl)%v)%data_2d=0.
-        if (this%var_indx(kVARS%dSWE_slide)%v > 0)            this%vars_2d(this%var_indx(kVARS%dSWE_slide)%v)%data_2d=0.
-
-        !!
-        if (this%var_indx(kVARS%meltflux_out_tstep)%v > 0)  this%vars_2d(this%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d=0.
-        if (this%var_indx(kVARS%shortwave_direct)%v > 0)  this%vars_2d(this%var_indx(kVARS%shortwave_direct)%v)%data_2d=0.
-        if (this%var_indx(kVARS%shortwave_diffuse)%v > 0)  this%vars_2d(this%var_indx(kVARS%shortwave_diffuse)%v)%data_2d=0.
-        if (this%var_indx(kVARS%shortwave_direct_above)%v > 0)  this%vars_2d(this%var_indx(kVARS%shortwave_direct_above)%v)%data_2d=0.
-        if (this%var_indx(kVARS%Sliq_out)%v > 0)  this%vars_2d(this%var_indx(kVARS%Sliq_out)%v)%data_2d=0.
+        call this%update_device()
 
     end subroutine read_land_variables
 

@@ -356,6 +356,12 @@ contains
             call ioclient%receive_nest_init(domain, boundary)
         endif
 
+        ! now read in any static land data. This way we do: 
+        ! 1) init via default values, 
+        ! 2) receive any parent state variables from a spin-up,
+        ! 3) any user-set variables get the last word
+        call domain%read_land_variables(options)
+
         if (options%restart%restart) then
             if (STD_OUT_PE) write(*,*) "Reading restart data"
             call ioclient%receive_rst(domain, options)
