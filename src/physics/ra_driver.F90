@@ -1788,14 +1788,27 @@ contains
                 call gather_neighborhood_lw_emit(domain, nbr_buffer)
 
                 !$acc parallel loop gang vector collapse(2)                                      &
-                !$acc& present(svf, slope_ang, aspect_ang, emiss, skin_temp, longwave,           &
-                !$acc&         nbr_buffer, azimuth_offset, inv_dist2_offset,                 &
-                !$acc&         ihs, ihe, jhs, jhe)                                               &
+                !$acc& present(svf, aspect_ang, emiss, skin_temp, longwave, nbr_buffer,          &
+                !$acc&         azimuth_offset, inv_dist2_offset, ihs, ihe, jhs, jhe)             &
                 !$acc& private(lw_emit_sum, lw_weight_sum, facing, w_refl,                       &
                 !$acc&         lw_emit_terrain, local_emit, terrain_vf, di, dj, ii, jj)
                 do j = jts, jte
                     do i = its, ite
-                        ! Weighted sum of emitted LW from neighbours that face this cell
+                        ! Weight per neighbour = (solid angle subtended from target)
+                        ! ~ (1/r²) · cos(θ_n), where θ_n is the angle between the
+                        ! neighbour's surface normal and the line of sight from the
+                        ! neighbour to the target. In the horizontal-LOS stencil
+                        ! approximation (using only aspect/azimuth angles), that's
+                        ! cos(θ_n) ≈ max(cos(aspect_nbr − azimuth_from_target), 0) —
+                        ! a neighbour whose down-slope aspect aligns with the azimuth
+                        ! from the target is tilted toward us, projecting more area.
+                        !
+                        ! NOTE: unlike the SW reflected-terrain kernel above we do
+                        ! NOT multiply by the target-side `-sin(α_nbr)·sin(α_tgt)·
+                        ! cos(Δaspect)` factor. That's an SW-only "target hemisphere
+                        ! orientation" term. For LW absorption, (1-SVF) already sets
+                        ! the total terrain-hemisphere fraction at the target, so no
+                        ! target-side cosine belongs in the per-neighbour weight.
                         lw_emit_sum    = 0.0
                         lw_weight_sum  = 0.0
                         do dj = -R_cells, R_cells
@@ -1806,12 +1819,11 @@ contains
                                 jj = j + dj
                                 if (ii < ihs .or. ii > ihe .or. jj < jhs .or. jj > jhe) cycle
 
-                                ! Same facing weight as SW reflected-terrain stencil:
-                                ! neighbours whose slope points toward this cell contribute more.
-                                facing = max(cos(aspect_ang(ii,jj) - azimuth_offset(di,dj)), 0.0) &
-                                       * max(-sin(slope_ang(ii,jj)) * sin(slope_ang(i,j))          &
-                                       * cos(aspect_ang(ii,jj) - aspect_ang(i,j)), 0.01)
-                                w_refl = inv_dist2_offset(di,dj) * max(facing, 0.0)
+                                ! Neighbour-facing cosine (clamped ≥ 0). Neighbours
+                                ! turned away from the target project no area into
+                                ! the target's hemisphere and contribute nothing.
+                                facing = max(cos(aspect_ang(ii,jj) - azimuth_offset(di,dj)), 0.0)
+                                w_refl = inv_dist2_offset(di,dj) * facing
 
                                 lw_emit_sum   = lw_emit_sum   + w_refl * nbr_buffer(ii,jj)
                                 lw_weight_sum = lw_weight_sum + w_refl
@@ -1834,7 +1846,7 @@ contains
 
                 end associate
                 !$acc end data
-            else
+            elseif (run_full_radiation .and. options%rad%terrain_refl_radius == 0) then
                 ! LOCAL fallback: use this cell's own skin temperature and emissivity
                 ! for the terrain-emission term. No neighbourhood gather.
                 associate(svf       => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d,              &
