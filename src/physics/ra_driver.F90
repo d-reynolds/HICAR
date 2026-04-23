@@ -31,7 +31,7 @@ module radiation
     use iso_fortran_env, only: real64
     use time_object,        only : Time_type
     use icar_constants, only : kVARS, kRA_BASIC, kRA_SIMPLE, kRA_RRTMG, kRA_RRTMGP, STD_OUT_PE, kMP_THOMP_AER, kMAX_NESTS
-    use mod_wrf_constants, only : cp, R_d, gravity, DEGRAD, DPD, piconst
+    use mod_wrf_constants, only : cp, R_d, gravity, DEGRAD, DPD, piconst, STBOLT
     use mod_atm_utilities, only : cal_cldfra3, calc_solar_elevation, calc_solar_date
     use mpi_f08
 
@@ -386,34 +386,31 @@ contains
     !! corner exchanges, because the EW strips include data received from NS exchanges.
     !! (In a 2D grid decomposition, NS neighbors share the same x range and EW neighbors
     !!  share the same y range, so strip lengths always match between sender and receiver.)
-    subroutine gather_neighborhood_albedo(domain, nbr_albedo_2d)
+    !>----------------------------------------------------------
+    !! Extend a 2D field outward from the owned tile `[its:ite, jts:jte]`
+    !! across MPI ranks to a neighbourhood radius of `R_cells`. The
+    !! owned tile must be pre-populated by the caller; halo cells must
+    !! be zeroed. On return, halo cells within R_cells of the tile
+    !! boundaries hold the corresponding values from neighbouring
+    !! ranks. Halo cells beyond that radius remain zero.
+    !!
+    !! Exchanges are done in phases of up to `min(tile_w_i, tile_w_j)`
+    !! cells each, with NS strips first and then EW (so corner regions
+    !! are filled from the already-extended NS data). Pure MPI Isend +
+    !! Recv + Wait, with CUDA-aware buffers via `acc host_data`.
+    !!----------------------------------------------------------
+    subroutine extend_neighborhood_2d(domain, nbr_2d)
         implicit none
         type(domain_t), intent(in) :: domain
-        real, intent(inout) :: nbr_albedo_2d(domain%ihs:domain%ihe, domain%jhs:domain%jhe)
+        real, intent(inout) :: nbr_2d(domain%ihs:domain%ihe, domain%jhs:domain%jhe)
 
         real, allocatable :: send_buf(:), recv_buf(:)
         integer :: phase, n_phases, tile_w_i, tile_w_j, min_tile_w, width
-        integer :: i_lo, i_hi, j_lo, j_hi  ! current valid extent in nbr_albedo_2d
+        integer :: i_lo, i_hi, j_lo, j_hi  ! current valid extent in nbr_2d
         integer :: send_len, recv_width, max_recv_len, buf_size, ierr
         integer :: i, j
         type(MPI_Status) :: stat
         type(MPI_Request) :: send_req
-
-        !zero buffer
-        !$acc kernels present(nbr_albedo_2d)
-        nbr_albedo_2d = 0.0
-        !$acc end kernels
-
-        ! Copy own tile albedo into the buffer
-        associate(albedo => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
-                  shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d)
-        !$acc parallel loop gang vector collapse(2) present(nbr_albedo_2d, albedo, shortwave)
-        do j = jts, jte
-            do i = its, ite
-                nbr_albedo_2d(i,j) = albedo(i,j) * shortwave(i,j)
-            end do
-        end do
-        end associate
 
         tile_w_i = ite - its + 1
         tile_w_j = jte - jts + 1
@@ -425,7 +422,7 @@ contains
         !Do an MPI max reduce on n_phases so that sync calls are always complete
         call MPI_Allreduce(MPI_IN_PLACE, n_phases, 1, MPI_INT, MPI_MAX, domain%compute_comms)
 
-        ! Track the extent of valid data in nbr_albedo_2d
+        ! Track the extent of valid data in nbr_2d
         i_lo = its; i_hi = ite
         j_lo = jts; j_hi = jte
 
@@ -446,10 +443,10 @@ contains
                 send_len = (i_hi - i_lo + 1) * width
                 max_recv_len = send_len
                 ! Pack: send our southernmost `width` rows to south neighbor
-                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_albedo_2d)
+                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
                 do j = j_lo, j_lo + width - 1
                     do i = i_lo, i_hi
-                        send_buf((j - j_lo) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_albedo_2d(i, j)
+                        send_buf((j - j_lo) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_2d(i, j)
                     end do
                 end do
                 !$acc host_data use_device(send_buf, recv_buf)
@@ -463,10 +460,10 @@ contains
                 !$acc end host_data
                 ! Unpack only the rows we have space for (closest to our domain)
                 if (recv_width > 0) then
-                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_albedo_2d)
+                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_2d)
                     do j = j_lo - recv_width, j_lo - 1
                         do i = i_lo, i_hi
-                            nbr_albedo_2d(i, j) = recv_buf( &
+                            nbr_2d(i, j) = recv_buf( &
                                 (width - recv_width) * (i_hi - i_lo + 1) + &
                                 (j - (j_lo - recv_width)) * (i_hi - i_lo + 1) + (i - i_lo) + 1)
                         end do
@@ -480,10 +477,10 @@ contains
                 recv_width = max(0, min(width, domain%jhe - j_hi))
                 send_len = (i_hi - i_lo + 1) * width
                 max_recv_len = send_len
-                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_albedo_2d)
+                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
                 do j = j_hi - width + 1, j_hi
                     do i = i_lo, i_hi
-                        send_buf((j - (j_hi - width + 1)) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_albedo_2d(i, j)
+                        send_buf((j - (j_hi - width + 1)) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_2d(i, j)
                     end do
                 end do
                 !$acc host_data use_device(send_buf, recv_buf)
@@ -497,10 +494,10 @@ contains
                 !$acc end host_data
                 ! Unpack only the rows we have space for (closest to our domain)
                 if (recv_width > 0) then
-                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_albedo_2d)
+                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_2d)
                     do j = j_hi + 1, j_hi + recv_width
                         do i = i_lo, i_hi
-                            nbr_albedo_2d(i, j) = recv_buf((j - (j_hi + 1)) * (i_hi - i_lo + 1) + (i - i_lo) + 1)
+                            nbr_2d(i, j) = recv_buf((j - (j_hi + 1)) * (i_hi - i_lo + 1) + (i - i_lo) + 1)
                         end do
                     end do
                     j_hi = j_hi + recv_width
@@ -516,10 +513,10 @@ contains
                 recv_width = max(0, min(width, i_lo - domain%ihs))
                 send_len = width * (j_hi - j_lo + 1)
                 max_recv_len = send_len
-                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_albedo_2d)
+                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
                 do j = j_lo, j_hi
                     do i = i_lo, i_lo + width - 1
-                        send_buf((j - j_lo) * width + (i - i_lo) + 1) = nbr_albedo_2d(i, j)
+                        send_buf((j - j_lo) * width + (i - i_lo) + 1) = nbr_2d(i, j)
                     end do
                 end do
                 !$acc host_data use_device(send_buf, recv_buf)
@@ -533,10 +530,10 @@ contains
                 !$acc end host_data
                 ! Unpack only the columns we have space for (closest to our domain)
                 if (recv_width > 0) then
-                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_albedo_2d)
+                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_2d)
                     do j = j_lo, j_hi
                         do i = i_lo - recv_width, i_lo - 1
-                            nbr_albedo_2d(i, j) = recv_buf( &
+                            nbr_2d(i, j) = recv_buf( &
                                 (j - j_lo) * width + (width - recv_width) + (i - (i_lo - recv_width)) + 1)
                         end do
                     end do
@@ -549,10 +546,10 @@ contains
                 recv_width = max(0, min(width, domain%ihe - i_hi))
                 send_len = width * (j_hi - j_lo + 1)
                 max_recv_len = send_len
-                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_albedo_2d)
+                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
                 do j = j_lo, j_hi
                     do i = i_hi - width + 1, i_hi
-                        send_buf((j - j_lo) * width + (i - (i_hi - width + 1)) + 1) = nbr_albedo_2d(i, j)
+                        send_buf((j - j_lo) * width + (i - (i_hi - width + 1)) + 1) = nbr_2d(i, j)
                     end do
                 end do
                 !$acc host_data use_device(send_buf, recv_buf)
@@ -566,10 +563,10 @@ contains
                 !$acc end host_data
                 ! Unpack only the columns we have space for (closest to our domain)
                 if (recv_width > 0) then
-                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_albedo_2d)
+                    !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_2d)
                     do j = j_lo, j_hi
                         do i = i_hi + 1, i_hi + recv_width
-                            nbr_albedo_2d(i, j) = recv_buf((j - j_lo) * width + (i - (i_hi + 1)) + 1)
+                            nbr_2d(i, j) = recv_buf((j - j_lo) * width + (i - (i_hi + 1)) + 1)
                         end do
                     end do
                     i_hi = i_hi + recv_width
@@ -581,7 +578,67 @@ contains
         !$acc end data
         deallocate(send_buf, recv_buf)
 
+    end subroutine extend_neighborhood_2d
+
+
+    !>----------------------------------------------------------
+    !! Gather albedo·shortwave (per-cell reflected SW, W/m²) from
+    !! neighbouring cells across MPI processes, out to radius R_cells.
+    !! Seeds the owned tile then delegates to extend_neighborhood_2d.
+    !!----------------------------------------------------------
+    subroutine gather_neighborhood_albedo(domain, nbr_albedo_2d)
+        implicit none
+        type(domain_t), intent(in) :: domain
+        real, intent(inout) :: nbr_albedo_2d(domain%ihs:domain%ihe, domain%jhs:domain%jhe)
+        integer :: i, j
+
+        !$acc kernels present(nbr_albedo_2d)
+        nbr_albedo_2d = 0.0
+        !$acc end kernels
+
+        associate(albedo    => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+                  shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d)
+        !$acc parallel loop gang vector collapse(2) present(nbr_albedo_2d, albedo, shortwave)
+        do j = jts, jte
+            do i = its, ite
+                nbr_albedo_2d(i,j) = albedo(i,j) * shortwave(i,j)
+            end do
+        end do
+        end associate
+
+        call extend_neighborhood_2d(domain, nbr_albedo_2d)
+
     end subroutine gather_neighborhood_albedo
+
+
+    !>----------------------------------------------------------
+    !! Gather emitted-longwave (ε·σ·T_skin^4, W/m²) from neighbouring
+    !! cells across MPI processes, out to radius R_cells. Seeds the
+    !! owned tile then delegates to extend_neighborhood_2d.
+    !!----------------------------------------------------------
+    subroutine gather_neighborhood_lw_emit(domain, nbr_lw_emit_2d)
+        implicit none
+        type(domain_t), intent(in) :: domain
+        real, intent(inout) :: nbr_lw_emit_2d(domain%ihs:domain%ihe, domain%jhs:domain%jhe)
+        integer :: i, j
+
+        !$acc kernels present(nbr_lw_emit_2d)
+        nbr_lw_emit_2d = 0.0
+        !$acc end kernels
+
+        associate(emiss     => domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d,  &
+                  skin_temp => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d)
+        !$acc parallel loop gang vector collapse(2) present(nbr_lw_emit_2d, emiss, skin_temp)
+        do j = jts, jte
+            do i = its, ite
+                nbr_lw_emit_2d(i,j) = emiss(i,j) * STBOLT * skin_temp(i,j)**4
+            end do
+        end do
+        end associate
+
+        call extend_neighborhood_2d(domain, nbr_lw_emit_2d)
+
+    end subroutine gather_neighborhood_lw_emit
 
 
     subroutine ra_var_request(options)
@@ -672,7 +729,7 @@ contains
 
 
         real, dimension(:,:,:,:), pointer :: tauaer_sw=>null(), ssaaer_sw=>null(), asyaer_sw=>null()
-        real, allocatable:: nbr_albedo_2d(:,:), gsw(:,:)
+        real, allocatable:: nbr_buffer(:,:), gsw(:,:)
         real, allocatable:: t_1d(:), p_1d(:), Dz_1d(:), qv_1d(:), qc_1d(:), qi_1d(:), qs_1d(:), cf_1d(:)
         real, allocatable :: qi(:,:,:), qc(:,:,:), qs(:,:,:), cldfra(:,:,:), re_c(:,:,:), re_i(:,:,:), re_s(:,:,:)
 
@@ -741,6 +798,8 @@ contains
         real :: local_albedo, nbr_albedo, albedo_sum, weight_sum
         real :: facing, w_refl, albedo_terrain, terrain_vf, refl_correction
         integer :: di, dj, ii, jj
+        ! Terrain-emitted LW local variables (LW-SVF correction)
+        real :: lw_emit_sum, lw_weight_sum, lw_emit_terrain, local_emit
         logical :: run_full_radiation = .False. ! Default to not running full radiation, but may be set to true below if we are over the update interval
         if (options%physics%radiation == 0) return
         
@@ -1647,12 +1706,12 @@ contains
             ! Simple method with multi-reflection correction and elevation-aware neighborhood albedo
             if (run_full_radiation .and. options%rad%terrain_refl_radius > 0) then
 
-                allocate(nbr_albedo_2d(domain%ihs:domain%ihe, domain%jhs:domain%jhe))
-                !$acc data create(nbr_albedo_2d)
+                allocate(nbr_buffer(domain%ihs:domain%ihe, domain%jhs:domain%jhe))
+                !$acc data create(nbr_buffer)
 
                 !$acc wait(1) ! wait for prior update to shortwave radiation before calculating reflected SW in following subroutine
                 ! Gather neighborhood albedo from neighboring MPI processes
-                call gather_neighborhood_albedo(domain, nbr_albedo_2d)
+                call gather_neighborhood_albedo(domain, nbr_buffer)
 
                 associate(svf        => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d,                    &
                           slope_ang  => domain%vars_2d(domain%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d,   &
@@ -1660,10 +1719,13 @@ contains
                           albedo_2d  => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d,        &
                           shortwave  => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d,     &
                           sw_terrain => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d, &
+                          emiss      => domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d,        &
+                          skin_temp  => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,       &
+                          longwave   => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d,               &
                           ihs => domain%ihs, ihe => domain%ihe, jhs => domain%jhs, jhe => domain%jhe)
 
                 !$acc parallel loop gang vector collapse(2) &
-                !$acc& present(svf, slope_ang, aspect_ang, albedo_2d, nbr_albedo_2d, shortwave, sw_terrain, &
+                !$acc& present(svf, slope_ang, aspect_ang, albedo_2d, nbr_buffer, shortwave, sw_terrain, &
                 !$acc&         azimuth_offset, inv_dist2_offset, ihs, ihe, jhs, jhe) &
                 !$acc& private(local_albedo, nbr_albedo, albedo_sum, weight_sum, facing, &
                 !$acc&         w_refl, albedo_terrain, terrain_vf, refl_correction, di, dj, ii, jj)
@@ -1682,7 +1744,7 @@ contains
                                 if (ii < ihs .or. ii > ihe .or. jj < jhs .or. jj > jhe) cycle
 
                                 ! Neighbor albedo from gathered buffer
-                                nbr_albedo = nbr_albedo_2d(ii, jj)
+                                nbr_albedo = nbr_buffer(ii, jj)
 
                                 ! Facing: neighbor faces target * neighbor is illuminated by sun
                                 facing = max(cos(aspect_ang(ii,jj) - azimuth_offset(di,dj)), 0.0) &  ! if the neighbor slope faces the location of the target slope
@@ -1720,8 +1782,96 @@ contains
                         shortwave(i,j) = shortwave(i,j) + sw_terrain(i,j)
                     end do
                 end do
+
+                !$acc wait(1) ! wait for prior update to shortwave radiation before calculating terrain emitted LW in following subroutine
+                ! Gather neighborhood LW emission from neighboring MPI processes
+                call gather_neighborhood_lw_emit(domain, nbr_buffer)
+
+                !$acc parallel loop gang vector collapse(2)                                      &
+                !$acc& present(svf, slope_ang, aspect_ang, emiss, skin_temp, longwave,           &
+                !$acc&         nbr_buffer, azimuth_offset, inv_dist2_offset,                 &
+                !$acc&         ihs, ihe, jhs, jhe)                                               &
+                !$acc& private(lw_emit_sum, lw_weight_sum, facing, w_refl,                       &
+                !$acc&         lw_emit_terrain, local_emit, terrain_vf, di, dj, ii, jj)
+                do j = jts, jte
+                    do i = its, ite
+                        ! Weighted sum of emitted LW from neighbours that face this cell
+                        lw_emit_sum    = 0.0
+                        lw_weight_sum  = 0.0
+                        do dj = -R_cells, R_cells
+                            do di = -R_cells, R_cells
+                                if (di == 0 .and. dj == 0) cycle
+                                if (inv_dist2_offset(di,dj) == 0.0) cycle
+                                ii = i + di
+                                jj = j + dj
+                                if (ii < ihs .or. ii > ihe .or. jj < jhs .or. jj > jhe) cycle
+
+                                ! Same facing weight as SW reflected-terrain stencil:
+                                ! neighbours whose slope points toward this cell contribute more.
+                                facing = max(cos(aspect_ang(ii,jj) - azimuth_offset(di,dj)), 0.0) &
+                                       * max(-sin(slope_ang(ii,jj)) * sin(slope_ang(i,j))          &
+                                       * cos(aspect_ang(ii,jj) - aspect_ang(i,j)), 0.01)
+                                w_refl = inv_dist2_offset(di,dj) * max(facing, 0.0)
+
+                                lw_emit_sum   = lw_emit_sum   + w_refl * nbr_buffer(ii,jj)
+                                lw_weight_sum = lw_weight_sum + w_refl
+                            end do
+                        end do
+
+                        ! Local fallback if no valid neighbours contributed
+                        local_emit = emiss(i,j) * STBOLT * skin_temp(i,j)**4
+                        if (lw_weight_sum > 1.0e-8) then
+                            lw_emit_terrain = lw_emit_sum / lw_weight_sum
+                        else
+                            lw_emit_terrain = local_emit
+                        end if
+
+                        terrain_vf     = 1.0 - svf(i,j)
+                        longwave(i,j)  = svf(i,j) * longwave(i,j) &
+                                       + terrain_vf * lw_emit_terrain
+                    end do
+                end do
+
                 end associate
                 !$acc end data
+            else
+                ! LOCAL fallback: use this cell's own skin temperature and emissivity
+                ! for the terrain-emission term. No neighbourhood gather.
+                associate(svf       => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d,              &
+                          albedo_2d  => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d,        &
+                          shortwave  => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d,     &
+                          sw_terrain => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d, &
+                          emiss     => domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d, &
+                          skin_temp => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                          longwave  => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d)
+
+                !$acc parallel loop gang vector collapse(2) &
+                !$acc   present(svf, albedo_2d, shortwave, sw_terrain, emiss, skin_temp, longwave) &
+                !$acc   private(terrain_vf)
+                do j = jts, jte
+                    do i = its, ite
+                        terrain_vf    = 1.0 - svf(i,j)
+
+                        longwave(i,j) = svf(i,j) * longwave(i,j) &
+                                      + terrain_vf * emiss(i,j)  &
+                                        * STBOLT * skin_temp(i,j)**4
+
+                        ! Local albedo as fallback
+                        local_albedo = albedo_2d(i, j)
+                        albedo_terrain = local_albedo * shortwave(i,j)
+
+                        ! Terrain reflected SW with multi-reflection correction (Dozier 1980, Chu et al. 2021)
+                        ! Geometric series: 1/(1 - alpha*Ct) accounts for infinite bounces
+                        refl_correction = 1.0 / max(1.0 - local_albedo * terrain_vf, 0.05)
+                        sw_terrain(i,j) = terrain_vf * albedo_terrain * refl_correction
+
+                        ! Add terrain reflected component to total shortwave
+                        shortwave(i,j) = shortwave(i,j) + sw_terrain(i,j)
+
+                    end do
+                end do
+                end associate
+
             endif
         endif
     end subroutine rad

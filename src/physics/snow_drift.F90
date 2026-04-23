@@ -757,11 +757,10 @@ contains
                     q_salt_val = 0.0
                     n_salt_val = 0.0
                     if (using_snowpack .and. saltation_doorschot) then
-                        h_salt_loc = bs_salt_height(i,j)
                         if (ustar_2d(i,j) > bs_ustar_t(i,j) .and. bs_salt_conc(i,j) > 0.0 .and. &
                             swe(i,j) >= 0.5 .and. skin_temp(i,j) < 272.15) then
                             q_salt_val = bs_salt_conc(i,j) / rho_air
-                                n_salt_val = 0.45 * q_salt_val &
+                            n_salt_val = 0.45 * q_salt_val &
                                         * (6.0 / (PI_CONST * D_MEAN_SALT**3 * RHO_ICE))
                         endif
                     else
