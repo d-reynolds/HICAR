@@ -18,7 +18,7 @@ submodule(domain_interface) domain_implementation
     use array_utilities,      only : array_offset_x, array_offset_y, smooth_array, smooth_array_2d, make_2d_x, make_2d_y
     use vertical_interpolation,only : vinterp, vLUT
     use output_metadata,            only : get_varname, get_varmeta, get_varindx
-    use mod_wrf_constants,    only : gravity, R_d, KARMAN, cp, DEGRAD
+    use mod_wrf_constants,    only : gravity, R_d, KARMAN, cp, DEGRAD, piconst
     use iso_fortran_env
     use debug_module,       only : domain_check
 
