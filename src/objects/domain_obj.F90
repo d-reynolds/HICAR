@@ -1229,7 +1229,6 @@ contains
         implicit none
         type(options_t), intent(inout) :: options
 
-        real, parameter :: pi_const = acos(-1.0)
         real :: z_exp
         real, allocatable :: vct_a(:), dz(:)
         real :: x1, a, b, c, jkr, alpha, exp_alpha, x_lin
