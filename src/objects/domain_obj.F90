@@ -1295,7 +1295,6 @@ contains
                 ! z_exp has been calculated above in order to return min_lay_thckn as thickness
                 ! of the lowest model layer
                 DO jk = 1, nlevp1
-                    jkr = nlevp1 - jk      ! reverse index as function approaches top height at 0, and 0 at nz
                     vct_a(nint(jk)) = top_height*(2.0/piconst*ACOS(REAL(nlevp1 - jk)**stretch_fac/ &
                     &              REAL(nz)**stretch_fac))**z_exp
                 ENDDO
