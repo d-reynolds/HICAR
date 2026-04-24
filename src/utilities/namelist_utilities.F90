@@ -1304,7 +1304,7 @@ contains
         character(len=1), allocatable :: dimensions(:)
 
         character(len=30), save :: last_group = ""
-        character(2048) :: var_string
+        character(256) :: var_string
         integer :: indx, indx_old, print_len, num_blnks
         logical :: numeric_only, is_logical
 
