@@ -1797,7 +1797,7 @@ contains
             case("model_top_height")
                 description = "Model top height in meters, only used when auto_level = 1, 2, 3 or 4."
                 min = 0.1
-                max = 1e6
+                max = 30000.0
                 default = "10000.0"
                 group = "Domain"
             case("stretch_fac")
