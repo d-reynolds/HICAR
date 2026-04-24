@@ -1781,7 +1781,7 @@ contains
                 description = "Integer that determines whether to create levels automatically (As used in ICON & WRF):"//achar(10)//BLNK_CHR_N// &
                     "Values: 0=No, 1=Third-order polynomial level distribution (ICON like), 2=Second-order polynomial level"//achar(10)//BLNK_CHR_N// &
                     "        distribution (COSMO like) 3=Eta style exponential level distribution (WRF like), 4=Arccosine level"//achar(10)//BLNK_CHR_N// &
-                    "        distribution (COSMO like). auto_level=3 might be most robust solution, while options 1 and 4 allow"//achar(10)//BLNK_CHR_N// &
+                    "        distribution (COSMO like). auto_level=3 is often the most robust solution, while options 1 and 4 allow"//achar(10)//BLNK_CHR_N// &
                     "        for forced lowest level height. Plotting the distributions beforehand is recommended,"//achar(10)//BLNK_CHR_N// &
                     "        geogebra plots can be found at https://www.geogebra.org/u/maxsesselmann."
                 allocate(values(5))
