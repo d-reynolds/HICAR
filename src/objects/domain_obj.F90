@@ -1231,7 +1231,7 @@ contains
 
         real :: z_exp
         real, allocatable :: vct_a(:), dz(:)
-        real :: x1, a, b, c, jkr, alpha, exp_alpha, x_lin
+        real :: x1, a, b, c, alpha, exp_alpha, x_lin
         integer :: nlevp1, jk
         logical :: auto_level_warnings
 
