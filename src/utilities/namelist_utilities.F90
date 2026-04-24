@@ -392,7 +392,8 @@ contains
         integer, optional, intent(inout) :: i
         logical, optional :: no_check
 
-        character(len=(kMAX_STRING_LENGTH*8)) :: group, default, description, units
+        character(len=kMAX_STRING_LENGTH) :: group, default, units
+        character(len=10000) :: description
         real :: min, max
         integer, allocatable :: values(:), var_dims(:), sanitized_dims(:), ref_var_dims(:)
         integer :: p, dim_indx, dim_len, type, n, cnt, varid, san_dim_indx
