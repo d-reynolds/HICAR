@@ -1252,8 +1252,6 @@ contains
         call set_nml_var_default(init_surf_temp, 'init_surf_temp', print_info, gennml)
         call set_nml_var_default(init_sst, 'init_sst', print_info, gennml)
 
-        call set_nml_var_default(dz_levels, 'dz_levels', print_info, gennml)
-
         ! If this is just a verbose print run, exit here so we don't need a namelist
         if (print_info .or. gennml) return
 
