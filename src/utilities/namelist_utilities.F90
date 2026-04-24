@@ -1212,7 +1212,8 @@ contains
         implicit none
         character(len=*), intent(in) :: name
 
-        character(len=(kMAX_STRING_LENGTH*8)) :: group, default, description, units
+        character(len=kMAX_STRING_LENGTH) :: group, default, units
+        character(len=10000) :: description
         character(len=1), allocatable :: dimensions(:)
         real :: min, max
         integer :: type
