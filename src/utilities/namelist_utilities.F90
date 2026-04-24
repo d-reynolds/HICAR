@@ -1812,9 +1812,6 @@ contains
                     " stretch_fac -> higher values: more level compression at the surface."//achar(10)//BLNK_CHR_N// &
                     "For auto_level=4: stretch_fac needs to be > 0. stretch_fac -> 0.0 more compression at the surface,"//achar(10)//BLNK_CHR_N// &
                     " stretch_fac -> higher values: more level compression at the model top."//achar(10)//BLNK_CHR_N// &
-                    "auto_level=3 might be most robust solution, while options 1 and 4 allow for forced lowest level height."//achar(10)//BLNK_CHR_N// &
-                    "Plotting the distributions is recommended,"//achar(10)//BLNK_CHR_N// &
-                    " geogebra plots can be found at https://www.geogebra.org/u/maxsesselmann."
                 min = 0.0001
                 max = 10.0
                 default = "0.7"
