@@ -1288,7 +1288,7 @@ contains
                 !         stretch_fac -> 0 gives stronger compression, first at mid height, then lower and lower heights.
                 !         stretch_fac = 1.1 to 1.2 gives almost a linear distribution of levels.
                 !         stretch_fac -> higher values (e.g. 3) gives more compression towards the top.
-                z_exp = LOG(min_lay_thckn/top_height)/LOG(2.0/pi_const*ACOS(REAL(nz-1)**stretch_fac/ &
+                z_exp = LOG(min_lay_thckn/top_height)/LOG(2.0/piconst*ACOS(REAL(nz-1)**stretch_fac/ &
                     &     REAL(nz)**stretch_fac))
 
                 ! Set up distribution of coordinate surfaces according to the analytical formula
