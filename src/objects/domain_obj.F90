@@ -1311,6 +1311,7 @@ contains
             if ( abs(vct_a(1)) > 1.0e-6 ) then
                 auto_level_warnings = .true.
                 write(*,*) 'WARNING in automatic level generation: lowest half-level is suspicious: ', vct_a(1)
+                stop
             else if ( abs(vct_a(nlevp1) - top_height) > 0.01*top_height ) then
                 auto_level_warnings = .true.
                 write(*,*) 'WARNING in automatic level generation: highest half-level deviates too far from model_top_height setting (', top_height,'). It is ', vct_a(nlevp1)
