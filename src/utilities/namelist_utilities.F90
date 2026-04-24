@@ -1791,7 +1791,7 @@ contains
             case("height_lowest_level")
                 description = "Lowest level height in meters, can only be forced when using auto_level=1 or 4."
                 min = 0.1
-                max = 1e6
+                max = 100
                 default = "20.0"
                 group = "Domain"
             case("model_top_height")
