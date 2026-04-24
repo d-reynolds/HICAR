@@ -1784,7 +1784,6 @@ contains
                     "        distribution (COSMO like). auto_level=3 might be most robust solution, while options 1 and 4 allow"//achar(10)//BLNK_CHR_N// &
                     "        for forced lowest level height. Plotting the distributions beforehand is recommended,"//achar(10)//BLNK_CHR_N// &
                     "        geogebra plots can be found at https://www.geogebra.org/u/maxsesselmann."
-                min = 0
                 max = 4
                 default = "0"
                 group = "Domain"
