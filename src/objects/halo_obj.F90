@@ -476,70 +476,69 @@ module subroutine exch_var(this, var, do_dqdt, corners)
 
     call nccl_group_start()
 
-    if (do_corners) then
-        if (.not. this%northeast_boundary) call this%put_northeast(var, dqdt)
-        if (.not. this%northwest_boundary) call this%put_northwest(var, dqdt)
-        if (.not. this%southeast_boundary) call this%put_southeast(var, dqdt)
-        if (.not. this%southwest_boundary) call this%put_southwest(var, dqdt)
-    endif
-
-    if (.not. this%north_boundary) call this%put_north(var, dqdt)
-    if (.not. this%south_boundary) call this%put_south(var, dqdt)
-    if (.not. this%east_boundary)  call this%put_east(var, dqdt)
-    if (.not. this%west_boundary)  call this%put_west(var, dqdt)
-
-    ! Post matching recvs. Each recv lands at offset 0 of *_in_3d; the
-    ! retrieve_*_halo kernels read with halo_off=0 under USE_NCCL.
-    if (.not. this%north_boundary) then
-        !$acc host_data use_device(this%north_in_3d)
-        nccl_ierr = nccl_recv_float(c_loc(this%north_in_3d), ns_count, &
-            this%north_neighbor, this%nccl_comm, this%nccl_stream)
-        !$acc end host_data
-    endif
-    if (.not. this%south_boundary) then
-        !$acc host_data use_device(this%south_in_3d)
-        nccl_ierr = nccl_recv_float(c_loc(this%south_in_3d), ns_count, &
-            this%south_neighbor, this%nccl_comm, this%nccl_stream)
-        !$acc end host_data
-    endif
-    if (.not. this%east_boundary) then
-        !$acc host_data use_device(this%east_in_3d)
-        nccl_ierr = nccl_recv_float(c_loc(this%east_in_3d), ew_count, &
-            this%east_neighbor, this%nccl_comm, this%nccl_stream)
-        !$acc end host_data
-    endif
-    if (.not. this%west_boundary) then
-        !$acc host_data use_device(this%west_in_3d)
-        nccl_ierr = nccl_recv_float(c_loc(this%west_in_3d), ew_count, &
-            this%west_neighbor, this%nccl_comm, this%nccl_stream)
-        !$acc end host_data
-    endif
-
+    ! Interleave send + recv per direction inside the group. NCCL pairs the
+    ! i-th send to a peer with the i-th recv at that peer (per pair, in post
+    ! order), so when a peer is shared by two directions (boundary
+    ! redirection), per-direction interleaving ensures matching sizes —
+    ! corners pair with corners, cardinals with cardinals.
     if (do_corners) then
         if (.not. this%northeast_boundary) then
+            call this%put_northeast(var, dqdt)
             !$acc host_data use_device(this%northeast_in_3d)
             nccl_ierr = nccl_recv_float(c_loc(this%northeast_in_3d), corner_count, &
                 this%northeast_neighbor, this%nccl_comm, this%nccl_stream)
             !$acc end host_data
         endif
         if (.not. this%northwest_boundary) then
+            call this%put_northwest(var, dqdt)
             !$acc host_data use_device(this%northwest_in_3d)
             nccl_ierr = nccl_recv_float(c_loc(this%northwest_in_3d), corner_count, &
                 this%northwest_neighbor, this%nccl_comm, this%nccl_stream)
             !$acc end host_data
         endif
         if (.not. this%southeast_boundary) then
+            call this%put_southeast(var, dqdt)
             !$acc host_data use_device(this%southeast_in_3d)
             nccl_ierr = nccl_recv_float(c_loc(this%southeast_in_3d), corner_count, &
                 this%southeast_neighbor, this%nccl_comm, this%nccl_stream)
             !$acc end host_data
         endif
         if (.not. this%southwest_boundary) then
+            call this%put_southwest(var, dqdt)
             !$acc host_data use_device(this%southwest_in_3d)
             nccl_ierr = nccl_recv_float(c_loc(this%southwest_in_3d), corner_count, &
                 this%southwest_neighbor, this%nccl_comm, this%nccl_stream)
             !$acc end host_data
         endif
+    endif
+
+    if (.not. this%north_boundary) then
+        call this%put_north(var, dqdt)
+        !$acc host_data use_device(this%north_in_3d)
+        nccl_ierr = nccl_recv_float(c_loc(this%north_in_3d), ns_count, &
+            this%north_neighbor, this%nccl_comm, this%nccl_stream)
+        !$acc end host_data
+    endif
+    if (.not. this%south_boundary) then
+        call this%put_south(var, dqdt)
+        !$acc host_data use_device(this%south_in_3d)
+        nccl_ierr = nccl_recv_float(c_loc(this%south_in_3d), ns_count, &
+            this%south_neighbor, this%nccl_comm, this%nccl_stream)
+        !$acc end host_data
+    endif
+    if (.not. this%east_boundary) then
+        call this%put_east(var, dqdt)
+        !$acc host_data use_device(this%east_in_3d)
+        nccl_ierr = nccl_recv_float(c_loc(this%east_in_3d), ew_count, &
+            this%east_neighbor, this%nccl_comm, this%nccl_stream)
+        !$acc end host_data
+    endif
+    if (.not. this%west_boundary) then
+        call this%put_west(var, dqdt)
+        !$acc host_data use_device(this%west_in_3d)
+        nccl_ierr = nccl_recv_float(c_loc(this%west_in_3d), ew_count, &
+            this%west_neighbor, this%nccl_comm, this%nccl_stream)
+        !$acc end host_data
     endif
 
     call nccl_group_end()
