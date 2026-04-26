@@ -162,6 +162,7 @@ module subroutine init_halo(this, exch_vars, grid, comms)
     !We only want to set up remote windows for domain objects which are part of the actual domain
     if (.not.(comms == MPI_COMM_NULL)) then
 
+#ifndef USE_NCCL
         call MPI_Info_create(info_in, ierr)
 #ifdef _OPENACC
         ! Check if MPI supports CUDA-aware memory
@@ -175,6 +176,7 @@ module subroutine init_halo(this, exch_vars, grid, comms)
         call MPI_INFO_SET(info_in, 'same_size', '.true.')
         call MPI_INFO_SET(info_in, 'same_disp_unit', '.true.')
 #endif
+#endif
         nx = this%grid%ns_halo_nx
         nz = this%grid%halo_win_nz   ! single-var exch_var windows sized to max
         ny = this%halo_size+1
@@ -183,9 +185,11 @@ module subroutine init_halo(this, exch_vars, grid, comms)
 #ifdef _OPENACC
         allocate(this%south_in_3d(nx, nz, ny))
         !$acc enter data copyin(this%south_in_3d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%south_in_3d)
         call MPI_WIN_CREATE(this%south_in_3d, win_size*real_size, real_size, info_in, comms, this%south_in_win, ierr)
         !$acc end host_data
+#endif
 #else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%south_in_win)
         call C_F_POINTER(tmp_ptr, this%south_in_3d, [nx, nz, ny])
@@ -196,9 +200,11 @@ module subroutine init_halo(this, exch_vars, grid, comms)
 #ifdef _OPENACC
         allocate(this%north_in_3d(nx, nz, ny))
         !$acc enter data copyin(this%north_in_3d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%north_in_3d)
         call MPI_WIN_CREATE(this%north_in_3d, win_size*real_size, real_size, info_in, comms, this%north_in_win, ierr)
         !$acc end host_data
+#endif
 #else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%north_in_win)
         call C_F_POINTER(tmp_ptr, this%north_in_3d, [nx, nz, ny])
@@ -215,9 +221,11 @@ module subroutine init_halo(this, exch_vars, grid, comms)
 #ifdef _OPENACC
         allocate(this%east_in_3d(nx, nz, ny))
         !$acc enter data copyin(this%east_in_3d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%east_in_3d)
         call MPI_WIN_CREATE(this%east_in_3d, win_size*real_size, real_size, info_in, comms, this%east_in_win, ierr)
         !$acc end host_data
+#endif
 #else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%east_in_win)
         call C_F_POINTER(tmp_ptr, this%east_in_3d, [nx, nz, ny])
@@ -229,9 +237,11 @@ module subroutine init_halo(this, exch_vars, grid, comms)
 #ifdef _OPENACC
         allocate(this%west_in_3d(nx, nz, ny))
         !$acc enter data copyin(this%west_in_3d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%west_in_3d)
         call MPI_WIN_CREATE(this%west_in_3d, win_size*real_size, real_size, info_in, comms, this%west_in_win, ierr)
         !$acc end host_data
+#endif
 #else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%west_in_win)
         call C_F_POINTER(tmp_ptr, this%west_in_3d, [nx, nz, ny])
@@ -252,9 +262,11 @@ module subroutine init_halo(this, exch_vars, grid, comms)
 #ifdef _OPENACC
         allocate(this%southwest_in_3d(nx, nz, ny))
         !$acc enter data copyin(this%southwest_in_3d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%southwest_in_3d)
         call MPI_WIN_CREATE(this%southwest_in_3d, win_size*real_size, real_size, info_in, comms, this%southwest_in_win, ierr)
         !$acc end host_data
+#endif
 #else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%southwest_in_win)
         call C_F_POINTER(tmp_ptr, this%southwest_in_3d, [nx, nz, ny])
@@ -263,9 +275,11 @@ module subroutine init_halo(this, exch_vars, grid, comms)
 #ifdef _OPENACC
         allocate(this%northwest_in_3d(nx, nz, ny))
         !$acc enter data copyin(this%northwest_in_3d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%northwest_in_3d)
         call MPI_WIN_CREATE(this%northwest_in_3d, win_size*real_size, real_size, info_in, comms, this%northwest_in_win, ierr)
         !$acc end host_data
+#endif
 #else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%northwest_in_win)
         call C_F_POINTER(tmp_ptr, this%northwest_in_3d, [nx, nz, ny])
@@ -274,9 +288,11 @@ module subroutine init_halo(this, exch_vars, grid, comms)
 #ifdef _OPENACC
         allocate(this%northeast_in_3d(nx, nz, ny))
         !$acc enter data copyin(this%northeast_in_3d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%northeast_in_3d)
         call MPI_WIN_CREATE(this%northeast_in_3d, win_size*real_size, real_size, info_in, comms, this%northeast_in_win, ierr)
         !$acc end host_data
+#endif
 #else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%northeast_in_win)
         call C_F_POINTER(tmp_ptr, this%northeast_in_3d, [nx, nz, ny])
@@ -285,9 +301,11 @@ module subroutine init_halo(this, exch_vars, grid, comms)
 #ifdef _OPENACC
         allocate(this%southeast_in_3d(nx, nz, ny))
         !$acc enter data copyin(this%southeast_in_3d)
+#ifndef USE_NCCL
         !$acc host_data use_device(this%southeast_in_3d)
         call MPI_WIN_CREATE(this%southeast_in_3d, win_size*real_size, real_size, info_in, comms, this%southeast_in_win, ierr)
         !$acc end host_data
+#endif
 #else
         call MPI_WIN_ALLOCATE(win_size*real_size, real_size, info_in, comms, tmp_ptr, this%southeast_in_win)
         call C_F_POINTER(tmp_ptr, this%southeast_in_3d, [nx, nz, ny])
@@ -389,6 +407,7 @@ module subroutine finalize(this)
     call MPI_Type_free(this%corner_3d_win_halo_type, ierr)
 #endif
 
+#ifndef USE_NCCL
     call MPI_Win_fence(0, this%north_in_win)
     call MPI_Win_fence(0, this%south_in_win)
     call MPI_Win_fence(0, this%east_in_win)
@@ -406,6 +425,7 @@ module subroutine finalize(this)
     call MPI_WIN_FREE(this%northwest_in_win, ierr)
     call MPI_WIN_FREE(this%northeast_in_win, ierr)
     call MPI_WIN_FREE(this%southeast_in_win, ierr)
+#endif
 
     !$acc exit data finalize delete(this%north_in_3d, this%south_in_3d, this%east_in_3d, this%west_in_3d, &
     !$acc                      this%north_in_buffer, this%south_in_buffer, this%east_in_buffer, this%west_in_buffer, &
@@ -431,15 +451,111 @@ module subroutine exch_var(this, var, do_dqdt, corners)
     class(halo_t),     intent(inout) :: this
     type(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt, corners
-    
+
     integer :: xdim, ydim
     logical :: dqdt, do_corners
+#ifdef USE_NCCL
+    integer(c_int) :: ns_count, ew_count, corner_count, nccl_ierr
+#endif
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
 
     do_corners=.False.
     if (present(corners)) do_corners=corners
+
+#ifdef USE_NCCL
+    ! NCCL pure path: pack-and-send each direction, post matching recvs into
+    ! the corresponding *_in_3d, all fused into one group. NCCL ops share
+    ! OpenACC's sync stream, so within-stream ordering serializes the
+    ! preceding pack kernels before NCCL reads, and serializes NCCL writes
+    ! before the unpack kernels in retrieve_*_halo.
+    ns_count     = int(size(this%north_in_buffer), c_int)
+    ew_count     = int(size(this%east_in_buffer),  c_int)
+    corner_count = int(size(this%ne_corner_send),  c_int)
+
+    call nccl_group_start()
+
+    if (do_corners) then
+        if (.not. this%northeast_boundary) call this%put_northeast(var, dqdt)
+        if (.not. this%northwest_boundary) call this%put_northwest(var, dqdt)
+        if (.not. this%southeast_boundary) call this%put_southeast(var, dqdt)
+        if (.not. this%southwest_boundary) call this%put_southwest(var, dqdt)
+    endif
+
+    if (.not. this%north_boundary) call this%put_north(var, dqdt)
+    if (.not. this%south_boundary) call this%put_south(var, dqdt)
+    if (.not. this%east_boundary)  call this%put_east(var, dqdt)
+    if (.not. this%west_boundary)  call this%put_west(var, dqdt)
+
+    ! Post matching recvs. Each recv lands at offset 0 of *_in_3d; the
+    ! retrieve_*_halo kernels read with halo_off=0 under USE_NCCL.
+    if (.not. this%north_boundary) then
+        !$acc host_data use_device(this%north_in_3d)
+        nccl_ierr = nccl_recv_float(c_loc(this%north_in_3d), ns_count, &
+            this%north_neighbor, this%nccl_comm, this%nccl_stream)
+        !$acc end host_data
+    endif
+    if (.not. this%south_boundary) then
+        !$acc host_data use_device(this%south_in_3d)
+        nccl_ierr = nccl_recv_float(c_loc(this%south_in_3d), ns_count, &
+            this%south_neighbor, this%nccl_comm, this%nccl_stream)
+        !$acc end host_data
+    endif
+    if (.not. this%east_boundary) then
+        !$acc host_data use_device(this%east_in_3d)
+        nccl_ierr = nccl_recv_float(c_loc(this%east_in_3d), ew_count, &
+            this%east_neighbor, this%nccl_comm, this%nccl_stream)
+        !$acc end host_data
+    endif
+    if (.not. this%west_boundary) then
+        !$acc host_data use_device(this%west_in_3d)
+        nccl_ierr = nccl_recv_float(c_loc(this%west_in_3d), ew_count, &
+            this%west_neighbor, this%nccl_comm, this%nccl_stream)
+        !$acc end host_data
+    endif
+
+    if (do_corners) then
+        if (.not. this%northeast_boundary) then
+            !$acc host_data use_device(this%northeast_in_3d)
+            nccl_ierr = nccl_recv_float(c_loc(this%northeast_in_3d), corner_count, &
+                this%northeast_neighbor, this%nccl_comm, this%nccl_stream)
+            !$acc end host_data
+        endif
+        if (.not. this%northwest_boundary) then
+            !$acc host_data use_device(this%northwest_in_3d)
+            nccl_ierr = nccl_recv_float(c_loc(this%northwest_in_3d), corner_count, &
+                this%northwest_neighbor, this%nccl_comm, this%nccl_stream)
+            !$acc end host_data
+        endif
+        if (.not. this%southeast_boundary) then
+            !$acc host_data use_device(this%southeast_in_3d)
+            nccl_ierr = nccl_recv_float(c_loc(this%southeast_in_3d), corner_count, &
+                this%southeast_neighbor, this%nccl_comm, this%nccl_stream)
+            !$acc end host_data
+        endif
+        if (.not. this%southwest_boundary) then
+            !$acc host_data use_device(this%southwest_in_3d)
+            nccl_ierr = nccl_recv_float(c_loc(this%southwest_in_3d), corner_count, &
+                this%southwest_neighbor, this%nccl_comm, this%nccl_stream)
+            !$acc end host_data
+        endif
+    endif
+
+    call nccl_group_end()
+
+    if (do_corners) then
+        if (.not. this%northeast_boundary) call this%retrieve_northeast_halo(var, dqdt)
+        if (.not. this%northwest_boundary) call this%retrieve_northwest_halo(var, dqdt)
+        if (.not. this%southeast_boundary) call this%retrieve_southeast_halo(var, dqdt)
+        if (.not. this%southwest_boundary) call this%retrieve_southwest_halo(var, dqdt)
+    endif
+
+    if (.not. this%north_boundary) call this%retrieve_north_halo(var, dqdt)
+    if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
+    if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
+    if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
+#else
 
     if (do_corners) then
 
@@ -484,6 +600,7 @@ module subroutine exch_var(this, var, do_dqdt, corners)
     if (.not. this%south_boundary) call this%retrieve_south_halo(var, dqdt)
     if (.not. this%east_boundary)  call this%retrieve_east_halo(var, dqdt)
     if (.not. this%west_boundary)  call this%retrieve_west_halo(var, dqdt)
+#endif
 
 end subroutine exch_var
 
@@ -1750,7 +1867,7 @@ end subroutine halo_2d_retrieve_batch
 ! end subroutine
 
 
-module subroutine put_north(this,var,do_dqdt)    
+module subroutine put_north(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(inout) :: this
     class(variable_t), intent(in) :: var
@@ -1758,6 +1875,9 @@ module subroutine put_north(this,var,do_dqdt)
     integer :: n, nx, offs, msg_size, i, k, j, indx_start
     logical :: dqdt
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+#ifdef USE_NCCL
+    integer(c_int) :: nccl_count, nccl_ierr
+#endif
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
@@ -1771,6 +1891,26 @@ module subroutine put_north(this,var,do_dqdt)
         north_in_buffer => this%north_in_buffer, north_in_buffer_2d => this%north_in_buffer_2d)
     !$acc data present(north_in_buffer, north_in_buffer_2d)
     if (var%two_d) then
+#ifdef USE_NCCL
+        ! Pack 2D data into k=1 slice of the 3D buffer so the flat size
+        ! matches the 3D receive buffer (north_in_3d). The receiver's
+        ! retrieve_*_halo only reads k=1 for 2D vars, so other slices are don't-care.
+        if(var%dtype==kINTEGER) then
+            !$acc parallel loop gang vector collapse(2) present(data_2di)
+            do j = indx_start, jte
+                do i = its, ite
+                    north_in_buffer(i-its+1, 1, j-indx_start+1) = real(data_2di(i,j))
+                enddo
+            enddo
+        else
+            !$acc parallel loop gang vector collapse(2) present(data_2d)
+            do j = indx_start, jte
+                do i = its, ite
+                    north_in_buffer(i-its+1, 1, j-indx_start+1) = data_2d(i,j)
+                enddo
+            enddo
+        endif
+#else
         if(var%dtype==kINTEGER) then
             !$acc parallel loop gang vector collapse(2) present(data_2di)
             do j = indx_start, jte
@@ -1790,7 +1930,7 @@ module subroutine put_north(this,var,do_dqdt)
         call MPI_Put(north_in_buffer_2d, msg_size, &
             var%grid%NS_halo, this%north_neighbor, disp, msg_size, var%grid%NS_win_halo, this%south_in_win)
         !$acc end host_data
-
+#endif
     else
         if (dqdt) then
             !$acc parallel loop gang vector collapse(3) present(dqdt_3d)
@@ -1811,11 +1951,23 @@ module subroutine put_north(this,var,do_dqdt)
                 enddo
             enddo
         endif
+#ifndef USE_NCCL
         !$acc host_data use_device(north_in_buffer)
         call MPI_Put(north_in_buffer, msg_size, &
             var%grid%NS_halo, this%north_neighbor, disp, msg_size, var%grid%NS_win_halo, this%south_in_win)
         !$acc end host_data
+#endif
     endif
+
+#ifdef USE_NCCL
+    ! Send the entire 3D buffer; receiver's recv buffer (north_in_3d on the
+    ! peer) has identical shape, so element-for-element layout matches.
+    nccl_count = int(size(this%north_in_buffer), c_int)
+    !$acc host_data use_device(north_in_buffer)
+    nccl_ierr = nccl_send_float(c_loc(north_in_buffer), nccl_count, &
+        this%north_neighbor, this%nccl_comm, this%nccl_stream)
+    !$acc end host_data
+#endif
 
     !$acc end data
     end associate
@@ -1823,7 +1975,7 @@ end subroutine
 
 
 
-module subroutine put_south(this,var,do_dqdt)    
+module subroutine put_south(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(inout) :: this
     class(variable_t), intent(in) :: var
@@ -1831,10 +1983,13 @@ module subroutine put_south(this,var,do_dqdt)
     integer :: start, nx, offs, msg_size, i, k, j, indx_end
     logical :: dqdt
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+#ifdef USE_NCCL
+    integer(c_int) :: nccl_count, nccl_ierr
+#endif
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
-    
+
     offs=var%ystag
     disp = 0
     msg_size = 1
@@ -1846,6 +2001,23 @@ module subroutine put_south(this,var,do_dqdt)
     !$acc data present(south_in_buffer, south_in_buffer_2d)
 
     if (var%two_d) then
+#ifdef USE_NCCL
+        if (var%dtype==kINTEGER) then
+            !$acc parallel loop gang vector collapse(2) present(data_2di)
+            do j = jts, indx_end
+                do i = its, ite
+                    south_in_buffer(i-its+1, 1, j-jts+1) = real(data_2di(i,j))
+                enddo
+            enddo
+        else
+            !$acc parallel loop gang vector collapse(2) present(data_2d)
+            do j = jts, indx_end
+                do i = its, ite
+                    south_in_buffer(i-its+1, 1, j-jts+1) = data_2d(i,j)
+                enddo
+            enddo
+        endif
+#else
         if (var%dtype==kINTEGER) then
             !$acc parallel loop gang vector collapse(2) present(data_2di)
             do j = jts, indx_end
@@ -1865,6 +2037,7 @@ module subroutine put_south(this,var,do_dqdt)
         call MPI_Put(south_in_buffer_2d, msg_size, &
             var%grid%NS_halo, this%south_neighbor, disp, msg_size, var%grid%NS_win_halo, this%north_in_win)
         !$acc end host_data
+#endif
     else
         if (dqdt) then
             !$acc parallel loop gang vector collapse(3) present(dqdt_3d)
@@ -1885,11 +2058,21 @@ module subroutine put_south(this,var,do_dqdt)
                 enddo
             enddo
         endif
+#ifndef USE_NCCL
         !$acc host_data use_device(south_in_buffer)
         call MPI_Put(south_in_buffer, msg_size, &
             var%grid%NS_halo, this%south_neighbor, disp, msg_size, var%grid%NS_win_halo, this%north_in_win)
         !$acc end host_data
+#endif
     endif
+
+#ifdef USE_NCCL
+    nccl_count = int(size(this%south_in_buffer), c_int)
+    !$acc host_data use_device(south_in_buffer)
+    nccl_ierr = nccl_send_float(c_loc(south_in_buffer), nccl_count, &
+        this%south_neighbor, this%nccl_comm, this%nccl_stream)
+    !$acc end host_data
+#endif
 
     !$acc end data
     end associate
@@ -1897,7 +2080,7 @@ module subroutine put_south(this,var,do_dqdt)
 end subroutine
 
 
-module subroutine put_east(this,var,do_dqdt)    
+module subroutine put_east(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(inout) :: this
     class(variable_t), intent(in) :: var
@@ -1905,10 +2088,13 @@ module subroutine put_east(this,var,do_dqdt)
     integer :: n, ny, msg_size, offs, i, k, j, indx_start
     logical :: dqdt
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+#ifdef USE_NCCL
+    integer(c_int) :: nccl_count, nccl_ierr
+#endif
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
-    
+
     offs=var%xstag
     disp = 0
     msg_size = 1
@@ -1920,6 +2106,23 @@ module subroutine put_east(this,var,do_dqdt)
     !$acc data present(east_in_buffer, east_in_buffer_2d)
 
     if (var%two_d) then
+#ifdef USE_NCCL
+        if (var%dtype==kINTEGER) then
+            !$acc parallel loop gang vector collapse(2) present(data_2di)
+            do j = jts, jte
+                do i = indx_start, ite
+                    east_in_buffer(i-indx_start+1, 1, j-jts+1) = real(data_2di(i,j))
+                enddo
+            enddo
+        else
+            !$acc parallel loop gang vector collapse(2) present(data_2d)
+            do j = jts, jte
+                do i = indx_start, ite
+                    east_in_buffer(i-indx_start+1, 1, j-jts+1) = data_2d(i,j)
+                enddo
+            enddo
+        endif
+#else
         if (var%dtype==kINTEGER) then
             !$acc parallel loop gang vector collapse(2) present(data_2di)
             do j = jts, jte
@@ -1939,6 +2142,7 @@ module subroutine put_east(this,var,do_dqdt)
         call MPI_Put(east_in_buffer_2d, msg_size, &
         var%grid%EW_halo, this%east_neighbor, disp, msg_size, var%grid%EW_win_halo, this%west_in_win)
         !$acc end host_data
+#endif
     else
         if (dqdt) then
             !$acc parallel loop gang vector collapse(3) present(dqdt_3d)
@@ -1959,11 +2163,21 @@ module subroutine put_east(this,var,do_dqdt)
                 enddo
             enddo
         endif
+#ifndef USE_NCCL
         !$acc host_data use_device(east_in_buffer)
         call MPI_Put(east_in_buffer, msg_size, &
         var%grid%EW_halo, this%east_neighbor, disp, msg_size, var%grid%EW_win_halo, this%west_in_win)
         !$acc end host_data
+#endif
     endif
+
+#ifdef USE_NCCL
+    nccl_count = int(size(this%east_in_buffer), c_int)
+    !$acc host_data use_device(east_in_buffer)
+    nccl_ierr = nccl_send_float(c_loc(east_in_buffer), nccl_count, &
+        this%east_neighbor, this%nccl_comm, this%nccl_stream)
+    !$acc end host_data
+#endif
 
     !$acc end data
     end associate
@@ -1973,7 +2187,7 @@ end subroutine
 
 
 
-module subroutine put_west(this,var,do_dqdt)    
+module subroutine put_west(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(inout) :: this
     class(variable_t), intent(in) :: var
@@ -1981,6 +2195,9 @@ module subroutine put_west(this,var,do_dqdt)
     integer :: start, ny, msg_size, offs, i, k, j, indx_end
     logical :: dqdt
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+#ifdef USE_NCCL
+    integer(c_int) :: nccl_count, nccl_ierr
+#endif
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
@@ -1996,6 +2213,23 @@ module subroutine put_west(this,var,do_dqdt)
     !$acc data present(west_in_buffer, west_in_buffer_2d)
 
     if (var%two_d) then
+#ifdef USE_NCCL
+        if (var%dtype==kINTEGER) then
+            !$acc parallel loop gang vector collapse(2) present(data_2di)
+            do j = jts, jte
+                do i = its, indx_end
+                    west_in_buffer(i-its+1, 1, j-jts+1) = real(data_2di(i,j))
+                enddo
+            enddo
+        else
+            !$acc parallel loop gang vector collapse(2) present(data_2d)
+            do j = jts, jte
+                do i = its, indx_end
+                    west_in_buffer(i-its+1, 1, j-jts+1) = data_2d(i,j)
+                enddo
+            enddo
+        endif
+#else
         if (var%dtype==kINTEGER) then
             !$acc parallel loop gang vector collapse(2) present(data_2di)
             do j = jts, jte
@@ -2015,6 +2249,7 @@ module subroutine put_west(this,var,do_dqdt)
         call MPI_Put(west_in_buffer_2d, msg_size, &
             var%grid%EW_halo, this%west_neighbor, disp, msg_size, var%grid%EW_win_halo, this%east_in_win)
         !$acc end host_data
+#endif
     else
         if (dqdt) then
             !$acc parallel loop gang vector collapse(3) present(dqdt_3d)
@@ -2035,31 +2270,50 @@ module subroutine put_west(this,var,do_dqdt)
                 enddo
             enddo
         endif
+#ifndef USE_NCCL
         !$acc host_data use_device(west_in_buffer)
         call MPI_Put(west_in_buffer, msg_size, &
             var%grid%EW_halo, this%west_neighbor, disp, msg_size, var%grid%EW_win_halo, this%east_in_win)
         !$acc end host_data
+#endif
     endif
+
+#ifdef USE_NCCL
+    nccl_count = int(size(this%west_in_buffer), c_int)
+    !$acc host_data use_device(west_in_buffer)
+    nccl_ierr = nccl_send_float(c_loc(west_in_buffer), nccl_count, &
+        this%west_neighbor, this%nccl_comm, this%nccl_stream)
+    !$acc end host_data
+#endif
 
     !$acc end data
     end associate
 
 end subroutine
 
-module subroutine retrieve_north_halo(this,var,do_dqdt)    
+module subroutine retrieve_north_halo(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
     integer :: n, nx, offs_x, offs_y, i, k, j
+    integer :: halo_off
     logical :: dqdt
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
-    
+
     offs_x=var%xstag
     offs_y=var%ystag
-  
+
+    ! Under USE_NCCL the recv lands at the start of north_in_3d (no derived-type
+    ! offset). MPI mode places the data at i-offset halo_size due to NS_win_halo.
+#ifdef USE_NCCL
+    halo_off = 0
+#else
+    halo_off = this%halo_size
+#endif
+
     associate(halo_size => this%halo_size, its => var%grid%its, jts => var%grid%jts, kts => var%grid%kts, ite => var%grid%ite, jte => var%grid%jte, kte => var%grid%kte, &
         data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d, &
         north_in_3d => this%north_in_3d)
@@ -2071,7 +2325,7 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(2) present(data_2di)
             do j = n-halo_size+1-offs_y, n
                 do i = its, ite
-                    data_2di(i,j) = north_in_3d(i-its+1+halo_size,1,j-(n-halo_size+1-offs_y)+1)
+                    data_2di(i,j) = north_in_3d(i-its+1+halo_off,1,j-(n-halo_size+1-offs_y)+1)
                 enddo
             enddo
         else
@@ -2080,7 +2334,7 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(2) present(data_2d)
             do j = n-halo_size+1-offs_y, n
                 do i = its, ite
-                    data_2d(i,j) = north_in_3d(i-its+1+halo_size,1,j-(n-halo_size+1-offs_y)+1)
+                    data_2d(i,j) = north_in_3d(i-its+1+halo_off,1,j-(n-halo_size+1-offs_y)+1)
                 enddo
             enddo
         endif
@@ -2092,7 +2346,7 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
             do j = n-halo_size+1-offs_y, n
                 do k = kts, kte
                     do i = its, ite
-                        dqdt_3d(i,k,j) = north_in_3d(i-its+1+halo_size,k,j-(n-halo_size+1-offs_y)+1)
+                        dqdt_3d(i,k,j) = north_in_3d(i-its+1+halo_off,k,j-(n-halo_size+1-offs_y)+1)
                     enddo
                 enddo
             enddo
@@ -2101,7 +2355,7 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
             do j = n-halo_size+1-offs_y, n
                 do k = kts, kte
                     do i = its, ite
-                        data_3d(i,k,j) = north_in_3d(i-its+1+halo_size,k,j-(n-halo_size+1-offs_y)+1)
+                        data_3d(i,k,j) = north_in_3d(i-its+1+halo_off,k,j-(n-halo_size+1-offs_y)+1)
                     enddo
                 enddo
             enddo
@@ -2113,19 +2367,26 @@ module subroutine retrieve_north_halo(this,var,do_dqdt)
 
 end subroutine
 
-module subroutine retrieve_south_halo(this,var,do_dqdt)    
+module subroutine retrieve_south_halo(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
     integer :: start, nx, offs_y, offs_x, i, j, k
+    integer :: halo_off
     logical :: dqdt
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
-    
+
     offs_x=var%xstag
     offs_y=var%ystag
+
+#ifdef USE_NCCL
+    halo_off = 0
+#else
+    halo_off = this%halo_size
+#endif
 
     associate(halo_size => this%halo_size, its => var%grid%its, jts => var%grid%jts, kts => var%grid%kts, ite => var%grid%ite, jte => var%grid%jte, kte => var%grid%kte, &
          data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d, &
@@ -2137,7 +2398,7 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(2) present(data_2di)
             do j = start,start+halo_size-1
             do i = its,ite
-                data_2di(i,j) = south_in_3d(i-its+1+halo_size,1,j-start+1)
+                data_2di(i,j) = south_in_3d(i-its+1+halo_off,1,j-start+1)
             enddo
             enddo
         else
@@ -2145,7 +2406,7 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(2) present(data_2d)
             do j = start,start+halo_size-1
             do i = its,ite
-                data_2d(i,j) = south_in_3d(i-its+1+halo_size,1,j-start+1)
+                data_2d(i,j) = south_in_3d(i-its+1+halo_off,1,j-start+1)
             enddo
             enddo
         endif
@@ -2156,7 +2417,7 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
             do j = start,start+halo_size-1
             do k = kts,kte
             do i = its,ite
-                dqdt_3d(i,k,j) = south_in_3d(i-its+1+halo_size,k,j-start+1)
+                dqdt_3d(i,k,j) = south_in_3d(i-its+1+halo_off,k,j-start+1)
             enddo
             enddo
             enddo
@@ -2165,7 +2426,7 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
             do j = start,start+halo_size-1
             do k = kts,kte
             do i = its,ite
-                data_3d(i,k,j) = south_in_3d(i-its+1+halo_size,k,j-start+1)
+                data_3d(i,k,j) = south_in_3d(i-its+1+halo_off,k,j-start+1)
             enddo
             enddo
             enddo
@@ -2177,12 +2438,13 @@ module subroutine retrieve_south_halo(this,var,do_dqdt)
 
 end subroutine
 
-module subroutine retrieve_east_halo(this,var,do_dqdt)    
+module subroutine retrieve_east_halo(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
     integer :: n, ny, offs_x, offs_y, i, j, k
+    integer :: halo_off
     logical :: dqdt
 
     dqdt=.False.
@@ -2190,6 +2452,12 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
 
     offs_x=var%xstag
     offs_y=var%ystag
+
+#ifdef USE_NCCL
+    halo_off = 0
+#else
+    halo_off = this%halo_size
+#endif
 
     associate(halo_size => this%halo_size, its => var%grid%its, jts => var%grid%jts, kts => var%grid%kts, ite => var%grid%ite, jte => var%grid%jte, kte => var%grid%kte, &
         data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d, &
@@ -2201,7 +2469,7 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(2) present(data_2di)
             do j = jts,jte
             do i = n-halo_size+1-offs_x,n
-                data_2di(i,j) = east_in_3d(i-(n-halo_size+1-offs_x)+1,1,j-jts+1+halo_size)
+                data_2di(i,j) = east_in_3d(i-(n-halo_size+1-offs_x)+1,1,j-jts+1+halo_off)
             enddo
             enddo
         else
@@ -2209,7 +2477,7 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(2) present(data_2d)
             do j = jts,jte
             do i = n-halo_size+1-offs_x,n
-                data_2d(i,j) = east_in_3d(i-(n-halo_size+1-offs_x)+1,1,j-jts+1+halo_size)
+                data_2d(i,j) = east_in_3d(i-(n-halo_size+1-offs_x)+1,1,j-jts+1+halo_off)
             enddo
             enddo
         endif
@@ -2220,7 +2488,7 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
             do j = jts,jte
             do k = kts,kte
             do i = n-halo_size+1-offs_x,n
-                dqdt_3d(i,k,j) = east_in_3d(i-(n-halo_size+1-offs_x)+1,k,j-jts+1+halo_size)
+                dqdt_3d(i,k,j) = east_in_3d(i-(n-halo_size+1-offs_x)+1,k,j-jts+1+halo_off)
             enddo
             enddo
             enddo
@@ -2229,7 +2497,7 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
             do j = jts,jte
             do k = kts,kte
             do i = n-halo_size+1-offs_x,n
-                data_3d(i,k,j) = east_in_3d(i-(n-halo_size+1-offs_x)+1,k,j-jts+1+halo_size)
+                data_3d(i,k,j) = east_in_3d(i-(n-halo_size+1-offs_x)+1,k,j-jts+1+halo_off)
             enddo
             enddo
             enddo
@@ -2239,12 +2507,13 @@ module subroutine retrieve_east_halo(this,var,do_dqdt)
     end associate
 end subroutine
 
-module subroutine retrieve_west_halo(this,var,do_dqdt)    
+module subroutine retrieve_west_halo(this,var,do_dqdt)
     implicit none
     class(halo_t), intent(in) :: this
     class(variable_t), intent(inout) :: var
     logical, optional, intent(in) :: do_dqdt
     integer :: start, ny, offs_x, offs_y, i, j, k
+    integer :: halo_off
     logical :: dqdt
 
     dqdt=.False.
@@ -2252,6 +2521,12 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
 
     offs_x=var%xstag
     offs_y=var%ystag
+
+#ifdef USE_NCCL
+    halo_off = 0
+#else
+    halo_off = this%halo_size
+#endif
 
     associate(halo_size => this%halo_size, its => var%grid%its, jts => var%grid%jts, kts => var%grid%kts, ite => var%grid%ite, jte => var%grid%jte, kte => var%grid%kte, &
         data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d, &
@@ -2263,7 +2538,7 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(2) present(data_2di)
             do j = jts,jte
             do i = start,start+halo_size-1
-                data_2di(i,j) = west_in_3d(i-start+1,1,j-jts+1+halo_size)
+                data_2di(i,j) = west_in_3d(i-start+1,1,j-jts+1+halo_off)
             enddo
             enddo
         else
@@ -2271,7 +2546,7 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
             !$acc parallel loop gang vector collapse(2) present(data_2d)
             do j = jts,jte
             do i = start,start+halo_size-1
-                data_2d(i,j) = west_in_3d(i-start+1,1,j-jts+1+halo_size)
+                data_2d(i,j) = west_in_3d(i-start+1,1,j-jts+1+halo_off)
             enddo
             enddo
         endif
@@ -2282,7 +2557,7 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
             do j = jts,jte
             do k = kts,kte
             do i = start,start+halo_size-1
-                dqdt_3d(i,k,j) = west_in_3d(i-start+1,k,j-jts+1+halo_size)
+                dqdt_3d(i,k,j) = west_in_3d(i-start+1,k,j-jts+1+halo_off)
             enddo
             enddo
             enddo
@@ -2291,7 +2566,7 @@ module subroutine retrieve_west_halo(this,var,do_dqdt)
             do j = jts,jte
             do k = kts,kte
             do i = start,start+halo_size-1
-                data_3d(i,k,j) = west_in_3d(i-start+1,k,j-jts+1+halo_size)
+                data_3d(i,k,j) = west_in_3d(i-start+1,k,j-jts+1+halo_off)
             enddo
             enddo
             enddo
@@ -2311,7 +2586,12 @@ module subroutine put_northeast(this,var,do_dqdt)
     logical :: dqdt
     integer :: msg_size, offs_x, offs_y, i_start, j_start, i, j, k
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+#ifndef USE_NCCL
     type(MPI_Win) :: dst_win
+#endif
+#ifdef USE_NCCL
+    integer(c_int) :: nccl_count, nccl_ierr
+#endif
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
@@ -2323,6 +2603,7 @@ module subroutine put_northeast(this,var,do_dqdt)
     disp = 0
     msg_size = 1
 
+#ifndef USE_NCCL
     ! select which destination window to use for MPI_Put. This handles
     ! the case for corner exchanges on domain boundaries
     if (this%north_boundary) then
@@ -2334,9 +2615,32 @@ module subroutine put_northeast(this,var,do_dqdt)
     else
         dst_win = this%southwest_in_win
     end if
+#endif
 
     associate(data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d)
     if (var%two_d) then
+#ifdef USE_NCCL
+        ! Pack 2D corner block into k=1 slice of the 3D corner send buffer.
+        associate(buf => this%ne_corner_send)
+        !$acc data present(buf)
+        if (var%dtype==kINTEGER) then
+            !$acc parallel loop gang vector collapse(2) present(data_2di)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do i = i_start, i_start + this%halo_size + offs_x - 1
+                    buf(i-i_start+1, 1, j-j_start+1) = real(data_2di(i,j))
+                enddo
+            enddo
+        else
+            !$acc parallel loop gang vector collapse(2) present(data_2d)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do i = i_start, i_start + this%halo_size + offs_x - 1
+                    buf(i-i_start+1, 1, j-j_start+1) = data_2d(i,j)
+                enddo
+            enddo
+        endif
+        !$acc end data
+        end associate
+#else
         if (var%dtype==kINTEGER) then
             !$acc host_data use_device(data_2di)
             call MPI_Put(data_2di(i_start,j_start), msg_size, &
@@ -2348,6 +2652,7 @@ module subroutine put_northeast(this,var,do_dqdt)
                 var%grid%corner_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         endif
+#endif
     else
         associate(kts => var%grid%kts, kte => var%grid%kte, buf => this%ne_corner_send)
         !$acc data present(buf)
@@ -2370,14 +2675,24 @@ module subroutine put_northeast(this,var,do_dqdt)
                 enddo
             enddo
         endif
+#ifndef USE_NCCL
         !$acc host_data use_device(buf)
         call MPI_Put(buf, msg_size, &
             var%grid%corner_win_halo, this%northeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         !$acc end host_data
+#endif
         !$acc end data
         end associate
     endif
     end associate
+
+#ifdef USE_NCCL
+    nccl_count = int(size(this%ne_corner_send), c_int)
+    !$acc host_data use_device(this%ne_corner_send)
+    nccl_ierr = nccl_send_float(c_loc(this%ne_corner_send), nccl_count, &
+        this%northeast_neighbor, this%nccl_comm, this%nccl_stream)
+    !$acc end host_data
+#endif
 end subroutine
 
 module subroutine put_northwest(this,var,do_dqdt)
@@ -2388,7 +2703,12 @@ module subroutine put_northwest(this,var,do_dqdt)
     logical :: dqdt
     integer :: msg_size, offs_x, offs_y, i_start, j_start, i, j, k
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+#ifndef USE_NCCL
     type(MPI_Win) :: dst_win
+#endif
+#ifdef USE_NCCL
+    integer(c_int) :: nccl_count, nccl_ierr
+#endif
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
@@ -2401,6 +2721,7 @@ module subroutine put_northwest(this,var,do_dqdt)
     disp = 0
     msg_size = 1
 
+#ifndef USE_NCCL
     ! select which destination window to use for MPI_Put. This handles
     ! the case for corner exchanges on domain boundaries
     if (this%north_boundary) then
@@ -2412,9 +2733,31 @@ module subroutine put_northwest(this,var,do_dqdt)
     else
         dst_win = this%southeast_in_win
     end if
+#endif
 
     associate(data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d)
     if (var%two_d) then
+#ifdef USE_NCCL
+        associate(buf => this%nw_corner_send)
+        !$acc data present(buf)
+        if (var%dtype==kINTEGER) then
+            !$acc parallel loop gang vector collapse(2) present(data_2di)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do i = i_start, i_start + this%halo_size + offs_x - 1
+                    buf(i-i_start+1, 1, j-j_start+1) = real(data_2di(i,j))
+                enddo
+            enddo
+        else
+            !$acc parallel loop gang vector collapse(2) present(data_2d)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do i = i_start, i_start + this%halo_size + offs_x - 1
+                    buf(i-i_start+1, 1, j-j_start+1) = data_2d(i,j)
+                enddo
+            enddo
+        endif
+        !$acc end data
+        end associate
+#else
         if (var%dtype==kINTEGER) then
             !$acc host_data use_device(data_2di)
             call MPI_Put(data_2di(i_start,j_start), msg_size, &
@@ -2426,6 +2769,7 @@ module subroutine put_northwest(this,var,do_dqdt)
                 var%grid%corner_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         endif
+#endif
     else
         associate(kts => var%grid%kts, kte => var%grid%kte, buf => this%nw_corner_send)
         !$acc data present(buf)
@@ -2448,14 +2792,24 @@ module subroutine put_northwest(this,var,do_dqdt)
                 enddo
             enddo
         endif
+#ifndef USE_NCCL
         !$acc host_data use_device(buf)
         call MPI_Put(buf, msg_size, &
             var%grid%corner_win_halo, this%northwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         !$acc end host_data
+#endif
         !$acc end data
         end associate
     endif
     end associate
+
+#ifdef USE_NCCL
+    nccl_count = int(size(this%nw_corner_send), c_int)
+    !$acc host_data use_device(this%nw_corner_send)
+    nccl_ierr = nccl_send_float(c_loc(this%nw_corner_send), nccl_count, &
+        this%northwest_neighbor, this%nccl_comm, this%nccl_stream)
+    !$acc end host_data
+#endif
 end subroutine
 
 
@@ -2467,7 +2821,12 @@ module subroutine put_southwest(this,var,do_dqdt)
     logical :: dqdt
     integer :: msg_size, offs_x, offs_y, i_start, j_start, i, j, k
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+#ifndef USE_NCCL
     type(MPI_Win) :: dst_win
+#endif
+#ifdef USE_NCCL
+    integer(c_int) :: nccl_count, nccl_ierr
+#endif
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
@@ -2479,6 +2838,7 @@ module subroutine put_southwest(this,var,do_dqdt)
     i_start = var%grid%its
     j_start = var%grid%jts
 
+#ifndef USE_NCCL
     ! select which destination window to use for MPI_Put. This handles
     ! the case for corner exchanges on domain boundaries
     if (this%south_boundary) then
@@ -2490,9 +2850,31 @@ module subroutine put_southwest(this,var,do_dqdt)
     else
         dst_win = this%northeast_in_win
     end if
+#endif
 
     associate(data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d)
     if (var%two_d) then
+#ifdef USE_NCCL
+        associate(buf => this%sw_corner_send)
+        !$acc data present(buf)
+        if (var%dtype==kINTEGER) then
+            !$acc parallel loop gang vector collapse(2) present(data_2di)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do i = i_start, i_start + this%halo_size + offs_x - 1
+                    buf(i-i_start+1, 1, j-j_start+1) = real(data_2di(i,j))
+                enddo
+            enddo
+        else
+            !$acc parallel loop gang vector collapse(2) present(data_2d)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do i = i_start, i_start + this%halo_size + offs_x - 1
+                    buf(i-i_start+1, 1, j-j_start+1) = data_2d(i,j)
+                enddo
+            enddo
+        endif
+        !$acc end data
+        end associate
+#else
         if (var%dtype==kINTEGER) then
             !$acc host_data use_device(data_2di)
             call MPI_Put(data_2di(i_start,j_start), msg_size, &
@@ -2504,6 +2886,7 @@ module subroutine put_southwest(this,var,do_dqdt)
                 var%grid%corner_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         endif
+#endif
     else
         associate(kts => var%grid%kts, kte => var%grid%kte, buf => this%sw_corner_send)
         !$acc data present(buf)
@@ -2526,14 +2909,24 @@ module subroutine put_southwest(this,var,do_dqdt)
                 enddo
             enddo
         endif
+#ifndef USE_NCCL
         !$acc host_data use_device(buf)
         call MPI_Put(buf, msg_size, &
             var%grid%corner_win_halo, this%southwest_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         !$acc end host_data
+#endif
         !$acc end data
         end associate
     endif
     end associate
+
+#ifdef USE_NCCL
+    nccl_count = int(size(this%sw_corner_send), c_int)
+    !$acc host_data use_device(this%sw_corner_send)
+    nccl_ierr = nccl_send_float(c_loc(this%sw_corner_send), nccl_count, &
+        this%southwest_neighbor, this%nccl_comm, this%nccl_stream)
+    !$acc end host_data
+#endif
 end subroutine
 
 module subroutine put_southeast(this,var,do_dqdt)
@@ -2544,7 +2937,12 @@ module subroutine put_southeast(this,var,do_dqdt)
     logical :: dqdt
     integer :: msg_size, offs_x, offs_y, i_start, j_start, i, j, k
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
+#ifndef USE_NCCL
     type(MPI_Win) :: dst_win
+#endif
+#ifdef USE_NCCL
+    integer(c_int) :: nccl_count, nccl_ierr
+#endif
 
     dqdt=.False.
     if (present(do_dqdt)) dqdt=do_dqdt
@@ -2556,6 +2954,7 @@ module subroutine put_southeast(this,var,do_dqdt)
     disp = 0
     msg_size = 1
 
+#ifndef USE_NCCL
     ! select which destination window to use for MPI_Put. This handles
     ! the case for corner exchanges on domain boundaries
     if (this%south_boundary) then
@@ -2567,9 +2966,31 @@ module subroutine put_southeast(this,var,do_dqdt)
     else
         dst_win = this%northwest_in_win
     end if
+#endif
 
     associate(data_3d => var%data_3d, data_2d => var%data_2d, data_2di => var%data_2di, dqdt_3d => var%dqdt_3d)
     if (var%two_d) then
+#ifdef USE_NCCL
+        associate(buf => this%se_corner_send)
+        !$acc data present(buf)
+        if (var%dtype==kINTEGER) then
+            !$acc parallel loop gang vector collapse(2) present(data_2di)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do i = i_start, i_start + this%halo_size + offs_x - 1
+                    buf(i-i_start+1, 1, j-j_start+1) = real(data_2di(i,j))
+                enddo
+            enddo
+        else
+            !$acc parallel loop gang vector collapse(2) present(data_2d)
+            do j = j_start, j_start + this%halo_size + offs_y - 1
+                do i = i_start, i_start + this%halo_size + offs_x - 1
+                    buf(i-i_start+1, 1, j-j_start+1) = data_2d(i,j)
+                enddo
+            enddo
+        endif
+        !$acc end data
+        end associate
+#else
         if (var%dtype==kINTEGER) then
             !$acc host_data use_device(data_2di)
             call MPI_Put(data_2di(i_start,j_start), msg_size, &
@@ -2581,6 +3002,7 @@ module subroutine put_southeast(this,var,do_dqdt)
                 var%grid%corner_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
             !$acc end host_data
         endif
+#endif
     else
         associate(kts => var%grid%kts, kte => var%grid%kte, buf => this%se_corner_send)
         !$acc data present(buf)
@@ -2603,14 +3025,24 @@ module subroutine put_southeast(this,var,do_dqdt)
                 enddo
             enddo
         endif
+#ifndef USE_NCCL
         !$acc host_data use_device(buf)
         call MPI_Put(buf, msg_size, &
             var%grid%corner_win_halo, this%southeast_neighbor, disp, msg_size, var%grid%corner_win_halo, dst_win)
         !$acc end host_data
+#endif
         !$acc end data
         end associate
     endif
     end associate
+
+#ifdef USE_NCCL
+    nccl_count = int(size(this%se_corner_send), c_int)
+    !$acc host_data use_device(this%se_corner_send)
+    nccl_ierr = nccl_send_float(c_loc(this%se_corner_send), nccl_count, &
+        this%southeast_neighbor, this%nccl_comm, this%nccl_stream)
+    !$acc end host_data
+#endif
 end subroutine
 
 
