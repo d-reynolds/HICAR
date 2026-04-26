@@ -75,9 +75,6 @@ option(SRUN_FLAGS "srun flags to use for running the test cases" "")
 # SNOWPACK_FORTRAN implies both SNOWPACK and OPENACC
 if(SNOWPACK_FORTRAN)
     set(SNOWPACK ON CACHE BOOL "Enable SNOWPACK support in HICAR" FORCE)
-    if(NOT OPENACC_SET_BY_USER)
-        set(OPENACC ON CACHE BOOL "Enable OpenACC support for GPU acceleration" FORCE)
-    endif()
 endif()
 #########################################
 

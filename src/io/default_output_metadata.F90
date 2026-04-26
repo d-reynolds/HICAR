@@ -4179,6 +4179,8 @@ contains
             var_meta%attributes  = [attribute_t("long_name", "Blowing snow mass mixing ratio on fine mesh"),   &
                                attribute_t("units",         "kg m-2"),                        &
                                attribute_t("coordinates",   "lat lon")]
+            var_meta%maxval      = 100.0
+            var_meta%minval      = -1e-10
             if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%qs_fmvar /= "")
 
         !>------------------------------------------------------------
@@ -4191,6 +4193,8 @@ contains
             var_meta%attributes  = [attribute_t("long_name", "Blowing snow number concentration on fine mesh"),   &
                                attribute_t("units",         "cm-3"),                        &
                                attribute_t("coordinates",   "lat lon")]
+            var_meta%maxval      = 1.0e8
+            var_meta%minval      = -1e-10
             if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%ns_fmvar /= "")
 
         end if

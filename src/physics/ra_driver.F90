@@ -1791,7 +1791,8 @@ contains
                 !$acc& present(svf, aspect_ang, emiss, skin_temp, longwave, nbr_buffer,          &
                 !$acc&         azimuth_offset, inv_dist2_offset, ihs, ihe, jhs, jhe)             &
                 !$acc& private(lw_emit_sum, lw_weight_sum, facing, w_refl,                       &
-                !$acc&         lw_emit_terrain, local_emit, terrain_vf, di, dj, ii, jj)
+                !$acc&         lw_emit_terrain, local_emit, terrain_vf, di, dj, ii, jj)          &
+                !$acc& firstprivate(STBOLT)
                 do j = jts, jte
                     do i = its, ite
                         ! Weight per neighbour = (solid angle subtended from target)
@@ -1859,7 +1860,7 @@ contains
 
                 !$acc parallel loop gang vector collapse(2) &
                 !$acc   present(svf, albedo_2d, shortwave, sw_terrain, emiss, skin_temp, longwave) &
-                !$acc   private(terrain_vf)
+                !$acc   private(terrain_vf, local_albedo, albedo_terrain, refl_correction) firstprivate(STBOLT)
                 do j = jts, jte
                     do i = its, ite
                         terrain_vf    = 1.0 - svf(i,j)
