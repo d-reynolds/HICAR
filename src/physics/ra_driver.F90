@@ -34,6 +34,11 @@ module radiation
     use mod_wrf_constants, only : cp, R_d, gravity, DEGRAD, DPD, piconst, STBOLT
     use mod_atm_utilities, only : cal_cldfra3, calc_solar_elevation, calc_solar_date
     use mpi_f08
+#ifdef USE_NCCL
+    use, intrinsic :: iso_c_binding, only: c_loc, c_int
+    use nccl_interface, only: nccl_send_float, nccl_recv_float, &
+                              nccl_group_start, nccl_group_end
+#endif
 
 #ifdef USE_RTE_RRTMGP
     use mo_rte_kind,           only: wp, i8, wl
@@ -450,6 +455,16 @@ contains
                     end do
                 end do
                 !$acc host_data use_device(send_buf, recv_buf)
+#ifdef USE_NCCL
+                call nccl_group_start()
+                ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
+                                       domain%halo%south_neighbor, &
+                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
+                                       domain%halo%south_neighbor, &
+                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                call nccl_group_end()
+#else
                 call MPI_Isend(send_buf, send_len, MPI_REAL, &
                                domain%halo%south_neighbor, 100 + phase, &
                                domain%compute_comms, send_req, ierr)
@@ -457,6 +472,7 @@ contains
                               domain%halo%south_neighbor, 200 + phase, &
                               domain%compute_comms, stat, ierr)
                 call MPI_Wait(send_req, stat, ierr)
+#endif
                 !$acc end host_data
                 ! Unpack only the rows we have space for (closest to our domain)
                 if (recv_width > 0) then
@@ -484,6 +500,16 @@ contains
                     end do
                 end do
                 !$acc host_data use_device(send_buf, recv_buf)
+#ifdef USE_NCCL
+                call nccl_group_start()
+                ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
+                                       domain%halo%north_neighbor, &
+                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
+                                       domain%halo%north_neighbor, &
+                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                call nccl_group_end()
+#else
                 call MPI_Isend(send_buf, send_len, MPI_REAL, &
                                domain%halo%north_neighbor, 200 + phase, &
                                domain%compute_comms, send_req, ierr)
@@ -491,6 +517,7 @@ contains
                               domain%halo%north_neighbor, 100 + phase, &
                               domain%compute_comms, stat, ierr)
                 call MPI_Wait(send_req, stat, ierr)
+#endif
                 !$acc end host_data
                 ! Unpack only the rows we have space for (closest to our domain)
                 if (recv_width > 0) then
@@ -520,6 +547,16 @@ contains
                     end do
                 end do
                 !$acc host_data use_device(send_buf, recv_buf)
+#ifdef USE_NCCL
+                call nccl_group_start()
+                ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
+                                       domain%halo%west_neighbor, &
+                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
+                                       domain%halo%west_neighbor, &
+                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                call nccl_group_end()
+#else
                 call MPI_Isend(send_buf, send_len, MPI_REAL, &
                                domain%halo%west_neighbor, 300 + phase, &
                                domain%compute_comms, send_req, ierr)
@@ -527,6 +564,7 @@ contains
                               domain%halo%west_neighbor, 400 + phase, &
                               domain%compute_comms, stat, ierr)
                 call MPI_Wait(send_req, stat, ierr)
+#endif
                 !$acc end host_data
                 ! Unpack only the columns we have space for (closest to our domain)
                 if (recv_width > 0) then
@@ -553,6 +591,16 @@ contains
                     end do
                 end do
                 !$acc host_data use_device(send_buf, recv_buf)
+#ifdef USE_NCCL
+                call nccl_group_start()
+                ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
+                                       domain%halo%east_neighbor, &
+                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
+                                       domain%halo%east_neighbor, &
+                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                call nccl_group_end()
+#else
                 call MPI_Isend(send_buf, send_len, MPI_REAL, &
                                domain%halo%east_neighbor, 400 + phase, &
                                domain%compute_comms, send_req, ierr)
@@ -560,6 +608,7 @@ contains
                               domain%halo%east_neighbor, 300 + phase, &
                               domain%compute_comms, stat, ierr)
                 call MPI_Wait(send_req, stat, ierr)
+#endif
                 !$acc end host_data
                 ! Unpack only the columns we have space for (closest to our domain)
                 if (recv_width > 0) then

@@ -651,12 +651,17 @@ subroutine setup_batch_exch(this, exch_vars, comms)
         call MPI_INFO_SET(info_in, 'same_disp_unit', '.true.')
         ! call MPI_INFO_SET(info_in, 'alloc_shared_noncontig', '.true.')
 #ifdef _OPENACC
-        ! Check if MPI supports CUDA-aware memory
+#ifndef USE_NCCL
+        ! Check if MPI supports CUDA-aware memory. Skipped under USE_NCCL —
+        ! no MPI windows are created on device buffers in that build, so
+        ! the hints are dead code and we don't want any "I'm CUDA-aware"
+        ! signal going to MPI when NCCL is the transport.
         call MPI_Info_set(info_in, "alloc_shm", ".true.", ierr)
         ! Set memory type hint for GPU accessibility
         call MPI_Info_set(info_in, "alloc_mem", "device", ierr)
         call MPI_Info_set(info_in, "mpi_assert_memory_alloc_kinds", "gpu:device", ierr)
         call MPI_Info_set(info_in, "cuda_aware", ".true.", ierr)
+#endif
 #endif
 
         !First do NS
