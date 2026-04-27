@@ -265,16 +265,7 @@ contains
         associate(temperature_2m => domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d, &
                   humidity_2m    => domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d,  &
                   temperature    => domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d,    &
-                  water_vapor    => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,   &
-                  albedo_dom     => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
-                  veg_frac      => domain%vars_3d(domain%var_indx(kVARS%vegetation_fraction)%v)%data_3d, &
-                  canopy_water  => domain%vars_2d(domain%var_indx(kVARS%canopy_water)%v)%data_2d, &
-                  cqs2_dom      => domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d, &
-                  soil_temperature => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
-                  soil_water_content => domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d, &
-                  land_mask_dom     => domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di, &
-                  roughness_z0     => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
-                  veg_type    => domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di)
+                  water_vapor    => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d)
 
 
         if (present(context_chng)) then
@@ -336,7 +327,7 @@ contains
         allocate(QSFC(ims:ime,jms:jme), source=water_vapor(:,kms,:))
         allocate(current_precipitation(ims:ime,jms:jme), source=0.0)
         allocate(windspd(ims:ime,jms:jme), source=1.0)
-        allocate(land_mask(ims:ime,jms:jme), source=real(land_mask_dom))
+        allocate(land_mask(ims:ime,jms:jme), source=real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di))
         !$acc enter data copyin(QSFC, current_precipitation, windspd, land_mask)
 
         if (options%physics%landsurface > kLSM_BASIC) then
@@ -375,6 +366,15 @@ contains
         
         ! Noah-MP Land Surface Model
         if (options%physics%landsurface==kLSM_NOAHMP) then
+
+            associate(veg_frac      => domain%vars_3d(domain%var_indx(kVARS%vegetation_fraction)%v)%data_3d, &
+                  canopy_water  => domain%vars_2d(domain%var_indx(kVARS%canopy_water)%v)%data_2d, &
+                  cqs2_dom      => domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d, &
+                  soil_temperature => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+                  soil_water_content => domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d, &
+                  roughness_z0     => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
+                  veg_type    => domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di)
+
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Noah-MP LSM"
 
             if(options%domain%snowh_var /="" .or. options%domain%swe_var /="") then 
@@ -610,6 +610,8 @@ contains
                     end if
                 end do
             end do
+
+            end associate
         endif ! Noah-MP LSM
 
         if(options%physics%watersurface==kWATER_LAKE) then
@@ -755,7 +757,115 @@ contains
             julian_day = domain%sim_time%day_of_year()
 
             if (options%physics%landsurface > 0 .or. options%physics%watersurface > 0) then
+                associate(u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
+                          v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d)
+                !$acc kernels
+                windspd = sqrt(u_10m**2 + v_10m**2)
+                where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
+                !$acc end kernels
+                end associate
 
+            endif
+
+            if (options%physics%watersurface > 0) then
+
+            if((options%physics%watersurface==kWATER_SIMPLE) .or.      &
+                (options%physics%watersurface==kWATER_LAKE) ) then
+                    call water_simple(options,                              &
+                                      domain%vars_2d(domain%var_indx(kVARS%sst)%v)%data_2d,                   &
+                                      domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d,      &
+                                      windspd,                              &
+                                      domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,       &
+                                      domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d,       &
+                                      domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d,         &
+                                      domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d,           &
+                                      land_mask,                     &
+                                      QSFC,                                 &
+                                      domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d,                   &
+                                      domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,      &
+                                      domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d,   &
+                                      domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di,             &
+                                      ims, ime, kms, kme, jms, jme,                                           &
+                                      its, ite, jts, jte)
+                                !   ,domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d               & ! terrain height [m] if ht(i,j)>=lake_min_elev -> lake (in case no lake category is provided, but lake model is selected, we need to not run the simple water as well - left comment in for future reference)
+            endif
+
+            !___________________ Lake model _____________________
+            ! This lake model (ported from WRF V4.4) is run for the grid cells that are defined as lake in the hi-res input file.
+            ! It also is advised to supply a lake_depth parameter in the hi-res input, otherwise the default depth of 50m is used (see lakeini above)
+            ! It requires the VEGPARM.TBL landuse category to be one which has a separate lake category (i.e. MODIFIED_IGBP_MODIS_NOAH, USGS-RUC or MODI-RUC).
+            ! For the grid cells that are defined as water, but not as lake (i.e. oceans), the simple water model above will be run.
+            if (options%physics%watersurface==kWATER_LAKE) then    ! WRF's lake model
+
+                associate(lsm_last_precip => domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
+                          precipitation => domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d)
+                !$acc kernels
+                current_precipitation = (precipitation - lsm_last_precip) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
+                !$acc end kernels
+                end associate
+
+                call lake( &
+                    t_phy=domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d                            & !-- t_phy         temperature (K)     !Temprature at the mid points (K)
+                    ,p8w=domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d(:,kms:kme,:)         & !-- p8w           pressure at full levels (Pa) ! Naming convention: 8~at => p8w reads as "p-at-w" (w=full levels)
+                    ,dz8w=domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d                           & !-- dz8w          dz between full levels (m)
+                    ,qvcurr=domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d                          &  !i
+                    ,u_phy=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d                                & !-- u_phy         u-velocity interpolated to theta points (m/s)
+                    ,v_phy=domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d                                & !-- v_phy         v-velocity interpolated to theta points (m/s)
+                    ,glw=domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d                                & !-- GLW           downward long wave flux at ground surface (W/m^2)
+                    ,emiss=domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d                       & !-- EMISS         surface emissivity (between 0 and 1)
+                    ,rainbl=current_precipitation                               & ! RAINBL in mm (Accumulation between PBL calls)
+                    ,dtbl=lsm_dt                                                & !-- dtbl          timestep (s) or ITIMESTEP?
+                    ,swdown=domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d  & !-- SWDOWN        downward short wave flux at ground surface (W/m^2)
+                    ,albedo=domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d                                            & ! albedo? fixed at 0.17?
+                    ,xlat_urb2d=domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d                         & ! optional ?
+                    ,z_lake3d=domain%vars_3d(domain%var_indx(kVARS%z_lake3d)%v)%data_3d                           &
+                    ,dz_lake3d=domain%vars_3d(domain%var_indx(kVARS%dz_lake3d)%v)%data_3d                         &
+                    ,lakedepth2d=domain%vars_2d(domain%var_indx(kVARS%lakedepth2d)%v)%data_2d                     &
+                    ,watsat3d=domain%vars_3d(domain%var_indx(kVARS%watsat3d)%v)%data_3d                           &
+                    ,csol3d=domain%vars_3d(domain%var_indx(kVARS%csol3d)%v)%data_3d                               &
+                    ,tkmg3d=domain%vars_3d(domain%var_indx(kVARS%tkmg3d)%v)%data_3d                               &
+                    ,tkdry3d=domain%vars_3d(domain%var_indx(kVARS%tkdry3d)%v)%data_3d        &
+                    ,tksatu3d=domain%vars_3d(domain%var_indx(kVARS%tksatu3d)%v)%data_3d                  &
+                    ,ivgtyp=domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di                                     &
+                    ,HT=domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d                                  &
+                    ,xland=land_mask                              & !-- XLAND         land mask (1 for land, 2 OR 0 for water)  i/o
+                    ,iswater=iswater,  xice=domain%vars_2d(domain%var_indx(kVARS%xice)%v)%data_2d,   xice_threshold=xice_threshold   &
+                    ,lake_min_elev=5.                                           & ! if this value is changed, also change it in lake_ini
+                    ,ids=ids, ide=ide, jds=jds, jde=jde, kds=kds, kde=kde       &
+                    ,ims=ims, ime=ime, jms=jms, jme=jme, kms=kms, kme=kme       &
+                    ,its=its, ite=ite, jts=jts, jte=jte, kts=kts, kte=kte       &
+                    ,h2osno2d=domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d             & !domain%h2osno2d%data_2d
+                    ,snowdp2d=domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d                        & ! domain%snowdp2d%data_2d
+                    ,snl2d=domain%vars_2d(domain%var_indx(kVARS%snl2d)%v)%data_2d                                 &
+                    ,z3d=domain%vars_3d(domain%var_indx(kVARS%z3d)%v)%data_3d                                     &
+                    ,dz3d=domain%vars_3d(domain%var_indx(kVARS%dz3d)%v)%data_3d                                   &
+                    ,zi3d=domain%vars_3d(domain%var_indx(kVARS%zi3d)%v)%data_3d                                   &
+                    ,h2osoi_vol3d=domain%vars_3d(domain%var_indx(kVARS%h2osoi_vol3d)%v)%data_3d           &
+                    ,h2osoi_liq3d=domain%vars_3d(domain%var_indx(kVARS%h2osoi_liq3d)%v)%data_3d       &
+                    ,h2osoi_ice3d=domain%vars_3d(domain%var_indx(kVARS%h2osoi_ice3d)%v)%data_3d           &
+                    ,t_grnd2d=domain%vars_2d(domain%var_indx(kVARS%t_grnd2d)%v)%data_2d               &
+                    ,t_soisno3d=domain%vars_3d(domain%var_indx(kVARS%t_soisno3d)%v)%data_3d                                      &
+                    ,t_lake3d=domain%vars_3d(domain%var_indx(kVARS%t_lake3d)%v)%data_3d                           & ! 3d lake temperature (K)
+                    ,savedtke12d=domain%vars_2d(domain%var_indx(kVARS%savedtke12d)%v)%data_2d                &
+                    ,lake_icefrac3d=domain%vars_3d(domain%var_indx(kVARS%lake_icefrac3d)%v)%data_3d    &
+                    ,lakemask=domain%vars_2d(domain%var_indx(kVARS%lakemask)%v)%data_2d                                        &
+                    ,lakeflag=lakeflag                                          &
+                    ,hfx= domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d                          & !(OUT)-- HFX         upward heat flux at the surface (W/m^2)   (INTENT:OUT)
+                    ,lh=domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d                              & !(OUT)-- LH          net upward latent heat flux at surface (W/m^2)
+                    ,grdflx=domain%vars_2d(domain%var_indx(kVARS%ground_heat_flux)%v)%data_2d                     & !(OUT)-- GRDFLX(I,J) ground heat flux (W m-2)
+                    ,tsk=domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d                        & !(OUT)-- TSK          skin temperature [K]
+                    ,qfx=domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d                                     & !(OUT)-- QFX        upward moisture flux at the surface (kg/m^2/s) in
+                    ,t2= domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d                          & !(OUT)-- t2         diagnostic 2-m temperature from surface layer and lsm
+                    ,th2=TH2                                                    & !(OUT)-- th2        diagnostic 2-m theta from surface layer and lsm
+                    ,q2=domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d                              & !(OUT)-- q2         diagnostic 2-m mixing ratio from surface layer and lsm
+                )
+
+            endif
+
+            endif ! options%physics%watersurface > 0
+            
+
+            if (options%physics%landsurface > 0) then
             associate( &
                 veg_frac      => domain%vars_3d(domain%var_indx(kVARS%vegetation_fraction)%v)%data_3d, &
                 u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
@@ -777,11 +887,6 @@ contains
                 snow_temperature => domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d &
             )
             
-            !$acc kernels
-            windspd = sqrt(u_10m**2 + v_10m**2)
-            where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
-            !$acc end kernels
-
             if (options%physics%landsurface==kLSM_NOAHMP) then
                 !$acc kernels
                 current_precipitation = (precipitation - lsm_last_precip) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
@@ -847,100 +952,6 @@ contains
                         end do
                     end do
                 endif
-            endif
-
-
-            if((options%physics%watersurface==kWATER_SIMPLE) .or.      &
-                (options%physics%watersurface==kWATER_LAKE) ) then
-                    call water_simple(options,                              &
-                                      domain%vars_2d(domain%var_indx(kVARS%sst)%v)%data_2d,                   &
-                                      domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d,      &
-                                      windspd,                              &
-                                      domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,       &
-                                      domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d,       &
-                                      domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d,         &
-                                      domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d,           &
-                                      land_mask,                     &
-                                      QSFC,                                 &
-                                      domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d,                   &
-                                      domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,      &
-                                      domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d,   &
-                                      domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di,             &
-                                      ims, ime, kms, kme, jms, jme,                                           &
-                                      its, ite, jts, jte)
-                                !   ,domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d               & ! terrain height [m] if ht(i,j)>=lake_min_elev -> lake (in case no lake category is provided, but lake model is selected, we need to not run the simple water as well - left comment in for future reference)
-            endif
-
-            !___________________ Lake model _____________________
-            ! This lake model (ported from WRF V4.4) is run for the grid cells that are defined as lake in the hi-res input file.
-            ! It also is advised to supply a lake_depth parameter in the hi-res input, otherwise the default depth of 50m is used (see lakeini above)
-            ! It requires the VEGPARM.TBL landuse category to be one which has a separate lake category (i.e. MODIFIED_IGBP_MODIS_NOAH, USGS-RUC or MODI-RUC).
-            ! For the grid cells that are defined as water, but not as lake (i.e. oceans), the simple water model above will be run.
-            if (options%physics%watersurface==kWATER_LAKE) then    ! WRF's lake model
-
-                call lake( &
-                    t_phy=domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d                            & !-- t_phy         temperature (K)     !Temprature at the mid points (K)
-                    ,p8w=domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d(:,kms:kme,:)         & !-- p8w           pressure at full levels (Pa) ! Naming convention: 8~at => p8w reads as "p-at-w" (w=full levels)
-                    ,dz8w=domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d                           & !-- dz8w          dz between full levels (m)
-                    ,qvcurr=domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d                          &  !i
-                    ,u_phy=domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d                                & !-- u_phy         u-velocity interpolated to theta points (m/s)
-                    ,v_phy=domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d                                & !-- v_phy         v-velocity interpolated to theta points (m/s)
-                    ,glw=domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d                                & !-- GLW           downward long wave flux at ground surface (W/m^2)
-                    ,emiss=domain%vars_2d(domain%var_indx(kVARS%land_emissivity)%v)%data_2d                       & !-- EMISS         surface emissivity (between 0 and 1)
-                    ,rainbl=current_precipitation                               & ! RAINBL in mm (Accumulation between PBL calls)
-                    ,dtbl=lsm_dt                                                & !-- dtbl          timestep (s) or ITIMESTEP?
-                    ,swdown=domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d  & !-- SWDOWN        downward short wave flux at ground surface (W/m^2)
-                    ,albedo=albedo_dom                                            & ! albedo? fixed at 0.17?
-                    ,xlat_urb2d=domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d                         & ! optional ?
-                    ,z_lake3d=domain%vars_3d(domain%var_indx(kVARS%z_lake3d)%v)%data_3d                           &
-                    ,dz_lake3d=domain%vars_3d(domain%var_indx(kVARS%dz_lake3d)%v)%data_3d                         &
-                    ,lakedepth2d=domain%vars_2d(domain%var_indx(kVARS%lakedepth2d)%v)%data_2d                     &
-                    ,watsat3d=domain%vars_3d(domain%var_indx(kVARS%watsat3d)%v)%data_3d                           &
-                    ,csol3d=domain%vars_3d(domain%var_indx(kVARS%csol3d)%v)%data_3d                               &
-                    ,tkmg3d=domain%vars_3d(domain%var_indx(kVARS%tkmg3d)%v)%data_3d                               &
-                    ,tkdry3d=domain%vars_3d(domain%var_indx(kVARS%tkdry3d)%v)%data_3d        &
-                    ,tksatu3d=domain%vars_3d(domain%var_indx(kVARS%tksatu3d)%v)%data_3d                  &
-                    ,ivgtyp=domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di                                     &
-                    ,HT=domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d                                  &
-                    ,xland=land_mask                              & !-- XLAND         land mask (1 for land, 2 OR 0 for water)  i/o
-                    ,iswater=iswater,  xice=domain%vars_2d(domain%var_indx(kVARS%xice)%v)%data_2d,   xice_threshold=xice_threshold   &
-                    ,lake_min_elev=5.                                           & ! if this value is changed, also change it in lake_ini
-                    ,ids=ids, ide=ide, jds=jds, jde=jde, kds=kds, kde=kde       &
-                    ,ims=ims, ime=ime, jms=jms, jme=jme, kms=kms, kme=kme       &
-                    ,its=its, ite=ite, jts=jts, jte=jte, kts=kts, kte=kte       &
-                    ,h2osno2d=domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d             & !domain%h2osno2d%data_2d
-                    ,snowdp2d=domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d                        & ! domain%snowdp2d%data_2d
-                    ,snl2d=domain%vars_2d(domain%var_indx(kVARS%snl2d)%v)%data_2d                                 &
-                    ,z3d=domain%vars_3d(domain%var_indx(kVARS%z3d)%v)%data_3d                                     &
-                    ,dz3d=domain%vars_3d(domain%var_indx(kVARS%dz3d)%v)%data_3d                                   &
-                    ,zi3d=domain%vars_3d(domain%var_indx(kVARS%zi3d)%v)%data_3d                                   &
-                    ,h2osoi_vol3d=domain%vars_3d(domain%var_indx(kVARS%h2osoi_vol3d)%v)%data_3d           &
-                    ,h2osoi_liq3d=domain%vars_3d(domain%var_indx(kVARS%h2osoi_liq3d)%v)%data_3d       &
-                    ,h2osoi_ice3d=domain%vars_3d(domain%var_indx(kVARS%h2osoi_ice3d)%v)%data_3d           &
-                    ,t_grnd2d=domain%vars_2d(domain%var_indx(kVARS%t_grnd2d)%v)%data_2d               &
-                    ,t_soisno3d=domain%vars_3d(domain%var_indx(kVARS%t_soisno3d)%v)%data_3d                                      &
-                    ,t_lake3d=domain%vars_3d(domain%var_indx(kVARS%t_lake3d)%v)%data_3d                           & ! 3d lake temperature (K)
-                    ,savedtke12d=domain%vars_2d(domain%var_indx(kVARS%savedtke12d)%v)%data_2d                &
-                    ,lake_icefrac3d=domain%vars_3d(domain%var_indx(kVARS%lake_icefrac3d)%v)%data_3d    &
-                    ,lakemask=domain%vars_2d(domain%var_indx(kVARS%lakemask)%v)%data_2d                                        &
-                    ,lakeflag=lakeflag                                          &
-                    ,hfx= domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d                          & !(OUT)-- HFX         upward heat flux at the surface (W/m^2)   (INTENT:OUT)
-                    ,lh=domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d                              & !(OUT)-- LH          net upward latent heat flux at surface (W/m^2)
-                    ,grdflx=domain%vars_2d(domain%var_indx(kVARS%ground_heat_flux)%v)%data_2d                     & !(OUT)-- GRDFLX(I,J) ground heat flux (W m-2)
-                    ,tsk=domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d                        & !(OUT)-- TSK          skin temperature [K]
-                    ,qfx=domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d                                     & !(OUT)-- QFX        upward moisture flux at the surface (kg/m^2/s) in
-                    ,t2= domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v)%data_2d                          & !(OUT)-- t2         diagnostic 2-m temperature from surface layer and lsm
-                    ,th2=TH2                                                    & !(OUT)-- th2        diagnostic 2-m theta from surface layer and lsm
-                    ,q2=domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d                              & !(OUT)-- q2         diagnostic 2-m mixing ratio from surface layer and lsm
-                )
-
-            endif
-            
-            
-            ! --------------------------------------------------
-            ! Now handle the land surface options
-            ! --------------------------------------------------
-            if (options%physics%landsurface == kLSM_NOAHMP) then
 
                 !$acc update device(lsm_dt, landuse_name, julian_day)
 
@@ -1175,7 +1186,7 @@ contains
 
             end associate
 
-            endif ! end if landsurface > 0 .or. watersurface > 0
+            endif ! end if landsurface > 0
         endif ! end if time to call lsm
 
         call snow_model(domain, options, dt)
