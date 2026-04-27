@@ -821,7 +821,9 @@ contains
     end subroutine pack_init_vars_3d
 
     ! Receive 2D init-only variables from parent nest via MPI_Recv, then geo-interpolate
-    ! each from forcing grid to domain grid and write into domain storage.
+    ! each from forcing grid directly into domain storage on the device. The geolut
+    ! (forcing%geo%geolut%x/y/w) is already enter-data'd on the device by domain_obj at
+    ! init, so the only host->device traffic is the bulk recv_2d transfer.
     subroutine unpack_init_vars_2d(this, domain, forcing, var_names, n_init_2d, parent_rank)
         class(ioclient_t), intent(inout) :: this
         type(domain_t),    intent(inout) :: domain
@@ -830,8 +832,10 @@ contains
         integer,           intent(in)    :: n_init_2d, parent_rank
 
         integer :: n, v, var_indx, idx, nx_r, ny_r, ierr
+        integer :: i, j, l, localx, localy
+        integer :: ims, ime, jms, jme
+        real :: localw, local_center, tmp_val
         real, allocatable :: recv_2d(:,:,:)
-        real, allocatable :: forcing_field(:,:), domain_field(:,:)
         type(MPI_Status)  :: status
         type(meta_data_t) :: meta
 
@@ -842,10 +846,15 @@ contains
         call MPI_Recv(recv_2d, size(recv_2d), MPI_REAL, parent_rank, 98, &
                       this%parent_comms, status, ierr)
 
-        ! 1-based bounds: the geolut stores 1-based local forcing-tile indices,
-        ! not global parent-grid indices.
-        allocate(forcing_field(this%i_e_r - this%i_s_r + 1, this%j_e_r - this%j_s_r + 1))
-        allocate(domain_field(domain%ims:domain%ime, domain%jms:domain%jme))
+        ! Single bulk host->device transfer. The MPI buffer must stay on the
+        ! host (parent_comms carries mpi_memory_alloc_kinds=system, set in
+        ! init.F90), so we copy here once and then run all per-var interps
+        ! on the device.
+        !$acc enter data copyin(recv_2d)
+
+        associate( gx => forcing%geo%geolut%x, &
+                   gy => forcing%geo%geolut%y, &
+                   gw => forcing%geo%geolut%w )
 
         n = 1
         do v = 1, kMAX_STORAGE_VARS
@@ -864,26 +873,71 @@ contains
                 cycle
             endif
 
-            ! Unpack onto forcing grid (without stagger extra)
-            forcing_field(:, :) = &
-                recv_2d(n, 1:(this%i_e_r-this%i_s_r+1), 1:(this%j_e_r-this%j_s_r+1))
-
-            call geo_interp2d(domain_field, forcing_field, forcing%geo%geolut)
-
-            ! Write to domain
             if (domain%vars_2d(idx)%dtype == kREAL) then
-                domain%vars_2d(idx)%data_2d(domain%ims:domain%ime, domain%jms:domain%jme) = domain_field
-                !$acc update device(domain%vars_2d(idx)%data_2d)
+                associate(dst => domain%vars_2d(idx)%data_2d)
+                ims = lbound(dst, 1); ime = ubound(dst, 1)
+                jms = lbound(dst, 2); jme = ubound(dst, 2)
+                !$acc parallel loop gang vector collapse(2) &
+                !$acc& present(dst, recv_2d, gx, gy, gw) &
+                !$acc& private(l, localx, localy, localw, local_center)
+                do j = jms, jme
+                    do i = ims, ime
+                        dst(i, j) = 0
+                        local_center = 0
+                        do l = 1, 4
+                            localx = gx(l, i, j)
+                            localy = gy(l, i, j)
+                            local_center = local_center + recv_2d(n, localx, localy)
+                            if (l < 3) then
+                                localw = gw(l, i, j)
+                                dst(i, j) = dst(i, j) + recv_2d(n, localx, localy) * localw
+                            endif
+                        enddo
+                        localw = gw(3, i, j)
+                        dst(i, j) = dst(i, j) + local_center / 4 * localw
+                    enddo
+                enddo
+                end associate
             elseif (domain%vars_2d(idx)%dtype == kINTEGER) then
-                domain%vars_2d(idx)%data_2di(domain%ims:domain%ime, domain%jms:domain%jme) = nint(domain_field)
-                !$acc update device(domain%vars_2d(idx)%data_2di)
+                associate(dst => domain%vars_2d(idx)%data_2di)
+                ims = lbound(dst, 1); ime = ubound(dst, 1)
+                jms = lbound(dst, 2); jme = ubound(dst, 2)
+                !$acc parallel loop gang vector collapse(2) &
+                !$acc& present(dst, recv_2d, gx, gy, gw) &
+                !$acc& private(l, localx, localy, localw, local_center, tmp_val)
+                do j = jms, jme
+                    do i = ims, ime
+                        tmp_val = 0
+                        local_center = 0
+                        do l = 1, 4
+                            localx = gx(l, i, j)
+                            localy = gy(l, i, j)
+                            local_center = local_center + recv_2d(n, localx, localy)
+                            if (l < 3) then
+                                localw = gw(l, i, j)
+                                tmp_val = tmp_val + recv_2d(n, localx, localy) * localw
+                            endif
+                        enddo
+                        localw = gw(3, i, j)
+                        tmp_val = tmp_val + local_center / 4 * localw
+                        dst(i, j) = nint(tmp_val)
+                    enddo
+                enddo
+                end associate
             endif
             n = n + 1
         enddo
+
+        end associate
+
+        !$acc exit data delete(recv_2d)
+        deallocate(recv_2d)
     end subroutine unpack_init_vars_2d
 
-    ! Receive 3D init-only variables from parent nest via MPI_Recv, then layer-by-layer
-    ! geo-interpolate each from forcing grid to domain grid and write into domain storage.
+    ! Receive 3D init-only variables from parent nest via MPI_Recv, then geo-interpolate
+    ! each from forcing grid directly into domain storage on the device, k-layer kernel
+    ! collapsed into one launch per variable. As with the 2D path, the geolut is already
+    ! resident on the device so the only host->device traffic is the bulk recv_3d transfer.
     subroutine unpack_init_vars_3d(this, domain, forcing, var_names, n_init_3d, parent_rank)
         class(ioclient_t), intent(inout) :: this
         type(domain_t),    intent(inout) :: domain
@@ -891,10 +945,12 @@ contains
         character(len=*),  intent(in)    :: var_names(:)
         integer,           intent(in)    :: n_init_3d, parent_rank
 
-        integer :: n, v, var_indx, idx, nx_r, ny_r, nz_r, nz_v, k, ierr
+        integer :: n, v, var_indx, idx, nx_r, ny_r, nz_r, nz_v, ierr
         integer :: msg_count
+        integer :: i, j, k, l, localx, localy
+        integer :: ims, ime, jms, jme
+        real :: localw, local_center
         real, allocatable :: recv_3d(:,:,:,:)
-        real, allocatable :: forcing_field(:,:), domain_field(:,:)
         type(MPI_Status)  :: status, probe_status
         type(meta_data_t) :: meta
 
@@ -911,10 +967,11 @@ contains
         call MPI_Recv(recv_3d, size(recv_3d), MPI_REAL, parent_rank, 99, &
                       this%parent_comms, status, ierr)
 
-        ! 1-based bounds: the geolut stores 1-based local forcing-tile indices,
-        ! not global parent-grid indices.
-        allocate(forcing_field(this%i_e_r - this%i_s_r + 1, this%j_e_r - this%j_s_r + 1))
-        allocate(domain_field(domain%ims:domain%ime, domain%jms:domain%jme))
+        !$acc enter data copyin(recv_3d)
+
+        associate( gx => forcing%geo%geolut%x, &
+                   gy => forcing%geo%geolut%y, &
+                   gw => forcing%geo%geolut%w )
 
         n = 1
         do v = 1, kMAX_STORAGE_VARS
@@ -935,17 +992,40 @@ contains
 
             nz_v = domain%vars_3d(idx)%dim_len(2)
 
-            do k = 1, nz_v
-                forcing_field(:, :) = &
-                    recv_3d(n, 1:(this%i_e_r-this%i_s_r+1), k, 1:(this%j_e_r-this%j_s_r+1))
-
-                call geo_interp2d(domain_field, forcing_field, forcing%geo%geolut)
-
-                domain%vars_3d(idx)%data_3d(domain%ims:domain%ime, k, domain%jms:domain%jme) = domain_field
+            associate(dst => domain%vars_3d(idx)%data_3d)
+            ims = lbound(dst, 1); ime = ubound(dst, 1)
+            jms = lbound(dst, 3); jme = ubound(dst, 3)
+            !$acc parallel loop gang vector collapse(3) &
+            !$acc& present(dst, recv_3d, gx, gy, gw) &
+            !$acc& private(l, localx, localy, localw, local_center)
+            do j = jms, jme
+                do k = 1, nz_v
+                    do i = ims, ime
+                        dst(i, k, j) = 0
+                        local_center = 0
+                        do l = 1, 4
+                            localx = gx(l, i, j)
+                            localy = gy(l, i, j)
+                            local_center = local_center + recv_3d(n, localx, k, localy)
+                            if (l < 3) then
+                                localw = gw(l, i, j)
+                                dst(i, k, j) = dst(i, k, j) + recv_3d(n, localx, k, localy) * localw
+                            endif
+                        enddo
+                        localw = gw(3, i, j)
+                        dst(i, k, j) = dst(i, k, j) + local_center / 4 * localw
+                    enddo
+                enddo
             enddo
-            !$acc update device(domain%vars_3d(idx)%data_3d)
+            end associate
+
             n = n + 1
         enddo
+
+        end associate
+
+        !$acc exit data delete(recv_3d)
+        deallocate(recv_3d)
     end subroutine unpack_init_vars_3d
 
     !Necesary? Should communicate relevant post/wait calls and free window
