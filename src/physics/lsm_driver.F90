@@ -1146,7 +1146,7 @@ contains
                 end do
                 end associate
 
-                !$acc parallel loop gang vector collapse(2) present(nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, snow_height, snow_water_equivalent, snow_nlayers, snow_temperature)
+                !$acc parallel loop gang vector collapse(2) present(skin_temperature, albedo_dom, soil_temperature, nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, snow_height, snow_water_equivalent, snow_nlayers, snow_temperature)
                 do j = jts, jte
                     do i = its, ite
                         if (options%physics%snowmodel==0) then

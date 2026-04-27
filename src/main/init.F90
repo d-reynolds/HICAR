@@ -338,6 +338,8 @@ contains
         type(boundary_t),intent(inout) :: boundary ! forcing file for init conditions
         type(ioclient_t),intent(inout) :: ioclient
 
+        integer :: comm_size, ierr
+
         if (STD_OUT_PE) write(*,*) "Receiving initial data"
         if (STD_OUT_PE) flush(output_unit)
         call ioclient%receive(boundary, domain)
@@ -365,6 +367,13 @@ contains
         if (options%restart%restart) then
             if (STD_OUT_PE) write(*,*) "Reading restart data"
             call ioclient%receive_rst(domain, options)
+            ! Bcast restart_dt here, BEFORE update_nest below. Otherwise the
+            ! client's update_nest Isend+Wait crosses the server's bcast in
+            ! wake_component (which sits ahead of the matching Irecv in
+            ! update_component_nest), and the two ranks deadlock.
+            call MPI_Comm_Size(ioclient%parent_comms, comm_size, ierr)
+            call MPI_Bcast(domain%restart_dt, 1, MPI_REAL, comm_size-1, &
+                           ioclient%parent_comms, ierr)
         endif
 
         if (STD_OUT_PE) write(*,*) "Initializing physics"

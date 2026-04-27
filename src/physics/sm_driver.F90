@@ -470,24 +470,6 @@ contains
                 call snowpack_step(domain,options,lsm_dt,current_rain,current_snow,windspd)
                 !$acc exit data delete(current_rain, current_snow, windspd)
 #else
-                ! EVAN'S BIG DRIVER HERE:
-                ! input variables for SNOWPACK, which we need, are:
-
-                ! - ta;       ///< Air temperature (K)
-                ! - rh;       ///< Relative humidity (% or 1)
-                ! - vw;       ///< Wind velocity at snow station (m s-1)
-                !!! - ustar;    ///< The friction velocity (m s-1) computed in mt_MicroMet() and also used later for the MeteoHeat fluxes
-                ! - z0;       ///< The roughness length computed in SnowDrift and also used later for the MeteoHeat fluxes (m)
-                ! - psi_s;    ///< Stability correction for scalar heat fluxes
-                ! - iswr;     ///< Incoming SHORTWAVE radiation (W m-2)
-                !!! - ea;       ///< Atmospheric emissivity (1)
-                ! - lw_net;   ///< Net longwave radiation (W m-2)
-                ! - tss;      ///< Snow surface temperature (K)
-                ! - ts0;      ///< Bottom temperatures of snow/soil pack (K)
-                ! - psum;     ///< precipitation sum over the current timestep (mm)
-                ! - psum_ph;  ///< precipitation phase for the current timestep (between 0 and 1, 0 is fully solid while 1 is fully liquid).
-                !!! - hs;       ///< The measured height of snow (m)
-                ! - geo_heat; ///< Geo heat flux (W/m^2), for the neumann lower boundary condition in the heat equation
 
                 ! --- Update host: SNOWPACK-specific inputs ---
                 !$acc update host( &
