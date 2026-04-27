@@ -39,6 +39,8 @@ contains
         logical :: is_output, is_rst_only
         type(meta_data_t) :: tmp_meta
         integer :: v
+        integer :: c_idx, child_id, p_idx
+        logical :: child_needs_recv
 
         ! Call the parent type's init procedure
         call this%init_flow_obj(options(nest_indx),nest_indx)
@@ -71,6 +73,41 @@ contains
         this%n_f = 0
         this%n_f_2d = 0
         this%n_f_3d_init = 0
+
+        ! Three-condition gate for the parent->child init transfer.
+        ! recv side: this nest needs the transfer iff
+        !   (.not. restart) .and. (parent_nest > 0)
+        !                   .and. (start_time > parent's start_time).
+        ! send side: this nest needs to send iff any of its children needs to recv.
+        ! Both flags are queried by distribute_init_forcing (send + per-child).
+
+        this%nest_init_recv_done = .true.
+        if (.not. options(nest_indx)%restart%restart) then
+            p_idx = options(nest_indx)%general%parent_nest
+            if (p_idx > 0) then
+                if (options(nest_indx)%general%start_time > options(p_idx)%general%start_time) then
+                    this%nest_init_recv_done = .false.
+                endif
+            endif
+        endif
+
+        this%nest_init_send_done = .true.
+        do c_idx = 1, this%n_child_ioservers
+            child_id = options(nest_indx)%general%child_nests(c_idx)
+            child_needs_recv = .false.
+            if (.not. options(child_id)%restart%restart) then
+                if (options(child_id)%general%parent_nest > 0) then
+                    if (options(child_id)%general%start_time > &
+                        options(options(child_id)%general%parent_nest)%general%start_time) then
+                        child_needs_recv = .true.
+                    endif
+                endif
+            endif
+            if (child_needs_recv) then
+                this%nest_init_send_done = .false.
+                exit
+            endif
+        enddo
 
         !determine if we need to increase our k index due to some very large soil field
         this%n_w_3d = 0
@@ -1184,7 +1221,14 @@ contains
     ! grows this%gather_buffer_3d_init if needed, drives gather_forcing_2d
     ! and gather_forcing_3d_init, then pushes the init 2D + 3D restart vars
     ! to every child via MPI_Alltoallw + MPI_Isend (one Waitall per child nest). Called once per parent
-    ! from flow_events.component_read, guarded by initial_nest_done.
+    ! from flow_events.component_read.
+    !
+    ! Gating (set in init_ioserver per the three-condition rule):
+    !   nest_init_send_done == .true. -> early return: no child of this nest
+    !                                    needs the transfer.
+    ! Per-child loop body cycles when the child's own nest_init_recv_done is
+    ! set so that we don't Isend to a child whose compute side will skip the
+    ! recv (which would leave the parent's MPI_Waitall hanging).
     module subroutine distribute_init_forcing(this, components, child_nests)
         class(ioserver_t), intent(inout) :: this
         type(comp_arr_t),  intent(inout) :: components(:)
@@ -1198,7 +1242,7 @@ contains
         type(MPI_Request), allocatable :: reqs(:)
         INTEGER(KIND=MPI_ADDRESS_KIND) :: lowerbound, extent
 
-        if (this%initial_nest_done) return
+        if (this%nest_init_send_done) return
 
         ! 1. Per-family max across this parent and its children.
         family_nz = this%nz_init_3d
@@ -1243,6 +1287,13 @@ contains
         do n = 1, size(child_nests)
             select type (child_ioserver => components(child_nests(n))%comp)
             type is (ioserver_t)
+                ! Skip children that don't need the transfer (e.g. they're in
+                ! restart mode, or share start_time with this parent). All
+                ! parent IO ranks read the same options(:) so they reach the
+                ! same skip decision per child, keeping any inner Alltoallw
+                ! collective consistent.
+                if (child_ioserver%nest_init_recv_done) cycle
+
                 ! Issue all per-child-rank sends (2D + 3D) as MPI_Isend so the
                 ! parent IO rank's rendezvous handshakes can pipeline. A single
                 ! MPI_Waitall at the end of this iteration keeps the buffer
@@ -1349,7 +1400,7 @@ contains
             end select
         enddo
 
-        this%initial_nest_done = .true.
+        this%nest_init_send_done = .true.
     end subroutine distribute_init_forcing
 
     module subroutine scatter_forcing(this)

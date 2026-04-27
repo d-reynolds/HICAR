@@ -193,8 +193,9 @@ subroutine update_component_nest(comp_arr,options,ioclient)
             ! has already unblocked past its ioclient%receive (via the main
             ! scatter_forcing) and is ready to post the init MPI_Recv by the
             ! time we MPI_Send here. All cross-nest coordination lives in
-            ! this method. It will return immedietly if the field
-            ! initial_nest_done is already true (i.e. only runs once per nest)
+            ! this method. It returns immediately when nest_init_send_done is
+            ! already true (one-time per parent, plus the three-condition gate
+            ! computed in init_ioserver from options(:)).
             call comp%distribute_init_forcing(comp_arr, options%general%child_nests)
         class default
             ! if ioclient is null, then we are acting as an ioserver

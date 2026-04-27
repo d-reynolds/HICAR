@@ -351,12 +351,11 @@ contains
         if (STD_OUT_PE) write(*,*) "Initializing forcing interpolation"
         call domain%get_initial_conditions(boundary, options)
 
-        ! Receive full restart state from parent nest (one-time, with geo-interpolation)
-        if (options%general%parent_nest > 0) then
-            if (STD_OUT_PE) write(*,*) "Receiving 2D+3D restart state from parent nest"
-            if (STD_OUT_PE) flush(output_unit)
-            call ioclient%receive_nest_init(domain, boundary)
-        endif
+        ! Receive full state from parent nest (one-time, with geo-interpolation).
+        ! The three-condition gate (no restart, has parent, start_time > parent.start_time)
+        ! is enforced inside receive_nest_init via nest_init_recv_done; this call is a
+        ! cheap no-op when the gate is set.
+        call ioclient%receive_nest_init(domain, boundary)
 
         ! now read in any static land data. This way we do: 
         ! 1) init via default values, 

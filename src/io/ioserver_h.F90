@@ -121,7 +121,15 @@ module ioserver_interface
         integer :: i_s_w, i_e_w, k_s_w, k_e_w, j_s_w, j_e_w, i_s_r, i_e_r, k_s_r, k_e_r, k_e_f, j_s_r, j_e_r, i_s_re, i_e_re, j_s_re, j_e_re, n_restart
         integer :: nx_w, nz_w, ny_w, n_w_3d, n_w_2d, nx_r, nz_r, ny_r, n_r, n_f, n_f_2d, n_f_3d_init, nx_re, ny_re
         integer, public :: nz_init_3d = 0
-        logical :: initial_nest_done = .false.
+
+        ! Two-flag gate for the one-time parent->child init transfer.
+        ! See ioclient_h.F90 for the three-condition rule that drives them.
+        ! On ioserver_t:
+        !   nest_init_send_done -> early-returns distribute_init_forcing.
+        !   nest_init_recv_done -> queried per-child by the parent server's
+        !                          distribute loop to skip individual children.
+        logical :: nest_init_send_done = .false.
+        logical :: nest_init_recv_done = .false.
         integer         :: ide, kde, jde
         integer :: restart_counter = 0
         integer :: output_counter = 0
@@ -221,7 +229,7 @@ module ioserver_interface
         ! parent's gather_buffer_3d_init if needed, run gather_forcing_2d +
         ! gather_forcing_3d_init, then push the init 2D + 3D restart vars
         ! to every child via MPI_Alltoallw + MPI_Send. Called once per
-        ! parent, guarded by initial_nest_done.
+        ! parent, gated by nest_init_send_done plus per-child nest_init_recv_done.
         module subroutine distribute_init_forcing(this, components, child_nests)
             class(ioserver_t), intent(inout) :: this
             type(comp_arr_t),  intent(inout) :: components(:)

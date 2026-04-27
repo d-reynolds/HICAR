@@ -88,21 +88,26 @@ module ioclient_interface
       real, allocatable :: rst_scratch_2d(:,:,:)
       logical :: rst_posted = .false.
 
-      ! Pre-posted Irecv for the 2D init-nest transfer (child only). Posted in
-      ! init_ioclient once the recv_init_vars classification has fixed
-      ! n_init_2d, waited on in receive_nest_init. The 3D init buffer size
-      ! depends on the parent's family_nz which is only resolved during
-      ! distribute_init_forcing, so the 3D path keeps MPI_Probe for now.
-      type(MPI_Request) :: recv_init_2d_req
-      real, allocatable :: recv_init_2d(:,:,:)
-      logical :: recv_init_2d_posted = .false.
-
       character(len=kMAX_NAME_LENGTH) :: vars_for_nest(kMAX_STORAGE_VARS)
 
       ! Init-only nest transfer: 2D + extra 3D restart vars (not in atmospheric forcing)
       type(nest_init_var_list_t) :: send_init_vars  ! parent -> children (this node is parent)
       type(nest_init_var_list_t) :: recv_init_vars  ! child  <- parent   (this node is child)
-      logical :: initial_nest_done = .false.
+
+      ! Two independent gates for the one-time parent->child init transfer.
+      !   nest_init_send_done = .true.  -> skip the parent's init Isend in update_nest
+      !                                    (no child of this nest needs the transfer, or
+      !                                    we have already sent once).
+      !   nest_init_recv_done = .true.  -> skip the child's MPI_Recv + unpack in
+      !                                    receive_nest_init (this nest doesn't need
+      !                                    a transfer, or we have already received).
+      ! Computed in init_ioclient from options(:) using the three-condition rule:
+      !   nest needs recv  iff  (.not. restart) .and. (parent_nest > 0)
+      !                          .and. (start_time > parent's start_time)
+      !   nest needs send  iff  any of its children needs recv.
+      ! Also flipped to .true. as a sentinel after the first successful send/recv.
+      logical :: nest_init_send_done = .false.
+      logical :: nest_init_recv_done = .false.
 
   contains
 

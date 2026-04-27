@@ -36,7 +36,9 @@ contains
         type(variable_t) :: var
 
         integer :: my_rank, comm_size, some_child_id, ierr, my_nx, my_ny
-        
+        integer :: c_idx, child_id, p_idx
+        logical :: child_needs_recv
+
         this%i_s_r = forcing%its; this%i_e_r = forcing%ite
         this%k_s_r = forcing%kts; this%k_e_r = forcing%kte
         this%j_s_r = forcing%jts; this%j_e_r = forcing%jte
@@ -71,6 +73,41 @@ contains
         if (options(n_indx)%general%parent_nest > 0) then
             call classify_nest_init_vars(options(n_indx), options(n_indx)%forcing%vars_to_read, this%recv_init_vars)
         endif
+
+        ! Three-condition gate for the parent->child init transfer.
+        ! recv side: this nest needs the transfer iff
+        !   (.not. restart) .and. (parent_nest > 0)
+        !                   .and. (start_time > parent's start_time).
+        ! send side: this nest needs to send iff any of its children needs to recv.
+        ! See ioclient_h.F90 for the flag semantics.
+
+        this%nest_init_recv_done = .true.
+        if (.not. options(n_indx)%restart%restart) then
+            p_idx = options(n_indx)%general%parent_nest
+            if (p_idx > 0) then
+                if (options(n_indx)%general%start_time > options(p_idx)%general%start_time) then
+                    this%nest_init_recv_done = .false.
+                endif
+            endif
+        endif
+
+        this%nest_init_send_done = .true.
+        do c_idx = 1, size(options(n_indx)%general%child_nests)
+            child_id = options(n_indx)%general%child_nests(c_idx)
+            child_needs_recv = .false.
+            if (.not. options(child_id)%restart%restart) then
+                if (options(child_id)%general%parent_nest > 0) then
+                    if (options(child_id)%general%start_time > &
+                        options(options(child_id)%general%parent_nest)%general%start_time) then
+                        child_needs_recv = .true.
+                    endif
+                endif
+            endif
+            if (child_needs_recv) then
+                this%nest_init_send_done = .false.
+                exit
+            endif
+        enddo
 
         ! Change 2: Store output/restart classification and compute counts
         this%vars_for_output = options(n_indx)%output%vars_for_output
@@ -114,26 +151,6 @@ contains
                            this%rst_req_2d, ierr)
             this%rst_posted = .true.
         endif
-
-        ! Init-nest 2D: pre-post the Irecv now so the parent's Isend from
-        ! distribute_init_forcing (which can fire during the parent's wake,
-        ! before this child reaches receive_nest_init) does not stall.
-        ! recv_init_vars is populated above for child nests, so the size is
-        ! fully known here. The matching tag (98) and root rank (this%server)
-        ! mirror the unpack-side MPI_Recv in unpack_init_vars_2d.
-        block
-            integer :: n_init_2d_pre, nx_r2, ny_r2
-            n_init_2d_pre = count(this%recv_init_vars%vars_2d /= '')
-            if (n_init_2d_pre > 0) then
-                nx_r2 = this%i_e_r - this%i_s_r + 2
-                ny_r2 = this%j_e_r - this%j_s_r + 2
-                allocate(this%recv_init_2d(n_init_2d_pre, nx_r2, ny_r2))
-                call MPI_Irecv(this%recv_init_2d, size(this%recv_init_2d), MPI_REAL, &
-                               this%server, 98, this%parent_comms, &
-                               this%recv_init_2d_req, ierr)
-                this%recv_init_2d_posted = .true.
-            endif
-        end block
 
     end subroutine init_ioclient
 
@@ -404,8 +421,10 @@ contains
             enddo
         endif
 
+        !decrement for indexing write_buffer_3d next
+        n_3d = n_3d - 1
         !$acc wait
-        !$acc update host(this%write_buffer_3d, this%write_buffer_2d)
+        !$acc update host(this%write_buffer_3d(1:n_3d,:,:,:), this%write_buffer_2d)
 
         this%written = .True.
         call domain%increment_output_time()
@@ -500,8 +519,11 @@ contains
                         this%server, kIO_TAG_NEST_3D, this%parent_comms, req, ierr)
         call MPI_Wait(req, MPI_STATUS_IGNORE, ierr)
 
-        ! One-time init: pack 2D + extra 3D restart vars for child nest initialization
-        if (.not. this%initial_nest_done) then
+        ! One-time init: pack 2D + extra 3D restart vars for child nest initialization.
+        ! Skipped when nest_init_send_done is pre-set in init_ioclient (no child of this
+        ! nest needs the transfer per the three-condition rule). Sentinel'd at the end
+        ! so subsequent update_nest calls during the run don't repeat the init send.
+        if (.not. this%nest_init_send_done) then
             if (associated(this%forcing_buffer_2d)) then
                 call pack_init_vars_2d(this, domain, this%send_init_vars%vars_2d)
                 !$acc wait
@@ -520,7 +542,7 @@ contains
                 call MPI_Wait(req, MPI_STATUS_IGNORE, ierr)
             endif
 
-            this%initial_nest_done = .true.
+            this%nest_init_send_done = .true.
         endif
 
     end subroutine
@@ -704,29 +726,42 @@ contains
         type(domain_t),    intent(inout) :: domain
         type(boundary_t),  intent(in)    :: forcing
 
-        integer :: n_init_2d, n_init_3d, parent_rank, ierr
+        integer :: n_init_2d, n_init_3d, parent_rank, nx_r, ny_r, ierr
         type(MPI_Status) :: status
+        real, allocatable :: recv_2d(:,:,:)
+
+        ! Skip the parent->child init transfer entirely when the flag is
+        ! pre-set: the three conditions checked in init_ioclient determined
+        ! that this nest does not need a state transfer from its parent
+        ! (restart, no parent, or start_time not later than parent's).
+        if (this%nest_init_recv_done) return
 
         n_init_2d = count(this%recv_init_vars%vars_2d /= '')
         n_init_3d = count(this%recv_init_vars%vars_3d /= '')
 
         if (n_init_2d == 0 .and. n_init_3d == 0) return
 
+        if (STD_OUT_PE) write(*,*) "Receiving 2D+3D state from parent nest"
+        if (STD_OUT_PE) flush(output_unit)
+
         ! init_ioclient already cached this%server (= comm_size-1 in parent_comms).
         parent_rank = this%server
 
         if (n_init_2d > 0) then
-            ! Wait on the Irecv pre-posted in init_ioclient. The host buffer
-            ! this%recv_init_2d is filled at this point.
-            call MPI_Wait(this%recv_init_2d_req, status, ierr)
-            this%recv_init_2d_posted = .false.
-            call unpack_init_vars_2d(this, domain, forcing, this%recv_init_vars%vars_2d, n_init_2d)
-            deallocate(this%recv_init_2d)
+            nx_r = this%i_e_r - this%i_s_r + 2
+            ny_r = this%j_e_r - this%j_s_r + 2
+            allocate(recv_2d(n_init_2d, nx_r, ny_r))
+            call MPI_Recv(recv_2d, size(recv_2d), MPI_REAL, parent_rank, 98, &
+                          this%parent_comms, status, ierr)
+            call unpack_init_vars_2d(this, domain, forcing, this%recv_init_vars%vars_2d, n_init_2d, recv_2d)
+            deallocate(recv_2d)
         endif
 
         if (n_init_3d > 0) then
             call unpack_init_vars_3d(this, domain, forcing, this%recv_init_vars%vars_3d, n_init_3d, parent_rank)
         endif
+
+        this%nest_init_recv_done = .true.
 
     end subroutine
 
@@ -846,17 +881,18 @@ contains
         enddo
     end subroutine pack_init_vars_3d
 
-    ! Geo-interpolate the (already-received) 2D init slabs in this%recv_init_2d
-    ! directly into domain storage on the device. The geolut (forcing%geo%geolut%x/y/w)
-    ! is already enter-data'd on the device by domain_obj at init, so the only host->device
-    ! traffic is the bulk recv_init_2d transfer issued here. The MPI_Wait that fills
-    ! the host buffer is the caller's responsibility (receive_nest_init).
-    subroutine unpack_init_vars_2d(this, domain, forcing, var_names, n_init_2d)
+    ! Geo-interpolate the 2D init slabs in recv_2d (filled by the caller via
+    ! MPI_Recv) directly into domain storage on the device. The geolut
+    ! (forcing%geo%geolut%x/y/w) is already enter-data'd on the device by
+    ! domain_obj at init, so the only host->device traffic is the bulk
+    ! recv_2d transfer issued here.
+    subroutine unpack_init_vars_2d(this, domain, forcing, var_names, n_init_2d, recv_2d)
         class(ioclient_t), intent(inout) :: this
         type(domain_t),    intent(inout) :: domain
         type(boundary_t),  intent(in)    :: forcing
         character(len=*),  intent(in)    :: var_names(:)
         integer,           intent(in)    :: n_init_2d
+        real,              intent(inout) :: recv_2d(:,:,:)
 
         integer :: n, v, var_indx, idx
         integer :: i, j, l, localx, localy
@@ -868,10 +904,9 @@ contains
         ! host (parent_comms carries mpi_memory_alloc_kinds=system, set in
         ! init.F90), so we copy here once and then run all per-var interps
         ! on the device.
-        !$acc enter data copyin(this%recv_init_2d)
+        !$acc enter data copyin(recv_2d)
 
-        associate( recv_2d => this%recv_init_2d, &
-                   gx => forcing%geo%geolut%x, &
+        associate( gx => forcing%geo%geolut%x, &
                    gy => forcing%geo%geolut%y, &
                    gw => forcing%geo%geolut%w )
 
@@ -949,7 +984,7 @@ contains
 
         end associate
 
-        !$acc exit data delete(this%recv_init_2d)
+        !$acc exit data delete(recv_2d)
     end subroutine unpack_init_vars_2d
 
     ! Receive 3D init-only variables from parent nest via MPI_Recv, then geo-interpolate
@@ -1069,14 +1104,6 @@ contains
             if (allocated(this%rst_scratch_3d)) deallocate(this%rst_scratch_3d)
             if (allocated(this%rst_scratch_2d)) deallocate(this%rst_scratch_2d)
             this%rst_posted = .false.
-        endif
-
-        ! Same for the pre-posted nest-init 2D Irecv.
-        if (this%recv_init_2d_posted) then
-            call MPI_Cancel(this%recv_init_2d_req, ierr)
-            call MPI_Wait(this%recv_init_2d_req, MPI_STATUS_IGNORE, ierr)
-            if (allocated(this%recv_init_2d)) deallocate(this%recv_init_2d)
-            this%recv_init_2d_posted = .false.
         endif
 
     end subroutine close_client
