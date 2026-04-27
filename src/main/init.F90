@@ -382,7 +382,6 @@ contains
 
         if (.not.(options%restart%restart)) call ioclient%push(domain)
 
-        if (size(options%general%child_nests) > 0) call ioclient%update_nest(domain)
 
     end subroutine init_model_state
 

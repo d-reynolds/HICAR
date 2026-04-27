@@ -77,6 +77,15 @@ subroutine wake_component(comp_arr, options, boundary, ioclient)
             call wake_nest(comp)
             call init_model_state(options, comp, boundary, ioclient)
 
+            ! Pair with the ioserver_t branch's update_component_nest gate
+            ! below. Without this guard the compute's Isend in update_nest
+            ! hangs whenever a child starts later than its parent: the IO
+            ! side's gather_forcing only fires via update_component_nest,
+            ! which is also gated on should_update_nests.
+            if (should_update_nests(comp_arr, options)) then
+                call ioclient%update_nest(comp)
+            endif
+
             call comp%total_timer%stop()
             call comp%initialization_timer%stop() 
         type is (ioserver_t)

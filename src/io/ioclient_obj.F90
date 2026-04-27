@@ -38,6 +38,7 @@ contains
         integer :: my_rank, comm_size, some_child_id, ierr, my_nx, my_ny
         integer :: c_idx, child_id, p_idx
         logical :: child_needs_recv
+        integer :: parent_idx, first_sibling_idx
 
         this%i_s_r = forcing%its; this%i_e_r = forcing%ite
         this%k_s_r = forcing%kts; this%k_e_r = forcing%kte
@@ -62,16 +63,31 @@ contains
 
         ! If this run uses nests, then set the variables which we need to output to a child nest.
         ! Microphysics must be the same for all nests, so any child's forcing_options may be used;
-        ! pick the first child nest id.
+        ! pick the first child nest id. Pass options(n_indx) — this nest IS the parent — as
+        ! parent_opts so vars the parent doesn't allocate are filtered out of send_init_vars.
         if (size(options(n_indx)%general%child_nests) > 0) then
             some_child_id = options(n_indx)%general%child_nests(1)
             this%vars_for_nest = options(some_child_id)%forcing%vars_to_read
-            call classify_nest_init_vars(options(some_child_id), this%vars_for_nest, this%send_init_vars)
+            call classify_nest_init_vars(options(some_child_id), options(n_indx), &
+                                         this%vars_for_nest, this%send_init_vars)
         endif
 
-        ! If this is a child nest, compute the 2D + 3D restart vars to receive from parent.
+        ! If this is a child nest, compute the 2D + 3D restart vars to receive
+        ! from parent. The list MUST match the parent's send_init_vars exactly
+        ! (same options used for classification, same iteration order in
+        ! classify_nest_init_vars), or pack and unpack will use different
+        ! slot indices and we get aliasing / kEMPT_BUFF leaking into vars.
+        ! The parent's send-side (above, line ~67, plus init_ioserver in
+        ! ioserver_obj.F90) classifies using its first child's options, so
+        ! every child of a given parent must mirror that here — including
+        ! children that aren't themselves the first sibling.
         if (options(n_indx)%general%parent_nest > 0) then
-            call classify_nest_init_vars(options(n_indx), options(n_indx)%forcing%vars_to_read, this%recv_init_vars)
+            parent_idx        = options(n_indx)%general%parent_nest
+            first_sibling_idx = options(parent_idx)%general%child_nests(1)
+            call classify_nest_init_vars(options(first_sibling_idx), &
+                                            options(parent_idx), &
+                                            options(first_sibling_idx)%forcing%vars_to_read, &
+                                            this%recv_init_vars)
         endif
 
         ! Three-condition gate for the parent->child init transfer.
@@ -766,12 +782,18 @@ contains
     end subroutine
 
 
-    ! Filter/classify kMAX_STORAGE_VARS into 2D and 3D name lists for the init-only
-    ! nest transfer. Used for both the parent-send path (opts = child's options,
-    ! forcing_vars = child's forcing var list) and the child-receive path
-    ! (opts = this node's options, forcing_vars = this node's forcing var list).
-    subroutine classify_nest_init_vars(opts, forcing_vars, out)
+    ! Filter/classify kMAX_STORAGE_VARS into 2D and 3D name lists for the
+    ! init-only nest transfer. Both the parent-send path (in init_ioclient and
+    ! init_ioserver) and the child-receive path (in init_ioclient) call this
+    ! with the SAME `opts` (the parent's first child's options — which fixes
+    ! slot ordering across siblings) and the SAME `parent_opts` (the parent's
+    ! own options — which excludes vars the parent doesn't allocate so we
+    ! never end up sending kEMPT_BUFF for a var the parent simply doesn't
+    ! carry). The two filters together ensure pack and unpack iterate
+    ! identical lists in identical order on every rank.
+    subroutine classify_nest_init_vars(opts, parent_opts, forcing_vars, out)
         type(options_t),             intent(in)    :: opts
+        type(options_t),             intent(in)    :: parent_opts
         character(len=*),            intent(in)    :: forcing_vars(:)
         type(nest_init_var_list_t),  intent(out)   :: out
 
@@ -784,6 +806,10 @@ contains
         do v = 1, kMAX_STORAGE_VARS
             if (opts%vars_to_allocate(v) <= 0) cycle
             if (opts%vars_for_restart(v) <= 0) cycle
+            ! The parent must actually have this var allocated, otherwise its
+            ! pack would skip the slot and leave kEMPT_BUFF in forcing_buffer
+            ! for the child to read.
+            if (parent_opts%vars_to_allocate(v) <= 0) cycle
             meta = get_varmeta(v)
             if (len_trim(meta%name) == 0) cycle
             if (any(forcing_vars == meta%name)) cycle
@@ -1044,6 +1070,20 @@ contains
             endif
 
             nz_v = domain%vars_3d(idx)%dim_len(2)
+
+            ! Skip the var entirely when parent and child disagree on its
+            ! z-extent. Pack on the parent only writes [1:nz_v_parent]
+            ! into the slot, leaving [nz_v_parent+1:nz_w] at the buffer's
+            ! kEMPT_BUFF init value. If the cell at this child's nz_v layer
+            ! is still the sentinel, the parent didn't write that deep, so
+            ! its nz_v < ours and the protocol's slot cannot give us valid
+            ! data for this var — child's own init pipeline (read_land,
+            ! init_physics, restart) is responsible for it instead. Slot
+            ! counter still advances to keep iteration in lockstep with pack.
+            if (recv_3d(n, 1, nz_v, 1) == kEMPT_BUFF) then
+                n = n + 1
+                cycle
+            endif
 
             associate(dst => domain%vars_3d(idx)%data_3d)
             ims = lbound(dst, 1); ime = ubound(dst, 1)

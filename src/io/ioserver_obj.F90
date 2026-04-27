@@ -130,10 +130,15 @@ contains
             ! Shared per-child geometry cache for the three setup_nest_types_* variants
             allocate(this%nest_geometry(this%n_child_ioservers))
 
-            ! Count init-only restart vars (2D + extra 3D not in atmospheric forcing)
+            ! Count init-only restart vars (2D + extra 3D not in atmospheric
+            ! forcing). Same filter set as classify_nest_init_vars in
+            ! ioclient_obj.F90: must be allocated AND wanted-on-restart by
+            ! the first child, AND allocated by the parent (this nest), so
+            ! pack never has to skip a slot and leak kEMPT_BUFF.
             do v = 1, kMAX_STORAGE_VARS
                 if (options(some_child_id)%vars_to_allocate(v) <= 0) cycle
                 if (options(some_child_id)%vars_for_restart(v) <= 0) cycle
+                if (options(nest_indx)%vars_to_allocate(v) <= 0) cycle
                 tmp_meta = get_varmeta(v)
                 if (len_trim(tmp_meta%name) == 0) cycle
                 if (any(options(some_child_id)%forcing%vars_to_read == tmp_meta%name)) cycle
@@ -1220,7 +1225,7 @@ contains
     ! nz_init_3d (max across this parent and its children) on this rank,
     ! grows this%gather_buffer_3d_init if needed, drives gather_forcing_2d
     ! and gather_forcing_3d_init, then pushes the init 2D + 3D restart vars
-    ! to every child via MPI_Alltoallw + MPI_Isend (one Waitall per child nest). Called once per parent
+    ! to every child via MPI_Alltoallw + fire-and-forget MPI_Isend (Request_free per send). Called once per parent
     ! from flow_events.component_read.
     !
     ! Gating (set in init_ioserver per the three-condition rule):
@@ -1236,10 +1241,9 @@ contains
 
         integer :: n, ci, nx_c, ny_c, nz_c, msg_size_2d, msg_size_3d
         integer :: family_nz, ierr, real_size
-        integer :: n_isends, req_idx
         integer, allocatable :: send_2d_sizes(:), buff_2d_sizes(:), disp_2d(:)
         integer, allocatable :: send_3d_sizes(:), buff_3d_sizes(:), disp_3d(:)
-        type(MPI_Request), allocatable :: reqs(:)
+        type(MPI_Request) :: req
         INTEGER(KIND=MPI_ADDRESS_KIND) :: lowerbound, extent
 
         if (this%nest_init_send_done) return
@@ -1294,15 +1298,19 @@ contains
                 ! collective consistent.
                 if (child_ioserver%nest_init_recv_done) cycle
 
-                ! Issue all per-child-rank sends (2D + 3D) as MPI_Isend so the
-                ! parent IO rank's rendezvous handshakes can pipeline. A single
-                ! MPI_Waitall at the end of this iteration keeps the buffer
-                ! slices live until every Isend has completed.
-                n_isends = 0
-                if (this%n_f_2d > 0)      n_isends = n_isends + child_ioserver%n_children
-                if (this%n_f_3d_init > 0) n_isends = n_isends + child_ioserver%n_children
-                if (n_isends > 0) allocate(reqs(n_isends))
-                req_idx = 0
+                ! Per-child-rank sends are MPI_Isend + MPI_Request_free
+                ! (fire-and-forget). A blocking Waitall here would deadlock
+                ! when this parent has multiple children: compute processes
+                ! children sequentially through component_loop, and between
+                ! two children's wakes compute does push (nest N) which
+                ! needs IO's component_write (nest N) -- but component_write
+                ! only runs after distribute_init_forcing returns. The
+                ! buffers (forcing_buffer_2d/3d_init) are allocated once
+                ! per child (gated by nest_types_*_initialized below) and
+                ! persist for the run, so the slices stay valid for the
+                ! Isends. The per-child cycle above guarantees every freed
+                ! request has a matching MPI_Recv coming from the child's
+                ! receive_nest_init.
 
                 ! 2D init distribute
                 if (this%n_f_2d > 0) then
@@ -1312,6 +1320,19 @@ contains
                             child_ioserver%i_s_r:child_ioserver%i_e_r+1, child_ioserver%j_s_r:child_ioserver%j_e_r+1))
                         call this%setup_nest_types_2d(child_ioserver, n, &
                             this%send_nest_types_2d(n,:), this%buffer_nest_types_2d(n,:))
+                        ! Per-child-rank contiguous send buffers. The slice
+                        ! forcing_buffer_2d(:, isrc:ierc+1, jsrc:jerc+1) is
+                        ! non-contiguous when this IO server hosts more than
+                        ! one compute rank; basic-count Isend over a non-
+                        ! contiguous slice is unreliable under mpi_f08+NVHPC.
+                        ! Copy into these contiguous buffers, then Isend.
+                        if (.not. allocated(child_ioserver%client_send_buffers_2d)) &
+                            allocate(child_ioserver%client_send_buffers_2d(child_ioserver%n_children))
+                        do ci = 1, child_ioserver%n_children
+                            nx_c = child_ioserver%ierc(ci) - child_ioserver%isrc(ci) + 2
+                            ny_c = child_ioserver%jerc(ci) - child_ioserver%jsrc(ci) + 2
+                            allocate(child_ioserver%client_send_buffers_2d(ci)%buff(this%n_f_2d, nx_c, ny_c))
+                        enddo
                         this%nest_types_2d_initialized(n) = .true.
                     endif
 
@@ -1328,17 +1349,22 @@ contains
                         child_ioserver%forcing_buffer_2d, buff_2d_sizes, disp_2d, this%buffer_nest_types_2d(n,:), this%IO_Comms)
                     deallocate(send_2d_sizes, buff_2d_sizes, disp_2d)
 
-                    ! Isend 2D data to each child ioclient (waited at end of iteration).
+                    ! Fire-and-forget Isend of 2D data to each child ioclient.
+                    ! Copy the per-rank slice into a contiguous buffer first
+                    ! (Fortran assignment handles strides correctly), then
+                    ! Isend the contiguous buffer.
                     do ci = 1, child_ioserver%n_children
                         nx_c = child_ioserver%ierc(ci) - child_ioserver%isrc(ci) + 2
                         ny_c = child_ioserver%jerc(ci) - child_ioserver%jsrc(ci) + 2
                         msg_size_2d = this%n_f_2d * nx_c * ny_c
-                        req_idx = req_idx + 1
-                        call MPI_Isend(child_ioserver%forcing_buffer_2d(:, &
-                            child_ioserver%isrc(ci):child_ioserver%ierc(ci)+1, &
-                            child_ioserver%jsrc(ci):child_ioserver%jerc(ci)+1), &
+                        child_ioserver%client_send_buffers_2d(ci)%buff(:, 1:nx_c, 1:ny_c) = &
+                            child_ioserver%forcing_buffer_2d(:, &
+                                child_ioserver%isrc(ci):child_ioserver%ierc(ci)+1, &
+                                child_ioserver%jsrc(ci):child_ioserver%jerc(ci)+1)
+                        call MPI_Isend(child_ioserver%client_send_buffers_2d(ci)%buff, &
                             msg_size_2d, MPI_REAL, ci-1, 98, child_ioserver%client_comms, &
-                            reqs(req_idx), ierr)
+                            req, ierr)
+                        call MPI_Request_free(req, ierr)
                     enddo
                 endif
 
@@ -1353,6 +1379,16 @@ contains
                             child_ioserver%j_s_r:child_ioserver%j_e_r+1))
                         call this%setup_nest_types_3d_init(child_ioserver, n, &
                             this%send_nest_types_3d_init(n,:), this%buffer_nest_types_3d_init(n,:))
+                        ! Per-child-rank contiguous send buffers (see 2D
+                        ! block above for rationale).
+                        if (.not. allocated(child_ioserver%client_send_buffers_3d_init)) &
+                            allocate(child_ioserver%client_send_buffers_3d_init(child_ioserver%n_children))
+                        do ci = 1, child_ioserver%n_children
+                            nx_c = child_ioserver%ierc(ci) - child_ioserver%isrc(ci) + 2
+                            ny_c = child_ioserver%jerc(ci) - child_ioserver%jsrc(ci) + 2
+                            allocate(child_ioserver%client_send_buffers_3d_init(ci)%buff( &
+                                this%n_f_3d_init, nx_c, child_ioserver%nz_init_3d, ny_c))
+                        enddo
                         this%nest_types_3d_init_initialized(n) = .true.
                     endif
 
@@ -1369,27 +1405,26 @@ contains
                         child_ioserver%forcing_buffer_3d_init, buff_3d_sizes, disp_3d, this%buffer_nest_types_3d_init(n,:), this%IO_Comms)
                     deallocate(send_3d_sizes, buff_3d_sizes, disp_3d)
 
-                    ! Isend 3D init data to each child ioclient. Use the full
-                    ! k extent (1:nz_init_3d) so variables with per-var nz_v larger
-                    ! than atmospheric (snow/soil) are transmitted in their entirety.
+                    ! Fire-and-forget Isend of 3D init data to each child
+                    ! ioclient. Use the full k extent (1:nz_init_3d) so
+                    ! variables with per-var nz_v larger than atmospheric
+                    ! (snow/soil) are transmitted in their entirety. Copy
+                    ! the per-rank slice into a contiguous buffer first.
                     do ci = 1, child_ioserver%n_children
                         nx_c = child_ioserver%ierc(ci) - child_ioserver%isrc(ci) + 2
                         nz_c = child_ioserver%nz_init_3d
                         ny_c = child_ioserver%jerc(ci) - child_ioserver%jsrc(ci) + 2
                         msg_size_3d = this%n_f_3d_init * nx_c * nz_c * ny_c
-                        req_idx = req_idx + 1
-                        call MPI_Isend(child_ioserver%forcing_buffer_3d_init(:, &
-                            child_ioserver%isrc(ci):child_ioserver%ierc(ci)+1, &
-                            1:child_ioserver%nz_init_3d, &
-                            child_ioserver%jsrc(ci):child_ioserver%jerc(ci)+1), &
+                        child_ioserver%client_send_buffers_3d_init(ci)%buff(:, 1:nx_c, 1:nz_c, 1:ny_c) = &
+                            child_ioserver%forcing_buffer_3d_init(:, &
+                                child_ioserver%isrc(ci):child_ioserver%ierc(ci)+1, &
+                                1:child_ioserver%nz_init_3d, &
+                                child_ioserver%jsrc(ci):child_ioserver%jerc(ci)+1)
+                        call MPI_Isend(child_ioserver%client_send_buffers_3d_init(ci)%buff, &
                             msg_size_3d, MPI_REAL, ci-1, 99, child_ioserver%client_comms, &
-                            reqs(req_idx), ierr)
+                            req, ierr)
+                        call MPI_Request_free(req, ierr)
                     enddo
-                endif
-
-                if (n_isends > 0) then
-                    call MPI_Waitall(n_isends, reqs, MPI_STATUSES_IGNORE, ierr)
-                    deallocate(reqs)
                 endif
 
                 ! All three datatype variants for this child have now been

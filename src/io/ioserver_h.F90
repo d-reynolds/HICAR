@@ -90,6 +90,16 @@ module ioserver_interface
         type(buffer_2d_t), allocatable :: write_buffer_2d(:)
         type(buffer_2d_t), allocatable :: child_gather_buffers_2d(:)
 
+        ! Contiguous per-child-compute-rank send buffers for distribute_init_forcing.
+        ! forcing_buffer_2d/_3d_init are allocated over the full IO-server-wide range
+        ! (i_s_r:i_e_r+1, j_s_r:j_e_r+1); the per-rank slice (isrc:ierc+1, jsrc:jerc+1)
+        ! is non-contiguous in memory when an IO server hosts more than one compute
+        ! rank. mpi_f08 MPI_Isend with a basic count over a non-contiguous slice is
+        ! unreliable under NVHPC/GPU, so we copy the slice into these contiguous
+        ! per-rank buffers via a Fortran assignment and Isend the contiguous buffer.
+        type(buffer_2d_t), allocatable :: client_send_buffers_2d(:)
+        type(buffer_3d_t), allocatable :: client_send_buffers_3d_init(:)
+
         ! MPI datatypes describing nest-transfer access patterns. The
         ! restart RMA datatypes (rst_types_*, child_rst_types_*) have been
         ! retired alongside the move from MPI-RMA to two-sided Isend/Irecv.
