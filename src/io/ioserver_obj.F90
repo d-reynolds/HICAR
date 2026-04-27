@@ -1183,7 +1183,7 @@ contains
     ! nz_init_3d (max across this parent and its children) on this rank,
     ! grows this%gather_buffer_3d_init if needed, drives gather_forcing_2d
     ! and gather_forcing_3d_init, then pushes the init 2D + 3D restart vars
-    ! to every child via MPI_Alltoallw + MPI_Send. Called once per parent
+    ! to every child via MPI_Alltoallw + MPI_Isend (one Waitall per child nest). Called once per parent
     ! from flow_events.component_read, guarded by initial_nest_done.
     module subroutine distribute_init_forcing(this, components, child_nests)
         class(ioserver_t), intent(inout) :: this
@@ -1192,8 +1192,10 @@ contains
 
         integer :: n, ci, nx_c, ny_c, nz_c, msg_size_2d, msg_size_3d
         integer :: family_nz, ierr, real_size
+        integer :: n_isends, req_idx
         integer, allocatable :: send_2d_sizes(:), buff_2d_sizes(:), disp_2d(:)
         integer, allocatable :: send_3d_sizes(:), buff_3d_sizes(:), disp_3d(:)
+        type(MPI_Request), allocatable :: reqs(:)
         INTEGER(KIND=MPI_ADDRESS_KIND) :: lowerbound, extent
 
         if (this%initial_nest_done) return
@@ -1241,6 +1243,16 @@ contains
         do n = 1, size(child_nests)
             select type (child_ioserver => components(child_nests(n))%comp)
             type is (ioserver_t)
+                ! Issue all per-child-rank sends (2D + 3D) as MPI_Isend so the
+                ! parent IO rank's rendezvous handshakes can pipeline. A single
+                ! MPI_Waitall at the end of this iteration keeps the buffer
+                ! slices live until every Isend has completed.
+                n_isends = 0
+                if (this%n_f_2d > 0)      n_isends = n_isends + child_ioserver%n_children
+                if (this%n_f_3d_init > 0) n_isends = n_isends + child_ioserver%n_children
+                if (n_isends > 0) allocate(reqs(n_isends))
+                req_idx = 0
+
                 ! 2D init distribute
                 if (this%n_f_2d > 0) then
                     if (.not. this%nest_types_2d_initialized(n)) then
@@ -1265,15 +1277,17 @@ contains
                         child_ioserver%forcing_buffer_2d, buff_2d_sizes, disp_2d, this%buffer_nest_types_2d(n,:), this%IO_Comms)
                     deallocate(send_2d_sizes, buff_2d_sizes, disp_2d)
 
-                    ! MPI_Send 2D data to each child ioclient
+                    ! Isend 2D data to each child ioclient (waited at end of iteration).
                     do ci = 1, child_ioserver%n_children
                         nx_c = child_ioserver%ierc(ci) - child_ioserver%isrc(ci) + 2
                         ny_c = child_ioserver%jerc(ci) - child_ioserver%jsrc(ci) + 2
                         msg_size_2d = this%n_f_2d * nx_c * ny_c
-                        call MPI_Send(child_ioserver%forcing_buffer_2d(:, &
+                        req_idx = req_idx + 1
+                        call MPI_Isend(child_ioserver%forcing_buffer_2d(:, &
                             child_ioserver%isrc(ci):child_ioserver%ierc(ci)+1, &
                             child_ioserver%jsrc(ci):child_ioserver%jerc(ci)+1), &
-                            msg_size_2d, MPI_REAL, ci-1, 98, child_ioserver%client_comms, ierr)
+                            msg_size_2d, MPI_REAL, ci-1, 98, child_ioserver%client_comms, &
+                            reqs(req_idx), ierr)
                     enddo
                 endif
 
@@ -1304,7 +1318,7 @@ contains
                         child_ioserver%forcing_buffer_3d_init, buff_3d_sizes, disp_3d, this%buffer_nest_types_3d_init(n,:), this%IO_Comms)
                     deallocate(send_3d_sizes, buff_3d_sizes, disp_3d)
 
-                    ! MPI_Send 3D init data to each child ioclient. Use the full
+                    ! Isend 3D init data to each child ioclient. Use the full
                     ! k extent (1:nz_init_3d) so variables with per-var nz_v larger
                     ! than atmospheric (snow/soil) are transmitted in their entirety.
                     do ci = 1, child_ioserver%n_children
@@ -1312,12 +1326,19 @@ contains
                         nz_c = child_ioserver%nz_init_3d
                         ny_c = child_ioserver%jerc(ci) - child_ioserver%jsrc(ci) + 2
                         msg_size_3d = this%n_f_3d_init * nx_c * nz_c * ny_c
-                        call MPI_Send(child_ioserver%forcing_buffer_3d_init(:, &
+                        req_idx = req_idx + 1
+                        call MPI_Isend(child_ioserver%forcing_buffer_3d_init(:, &
                             child_ioserver%isrc(ci):child_ioserver%ierc(ci)+1, &
                             1:child_ioserver%nz_init_3d, &
                             child_ioserver%jsrc(ci):child_ioserver%jerc(ci)+1), &
-                            msg_size_3d, MPI_REAL, ci-1, 99, child_ioserver%client_comms, ierr)
+                            msg_size_3d, MPI_REAL, ci-1, 99, child_ioserver%client_comms, &
+                            reqs(req_idx), ierr)
                     enddo
+                endif
+
+                if (n_isends > 0) then
+                    call MPI_Waitall(n_isends, reqs, MPI_STATUSES_IGNORE, ierr)
+                    deallocate(reqs)
                 endif
 
                 ! All three datatype variants for this child have now been
