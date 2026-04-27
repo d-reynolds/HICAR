@@ -88,6 +88,15 @@ module ioclient_interface
       real, allocatable :: rst_scratch_2d(:,:,:)
       logical :: rst_posted = .false.
 
+      ! Pre-posted Irecv for the 2D init-nest transfer (child only). Posted in
+      ! init_ioclient once the recv_init_vars classification has fixed
+      ! n_init_2d, waited on in receive_nest_init. The 3D init buffer size
+      ! depends on the parent's family_nz which is only resolved during
+      ! distribute_init_forcing, so the 3D path keeps MPI_Probe for now.
+      type(MPI_Request) :: recv_init_2d_req
+      real, allocatable :: recv_init_2d(:,:,:)
+      logical :: recv_init_2d_posted = .false.
+
       character(len=kMAX_NAME_LENGTH) :: vars_for_nest(kMAX_STORAGE_VARS)
 
       ! Init-only nest transfer: 2D + extra 3D restart vars (not in atmospheric forcing)

@@ -115,6 +115,26 @@ contains
             this%rst_posted = .true.
         endif
 
+        ! Init-nest 2D: pre-post the Irecv now so the parent's Isend from
+        ! distribute_init_forcing (which can fire during the parent's wake,
+        ! before this child reaches receive_nest_init) does not stall.
+        ! recv_init_vars is populated above for child nests, so the size is
+        ! fully known here. The matching tag (98) and root rank (this%server)
+        ! mirror the unpack-side MPI_Recv in unpack_init_vars_2d.
+        block
+            integer :: n_init_2d_pre, nx_r2, ny_r2
+            n_init_2d_pre = count(this%recv_init_vars%vars_2d /= '')
+            if (n_init_2d_pre > 0) then
+                nx_r2 = this%i_e_r - this%i_s_r + 2
+                ny_r2 = this%j_e_r - this%j_s_r + 2
+                allocate(this%recv_init_2d(n_init_2d_pre, nx_r2, ny_r2))
+                call MPI_Irecv(this%recv_init_2d, size(this%recv_init_2d), MPI_REAL, &
+                               this%server, 98, this%parent_comms, &
+                               this%recv_init_2d_req, ierr)
+                this%recv_init_2d_posted = .true.
+            endif
+        end block
+
     end subroutine init_ioclient
 
     subroutine init_with_server(this)
@@ -684,18 +704,24 @@ contains
         type(domain_t),    intent(inout) :: domain
         type(boundary_t),  intent(in)    :: forcing
 
-        integer :: n_init_2d, n_init_3d, comm_size, parent_rank
+        integer :: n_init_2d, n_init_3d, parent_rank, ierr
+        type(MPI_Status) :: status
 
         n_init_2d = count(this%recv_init_vars%vars_2d /= '')
         n_init_3d = count(this%recv_init_vars%vars_3d /= '')
 
         if (n_init_2d == 0 .and. n_init_3d == 0) return
 
-        call MPI_Comm_Size(this%parent_comms, comm_size)
-        parent_rank = comm_size - 1
+        ! init_ioclient already cached this%server (= comm_size-1 in parent_comms).
+        parent_rank = this%server
 
         if (n_init_2d > 0) then
-            call unpack_init_vars_2d(this, domain, forcing, this%recv_init_vars%vars_2d, n_init_2d, parent_rank)
+            ! Wait on the Irecv pre-posted in init_ioclient. The host buffer
+            ! this%recv_init_2d is filled at this point.
+            call MPI_Wait(this%recv_init_2d_req, status, ierr)
+            this%recv_init_2d_posted = .false.
+            call unpack_init_vars_2d(this, domain, forcing, this%recv_init_vars%vars_2d, n_init_2d)
+            deallocate(this%recv_init_2d)
         endif
 
         if (n_init_3d > 0) then
@@ -820,39 +846,32 @@ contains
         enddo
     end subroutine pack_init_vars_3d
 
-    ! Receive 2D init-only variables from parent nest via MPI_Recv, then geo-interpolate
-    ! each from forcing grid directly into domain storage on the device. The geolut
-    ! (forcing%geo%geolut%x/y/w) is already enter-data'd on the device by domain_obj at
-    ! init, so the only host->device traffic is the bulk recv_2d transfer.
-    subroutine unpack_init_vars_2d(this, domain, forcing, var_names, n_init_2d, parent_rank)
+    ! Geo-interpolate the (already-received) 2D init slabs in this%recv_init_2d
+    ! directly into domain storage on the device. The geolut (forcing%geo%geolut%x/y/w)
+    ! is already enter-data'd on the device by domain_obj at init, so the only host->device
+    ! traffic is the bulk recv_init_2d transfer issued here. The MPI_Wait that fills
+    ! the host buffer is the caller's responsibility (receive_nest_init).
+    subroutine unpack_init_vars_2d(this, domain, forcing, var_names, n_init_2d)
         class(ioclient_t), intent(inout) :: this
         type(domain_t),    intent(inout) :: domain
         type(boundary_t),  intent(in)    :: forcing
         character(len=*),  intent(in)    :: var_names(:)
-        integer,           intent(in)    :: n_init_2d, parent_rank
+        integer,           intent(in)    :: n_init_2d
 
-        integer :: n, v, var_indx, idx, nx_r, ny_r, ierr
+        integer :: n, v, var_indx, idx
         integer :: i, j, l, localx, localy
         integer :: ims, ime, jms, jme
         real :: localw, local_center, tmp_val
-        real, allocatable :: recv_2d(:,:,:)
-        type(MPI_Status)  :: status
         type(meta_data_t) :: meta
-
-        nx_r = this%i_e_r - this%i_s_r + 2
-        ny_r = this%j_e_r - this%j_s_r + 2
-
-        allocate(recv_2d(n_init_2d, nx_r, ny_r))
-        call MPI_Recv(recv_2d, size(recv_2d), MPI_REAL, parent_rank, 98, &
-                      this%parent_comms, status, ierr)
 
         ! Single bulk host->device transfer. The MPI buffer must stay on the
         ! host (parent_comms carries mpi_memory_alloc_kinds=system, set in
         ! init.F90), so we copy here once and then run all per-var interps
         ! on the device.
-        !$acc enter data copyin(recv_2d)
+        !$acc enter data copyin(this%recv_init_2d)
 
-        associate( gx => forcing%geo%geolut%x, &
+        associate( recv_2d => this%recv_init_2d, &
+                   gx => forcing%geo%geolut%x, &
                    gy => forcing%geo%geolut%y, &
                    gw => forcing%geo%geolut%w )
 
@@ -930,8 +949,7 @@ contains
 
         end associate
 
-        !$acc exit data delete(recv_2d)
-        deallocate(recv_2d)
+        !$acc exit data delete(this%recv_init_2d)
     end subroutine unpack_init_vars_2d
 
     ! Receive 3D init-only variables from parent nest via MPI_Recv, then geo-interpolate
@@ -1051,6 +1069,14 @@ contains
             if (allocated(this%rst_scratch_3d)) deallocate(this%rst_scratch_3d)
             if (allocated(this%rst_scratch_2d)) deallocate(this%rst_scratch_2d)
             this%rst_posted = .false.
+        endif
+
+        ! Same for the pre-posted nest-init 2D Irecv.
+        if (this%recv_init_2d_posted) then
+            call MPI_Cancel(this%recv_init_2d_req, ierr)
+            call MPI_Wait(this%recv_init_2d_req, MPI_STATUS_IGNORE, ierr)
+            if (allocated(this%recv_init_2d)) deallocate(this%recv_init_2d)
+            this%recv_init_2d_posted = .false.
         endif
 
     end subroutine close_client
