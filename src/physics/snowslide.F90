@@ -119,6 +119,8 @@ contains
         call options%alloc_vars( &
             [kVARS%dSWE_slide, kVARS%shd, kVARS%terrain, kVARS%slope_angle, &
              kVARS%snow_height, kVARS%snow_water_equivalent])
+
+        call options%restart_vars([kVARS%dSWE_slide])
     end subroutine snowslide_var_request
 
 

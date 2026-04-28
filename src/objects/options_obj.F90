@@ -2767,9 +2767,10 @@ contains
     !! Mostly just changes forcing var names
     !!
     !! -------------------------------
-    module subroutine setup_synthetic_forcing(this)
+    module subroutine setup_synthetic_forcing(this, parent_opts)
         implicit none
-        class(options_t),  intent(inout):: this
+        class(options_t),  intent(inout) :: this
+        type(options_t),   intent(in)    :: parent_opts
         integer :: ierr, i
 
         this%forcing%qv_is_relative_humidity = .false.
@@ -2798,28 +2799,28 @@ contains
         call set_nml_var(this%forcing%lonvar, get_varname( kVARS%longitude ), 'lonvar', this%forcing, no_check=.True.)
         call set_nml_var(this%forcing%hgtvar, get_varname( kVARS%terrain ), 'hgtvar', this%forcing, no_check=.True.)
 
-        if (0<this%vars_to_allocate( kVARS%cloud_water_mass) ) call set_nml_var(this%forcing%qcvar, get_varname( kVARS%cloud_water_mass ), 'qcvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice_mass) ) call set_nml_var(this%forcing%qivar, get_varname( kVARS%ice_mass ), 'qivar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%rain_mass) ) call set_nml_var(this%forcing%qrvar, get_varname( kVARS%rain_mass ), 'qrvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%graupel_mass) ) call set_nml_var(this%forcing%qgvar, get_varname( kVARS%graupel_mass ), 'qgvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%snow_mass) ) call set_nml_var(this%forcing%qsvar, get_varname( kVARS%snow_mass ), 'qsvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%cloud_number) ) call set_nml_var(this%forcing%qncvar, get_varname( kVARS%cloud_number ), 'qncvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice_number) ) call set_nml_var(this%forcing%qnivar, get_varname( kVARS%ice_number ), 'qnivar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%rain_number) ) call set_nml_var(this%forcing%qnrvar, get_varname( kVARS%rain_number ), 'qnrvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%graupel_number) ) call set_nml_var(this%forcing%qngvar, get_varname( kVARS%graupel_number ), 'qngvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%snow_number) ) call set_nml_var(this%forcing%qnsvar, get_varname( kVARS%snow_number ), 'qnsvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice2_mass) ) call set_nml_var(this%forcing%i2mvar, get_varname( kVARS%ice2_mass ), 'i2mvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice3_mass) ) call set_nml_var(this%forcing%i3mvar, get_varname( kVARS%ice3_mass ), 'i3mvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice2_number) ) call set_nml_var(this%forcing%i2nvar, get_varname( kVARS%ice2_number ), 'i2nvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice3_number) ) call set_nml_var(this%forcing%i3nvar, get_varname( kVARS%ice3_number ), 'i3nvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice1_a) ) call set_nml_var(this%forcing%i1avar, get_varname( kVARS%ice1_a ), 'i1avar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice2_a) ) call set_nml_var(this%forcing%i2avar, get_varname( kVARS%ice2_a ), 'i2avar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice3_a) ) call set_nml_var(this%forcing%i3avar, get_varname( kVARS%ice3_a ), 'i3avar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice1_c) ) call set_nml_var(this%forcing%i1cvar, get_varname( kVARS%ice1_c ), 'i1cvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice2_c) ) call set_nml_var(this%forcing%i2cvar, get_varname( kVARS%ice2_c ), 'i2cvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ice3_c) ) call set_nml_var(this%forcing%i3cvar, get_varname( kVARS%ice3_c ), 'i3cvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%qs_fm) ) call set_nml_var(this%forcing%qs_fmvar, get_varname( kVARS%qs_fm ), 'qs_fmvar', this%forcing, i, no_check=.True.)
-        if (0<this%vars_to_allocate( kVARS%ns_fm) ) call set_nml_var(this%forcing%ns_fmvar, get_varname( kVARS%ns_fm ), 'ns_fmvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%cloud_water_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%cloud_water_mass) ) call set_nml_var(this%forcing%qcvar, get_varname( kVARS%cloud_water_mass ), 'qcvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%ice_mass) ) call set_nml_var(this%forcing%qivar, get_varname( kVARS%ice_mass ), 'qivar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%rain_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%rain_mass) ) call set_nml_var(this%forcing%qrvar, get_varname( kVARS%rain_mass ), 'qrvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%graupel_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%graupel_mass) ) call set_nml_var(this%forcing%qgvar, get_varname( kVARS%graupel_mass ), 'qgvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%snow_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%snow_mass) ) call set_nml_var(this%forcing%qsvar, get_varname( kVARS%snow_mass ), 'qsvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%cloud_number) .and. 0<parent_opts%vars_to_allocate( kVARS%cloud_number) ) call set_nml_var(this%forcing%qncvar, get_varname( kVARS%cloud_number ), 'qncvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice_number) .and. 0<parent_opts%vars_to_allocate( kVARS%ice_number) ) call set_nml_var(this%forcing%qnivar, get_varname( kVARS%ice_number ), 'qnivar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%rain_number) .and. 0<parent_opts%vars_to_allocate( kVARS%rain_number) ) call set_nml_var(this%forcing%qnrvar, get_varname( kVARS%rain_number ), 'qnrvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%graupel_number) .and. 0<parent_opts%vars_to_allocate( kVARS%graupel_number) ) call set_nml_var(this%forcing%qngvar, get_varname( kVARS%graupel_number ), 'qngvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%snow_number) .and. 0<parent_opts%vars_to_allocate( kVARS%snow_number) ) call set_nml_var(this%forcing%qnsvar, get_varname( kVARS%snow_number ), 'qnsvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice2_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%ice2_mass) ) call set_nml_var(this%forcing%i2mvar, get_varname( kVARS%ice2_mass ), 'i2mvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice3_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%ice3_mass) ) call set_nml_var(this%forcing%i3mvar, get_varname( kVARS%ice3_mass ), 'i3mvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice2_number) .and. 0<parent_opts%vars_to_allocate( kVARS%ice2_number) ) call set_nml_var(this%forcing%i2nvar, get_varname( kVARS%ice2_number ), 'i2nvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice3_number) .and. 0<parent_opts%vars_to_allocate( kVARS%ice3_number) ) call set_nml_var(this%forcing%i3nvar, get_varname( kVARS%ice3_number ), 'i3nvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice1_a) .and. 0<parent_opts%vars_to_allocate( kVARS%ice1_a) ) call set_nml_var(this%forcing%i1avar, get_varname( kVARS%ice1_a ), 'i1avar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice2_a) .and. 0<parent_opts%vars_to_allocate( kVARS%ice2_a) ) call set_nml_var(this%forcing%i2avar, get_varname( kVARS%ice2_a ), 'i2avar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice3_a) .and. 0<parent_opts%vars_to_allocate( kVARS%ice3_a) ) call set_nml_var(this%forcing%i3avar, get_varname( kVARS%ice3_a ), 'i3avar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice1_c) .and. 0<parent_opts%vars_to_allocate( kVARS%ice1_c) ) call set_nml_var(this%forcing%i1cvar, get_varname( kVARS%ice1_c ), 'i1cvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice2_c) .and. 0<parent_opts%vars_to_allocate( kVARS%ice2_c) ) call set_nml_var(this%forcing%i2cvar, get_varname( kVARS%ice2_c ), 'i2cvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice3_c) .and. 0<parent_opts%vars_to_allocate( kVARS%ice3_c) ) call set_nml_var(this%forcing%i3cvar, get_varname( kVARS%ice3_c ), 'i3cvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%qs_fm) .and. 0<parent_opts%vars_to_allocate( kVARS%qs_fm) ) call set_nml_var(this%forcing%qs_fmvar, get_varname( kVARS%qs_fm ), 'qs_fmvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ns_fm) .and. 0<parent_opts%vars_to_allocate( kVARS%ns_fm) ) call set_nml_var(this%forcing%ns_fmvar, get_varname( kVARS%ns_fm ), 'ns_fmvar', this%forcing, i, no_check=.True.)
 
     end subroutine setup_synthetic_forcing
 

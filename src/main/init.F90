@@ -288,7 +288,7 @@ contains
 
             if (options(i)%general%parent_nest > 0) then
                 ! Setup options%forcing to expect synthetic forcing from parent domain
-                call options(i)%setup_synthetic_forcing()
+                call options(i)%setup_synthetic_forcing(options(options(i)%general%parent_nest))
             endif
             call options(i)%verify_options()
 

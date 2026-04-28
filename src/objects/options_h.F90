@@ -122,9 +122,10 @@ interface
         integer, optional, intent(out) :: error
     end subroutine
 
-    module subroutine setup_synthetic_forcing(this)
+    module subroutine setup_synthetic_forcing(this, parent_opts)
         implicit none
         class(options_t), intent(inout):: this
+        type(options_t),  intent(in)   :: parent_opts
     end subroutine
 
     module subroutine generate_config_string(this, config_str, exclude_restart_fields)
