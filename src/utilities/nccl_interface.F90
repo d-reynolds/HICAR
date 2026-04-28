@@ -40,6 +40,26 @@ module nccl_interface
             type(c_ptr), value :: stream
         end subroutine
 
+        integer(c_int) function cuda_event_create(event) bind(C, name='cuda_event_create')
+            import :: c_ptr, c_int
+            type(c_ptr), intent(out) :: event
+        end function
+
+        subroutine cuda_event_destroy(event) bind(C, name='cuda_event_destroy')
+            import :: c_ptr
+            type(c_ptr), value :: event
+        end subroutine
+
+        integer(c_int) function cuda_event_record(event, stream) bind(C, name='cuda_event_record')
+            import :: c_ptr, c_int
+            type(c_ptr), value :: event, stream
+        end function
+
+        integer(c_int) function cuda_stream_wait_event(stream, event) bind(C, name='cuda_stream_wait_event')
+            import :: c_ptr, c_int
+            type(c_ptr), value :: stream, event
+        end function
+
         subroutine nccl_group_start() bind(C, name='nccl_group_start')
         end subroutine
 

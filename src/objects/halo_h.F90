@@ -137,7 +137,18 @@ module halo_interface
 
 #ifdef USE_NCCL
         type(c_ptr) :: nccl_comm = c_null_ptr
+        ! nccl_stream: aliased to OpenACC's acc_async_sync — used by exch_var
+        ! and put_*/retrieve_* so within-stream ordering keeps that path
+        ! correct without extra event sync (single-call, self-contained).
         type(c_ptr) :: nccl_stream = c_null_ptr
+        ! nccl_batch_stream: dedicated CUDA stream for halo_*_send_batch.
+        ! Lets NCCL run concurrently with caller compute on acc_async_sync;
+        ! pack_*_done / nccl_*_done events handshake across the two streams.
+        type(c_ptr) :: nccl_batch_stream = c_null_ptr
+        type(c_ptr) :: pack_3d_done = c_null_ptr
+        type(c_ptr) :: nccl_3d_done = c_null_ptr
+        type(c_ptr) :: pack_2d_done = c_null_ptr
+        type(c_ptr) :: nccl_2d_done = c_null_ptr
 #endif
 
     contains

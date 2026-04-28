@@ -146,12 +146,32 @@ module subroutine init_halo(this, exch_vars, grid, comms)
             write(*,*) "ERROR: NCCL communicator init failed on rank ", this%halo_rank
             call MPI_Abort(comms, nccl_ierr)
         endif
-        ! Use OpenACC's synchronous-queue CUDA stream for NCCL operations.
-        ! Sharing the stream provides natural within-stream ordering between
-        ! pack/unpack OpenACC kernels and NCCL send/recv, eliminating the need
-        ! for host-side stream synchronization and silencing racecheck false
-        ! positives that arise from cross-stream host-side syncs.
+        ! exch_var path keeps nccl_stream aliased to OpenACC's sync queue so
+        ! within-stream ordering keeps put_*/nccl_send/nccl_recv/retrieve_*
+        ! correct without extra synchronization.
         this%nccl_stream = transfer(acc_get_cuda_stream(acc_async_sync), this%nccl_stream)
+        ! Batched halo path uses a dedicated stream so NCCL collectives run
+        ! concurrently with caller compute on acc_async_sync. Cross-stream
+        ! correctness is maintained by CUDA events:
+        !   pack_*_done — recorded on acc_async_sync after pack kernels;
+        !                 nccl_batch_stream waits on it before launching NCCL.
+        !   nccl_*_done — recorded on nccl_batch_stream after the NCCL group;
+        !                 acc_async_sync waits on it before launching unpack.
+        ! Separate event pairs for 3D and 2D batches because both can be in
+        ! flight simultaneously (time-step issues both sends back-to-back).
+        nccl_ierr = nccl_stream_create(this%nccl_batch_stream)
+        if (nccl_ierr /= 0) then
+            write(*,*) "ERROR: NCCL batch stream create failed on rank ", this%halo_rank
+            call MPI_Abort(comms, nccl_ierr)
+        endif
+        nccl_ierr = cuda_event_create(this%pack_3d_done)
+        nccl_ierr = cuda_event_create(this%nccl_3d_done) + nccl_ierr
+        nccl_ierr = cuda_event_create(this%pack_2d_done) + nccl_ierr
+        nccl_ierr = cuda_event_create(this%nccl_2d_done) + nccl_ierr
+        if (nccl_ierr /= 0) then
+            write(*,*) "ERROR: CUDA event create failed on rank ", this%halo_rank
+            call MPI_Abort(comms, nccl_ierr)
+        endif
         if (STD_OUT_PE) write(*,*) "NCCL communicator initialized for halo exchange"
 #endif
 
@@ -341,6 +361,11 @@ module subroutine finalize(this)
 
 #ifdef USE_NCCL
         ! Note: do NOT destroy this%nccl_stream — it's owned by OpenACC, not us.
+        call cuda_event_destroy(this%pack_3d_done)
+        call cuda_event_destroy(this%nccl_3d_done)
+        call cuda_event_destroy(this%pack_2d_done)
+        call cuda_event_destroy(this%nccl_2d_done)
+        call nccl_stream_destroy(this%nccl_batch_stream)
         call nccl_comm_destroy(this%nccl_comm)
 #else
     if (this%n_2d > 0) then
@@ -986,6 +1011,14 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
     integer :: i_start, j_start, kms_var, kme_var
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
     integer :: ierr, ns_msg_size, ew_msg_size, corner_msg_size
+    ! Fused-pack locals: one kernel per variable instead of 8 per-direction kernels.
+    integer :: nx_t, ny_t, nz_var
+    integer :: ns_count, ew_count, cn_count
+    integer :: n_count, s_count, e_count, w_count
+    integer :: nw_count, ne_count, sw_count, se_count
+    integer :: n_off, s_off, e_off, w_off, nw_off, ne_off, sw_off, se_off
+    integer :: total_pack, idx, idx_local, ii, jj, kk
+    integer :: nw_is, nw_js, ne_is, ne_js, sw_is, sw_js, se_is, se_js
 
     if (this%n_3d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
@@ -1022,131 +1055,125 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
                 kms_var = var_data(vars_to_send(p)%v)%grid%kts
                 kme_var = var_data(vars_to_send(p)%v)%grid%kte
 
-                if (.not.(this%north_boundary)) then
-                    associate(buff => this%north_buffer_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = its,ite
-                        buff(n,i-its+1,k,j) = var(i,k,(jte-halo_size+j))
-                    enddo
-                    enddo
-                    enddo
-                    end associate
+                ! ---- Fused pack: one kernel covers all 8 active halo regions ----
+                nx_t   = ite - its + 1
+                ny_t   = jte - jts + 1
+                nz_var = kme_var - kms_var + 1
+                ns_count = nx_t * nz_var * halo_size
+                ew_count = halo_size * nz_var * ny_t
+                cn_count = halo_size * nz_var * halo_size
+
+                n_count  = merge(ns_count, 0, .not. this%north_boundary)
+                s_count  = merge(ns_count, 0, .not. this%south_boundary)
+                e_count  = merge(ew_count, 0, .not. this%east_boundary)
+                w_count  = merge(ew_count, 0, .not. this%west_boundary)
+                nw_count = merge(cn_count, 0, .not. this%northwest_boundary)
+                ne_count = merge(cn_count, 0, .not. this%northeast_boundary)
+                sw_count = merge(cn_count, 0, .not. this%southwest_boundary)
+                se_count = merge(cn_count, 0, .not. this%southeast_boundary)
+
+                n_off  = 0
+                s_off  = n_off  + n_count
+                e_off  = s_off  + s_count
+                w_off  = e_off  + e_count
+                nw_off = w_off  + w_count
+                ne_off = nw_off + nw_count
+                sw_off = ne_off + ne_count
+                se_off = sw_off + sw_count
+                total_pack = se_off + se_count
+
+                ! Corner i_start/j_start mirror the original per-corner logic
+                ! at the old single-kernel sites, including boundary redirection.
+                nw_js = jte - halo_size; nw_is = its - 1
+                if (this%north_boundary) then
+                    nw_js = nw_js + halo_size
+                elseif (this%west_boundary) then
+                    nw_is = nw_is - halo_size
                 endif
-                if (.not.(this%south_boundary)) then
-                    associate(buff => this%south_buffer_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = its,ite
-                        buff(n,i-its+1,k,j) = var(i,k,jts+j-1)
-                    enddo
-                    enddo
-                    enddo
-                    end associate
+                ne_js = jte - halo_size; ne_is = ite - halo_size
+                if (this%north_boundary) then
+                    ne_js = ne_js + halo_size
+                elseif (this%east_boundary) then
+                    ne_is = ne_is + halo_size
                 endif
-                if (.not.(this%east_boundary)) then
-                    associate(buff => this%east_buffer_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = jts,jte
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        buff(n,i,k,j-jts+1) = var((ite-halo_size+i),k,j)
-                    enddo
-                    enddo
-                    enddo
-                    end associate
+                sw_js = jts - 1; sw_is = its - 1
+                if (this%south_boundary) then
+                    sw_js = sw_js - halo_size
+                elseif (this%west_boundary) then
+                    sw_is = sw_is - halo_size
                 endif
-                if (.not.(this%west_boundary)) then
-                    associate(buff => this%west_buffer_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = jts,jte
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        buff(n,i,k,j-jts+1) = var(its+i-1,k,j)
-                    enddo
-                    enddo
-                    enddo
-                    end associate
+                se_js = jts - 1; se_is = ite - halo_size
+                if (this%south_boundary) then
+                    se_js = se_js - halo_size
+                elseif (this%east_boundary) then
+                    se_is = se_is + halo_size
                 endif
 
-                if (.not.(this%northwest_boundary)) then
-                    j_start = jte-halo_size
-                    i_start = its-1 
-                    if (this%north_boundary) then
-                        j_start = j_start + halo_size
-                    elseif (this%west_boundary) then
-                        i_start = i_start - halo_size
-                    endif
-                    associate(buff => this%northwest_buffer_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
-                    enddo
-                    enddo
-                    enddo
-                    end associate
-                endif
-
-                if (.not.(this%southeast_boundary)) then
-                    j_start = jts-1
-                    i_start = ite-halo_size
-                    if (this%south_boundary) then
-                        j_start = j_start - halo_size
-                    elseif (this%east_boundary) then
-                        i_start = i_start + halo_size
-                    endif
-                    associate(buff => this%southeast_buffer_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
-                    enddo
-                    enddo
-                    enddo
-                    end associate
-                endif
-                
-                if (.not.(this%southwest_boundary)) then
-                    j_start = jts-1
-                    i_start = its-1
-                    if (this%south_boundary) then
-                        j_start = j_start - halo_size
-                    elseif (this%west_boundary) then
-                        i_start = i_start - halo_size
-                    endif
-                    associate(buff => this%southwest_buffer_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
-                    enddo
-                    enddo
-                    enddo
-                    end associate
-                endif
-
-                if (.not.(this%northeast_boundary)) then
-                    j_start = jte-halo_size
-                    i_start = ite-halo_size
-                    if (this%north_boundary) then
-                        j_start = j_start + halo_size
-                    elseif (this%east_boundary) then
-                        i_start = i_start + halo_size
-                    endif
-                    associate(buff => this%northeast_buffer_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        buff(n,i,k,j) = var((i_start+i),k,(j_start+j))
-                    enddo
-                    enddo
+                if (total_pack > 0) then
+                    associate(bn  => this%north_buffer_3d,     bs  => this%south_buffer_3d,     &
+                              be  => this%east_buffer_3d,      bw  => this%west_buffer_3d,      &
+                              bnw => this%northwest_buffer_3d, bne => this%northeast_buffer_3d, &
+                              bsw => this%southwest_buffer_3d, bse => this%southeast_buffer_3d)
+                    !$acc parallel loop gang vector present(var, bn, bs, be, bw, bnw, bne, bsw, bse) &
+                    !$acc private(idx_local, ii, jj, kk)
+                    do idx = 0, total_pack - 1
+                        if (idx < s_off) then
+                            idx_local = idx - n_off
+                            jj = idx_local / (nx_t * nz_var)
+                            kk = mod(idx_local, nx_t * nz_var) / nx_t
+                            ii = mod(idx_local, nx_t)
+                            bn(n, ii+1, kms_var+kk, jj+1) = &
+                                var(its+ii, kms_var+kk, jte-halo_size+jj+1)
+                        else if (idx < e_off) then
+                            idx_local = idx - s_off
+                            jj = idx_local / (nx_t * nz_var)
+                            kk = mod(idx_local, nx_t * nz_var) / nx_t
+                            ii = mod(idx_local, nx_t)
+                            bs(n, ii+1, kms_var+kk, jj+1) = &
+                                var(its+ii, kms_var+kk, jts+jj)
+                        else if (idx < w_off) then
+                            idx_local = idx - e_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            be(n, ii+1, kms_var+kk, jj+1) = &
+                                var(ite-halo_size+ii+1, kms_var+kk, jts+jj)
+                        else if (idx < nw_off) then
+                            idx_local = idx - w_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            bw(n, ii+1, kms_var+kk, jj+1) = &
+                                var(its+ii, kms_var+kk, jts+jj)
+                        else if (idx < ne_off) then
+                            idx_local = idx - nw_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            bnw(n, ii+1, kms_var+kk, jj+1) = &
+                                var(nw_is+ii+1, kms_var+kk, nw_js+jj+1)
+                        else if (idx < sw_off) then
+                            idx_local = idx - ne_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            bne(n, ii+1, kms_var+kk, jj+1) = &
+                                var(ne_is+ii+1, kms_var+kk, ne_js+jj+1)
+                        else if (idx < se_off) then
+                            idx_local = idx - sw_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            bsw(n, ii+1, kms_var+kk, jj+1) = &
+                                var(sw_is+ii+1, kms_var+kk, sw_js+jj+1)
+                        else
+                            idx_local = idx - se_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            bse(n, ii+1, kms_var+kk, jj+1) = &
+                                var(se_is+ii+1, kms_var+kk, se_js+jj+1)
+                        endif
                     enddo
                     end associate
                 endif
@@ -1162,83 +1189,90 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
         ew_msg_size = this%n_3d * this%halo_size * this%grid%halo_nz * this%grid%ew_halo_ny
         corner_msg_size = this%n_3d * this%halo_size * this%grid%halo_nz * this%halo_size
 
-        ! NCCL operations share OpenACC's stream, so within-stream ordering
-        ! automatically serializes the preceding pack kernels before NCCL reads.
+        ! Cross-stream handshake: pack kernels above ran on acc_async_sync;
+        ! the NCCL group below runs on this%nccl_batch_stream. Without these
+        ! two event ops the NCCL stream would race the still-in-flight packs.
+        ierr = cuda_event_record(this%pack_3d_done, &
+            transfer(acc_get_cuda_stream(acc_async_sync), this%nccl_batch_stream))
+        ierr = cuda_stream_wait_event(this%nccl_batch_stream, this%pack_3d_done)
         call nccl_group_start()
 
         if (.not. this%north_boundary) then
             !$acc host_data use_device(this%north_buffer_3d, this%north_batch_in_3d)
             ierr = nccl_send_float(c_loc(this%north_buffer_3d), ns_msg_size, &
-                this%north_neighbor, this%nccl_comm, this%nccl_stream)
+                this%north_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%north_batch_in_3d), ns_msg_size, &
-                this%north_neighbor, this%nccl_comm, this%nccl_stream)
+                this%north_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         if (.not. this%south_boundary) then
             !$acc host_data use_device(this%south_buffer_3d, this%south_batch_in_3d)
             ierr = nccl_send_float(c_loc(this%south_buffer_3d), ns_msg_size, &
-                this%south_neighbor, this%nccl_comm, this%nccl_stream)
+                this%south_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%south_batch_in_3d), ns_msg_size, &
-                this%south_neighbor, this%nccl_comm, this%nccl_stream)
+                this%south_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         if (.not. this%east_boundary) then
             !$acc host_data use_device(this%east_buffer_3d, this%east_batch_in_3d)
             ierr = nccl_send_float(c_loc(this%east_buffer_3d), ew_msg_size, &
-                this%east_neighbor, this%nccl_comm, this%nccl_stream)
+                this%east_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%east_batch_in_3d), ew_msg_size, &
-                this%east_neighbor, this%nccl_comm, this%nccl_stream)
+                this%east_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         if (.not. this%west_boundary) then
             !$acc host_data use_device(this%west_buffer_3d, this%west_batch_in_3d)
             ierr = nccl_send_float(c_loc(this%west_buffer_3d), ew_msg_size, &
-                this%west_neighbor, this%nccl_comm, this%nccl_stream)
+                this%west_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%west_batch_in_3d), ew_msg_size, &
-                this%west_neighbor, this%nccl_comm, this%nccl_stream)
+                this%west_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         if (.not. this%northwest_boundary) then
             !$acc host_data use_device(this%northwest_buffer_3d, this%northwest_batch_in_3d)
             ierr = nccl_send_float(c_loc(this%northwest_buffer_3d), corner_msg_size, &
-                this%northwest_neighbor, this%nccl_comm, this%nccl_stream)
+                this%northwest_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%northwest_batch_in_3d), corner_msg_size, &
-                this%northwest_neighbor, this%nccl_comm, this%nccl_stream)
+                this%northwest_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         if (.not. this%northeast_boundary) then
             !$acc host_data use_device(this%northeast_buffer_3d, this%northeast_batch_in_3d)
             ierr = nccl_send_float(c_loc(this%northeast_buffer_3d), corner_msg_size, &
-                this%northeast_neighbor, this%nccl_comm, this%nccl_stream)
+                this%northeast_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%northeast_batch_in_3d), corner_msg_size, &
-                this%northeast_neighbor, this%nccl_comm, this%nccl_stream)
+                this%northeast_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         if (.not. this%southwest_boundary) then
             !$acc host_data use_device(this%southwest_buffer_3d, this%southwest_batch_in_3d)
             ierr = nccl_send_float(c_loc(this%southwest_buffer_3d), corner_msg_size, &
-                this%southwest_neighbor, this%nccl_comm, this%nccl_stream)
+                this%southwest_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%southwest_batch_in_3d), corner_msg_size, &
-                this%southwest_neighbor, this%nccl_comm, this%nccl_stream)
+                this%southwest_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         if (.not. this%southeast_boundary) then
             !$acc host_data use_device(this%southeast_buffer_3d, this%southeast_batch_in_3d)
             ierr = nccl_send_float(c_loc(this%southeast_buffer_3d), corner_msg_size, &
-                this%southeast_neighbor, this%nccl_comm, this%nccl_stream)
+                this%southeast_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%southeast_batch_in_3d), corner_msg_size, &
-                this%southeast_neighbor, this%nccl_comm, this%nccl_stream)
+                this%southeast_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         call nccl_group_end()
+        ! Mark NCCL completion so the matching halo_3d_retrieve_batch can
+        ! gate its unpack kernels on it via cuda_stream_wait_event.
+        ierr = cuda_event_record(this%nccl_3d_done, this%nccl_batch_stream)
 #else
     !$acc data present(this)
 
@@ -1335,6 +1369,16 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
     integer :: n, p, k_max, i, j, k, n_vars
     integer :: halo_size, kms, kme, ims, jms, its, ite, jts, jte
     integer :: kms_var, kme_var
+    ! Fused-unpack locals: one kernel per variable instead of 8 per-direction kernels.
+    integer :: nx_t, ny_t, nz_var
+    integer :: ns_count, ew_count, cn_count
+    integer :: n_count, s_count, e_count, w_count
+    integer :: nw_count, ne_count, sw_count, se_count
+    integer :: n_off, s_off, e_off, w_off, nw_off, ne_off, sw_off, se_off
+    integer :: total_unpack, idx, idx_local, ii, jj, kk
+#ifdef USE_NCCL
+    integer :: ierr
+#endif
 
     if (this%n_3d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
@@ -1345,9 +1389,13 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
     jts = this%jts; jte = this%jte
 
 #ifdef USE_NCCL
-        ! NCCL shares OpenACC's stream — within-stream ordering ensures NCCL
-        ! writes to receive buffers complete before the unpack kernels below
-        ! read them. No explicit sync needed.
+        ! Make the OpenACC compute stream wait for the NCCL group recorded
+        ! in halo_3d_send_batch. GPU-side dependency edge — host non-blocking.
+        ! Subsequent unpack kernels on acc_async_sync are then guaranteed to
+        ! see fully-written receive buffers via within-stream ordering.
+        ierr = cuda_stream_wait_event( &
+            transfer(acc_get_cuda_stream(acc_async_sync), this%nccl_batch_stream), &
+            this%nccl_3d_done)
 #else
     if (.not.(this%north_boundary)) call MPI_Win_Wait(this%north_3d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_3d_win)
@@ -1371,103 +1419,98 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
                 associate(var => var_data(vars_to_ret(p)%v)%data_3d)
                 kms_var = var_data(vars_to_ret(p)%v)%grid%kts
                 kme_var = var_data(vars_to_ret(p)%v)%grid%kte
-                if (.not.(this%north_boundary)) then
-                    associate(buff => this%north_batch_in_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = its,ite
-                        var(i,k,(jte+j)) = buff(n,i-its+1,k,j)
-                    enddo
-                    enddo
-                    enddo
-                    end associate
-                endif
-                if (.not.(this%south_boundary)) then
-                    associate(buff => this%south_batch_in_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = its,ite
-                        var(i,k,jms+j-1) = buff(n,i-its+1,k,j)
-                    enddo
-                    enddo
-                    enddo
-                    end associate
-                endif
-                if (.not.(this%east_boundary)) then
-                    associate(buff => this%east_batch_in_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = jts,jte
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        var((ite+i),k,j) = buff(n,i,k,j-jts+1)
-                    enddo
-                    enddo
-                    enddo
-                    end associate
-                endif
-                if (.not.(this%west_boundary)) then
-                    associate(buff => this%west_batch_in_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = jts,jte
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        var(ims+i-1,k,j) = buff(n,i,k,j-jts+1)
-                    enddo
-                    enddo
-                    enddo
-                    end associate
-                endif
-                
-                if (.not.(this%northwest_boundary)) then
-                    associate(buff => this%northwest_batch_in_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        var(ims+i-1,k,(jte+j)) = buff(n,i,k,j)
-                    enddo
-                    enddo
-                    enddo
-                    end associate
-                endif
+                ! ---- Fused unpack: one kernel covers all 8 active halo regions ----
+                nx_t   = ite - its + 1
+                ny_t   = jte - jts + 1
+                nz_var = kme_var - kms_var + 1
+                ns_count = nx_t * nz_var * halo_size
+                ew_count = halo_size * nz_var * ny_t
+                cn_count = halo_size * nz_var * halo_size
 
-                if (.not.(this%southeast_boundary)) then
-                    associate(buff => this%southeast_batch_in_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        var((ite+i),k,jms+j-1) = buff(n,i,k,j)
-                    enddo
-                    enddo
-                    enddo
-                    end associate
-                endif
+                n_count  = merge(ns_count, 0, .not. this%north_boundary)
+                s_count  = merge(ns_count, 0, .not. this%south_boundary)
+                e_count  = merge(ew_count, 0, .not. this%east_boundary)
+                w_count  = merge(ew_count, 0, .not. this%west_boundary)
+                nw_count = merge(cn_count, 0, .not. this%northwest_boundary)
+                ne_count = merge(cn_count, 0, .not. this%northeast_boundary)
+                sw_count = merge(cn_count, 0, .not. this%southwest_boundary)
+                se_count = merge(cn_count, 0, .not. this%southeast_boundary)
 
-                if (.not.(this%southwest_boundary)) then
-                    associate(buff => this%southwest_batch_in_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        var(ims+i-1,k,jms+j-1) = buff(n,i,k,j)
-                    enddo
-                    enddo
-                    enddo
-                    end associate
-                endif
+                n_off  = 0
+                s_off  = n_off  + n_count
+                e_off  = s_off  + s_count
+                w_off  = e_off  + e_count
+                nw_off = w_off  + w_count
+                ne_off = nw_off + nw_count
+                sw_off = ne_off + ne_count
+                se_off = sw_off + sw_count
+                total_unpack = se_off + se_count
 
-                if (.not.(this%northeast_boundary)) then
-                    associate(buff => this%northeast_batch_in_3d)
-                    !$acc parallel loop gang vector collapse(3) present(var, buff)
-                    do j = 1,halo_size
-                    do k = kms_var,kme_var
-                    do i = 1,halo_size
-                        var((ite+i),k,(jte+j)) = buff(n,i,k,j)
-                    enddo
-                    enddo
+                if (total_unpack > 0) then
+                    associate(bn  => this%north_batch_in_3d,     bs  => this%south_batch_in_3d,     &
+                              be  => this%east_batch_in_3d,      bw  => this%west_batch_in_3d,      &
+                              bnw => this%northwest_batch_in_3d, bne => this%northeast_batch_in_3d, &
+                              bsw => this%southwest_batch_in_3d, bse => this%southeast_batch_in_3d)
+                    !$acc parallel loop gang vector present(var, bn, bs, be, bw, bnw, bne, bsw, bse) &
+                    !$acc private(idx_local, ii, jj, kk)
+                    do idx = 0, total_unpack - 1
+                        if (idx < s_off) then
+                            idx_local = idx - n_off
+                            jj = idx_local / (nx_t * nz_var)
+                            kk = mod(idx_local, nx_t * nz_var) / nx_t
+                            ii = mod(idx_local, nx_t)
+                            var(its+ii, kms_var+kk, jte+jj+1) = &
+                                bn(n, ii+1, kms_var+kk, jj+1)
+                        else if (idx < e_off) then
+                            idx_local = idx - s_off
+                            jj = idx_local / (nx_t * nz_var)
+                            kk = mod(idx_local, nx_t * nz_var) / nx_t
+                            ii = mod(idx_local, nx_t)
+                            var(its+ii, kms_var+kk, jms+jj) = &
+                                bs(n, ii+1, kms_var+kk, jj+1)
+                        else if (idx < w_off) then
+                            idx_local = idx - e_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            var(ite+ii+1, kms_var+kk, jts+jj) = &
+                                be(n, ii+1, kms_var+kk, jj+1)
+                        else if (idx < nw_off) then
+                            idx_local = idx - w_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            var(ims+ii, kms_var+kk, jts+jj) = &
+                                bw(n, ii+1, kms_var+kk, jj+1)
+                        else if (idx < ne_off) then
+                            idx_local = idx - nw_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            var(ims+ii, kms_var+kk, jte+jj+1) = &
+                                bnw(n, ii+1, kms_var+kk, jj+1)
+                        else if (idx < sw_off) then
+                            idx_local = idx - ne_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            var(ite+ii+1, kms_var+kk, jte+jj+1) = &
+                                bne(n, ii+1, kms_var+kk, jj+1)
+                        else if (idx < se_off) then
+                            idx_local = idx - sw_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            var(ims+ii, kms_var+kk, jms+jj) = &
+                                bsw(n, ii+1, kms_var+kk, jj+1)
+                        else
+                            idx_local = idx - se_off
+                            jj = idx_local / (halo_size * nz_var)
+                            kk = mod(idx_local, halo_size * nz_var) / halo_size
+                            ii = mod(idx_local, halo_size)
+                            var(ite+ii+1, kms_var+kk, jms+jj) = &
+                                bse(n, ii+1, kms_var+kk, jj+1)
+                        endif
                     enddo
                     end associate
                 endif
@@ -1501,6 +1544,12 @@ module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
     integer :: halo_size, its, ite, jts, jte
     INTEGER(KIND=MPI_ADDRESS_KIND) :: disp
     integer :: ierr, ns_msg_size, ew_msg_size
+    ! Fused-pack locals: one kernel per variable instead of 4 per-direction kernels.
+    integer :: nx_t, ny_t
+    integer :: ns2_count, ew2_count
+    integer :: n2_count, s2_count, e2_count, w2_count
+    integer :: n2_off, s2_off, e2_off, w2_off
+    integer :: total2_pack, idx, idx_local, ii, jj
     if (this%n_2d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
     msg_size = 1
@@ -1520,6 +1569,21 @@ module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
     n = 1
     n_vars = size(var_data)
 
+    ! 2D fused-pack offsets: var-independent (no z dim), compute once.
+    nx_t = ite - its + 1
+    ny_t = jte - jts + 1
+    ns2_count = nx_t * halo_size
+    ew2_count = halo_size * ny_t
+    n2_count = merge(ns2_count, 0, .not. this%north_boundary)
+    s2_count = merge(ns2_count, 0, .not. this%south_boundary)
+    e2_count = merge(ew2_count, 0, .not. this%east_boundary)
+    w2_count = merge(ew2_count, 0, .not. this%west_boundary)
+    n2_off = 0
+    s2_off = n2_off + n2_count
+    e2_off = s2_off + s2_count
+    w2_off = e2_off + e2_count
+    total2_pack = w2_off + w2_count
+
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do p = 1, size(vars_to_send)
         if (vars_to_send(p)%v <= n_vars) then
@@ -1527,86 +1591,74 @@ module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
             if (var_data(vars_to_send(p)%v)%id == vars_to_send(p)%id) then
                 if (var_data(vars_to_send(p)%v)%dtype == kINTEGER) then
                     associate(var => var_data(vars_to_send(p)%v)%data_2di)
-                    if (.not.(this%north_boundary)) then
-                        associate(buff => this%north_buffer_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = 1,halo_size
-                        do i = its,ite
-                            buff(n,i-its+1,j) = var(i,(jte-halo_size+j))
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%south_boundary)) then
-                        associate(buff => this%south_buffer_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = 1,halo_size
-                        do i = its,ite
-                            buff(n,i-its+1,j) = var(i,jts+j-1)
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%east_boundary)) then
-                        associate(buff => this%east_buffer_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = jts,jte
-                        do i = 1,halo_size
-                            buff(n,i,j-jts+1) = var((ite-halo_size+i),j)
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%west_boundary)) then
-                        associate(buff => this%west_buffer_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = jts,jte
-                        do i = 1,halo_size
-                            buff(n,i,j-jts+1) = var(its+i-1,j)
-                        enddo
+                    if (total2_pack > 0) then
+                        associate(bn => this%north_buffer_2d, bs => this%south_buffer_2d, &
+                                  be => this%east_buffer_2d,  bw => this%west_buffer_2d)
+                        !$acc parallel loop gang vector present(var, bn, bs, be, bw) &
+                        !$acc private(idx_local, ii, jj)
+                        do idx = 0, total2_pack - 1
+                            if (idx < s2_off) then
+                                idx_local = idx - n2_off
+                                jj = idx_local / nx_t
+                                ii = mod(idx_local, nx_t)
+                                bn(n, ii+1, jj+1) = &
+                                    var(its+ii, jte-halo_size+jj+1)
+                            else if (idx < e2_off) then
+                                idx_local = idx - s2_off
+                                jj = idx_local / nx_t
+                                ii = mod(idx_local, nx_t)
+                                bs(n, ii+1, jj+1) = &
+                                    var(its+ii, jts+jj)
+                            else if (idx < w2_off) then
+                                idx_local = idx - e2_off
+                                jj = idx_local / halo_size
+                                ii = mod(idx_local, halo_size)
+                                be(n, ii+1, jj+1) = &
+                                    var(ite-halo_size+ii+1, jts+jj)
+                            else
+                                idx_local = idx - w2_off
+                                jj = idx_local / halo_size
+                                ii = mod(idx_local, halo_size)
+                                bw(n, ii+1, jj+1) = &
+                                    var(its+ii, jts+jj)
+                            endif
                         enddo
                         end associate
                     endif
                     end associate
                 else
                     associate(var => var_data(vars_to_send(p)%v)%data_2d)
-                    if (.not.(this%north_boundary)) then
-                        associate(buff => this%north_buffer_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = 1,halo_size
-                        do i = its,ite
-                            buff(n,i-its+1,j) = var(i,(jte-halo_size+j))
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%south_boundary)) then
-                        associate(buff => this%south_buffer_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = 1,halo_size
-                        do i = its,ite
-                            buff(n,i-its+1,j) = var(i,jts+j-1)
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%east_boundary)) then
-                        associate(buff => this%east_buffer_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = jts,jte
-                        do i = 1,halo_size
-                            buff(n,i,j-jts+1) = var((ite-halo_size+i),j)
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%west_boundary)) then
-                        associate(buff => this%west_buffer_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = jts,jte
-                        do i = 1,halo_size
-                            buff(n,i,j-jts+1) = var(its+i-1,j)
-                        enddo
+                    if (total2_pack > 0) then
+                        associate(bn => this%north_buffer_2d, bs => this%south_buffer_2d, &
+                                  be => this%east_buffer_2d,  bw => this%west_buffer_2d)
+                        !$acc parallel loop gang vector present(var, bn, bs, be, bw) &
+                        !$acc private(idx_local, ii, jj)
+                        do idx = 0, total2_pack - 1
+                            if (idx < s2_off) then
+                                idx_local = idx - n2_off
+                                jj = idx_local / nx_t
+                                ii = mod(idx_local, nx_t)
+                                bn(n, ii+1, jj+1) = &
+                                    var(its+ii, jte-halo_size+jj+1)
+                            else if (idx < e2_off) then
+                                idx_local = idx - s2_off
+                                jj = idx_local / nx_t
+                                ii = mod(idx_local, nx_t)
+                                bs(n, ii+1, jj+1) = &
+                                    var(its+ii, jts+jj)
+                            else if (idx < w2_off) then
+                                idx_local = idx - e2_off
+                                jj = idx_local / halo_size
+                                ii = mod(idx_local, halo_size)
+                                be(n, ii+1, jj+1) = &
+                                    var(ite-halo_size+ii+1, jts+jj)
+                            else
+                                idx_local = idx - w2_off
+                                jj = idx_local / halo_size
+                                ii = mod(idx_local, halo_size)
+                                bw(n, ii+1, jj+1) = &
+                                    var(its+ii, jts+jj)
+                            endif
                         enddo
                         end associate
                     endif
@@ -1622,47 +1674,54 @@ module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
         ns_msg_size = this%n_2d * this%grid%ns_halo_nx * this%halo_size
         ew_msg_size = this%n_2d * this%halo_size * this%grid%ew_halo_ny
 
-        ! NCCL operations share OpenACC's stream, so within-stream ordering
-        ! automatically serializes the preceding pack kernels before NCCL reads.
+        ! Cross-stream handshake: pack kernels above ran on acc_async_sync;
+        ! the NCCL group below runs on this%nccl_batch_stream. Without these
+        ! two event ops the NCCL stream would race the still-in-flight packs.
+        ierr = cuda_event_record(this%pack_2d_done, &
+            transfer(acc_get_cuda_stream(acc_async_sync), this%nccl_batch_stream))
+        ierr = cuda_stream_wait_event(this%nccl_batch_stream, this%pack_2d_done)
         call nccl_group_start()
 
         if (.not. this%north_boundary) then
             !$acc host_data use_device(this%north_buffer_2d, this%north_batch_in_2d)
             ierr = nccl_send_float(c_loc(this%north_buffer_2d), ns_msg_size, &
-                this%north_neighbor, this%nccl_comm, this%nccl_stream)
+                this%north_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%north_batch_in_2d), ns_msg_size, &
-                this%north_neighbor, this%nccl_comm, this%nccl_stream)
+                this%north_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         if (.not. this%south_boundary) then
             !$acc host_data use_device(this%south_buffer_2d, this%south_batch_in_2d)
             ierr = nccl_send_float(c_loc(this%south_buffer_2d), ns_msg_size, &
-                this%south_neighbor, this%nccl_comm, this%nccl_stream)
+                this%south_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%south_batch_in_2d), ns_msg_size, &
-                this%south_neighbor, this%nccl_comm, this%nccl_stream)
+                this%south_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         if (.not. this%east_boundary) then
             !$acc host_data use_device(this%east_buffer_2d, this%east_batch_in_2d)
             ierr = nccl_send_float(c_loc(this%east_buffer_2d), ew_msg_size, &
-                this%east_neighbor, this%nccl_comm, this%nccl_stream)
+                this%east_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%east_batch_in_2d), ew_msg_size, &
-                this%east_neighbor, this%nccl_comm, this%nccl_stream)
+                this%east_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         if (.not. this%west_boundary) then
             !$acc host_data use_device(this%west_buffer_2d, this%west_batch_in_2d)
             ierr = nccl_send_float(c_loc(this%west_buffer_2d), ew_msg_size, &
-                this%west_neighbor, this%nccl_comm, this%nccl_stream)
+                this%west_neighbor, this%nccl_comm, this%nccl_batch_stream)
             ierr = nccl_recv_float(c_loc(this%west_batch_in_2d), ew_msg_size, &
-                this%west_neighbor, this%nccl_comm, this%nccl_stream)
+                this%west_neighbor, this%nccl_comm, this%nccl_batch_stream)
             !$acc end host_data
         endif
 
         call nccl_group_end()
+        ! Mark NCCL completion so the matching halo_2d_retrieve_batch can
+        ! gate its unpack kernels on it via cuda_stream_wait_event.
+        ierr = cuda_event_record(this%nccl_2d_done, this%nccl_batch_stream)
 #else
     !$acc host_data use_device(this%south_buffer_2d, this%north_buffer_2d, &
     !$acc this%east_buffer_2d, this%west_buffer_2d)
@@ -1709,6 +1768,15 @@ module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
     type(variable_t), intent(inout) :: var_data(:)
     integer :: n, p, i, j, k, n_vars
     integer :: halo_size, ims, jms, its, ite, jts, jte
+    ! Fused-unpack locals: one kernel per variable instead of 4 per-direction kernels.
+    integer :: nx_t, ny_t
+    integer :: ns2_count, ew2_count
+    integer :: n2_count, s2_count, e2_count, w2_count
+    integer :: n2_off, s2_off, e2_off, w2_off
+    integer :: total2_unpack, idx, idx_local, ii, jj
+#ifdef USE_NCCL
+    integer :: ierr
+#endif
 
     if (this%n_2d <= 0 .or. (this%north_boundary.and.this%east_boundary.and.this%south_boundary.and.this%west_boundary)) return
 
@@ -1718,9 +1786,13 @@ module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
     jts = this%jts; jte = this%jte
 
 #ifdef USE_NCCL
-        ! NCCL shares OpenACC's stream — within-stream ordering ensures NCCL
-        ! writes to receive buffers complete before the unpack kernels below
-        ! read them. No explicit sync needed.
+        ! Make the OpenACC compute stream wait for the NCCL group recorded
+        ! in halo_2d_send_batch. GPU-side dependency edge — host non-blocking.
+        ! Subsequent unpack kernels on acc_async_sync are then guaranteed to
+        ! see fully-written receive buffers via within-stream ordering.
+        ierr = cuda_stream_wait_event( &
+            transfer(acc_get_cuda_stream(acc_async_sync), this%nccl_batch_stream), &
+            this%nccl_2d_done)
 #else
     if (.not.(this%north_boundary)) call MPI_Win_Wait(this%north_2d_win)
     if (.not.(this%south_boundary)) call MPI_Win_Wait(this%south_2d_win)
@@ -1728,8 +1800,23 @@ module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
     if (.not.(this%west_boundary)) call MPI_Win_Wait(this%west_2d_win)
 #endif
 
-    n = 1    
+    n = 1
     n_vars = size(var_data)
+
+    ! 2D fused-unpack offsets: var-independent (no z dim), compute once.
+    nx_t = ite - its + 1
+    ny_t = jte - jts + 1
+    ns2_count = nx_t * halo_size
+    ew2_count = halo_size * ny_t
+    n2_count = merge(ns2_count, 0, .not. this%north_boundary)
+    s2_count = merge(ns2_count, 0, .not. this%south_boundary)
+    e2_count = merge(ew2_count, 0, .not. this%east_boundary)
+    w2_count = merge(ew2_count, 0, .not. this%west_boundary)
+    n2_off = 0
+    s2_off = n2_off + n2_count
+    e2_off = s2_off + s2_count
+    w2_off = e2_off + e2_count
+    total2_unpack = w2_off + w2_count
 
     ! Now iterate through the exchange-only objects as long as there are more elements present
     do p = 1, size(vars_to_ret)
@@ -1738,86 +1825,74 @@ module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
             if (var_data(vars_to_ret(p)%v)%id == vars_to_ret(p)%id) then
                 if (var_data(vars_to_ret(p)%v)%dtype==kINTEGER) then
                     associate(var => var_data(vars_to_ret(p)%v)%data_2di)
-                    if (.not.(this%north_boundary)) then
-                        associate(buff => this%north_batch_in_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = 1,halo_size
-                        do i = its,ite
-                            var(i,(jte+j)) = buff(n,i-its+1,j)
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%south_boundary)) then
-                        associate(buff => this%south_batch_in_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = 1,halo_size
-                        do i = its,ite
-                            var(i,jms+j-1) = buff(n,i-its+1,j)
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%east_boundary)) then
-                        associate(buff => this%east_batch_in_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = jts,jte
-                        do i = 1,halo_size
-                            var((ite+i),j) = buff(n,i,j-jts+1)
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%west_boundary)) then
-                        associate(buff => this%west_batch_in_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = jts,jte
-                        do i = 1,halo_size
-                            var(ims+i-1,j) = buff(n,i,j-jts+1)
-                        enddo
+                    if (total2_unpack > 0) then
+                        associate(bn => this%north_batch_in_2d, bs => this%south_batch_in_2d, &
+                                  be => this%east_batch_in_2d,  bw => this%west_batch_in_2d)
+                        !$acc parallel loop gang vector present(var, bn, bs, be, bw) &
+                        !$acc private(idx_local, ii, jj)
+                        do idx = 0, total2_unpack - 1
+                            if (idx < s2_off) then
+                                idx_local = idx - n2_off
+                                jj = idx_local / nx_t
+                                ii = mod(idx_local, nx_t)
+                                var(its+ii, jte+jj+1) = &
+                                    bn(n, ii+1, jj+1)
+                            else if (idx < e2_off) then
+                                idx_local = idx - s2_off
+                                jj = idx_local / nx_t
+                                ii = mod(idx_local, nx_t)
+                                var(its+ii, jms+jj) = &
+                                    bs(n, ii+1, jj+1)
+                            else if (idx < w2_off) then
+                                idx_local = idx - e2_off
+                                jj = idx_local / halo_size
+                                ii = mod(idx_local, halo_size)
+                                var(ite+ii+1, jts+jj) = &
+                                    be(n, ii+1, jj+1)
+                            else
+                                idx_local = idx - w2_off
+                                jj = idx_local / halo_size
+                                ii = mod(idx_local, halo_size)
+                                var(ims+ii, jts+jj) = &
+                                    bw(n, ii+1, jj+1)
+                            endif
                         enddo
                         end associate
                     endif
                     end associate
                 else
                     associate(var => var_data(vars_to_ret(p)%v)%data_2d)
-                    if (.not.(this%north_boundary)) then
-                        associate(buff => this%north_batch_in_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = 1,halo_size
-                        do i = its,ite
-                            var(i,(jte+j)) = buff(n,i-its+1,j)
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%south_boundary)) then
-                        associate(buff => this%south_batch_in_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = 1,halo_size
-                        do i = its,ite
-                            var(i,jms+j-1) = buff(n,i-its+1,j)
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%east_boundary)) then
-                        associate(buff => this%east_batch_in_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = jts,jte
-                        do i = 1,halo_size
-                            var((ite+i),j) = buff(n,i,j-jts+1)
-                        enddo
-                        enddo
-                        end associate
-                    endif
-                    if (.not.(this%west_boundary)) then
-                        associate(buff => this%west_batch_in_2d)
-                        !$acc parallel loop gang vector collapse(2) present(var, buff)
-                        do j = jts,jte
-                        do i = 1,halo_size
-                            var(ims+i-1,j) = buff(n,i,j-jts+1)
-                        enddo
+                    if (total2_unpack > 0) then
+                        associate(bn => this%north_batch_in_2d, bs => this%south_batch_in_2d, &
+                                  be => this%east_batch_in_2d,  bw => this%west_batch_in_2d)
+                        !$acc parallel loop gang vector present(var, bn, bs, be, bw) &
+                        !$acc private(idx_local, ii, jj)
+                        do idx = 0, total2_unpack - 1
+                            if (idx < s2_off) then
+                                idx_local = idx - n2_off
+                                jj = idx_local / nx_t
+                                ii = mod(idx_local, nx_t)
+                                var(its+ii, jte+jj+1) = &
+                                    bn(n, ii+1, jj+1)
+                            else if (idx < e2_off) then
+                                idx_local = idx - s2_off
+                                jj = idx_local / nx_t
+                                ii = mod(idx_local, nx_t)
+                                var(its+ii, jms+jj) = &
+                                    bs(n, ii+1, jj+1)
+                            else if (idx < w2_off) then
+                                idx_local = idx - e2_off
+                                jj = idx_local / halo_size
+                                ii = mod(idx_local, halo_size)
+                                var(ite+ii+1, jts+jj) = &
+                                    be(n, ii+1, jj+1)
+                            else
+                                idx_local = idx - w2_off
+                                jj = idx_local / halo_size
+                                ii = mod(idx_local, halo_size)
+                                var(ims+ii, jts+jj) = &
+                                    bw(n, ii+1, jj+1)
+                            endif
                         enddo
                         end associate
                     endif

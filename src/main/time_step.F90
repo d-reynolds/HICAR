@@ -34,7 +34,7 @@ module time_step
     real, parameter  :: DT_BIG = 36000.0
     real  :: future_dt_seconds = DT_BIG
     integer :: max_i, max_j, max_k
-
+    real :: max_u, max_v, max_w
     public :: step, compute_dt
 
 contains
@@ -126,6 +126,12 @@ contains
         max_k = indx(2)
         max_j = indx(3)+jts-1
 
+        !$acc kernels present(u, v, w) firstprivate(max_i, max_j, max_k) copy(max_u, max_v, max_w)
+        max_u = max(abs(u(max_i,max_k,max_j)), abs(u(max_i+1,max_k,max_j)))
+        max_v = max(abs(v(max_i,max_k,max_j)), abs(v(max_i,max_k,max_j+1)))
+        max_w = max(abs(w(max_i,max_k,max_j)), abs(w(max_i,max(1,max_k-1),max_j)))
+        !$acc end kernels
+
         dt = CFL / maxwind
 
         ! If we have too small a time step throw an error
@@ -195,7 +201,9 @@ contains
         type(domain_t),     intent(in)    :: domain
 
         real                  :: present_dt_seconds, seconds_out
-        integer :: max_i_loc, max_j_loc, max_k_loc
+        integer :: ierr
+        integer :: max_i_pres, max_j_pres, max_k_pres
+        real :: max_u_pres, max_v_pres, max_w_pres
         ! compute internal timestep dt to maintain stability
         ! courant condition for 3D advection. 
                 
@@ -208,9 +216,12 @@ contains
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
                         err_msg="error computing dt for winds at the current time step")
-        max_i_loc = max_i
-        max_j_loc = max_j
-        max_k_loc = max_k
+        max_u_pres = max_u
+        max_v_pres = max_v
+        max_w_pres = max_w
+        max_i_pres = max_i
+        max_j_pres = max_j
+        max_k_pres = max_k
 
         future_dt_seconds = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
@@ -225,22 +236,21 @@ contains
         if (min(present_dt_seconds, future_dt_seconds)==seconds_out) then
 
             if (future_dt_seconds>present_dt_seconds) then
-                max_i = max_i_loc
-                max_j = max_j_loc
-                max_k = max_k_loc
+                max_u = max_u_pres
+                max_v = max_v_pres
+                max_w = max_w_pres
+                max_i = max_i_pres
+                max_j = max_j_pres
+                max_k = max_k_pres
             endif
             write(*,*) 'time_step determining i:      ',max_i
             write(*,*) 'time_step determining j:      ',max_j
             write(*,*) 'time_step determining k:      ',max_k
-            if (future_dt_seconds<present_dt_seconds) then
-                write(*,*) 'time_step determining w_grid: ',domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining u: ',domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d(max_i,max_k,max_j)
-                write(*,*) 'time_step determining v: ',domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d(max_i,max_k,max_j)
-            else
-                write(*,*) 'time_step determining w_grid: ',domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(max_i_loc,max_k_loc,max_j_loc)
-                write(*,*) 'time_step determining u: ',domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(max_i_loc,max_k_loc,max_j_loc)
-                write(*,*) 'time_step determining v: ',domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(max_i_loc,max_k_loc,max_j_loc)
-            endif
+
+            write(*,*) 'time_step determining w_grid: ',max_w
+            write(*,*) 'time_step determining u: ',max_u
+            write(*,*) 'time_step determining v: ',max_v
+
             write(*,*) 'time_step determining w_real: ',domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d(max_i,max_k,max_j)
             write(*,*) 'time_step determining jaco: ',domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d(max_i,max_k,max_j)
             write(*,*) 'time_step determining dzdx: ',domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d(max_i,max_k,max_j)
@@ -374,12 +384,6 @@ contains
                 call domain%halo_3d_send()
                 call domain%halo_2d_send()
                 call domain%send_timer%stop()
-! #ifdef _OPENACC
-!                 call domain%ret_timer%start()
-!                 call domain%halo_3d_retrieve()
-!                 call domain%halo_2d_retrieve()
-!                 call domain%ret_timer%stop()
-! #endif
 
                 call domain%rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
@@ -397,12 +401,10 @@ contains
                 call pbl(domain, options, real(dt%seconds()))!, halo=1)
                 call domain%pbl_timer%stop()
 
-!#ifndef _OPENACC
                 call domain%ret_timer%start()
                 call domain%halo_3d_retrieve()
                 call domain%halo_2d_retrieve()
                 call domain%ret_timer%stop()
-!#endif
 
                 if (options%adv%advect_density) then
                 ! if using advect_density winds need to be balanced at each update

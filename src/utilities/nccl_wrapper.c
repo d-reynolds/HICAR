@@ -128,6 +128,40 @@ void nccl_stream_destroy(cudaStream_t stream) {
 }
 
 /*
+ * Create a CUDA event with timing disabled (cheap; we only use it for
+ * cross-stream dependency edges, never for elapsed-time queries).
+ */
+int cuda_event_create(cudaEvent_t *event) {
+    CUDA_CHECK(cudaEventCreateWithFlags(event, cudaEventDisableTiming));
+    return 0;
+}
+
+/*
+ * Destroy a CUDA event.
+ */
+void cuda_event_destroy(cudaEvent_t event) {
+    cudaEventDestroy(event);
+}
+
+/*
+ * Record a CUDA event onto a stream. When the stream's preceding work
+ * completes, the event fires. Non-blocking on the host.
+ */
+int cuda_event_record(cudaEvent_t event, cudaStream_t stream) {
+    CUDA_CHECK(cudaEventRecord(event, stream));
+    return 0;
+}
+
+/*
+ * Make a CUDA stream wait for an event before launching subsequent work.
+ * GPU-side dependency edge — non-blocking on the host.
+ */
+int cuda_stream_wait_event(cudaStream_t stream, cudaEvent_t event) {
+    CUDA_CHECK(cudaStreamWaitEvent(stream, event, 0));
+    return 0;
+}
+
+/*
  * Begin a NCCL group operation. All ncclSend/ncclRecv between
  * nccl_group_start and nccl_group_end are fused into a single operation.
  */
