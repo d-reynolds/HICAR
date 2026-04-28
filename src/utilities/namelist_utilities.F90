@@ -1924,12 +1924,6 @@ contains
                 allocate(dimensions(2))
                 dimensions = ["Y", "X"]
                 group = "Domain"
-            case ("canwat_var")
-                description = "Name of the canopy water variable in domain file"
-                allocate(dimensions(2))
-                dimensions = ["Y", "X"]
-                units = "mm"
-                group = "Domain"
             case ("sinalpha_var")
                 description = "Name of the sine of the slope angle variable in domain file"
                 allocate(dimensions(2))

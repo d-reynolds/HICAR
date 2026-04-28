@@ -1127,7 +1127,7 @@ contains
 
         character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: landvar,lakedepthvar,hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
                                         snowh_var, soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var, soil_deept_var,           &
-                                        vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
+                                        vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var,  &
                                         sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_angle_var, &
                                         aspect_angle_var, shd_var, surface_temp_var, &  !!MJ added
                                         snowpack_nlayers_var, snowpack_deposition_var, &
@@ -1141,7 +1141,7 @@ contains
                             landvar,lakedepthvar, snowh_var, agl_cap, use_agl_height, &
                             hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
                             soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
-                            vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var, canwat_var,  &
+                            vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var,  &
                             sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_angle_var, aspect_angle_var, shd_var, & !! MJ added
                             surface_temp_var, init_surf_temp, init_sst, &
                             snowpack_nlayers_var, snowpack_deposition_var, &
@@ -1197,7 +1197,6 @@ contains
         call set_nml_var_default(vegfracmax_var, 'vegfracmax_var', print_info, gennml)
         call set_nml_var_default(albedo_var, 'albedo_var', print_info, gennml)
         call set_nml_var_default(lai_var, 'lai_var', print_info, gennml)
-        call set_nml_var_default(canwat_var, 'canwat_var', print_info, gennml)
         call set_nml_var_default(sinalpha_var, 'sinalpha_var', print_info, gennml)
         call set_nml_var_default(cosalpha_var, 'cosalpha_var', print_info, gennml)
         call set_nml_var_default(surface_temp_var, 'surface_temp_var', print_info, gennml)
@@ -1320,7 +1319,6 @@ contains
         call set_nml_var(domain_options%vegfracmax_var, vegfracmax_var(n_indx), 'vegfracmax_var',domain_options, vegfracmax_var(1))
         call set_nml_var(domain_options%albedo_var, albedo_var(n_indx), 'albedo_var',domain_options, albedo_var(1))
         call set_nml_var(domain_options%lai_var, lai_var(n_indx), 'lai_var',domain_options, lai_var(1))
-        call set_nml_var(domain_options%canwat_var, canwat_var(n_indx), 'canwat_var',domain_options, canwat_var(1))
         call set_nml_var(domain_options%sinalpha_var, sinalpha_var(n_indx), 'sinalpha_var',domain_options, sinalpha_var(1))
         call set_nml_var(domain_options%cosalpha_var, cosalpha_var(n_indx), 'cosalpha_var',domain_options, cosalpha_var(1))
         call set_nml_var(domain_options%surface_temp_var, surface_temp_var(n_indx), 'surface_temp_var',domain_options, surface_temp_var(1))

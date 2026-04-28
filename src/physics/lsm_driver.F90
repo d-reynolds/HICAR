@@ -113,7 +113,7 @@ contains
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m, kVARS%temperature_2m,        &
                          kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
                          kVARS%soil_totalmoisture, kVARS%soil_deep_temperature, kVARS%roughness_z0, kVARS%ustar,        &
-                         kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%soil_water_content_liq,                    &
+                         kVARS%QFX, kVARS%chs, kVARS%soil_water_content_liq,                    &
                          kVARS%snow_height, kVARS%lai, kVARS%temperature_2m_veg, kVARS%albedo, kVARS%lsm_last_snow,     &
                          kVARS%lsm_last_precip, kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%land_emissivity])
 
@@ -171,7 +171,7 @@ contains
                          kVARS%Sice, kVARS%Sliq, kVARS%soil_texture_1, kVARS%gecros_state, &
                          kVARS%soil_texture_2, kVARS%soil_texture_3, kVARS%soil_texture_4, kVARS%soil_sand_and_clay,    &
                          kVARS%vegetation_fraction_out, kVARS%latitude, kVARS%longitude, kVARS%cosine_zenith_angle,     &
-                         kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%soil_water_content_liq, kVARS%xice,        &
+                         kVARS%QFX, kVARS%chs, kVARS%soil_water_content_liq, kVARS%xice,        &
                          kVARS%wetland_sat_frac, kVARS%wetland_h20_store, kVARS%snicar_sn_rad, kVARS%snicar_sn_fr,      &
                          kVARS%snicar_bcphi, kVARS%snicar_bcpho, kVARS%snicar_ocphi, kVARS%snicar_ocpho,                &
                          kVARS%snicar_dust1, kVARS%snicar_dust2, kVARS%snicar_dust3, kVARS%snicar_dust4, kVARS%snicar_dust5,      &
@@ -210,7 +210,7 @@ contains
             call options%alloc_vars( &
                          [kVARS%sst, kVARS%ustar, kVARS%surface_pressure, kVARS%water_vapor,            &
                          kVARS%temperature, kVARS%sensible_heat, kVARS%latent_heat, kVARS%land_mask,    &
-                         kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%veg_type,                  &
+                         kVARS%QFX, kVARS%chs, kVARS%veg_type,                  &
                          kVARS%humidity_2m, kVARS%temperature_2m, kVARS%skin_temperature, kVARS%u_10m, kVARS%v_10m])
 
              call options%restart_vars( &
@@ -228,7 +228,7 @@ contains
             kVARS%ground_heat_flux, kVARS%snow_water_equivalent, kVARS%t_lake3d, kVARS%dz_lake3d,                   &
             kVARS%t_soisno3d, kVARS%h2osoi_ice3d, kVARS%h2osoi_liq3d, kVARS%h2osoi_vol3d, kVARS%z3d,                &
             kVARS%dz3d, kVARS%watsat3d, kVARS%csol3d, kVARS%tkmg3d, kVARS%lakemask, kVARS%zi3d,                     &
-            kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%land_emissivity, kVARS%xice, kVARS%lsm_last_precip, &
+            kVARS%QFX, kVARS%chs, kVARS%land_emissivity, kVARS%xice, kVARS%lsm_last_precip, &
             kVARS%tksatu3d, kVARS%tkdry3d, kVARS%snl2d, kVARS%t_grnd2d,  kVARS%savedtke12d, kVARS%lakedepth2d,      & !  kVARS%snowdp2d, kVARS%h2osno2d,
             kVARS%lake_icefrac3d, kVARS%z_lake3d,kVARS%water_vapor, kVARS%potential_temperature     ])
 
@@ -372,7 +372,6 @@ contains
 
             associate(veg_frac      => domain%vars_3d(domain%var_indx(kVARS%vegetation_fraction)%v)%data_3d, &
                   canopy_water  => domain%vars_2d(domain%var_indx(kVARS%canopy_water)%v)%data_2d, &
-                  cqs2_dom      => domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d, &
                   soil_temperature => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
                   soil_water_content => domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d, &
                   roughness_z0     => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
@@ -403,7 +402,7 @@ contains
             monthly_vegfrac = options%lsm%monthly_vegfrac
             cur_vegmonth = domain%sim_time%month
 
-            !$acc parallel loop gang vector collapse(2) present(veg_frac, cqs2_dom, canopy_water, soil_temperature, soil_water_content, VEGFRAC)
+            !$acc parallel loop gang vector collapse(2) present(veg_frac, canopy_water, soil_temperature, soil_water_content, VEGFRAC)
             do j = jms, jme
                 do i = ims, ime
                     if (monthly_vegfrac) then
@@ -412,8 +411,6 @@ contains
                         VEGFRAC(i,j) = veg_frac(i, 1, j)
                     endif
 
-                    ! save the canopy water in a temporary variable in case this is a restart run because lsm_init resets it to 0
-                    cqs2_dom(i,j) = canopy_water(i,j)
                     ! prevents init from failing when processing water points that may have "soil_t"=0
                     !$acc loop
                     do k=1,ubound(soil_temperature,2)
@@ -655,12 +652,9 @@ contains
             enddo
             end associate
 
-            !$acc parallel loop gang vector collapse(2) present(canopy_water, cqs2_dom, veg_type, land_mask)
+            !$acc parallel loop gang vector collapse(2) present(veg_type, land_mask)
             do j = jms, jme
                 do i = ims, ime
-                    canopy_water(i,j) = cqs2_dom(i,j)
-                    cqs2_dom(i,j)=0.01
-
                     if (veg_type(i,j) == ISWATER .or. veg_type(i,j) == ISLAKE) then
                         land_mask(i,j) = kLC_WATER
                     end if

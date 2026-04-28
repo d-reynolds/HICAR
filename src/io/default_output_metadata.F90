@@ -2960,27 +2960,6 @@ contains
                                attribute_t("coordinates",   "lat lon")]
         
         !>------------------------------------------------------------
-        !!  Sensible Heat Exchange Coefficient, 2m
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%chs2) then
-            var_meta%name        = "coeff_heat_exchange_2m"
-            var_meta%dimensions  = two_d_t_dimensions
-            var_meta%attributes  = [attribute_t("long_name", "sensible_heat_exchange_coefficient_at_2m"), &
-                               attribute_t("units",         "1"),                                      &
-                               attribute_t("coordinates",   "lat lon")]
-        
-        !>------------------------------------------------------------
-        !!  Latent Heat Exchange Coefficient, 2m
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%cqs2) then
-            var_meta%name        = "coeff_moisture_exchange"
-            var_meta%dimensions  = two_d_t_dimensions
-            var_meta%attributes  = [attribute_t("long_name", "latent_heat_exchange_coefficient"), &
-                               attribute_t("units",         "1"),                                      &
-                               attribute_t("coordinates",   "lat lon")]
-        
-
-        !>------------------------------------------------------------
         !!  Sensible Heat Exchange Coefficient 3d
         !!------------------------------------------------------------
         else if (var_idx==kVARS%coeff_heat_exchange_3d) then

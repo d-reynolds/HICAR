@@ -1959,8 +1959,6 @@ contains
         if (this%var_indx(kVARS%canopy_vapor_pressure)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_vapor_pressure)%v)%data_2d=2000
         if (this%var_indx(kVARS%coeff_momentum_drag)%v > 0) this%vars_2d(this%var_indx(kVARS%coeff_momentum_drag)%v)%data_2d=0.01
         if (this%var_indx(kVARS%chs)%v > 0) this%vars_2d(this%var_indx(kVARS%chs)%v)%data_2d=0.01
-        if (this%var_indx(kVARS%chs2)%v > 0) this%vars_2d(this%var_indx(kVARS%chs2)%v)%data_2d=0.01
-        if (this%var_indx(kVARS%cqs2)%v > 0) this%vars_2d(this%var_indx(kVARS%cqs2)%v)%data_2d=0.01
 
         if (this%var_indx(kVARS%hpbl)%v > 0) this%vars_2d(this%var_indx(kVARS%hpbl)%v)%data_2d=100.0
         if (this%var_indx(kVARS%coeff_heat_exchange_3d)%v > 0) this%vars_3d(this%var_indx(kVARS%coeff_heat_exchange_3d)%v)%data_3d=0.01
@@ -2229,15 +2227,6 @@ contains
                            temporary_data)
             if (this%var_indx(kVARS%lai)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%lai)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-            endif
-        endif
-
-        if (options%domain%canwat_var /= "") then
-            call io_read(options%domain%init_conditions_file,   &
-                           options%domain%canwat_var,              &
-                           temporary_data)
-            if (this%var_indx(kVARS%canopy_water)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%canopy_water)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         endif
 

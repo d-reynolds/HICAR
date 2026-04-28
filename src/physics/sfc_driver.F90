@@ -35,7 +35,12 @@ module surface_layer
 
     implicit none
     real,allocatable, dimension(:,:)    ::  windspd, gz1oz0, th2d, regime, flhc, flqc, &
-                                            rmol, qgh, qsfc, cpm, mavail, zol
+                                            rmol, qgh, qsfc, cpm, mavail, zol, &
+                                            chs2_unused, cqs2_unused
+    ! chs2_unused / cqs2_unused: 2-m heat/moisture exchange coefficients computed
+    ! by SFCLAYREV but not consumed by any HICAR physics. SFCLAYREV declares them
+    ! INTENT(INOUT) (not optional), so we pass dummy module-scope arrays here to
+    ! satisfy the interface without keeping kVARS%chs2 / kVARS%cqs2 alive.
 
     private
     public :: sfc_var_request, sfc_init, sfc   !, sfc_finalize
@@ -59,7 +64,7 @@ contains
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m,                  &
                          kVARS%temperature_2m, kVARS%humidity_2m, kVARS%roughness_z0, kVARS%hpbl, kVARS%QFX,       &
                          kVARS%land_mask, kVARS%br, kVARS%mol, kVARS%ustar,                      &
-                         kVARS%chs, kVARS%chs2, kVARS%cqs2,                           &
+                         kVARS%chs,                           &
                          kVARS%u, kVARS%v, kVARS%psim, kVARS%psih, kVARS%fm, kVARS%fh])
 
              call options%restart_vars( &
@@ -67,7 +72,7 @@ contains
                          kVARS%dz_interface, kVARS%pressure,  kVARS%skin_temperature, &
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m,                  &
                          kVARS%roughness_z0, kVARS%hpbl, kVARS%mol, kVARS%QFX,       &
-                         kVARS%chs, kVARS%chs2, kVARS%cqs2,               &
+                         kVARS%chs,               &
                          kVARS%u, kVARS%v ])
 
         endif
@@ -145,7 +150,15 @@ contains
                 !$acc exit data delete(gz1oz0)
                 deallocate(gz1oz0)
             endif
-            
+            if (allocated(chs2_unused)) then
+                !$acc exit data delete(chs2_unused)
+                deallocate(chs2_unused)
+            endif
+            if (allocated(cqs2_unused)) then
+                !$acc exit data delete(cqs2_unused)
+                deallocate(cqs2_unused)
+            endif
+
             allocate(windspd(ims:ime, jms:jme))
             allocate(rmol(ims:ime, jms:jme))
             allocate(zol(ims:ime, jms:jme))
@@ -158,6 +171,8 @@ contains
             allocate(mavail(ims:ime, jms:jme))
             allocate(th2d(ims:ime, jms:jme))
             allocate(gz1oz0(ims:ime, jms:jme))  !-- gz1oz0      log(z/z0) where z0 is roughness length
+            allocate(chs2_unused(ims:ime, jms:jme))
+            allocate(cqs2_unused(ims:ime, jms:jme))
 
             rmol = 0.0
             zol = 0.0
@@ -169,9 +184,11 @@ contains
             regime = 0.0
             mavail = 0.3
             th2d = 0.0
+            chs2_unused = 0.0
+            cqs2_unused = 0.0
 
             gz1oz0 = log((domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(:,kts,:) - domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d) / domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d)
-            !$acc enter data copyin(windspd,rmol,zol,qgh,qsfc,cpm,flhc,flqc,regime,mavail,th2d,gz1oz0)
+            !$acc enter data copyin(windspd,rmol,zol,qgh,qsfc,cpm,flhc,flqc,regime,mavail,th2d,gz1oz0,chs2_unused,cqs2_unused)
 
             if (context_change) return
 
@@ -216,8 +233,8 @@ contains
                ,xlv=XLV                                & !-- xlv         latent heat of vaporization (j/kg)
                ,psfcpa=domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d   &
                ,chs=domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d                 &
-               ,chs2=domain%vars_2d(domain%var_indx(kVARS%chs2)%v)%data_2d               &
-               ,cqs2=domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d               &
+               ,chs2=chs2_unused                                                         & ! dummy: SFCLAYREV writes here but no HICAR physics consumes it
+               ,cqs2=cqs2_unused                                                         & ! dummy: SFCLAYREV writes here but no HICAR physics consumes it
                ,cpm=cpm                                &
                ,mavail=mavail                          &
                ,regime=regime                          &
@@ -310,9 +327,6 @@ contains
         where(domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d > MAX_EXCHANGE_C) domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d=MAX_EXCHANGE_C
         where(domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d < MIN_EXCHANGE_C) domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d=MIN_EXCHANGE_C
 
-        domain%vars_2d(domain%var_indx(kVARS%chs2)%v)%data_2d = domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d
-        domain%vars_2d(domain%var_indx(kVARS%cqs2)%v)%data_2d = domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d
-
     end subroutine calc_exchange_coefficient
 
    subroutine sfc_finalize(options)
@@ -320,7 +334,7 @@ contains
        type(options_t), intent(in) :: options
 
        if (options%physics%surfacelayer==kSFC_MM5REV) then
-            !$acc exit data delete(windspd,rmol,zol,qgh,qsfc,cpm,flhc,flqc,regime,mavail,th2d,gz1oz0)
+            !$acc exit data delete(windspd,rmol,zol,qgh,qsfc,cpm,flhc,flqc,regime,mavail,th2d,gz1oz0,chs2_unused,cqs2_unused)
        endif
 
    end subroutine sfc_finalize

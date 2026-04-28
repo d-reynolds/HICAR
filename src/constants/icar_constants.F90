@@ -164,8 +164,6 @@ module icar_constants
         integer :: ustar
         integer :: coeff_momentum_drag
         integer :: chs
-        integer :: chs2
-        integer :: cqs2
         integer :: coeff_heat_exchange_3d
         integer :: coeff_momentum_exchange_3d
         integer :: QFX

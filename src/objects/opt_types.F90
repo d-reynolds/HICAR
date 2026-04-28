@@ -431,7 +431,7 @@ module options_types
         ! variable names from init/BC/wind/... files
         character (len=kMAX_NAME_LENGTH) :: hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,landvar,lakedepthvar, &
                                         snowh_var, soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var, &
-                                        vegtype_var,vegfrac_var, albedo_var, vegfracmax_var, lai_var, canwat_var, &
+                                        vegtype_var,vegfrac_var, albedo_var, vegfracmax_var, lai_var, &
                                         sinalpha_var, cosalpha_var, surface_temp_var
 
         character(len=kMAX_NAME_LENGTH) :: svf_var, hlm_var, slope_angle_var, aspect_angle_var, shd_var !!MJ added
