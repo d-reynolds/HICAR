@@ -223,8 +223,6 @@ module icar_constants
         integer :: snow_water_eq_prev
         integer :: snow_albedo_prev
         integer :: snow_layer_depth
-        integer :: snow_layer_ice
-        integer :: snow_layer_liquid_water
         integer :: snow_age_factor
         integer :: soil_water_content
         integer :: soil_water_content_liq

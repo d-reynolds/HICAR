@@ -420,12 +420,14 @@ contains
         tile_w_i = ite - its + 1
         tile_w_j = jte - jts + 1
         min_tile_w = min(tile_w_i, tile_w_j)
-        if (min_tile_w < 1) return
+        ! Globally min-reduce min_tile_w so every rank derives the same per-phase
+        ! `width` below. Without this, paired neighbours with different tile
+        ! shapes compute mismatched send_len/max_recv_len and MPI truncates.
+        if (min_tile_w < 1) min_tile_w = huge(min_tile_w)
+        call MPI_Allreduce(MPI_IN_PLACE, min_tile_w, 1, MPI_INT, MPI_MIN, domain%compute_comms, ierr)
+        if (min_tile_w == huge(min_tile_w)) return
 
         n_phases = ceiling(real(R_cells) / real(min_tile_w))
-
-        !Do an MPI max reduce on n_phases so that sync calls are always complete
-        call MPI_Allreduce(MPI_IN_PLACE, n_phases, 1, MPI_INT, MPI_MAX, domain%compute_comms)
 
         ! Track the extent of valid data in nbr_2d
         i_lo = its; i_hi = ite

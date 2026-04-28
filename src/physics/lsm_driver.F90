@@ -61,8 +61,9 @@ module land_surface
     real,allocatable, dimension(:,:)    :: SMSTAV,SFCRUNOFF,UDRUNOFF,                           &
                                            SNOWC, ACSNOW, ACSNOM,           &
                                            QSFC, SR, VEGFRAC, windspd,  nmp_albedo, &
-                                           nmp_snow, nmp_snowh, nmp_tskin, land_mask
+                                           nmp_snow, nmp_snowh, nmp_tskin, land_mask, land_mask_noahmp
     real, allocatable, dimension(:,:,:)  :: nmp_snow_t, nmp_soil_t
+    real, allocatable, dimension(:,:,:)  :: nmp_snicexy, nmp_snliqxy, nmp_zsnsoxy
     integer, allocatable, dimension(:,:) :: nmp_snow_nlayers
     real,allocatable, dimension(:)      :: DZs
     real, parameter :: XICE_THRESHOLD = 1.0
@@ -167,7 +168,7 @@ contains
                          kVARS%irr_evap_loss_sprinkler, kVARS%irr_amt_sprinkler, kVARS%irr_amt_micro,                   &
                          kVARS%evap_heat_sprinkler, kVARS%snowfall_ground, kVARS%rainfall_ground, kVARS%crop_type,      &
                          kVARS%ground_surf_temperature, kVARS%snow_temperature, kVARS%snow_layer_depth,                 &
-                         kVARS%snow_layer_ice, kVARS%snow_layer_liquid_water, kVARS%soil_texture_1, kVARS%gecros_state, &
+                         kVARS%Sice, kVARS%Sliq, kVARS%soil_texture_1, kVARS%gecros_state, &
                          kVARS%soil_texture_2, kVARS%soil_texture_3, kVARS%soil_texture_4, kVARS%soil_sand_and_clay,    &
                          kVARS%vegetation_fraction_out, kVARS%latitude, kVARS%longitude, kVARS%cosine_zenith_angle,     &
                          kVARS%QFX, kVARS%chs, kVARS%chs2, kVARS%cqs2, kVARS%soil_water_content_liq, kVARS%xice,        &
@@ -191,8 +192,8 @@ contains
                          kVARS%ground_surf_temperature, kVARS%snow_nlayers, kVARS%veg_leaf_temperature,                 &
                          kVARS%canopy_water_liquid, kVARS%coeff_momentum_drag, kVARS%chs, kVARS%canopy_fwet,            &
                          kVARS%mass_leaf, kVARS%mass_root, kVARS%mass_stem, kVARS%mass_wood, kVARS%snow_water_eq_prev,  &
-                         kVARS%snow_albedo_prev, kVARS%snow_temperature, kVARS%snow_layer_depth,  kVARS%snow_layer_ice, &
-                         kVARS%snow_layer_liquid_water,kVARS%snowfall_ground, kVARS%rainfall_ground, kVARS%storage_lake,&
+                         kVARS%snow_albedo_prev, kVARS%snow_temperature, kVARS%snow_layer_depth,  kVARS%Sice, &
+                         kVARS%Sliq,kVARS%snowfall_ground, kVARS%rainfall_ground, kVARS%storage_lake,&
                          kVARS%storage_gw, kVARS%water_table_depth, kVARS%water_aquifer, kVARS%soil_carbon_fast,        &
                          kVARS%soil_carbon_stable, kVARS%lai, kVARS%sai, kVARS%soil_water_content_liq, kVARS%xice,      &
                          kVARS%wetland_sat_frac, kVARS%wetland_h20_store, kVARS%snicar_sn_rad, kVARS%snicar_sn_fr,      &
@@ -302,7 +303,7 @@ contains
         kte = domain%grid%kte
 
         if (allocated(QSFC)) then
-            !$acc exit data delete(QSFC, current_precipitation, windspd, land_mask)
+            !$acc exit data delete(QSFC, current_precipitation, windspd, land_mask, land_mask_noahmp)
             !$acc exit data delete(landuse_name, &
             !$acc                                    IDVEG, IOPT_CRS,  IOPT_BTR, IOPT_RUNSUB,     &
             !$acc                                    IOPT_SFC, IOPT_FRZ, IOPT_INF, IOPT_RAD,   &
@@ -323,12 +324,14 @@ contains
         if (allocated(current_precipitation)) deallocate(current_precipitation)
         if (allocated(windspd)) deallocate(windspd)
         if (allocated(land_mask)) deallocate(land_mask)
+        if (allocated(land_mask_noahmp)) deallocate(land_mask_noahmp)
 
         allocate(QSFC(ims:ime,jms:jme), source=water_vapor(:,kms,:))
         allocate(current_precipitation(ims:ime,jms:jme), source=0.0)
         allocate(windspd(ims:ime,jms:jme), source=1.0)
         allocate(land_mask(ims:ime,jms:jme), source=real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di))
-        !$acc enter data copyin(QSFC, current_precipitation, windspd, land_mask)
+        allocate(land_mask_noahmp(ims:ime,jms:jme), source=land_mask)
+        !$acc enter data copyin(QSFC, current_precipitation, windspd, land_mask, land_mask_noahmp)
 
         if (options%physics%landsurface > kLSM_BASIC) then
             if (options%physics%microphysics == 0) then
@@ -485,6 +488,33 @@ contains
             !$acc                                    SF_URBAN_PHYSICS, NMP_SOILTSTEP, lsm_dt, julian_day, &
             !$acc                                    num_soil_layers, num_snow_layers, ISURBAN,ISICE,ISWATER, ISLAKE)
 
+            ! Copy snow-layer state from HICAR's data_3d (z = global
+            ! kSNOW_GRID_Z, possibly large) into NoahMP-sized scratch
+            ! arrays before the init call. NoahmpHICARinit's dummy args
+            ! have z = NSNOW (or NSNOW+NSOIL for zsnsoxy) and would
+            ! mis-stride otherwise. See declaration comment for details.
+            associate(snow_temperature => domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+                      Sice => domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+                      Sliq => domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+                      snow_layer_depth => domain%vars_3d(domain%var_indx(kVARS%snow_layer_depth)%v)%data_3d)
+            !$acc parallel loop gang vector collapse(2) present(snow_temperature, Sice, Sliq, snow_layer_depth, nmp_snow_t, nmp_snicexy, nmp_snliqxy, nmp_zsnsoxy)
+            do j = jms, jme
+                do i = ims, ime
+                    !$acc loop seq
+                    do k = 1, num_snow_layers
+                        nmp_snow_t (i,k,j) = snow_temperature(i,k,j)
+                        nmp_snicexy(i,k,j) = Sice(i,k,j)
+                        nmp_snliqxy(i,k,j) = Sliq(i,k,j)
+                        nmp_zsnsoxy(i,k,j) = snow_layer_depth(i,k,j)
+                    enddo
+                    !$acc loop seq
+                    do k = num_snow_layers+1, num_snow_layers+num_soil_layers
+                        nmp_zsnsoxy(i,k,j) = snow_layer_depth(i,k,j)
+                    enddo
+                enddo
+            enddo
+            end associate
+
             call NoahmpHICARinit( NoahmpIO(domain%nest_indx), MMINLU,                                  &
                                 domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d,   &
                                 domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d,             &
@@ -517,10 +547,10 @@ contains
                                 domain%vars_2d(domain%var_indx(kVARS%water_table_depth)%v)%data_2d,       &
                                 domain%vars_2d(domain%var_indx(kVARS%water_aquifer)%v)%data_2d,           &
                                 domain%vars_2d(domain%var_indx(kVARS%storage_gw)%v)%data_2d,              &
-                                domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d,        &
-                                domain%vars_3d(domain%var_indx(kVARS%snow_layer_depth)%v)%data_3d,        &
-                                domain%vars_3d(domain%var_indx(kVARS%snow_layer_ice)%v)%data_3d,          &
-                                domain%vars_3d(domain%var_indx(kVARS%snow_layer_liquid_water)%v)%data_3d, &
+                                nmp_snow_t,                                                              &
+                                nmp_zsnsoxy,                                                             &
+                                nmp_snicexy,                                                             &
+                                nmp_snliqxy,                                                             &
                                 domain%vars_2d(domain%var_indx(kVARS%mass_leaf)%v)%data_2d,               &
                                 domain%vars_2d(domain%var_indx(kVARS%mass_root)%v)%data_2d,               &
                                 domain%vars_2d(domain%var_indx(kVARS%mass_stem)%v)%data_2d,               &
@@ -599,6 +629,32 @@ contains
   !                                   rechclim,                                                             &      ! Optional groundwater
   !                                   gecros_state)                                                                ! Optional gecros crop
 
+            ! Copy NoahMP-sized scratch back to HICAR's data_3d. NoahmpHICARinit
+            ! may have modified the snow-layer scratch arrays (cold-start init
+            ! writes them); for restart, the values are unchanged but the
+            ! copy-back is harmless.
+            associate(snow_temperature => domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
+                      Sice => domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+                      Sliq => domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+                      snow_layer_depth => domain%vars_3d(domain%var_indx(kVARS%snow_layer_depth)%v)%data_3d)
+            !$acc parallel loop gang vector collapse(2) present(snow_temperature, Sice, Sliq, snow_layer_depth, nmp_snow_t, nmp_snicexy, nmp_snliqxy, nmp_zsnsoxy)
+            do j = jms, jme
+                do i = ims, ime
+                    !$acc loop seq
+                    do k = 1, num_snow_layers
+                        snow_temperature(i,k,j)        = nmp_snow_t (i,k,j)
+                        Sice(i,k,j)          = nmp_snicexy(i,k,j)
+                        Sliq(i,k,j) = nmp_snliqxy(i,k,j)
+                        snow_layer_depth(i,k,j)        = nmp_zsnsoxy(i,k,j)
+                    enddo
+                    !$acc loop seq
+                    do k = num_snow_layers+1, num_snow_layers+num_soil_layers
+                        snow_layer_depth(i,k,j) = nmp_zsnsoxy(i,k,j)
+                    enddo
+                enddo
+            enddo
+            end associate
+
             !$acc parallel loop gang vector collapse(2) present(canopy_water, cqs2_dom, veg_type, land_mask)
             do j = jms, jme
                 do i = ims, ime
@@ -610,6 +666,18 @@ contains
                     end if
                 end do
             end do
+
+            ! Seed the NoahMP-only mirror with the post-veg-override mask. The
+            ! per-step lsm() refreshes this from land_mask + a snow override
+            ! when an external snow model is active, but the snowmodel==0 path
+            ! never touches it, so it must already be correct here.
+            !$acc parallel loop gang vector collapse(2) present(land_mask, land_mask_noahmp)
+            do j = jms, jme
+                do i = ims, ime
+                    land_mask_noahmp(i,j) = land_mask(i,j)
+                end do
+            end do
+
 
             end associate
         endif ! Noah-MP LSM
@@ -910,7 +978,7 @@ contains
                 end do
 
                 if (options%physics%snowmodel>0) then
-                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
+                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, nmp_snicexy, nmp_snliqxy, nmp_zsnsoxy, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation, land_mask, land_mask_noahmp)
                     do j = jms, jme
                         do i = ims, ime
                             SR(i,j) = 0.0 ! This, in combination with setting OPT_SNF to 4 in the LSM_init, will turn off snowfall partitioning in NoahMP
@@ -924,15 +992,37 @@ contains
                             !$acc loop seq
                             do k=1,num_snow_layers
                                 nmp_snow_t(i,k,j) = 273.15
+                                nmp_snicexy(i,k,j) = 0.0
+                                nmp_snliqxy(i,k,j) = 0.0
+                                nmp_zsnsoxy(i,k,j) = 0.0
+                            enddo
+                            !$acc loop seq
+                            do k=num_snow_layers+1,num_snow_layers+num_soil_layers
+                                nmp_zsnsoxy(i,k,j) = 0.0
                             enddo
                             !$acc loop seq
                             do k=1,num_soil_layers
                                 nmp_soil_t(i,k,j) = soil_temperature(i,k,j)
                             enddo
+
+                            ! Mark snow-covered cells as water in the XLAND fed
+                            ! to NoahMP so the *OutTransfer XLAND>=1.5 cycles
+                            ! discard NoahMP's per-cell write-back, leaving
+                            ! snow-cell state owned by the external snow model.
+                            ! Rebuild from land_mask each call so cells whose
+                            ! snow has melted revert to land automatically.
+                            if (snow_height(i,j) > 0.0) then
+                                land_mask_noahmp(i,j) = real(kLC_WATER)
+                            else
+                                land_mask_noahmp(i,j) = land_mask(i,j)
+                            endif
                         enddo
                     enddo
                 else
-                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, snow_height, snow_water_equivalent, snow_temperature, current_snow, current_precipitation)
+                    associate(Sice => domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+                              Sliq => domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+                              snow_layer_depth => domain%vars_3d(domain%var_indx(kVARS%snow_layer_depth)%v)%data_3d)
+                    !$acc parallel loop gang vector collapse(2) present(SR, nmp_snowh, nmp_snow, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, nmp_snicexy, nmp_snliqxy, nmp_zsnsoxy, snow_height, snow_water_equivalent, snow_temperature, Sice, Sliq, snow_layer_depth, current_snow, current_precipitation)
                     do j = jms, jme
                         do i = ims, ime
                             SR(i,j) = current_snow(i,j)/(current_precipitation(i,j)+epsilon)
@@ -944,6 +1034,18 @@ contains
                             !$acc loop seq
                             do k=1,num_snow_layers
                                 nmp_snow_t(i,k,j) = snow_temperature(i,k,j)
+                                ! Copy snow-layer state into NoahMP-sized
+                                ! scratch (avoids stride mismatch when
+                                ! HICAR's data_3d uses a global kSNOW_GRID_Z
+                                ! that differs from NoahMP's NSNOW).
+                                nmp_snicexy(i,k,j) = Sice(i,k,j)
+                                nmp_snliqxy(i,k,j) = Sliq(i,k,j)
+                                nmp_zsnsoxy(i,k,j) = snow_layer_depth(i,k,j)
+                            enddo
+                            ! Soil portion of zsnsoxy (HICAR indices NSNOW+1..NSNOW+NSOIL)
+                            !$acc loop seq
+                            do k=num_snow_layers+1,num_snow_layers+num_soil_layers
+                                nmp_zsnsoxy(i,k,j) = snow_layer_depth(i,k,j)
                             enddo
                             !$acc loop seq
                             do k=1,num_soil_layers
@@ -951,6 +1053,7 @@ contains
                             enddo
                         end do
                     end do
+                    end associate
                 endif
 
                 !$acc update device(lsm_dt, landuse_name, julian_day)
@@ -971,7 +1074,7 @@ contains
                             VEGFRAC,                                  &
                             domain%vars_2d(domain%var_indx(kVARS%vegetation_fraction_max)%v)%data_2d,   &
                             domain%vars_2d(domain%var_indx(kVARS%soil_deep_temperature)%v)%data_2d,     &
-                            land_mask,                   &
+                            land_mask_noahmp,            &
                             domain%vars_2d(domain%var_indx(kVARS%xice)%v)%data_2d,                              &
                             domain%vars_2d(domain%var_indx(kVARS%crop_category)%v)%data_2di,                     &  !only used if iopt_crop>0; not currently set up
                             domain%vars_2d(domain%var_indx(kVARS%date_planting)%v)%data_2d,             &  !only used if iopt_crop>0; not currently set up
@@ -1047,9 +1150,9 @@ contains
                             domain%vars_2d(domain%var_indx(kVARS%water_aquifer)%v)%data_2d,             &
                             domain%vars_2d(domain%var_indx(kVARS%storage_gw)%v)%data_2d,                &
                             nmp_snow_t, &
-                            domain%vars_3d(domain%var_indx(kVARS%snow_layer_depth)%v)%data_3d,  &
-                            domain%vars_3d(domain%var_indx(kVARS%snow_layer_ice)%v)%data_3d,            &
-                            domain%vars_3d(domain%var_indx(kVARS%snow_layer_liquid_water)%v)%data_3d,   &
+                            nmp_zsnsoxy,                              &
+                            nmp_snicexy,                              &
+                            nmp_snliqxy,                              &
                             domain%vars_2d(domain%var_indx(kVARS%mass_leaf)%v)%data_2d,                 &
                             domain%vars_2d(domain%var_indx(kVARS%mass_root)%v)%data_2d,                 &
                             domain%vars_2d(domain%var_indx(kVARS%mass_stem)%v)%data_2d,                 &
@@ -1157,7 +1260,10 @@ contains
                 end do
                 end associate
 
-                !$acc parallel loop gang vector collapse(2) present(skin_temperature, albedo_dom, soil_temperature, nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, snow_height, snow_water_equivalent, snow_nlayers, snow_temperature)
+                associate(Sice => domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+                          Sliq => domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+                          snow_layer_depth => domain%vars_3d(domain%var_indx(kVARS%snow_layer_depth)%v)%data_3d)
+                !$acc parallel loop gang vector collapse(2) present(skin_temperature, albedo_dom, soil_temperature, nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, nmp_snicexy, nmp_snliqxy, nmp_zsnsoxy, snow_height, snow_water_equivalent, snow_nlayers, snow_temperature, Sice, Sliq, snow_layer_depth)
                 do j = jts, jte
                     do i = its, ite
                         if (options%physics%snowmodel==0) then
@@ -1167,6 +1273,16 @@ contains
                             !$acc loop
                             do k = 1, num_snow_layers
                                 snow_temperature(i,k,j) = nmp_snow_t(i,k,j)
+                                ! Copy NoahMP-sized scratch back to HICAR's
+                                ! data_3d. Only for snowmodel==0 so we don't
+                                ! clobber the external snow model's state.
+                                Sice(i,k,j) = nmp_snicexy(i,k,j)
+                                Sliq(i,k,j) = nmp_snliqxy(i,k,j)
+                                snow_layer_depth(i,k,j) = nmp_zsnsoxy(i,k,j)
+                            end do
+                            !$acc loop
+                            do k = num_snow_layers+1, num_snow_layers+num_soil_layers
+                                snow_layer_depth(i,k,j) = nmp_zsnsoxy(i,k,j)
                             end do
                         endif
                         if (options%physics%snowmodel==0 .or. snow_height(i,j)==0.0) then
@@ -1179,6 +1295,7 @@ contains
                         endif
                     end do
                 end do
+                end associate
 
                 ! where(domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d > options%lsm%max_swe) domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = options%lsm%max_swe
             endif !end if noahmp
@@ -1300,7 +1417,7 @@ contains
         ITIMESTEP=1
 
         if (allocated(SMSTAV)) then
-            !$acc exit data delete(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t)
+            !$acc exit data delete(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, nmp_snicexy, nmp_snliqxy, nmp_zsnsoxy)
             deallocate(SMSTAV)
         endif
         if (allocated(SFCRUNOFF)) deallocate(SFCRUNOFF)
@@ -1317,6 +1434,9 @@ contains
         if (allocated(nmp_tskin)) deallocate(nmp_tskin)
         if (allocated(nmp_snow_t)) deallocate(nmp_snow_t)
         if (allocated(nmp_soil_t)) deallocate(nmp_soil_t)
+        if (allocated(nmp_snicexy)) deallocate(nmp_snicexy)
+        if (allocated(nmp_snliqxy)) deallocate(nmp_snliqxy)
+        if (allocated(nmp_zsnsoxy)) deallocate(nmp_zsnsoxy)
         if (allocated(DZs)) deallocate(DZs)
 
         allocate(SMSTAV(ims:ime,jms:jme),source=0.5)!average soil moisture available for transp (between SMCWLT and SMCMAX)
@@ -1337,12 +1457,16 @@ contains
         allocate(nmp_tskin(ims:ime,jms:jme))
         allocate(nmp_snow_t(ims:ime,1:num_snow_layers,jms:jme), source=273.15)
         allocate(nmp_soil_t(ims:ime,1:num_soil_layers,jms:jme), source=273.15)
+        ! Snow-layer scratch (NoahMP-sized; see header comment).
+        allocate(nmp_snicexy(ims:ime,1:num_snow_layers,jms:jme), source=0.0)
+        allocate(nmp_snliqxy(ims:ime,1:num_snow_layers,jms:jme), source=0.0)
+        allocate(nmp_zsnsoxy(ims:ime,1:(num_snow_layers+num_soil_layers),jms:jme), source=0.0)
         allocate(DZs(num_soil_layers))
 
         DZs = [0.1,0.2,0.4,0.8]
 
 
-        !$acc enter data copyin(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t)
+        !$acc enter data copyin(DZs, SMSTAV, SFCRUNOFF, UDRUNOFF, SNOWC, ACSNOW, ACSNOM, SR, VEGFRAC, nmp_snow, nmp_snowh, nmp_albedo, nmp_snow_nlayers, nmp_tskin, nmp_snow_t, nmp_soil_t, nmp_snicexy, nmp_snliqxy, nmp_zsnsoxy)
 
     end subroutine allocate_noah_data
 

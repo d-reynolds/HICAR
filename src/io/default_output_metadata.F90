@@ -2277,31 +2277,7 @@ contains
             var_meta%attributes  = [attribute_t("long_name", "snow_layer_depth"),                &
                                attribute_t("units",         "m"),                                   &
                                attribute_t("coordinates",   "lat lon")]
-        
-        !>------------------------------------------------------------
-        !!  Snow Layer Ice
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%snow_layer_ice) then
-            var_meta%name        = "snow_layer_ice"
-            var_meta%dimensions  = three_d_t_snow_dimensions
-            var_meta%dim_len(2)  = kSNOW_GRID_Z
-            var_meta%attributes  = [attribute_t("long_name", "snow_layer_ice_content"),          &
-                               attribute_t("units",         "mm"),                                  &
-                               attribute_t("positive",       "down"),                          &
-                               attribute_t("coordinates",   "lat lon")]
-        
-        !>------------------------------------------------------------
-        !!  Snow Layer Liquid Water
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%snow_layer_liquid_water) then
-            var_meta%name        = "snow_layer_liquid_water"
-            var_meta%dimensions  = three_d_t_snow_dimensions
-            var_meta%dim_len(2)  = kSNOW_GRID_Z
-            var_meta%attributes  = [attribute_t("long_name", "snow_layer_liquid_water_content"), &
-                               attribute_t("units",         "mm"),                                  &
-                               attribute_t("positive",       "down"),                          &
-                               attribute_t("coordinates",   "lat lon")]
-        
+                
         !>------------------------------------------------------------
         !!  Snow Age Factor
         !!------------------------------------------------------------
