@@ -7,7 +7,6 @@
 !! ----------------------------------------------------------------------------
 module adv_fluxcorr
     use domain_interface,  only: domain_t
-    use mpi_f08, only: MPI_Wtime
     implicit none
     private
     integer :: ims, ime, jms, jme, kms, kme, its, ite, jts, jte

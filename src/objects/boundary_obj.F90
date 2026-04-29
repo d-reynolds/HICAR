@@ -167,7 +167,7 @@ contains
         real, allocatable :: temp_3d(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:), temp_1d(:)
         integer, allocatable :: qv_dims(:)
         real :: neg_z
-        integer :: i, nx, ny, nz, PE_RANK_GLOBAL
+        integer :: i, nx, ny, nz
         logical :: z_staggered, data_flipped
         integer, allocatable :: z_dims(:), start_3d(:), count_3d(:)
         integer :: full_nz
@@ -177,17 +177,15 @@ contains
 
         call read_latlon(this%firstfile, options%latvar, options%lonvar, temp_lat, temp_lon, options%forcing_longitude_system)
 
-        call MPI_Comm_Rank(MPI_COMM_WORLD,PE_RANK_GLOBAL)
-
         if (minval(domain_lat) < minval(temp_lat) .or. maxval(domain_lat) > maxval(temp_lat)) then
             write(*,*) 'ERROR: First domain not contained within forcing data'
-            write(*,*) 'Lat min/max of domain on process ',PE_RANK_GLOBAL+1,': ',minval(domain_lat),' ',maxval(domain_lat)
+            write(*,*) 'Lat min/max of domain on process: ',minval(domain_lat),' ',maxval(domain_lat)
             write(*,*) 'Lat min/max of forcing data:         ',minval(temp_lat),' ',maxval(temp_lat)
             stop
         endif
         if (minval(domain_lon) < minval(temp_lon) .or. maxval(domain_lon) > maxval(temp_lon)) then
             write(*,*) 'ERROR: First domain not contained within forcing data'
-            write(*,*) 'Lon min/max of domain on process ',PE_RANK_GLOBAL+1,': ',minval(domain_lon),' ',maxval(domain_lon)
+            write(*,*) 'Lon min/max of domain on process: ',minval(domain_lon),' ',maxval(domain_lon)
             write(*,*) 'Lon min/max of forcing data:         ',minval(temp_lon),' ',maxval(temp_lon)
             stop
         endif
@@ -300,9 +298,9 @@ contains
         this%kts = 1
         this%kte = nz
 
-        if (this%ite < this%its) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        if (this%kte < this%kts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
-        if (this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%ite < this%its) write(*,*) ' its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%kte < this%kts) write(*,*) ' its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%jte < this%jts) write(*,*) ' its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
 
         ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
         do i=1, size(var_list)

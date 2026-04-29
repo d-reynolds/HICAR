@@ -7,7 +7,6 @@
 !!
 !! ----------------------------------------------------------------------------
 module adv_std
-    use mpi_f08, only : MPI_Wtime
     use icar_constants
     use options_interface, only: options_t
     use domain_interface,  only: domain_t

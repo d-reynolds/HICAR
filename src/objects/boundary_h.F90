@@ -1,6 +1,5 @@
 module boundary_interface
 
-    use mpi_f08
     use netcdf
     use options_interface,        only : options_t
     use options_types,            only : forcing_options_type
