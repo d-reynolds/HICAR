@@ -328,6 +328,7 @@ contains
         real, allocatable, dimension(:,:) :: current_precipitation
         real, allocatable, dimension(:,:) :: current_snow
         real, allocatable, dimension(:,:) :: current_rain
+        integer :: i, j
 
         if (options%physics%snowmodel == 0) return
 
@@ -561,9 +562,12 @@ contains
                 ! zero out bs_swe_exch since it tracked mass changes
                 ! across this LSM step only.
                 associate (bs_swe_exch  => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d)
-                !$acc kernels default(present)
-                bs_swe_exch = 0.0
-                !$acc end kernels
+                !$acc parallel loop collapse(2) present(bs_swe_exch)
+                do j= jts, jte
+                    do i= its, ite
+                        bs_swe_exch(i,j) = 0.0
+                    end do
+                end do
                 end associate
             endif
         endif

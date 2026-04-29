@@ -126,7 +126,7 @@ contains
         max_k = indx(2)
         max_j = indx(3)+jts-1
 
-        !$acc kernels present(u, v, w) firstprivate(max_i, max_j, max_k) copy(max_u, max_v, max_w)
+        !$acc kernels present(u, v, w) copyin(max_i, max_j, max_k) copy(max_u, max_v, max_w)
         max_u = max(abs(u(max_i,max_k,max_j)), abs(u(max_i+1,max_k,max_j)))
         max_v = max(abs(v(max_i,max_k,max_j)), abs(v(max_i,max_k,max_j+1)))
         max_w = max(abs(w(max_i,max_k,max_j)), abs(w(max_i,max(1,max_k-1),max_j)))
