@@ -426,13 +426,17 @@ contains
     ! Displacement formula (matches the layout of a (v, i, k, j) Fortran array):
     !     disp = (v-1) + ((i - i_origin) + (k - k_s)*ni + (j - j_origin)*ni*nk) * n_vars
     !
-    ! The legacy routines used a do j; do k; do i; do v loop order. Because the
-    ! cell list is filled in j-outer/i-inner order by build_nest_geometry, we
-    ! reproduce the legacy order exactly by walking the list in runs of equal j,
-    ! and nesting (k, within-j-run, v) inside. This makes the emitted
-    ! displacements array bit-identical to the legacy routines' output for the
-    ! same inputs, which is important because the MPI datatype fixes the order
-    ! of memory traversal inside MPI_Alltoallw.
+    ! The buffer layout has v as the fastest dimension, so for any fixed (i,k,j)
+    ! the n_vars values are contiguous in memory, and stepping i->i+1 lands
+    ! immediately after the previous (v=1..n_vars) run. We exploit this by
+    ! emitting one block per maximal contiguous (v=1..n_vars, i=run) span at
+    ! fixed (k, j_cur), with block_length = n_vars * run_length. This is
+    ! many orders of magnitude fewer indexed entries than the prior
+    ! per-(v,i,k,j) length-1 emission, which is the dominant cost inside
+    ! MPI_Alltoallw under MPI implementations that walk the indexed list
+    ! sequentially. Both sides of the alltoallw use this same builder over
+    ! their corresponding cell lists (built in j-outer/i-inner order by
+    ! build_nest_geometry), so sender and receiver agree on the byte order.
     !
     ! For the 2D variant, pass k_s = k_e = 1 (nk = 1). The k-term then collapses
     ! to zero and the formula reduces to the 2D (v, i, j) layout.
@@ -441,21 +445,21 @@ contains
         integer,                intent(in)  :: n_vars, i_origin, j_origin, ni, k_s, k_e
         type(MPI_Datatype),     intent(out) :: mpi_type
 
-        integer :: total, nk, counter, c_start, c_end, cc, k, v, j_cur
+        integer :: nk, counter, c_start, c_end, cc, k, j_cur, run_start, run_end
         integer, allocatable :: block_lengths(:), displacements(:)
 
         nk = k_e - k_s + 1
-        total = cells%n * n_vars * nk
 
-        if (total == 0) then
+        if (cells%n * nk == 0) then
             mpi_type = MPI_REAL
             call MPI_Type_commit(mpi_type)
             return
         endif
 
-        allocate(block_lengths(total))
-        allocate(displacements(total))
-        block_lengths = 1
+        ! Worst case: every cell is its own i-run (no two consecutive i's),
+        ! repeated for every k. Real counts are typically far smaller.
+        allocate(block_lengths(cells%n * nk))
+        allocate(displacements(cells%n * nk))
 
         counter = 0
         c_start = 1
@@ -468,23 +472,32 @@ contains
                 c_end = c_end + 1
             enddo
 
-            ! Legacy loop order: do j (fixed at j_cur here); do k; do i; do v
             do k = k_s, k_e
-                do cc = c_start, c_end
-                    do v = 1, n_vars
-                        counter = counter + 1
-                        displacements(counter) = (v-1) + &
-                            ((cells%i(cc) - i_origin) + &
-                             (k - k_s) * ni + &
-                             (j_cur   - j_origin) * ni * nk) * n_vars
+                ! Within this (j_cur, k), fuse cells with consecutive i values
+                ! into a single block. Run [run_start..run_end] becomes one
+                ! length-(n_vars*run_length) block at the run-start displacement.
+                cc = c_start
+                do while (cc <= c_end)
+                    run_start = cc
+                    do while (cc < c_end)
+                        if (cells%i(cc + 1) /= cells%i(cc) + 1) exit
+                        cc = cc + 1
                     enddo
+                    run_end = cc
+
+                    counter = counter + 1
+                    block_lengths(counter) = n_vars * (run_end - run_start + 1)
+                    displacements(counter) = ((cells%i(run_start) - i_origin) + &
+                                              (k     - k_s)      * ni        + &
+                                              (j_cur - j_origin) * ni * nk) * n_vars
+                    cc = cc + 1
                 enddo
             enddo
 
             c_start = c_end + 1
         enddo
 
-        call MPI_Type_Indexed(counter, block_lengths, displacements, MPI_REAL, mpi_type)
+        call MPI_Type_Indexed(counter, block_lengths(1:counter), displacements(1:counter), MPI_REAL, mpi_type)
         call MPI_Type_commit(mpi_type)
     end subroutine build_indexed_type_from_cells
 
