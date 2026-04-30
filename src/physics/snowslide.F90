@@ -51,8 +51,7 @@ module module_snowslide
     integer :: n_slide_iters = 10
 
     ! Layer info (detected at init)
-    logical :: has_Sice    = .false.              ! FSM-style mass vars (Sice, Sliq) available
-    logical :: has_VolFrac = .false.              ! SNOWPACK-style volume fractions available
+    logical :: use_snowpack = .false.              ! Using SNOWPACK-style volume fractions
 
     ! Parameters (from PARAM_SNOWSLIDE)
     real, parameter :: dyn_ratio    = 0.7         ! Dynamic snow holding depth ratio
@@ -185,8 +184,7 @@ contains
         call Sice_0_var%initialize(kVARS%density, domain%grid2d)
 
         ! Detect layer representation and max layers
-        has_Sice    = (domain%var_indx(kVARS%Sice)%v > 0)
-        has_VolFrac = (domain%var_indx(kVARS%Vol_Frac_I)%v > 0)
+        use_snowpack = (options%physics%snowmodel == kSM_SNOWPACK)
 
         Ds_min_fsm = options%sm%fsm_ds_min
         Ds_surflay = options%sm%fsm_ds_surflay
@@ -249,13 +247,12 @@ contains
             call sync_snow_halo_to_device(domain)
             call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v),corners=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Ds)%v),corners=.True.)
-            if (has_Sice) then
-                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Sice)%v),corners=.True.)
-                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Sliq)%v),corners=.True.)
-            end if
-            if (has_VolFrac) then
+            if (use_snowpack) then
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v),corners=.True.)
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v),corners=.True.)
+            else
+                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Sice)%v),corners=.True.)
+                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Sliq)%v),corners=.True.)
             end if
             call sync_snow_halo_to_host(domain)
 
@@ -355,13 +352,7 @@ contains
         !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
         !$acc   domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
         !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d)
-        if (has_Sice) then
-            !$acc update host( &
-            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
-            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
-            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d)
-        end if
-        if (has_VolFrac) then
+        if (use_snowpack) then
             !$acc update host( &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d, &
@@ -380,6 +371,11 @@ contains
             !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d)
+        else
+            !$acc update host( &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d)
         end if
     end subroutine sync_snow_to_host
 
@@ -400,15 +396,14 @@ contains
         !$acc update host( &
         !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
         !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d)
-        if (has_Sice) then
-            !$acc update host( &
-            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
-            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d)
-        end if
-        if (has_VolFrac) then
+        if (use_snowpack) then
             !$acc update host( &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d)
+        else
+            !$acc update host( &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d)
         end if
     end subroutine sync_snow_halo_to_host
 
@@ -419,15 +414,14 @@ contains
         !$acc update device( &
         !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
         !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d)
-        if (has_Sice) then
-            !$acc update device( &
-            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
-            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d)
-        end if
-        if (has_VolFrac) then
+        if (use_snowpack) then
             !$acc update device( &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d)
+        else
+            !$acc update device( &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d)
         end if
     end subroutine sync_snow_halo_to_device
 
@@ -444,16 +438,15 @@ contains
         !$acc   domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d, &
         !$acc   domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
         !$acc   domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d)
-        if (has_Sice) then
-            !$acc update device( &
-            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
-            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d)
-        end if
-        if (has_VolFrac) then
+        if (use_snowpack) then
             !$acc update device( &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d)
+        else
+            !$acc update device( &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sice)%v)%data_3d, &
+            !$acc   domain%vars_3d(domain%var_indx(kVARS%Sliq)%v)%data_3d)
         end if
     end subroutine sync_snow_to_device
 
@@ -640,14 +633,14 @@ contains
         if (nlay <= 0 .or. dhs <= 0.0) return
 
         vidx_Ds = domain%var_indx(kVARS%Ds)%v
-        if (has_Sice) then
+        if (use_snowpack) then
+            vidx_Sice = -1; vidx_Sliq = -1; vidx_Tsn = -1
+        else
             vidx_Sice = domain%var_indx(kVARS%Sice)%v
             vidx_Sliq = domain%var_indx(kVARS%Sliq)%v
             vidx_Tsn  = domain%var_indx(kVARS%snow_temperature)%v
-        else
-            vidx_Sice = -1; vidx_Sliq = -1; vidx_Tsn = -1
         end if
-        if (has_VolFrac) then
+        if (use_snowpack) then
             vidx_Tsn   = domain%var_indx(kVARS%snow_temperature)%v
             vidx_Tsni  = domain%var_indx(kVARS%snow_temperature_i)%v
             vidx_VFI   = domain%var_indx(kVARS%Vol_Frac_I)%v
@@ -677,19 +670,18 @@ contains
         do while (k < nlay .and. depth_accum < dhs)
             k = k + 1
             Ds_k = domain%vars_3d(vidx_Ds)%data_3d(i_dom, k, j_dom)
-            if (has_Sice) then
-                ! FSM: Sice/Sliq are mass per unit area (kg/m²), so
-                ! density = (Sice + Sliq) / Ds.
-                rho_k = (domain%vars_3d(vidx_Sice)%data_3d(i_dom, k, j_dom) &
-                       + domain%vars_3d(vidx_Sliq)%data_3d(i_dom, k, j_dom)) &
-                      / max(Ds_k, 1.0e-10)
-            else if (has_VolFrac) then
+            if (use_snowpack) then
                 ! SNOWPACK: volume fractions are already mass per unit volume
                 ! when multiplied by their phase density, no Ds involved.
                 rho_k = domain%vars_3d(vidx_VFI)%data_3d(i_dom, k, j_dom) * rho_ice_c &
                       + domain%vars_3d(vidx_VFW)%data_3d(i_dom, k, j_dom) * rho_water_c
             else
-                rho_k = 0.0
+                ! FSM: Sice/Sliq are mass per unit area (kg/m²), so
+                ! density = (Sice + Sliq) / Ds.
+                rho_k = (domain%vars_3d(vidx_Sice)%data_3d(i_dom, k, j_dom) &
+                       + domain%vars_3d(vidx_Sliq)%data_3d(i_dom, k, j_dom)) &
+                      / max(Ds_k, 1.0e-10)
+
             end if
             if (depth_accum + Ds_k <= dhs) then
                 ! Whole layer consumed
@@ -737,33 +729,8 @@ contains
             domain%vars_3d(vidx_Ds)%data_3d(i_dom, k, j_dom) = 0.0
         end do
 
-        if (has_Sice) then
-            ! FSM: Sice/Sliq are extensive (mass per unit area) and must
-            ! be rescaled for the partial top layer; snow_temperature
-            ! is intensive (plain copy).
-            associate(Sice_3d => domain%vars_3d(vidx_Sice)%data_3d, &
-                        Sliq_3d => domain%vars_3d(vidx_Sliq)%data_3d, &
-                        Tsn_3d  => domain%vars_3d(vidx_Tsn )%data_3d)
-                if (nlay_new > 0) then
-                    Sice_3d(i_dom, 1, j_dom) = Sice_3d(i_dom, 1+k_eaten, j_dom) * scale
-                    Sliq_3d(i_dom, 1, j_dom) = Sliq_3d(i_dom, 1+k_eaten, j_dom) * scale
-                    Tsn_3d (i_dom, 1, j_dom) = Tsn_3d (i_dom, 1+k_eaten, j_dom)
-                    do k = 2, nlay_new
-                        Sice_3d(i_dom, k, j_dom) = Sice_3d(i_dom, k+k_eaten, j_dom)
-                        Sliq_3d(i_dom, k, j_dom) = Sliq_3d(i_dom, k+k_eaten, j_dom)
-                        Tsn_3d (i_dom, k, j_dom) = Tsn_3d (i_dom, k+k_eaten, j_dom)
-                    end do
-                endif
-                do k = nlay_new + 1, kSNOW_GRID_Z
-                    Sice_3d(i_dom, k, j_dom) = 0.0
-                    Sliq_3d(i_dom, k, j_dom) = 0.0
-                    Tsn_3d (i_dom, k, j_dom) = 0.0
-                end do
-            end associate
-        end if
 
-#ifdef SNOWPACK
-        if (has_VolFrac) then
+        if (use_snowpack) then
             ! SNOWPACK: Vol_Frac_* and microstructure are intensive and
             ! ride along with the layer — plain copy via the 17-var
             ! helpers. No rescale needed for a partial top layer because
@@ -813,8 +780,31 @@ contains
                         i_dom, j_dom, k, ims, ime, jms, jme, kSNOW_GRID_Z)
                 end do
             end associate
+        else
+            ! FSM: Sice/Sliq are extensive (mass per unit area) and must
+            ! be rescaled for the partial top layer; snow_temperature
+            ! is intensive (plain copy).
+            associate(Sice_3d => domain%vars_3d(vidx_Sice)%data_3d, &
+                        Sliq_3d => domain%vars_3d(vidx_Sliq)%data_3d, &
+                        Tsn_3d  => domain%vars_3d(vidx_Tsn )%data_3d)
+                if (nlay_new > 0) then
+                    Sice_3d(i_dom, 1, j_dom) = Sice_3d(i_dom, 1+k_eaten, j_dom) * scale
+                    Sliq_3d(i_dom, 1, j_dom) = Sliq_3d(i_dom, 1+k_eaten, j_dom) * scale
+                    Tsn_3d (i_dom, 1, j_dom) = Tsn_3d (i_dom, 1+k_eaten, j_dom)
+                    do k = 2, nlay_new
+                        Sice_3d(i_dom, k, j_dom) = Sice_3d(i_dom, k+k_eaten, j_dom)
+                        Sliq_3d(i_dom, k, j_dom) = Sliq_3d(i_dom, k+k_eaten, j_dom)
+                        Tsn_3d (i_dom, k, j_dom) = Tsn_3d (i_dom, k+k_eaten, j_dom)
+                    end do
+                endif
+                do k = nlay_new + 1, kSNOW_GRID_Z
+                    Sice_3d(i_dom, k, j_dom) = 0.0
+                    Sliq_3d(i_dom, k, j_dom) = 0.0
+                    Tsn_3d (i_dom, k, j_dom) = 0.0
+                end do
+            end associate
         end if
-#endif
+
         domain%vars_2d(vidx_nlay)%data_2di(i_dom, j_dom) = nlay_new
 
     end subroutine ablate_snow_layers

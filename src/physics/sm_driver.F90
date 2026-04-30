@@ -555,6 +555,7 @@ contains
                       meltflux_cum  => domain%vars_2d(domain%var_indx(kVARS%meltflux_out_cumul)%v)%data_2d)
                 !$acc kernels default(present)
                 meltflux_cum(its:ite,jts:jte) = meltflux_cum(its:ite,jts:jte) + meltflux_inst(its:ite,jts:jte)
+                meltflux_inst(its:ite,jts:jte) = 0.0 ! reset the instantaneous melt flux for the next LSM step
                 !$acc end kernels
             end associate
 
