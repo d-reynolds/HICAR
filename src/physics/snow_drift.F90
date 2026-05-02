@@ -430,8 +430,8 @@ contains
 
         associate( &
             w   => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
-            u        => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
-            v        => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+            u        => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
+            v        => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d, &
             temperature => domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d, &
             qv       => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d, &
             dz       => domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d, &
@@ -457,8 +457,8 @@ contains
                                 / log(z_ref / z0_loc)
 
                     ! Monin-Obukhov logarithmic profiles for horizontal wind, temperature, and moisture
-                    u_fm(i,k,j) = u(i,1,j) * log_ratio
-                    v_fm(i,k,j) = v(i,1,j) * log_ratio
+                    u_fm(i,k,j) = u(i,j) * log_ratio
+                    v_fm(i,k,j) = v(i,j) * log_ratio
                     t_fm(i,k,j) = temperature(i,1,j) * log_ratio
                     qv_fm(i,k,j) = qv(i,1,j) * log_ratio
 
