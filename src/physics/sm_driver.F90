@@ -42,6 +42,16 @@ module snow_model_driver
 #endif
     use snow_drift,            only : snow_drift_var_request, snow_drift_init
     use module_snowslide,      only : snowslide_var_request, snowslide_init, snowslide_step
+    use NoahmpIOVarType,            only : NoahmpIO_type
+    use NoahmpDriverMainMod,        only : noahmp
+    use ConfigVarInTransferMod,      only : ConfigVarInTransfer
+    use ForcingVarInTransferMod,     only : ForcingVarInTransfer
+    use EnergyVarInTransferMod,      only : EnergyVarInTransfer
+    use WaterVarInTransferMod,       only : WaterVarInTransfer
+    use GroundThermalPropertyMod,    only : GroundThermalProperty
+    use SoilSnowTemperatureMainMod,  only : SoilSnowTemperatureMain
+    use SoilSnowWaterPhaseChangeMod, only : SoilSnowWaterPhaseChange
+    use SoilWaterMainMod,            only : SoilWaterMain
 
     implicit none
 
@@ -119,7 +129,8 @@ contains
                          kVARS%Vol_Frac_A, kVARS%Vol_Frac_S, kVARS%Vol_Frac_WP, kVARS%Rg, kVARS%Rb, kVARS%Dd, kVARS%Sp, kVARS%mk, &
                          kVARS%snow_nlayers, kVARS%bs_threshold_ustar, kVARS%bs_saltation_flux, kVARS%bs_saltation_height, kVARS%bs_saltation_concentration, &
                          kVARS%bs_swe_exchange, kVARS%mass_hoar, kVARS%CDot, kVARS%snow_stress, kVARS%N3, kVARS%depositionDate, kVARS%dSWE_subl, &
-                         kVARS%meltflux_out_tstep, kVARS%meltflux_out_cumul])
+                         kVARS%meltflux_out_tstep, kVARS%meltflux_out_cumul, kVARS%snow_basal_heat_flux, kVARS%soil_water_content_liq, &
+                         kVARS%runoff_surface, kVARS%runoff_subsurface])
 
              call options%restart_vars( &
                          [kVARS%sst, kVARS%water_vapor, kVARS%potential_temperature, kVARS%precipitation, kVARS%temperature, &
@@ -318,11 +329,12 @@ contains
 
     end subroutine sm_init
 
-    subroutine snow_model(domain,options,dt)
+    subroutine snow_model(domain,options,dt,NoahmpIO_arg)
         implicit none
-        type(domain_t),     intent(inout)   :: domain
-        type(options_t),    intent(in)      :: options
-        real,               intent(in)      :: dt
+        type(domain_t),                  intent(inout) :: domain
+        type(options_t),                 intent(in)    :: options
+        real,                            intent(in)    :: dt
+        type(NoahmpIO_type), optional,   intent(inout) :: NoahmpIO_arg
 
         real, allocatable, dimension(:,:) :: windspd
         real, allocatable, dimension(:,:) :: current_precipitation
@@ -472,6 +484,13 @@ contains
                 !$acc enter data copyin(current_rain, current_snow, windspd)
                 call snowpack_step(domain,options,lsm_dt,current_rain,current_snow,windspd)
                 !$acc exit data delete(current_rain, current_snow, windspd)
+
+                ! Hand soil-T evolution on snow cells over to NoahMP, using the
+                ! conductive heat flux at the snowpack base (G_base, computed by
+                ! snowpack_step) as the upper Neumann BC.
+                if (options%physics%landsurface == kLSM_NOAHMP .and. present(NoahmpIO_arg)) then
+                    call noahmp_soil_only(domain, options, lsm_dt, NoahmpIO_arg)
+                end if
 #else
 
                 ! --- Update host: SNOWPACK-specific inputs ---
@@ -574,5 +593,213 @@ contains
         endif
 
         end subroutine snow_model
+
+
+    !>------------------------------------------------------------
+    !! Run NoahMP's soil-temperature pipeline only, on snow-covered cells,
+    !! using SNOWPACK's basal conductive heat flux (G_base, computed by
+    !! snowpack_step) as the upper Neumann BC.
+    !!
+    !! Why: when SNOWPACK owns the snow column, NoahmpHICARmain runs with
+    !! snow state spoofed to zero and its soil-T output is discarded for
+    !! snow cells (the line-1282 gate in lsm_driver.F90). That left
+    !! soil_temperature on snow-covered cells frozen in time. This helper
+    !! evolves soil_temperature on those cells by calling NoahMP's
+    !! GroundThermalProperty + SoilSnowTemperatureMain only — no surface
+    !! energy balance, no canopy, no snow physics, no soil moisture solve.
+    !!
+    !! Coupling is staggered: SNOWPACK uses last-step soil_temperature(:,1,:)
+    !! as Dirichlet at its base; this helper takes SNOWPACK's just-computed
+    !! G_base as Neumann at the top of the soil column.
+    !!
+    !! For non-snow cells the soil-T pipeline is also re-run as a side
+    !! effect (NoahMP routines parallelize internally over the full domain),
+    !! but the result is not written back to HICAR (gated on snow_height>0)
+    !! and noahmp%* state is overwritten by the next NoahmpHICARmain call's
+    !! *VarInTransfer step.
+    !!------------------------------------------------------------
+    subroutine noahmp_soil_only(domain, options, dt, NIO)
+        implicit none
+        type(domain_t),       intent(inout) :: domain
+        type(options_t),      intent(in)    :: options
+        real,                 intent(in)    :: dt
+        type(NoahmpIO_type),  intent(inout) :: NIO
+
+        integer :: i, j, k
+        integer :: nsoil, nsnow_max
+        real, pointer, dimension(:,:)   :: snow_height, G_base, melt_basal
+        real, pointer, dimension(:,:)   :: runoff_surface, runoff_subsurface
+        real, pointer, dimension(:,:,:) :: soil_temperature, soil_moisture, soil_liq
+
+        associate( &
+            snow_height       => domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+            G_base            => domain%vars_2d(domain%var_indx(kVARS%snow_basal_heat_flux)%v)%data_2d, &
+            melt_basal        => domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+            runoff_surface    => domain%vars_2d(domain%var_indx(kVARS%runoff_surface)%v)%data_2d, &
+            runoff_subsurface => domain%vars_2d(domain%var_indx(kVARS%runoff_subsurface)%v)%data_2d, &
+            soil_temperature  => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d, &
+            soil_moisture     => domain%vars_3d(domain%var_indx(kVARS%soil_water_content)%v)%data_3d, &
+            soil_liq          => domain%vars_3d(domain%var_indx(kVARS%soil_water_content_liq)%v)%data_3d)
+
+        nsoil     = noahmp%config%domain%NumSoilLayer
+        nsnow_max = noahmp%config%domain%NumSnowLayerMax
+
+        ! 1. Refresh NoahmpIO with HICAR's truth on snow cells AND on cells
+        !    where SNOWPACK just produced meltwater (snow_height now 0 but
+        !    meltflux > 0 — the meltout-step transition). Without that
+        !    second condition, the meltout pulse would be dropped because
+        !    the helper would skip the cell entirely.
+        !    NoahmpIO currently holds NoahmpHICARmain's spoofed-no-snow
+        !    output for these cells; we overwrite that with HICAR truth.
+        !$acc parallel loop collapse(2) default(present)
+        do j = jts, jte
+            do i = its, ite
+                if (snow_height(i,j) <= 0.0 .and. melt_basal(i,j) <= 0.0) cycle
+                !$acc loop seq
+                do k = 1, nsoil
+                    NIO%TSLB (i,k,j) = soil_temperature(i,k,j)
+                    NIO%SMOIS(i,k,j) = soil_moisture   (i,k,j)
+                    NIO%SH2O (i,k,j) = soil_liq        (i,k,j)
+                end do
+                NIO%ISNOWXY(i,j) = 0
+                !$acc loop seq
+                do k = -nsnow_max+1, 0
+                    NIO%TSNOXY (i,k,j) = 0.0
+                    NIO%ZSNSOXY(i,k,j) = 0.0
+                    NIO%SNICEXY(i,k,j) = 0.0
+                    NIO%SNLIQXY(i,k,j) = 0.0
+                end do
+            end do
+        end do
+
+        ! 2. Marshal NoahmpIO -> module-level noahmp (whole-domain transfer;
+        !    the routines wrap their own !$acc parallel loop internally).
+        !    Config first so timestep, soil-layer thicknesses, and
+        !    NumSnowLayerNeg are all sync'd to the snow-cell-corrected
+        !    NoahmpIO state. Forcing is needed for TemperatureSoilBottom
+        !    (the deep-ground Dirichlet temperature read from NoahmpIO%TMN)
+        !    so we don't depend on whatever value the prior NoahmpHICARmain
+        !    call happened to leave behind.
+        call ConfigVarInTransfer (noahmp, NIO)
+        call ForcingVarInTransfer(noahmp, NIO)
+        call EnergyVarInTransfer (noahmp, NIO)
+        call WaterVarInTransfer  (noahmp, NIO)
+
+        ! 3. Override Neumann BC on snow cells: G_base from SNOWPACK and
+        !    zero SW penetration (SNOWPACK absorbs all SW above).
+        !    NumSnowLayerNeg was already set to 0 by ConfigVarInTransfer
+        !    via NIO%ISNOWXY (which we set to 0 for snow cells in step 1).
+        !    On a meltout step (snow_height now 0 but melt_basal > 0)
+        !    G_base was zeroed by snowpack_driver's bare-ground branch, so
+        !    HeatGroundTotMean = 0 here is correct: no spurious heat flux
+        !    is injected for the part of the step after the snow vanished.
+        !$acc parallel loop collapse(2) default(present)
+        do j = jts, jte
+            do i = its, ite
+                if (snow_height(i,j) <= 0.0 .and. melt_basal(i,j) <= 0.0) cycle
+                noahmp%energy%flux%HeatGroundTotMean(i,j)   = G_base(i,j)
+                noahmp%energy%flux%RadSwPenetrateGrd(i,:,j) = 0.0
+            end do
+        end do
+
+        ! 4. Soil-only physics: refresh thermal properties, solve soil-T
+        !    tridiagonal system, then handle ice<->liquid phase change in
+        !    the soil column. With NumSnowLayerNeg = 0, every snow loop
+        !    inside SoilSnowWaterPhaseChange has bound (1,0) and skips —
+        !    only soil layers see updates. All routines parallelize
+        !    internally over the full (I,J) domain.
+        call GroundThermalProperty   (noahmp)
+        call SoilSnowTemperatureMain (noahmp)
+        call SoilSnowWaterPhaseChange(noahmp)
+
+        ! 5. Soil-water solve. Drive infiltration on snow cells from
+        !    SNOWPACK's basal melt flux (kg/m^2 per LSM step ->
+        !    SoilSfcInflowMean in m/s). Surface evap and transpiration are
+        !    zero under snow (SNOWPACK owns surface energy; no veg).
+        !
+        !    SoilIce must be refreshed after phase change because
+        !    SoilSnowWaterPhaseChange modifies SoilLiqWater & SoilMoisture
+        !    but leaves SoilIce stale. NoahMP's normal pipeline does the
+        !    same refresh at WaterMainMod.F90:114 before calling SoilWaterMain.
+        !
+        !    For non-snow cells the call still runs (SoilWaterMain has no
+        !    per-cell gate other than IndicatorIceSfc==-1) but its result is
+        !    ignored: their writeback is gated on snow_height>0, and noahmp
+        !    state is reset by next step's *VarInTransfer.
+        !$acc parallel loop collapse(2) default(present)
+        do j = jts, jte
+            do i = its, ite
+                noahmp%water%flux%SoilSfcInflowMean (i,j) = 0.0
+                noahmp%water%flux%EvapSoilSfcLiqMean(i,j) = 0.0
+                !$acc loop seq
+                do k = 1, nsoil
+                    noahmp%water%state%SoilIce(i,k,j) = max(0.0, &
+                        noahmp%water%state%SoilMoisture (i,k,j) - &
+                        noahmp%water%state%SoilLiqWater(i,k,j))
+                    noahmp%water%flux%TranspWatLossSoilMean(i,k,j) = 0.0
+                end do
+                ! Inject SNOWPACK basal melt as soil-surface inflow on
+                ! snow cells AND on meltout-step cells (snow_height now 0
+                ! but melt_basal > 0 — last basal-water pulse from the
+                ! disappearing snowpack).
+                if (snow_height(i,j) > 0.0 .or. melt_basal(i,j) > 0.0) then
+                    ! kg/m^2 per LSM step -> m/s: divide by rho_water and dt
+                    noahmp%water%flux%SoilSfcInflowMean(i,j) = melt_basal(i,j) / (1000.0 * dt)
+                end if
+            end do
+        end do
+
+        call SoilWaterMain(noahmp)
+
+        ! 6. Write updated soil state back to HICAR for snow cells, reading
+        !    DIRECTLY from noahmp%energy%state and noahmp%water%state.
+        !
+        !    We deliberately DO NOT call Energy/WaterVarOutTransfer here:
+        !    every NoahMP *VarOutTransfer routine starts with
+        !        if (NoahmpIO%XLAND(I,J) - 1.5 >= 0.0) cycle
+        !    (e.g. EnergyVarOutTransferMod.F90:48, WaterVarOutTransferMod.F90:39),
+        !    and lsm_driver.F90:1009 marks snow cells as XLAND = kLC_WATER (=2).
+        !    So those out-transfers would skip the cells we care about, leaving
+        !    NoahmpIO%TSLB / SMOIS for snow cells equal to whatever step 1
+        !    seeded — i.e. HICAR's pre-step values — and silently discarding
+        !    the soil-T and phase-change result. Reading noahmp%* directly
+        !    bypasses that gate.
+        !
+        !    Side benefit: NoahmpIO%SMOIS / SH2O for non-snow cells stays at
+        !    NoahmpHICARmain's authoritative first-call result, so there is
+        !    no cumulative drift across LSM steps (soil moisture has no
+        !    HICAR<->NoahmpIO round-trip equivalent to the soil-T resync at
+        !    lsm_driver.F90:999).
+        !
+        !    The noahmp%* state for non-snow cells was perturbed by our
+        !    second-call solve, but it is reset by the next LSM step's
+        !    *VarInTransfer (which reads from the still-clean NoahmpIO).
+        !$acc parallel loop collapse(2) default(present)
+        do j = jts, jte
+            do i = its, ite
+                ! Same gate as steps 1, 3, 5 — snow cells AND meltout-step
+                ! cells. The meltout step is the LAST step where SNOWPACK
+                ! owns the cell; from the next step on, snow_height is 0
+                ! AND melt_basal is 0, control returns to NoahmpHICARmain.
+                if (snow_height(i,j) <= 0.0 .and. melt_basal(i,j) <= 0.0) cycle
+                !$acc loop seq
+                do k = 1, nsoil
+                    soil_temperature(i,k,j) = noahmp%energy%state%TemperatureSoilSnow(i,k,j)
+                    soil_moisture   (i,k,j) = noahmp%water%state%SoilMoisture       (i,k,j)
+                    soil_liq        (i,k,j) = noahmp%water%state%SoilLiqWater       (i,k,j)
+                end do
+                ! NoahmpHICARmain populates runoff_surface/runoff_subsurface for
+                ! non-snow cells from NoahmpIO%RUNSFXY/RUNSBXY (which the XLAND
+                ! gate left stale for snow cells). Refresh from the live
+                ! noahmp%water%flux values so snow cells aren't frozen at junk.
+                ! Units match NoahmpHICARmain's existing wiring: mm per soil
+                ! timestep (= mm per LSM step when NumSoilTimeStep = 1).
+                runoff_surface   (i,j) = noahmp%water%flux%RunoffSurface   (i,j)
+                runoff_subsurface(i,j) = noahmp%water%flux%RunoffSubsurface(i,j)
+            end do
+        end do
+        end associate
+        
+    end subroutine noahmp_soil_only
 
     end module snow_model_driver

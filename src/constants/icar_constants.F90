@@ -188,6 +188,7 @@ module icar_constants
         integer :: rad_net_longwave
         integer :: longwave_up
         integer :: ground_heat_flux
+        integer :: snow_basal_heat_flux
         integer :: evap_canopy
         integer :: evap_soil_surface
         integer :: transpiration_rate

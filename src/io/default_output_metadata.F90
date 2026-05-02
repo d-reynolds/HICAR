@@ -1589,7 +1589,20 @@ contains
             var_meta%attributes  = [attribute_t("standard_name", "upward_heat_flux_at_ground_level_in_soil"), &
                                attribute_t("units",         "W m-2"),                                    &
                                attribute_t("coordinates",   "lat lon")]
-        
+
+        !>------------------------------------------------------------
+        !!  Conductive heat flux at the base of the snowpack (positive down).
+        !!  Computed by SNOWPACK from the bottom-element temperature gradient
+        !!  and supplied to NoahMP's soil-only solve as the upper Neumann BC
+        !!  on snow-covered cells.
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%snow_basal_heat_flux) then
+            var_meta%name        = "snow_basal_heat_flux"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("standard_name", "downward_heat_flux_at_snow_soil_interface"), &
+                               attribute_t("units",         "W m-2"),                                    &
+                               attribute_t("coordinates",   "lat lon")]
+
         !>------------------------------------------------------------
         !!  Vegetation fraction
         !!------------------------------------------------------------

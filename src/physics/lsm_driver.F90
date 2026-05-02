@@ -48,7 +48,7 @@ module land_surface
     implicit none
 
     private
-    public :: lsm_init, lsm, lsm_var_request, lsm_apply_fluxes
+    public :: lsm_init, lsm, lsm_var_request, lsm_apply_fluxes, NoahmpIO
 
     ! Noah LSM required variables.  Some of these should be stored in domain, but tested here for now
     integer :: ids,ide,jds,jde,kds,kde ! Domain dimensions
@@ -1300,7 +1300,7 @@ contains
             endif ! end if landsurface > 0
         endif ! end if time to call lsm
 
-        call snow_model(domain, options, dt)
+        call snow_model(domain, options, dt, NoahmpIO(domain%nest_indx))
 
         if (last_model_time(domain%nest_indx) == domain%sim_time%seconds()) then ! if we just ran this call, update the precip tracking arrays, now that snowmodel has potentially been called
             if (options%physics%landsurface == kLSM_NOAHMP .or. options%physics%watersurface == kWATER_LAKE .or. options%physics%snowmodel > 0) then
