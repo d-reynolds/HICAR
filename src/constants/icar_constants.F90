@@ -552,7 +552,6 @@ module icar_constants
     integer, parameter :: kRA_RRTMGP     = 4
     
     integer, parameter :: kADV_STD       = 1
-    integer, parameter :: kADV_MPDATA    = 2
 
     integer, parameter :: kFLUXCOR_MONO   = 1
 

@@ -1680,15 +1680,12 @@ contains
         integer :: name_unit, rc, nml_scratch
         logical :: print_info, gennml
 
-        logical :: boundary_buffer(kMAX_NESTS)   ! apply some smoothing to the x and y boundaries in MPDATA
-        logical :: MPDATA_FCT(kMAX_NESTS) ! use the flux corrected transport option in MPDATA
         logical :: advect_density(kMAX_NESTS)
-        ! MPDATA order of correction (e.g. 1st=upwind, 2nd=classic, 3rd=better)
-        integer, dimension(kMAX_NESTS) :: mpdata_order, flux_corr, h_order, v_order
+        integer, dimension(kMAX_NESTS) :: flux_corr, h_order, v_order
         CHARACTER(LEN=200) :: error_msg
 
         ! define the namelist
-        namelist /adv_parameters/ boundary_buffer, MPDATA_FCT, mpdata_order, flux_corr, h_order, v_order, advect_density
+        namelist /adv_parameters/ flux_corr, h_order, v_order, advect_density
 
         print_info = .False.
         if (present(info_only)) print_info = info_only
@@ -1696,10 +1693,7 @@ contains
         gennml = .False.
         if (present(gen_nml)) gennml = gen_nml
 
-        call set_nml_var_default(boundary_buffer, 'boundary_buffer', print_info, gennml)
         call set_nml_var_default(advect_density, 'advect_density', print_info, gennml)
-        call set_nml_var_default(MPDATA_FCT, 'MPDATA_FCT', print_info, gennml)
-        call set_nml_var_default(mpdata_order, 'mpdata_order', print_info, gennml)
         call set_nml_var_default(flux_corr, 'flux_corr', print_info, gennml)
         call set_nml_var_default(h_order, 'h_order', print_info, gennml)
         call set_nml_var_default(v_order, 'v_order', print_info, gennml)
@@ -1721,8 +1715,6 @@ contains
                 close(nml_scratch)
             endif
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
-            boundary_buffer(n_indx) = boundary_buffer(1)
-            MPDATA_FCT(n_indx) = MPDATA_FCT(1)
             advect_density(n_indx) = advect_density(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             ! read the namelist options
@@ -1736,9 +1728,6 @@ contains
             ! endif
         endif
 
-        call set_nml_var(adv_options%boundary_buffer, boundary_buffer(n_indx), 'boundary_buffer', boundary_buffer(1))
-        call set_nml_var(adv_options%MPDATA_FCT, MPDATA_FCT(n_indx), 'MPDATA_FCT', MPDATA_FCT(1))
-        call set_nml_var(adv_options%mpdata_order, mpdata_order(n_indx), 'mpdata_order', mpdata_order(1))
         call set_nml_var(adv_options%flux_corr, flux_corr(n_indx), 'flux_corr', flux_corr(1))
         call set_nml_var(adv_options%h_order, h_order(n_indx), 'h_order', h_order(1))
         call set_nml_var(adv_options%v_order, v_order(n_indx), 'v_order', v_order(1))
@@ -3094,9 +3083,6 @@ contains
         call append_kv_real   (config_str, pos, 'lt', 'minimum_layer_size',      this%lt%minimum_layer_size)
 
         ! --- adv group ---
-        call append_kv_logical(config_str, pos, 'adv', 'boundary_buffer', this%adv%boundary_buffer)
-        call append_kv_logical(config_str, pos, 'adv', 'MPDATA_FCT',     this%adv%MPDATA_FCT)
-        call append_kv_int    (config_str, pos, 'adv', 'mpdata_order',   this%adv%mpdata_order)
         call append_kv_int    (config_str, pos, 'adv', 'flux_corr',      this%adv%flux_corr)
         call append_kv_int    (config_str, pos, 'adv', 'h_order',        this%adv%h_order)
         call append_kv_int    (config_str, pos, 'adv', 'v_order',        this%adv%v_order)

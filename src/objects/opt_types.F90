@@ -112,9 +112,6 @@ module options_types
     ! store Advection options
     ! ------------------------------------------------
     type adv_options_type
-        logical :: boundary_buffer          ! buffer to smooth a bit to cut down on oscillations at the border if FCT is not used
-        logical :: MPDATA_FCT               ! use Flux Corrected Transport (FCT) to maintain stability and prevent any wild oscllations
-        integer :: mpdata_order             ! accuracy order for MP_DATA advection scheme.
         integer :: flux_corr                ! Designates which flux-correction scheme to use
         integer :: h_order                  ! Designates which order the horizontal advection should be
         integer :: v_order                  ! Designates which order the vertical advection should be

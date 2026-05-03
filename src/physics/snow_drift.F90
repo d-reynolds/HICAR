@@ -1058,7 +1058,9 @@ contains
 
                 ! Saltation deposition from horizontal divergence
                 ! (SWE is NOT modified here — net budget applied via bs_swe_exchange)
-                dep_mass_salt = (bs_salt_mass(i,j) * div(i,1,j) / wind_fm(i,snc_N_loc,j)) * dt
+                ! divergence is positive for horizontal spreading (net erosion), negative for convergence (net deposition) so
+                ! we multiply by -1 to get the correct sign for deposition/erosion
+                dep_mass_salt = (bs_salt_mass(i,j) * (-div(i,1,j)) / wind_fm(i,snc_N_loc,j)) * dt
                 bs_swe_salt(i,j) = bs_swe_salt(i,j) + dep_mass_salt
 
                 bs_swe_susp(i,j) = bs_swe_susp(i,j) + bs_susp_flux(i,j) * dt

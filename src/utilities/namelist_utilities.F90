@@ -2615,11 +2615,10 @@ contains
             case ("adv")
                 description = "Advection scheme to use:  "//achar(10)//BLNK_CHR_N// &
                                                         "'none'     = no ADV,"//achar(10)//BLNK_CHR_N// &
-                                                        "'standard' = standard advection scheme"//achar(10)//BLNK_CHR_N// &
-                                                        "'MPDATA'   = MPDATA (NOT SUPPORTED)"
+                                                        "'standard' = standard advection scheme"
                 default = "standard"
                 if (present(val_keys)) then
-                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "standard", trim(str(kADV_STD)), "MPDATA", trim(str(kADV_MPDATA))]
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "standard", trim(str(kADV_STD))]
                 endif
                 group = "Physics"
             case ("sfc")
@@ -2971,23 +2970,9 @@ contains
             ! Advection parameters namelist variables
             ! --------------------------------------
             ! --------------------------------------
-            case ("boundary_buffer")
-                description = "apply some smoothing to the x and y boundaries in MPDATA (T/F)"
-                default = ".False."
-                group = "ADV_Parameters"
             case ("advect_density")
                 description = "use air density in the advection equations (T/F)"
                 default = ".True."
-                group = "ADV_Parameters"
-            case ("MPDATA_FCT")
-                description = "use the flux corrected transport scheme in MPDATA (T/F)"
-                default = ".True."
-                group = "ADV_Parameters"
-            case ("mpdata_order")
-                description = "order of the MPDATA scheme"
-                min = 1
-                max = 6
-                default = "2"
                 group = "ADV_Parameters"
             case ("flux_corr")
                 description = "flux correction scheme to use for standard advection. Recommended use with RK3=.True."//achar(10)//BLNK_CHR_N// &

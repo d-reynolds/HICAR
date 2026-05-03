@@ -8,7 +8,6 @@
 module advection
     use icar_constants
     use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, adv_std_clean_wind_arrays
-    use adv_mpdata,                 only : mpdata_init, mpdata_advect3d, mpdata_compute_wind
     use adv_fluxcorr,               only : init_fluxcorr, set_sign_arrays, compute_upwind_fluxes_async
     ! use debug_module,               only : domain_fix
     use options_interface,          only: options_t
@@ -44,9 +43,6 @@ contains
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Standard"
             call adv_std_init(domain,options)
             if (options%adv%flux_corr > 0) call init_fluxcorr(domain)
-        else if(options%physics%advection==kADV_MPDATA) then
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    MP-DATA"
-            call mpdata_init(domain,options)
         endif
         
         ims = domain%ims; ime = domain%ime
@@ -61,9 +57,7 @@ contains
 
         !if (options%physics%advection==kADV_UPWIND) then
         !    call upwind_var_request(options)
-        if (options%physics%advection==kADV_MPDATA) then
-            call adv_std_var_request(options)
-        else
+        if (options%physics%advection==kADV_STD) then
             call adv_std_var_request(options)
         endif
     end subroutine
@@ -94,9 +88,6 @@ contains
                                       domain%dx,options,dt, U_m, V_m, W_m, denom)
             if (options%adv%flux_corr==kFLUXCOR_MONO) call set_sign_arrays(U_m,V_m,W_m)
             call adv_wind_time%stop()
-
-        ! else if(options%physics%advection==kADV_MPDATA) then
-        !     call mpdata_compute_wind(domain,options,dt)
         else
             return
         endif
@@ -111,15 +102,10 @@ contains
                 !     call RK3_adv(domain%vars_3d(domain%adv_vars(n)%v)%data_3d, temp, options, U_m, V_m, W_m, denom, &
                 !          domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, flux_time, flux_corr_time, sum_time, adv_wind_time, n)
                 ! 
-                ! else if(options%physics%advection==kADV_MPDATA) then
-                    ! Not yet implemented (is it compatable w/ RK3?)
-                ! endif
             ! else
                 if (options%physics%advection==kADV_STD) then
                     call adv_std_advect3d(domain%vars_3d(domain%adv_vars(n)%v)%data_3d,domain%vars_3d(domain%adv_vars(n)%v)%data_3d, &
                         U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_corr_time, sum_time)
-                !else if(options%physics%advection==kADV_MPDATA) then                                    
-                !    call mpdata_advect3d(var, rho, jaco, dz, options)
                 endif
             enddo
         endif

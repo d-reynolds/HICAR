@@ -2431,10 +2431,7 @@ contains
         !halo. Thus, we need one extra cell in each halo direction to support the finite difference stencil
         !This is achieved here by artificially inflating the adv_order which is passed to the grid setup
         if (options%adv%flux_corr==kFLUXCOR_MONO) adv_order = adv_order+2
-        
-        !If using MPDATA, we need a halo of size 2 to support the difference stencil
-        if (options%physics%advection==kADV_MPDATA) adv_order = 4
-        
+                
         if (this%compute_comms == MPI_COMM_NULL) then
             my_index = 1
         else
