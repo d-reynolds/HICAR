@@ -2209,8 +2209,8 @@ contains
         !!  used so SNOWPACK can hold sub-threshold (hn<0.001 m) snow mass
         !!  across calls until enough has accumulated to form a layer.
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%last_sm_snow) then
-            var_meta%name        = "last_sm_snow"
+        else if (var_idx==kVARS%sm_last_snow) then
+            var_meta%name        = "sm_last_snow"
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("long_name", "snowfall at last snow-model layer deposit"),     &
                                 attribute_t("units",         "mm"),                                   &
@@ -2218,11 +2218,11 @@ contains
 
         !>------------------------------------------------------------
         !!  Cumulative precipitation snapshot at the last SNOWPACK layer deposit;
-        !!  paired with last_sm_snow to compute the rain mass folded into the
+        !!  paired with sm_last_snow to compute the rain mass folded into the
         !!  newly-formed layer's theta_w.
         !!------------------------------------------------------------
-        else if (var_idx==kVARS%last_sm_precip) then
-            var_meta%name        = "last_sm_precip"
+        else if (var_idx==kVARS%sm_last_precip) then
+            var_meta%name        = "sm_last_precip"
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("long_name", "precipitation at last snow-model layer deposit"),&
                                 attribute_t("units",         "mm"),                                   &
