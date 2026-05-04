@@ -4099,6 +4099,16 @@ contains
                                attribute_t("coordinates",   "lat lon")]
 
         !>------------------------------------------------------------
+        !!  Blowing snow historical deepest erosion this LSM step
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%bs_swe_erode_max) then
+            var_meta%name        = "bs_swe_erode_max"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "Blowing snow deepest cumulative erosion this LSM step"), &
+                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
         !!  Blowing snow sublimation flux
         !!------------------------------------------------------------
         else if (var_idx==kVARS%bs_sublimation_flux) then
@@ -4145,7 +4155,7 @@ contains
             var_meta%dimensions  = three_d_t_fm_dimensions
             var_meta%dim_len(2)  = kFM_GRID_Z
             var_meta%attributes  = [attribute_t("long_name", "Blowing snow mass mixing ratio on fine mesh"),   &
-                               attribute_t("units",         "kg m-2"),                        &
+                               attribute_t("units",         "kg kg-1"),                        &
                                attribute_t("coordinates",   "lat lon")]
             var_meta%maxval      = 100.0
             var_meta%minval      = -1e-10

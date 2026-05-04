@@ -109,6 +109,7 @@ contains
              kVARS%bs_saltation_height, &
              kVARS%bs_saltation_concentration, &
              kVARS%bs_swe_exchange,    &
+             kVARS%bs_swe_erode_max,   &
              kVARS%bs_sublimation_flux, &
              kVARS%bs_suspension_flux, &
              kVARS%bs_drift_swe_salt,   &
@@ -289,8 +290,8 @@ contains
 
         integer :: i, j, n_snow, k
         real :: Sp_top, Rg_top, Rb_top, N3_top
-        real :: rho_air, rg_m
-        real :: weight, binding, tau_thresh, ustar_t, ustar_t_out
+        real :: rho_air, rg_m, cumulative_swe
+        real :: weight, binding, tau_thresh, ustar_t, ustar_t_out, ustar_thresh_fresh
 
         associate( &
             bs_ustar_t  => domain%vars_2d(domain%var_indx(kVARS%bs_threshold_ustar)%v)%data_2d, &
@@ -308,6 +309,7 @@ contains
             bs_salt_flux => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_flux)%v)%data_2d, &
             bs_salt_height => domain%vars_2d(domain%var_indx(kVARS%bs_saltation_height)%v)%data_2d, &
             bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d, &
+            bs_swe_erode_max => domain%vars_2d(domain%var_indx(kVARS%bs_swe_erode_max)%v)%data_2d, &
             n_layers    => domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di &
         )
 
@@ -316,16 +318,43 @@ contains
             do i = its, ite
                 n_snow = n_layers(i,j)
 
-                if (swe(i,j) < 1.0 .or. n_snow < 1 .or. land_mask(i,j) == 2) then
+                if (( swe(i,j) + bs_swe_exch(i,j) ) < 1.0 .or. n_snow < 1 .or. land_mask(i,j) == 2) then
                     bs_ustar_t(i,j) = 9999.0  ! No snow or water; suppress drift
                     cycle
                 endif
 
+                ustar_thresh_fresh = 0.6
+
+                ! Case A: cursor sits above the deepest-erosion line → fresh deposit on top.
+                if (-bs_swe_exch(i,j) < bs_swe_erode_max(i,j)) then
+                    bs_ustar_t(i,j) = ustar_thresh_fresh
+                    cycle
+                ! Case B: pure deposition (no erosion has ever happened this step).
+                else if (bs_swe_erode_max(i,j) <= 0.0 .and. bs_swe_exch(i,j) > 0.0) then
+                    bs_ustar_t(i,j) = ustar_thresh_fresh
+                    cycle
+                !determine which snow layer the bs_swe_exch erosion depth corresponds to
+                else if (bs_swe_exch(i,j) < 0) then
+                    !erosion: find the layer index corresponding to the erosion depth
+                    cumulative_swe = 0.0
+                    !$acc loop seq
+                    do k = 1, n_snow
+                        ! convert snow depth (in m) to mm of SWE by multiplying by density and 1000
+                        cumulative_swe = cumulative_swe + (Ds_3d(i,k,j) * 1000.0) * VFI_3d(i,k,j)
+                        if (cumulative_swe > -bs_swe_exch(i,j)) then
+                            exit
+                        endif
+                    enddo
+                else
+                    !deposition or no change: use top layer properties
+                    k = 1
+                endif
+
                 ! Top snow layer properties (layer index 1 = top in SNOWPACK)
-                Sp_top  = max(Sp_3d(i,1,j), 0.0)
-                Rg_top  = max(Rg_3d(i,1,j), 0.01)   ! min 0.05 mm (stored in mm)
-                Rb_top  = max(Rb_3d(i,1,j), 0.0)
-                N3_top  = max(N3_3d(i,1,j), 0.0)     ! coordination number from SNOWPACK
+                Sp_top  = max(Sp_3d(i,k,j), 0.0)
+                Rg_top  = max(Rg_3d(i,k,j), 0.01)   ! min 0.05 mm (stored in mm)
+                Rb_top  = max(Rb_3d(i,k,j), 0.0)
+                N3_top  = max(N3_3d(i,k,j), 0.0)     ! coordination number from SNOWPACK
 
                 ! Air density at surface
                 rho_air = density(i,kts,j)
@@ -583,8 +612,11 @@ contains
         real, allocatable :: U_m_fm(:,:,:), V_m_fm(:,:,:), denom_fm(:,:,:)
         real, allocatable :: qs_fm_old(:,:,:), ns_fm_old(:,:,:)
         real, allocatable :: jaco_fm(:,:,:), jaco_u_fm(:,:,:), jaco_v_fm(:,:,:)
-        real    :: t_fac
-        integer :: flux_corr, max_iters
+        ! Per-column erosion budgets (allocated/deallocated inside this routine)
+        real, allocatable :: layer_mass_remaining_2d(:,:), dep_mass_salt_2d(:,:), susp_budget_2d(:,:)
+        real    :: t_fac, cumulative_swe, layer_mass, layer_mass_remaining
+        real    :: salt_request, denom, max_entrain
+        integer :: flux_corr, max_iters, n_snow
         logical :: using_snowpack, saltation_doorschot
 
         associate( &
@@ -595,6 +627,10 @@ contains
             swe        => domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d, &
             skin_temp  => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
             bs_swe_exch => domain%vars_2d(domain%var_indx(kVARS%bs_swe_exchange)%v)%data_2d, &
+            bs_swe_erode_max => domain%vars_2d(domain%var_indx(kVARS%bs_swe_erode_max)%v)%data_2d, &
+            VFI_3d      => domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d, &
+            Ds_3d      => domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d, &
+            n_layers    => domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di, &
             z0         => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d, &
             psfc       => domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d, &
             ustar_2d   => domain%vars_2d(domain%var_indx(kVARS%ustar)%v)%data_2d, &
@@ -627,13 +663,17 @@ contains
         allocate(jaco_fm  (ims:ime, 1:snc_N_loc, jms:jme))
         allocate(jaco_u_fm(ims:ime, 1:snc_N_loc, jms:jme))
         allocate(jaco_v_fm(ims:ime, 1:snc_N_loc, jms:jme))
+        allocate(layer_mass_remaining_2d(its:ite, jts:jte))
+        allocate(dep_mass_salt_2d       (its:ite, jts:jte))
+        allocate(susp_budget_2d         (its:ite, jts:jte))
 
         ! Halo exchange before saving initial state for RK3 advection
         call exch_fine_mesh_3d(domain)
 
         using_snowpack = (options%physics%snowmodel == kSM_SNOWPACK)
         saltation_doorschot = (options%sm%saltation_model == kSALTATION_DOORSCHOT)
-        !$acc data create(rho_fm, qs_fm_old, ns_fm_old, div, jaco_fm, jaco_u_fm, jaco_v_fm)
+        !$acc data create(rho_fm, qs_fm_old, ns_fm_old, div, jaco_fm, jaco_u_fm, jaco_v_fm, &
+        !$acc&            layer_mass_remaining_2d, dep_mass_salt_2d, susp_budget_2d)
 
         ! Zero sublimation accumulator for this step
         !$acc parallel loop gang vector collapse(2) default(present)
@@ -688,6 +728,55 @@ contains
         else
             max_iters = 1
         endif
+
+        ! ===================================================================
+        ! Pre-RK3 erosion budget allocation
+        !
+        ! Compute, per (i,j): the mass available for erosion in the currently
+        ! exposed snow layer; the saltation surface exchange (capped by that
+        ! mass); and the residual budget left for suspension entrainment.
+        ! Saltation gets first claim on the budget because it is the source
+        ! process — particles enter saltation before being lifted into
+        ! suspension by turbulence. The suspension budget is enforced inside
+        ! the Thomas BC as an upper bound on q_ghost_limited so that airborne
+        ! mass added to qs_fm matches what was actually removed from the surface.
+        ! ===================================================================
+        !$acc parallel loop gang vector collapse(2) default(present)
+        do j = jts, jte
+            do i = its, ite
+                n_snow = n_layers(i,j)
+                layer_mass = 0.0
+                layer_mass_remaining = 0.0
+                if (bs_swe_exch(i,j) <= 0 .and. n_snow > 0) then
+                    cumulative_swe = 0.0
+                    !$acc loop seq
+                    do k = 1, n_snow
+                        layer_mass = VFI_3d(i,k,j) * Ds_3d(i,k,j) * 1000.0
+                        cumulative_swe = cumulative_swe + layer_mass
+                        if (cumulative_swe > -bs_swe_exch(i,j)) then
+                            layer_mass_remaining = cumulative_swe + bs_swe_exch(i,j)
+                            exit
+                        endif
+                    enddo
+                elseif (bs_swe_exch(i,j) > 0) then
+                    layer_mass_remaining = bs_swe_exch(i,j)
+                endif
+                layer_mass_remaining_2d(i,j) = layer_mass_remaining
+
+                ! Saltation surface exchange request (negative = erosion).
+                ! Guard against vanishing wind to avoid blow-up.
+                if (bs_salt_mass(i,j) /= 0.0 .and. wind_fm(i,snc_N_loc,j) > 1.0e-6) then
+                    salt_request = bs_salt_mass(i,j) * (-div(i,1,j)) / wind_fm(i,snc_N_loc,j) * dt
+                else
+                    salt_request = 0.0
+                endif
+                dep_mass_salt_2d(i,j) = max(salt_request, -layer_mass_remaining)
+
+                ! Residual budget for suspension entrainment (non-negative).
+                susp_budget_2d(i,j) = max(layer_mass_remaining + dep_mass_salt_2d(i,j), 0.0)
+            enddo
+        enddo
+
         ! ===================================================================
         ! IMEX-RK3: Explicit horizontal advection + implicit vertical transport
         ! Each RK3 substep: horizontal advection (3rd-order) followed by
@@ -830,12 +919,22 @@ contains
                     ! ============ Thomas solve for q_bs ============
                     a = 0.0; b = 0.0; c = 0.0; d_rhs = 0.0
 
-                    ! k=1: Ghost-cell bottom BC from saltation
+                    ! k=1: Ghost-cell bottom BC from saltation.
+                    ! Cap q_ghost_limited so that the implied entrainment
+                    !   dq_entrain = (q_ghost_limited - qs_fm(i,1,j)) * ghost_coeff * rho_air * snc_dz
+                    ! does not exceed the suspension share of layer_mass_remaining
+                    ! (saltation already took its share above, in the pre-RK3 budget).
                     dz_salt_interface = 0.5 * snc_dz(i,1,j)
                     ghost_coeff = dt_thomas * Kh_fm(i,1,j) / (dz_salt_interface * snc_dz(i,1,j))
-                    if (ghost_coeff * q_salt_val * rho_air * snc_dz(i,1,j) > swe(i,j) &
-                        .and. q_salt_val > 0.0) then
-                        q_ghost_limited = swe(i,j) / (ghost_coeff * rho_air * snc_dz(i,1,j))
+                    denom       = ghost_coeff * rho_air * snc_dz(i,1,j)
+                    max_entrain = susp_budget_2d(i,j)
+                    if (max_entrain <= 0.0) then
+                        ! No mass available — let downward diffusion still happen but
+                        ! prevent any net upward injection from the ghost cell.
+                        q_ghost_limited = 0.0
+                    else if (denom > 0.0 .and. q_salt_val > 0.0 .and. &
+                             (q_salt_val * denom) > max_entrain) then
+                        q_ghost_limited = max_entrain / denom
                     else
                         q_ghost_limited = q_salt_val
                     endif
@@ -1052,18 +1151,17 @@ contains
 
                 ! ===================================================================
                 ! Surface mass balance (Eq. 22)
-                ! Suspension entrainment/deposition already applied to SWE above
-                ! (in the flux BC and post-Thomas deposition steps)
+                ! Saltation surface exchange was capped pre-RK3; suspension
+                ! entrainment was capped via the q_ghost_limited Thomas BC.
+                ! Net erosion is therefore guaranteed not to exceed
+                ! layer_mass_remaining_2d(i,j).
                 ! ===================================================================
 
-                ! Saltation deposition from horizontal divergence
-                ! (SWE is NOT modified here — net budget applied via bs_swe_exchange)
-                ! divergence is positive for horizontal spreading (net erosion), negative for convergence (net deposition) so
-                ! we multiply by -1 to get the correct sign for deposition/erosion
-                dep_mass_salt = (bs_salt_mass(i,j) * (-div(i,1,j)) / wind_fm(i,snc_N_loc,j)) * dt
+                dep_mass_salt = dep_mass_salt_2d(i,j)
                 bs_swe_salt(i,j) = bs_swe_salt(i,j) + dep_mass_salt
 
-                bs_swe_susp(i,j) = bs_swe_susp(i,j) + bs_susp_flux(i,j) * dt
+                dep_mass_susp = bs_susp_flux(i,j) * dt
+                bs_swe_susp(i,j) = bs_swe_susp(i,j) + dep_mass_susp
 
                 ! Sublimation diagnostics
                 bs_subl(i,j)     = subl_mass_2d(i,j) * XLS / dt  ! W/m^2
@@ -1072,7 +1170,13 @@ contains
                 ! Accumulate net drift mass exchange for SNOWPACK element modification.
                 ! Positive = deposition (mass added to snowpack), negative = erosion.
                 ! Applied to SNOWPACK elements at the NEXT snowpack_fortran_step call.
-                bs_swe_exch(i,j) = bs_swe_exch(i,j) + bs_susp_flux(i,j) * dt + dep_mass_salt
+                bs_swe_exch(i,j) = bs_swe_exch(i,j) + (dep_mass_susp + dep_mass_salt)
+
+                ! Track historical deepest erosion for this LSM step. Used by
+                ! the u*_thresh depth-walk helper so that a deposit landing
+                ! on top of an exposed hard layer uses fresh-snow grain
+                ! properties rather than the (already-eroded) original top.
+                bs_swe_erode_max(i,j) = max(bs_swe_erode_max(i,j), -bs_swe_exch(i,j))
 
             enddo
         enddo
@@ -1087,6 +1191,7 @@ contains
         ! Module-level flux_x_fm/flux_y_fm cleanup is still in adv_std module
         call adv_std_clean_wind_arrays_fm()
         deallocate(rho_fm, qs_fm_old, ns_fm_old, jaco_fm, jaco_u_fm, jaco_v_fm)
+        deallocate(layer_mass_remaining_2d, dep_mass_salt_2d, susp_budget_2d)
 
     end subroutine snow_drift_integrate
 
