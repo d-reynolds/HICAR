@@ -123,7 +123,8 @@ contains
                          kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
                          kVARS%soil_totalmoisture, kVARS%soil_deep_temperature, kVARS%roughness_z0, kVARS%ustar,        &
                          kVARS%snow_height, kVARS%lai, kVARS%temperature_2m_veg, kVARS%slope_angle, kVARS%lsm_last_snow,&
-                         kVARS%lsm_last_precip, kVARS%QFX, kVARS%chs, kVARS%land_emissivity,    &
+                         kVARS%lsm_last_precip, kVARS%sm_last_snow, kVARS%sm_last_precip,                              &
+                         kVARS%QFX, kVARS%chs, kVARS%land_emissivity,    &
                          kVARS%veg_type, kVARS%soil_type, kVARS%land_mask, kVARS%snowfall, kVARS%albedo,                &
                          kVARS%snow_temperature, kVARS%Ds, kVARS%snow_temperature_i, kVARS%Vol_Frac_I, kVARS%Vol_Frac_W, &
                          kVARS%Vol_Frac_A, kVARS%Vol_Frac_S, kVARS%Vol_Frac_WP, kVARS%Rg, kVARS%Rb, kVARS%Dd, kVARS%Sp, kVARS%mk, &
@@ -141,6 +142,7 @@ contains
                          kVARS%snow_height,  kVARS%snowfall, kVARS%albedo, kVARS%QFX, kVARS%land_emissivity,            &
                          kVARS%humidity_2m, kVARS%surface_pressure, kVARS%longwave_up, kVARS%ground_heat_flux,          &
                          kVARS%soil_totalmoisture, kVARS%roughness_z0, kVARS%lsm_last_snow, kVARS%lsm_last_precip,      &
+                         kVARS%sm_last_snow, kVARS%sm_last_precip,                                                      &
                          kVARS%snow_temperature, kVARS%Ds, kVARS%snow_temperature_i, kVARS%Vol_Frac_I, kVARS%Vol_Frac_W, &
                          kVARS%Vol_Frac_A, kVARS%Vol_Frac_S, kVARS%Vol_Frac_WP, kVARS%Rg, kVARS%Rb, kVARS%Dd, kVARS%Sp, kVARS%mk, &
                          kVARS%snow_nlayers,                                                                      &
@@ -356,14 +358,30 @@ contains
 
 
             ! --- Update host: common snow model inputs ---
-            !$acc update host( &
-            !$acc   domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
-            !$acc   domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d, &
-            !$acc   domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
-            !$acc   domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d, &
-            !$acc   domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
-            !$acc   domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d)
-            
+            ! For SNOWPACK we read sm_last_* (snapshots taken at the last
+            ! layer deposit) instead of lsm_last_*; this lets sub-threshold
+            ! snowfall accumulate across calls until enough mass exists to
+            ! form a layer. For FSM the lsm_last_* path is used, since FSM
+            ! has no layer-formation threshold and lsm_last_* updates each
+            ! LSM tick.
+            if (options%physics%snowmodel == kSM_SNOWPACK) then
+                !$acc update host( &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%sm_last_precip)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%sm_last_snow)%v)%data_2d)
+            else
+                !$acc update host( &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%snowfall)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
+                !$acc   domain%vars_2d(domain%var_indx(kVARS%lsm_last_snow)%v)%data_2d)
+            endif
+
             associate( &
                 u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
                 v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d, &
@@ -375,10 +393,20 @@ contains
 
             windspd = sqrt(u_10m**2 + v_10m**2)
             where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
-            current_precipitation = (precipitation - lsm_last_precip) !+(domain%precipitation_bucket-rain_bucket)*kPRECIP_BUCKET_SIZE
 
-            ! Setup the input data for the snow models
-            current_snow = (snowfall-lsm_last_snow) !! MJ: snowfall in kg m-2
+            ! Setup the input data for the snow models. For SNOWPACK use the
+            ! per-deposit snapshots so held mass below hn<0.001 m carries
+            ! across calls; for FSM use the per-call lsm_last_* snapshots.
+            if (options%physics%snowmodel == kSM_SNOWPACK) then
+                associate(sm_last_precip => domain%vars_2d(domain%var_indx(kVARS%sm_last_precip)%v)%data_2d, &
+                          sm_last_snow   => domain%vars_2d(domain%var_indx(kVARS%sm_last_snow)%v)%data_2d)
+                current_precipitation = (precipitation - sm_last_precip)
+                current_snow          = (snowfall      - sm_last_snow)
+                end associate
+            else
+                current_precipitation = (precipitation - lsm_last_precip)
+                current_snow          = (snowfall      - lsm_last_snow)
+            endif
             current_rain = max(current_precipitation-current_snow,0.) !! MJ: rainfall in kg m-2
 
             ! SNOWSLIDE gravitational redistribution runs on its own hourly

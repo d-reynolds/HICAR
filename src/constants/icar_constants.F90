@@ -82,6 +82,8 @@ module icar_constants
         integer :: rainfall_ground
         integer :: lsm_last_snow
         integer :: lsm_last_precip
+        integer :: sm_last_snow
+        integer :: sm_last_precip
         integer :: exner
         integer :: nsquared
         integer :: density

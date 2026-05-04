@@ -2203,7 +2203,31 @@ contains
             var_meta%attributes  = [attribute_t("long_name", "precipitation at last lsm call"),                &
                                 attribute_t("units",         "mm"),                                   &
                                 attribute_t("coordinates",   "lat lon")]
-                    
+
+        !>------------------------------------------------------------
+        !!  Cumulative snowfall snapshot at the last SNOWPACK layer deposit;
+        !!  used so SNOWPACK can hold sub-threshold (hn<0.001 m) snow mass
+        !!  across calls until enough has accumulated to form a layer.
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%last_sm_snow) then
+            var_meta%name        = "last_sm_snow"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "snowfall at last snow-model layer deposit"),     &
+                                attribute_t("units",         "mm"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  Cumulative precipitation snapshot at the last SNOWPACK layer deposit;
+        !!  paired with last_sm_snow to compute the rain mass folded into the
+        !!  newly-formed layer's theta_w.
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%last_sm_precip) then
+            var_meta%name        = "last_sm_precip"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "precipitation at last snow-model layer deposit"),&
+                                attribute_t("units",         "mm"),                                   &
+                                attribute_t("coordinates",   "lat lon")]
+
         !>------------------------------------------------------------
         !!  Snow water equivalent on the surface
         !!------------------------------------------------------------
