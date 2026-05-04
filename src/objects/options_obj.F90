@@ -2106,7 +2106,7 @@ contains
         integer :: sm_nsnow_max(kMAX_NESTS)      ! maximum number of snow layers in the FSM2trans snow model
         integer, dimension(kMAX_NESTS) :: fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
                    fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_sntran, fsm_zoffst
-        real, dimension(kMAX_NESTS)    :: fsm_ds_min, fsm_ds_surflay
+        real, dimension(kMAX_NESTS)    :: fsm_ds_min, fsm_ds_surflay, lowest_susp_level
         logical, dimension(kMAX_NESTS) :: fsm_hn_on, fsm_for_hn
 
         integer, dimension(kMAX_NESTS) :: snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt
@@ -2128,7 +2128,7 @@ contains
                                  snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt, &
                                  snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable, &
                                  snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_reduce_n_elements, snowpack_variant, snowpack_enable_vapour_transport, &
-                                 suspension_fine_mesh_levels, suspension_layer, bs_atm_feedback, saltation_model, snowslide
+                                 suspension_fine_mesh_levels, lowest_susp_level, suspension_layer, bs_atm_feedback, saltation_model, snowslide
                                  
 
         CHARACTER(LEN=200) :: error_msg
@@ -2177,6 +2177,7 @@ contains
 
         call set_nml_var_default(suspension_layer, 'suspension_layer', print_info, gennml)
         call set_nml_var_default(suspension_fine_mesh_levels, 'suspension_fine_mesh_levels', print_info, gennml)
+        call set_nml_var_default(lowest_susp_level, 'lowest_susp_level', print_info, gennml)
         call set_nml_var_default(bs_atm_feedback, 'bs_atm_feedback', print_info, gennml)
         call set_nml_var_default(saltation_model, 'saltation_model', print_info, gennml)
         call set_nml_var_default(snowslide, 'snowslide', print_info, gennml)
@@ -2260,6 +2261,7 @@ contains
 
         call set_nml_var(sm_options%suspension_layer, suspension_layer(n_indx), 'suspension_layer', suspension_layer(1))
         call set_nml_var(sm_options%suspension_fine_mesh_levels, suspension_fine_mesh_levels(n_indx), 'suspension_fine_mesh_levels', suspension_fine_mesh_levels(1))
+        call set_nml_var(sm_options%lowest_susp_level, lowest_susp_level(n_indx), 'lowest_susp_level', lowest_susp_level(1))
         call set_nml_var(sm_options%bs_atm_feedback, bs_atm_feedback(n_indx), 'bs_atm_feedback')
         call set_nml_var(sm_options%saltation_model, saltation_model(n_indx), 'saltation_model', saltation_model(1))
         call set_nml_var(sm_options%snowslide, snowslide(n_indx), 'snowslide', snowslide(1))
@@ -3190,6 +3192,7 @@ contains
         call append_kv_logical(config_str, pos, 'sm', 'snowpack_enable_vapour_transport', this%sm%snowpack_enable_vapour_transport)
         call append_kv_int    (config_str, pos, 'sm', 'suspension_layer',              this%sm%suspension_layer)
         call append_kv_int    (config_str, pos, 'sm', 'suspension_fine_mesh_levels',   this%sm%suspension_fine_mesh_levels)
+        call append_kv_int    (config_str, pos, 'sm', 'lowest_susp_level',             this%sm%lowest_susp_level)
         call append_kv_logical(config_str, pos, 'sm', 'bs_atm_feedback',               this%sm%bs_atm_feedback)
         call append_kv_int    (config_str, pos, 'sm', 'saltation_model',               this%sm%saltation_model)
         call append_kv_int    (config_str, pos, 'sm', 'snowslide',                   this%sm%snowslide)

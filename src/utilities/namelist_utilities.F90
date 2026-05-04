@@ -3711,6 +3711,13 @@ contains
                 max = 30
                 group = "SM_Parameters"
                 type = 1
+            case("lowest_susp_level")
+                description = "Height of the lowest fine-mesh (suspension) level"
+                default = "0.15"
+                min = 0.05
+                max = 1.0
+                group = "SM_Parameters"
+                type = 1
             case("bs_atm_feedback")
                 description = "Enable atmospheric feedback from blowing snow sublimation"//achar(10)//BLNK_CHR_N// &
                     "(.False. = OFF, .True. = ON)"

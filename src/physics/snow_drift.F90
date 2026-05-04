@@ -31,7 +31,6 @@ module snow_drift
     ! Physical parameters
     ! -----------------------------------------------
     real, parameter :: PI_CONST     = 3.14159265358979323846
-    real, parameter :: LOWEST_LAYER       = 0.5        ! Lowest layer height (m)
     real, parameter :: BS_QS_MIN    = 0.0!1.0E-12     ! Floor for mass mixing ratio (kg/kg)
     real, parameter :: BS_NS_MIN    = 0.0!1.0E-6      ! Floor for number concentration (#/kg)
     real, parameter :: RHO_ICE      = 917.0       ! Density of ice (kg/m^3)
@@ -141,7 +140,7 @@ contains
         type(options_t), intent(in)    :: options
 
         integer :: i, j, k
-        real    :: z_top, dlog_z, z_bot, fm_top
+        real    :: z_top, dlog_z, z_bot, fm_top, lowest_susp_level
 
         if (module_initialized) then
             !$acc exit data delete(snc_dz,snc_Z,subl_mass_2d,kH_fm,wind_fm,v_fm,u_fm, qv_fm,t_fm,w_fm,qs_flux_cache,ns_flux_cache)
@@ -196,19 +195,20 @@ contains
         Kh_fm       = 0.0
         subl_mass_2d = 0.0
 
-        ! Build logarithmic fine mesh from LOWEST_LAYER to approximate first model level height
+        lowest_susp_level = options%sm%lowest_susp_level
+        ! Build logarithmic fine mesh from lowest_susp_level to approximate first model level height
         ! Heights are AGL; the actual coupling height varies per cell and is handled at runtime
         do j = jms, jme
             do i = ims, ime
                 fm_top  = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,1,j) * 0.5  ! Approximate first model level; adjusted per cell at runtime
 
-                dlog_z = log(fm_top / LOWEST_LAYER) / real(snc_N_loc)
+                dlog_z = log(fm_top / lowest_susp_level) / real(snc_N_loc)
                 do k = 1, snc_N_loc
-                    snc_Z(i, k, j) = LOWEST_LAYER * exp((real(k) - 0.5) * dlog_z)
+                    snc_Z(i, k, j) = lowest_susp_level * exp((real(k) - 0.5) * dlog_z)
                 end do
-                snc_dz(i,1,j) = LOWEST_LAYER * (exp(dlog_z) - 1.0)
+                snc_dz(i,1,j) = lowest_susp_level * (exp(dlog_z) - 1.0)
                 do k = 2, snc_N_loc
-                    snc_dz(i,k,j) = LOWEST_LAYER * (exp(real(k) * dlog_z) - exp(real(k-1) * dlog_z))
+                    snc_dz(i,k,j) = lowest_susp_level * (exp(real(k) * dlog_z) - exp(real(k-1) * dlog_z))
                 enddo
             enddo
         end do
@@ -1299,8 +1299,8 @@ contains
                 ! CFL stability limit
                 max_flux_q = max(0.0, qs(i,kts,j)) * dz_atm / dt
                 max_flux_n = max(0.0, ns(i,kts,j)) * dz_atm / dt
-                flux_down_q = max(0.0, min(flux_down_q, max_flux_q))
-                flux_down_n = max(0.0, min(flux_down_n, max_flux_n))
+                flux_down_q = 0.0!max(0.0, min(flux_down_q, max_flux_q))
+                flux_down_n = 0.0!max(0.0, min(flux_down_n, max_flux_n))
 
                 ! ============================================================
                 ! Mass-conserving application
