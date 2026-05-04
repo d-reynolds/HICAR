@@ -3192,7 +3192,7 @@ contains
         call append_kv_logical(config_str, pos, 'sm', 'snowpack_enable_vapour_transport', this%sm%snowpack_enable_vapour_transport)
         call append_kv_int    (config_str, pos, 'sm', 'suspension_layer',              this%sm%suspension_layer)
         call append_kv_int    (config_str, pos, 'sm', 'suspension_fine_mesh_levels',   this%sm%suspension_fine_mesh_levels)
-        call append_kv_int    (config_str, pos, 'sm', 'lowest_susp_level',             this%sm%lowest_susp_level)
+        call append_kv_real    (config_str, pos, 'sm', 'lowest_susp_level',             this%sm%lowest_susp_level)
         call append_kv_logical(config_str, pos, 'sm', 'bs_atm_feedback',               this%sm%bs_atm_feedback)
         call append_kv_int    (config_str, pos, 'sm', 'saltation_model',               this%sm%saltation_model)
         call append_kv_int    (config_str, pos, 'sm', 'snowslide',                   this%sm%snowslide)
