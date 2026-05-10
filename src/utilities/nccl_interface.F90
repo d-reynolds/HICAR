@@ -80,6 +80,30 @@ module nccl_interface
             type(c_ptr), value :: comm, stream
         end function
 
+        ! Double precision send/recv for the native iterative wind solver
+        integer(c_int) function nccl_send_double(buf, count, peer, comm, stream) bind(C, name='nccl_send_double')
+            import :: c_ptr, c_int
+            type(c_ptr), value :: buf
+            integer(c_int), value :: count, peer
+            type(c_ptr), value :: comm, stream
+        end function
+
+        integer(c_int) function nccl_recv_double(buf, count, peer, comm, stream) bind(C, name='nccl_recv_double')
+            import :: c_ptr, c_int
+            type(c_ptr), value :: buf
+            integer(c_int), value :: count, peer
+            type(c_ptr), value :: comm, stream
+        end function
+
+        ! All-reduce with sum op (double precision). sendbuf and recvbuf are device pointers.
+        integer(c_int) function nccl_allreduce_double_sum(sendbuf, recvbuf, count, comm, stream) &
+                bind(C, name='nccl_allreduce_double_sum')
+            import :: c_ptr, c_int
+            type(c_ptr), value :: sendbuf, recvbuf
+            integer(c_int), value :: count
+            type(c_ptr), value :: comm, stream
+        end function
+
     end interface
 
 end module nccl_interface

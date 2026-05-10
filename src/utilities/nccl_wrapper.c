@@ -205,3 +205,44 @@ int nccl_recv_float(float *buf, int count, int peer,
     NCCL_CHECK(ncclRecv(buf, (size_t)count, ncclFloat, peer, comm, stream));
     return 0;
 }
+
+/*
+ * NCCL point-to-point send (double).
+ * Used by the native iterative wind solver for Krylov-vector halo
+ * exchange — vectors are double precision.
+ */
+int nccl_send_double(const double *buf, int count, int peer,
+                     ncclComm_t comm, cudaStream_t stream) {
+    NCCL_CHECK(ncclSend(buf, (size_t)count, ncclDouble, peer, comm, stream));
+    return 0;
+}
+
+/*
+ * NCCL point-to-point recv (double).
+ */
+int nccl_recv_double(double *buf, int count, int peer,
+                     ncclComm_t comm, cudaStream_t stream) {
+    NCCL_CHECK(ncclRecv(buf, (size_t)count, ncclDouble, peer, comm, stream));
+    return 0;
+}
+
+/*
+ * NCCL all-reduce with sum op (double precision, in-place or out-of-place).
+ * sendbuf [in]  - device pointer to local data
+ * recvbuf [out] - device pointer for global result (may equal sendbuf for in-place)
+ * count   [in]  - number of double elements
+ * comm    [in]  - NCCL communicator
+ * stream  [in]  - CUDA stream
+ * Returns 0 on success.
+ *
+ * Used by the native iterative wind solver for the BiCGStab dot-product
+ * reductions (sigma = <r̂,v> and the 5-value omega/rho/||r|| reduction).
+ * Replaces MPI_Iallreduce + MPI_Wait so the reduction stays on-device,
+ * stream-ordered with the OpenACC kernels that produced the partial sums.
+ */
+int nccl_allreduce_double_sum(const double *sendbuf, double *recvbuf,
+                              int count, ncclComm_t comm, cudaStream_t stream) {
+    NCCL_CHECK(ncclAllReduce(sendbuf, recvbuf, (size_t)count, ncclDouble,
+                             ncclSum, comm, stream));
+    return 0;
+}

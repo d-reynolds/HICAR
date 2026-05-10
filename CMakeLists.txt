@@ -479,6 +479,32 @@ if(NOT AMGX_LIBRARY)
 endif()
 #########################################################
 
+# HICAR native iterative wind solver (pipelined BiCGStab + Block-Jacobi).
+# Pure OpenACC + MPI — no external solver library required.
+# Used as the wind solver when:
+#   1) HICAR_NATIVE_SOLVER=ON is requested explicitly (overrides AMGX/PETSc), OR
+#   2) Neither AMGX nor PETSc was found (automatic fallback).
+option(HICAR_NATIVE_SOLVER "Use HICAR's native iterative wind solver instead of AMGX/PETSc" OFF)
+
+if(HICAR_NATIVE_SOLVER OR (NOT AMGX_LIBRARY AND NOT PETSC_FOUND))
+	add_definitions(-DUSE_HICAR_SOLVER)
+	list(APPEND SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_hicar.F90)
+	set_source_files_properties(
+		${PROJECT_SOURCE_DIR}/src/physics/wind.F90
+		PROPERTIES OBJECT_DEPENDS
+		${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/hicar_lib.dir/src/physics/wind_iterative_hicar.F90.o
+	)
+	if(HICAR_NATIVE_SOLVER AND (AMGX_LIBRARY OR PETSC_FOUND))
+		message(STATUS "HICAR native wind solver REQUESTED (overrides AMGX/PETSc dispatch)")
+		# Drop the other backends' macros so wind.F90 dispatch picks native
+		remove_definitions(-DUSE_AMGX)
+		remove_definitions(-DUSE_PETSC)
+	else()
+		message(STATUS "HICAR native wind solver enabled (no external solver found)")
+	endif()
+endif()
+#########################################################
+
 if (NOT DEFINED NOAHMP_LIBRARY)
 	# Now fetch Noah-MP repo
 	message(STATUS "Fetching External Noah-MP library...")
