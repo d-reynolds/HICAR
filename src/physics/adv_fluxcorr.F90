@@ -443,106 +443,130 @@ contains
         integer :: i, j, k
 
         !$acc data present(u, v, w, q, denom, dz, flux_x_up, flux_y_up, flux_z_up, dumb_q) async(async_id)
-        
+
         ! ==========================================
         ! STEP 1: First half-step upwind fluxes
+        ! Split into 3 branchless kernels to keep the dominant interior loop vectorisable.
+        ! 1a: interior k=kms+1..kme (x, y, z fluxes — all three directions)
+        ! 1b: bottom k=kms (x, y only; flux_z_up at kms left untouched per original)
+        ! 1c: top k=kme+1 (only flux_z_up = 0.5*q(k-1)*w(k-1))
         ! ==========================================
-        !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(async_id)
+
+        ! 1a: interior — branchless 3D loop, all three directions
+        !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(async_id) &
+        !$acc private(q0, u_val, v_val, w_val, abs_u, abs_v, abs_w)
         do j = jts-2, jte+3
-            do k = kms, kme+1
+            do k = kms+1, kme
                 do i = its-2, ite+3
-                    if (k <= kme) then
-                        q0 = q(i,k,j)
-                        
-                        ! X-direction flux - first half-step
-                        u_val = u(i,k,j)
-                        abs_u = abs(u_val)
-                        flux_x_up(i,k,j) = 0.25 * (u_val * (q(i-1,k,j) + q0) + &
-                                                   abs_u * (q(i-1,k,j) - q0))
-                        
-                        ! Y-direction flux - first half-step
-                        v_val = v(i,k,j)
-                        abs_v = abs(v_val)
-                        flux_y_up(i,k,j) = 0.25 * (v_val * (q(i,k,j-1) + q0) + &
-                                                   abs_v * (q(i,k,j-1) - q0))
-                        
-                        ! Z-direction flux - first half-step
-                        if (k > kms) then
-                            w_val = w(i,k-1,j)
-                            abs_w = abs(w_val)
-                            flux_z_up(i,k,j) = 0.25 * (w_val * (q(i,k-1,j) + q0) + &
-                                                       abs_w * (q(i,k-1,j) - q0))
-                        endif
-                    else
-                        flux_z_up(i,k,j) = 0.5 * q(i,k-1,j) * w(i,k-1,j)
-                    endif
+                    q0 = q(i,k,j)
+                    u_val = u(i,k,j); abs_u = abs(u_val)
+                    v_val = v(i,k,j); abs_v = abs(v_val)
+                    w_val = w(i,k-1,j); abs_w = abs(w_val)
+                    flux_x_up(i,k,j) = 0.25 * (u_val * (q(i-1,k,j) + q0) + abs_u * (q(i-1,k,j) - q0))
+                    flux_y_up(i,k,j) = 0.25 * (v_val * (q(i,k,j-1) + q0) + abs_v * (q(i,k,j-1) - q0))
+                    flux_z_up(i,k,j) = 0.25 * (w_val * (q(i,k-1,j) + q0) + abs_w * (q(i,k-1,j) - q0))
                 enddo
             enddo
         enddo
-        
+
+        ! 1b: bottom k=kms — only x and y; flux_z_up(i,kms,j) left at its initial value
+        !$acc parallel loop gang vector tile(32, 8) async(async_id) &
+        !$acc private(q0, u_val, v_val, abs_u, abs_v)
+        do j = jts-2, jte+3
+            do i = its-2, ite+3
+                q0 = q(i,kms,j)
+                u_val = u(i,kms,j); abs_u = abs(u_val)
+                v_val = v(i,kms,j); abs_v = abs(v_val)
+                flux_x_up(i,kms,j) = 0.25 * (u_val * (q(i-1,kms,j) + q0) + abs_u * (q(i-1,kms,j) - q0))
+                flux_y_up(i,kms,j) = 0.25 * (v_val * (q(i,kms,j-1) + q0) + abs_v * (q(i,kms,j-1) - q0))
+            enddo
+        enddo
+
+        ! 1c: top k=kme+1 — only flux_z_up = 0.5*q(kme)*w(kme)
+        !$acc parallel loop gang vector tile(32, 8) async(async_id)
+        do j = jts-2, jte+3
+            do i = its-2, ite+3
+                flux_z_up(i,kme+1,j) = 0.5 * q(i,kme,j) * w(i,kme,j)
+            enddo
+        enddo
+
         ! ==========================================
-        ! STEP 2: Compute intermediate concentration after first half-step
+        ! STEP 2: Intermediate concentration. Split bottom k=kms slab (different flux_diff_z formula).
         ! ==========================================
-        !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(async_id)
+
+        ! 2a: bottom k=kms — flux_diff_z = flux_z_up(kms+1,j) (no flux_z_up at kms in the original)
+        !$acc parallel loop gang vector tile(32, 8) async(async_id) &
+        !$acc private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val)
         do j = jts-2, jte+2
-            do k = kms, kme
+            do i = its-2, ite+2
+                flux_diff_x = flux_x_up(i+1,kms,j) - flux_x_up(i,kms,j)
+                flux_diff_y = flux_y_up(i,kms,j+1) - flux_y_up(i,kms,j)
+                flux_diff_z = flux_z_up(i,kms+1,j)
+                denom_val = denom(i,kms,j); dz_val = dz(i,kms,j)
+                dumb_q(i,kms,j) = q(i,kms,j) - (flux_diff_x + flux_diff_y + flux_diff_z / dz_val) * denom_val
+            enddo
+        enddo
+
+        ! 2b: interior k=kms+1..kme — branchless 3D
+        !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(async_id) &
+        !$acc private(flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val)
+        do j = jts-2, jte+2
+            do k = kms+1, kme
                 do i = its-2, ite+2
                     flux_diff_x = flux_x_up(i+1,k,j) - flux_x_up(i,k,j)
                     flux_diff_y = flux_y_up(i,k,j+1) - flux_y_up(i,k,j)
-                    
-                    if (k == kms) then
-                        flux_diff_z = flux_z_up(i,k+1,j)
-                    else
-                        flux_diff_z = flux_z_up(i,k+1,j) - flux_z_up(i,k,j)
-                    endif
-                    
-                    denom_val = denom(i,k,j)
-                    dz_val = dz(i,k,j)
-                    
+                    flux_diff_z = flux_z_up(i,k+1,j) - flux_z_up(i,k,j)
+                    denom_val = denom(i,k,j); dz_val = dz(i,k,j)
                     dumb_q(i,k,j) = q(i,k,j) - (flux_diff_x + flux_diff_y + flux_diff_z / dz_val) * denom_val
                 enddo
             enddo
         enddo
-        
+
         ! ==========================================
-        ! STEP 3: Second half-step upwind fluxes (accumulate)
+        ! STEP 3: Second half-step upwind fluxes (accumulate). Mirror of step 1.
         ! ==========================================
-        !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(async_id)
+
+        ! 3a: interior k=kms+1..kme
+        !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(async_id) &
+        !$acc private(q0, u_val, v_val, w_val, abs_u, abs_v, abs_w)
         do j = jts-1, jte+2
-            do k = kms, kme+1
+            do k = kms+1, kme
                 do i = its-1, ite+2
-                    if (k <= kme) then
-                        q0 = dumb_q(i,k,j)
-                        
-                        ! X-direction flux - second half-step
-                        u_val = u(i,k,j)
-                        abs_u = abs(u_val)
-                        flux_x_up(i,k,j) = flux_x_up(i,k,j) + 0.25 * (u_val * (dumb_q(i-1,k,j) + q0) + &
-                                                                       abs_u * (dumb_q(i-1,k,j) - q0))
-                        
-                        ! Y-direction flux - second half-step
-                        v_val = v(i,k,j)
-                        abs_v = abs(v_val)
-                        flux_y_up(i,k,j) = flux_y_up(i,k,j) + 0.25 * (v_val * (dumb_q(i,k,j-1) + q0) + &
-                                                                       abs_v * (dumb_q(i,k,j-1) - q0))
-                        
-                        ! Z-direction flux - second half-step
-                        if (k > kms) then
-                            w_val = w(i,k-1,j)
-                            abs_w = abs(w_val)
-                            flux_z_up(i,k,j) = flux_z_up(i,k,j) + 0.25 * (w_val * (dumb_q(i,k-1,j) + q0) + &
-                                                                           abs_w * (dumb_q(i,k-1,j) - q0))
-                        endif
-                    else
-                        flux_z_up(i,k,j) = flux_z_up(i,k,j) + 0.5 * dumb_q(i,k-1,j) * w(i,k-1,j)
-                    endif
+                    q0 = dumb_q(i,k,j)
+                    u_val = u(i,k,j); abs_u = abs(u_val)
+                    v_val = v(i,k,j); abs_v = abs(v_val)
+                    w_val = w(i,k-1,j); abs_w = abs(w_val)
+                    flux_x_up(i,k,j) = flux_x_up(i,k,j) + 0.25 * (u_val * (dumb_q(i-1,k,j) + q0) + abs_u * (dumb_q(i-1,k,j) - q0))
+                    flux_y_up(i,k,j) = flux_y_up(i,k,j) + 0.25 * (v_val * (dumb_q(i,k,j-1) + q0) + abs_v * (dumb_q(i,k,j-1) - q0))
+                    flux_z_up(i,k,j) = flux_z_up(i,k,j) + 0.25 * (w_val * (dumb_q(i,k-1,j) + q0) + abs_w * (dumb_q(i,k-1,j) - q0))
                 enddo
             enddo
         enddo
-        
+
+        ! 3b: bottom k=kms — x and y only
+        !$acc parallel loop gang vector tile(32, 8) async(async_id) &
+        !$acc private(q0, u_val, v_val, abs_u, abs_v)
+        do j = jts-1, jte+2
+            do i = its-1, ite+2
+                q0 = dumb_q(i,kms,j)
+                u_val = u(i,kms,j); abs_u = abs(u_val)
+                v_val = v(i,kms,j); abs_v = abs(v_val)
+                flux_x_up(i,kms,j) = flux_x_up(i,kms,j) + 0.25 * (u_val * (dumb_q(i-1,kms,j) + q0) + abs_u * (dumb_q(i-1,kms,j) - q0))
+                flux_y_up(i,kms,j) = flux_y_up(i,kms,j) + 0.25 * (v_val * (dumb_q(i,kms,j-1) + q0) + abs_v * (dumb_q(i,kms,j-1) - q0))
+            enddo
+        enddo
+
+        ! 3c: top k=kme+1 — z only, accumulate
+        !$acc parallel loop gang vector tile(32, 8) async(async_id)
+        do j = jts-1, jte+2
+            do i = its-1, ite+2
+                flux_z_up(i,kme+1,j) = flux_z_up(i,kme+1,j) + 0.5 * dumb_q(i,kme,j) * w(i,kme,j)
+            enddo
+        enddo
+
         !$acc end data
         ! Note: No wait here - async computation continues
-        
+
     end subroutine compute_upwind_fluxes_async
 
     !>------------------------------------------------------------
@@ -572,118 +596,150 @@ contains
         !$acc data present(u, v, w, flux_x, flux_y, flux_z, q, denom, dz, scale_in, scale_out, flux_x_up, flux_y_up, flux_z_up, usign, vsign, wsign) async(1000)
         
         ! ==========================================
-        ! STEP 1: FUSED KERNEL - Compute qmax/qmin + scale_in/scale_out using pre-computed upwind fluxes
+        ! STEP 1: scale_in/scale_out — split into 2 kernels (bottom k=kms vs interior)
+        ! to keep the dominant interior branchless. The k==kms branch sets flux_z_up_0=0
+        ! and fz=0; interior reads flux_z_up(i,k,j) and computes fz normally.
+        ! Note: the early `cycle` when |qmax|+|qmin|==0 is preserved as is — it's a
+        ! per-cell short-circuit, not a row-category branch, so it doesn't inhibit
+        ! vectorisation more than absolutely necessary.
         ! ==========================================
-        !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(1000)
+
+        ! 1a: bottom k=kms (flux_z_up_0 = 0, fz = 0)
+        !$acc parallel loop gang vector tile(32, 8) async(1000) &
+        !$acc private(q0, q_i, q_j, q_k, qmax_local, qmin_local, dz_t_i, temp, &
+        !$acc         flux_x_up_0, flux_x_up_1, flux_y_up_0, flux_y_up_1, flux_z_up_1, &
+        !$acc         fx, fx1, fy, fy1, fz, fz1, flux_in, flux_out)
         do j = jts-1, jte+1
-            do k = kms, kme
-                do i = its-1, ite+1                    
-                    ! ==========================================
-                    ! 2. Compute qmax/qmin on-the-fly (no array storage)
-                    ! ==========================================
+            do i = its-1, ite+1
+                q0 = q(i,kms,j)
+                q_i = q(i+usign(i,kms,j),kms,j)
+                q_j = q(i,kms,j+vsign(i,kms,j))
+                q_k = q(i,kms+wsign(i,kms,j),j)
+                qmax_local = max(q0, q_i, q_j, q_k)
+                qmin_local = min(q0, q_i, q_j, q_k)
+                if ((abs(qmax_local) + abs(qmin_local)) == 0.0) then
+                    scale_in(i,kms,j) = 0.0
+                    scale_out(i,kms,j) = 0.0
+                    cycle
+                endif
+                dz_t_i = 1.0 / dz(i,kms,j)
+                flux_x_up_0 = flux_x_up(i,kms,j);   flux_x_up_1 = flux_x_up(i+1,kms,j)
+                flux_y_up_0 = flux_y_up(i,kms,j);   flux_y_up_1 = flux_y_up(i,kms,j+1)
+                flux_z_up_1 = flux_z_up(i,kms+1,j)
+                fz = 0.0
+                fx  = flux_x(i,kms,j)   - flux_x_up_0
+                fx1 = flux_x(i+1,kms,j) - flux_x_up_1
+                fy  = flux_y(i,kms,j)   - flux_y_up_0
+                fy1 = flux_y(i,kms,j+1) - flux_y_up_1
+                fz1 = flux_z(i,kms+1,j) - flux_z_up_1
+                temp = q0 - ((flux_x_up_1 - flux_x_up_0) + (flux_y_up_1 - flux_y_up_0) + &
+                             flux_z_up_1 * dz_t_i) * denom(i,kms,j)
+                flux_in  = ((max(0.0,-fx1) + max(0.0,fx)) + (max(0.0,-fy1) + max(0.0,fy)) + &
+                            max(0.0,-fz1) * dz_t_i) * denom(i,kms,j)
+                flux_out = ((max(0.0,fx1)  + max(0.0,-fx)) + (max(0.0,fy1)  + max(0.0,-fy)) + &
+                            max(0.0,fz1)  * dz_t_i) * denom(i,kms,j)
+                scale_in(i,kms,j)  = (qmax_local - temp) / (flux_in  + 1.0e-9)
+                scale_out(i,kms,j) = (temp - qmin_local) / (flux_out + 1.0e-9)
+            enddo
+        enddo
+
+        ! 1b: interior k=kms+1..kme — branchless 3D
+        !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(1000) &
+        !$acc private(q0, q_i, q_j, q_k, qmax_local, qmin_local, dz_t_i, temp, &
+        !$acc         flux_x_up_0, flux_x_up_1, flux_y_up_0, flux_y_up_1, flux_z_up_0, flux_z_up_1, &
+        !$acc         fx, fx1, fy, fy1, fz, fz1, flux_in, flux_out)
+        do j = jts-1, jte+1
+            do k = kms+1, kme
+                do i = its-1, ite+1
                     q0 = q(i,k,j)
                     q_i = q(i+usign(i,k,j),k,j)
                     q_j = q(i,k,j+vsign(i,k,j))
                     q_k = q(i,k+wsign(i,k,j),j)
-                    
                     qmax_local = max(q0, q_i, q_j, q_k)
                     qmin_local = min(q0, q_i, q_j, q_k)
-                    
-                    ! Skip if no variation
                     if ((abs(qmax_local) + abs(qmin_local)) == 0.0) then
                         scale_in(i,k,j) = 0.0
                         scale_out(i,k,j) = 0.0
                         cycle
                     endif
-                    
                     dz_t_i = 1.0 / dz(i,k,j)
-                    
-                    ! ==========================================
-                    ! 3. Use pre-computed two-step upwind fluxes
-                    ! ==========================================
-                    flux_x_up_0 = flux_x_up(i,k,j)
-                    flux_x_up_1 = flux_x_up(i+1,k,j)
-                    flux_y_up_0 = flux_y_up(i,k,j)
-                    flux_y_up_1 = flux_y_up(i,k,j+1)
-                    flux_z_up_1 = flux_z_up(i,k+1,j)
-                    
-                    if (k == kms) then
-                        flux_z_up_0 = 0.0
-                        fz = 0.0
-                    else
-                        flux_z_up_0 = flux_z_up(i,k,j)
-                        fz = flux_z(i,k,j) - flux_z_up_0
-                    endif
-                    
-                    ! ==========================================
-                    ! 4. Compute flux differences (higher-order - upwind)
-                    ! ==========================================
-                    fx = flux_x(i,k,j) - flux_x_up_0
+                    flux_x_up_0 = flux_x_up(i,k,j);   flux_x_up_1 = flux_x_up(i+1,k,j)
+                    flux_y_up_0 = flux_y_up(i,k,j);   flux_y_up_1 = flux_y_up(i,k,j+1)
+                    flux_z_up_0 = flux_z_up(i,k,j);   flux_z_up_1 = flux_z_up(i,k+1,j)
+                    fz  = flux_z(i,k,j)   - flux_z_up_0
+                    fx  = flux_x(i,k,j)   - flux_x_up_0
                     fx1 = flux_x(i+1,k,j) - flux_x_up_1
-                    fy = flux_y(i,k,j) - flux_y_up_0
+                    fy  = flux_y(i,k,j)   - flux_y_up_0
                     fy1 = flux_y(i,k,j+1) - flux_y_up_1
                     fz1 = flux_z(i,k+1,j) - flux_z_up_1
-                    
-                    ! ==========================================
-                    ! 5. Compute concentration with upwind-only
-                    ! ==========================================
-                    temp = q0 - ((flux_x_up_1 - flux_x_up_0) + &
-                                 (flux_y_up_1 - flux_y_up_0) + &
+                    temp = q0 - ((flux_x_up_1 - flux_x_up_0) + (flux_y_up_1 - flux_y_up_0) + &
                                  (flux_z_up_1 - flux_z_up_0) * dz_t_i) * denom(i,k,j)
-                    
-                    ! ==========================================
-                    ! 6. Compute flux limiters
-                    ! ==========================================
-                    flux_in = ((max(0.0,-fx1) + max(0.0,fx)) + &
-                               (max(0.0,-fy1) + max(0.0,fy)) + &
-                               (max(0.0,-fz1) + max(0.0,fz)) * dz_t_i) * denom(i,k,j)
-                    
-                    flux_out = ((max(0.0,fx1) + max(0.0,-fx)) + &
-                                (max(0.0,fy1) + max(0.0,-fy)) + &
-                                (max(0.0,fz1) + max(0.0,-fz)) * dz_t_i) * denom(i,k,j)
-                    
-                    scale_in(i,k,j) = (qmax_local - temp) / (flux_in + 1.0e-9)
+                    flux_in  = ((max(0.0,-fx1) + max(0.0,fx)) + (max(0.0,-fy1) + max(0.0,fy)) + &
+                                (max(0.0,-fz1) + max(0.0,fz)) * dz_t_i) * denom(i,k,j)
+                    flux_out = ((max(0.0,fx1)  + max(0.0,-fx)) + (max(0.0,fy1)  + max(0.0,-fy)) + &
+                                (max(0.0,fz1)  + max(0.0,-fz)) * dz_t_i) * denom(i,k,j)
+                    scale_in(i,k,j)  = (qmax_local - temp) / (flux_in  + 1.0e-9)
                     scale_out(i,k,j) = (temp - qmin_local) / (flux_out + 1.0e-9)
-                    
                 enddo
             enddo
         enddo
-        
+
         ! ==========================================
-        ! STEP 2: Apply flux corrections using pre-computed two-step upwind fluxes
+        ! STEP 2: Apply flux corrections. Split off bottom k=kms slab (no z-direction work).
         ! ==========================================
-        !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(1001) wait(1000)
+
+        ! 2a: bottom k=kms — only x and y corrections (z skipped per original)
+        !$acc parallel loop gang vector tile(32, 8) async(1001) wait(1000) &
+        !$acc private(scale_in_val, scale_out_val, flux_x_up_0, flux_y_up_0, scale)
         do j = jts, jte+1
-            do k = kms, kme
+            do i = its, ite+1
+                scale_in_val  = scale_in(i,kms,j)
+                scale_out_val = scale_out(i,kms,j)
+                flux_x_up_0 = flux_x_up(i,kms,j)
+                flux_x(i,kms,j) = flux_x(i,kms,j) - flux_x_up_0
+                scale = merge(max(0.0, min(scale_in_val,  scale_out(i-1,kms,j), 1.0)), &
+                              max(0.0, min(scale_out_val, scale_in(i-1,kms,j),  1.0)), &
+                              flux_x(i,kms,j) > 0.0)
+                flux_x(i,kms,j) = scale * flux_x(i,kms,j) + flux_x_up_0
+
+                flux_y_up_0 = flux_y_up(i,kms,j)
+                flux_y(i,kms,j) = flux_y(i,kms,j) - flux_y_up_0
+                scale = merge(max(0.0, min(scale_in_val,  scale_out(i,kms,j-1), 1.0)), &
+                              max(0.0, min(scale_out_val, scale_in(i,kms,j-1),  1.0)), &
+                              flux_y(i,kms,j) > 0.0)
+                flux_y(i,kms,j) = scale * flux_y(i,kms,j) + flux_y_up_0
+            enddo
+        enddo
+
+        ! 2b: interior k=kms+1..kme — branchless 3D, includes z-direction correction
+        !$acc parallel loop gang vector tile(32, 8, 1) vector_length(256) async(1001) wait(1000) &
+        !$acc private(scale_in_val, scale_out_val, flux_x_up_0, flux_y_up_0, flux_z_up_0, scale)
+        do j = jts, jte+1
+            do k = kms+1, kme
                 do i = its, ite+1
-                    scale_in_val = scale_in(i,k,j)
+                    scale_in_val  = scale_in(i,k,j)
                     scale_out_val = scale_out(i,k,j)
-                    
-                    ! X-direction flux correction
+
                     flux_x_up_0 = flux_x_up(i,k,j)
                     flux_x(i,k,j) = flux_x(i,k,j) - flux_x_up_0
-                    scale = merge(max(0.0, min(scale_in_val, scale_out(i-1,k,j), 1.0)), &
-                                  max(0.0, min(scale_out_val, scale_in(i-1,k,j), 1.0)), &
+                    scale = merge(max(0.0, min(scale_in_val,  scale_out(i-1,k,j), 1.0)), &
+                                  max(0.0, min(scale_out_val, scale_in(i-1,k,j),  1.0)), &
                                   flux_x(i,k,j) > 0.0)
                     flux_x(i,k,j) = scale * flux_x(i,k,j) + flux_x_up_0
-                    
-                    ! Y-direction flux correction
+
                     flux_y_up_0 = flux_y_up(i,k,j)
                     flux_y(i,k,j) = flux_y(i,k,j) - flux_y_up_0
-                    scale = merge(max(0.0, min(scale_in_val, scale_out(i,k,j-1), 1.0)), &
-                                  max(0.0, min(scale_out_val, scale_in(i,k,j-1), 1.0)), &
+                    scale = merge(max(0.0, min(scale_in_val,  scale_out(i,k,j-1), 1.0)), &
+                                  max(0.0, min(scale_out_val, scale_in(i,k,j-1),  1.0)), &
                                   flux_y(i,k,j) > 0.0)
                     flux_y(i,k,j) = scale * flux_y(i,k,j) + flux_y_up_0
-                    
-                    ! Z-direction flux correction
-                    if (k > kms) then
-                        flux_z_up_0 = flux_z_up(i,k,j)
-                        flux_z(i,k,j) = flux_z(i,k,j) - flux_z_up_0
-                        scale = merge(max(0.0, min(scale_in_val, scale_out(i,k-1,j), 1.0)), &
-                                      max(0.0, min(scale_out_val, scale_in(i,k-1,j), 1.0)), &
-                                      flux_z(i,k,j) > 0.0)
-                        flux_z(i,k,j) = scale * flux_z(i,k,j) + flux_z_up_0
-                    endif
+
+                    flux_z_up_0 = flux_z_up(i,k,j)
+                    flux_z(i,k,j) = flux_z(i,k,j) - flux_z_up_0
+                    scale = merge(max(0.0, min(scale_in_val,  scale_out(i,k-1,j), 1.0)), &
+                                  max(0.0, min(scale_out_val, scale_in(i,k-1,j),  1.0)), &
+                                  flux_z(i,k,j) > 0.0)
+                    flux_z(i,k,j) = scale * flux_z(i,k,j) + flux_z_up_0
                 enddo
             enddo
         enddo

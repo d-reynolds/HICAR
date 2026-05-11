@@ -7,7 +7,7 @@
 !! ----------------------------------------------------------------------------
 module advection
     use icar_constants
-    use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, adv_std_clean_wind_arrays
+    use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind
     use adv_fluxcorr,               only : init_fluxcorr, set_sign_arrays, compute_upwind_fluxes_async
     ! use debug_module,               only : domain_fix
     use options_interface,          only: options_t
@@ -71,7 +71,9 @@ contains
         type(variable_t) :: var_to_advect
         integer :: n
 
-        real, allocatable :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
+        ! Persist across timesteps via save — allocated once on first call by
+        ! adv_std_compute_wind, reused thereafter. Avoids per-timestep alloc/dealloc cycle.
+        real, allocatable, save :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
 
         if (options%physics%advection==kADV_STD) then
 
@@ -96,22 +98,13 @@ contains
             call RK3_adv(domain, options, U_m, V_m, W_m, denom, flux_time, flux_corr_time, sum_time, adv_wind_time)
         elseif (options%physics%advection==kADV_STD) then
             do n = 1, size(domain%adv_vars)
-
-                ! if (options%physics%advection==kADV_STD) then
-    
-                !     call RK3_adv(domain%vars_3d(domain%adv_vars(n)%v)%data_3d, temp, options, U_m, V_m, W_m, denom, &
-                !          domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, flux_time, flux_corr_time, sum_time, adv_wind_time, n)
-                ! 
-            ! else
-                if (options%physics%advection==kADV_STD) then
-                    call adv_std_advect3d(domain%vars_3d(domain%adv_vars(n)%v)%data_3d,domain%vars_3d(domain%adv_vars(n)%v)%data_3d, &
-                        U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_corr_time, sum_time)
-                endif
+            if (options%physics%advection==kADV_STD) then
+                call adv_std_advect3d(domain%vars_3d(domain%adv_vars(n)%v)%data_3d,domain%vars_3d(domain%adv_vars(n)%v)%data_3d, &
+                    U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_corr_time, sum_time)
+            endif
             enddo
         endif
 
-        call adv_std_clean_wind_arrays(U_m, V_m, W_m, denom)
-        ! if (options%adv%flux_corr==kFLUXCOR_MONO) call clear_flux_sign_arrays()
     end subroutine advect
 
     subroutine RK3_adv(domain, options, U_m, V_m, W_m, denom, flux_time, flux_corr_time, sum_time, adv_wind_time)

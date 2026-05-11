@@ -26,7 +26,7 @@ module adv_std
     ! Fine-mesh flux arrays (used by flux3_fm / sum_kernel_fm)
     real, dimension(:,:,:), allocatable   :: flux_x_fm, flux_y_fm, flux_z_fm
 
-    public :: adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, adv_std_clean_wind_arrays
+    public :: adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind
     public :: adv_std_compute_wind_2d_fm, flux_2d_fm, sum_kernel_2d_fm, adv_std_clean_wind_arrays_fm
     public :: flux_x_fm, flux_y_fm, flux_z_fm
 
@@ -318,33 +318,54 @@ contains
             !$acc end parallel
         else if (vorder==3) then
             coef = (1./12)*t_factor
-            ! Using tile(32,2) for vertical direction with more k levels
-            !$acc parallel loop gang vector tile(32,2,1) async(2) private(u_val, abs_u_val, tmp)
+            t_factor_compact = 0.5 * t_factor
+            !$acc parallel async(2)
+
+            ! Interior k=kms+2..kme-1 — branchless 4-pt 3rd-order stencil
+            !$acc loop gang vector tile(32,2,1) private(u, qn1, q0, q1, qn2, tmp)
             do j = j_s,j_e
-            do k = kms+1,kme+1
+            do k = kms+2,kme-1
             do i = i_s,i_e
-                u = W_m(i,k-1,j)
-                qn1 = q(i,k-1,j); 
-                if (k==kms+1 .or. k==kme) then
-                    q0  = q(i,k,j);
-                    flux_z(i,k,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0)  * 0.5 * t_factor
-                elseif(k==kme+1) then
-                    flux_z(i,k,j) = qn1 * u * t_factor
-                else 
-                    q0  = q(i,k,j);
-                    q1  = q(i,k+1,j)
-                    qn2 = q(i,k-2,j)
-                    !Calculation of 4th order fluxes for later application of 3rd order diffusive terms
-                    tmp = 7*(q0+qn1) - (q1+qn2)
-                    tmp = u*tmp
-                    !Application of 3rd order diffusive terms
-                    tmp = tmp - abs(u) * (3 * (q0 - qn1) - (q1 - qn2))
-                    !Application of Upwind fluxes to higher order fluxes -- needed for flux correction step
-                    flux_z(i,k,j) = tmp*coef         
-                end if
+                u   = W_m(i,k-1,j)
+                qn2 = q(i,k-2,j)
+                qn1 = q(i,k-1,j)
+                q0  = q(i,k,j)
+                q1  = q(i,k+1,j)
+                tmp = 7*(q0+qn1) - (q1+qn2)
+                tmp = u*tmp
+                tmp = tmp - abs(u) * (3 * (q0 - qn1) - (q1 - qn2))
+                flux_z(i,k,j) = tmp*coef
             enddo
             enddo
             enddo
+
+            ! Boundary slabs k=kms+1 and k=kme — 2-pt upwind (insufficient stencil for 3rd order)
+            !$acc loop gang vector tile(64,1) private(u, qn1, q0)
+            do j = j_s,j_e
+            do i = i_s,i_e
+                u = W_m(i,kms,j)
+                qn1 = q(i,kms,j)
+                q0  = q(i,kms+1,j)
+                flux_z(i,kms+1,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0) * t_factor_compact
+
+                u = W_m(i,kme-1,j)
+                qn1 = q(i,kme-1,j)
+                q0  = q(i,kme,j)
+                flux_z(i,kme,j) = ((u + ABS(u)) * qn1 + (u - ABS(u)) * q0) * t_factor_compact
+            enddo
+            enddo
+
+            ! Top slab k=kme+1 — outflow-only
+            !$acc loop gang vector tile(64,1) private(u, qn1)
+            do j = j_s,j_e
+            do i = i_s,i_e
+                u = W_m(i,kme,j)
+                qn1 = q(i,kme,j)
+                flux_z(i,kme+1,j) = qn1 * u * t_factor
+            enddo
+            enddo
+
+            !$acc end parallel
         else if (vorder==5) then
             coef = (1./60)*t_factor
             !$acc parallel async(2)
@@ -560,24 +581,27 @@ contains
         real, dimension(ims:ime,kms:kme,jms:jme+1), intent(in) :: v, jaco_v
         real, dimension(ims:ime,kms:kme,jms:jme), intent(in) :: w, jaco_w, density, dz, jaco
         type(options_t),    intent(in)  :: options
-        real, allocatable, intent(out) :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
+        real, allocatable, intent(inout) :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
         real,intent(in)::dt, dx
         
         integer :: i, j, k
         real, dimension(ims:ime,kms:kme,jms:jme) :: rho
         logical :: advect_density
 
-
-        ! allocate the arrays
-        allocate(U_m     (i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1))
-        allocate(V_m     (i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1))
-        allocate(W_m     (i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1))
-        allocate(denom   (ims:ime,  kms:kme,jms:jme  ))
-        allocate(flux_x(i_s:i_e+1,kms:kme,j_s:j_e+1))
-        allocate(flux_y(i_s:i_e+1,  kms:kme,j_s:j_e+1))
-        allocate(flux_z(i_s:i_e+1,  kms:kme+1,j_s:j_e+1))
+        ! Allocate the arrays on first call; subsequent calls reuse them. Per-timestep
+        ! alloc/free cycle was wasteful (and consistent with the wind solver lesson:
+        ! per-call alloc churn hurts at scale). Caller's intent changed from `out` to
+        ! `inout` to allow reuse; first call still allocates from an unallocated argument.
+        if (.not. allocated(U_m))   allocate(U_m   (i_s_w:i_e_w+1, kms:kme,   j_s_w:j_e_w+1))
+        if (.not. allocated(V_m))   allocate(V_m   (i_s_w:i_e_w+1, kms:kme,   j_s_w:j_e_w+1))
+        if (.not. allocated(W_m))   allocate(W_m   (i_s_w:i_e_w+1, kms:kme,   j_s_w:j_e_w+1))
+        if (.not. allocated(denom)) allocate(denom (ims:ime,       kms:kme,   jms:jme))
+        if (.not. allocated(flux_x)) allocate(flux_x(i_s:i_e+1, kms:kme,   j_s:j_e+1))
+        if (.not. allocated(flux_y)) allocate(flux_y(i_s:i_e+1, kms:kme,   j_s:j_e+1))
+        if (.not. allocated(flux_z)) allocate(flux_z(i_s:i_e+1, kms:kme+1, j_s:j_e+1))
 
         advect_density = options%adv%advect_density
+        ! Register on device once (subsequent calls see them already present)
         !$acc enter data create(U_m,V_m,W_m,denom, flux_x, flux_y, flux_z)
 
 
@@ -649,21 +673,6 @@ contains
 
     end subroutine adv_std_compute_wind
 
-    subroutine adv_std_clean_wind_arrays(U_m,V_m,W_m,denom)
-        implicit none
-        real, allocatable, dimension(:,:,:), intent(inout) :: U_m, V_m, W_m, denom
-
-        !$acc exit data delete(U_m,V_m,W_m,denom, flux_x, flux_y, flux_z)
-        
-        if (allocated(U_m)) deallocate(U_m)
-        if (allocated(V_m)) deallocate(V_m)
-        if (allocated(W_m)) deallocate(W_m)
-        if (allocated(denom)) deallocate(denom)
-        if (allocated(flux_x)) deallocate(flux_x)
-        if (allocated(flux_y)) deallocate(flux_y)
-        if (allocated(flux_z)) deallocate(flux_z)
-
-    end subroutine adv_std_clean_wind_arrays
 
 
     !>------------------------------------------------------------
