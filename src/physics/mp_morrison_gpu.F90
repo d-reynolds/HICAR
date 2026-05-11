@@ -898,24 +898,33 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
      REAL    FMULT                    ! TEMP.-DEP. PARAMETER FOR RIME-SPLINTERING
      REAL    COFFI                    ! ICE AUTOCONVERSION PARAMETER
 
-! FALL SPEED WORKING VARIABLES (DEFINED IN CODE)
+! FALL SPEED WORKING SCALARS
+! The 30 DUM*/F*/FALOUT* 3D arrays that used to live here were removed
+! 2026-05-11 — they're entirely subsumed by the gang-private 1D *_loc arrays
+! declared below, which the sedimentation kernel uses exclusively. Removing
+! the 3D allocations frees ~50-100 MB of GPU memory per nest at typical
+! HICAR grid sizes (30 × ITE×KTE×JTE × 4 bytes).
 
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::    DUMI,DUMR,DUMFNI,DUMG,DUMFNG
-      REAL UNI, UMI,UMR
+      REAL UNI, UMI, UMR
       REAL RGVM
-      REAL FALTNDR,FALTNDI,FALTNDNI,RHO2
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   DUMQS,DUMFNS
-      REAL UMS,UNS
-      REAL FALTNDS,FALTNDNS,UNR,FALTNDG,FALTNDNG
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::    DUMC,DUMFNC
-      REAL UNC,UMC,UNG,UMG
-      REAL FALTNDC,FALTNDNC
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   DUMFNR,FALOUTNR
+      REAL FALTNDR, FALTNDI, FALTNDNI, RHO2
+      REAL UMS, UNS
+      REAL FALTNDS, FALTNDNS, UNR, FALTNDG, FALTNDNG
+      REAL UNC, UMC, UNG, UMG
+      REAL FALTNDC, FALTNDNC
       REAL FALTNDNR
 
-      ! the only arrays which need to be stored
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::    FR, FI, FC, FNI,FG,FNG, FS,FNS, FNR, FNC
-      REAL, DIMENSION(ITS:ITE,KTS:KTE,JTS:JTE) ::   FALOUTS,FALOUTNS,FALOUTG,FALOUTNG, FALOUTR,FALOUTI,FALOUTNI, FALOUTC,FALOUTNC
+      ! Column-local 1D scratch arrays for the per-column sedimentation kernel.
+      ! Declared at subroutine scope; made gang-private at the parallel loop so
+      ! NVHPC allocates per-gang storage (shared memory or registers depending
+      ! on size). Replaces 30 global 3D arrays' worth of substep memory traffic
+      ! with column-local working memory.
+      REAL, DIMENSION(KTS:KTE) :: DUMR_loc, DUMI_loc, DUMC_loc, DUMG_loc, DUMQS_loc
+      REAL, DIMENSION(KTS:KTE) :: DUMFNI_loc, DUMFNS_loc, DUMFNR_loc, DUMFNC_loc, DUMFNG_loc
+      REAL, DIMENSION(KTS:KTE) :: FR_loc, FI_loc, FS_loc, FC_loc, FG_loc
+      REAL, DIMENSION(KTS:KTE) :: FNI_loc, FNS_loc, FNR_loc, FNC_loc, FNG_loc
+      REAL, DIMENSION(KTS:KTE) :: FALOUTR_loc, FALOUTI_loc, FALOUTS_loc, FALOUTC_loc, FALOUTG_loc
+      REAL, DIMENSION(KTS:KTE) :: FALOUTNI_loc, FALOUTNS_loc, FALOUTNR_loc, FALOUTNC_loc, FALOUTNG_loc
 
 ! FALL-SPEED PARAMETER 'A' WITH AIR DENSITY CORRECTION
 
@@ -988,6 +997,7 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
 ! DUMMY SIZE DISTRIBUTION PARAMETERS
 
         REAL DLAMS,DLAMR,DLAMI,DLAMC,DLAMG,LAMMAX,LAMMIN
+        REAL PGAM_VAL   ! column-local PGAM scalar for sedimentation kernel
 
         INTEGER IDROP
 
@@ -1032,10 +1042,11 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
    !$acc             lamg,acn,arn,ain,agn,ltrue,n0s,n0i,pgam, &
    !$acc             cdist1,xlf,xxlv,xxls,nc3d,lams,asn, &
    !$acc             n0g,cpm,lamr,n0rr,lami,nc3dten,mu,lamc,dap, &
-   !$acc             precprt1d,snowrt1d,snowprt1d,grplprt1d, &
-   !$acc             fnc,fc,fi,dumr,fni,fnr,fs,fr,fng,fg,fns,dumg, &
-   !$acc             dumi,dumqs,dumfng,dumfnr,dumfni,dumc,dumfns,dumfnc, &
-   !$acc             faloutns,faloutg,faloutng,falouts,faloutr,faloutnr,faloutni,falouti,faloutc,faloutnc)
+   !$acc             precprt1d,snowrt1d,snowprt1d,grplprt1d)
+   ! Note: the 30 sedimentation working arrays (DUMR/DUMI/.../FALOUT*/F*) that
+   ! used to be listed here were removed 2026-05-11. They're now gang-private
+   ! 1D *_loc arrays declared at routine scope and listed in the sedimentation
+   ! kernel's `private(...)` clause — no global device storage needed.
 
    ! default firstprivate to handle all of the module level variables that are defined in init (I hope this works as intented...)
    ! !$omp parallel default(shared) &
@@ -3241,7 +3252,20 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
 ! STABILITY, I.E. COURANT# < 1
 
 !.......................................................................
-   !$acc parallel loop gang collapse(2) wait(1) async(5)
+! OPTIMIZATION (2026-05-11): The DUM*/F*/FALOUT* working arrays are now
+! gang-private 1D arrays of length (kts:kte). For ~30 working variables
+! at ~60 levels, this is ~7 KB per gang — easily fits in NVHPC's per-gang
+! storage (shared memory or registers depending on compiler placement).
+! Replaces ~45k global memory accesses per column per substep with
+! column-local working memory. Expected speedup on the dominant
+! sedimentation kernel: 5-10x (memory-bandwidth limited → register/SMEM).
+   !$acc parallel loop gang collapse(2) wait(1) async(5) &
+   !$acc private(DUMR_loc, DUMI_loc, DUMC_loc, DUMG_loc, DUMQS_loc, &
+   !$acc         DUMFNI_loc, DUMFNS_loc, DUMFNR_loc, DUMFNC_loc, DUMFNG_loc, &
+   !$acc         FR_loc, FI_loc, FS_loc, FC_loc, FG_loc, &
+   !$acc         FNI_loc, FNS_loc, FNR_loc, FNC_loc, FNG_loc, &
+   !$acc         FALOUTR_loc, FALOUTI_loc, FALOUTS_loc, FALOUTC_loc, FALOUTG_loc, &
+   !$acc         FALOUTNI_loc, FALOUTNS_loc, FALOUTNR_loc, FALOUTNC_loc, FALOUTNG_loc)
    do j=jts,jte      ! j loop (north-south)
    do i=its,ite      ! i loop (east-west)
 
@@ -3260,343 +3284,280 @@ SUBROUTINE MP_MORR_TWO_MOMENT_gpu(ITIMESTEP,                       &
 
       if (LTRUE_COL_VAL.eq.0) cycle
 
-      ! --- Sedimentation setup: DUM arrays and fall speeds ---
-      !$acc loop vector
+      ! --- Phase 1: load DUM*_loc, compute lambdas + fall speeds F*_loc, all column-local ---
+      !$acc loop vector private(DLAMI, DLAMR, DLAMC, DLAMS, DLAMG, PGAM_VAL, &
+      !$acc                     UNC, UMC, UNI, UMI, UNR, UMR, UNS, UMS, UNG, UMG, &
+      !$acc                     LAMMIN, LAMMAX, dum)
       do k=kts,kte
 
-        DUMI(I,K,J) = QI3D(I,K,J)+QI3DTEN(I,K,J)*DT
-        DUMQS(I,K,J) = QNI3D(I,K,J)+QNI3DTEN(I,K,J)*DT
-        DUMR(I,K,J) = QR3D(I,K,J)+QR3DTEN(I,K,J)*DT
-        DUMFNI(I,K,J) = NI3D(I,K,J)+NI3DTEN(I,K,J)*DT
-        DUMFNS(I,K,J) = NS3D(I,K,J)+NS3DTEN(I,K,J)*DT
-        DUMFNR(I,K,J) = NR3D(I,K,J)+NR3DTEN(I,K,J)*DT
-        DUMC(I,K,J) = QC3D(I,K,J)+QC3DTEN(I,K,J)*DT
-        DUMFNC(I,K,J) = NC3D(I,K,J)+NC3DTEN(I,K,J)*DT
-	DUMG(I,K,J) = QG3D(I,K,J)+QG3DTEN(I,K,J)*DT
-	DUMFNG(I,K,J) = NG3D(I,K,J)+NG3DTEN(I,K,J)*DT
+        DUMI_loc(K) = QI3D(I,K,J)+QI3DTEN(I,K,J)*DT
+        DUMQS_loc(K) = QNI3D(I,K,J)+QNI3DTEN(I,K,J)*DT
+        DUMR_loc(K) = QR3D(I,K,J)+QR3DTEN(I,K,J)*DT
+        DUMFNI_loc(K) = NI3D(I,K,J)+NI3DTEN(I,K,J)*DT
+        DUMFNS_loc(K) = NS3D(I,K,J)+NS3DTEN(I,K,J)*DT
+        DUMFNR_loc(K) = NR3D(I,K,J)+NR3DTEN(I,K,J)*DT
+        DUMC_loc(K) = QC3D(I,K,J)+QC3DTEN(I,K,J)*DT
+        DUMFNC_loc(K) = NC3D(I,K,J)+NC3DTEN(I,K,J)*DT
+        DUMG_loc(K) = QG3D(I,K,J)+QG3DTEN(I,K,J)*DT
+        DUMFNG_loc(K) = NG3D(I,K,J)+NG3DTEN(I,K,J)*DT
 
 ! SWITCH FOR CONSTANT DROPLET NUMBER
         IF (iinum.EQ.1) THEN
-        DUMFNC(I,K,J) = NC3D(I,K,J)
+          DUMFNC_loc(K) = NC3D(I,K,J)
         END IF
 
-! GET DUMMY LAMDA FOR SEDIMENTATION CALCULATIONS
-
 ! MAKE SURE NUMBER CONCENTRATIONS ARE POSITIVE
-      DUMFNI(I,K,J) = MAX(0.,DUMFNI(I,K,J))
-      DUMFNS(I,K,J) = MAX(0.,DUMFNS(I,K,J))
-      DUMFNC(I,K,J) = MAX(0.,DUMFNC(I,K,J))
-      DUMFNR(I,K,J) = MAX(0.,DUMFNR(I,K,J))
-      DUMFNG(I,K,J) = MAX(0.,DUMFNG(I,K,J))
+        DUMFNI_loc(K) = MAX(0.,DUMFNI_loc(K))
+        DUMFNS_loc(K) = MAX(0.,DUMFNS_loc(K))
+        DUMFNC_loc(K) = MAX(0.,DUMFNC_loc(K))
+        DUMFNR_loc(K) = MAX(0.,DUMFNR_loc(K))
+        DUMFNG_loc(K) = MAX(0.,DUMFNG_loc(K))
 
-!......................................................................
-! CLOUD ICE
+        ! GET DUMMY LAMDA FOR SEDIMENTATION CALCULATIONS
+        ! Cloud ice
+        IF (DUMI_loc(K).GE.QSMALL) THEN
+          DLAMI = (CONS12*DUMFNI_loc(K)/DUMI_loc(K))**(1./DI)
+          DLAMI=MAX(DLAMI,LAMMINI)
+          DLAMI=MIN(DLAMI,LAMMAXI)
+        END IF
+        ! Rain
+        IF (DUMR_loc(K).GE.QSMALL) THEN
+          DLAMR = (PI*RHOW*DUMFNR_loc(K)/DUMR_loc(K))**(1./3.)
+          DLAMR=MAX(DLAMR,LAMMINR)
+          DLAMR=MIN(DLAMR,LAMMAXR)
+        END IF
+        ! Cloud droplets — PGAM is computed locally (only read within this k iteration)
+        IF (DUMC_loc(K).GE.QSMALL) THEN
+          DUM = PRES(I,K,J)/(287.15*T3D(I,K,J))
+          PGAM_VAL = 0.0005714*(NC3D(I,K,J)/1.E6*DUM)+0.2714
+          PGAM_VAL = 1./(PGAM_VAL**2)-1.
+          PGAM_VAL = MAX(PGAM_VAL,2.)
+          PGAM_VAL = MIN(PGAM_VAL,10.)
+          PGAM(I,K,J) = PGAM_VAL   ! preserve global write (read by other kernels)
 
-      IF (DUMI(I,K,J).GE.QSMALL) THEN
-        DLAMI = (CONS12*DUMFNI(I,K,J)/DUMI(I,K,J))**(1./DI)
-        DLAMI=MAX(DLAMI,LAMMINI)
-        DLAMI=MIN(DLAMI,LAMMAXI)
-      END IF
-!......................................................................
-! RAIN
+          DLAMC = (CONS26*DUMFNC_loc(K)*GAMMA(PGAM_VAL+4.)/(DUMC_loc(K)*GAMMA(PGAM_VAL+1.)))**(1./3.)
+          LAMMIN = (PGAM_VAL+1.)/60.E-6
+          LAMMAX = (PGAM_VAL+1.)/1.E-6
+          DLAMC=MAX(DLAMC,LAMMIN)
+          DLAMC=MIN(DLAMC,LAMMAX)
+        END IF
+        ! Snow
+        IF (DUMQS_loc(K).GE.QSMALL) THEN
+          DLAMS = (CONS1*DUMFNS_loc(K)/ DUMQS_loc(K))**(1./DS)
+          DLAMS=MAX(DLAMS,LAMMINS)
+          DLAMS=MIN(DLAMS,LAMMAXS)
+        END IF
+        ! Graupel
+        IF (DUMG_loc(K).GE.QSMALL) THEN
+          DLAMG = (CONS2*DUMFNG_loc(K)/ DUMG_loc(K))**(1./DG)
+          DLAMG=MAX(DLAMG,LAMMING)
+          DLAMG=MIN(DLAMG,LAMMAXG)
+        END IF
 
-      IF (DUMR(I,K,J).GE.QSMALL) THEN
-        DLAMR = (PI*RHOW*DUMFNR(I,K,J)/DUMR(I,K,J))**(1./3.)
-        DLAMR=MAX(DLAMR,LAMMINR)
-        DLAMR=MIN(DLAMR,LAMMAXR)
-      END IF
-!......................................................................
-! CLOUD DROPLETS
+        ! CALCULATE NUMBER- AND MASS-WEIGHTED TERMINAL FALL SPEEDS
+        IF (DUMC_loc(K).GE.QSMALL) THEN
+          UNC = ACN(I,K,J)*GAMMA(1.+BC+PGAM_VAL)/ (DLAMC**BC*GAMMA(PGAM_VAL+1.))
+          UMC = ACN(I,K,J)*GAMMA(4.+BC+PGAM_VAL)/ (DLAMC**BC*GAMMA(PGAM_VAL+4.))
+        ELSE
+          UMC = 0.;  UNC = 0.
+        END IF
 
-      IF (DUMC(I,K,J).GE.QSMALL) THEN
-         DUM = PRES(I,K,J)/(287.15*T3D(I,K,J))
-         PGAM(I,K,J)=0.0005714*(NC3D(I,K,J)/1.E6*DUM)+0.2714
-         PGAM(I,K,J)=1./(PGAM(I,K,J)**2)-1.
-         PGAM(I,K,J)=MAX(PGAM(I,K,J),2.)
-         PGAM(I,K,J)=MIN(PGAM(I,K,J),10.)
+        IF (DUMI_loc(K).GE.QSMALL) THEN
+          UNI = AIN(I,K,J)*CONS27/DLAMI**BI
+          UMI = AIN(I,K,J)*CONS28/(DLAMI**BI)
+        ELSE
+          UMI = 0.;  UNI = 0.
+        END IF
 
-        DLAMC = (CONS26*DUMFNC(I,K,J)*GAMMA(PGAM(I,K,J)+4.)/(DUMC(I,K,J)*GAMMA(PGAM(I,K,J)+1.)))**(1./3.)
-        LAMMIN = (PGAM(I,K,J)+1.)/60.E-6
-        LAMMAX = (PGAM(I,K,J)+1.)/1.E-6
-        DLAMC=MAX(DLAMC,LAMMIN)
-        DLAMC=MIN(DLAMC,LAMMAX)
-      END IF
-!......................................................................
-! SNOW
+        IF (DUMR_loc(K).GE.QSMALL) THEN
+          UNR = ARN(I,K,J)*CONS6/DLAMR**BR
+          UMR = ARN(I,K,J)*CONS4/(DLAMR**BR)
+        ELSE
+          UMR = 0.;  UNR = 0.
+        END IF
 
-      IF (DUMQS(I,K,J).GE.QSMALL) THEN
-        DLAMS = (CONS1*DUMFNS(I,K,J)/ DUMQS(I,K,J))**(1./DS)
-        DLAMS=MAX(DLAMS,LAMMINS)
-        DLAMS=MIN(DLAMS,LAMMAXS)
-      END IF
-!......................................................................
-! GRAUPEL
+        IF (DUMQS_loc(K).GE.QSMALL) THEN
+          UMS = ASN(I,K,J)*CONS3/(DLAMS**BS)
+          UNS = ASN(I,K,J)*CONS5/DLAMS**BS
+        ELSE
+          UMS = 0.;  UNS = 0.
+        END IF
 
-      IF (DUMG(I,K,J).GE.QSMALL) THEN
-        DLAMG = (CONS2*DUMFNG(I,K,J)/ DUMG(I,K,J))**(1./DG)
-        DLAMG=MAX(DLAMG,LAMMING)
-        DLAMG=MIN(DLAMG,LAMMAXG)
-      END IF
+        IF (DUMG_loc(K).GE.QSMALL) THEN
+          UMG = AGN(I,K,J)*CONS7/(DLAMG**BG)
+          UNG = AGN(I,K,J)*CONS8/DLAMG**BG
+        ELSE
+          UMG = 0.;  UNG = 0.
+        END IF
 
-!......................................................................
-! CALCULATE NUMBER-WEIGHTED AND MASS-WEIGHTED TERMINAL FALL SPEEDS
-
-! CLOUD WATER
-
-      IF (DUMC(I,K,J).GE.QSMALL) THEN
-      UNC =  ACN(I,K,J)*GAMMA(1.+BC+PGAM(I,K,J))/ (DLAMC**BC*GAMMA(PGAM(I,K,J)+1.))
-      UMC = ACN(I,K,J)*GAMMA(4.+BC+PGAM(I,K,J))/  (DLAMC**BC*GAMMA(PGAM(I,K,J)+4.))
-      ELSE
-      UMC = 0.
-      UNC = 0.
-      END IF
-
-      IF (DUMI(I,K,J).GE.QSMALL) THEN
-      UNI =  AIN(I,K,J)*CONS27/DLAMI**BI
-      UMI = AIN(I,K,J)*CONS28/(DLAMI**BI)
-      ELSE
-      UMI = 0.
-      UNI = 0.
-      END IF
-
-      IF (DUMR(I,K,J).GE.QSMALL) THEN
-      UNR = ARN(I,K,J)*CONS6/DLAMR**BR
-      UMR = ARN(I,K,J)*CONS4/(DLAMR**BR)
-      ELSE
-      UMR = 0.
-      UNR = 0.
-      END IF
-
-      IF (DUMQS(I,K,J).GE.QSMALL) THEN
-      UMS = ASN(I,K,J)*CONS3/(DLAMS**BS)
-      UNS = ASN(I,K,J)*CONS5/DLAMS**BS
-      ELSE
-      UMS = 0.
-      UNS = 0.
-      END IF
-
-      IF (DUMG(I,K,J).GE.QSMALL) THEN
-      UMG = AGN(I,K,J)*CONS7/(DLAMG**BG)
-      UNG = AGN(I,K,J)*CONS8/DLAMG**BG
-      ELSE
-      UMG = 0.
-      UNG = 0.
-      END IF
-
-! SET REALISTIC LIMITS ON FALLSPEED
-
-! bug fix, 10/08/09
+        ! REALISTIC LIMITS ON FALLSPEED
         dum=(rhosu/RHO(I,K,J))**0.54
-        UMS=MIN(UMS,1.2*dum)
-        UNS=MIN(UNS,1.2*dum)
-! fix 053011
-! fix for correction by AA 4/6/11
+        UMS=MIN(UMS,1.2*dum);  UNS=MIN(UNS,1.2*dum)
         UMI=MIN(UMI,1.2*(rhosu/RHO(I,K,J))**0.35)
         UNI=MIN(UNI,1.2*(rhosu/RHO(I,K,J))**0.35)
-        UMR=MIN(UMR,9.1*dum)
-        UNR=MIN(UNR,9.1*dum)
-        UMG=MIN(UMG,20.*dum)
-        UNG=MIN(UNG,20.*dum)
+        UMR=MIN(UMR,9.1*dum);  UNR=MIN(UNR,9.1*dum)
+        UMG=MIN(UMG,20.*dum);  UNG=MIN(UNG,20.*dum)
 
-      FR(I,K,J) = UMR
-      FI(I,K,J) = UMI
-      FNI(I,K,J) = UNI
-      FS(I,K,J) = UMS
-      FNS(I,K,J) = UNS
-      FNR(I,K,J) = UNR
-      FC(I,K,J) = UMC
-      FNC(I,K,J) = UNC
-      FG(I,K,J) = UMG
-      FNG(I,K,J) = UNG
+        FR_loc(K) = UMR;   FI_loc(K) = UMI;   FNI_loc(K) = UNI
+        FS_loc(K) = UMS;   FNS_loc(K) = UNS;  FNR_loc(K) = UNR
+        FC_loc(K) = UMC;   FNC_loc(K) = UNC
+        FG_loc(K) = UMG;   FNG_loc(K) = UNG
 
       end do  ! k (fall speed computation)
 
-! V3.3 MODIFY FALLSPEED BELOW LEVEL OF PRECIP
-
+      ! Phase 2: modify fall speeds below precip (sequential top-down) — column-local
       !$acc loop seq
       DO K = KTE-1,KTS,-1
-
-        IF (FR(I,K,J).LT.1.E-10) THEN
-	FR(I,K,J)=FR(I,K+1,J)
-	END IF
-        IF (FI(I,K,J).LT.1.E-10) THEN
-	FI(I,K,J)=FI(I,K+1,J)
-	END IF
-        IF (FNI(I,K,J).LT.1.E-10) THEN
-	FNI(I,K,J)=FNI(I,K+1,J)
-	END IF
-        IF (FS(I,K,J).LT.1.E-10) THEN
-	FS(I,K,J)=FS(I,K+1,J)
-	END IF
-        IF (FNS(I,K,J).LT.1.E-10) THEN
-	FNS(I,K,J)=FNS(I,K+1,J)
-	END IF
-        IF (FNR(I,K,J).LT.1.E-10) THEN
-	FNR(I,K,J)=FNR(I,K+1,J)
-	END IF
-        IF (FC(I,K,J).LT.1.E-10) THEN
-	FC(I,K,J)=FC(I,K+1,J)
-	END IF
-        IF (FNC(I,K,J).LT.1.E-10) THEN
-	FNC(I,K,J)=FNC(I,K+1,J)
-	END IF
-        IF (FG(I,K,J).LT.1.E-10) THEN
-	FG(I,K,J)=FG(I,K+1,J)
-	END IF
-        IF (FNG(I,K,J).LT.1.E-10) THEN
-	FNG(I,K,J)=FNG(I,K+1,J)
-	END IF
-
+        IF (FR_loc(K).LT.1.E-10)  FR_loc(K)  = FR_loc(K+1)
+        IF (FI_loc(K).LT.1.E-10)  FI_loc(K)  = FI_loc(K+1)
+        IF (FNI_loc(K).LT.1.E-10) FNI_loc(K) = FNI_loc(K+1)
+        IF (FS_loc(K).LT.1.E-10)  FS_loc(K)  = FS_loc(K+1)
+        IF (FNS_loc(K).LT.1.E-10) FNS_loc(K) = FNS_loc(K+1)
+        IF (FNR_loc(K).LT.1.E-10) FNR_loc(K) = FNR_loc(K+1)
+        IF (FC_loc(K).LT.1.E-10)  FC_loc(K)  = FC_loc(K+1)
+        IF (FNC_loc(K).LT.1.E-10) FNC_loc(K) = FNC_loc(K+1)
+        IF (FG_loc(K).LT.1.E-10)  FG_loc(K)  = FG_loc(K+1)
+        IF (FNG_loc(K).LT.1.E-10) FNG_loc(K) = FNG_loc(K+1)
       END DO
 
-! CALCULATE NUMBER OF SPLIT TIME STEPS AND MULTIPLY BY RHO
-
+      ! Phase 3: NSTEP_COL + multiply DUM by RHO — all column-local
       NSTEP_COL = 1
       !$acc loop seq
       DO K = KTS,KTE
+        RGVM = MAX(FR_loc(K),FI_loc(K),FS_loc(K),FC_loc(K),FNI_loc(K), &
+                   FNR_loc(K),FNS_loc(K),FNC_loc(K),FG_loc(K),FNG_loc(K))
+        NSTEP_COL = MAX(INT(RGVM*DT/DZQ(I,K,J)+1.),NSTEP_COL)
 
-      RGVM = MAX(FR(I,K,J),FI(I,K,J),FS(I,K,J),FC(I,K,J),FNI(I,K,J),FNR(I,K,J),FNS(I,K,J),FNC(I,K,J),FG(I,K,J),FNG(I,K,J))
-! VVT CHANGED IFIX -> INT (GENERIC FUNCTION)
-      NSTEP_COL = MAX(INT(RGVM*DT/DZQ(I,K,J)+1.),NSTEP_COL)
-
-! MULTIPLY VARIABLES BY RHO(I,K,J)
-      DUM1 = RHO(I,K,J)
-      DUMR(I,K,J) = DUMR(I,K,J)*DUM1
-      DUMI(I,K,J) = DUMI(I,K,J)*DUM1
-      DUMFNI(I,K,J) = DUMFNI(I,K,J)*DUM1
-      DUMQS(I,K,J) = DUMQS(I,K,J)*DUM1
-      DUMFNS(I,K,J) = DUMFNS(I,K,J)*DUM1
-      DUMFNR(I,K,J) = DUMFNR(I,K,J)*DUM1
-      DUMC(I,K,J) = DUMC(I,K,J)*DUM1
-      DUMFNC(I,K,J) = DUMFNC(I,K,J)*DUM1
-      DUMG(I,K,J) = DUMG(I,K,J)*DUM1
-      DUMFNG(I,K,J) = DUMFNG(I,K,J)*DUM1
-
+        DUM1 = RHO(I,K,J)
+        DUMR_loc(K)   = DUMR_loc(K)*DUM1
+        DUMI_loc(K)   = DUMI_loc(K)*DUM1
+        DUMFNI_loc(K) = DUMFNI_loc(K)*DUM1
+        DUMQS_loc(K)  = DUMQS_loc(K)*DUM1
+        DUMFNS_loc(K) = DUMFNS_loc(K)*DUM1
+        DUMFNR_loc(K) = DUMFNR_loc(K)*DUM1
+        DUMC_loc(K)   = DUMC_loc(K)*DUM1
+        DUMFNC_loc(K) = DUMFNC_loc(K)*DUM1
+        DUMG_loc(K)   = DUMG_loc(K)*DUM1
+        DUMFNG_loc(K) = DUMFNG_loc(K)*DUM1
       END DO
 
-      ! --- Sub-stepping loop (per-column, not global MAXN) ---
-  DO N = 1,NSTEP_COL
+      ! --- Phase 4: Sub-stepping loop — entirely column-local working memory ---
+      DO N = 1,NSTEP_COL
 
-      ! Compute fluxes
-      !$acc loop vector
-      DO K = KTS,KTE
-      FALOUTR(I,K,J) = FR(I,K,J)*DUMR(I,K,J)
-      FALOUTI(I,K,J) = FI(I,K,J)*DUMI(I,K,J)
-      FALOUTNI(I,K,J) = FNI(I,K,J)*DUMFNI(I,K,J)
-      FALOUTS(I,K,J) = FS(I,K,J)*DUMQS(I,K,J)
-      FALOUTNS(I,K,J) = FNS(I,K,J)*DUMFNS(I,K,J)
-      FALOUTNR(I,K,J) = FNR(I,K,J)*DUMFNR(I,K,J)
-      FALOUTC(I,K,J) = FC(I,K,J)*DUMC(I,K,J)
-      FALOUTNC(I,K,J) = FNC(I,K,J)*DUMFNC(I,K,J)
-      FALOUTG(I,K,J) = FG(I,K,J)*DUMG(I,K,J)
-      FALOUTNG(I,K,J) = FNG(I,K,J)*DUMFNG(I,K,J)
-      END DO
+        ! Compute fluxes (locals → locals)
+        !$acc loop vector
+        DO K = KTS,KTE
+          FALOUTR_loc(K)  = FR_loc(K)*DUMR_loc(K)
+          FALOUTI_loc(K)  = FI_loc(K)*DUMI_loc(K)
+          FALOUTNI_loc(K) = FNI_loc(K)*DUMFNI_loc(K)
+          FALOUTS_loc(K)  = FS_loc(K)*DUMQS_loc(K)
+          FALOUTNS_loc(K) = FNS_loc(K)*DUMFNS_loc(K)
+          FALOUTNR_loc(K) = FNR_loc(K)*DUMFNR_loc(K)
+          FALOUTC_loc(K)  = FC_loc(K)*DUMC_loc(K)
+          FALOUTNC_loc(K) = FNC_loc(K)*DUMFNC_loc(K)
+          FALOUTG_loc(K)  = FG_loc(K)*DUMG_loc(K)
+          FALOUTNG_loc(K) = FNG_loc(K)*DUMFNG_loc(K)
+        END DO
 
-      ! Flux divergence, tendency and DUM updates
-      !$acc loop vector
-      DO K = KTS,KTE
+        ! Flux divergence, tendency and DUM updates
+        !$acc loop vector private(FALTNDR, FALTNDI, FALTNDC, FALTNDS, FALTNDG, &
+        !$acc                     FALTNDNI, FALTNDNS, FALTNDNR, FALTNDNC, FALTNDNG, &
+        !$acc                     DUM1, DUM2, DUMT)
+        DO K = KTS,KTE
 
-      IF (K.EQ.KTE) THEN
-            ! Top of model: outflow only
-            DUM1 = 1.0/DZQ(I,KTE,J)
-            FALTNDR = FALOUTR(I,KTE,J)*DUM1
-            FALTNDI = FALOUTI(I,KTE,J)*DUM1
-            FALTNDNI = FALOUTNI(I,KTE,J)*DUM1
-            FALTNDS = FALOUTS(I,KTE,J)*DUM1
-            FALTNDNS = FALOUTNS(I,KTE,J)*DUM1
-            FALTNDNR = FALOUTNR(I,KTE,J)*DUM1
-            FALTNDC = FALOUTC(I,KTE,J)*DUM1
-            FALTNDNC = FALOUTNC(I,KTE,J)*DUM1
-            FALTNDG = FALOUTG(I,KTE,J)*DUM1
-            FALTNDNG = FALOUTNG(I,KTE,J)*DUM1
-      ! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
+        IF (K.EQ.KTE) THEN
+              DUM1 = 1.0/DZQ(I,KTE,J)
+              FALTNDR  = FALOUTR_loc(KTE)*DUM1
+              FALTNDI  = FALOUTI_loc(KTE)*DUM1
+              FALTNDNI = FALOUTNI_loc(KTE)*DUM1
+              FALTNDS  = FALOUTS_loc(KTE)*DUM1
+              FALTNDNS = FALOUTNS_loc(KTE)*DUM1
+              FALTNDNR = FALOUTNR_loc(KTE)*DUM1
+              FALTNDC  = FALOUTC_loc(KTE)*DUM1
+              FALTNDNC = FALOUTNC_loc(KTE)*DUM1
+              FALTNDG  = FALOUTG_loc(KTE)*DUM1
+              FALTNDNG = FALOUTNG_loc(KTE)*DUM1
 
-            DUM2 = 1.0/NSTEP_COL/RHO(I,KTE,J)
-            QRSTEN(I,KTE,J) = QRSTEN(I,KTE,J)-FALTNDR*DUM2
-            QISTEN(I,KTE,J) = QISTEN(I,KTE,J)-FALTNDI*DUM2
-            NI3DTEN(I,KTE,J) = NI3DTEN(I,KTE,J)-FALTNDNI*DUM2
-            QNISTEN(I,KTE,J) = QNISTEN(I,KTE,J)-FALTNDS*DUM2
-            NS3DTEN(I,KTE,J) = NS3DTEN(I,KTE,J)-FALTNDNS*DUM2
-            NR3DTEN(I,KTE,J) = NR3DTEN(I,KTE,J)-FALTNDNR*DUM2
-            QCSTEN(I,KTE,J) = QCSTEN(I,KTE,J)-FALTNDC*DUM2
-            NC3DTEN(I,KTE,J) = NC3DTEN(I,KTE,J)-FALTNDNC*DUM2
-            QGSTEN(I,KTE,J) = QGSTEN(I,KTE,J)-FALTNDG*DUM2
-            NG3DTEN(I,KTE,J) = NG3DTEN(I,KTE,J)-FALTNDNG*DUM2
+              DUM2 = 1.0/NSTEP_COL/RHO(I,KTE,J)
+              QRSTEN(I,KTE,J)  = QRSTEN(I,KTE,J) - FALTNDR*DUM2
+              QISTEN(I,KTE,J)  = QISTEN(I,KTE,J) - FALTNDI*DUM2
+              NI3DTEN(I,KTE,J) = NI3DTEN(I,KTE,J) - FALTNDNI*DUM2
+              QNISTEN(I,KTE,J) = QNISTEN(I,KTE,J) - FALTNDS*DUM2
+              NS3DTEN(I,KTE,J) = NS3DTEN(I,KTE,J) - FALTNDNS*DUM2
+              NR3DTEN(I,KTE,J) = NR3DTEN(I,KTE,J) - FALTNDNR*DUM2
+              QCSTEN(I,KTE,J)  = QCSTEN(I,KTE,J) - FALTNDC*DUM2
+              NC3DTEN(I,KTE,J) = NC3DTEN(I,KTE,J) - FALTNDNC*DUM2
+              QGSTEN(I,KTE,J)  = QGSTEN(I,KTE,J) - FALTNDG*DUM2
+              NG3DTEN(I,KTE,J) = NG3DTEN(I,KTE,J) - FALTNDNG*DUM2
 
-            DUMT = DT/NSTEP_COL
-            DUMR(I,KTE,J) = DUMR(I,KTE,J)+FALTNDR*DUMT
-            DUMI(I,KTE,J) = DUMI(I,KTE,J)+FALTNDI*DUMT
-            DUMFNI(I,KTE,J) = DUMFNI(I,KTE,J)+FALTNDNI*DUMT
-            DUMQS(I,KTE,J) = DUMQS(I,KTE,J)+FALTNDS*DUMT
-            DUMFNS(I,KTE,J) = DUMFNS(I,KTE,J)+FALTNDNS*DUMT
-            DUMFNR(I,KTE,J) = DUMFNR(I,KTE,J)+FALTNDNR*DUMT
-            DUMC(I,KTE,J) = DUMC(I,KTE,J)+FALTNDC*DUMT
-            DUMFNC(I,KTE,J) = DUMFNC(I,KTE,J)+FALTNDNC*DUMT
-            DUMG(I,KTE,J) = DUMG(I,KTE,J)+FALTNDG*DUMT
-            DUMFNG(I,KTE,J) = DUMFNG(I,KTE,J)+FALTNDNG*DUMT
+              DUMT = DT/NSTEP_COL
+              DUMR_loc(KTE)   = DUMR_loc(KTE)   + FALTNDR*DUMT
+              DUMI_loc(KTE)   = DUMI_loc(KTE)   + FALTNDI*DUMT
+              DUMFNI_loc(KTE) = DUMFNI_loc(KTE) + FALTNDNI*DUMT
+              DUMQS_loc(KTE)  = DUMQS_loc(KTE)  + FALTNDS*DUMT
+              DUMFNS_loc(KTE) = DUMFNS_loc(KTE) + FALTNDNS*DUMT
+              DUMFNR_loc(KTE) = DUMFNR_loc(KTE) + FALTNDNR*DUMT
+              DUMC_loc(KTE)   = DUMC_loc(KTE)   + FALTNDC*DUMT
+              DUMFNC_loc(KTE) = DUMFNC_loc(KTE) + FALTNDNC*DUMT
+              DUMG_loc(KTE)   = DUMG_loc(KTE)   + FALTNDG*DUMT
+              DUMFNG_loc(KTE) = DUMFNG_loc(KTE) + FALTNDNG*DUMT
 
-      ELSE
-            ! Interior levels: inflow from above minus outflow
-            DUM1 = 1.0/DZQ(I,K,J)
+        ELSE
+              ! Interior: inflow from above minus outflow
+              DUM1 = 1.0/DZQ(I,K,J)
+              FALTNDR  = (FALOUTR_loc(K+1) - FALOUTR_loc(K))*DUM1
+              FALTNDI  = (FALOUTI_loc(K+1) - FALOUTI_loc(K))*DUM1
+              FALTNDNI = (FALOUTNI_loc(K+1)- FALOUTNI_loc(K))*DUM1
+              FALTNDS  = (FALOUTS_loc(K+1) - FALOUTS_loc(K))*DUM1
+              FALTNDNS = (FALOUTNS_loc(K+1)- FALOUTNS_loc(K))*DUM1
+              FALTNDNR = (FALOUTNR_loc(K+1)- FALOUTNR_loc(K))*DUM1
+              FALTNDC  = (FALOUTC_loc(K+1) - FALOUTC_loc(K))*DUM1
+              FALTNDNC = (FALOUTNC_loc(K+1)- FALOUTNC_loc(K))*DUM1
+              FALTNDG  = (FALOUTG_loc(K+1) - FALOUTG_loc(K))*DUM1
+              FALTNDNG = (FALOUTNG_loc(K+1)- FALOUTNG_loc(K))*DUM1
 
-            FALTNDR = (FALOUTR(I,K+1,J)-FALOUTR(I,K,J))*DUM1
-            FALTNDI = (FALOUTI(I,K+1,J)-FALOUTI(I,K,J))*DUM1
-            FALTNDNI = (FALOUTNI(I,K+1,J)-FALOUTNI(I,K,J))*DUM1
-            FALTNDS = (FALOUTS(I,K+1,J)-FALOUTS(I,K,J))*DUM1
-            FALTNDNS = (FALOUTNS(I,K+1,J)-FALOUTNS(I,K,J))*DUM1
-            FALTNDNR = (FALOUTNR(I,K+1,J)-FALOUTNR(I,K,J))*DUM1
-            FALTNDC = (FALOUTC(I,K+1,J)-FALOUTC(I,K,J))*DUM1
-            FALTNDNC = (FALOUTNC(I,K+1,J)-FALOUTNC(I,K,J))*DUM1
-            FALTNDG = (FALOUTG(I,K+1,J)-FALOUTG(I,K,J))*DUM1
-            FALTNDNG = (FALOUTNG(I,K+1,J)-FALOUTNG(I,K,J))*DUM1
+              DUM2 = 1.0/NSTEP_COL/RHO(I,K,J)
+              QRSTEN(I,K,J)  = QRSTEN(I,K,J)  + FALTNDR*DUM2
+              QISTEN(I,K,J)  = QISTEN(I,K,J)  + FALTNDI*DUM2
+              NI3DTEN(I,K,J) = NI3DTEN(I,K,J) + FALTNDNI*DUM2
+              QNISTEN(I,K,J) = QNISTEN(I,K,J) + FALTNDS*DUM2
+              NS3DTEN(I,K,J) = NS3DTEN(I,K,J) + FALTNDNS*DUM2
+              NR3DTEN(I,K,J) = NR3DTEN(I,K,J) + FALTNDNR*DUM2
+              QCSTEN(I,K,J)  = QCSTEN(I,K,J)  + FALTNDC*DUM2
+              NC3DTEN(I,K,J) = NC3DTEN(I,K,J) + FALTNDNC*DUM2
+              QGSTEN(I,K,J)  = QGSTEN(I,K,J)  + FALTNDG*DUM2
+              NG3DTEN(I,K,J) = NG3DTEN(I,K,J) + FALTNDNG*DUM2
 
-      ! ADD FALLOUT TERMS TO EULERIAN TENDENCIES
-            DUM2 = 1.0/NSTEP_COL/RHO(I,K,J)
+              DUMT = DT/NSTEP_COL
+              DUMR_loc(K)   = DUMR_loc(K)   + FALTNDR*DUMT
+              DUMI_loc(K)   = DUMI_loc(K)   + FALTNDI*DUMT
+              DUMFNI_loc(K) = DUMFNI_loc(K) + FALTNDNI*DUMT
+              DUMQS_loc(K)  = DUMQS_loc(K)  + FALTNDS*DUMT
+              DUMFNS_loc(K) = DUMFNS_loc(K) + FALTNDNS*DUMT
+              DUMFNR_loc(K) = DUMFNR_loc(K) + FALTNDNR*DUMT
+              DUMC_loc(K)   = DUMC_loc(K)   + FALTNDC*DUMT
+              DUMFNC_loc(K) = DUMFNC_loc(K) + FALTNDNC*DUMT
+              DUMG_loc(K)   = DUMG_loc(K)   + FALTNDG*DUMT
+              DUMFNG_loc(K) = DUMFNG_loc(K) + FALTNDNG*DUMT
 
-            QRSTEN(I,K,J) = QRSTEN(I,K,J)+FALTNDR*DUM2
-            QISTEN(I,K,J) = QISTEN(I,K,J)+FALTNDI*DUM2
-            NI3DTEN(I,K,J) = NI3DTEN(I,K,J)+FALTNDNI*DUM2
-            QNISTEN(I,K,J) = QNISTEN(I,K,J)+FALTNDS*DUM2
-            NS3DTEN(I,K,J) = NS3DTEN(I,K,J)+FALTNDNS*DUM2
-            NR3DTEN(I,K,J) = NR3DTEN(I,K,J)+FALTNDNR*DUM2
-            QCSTEN(I,K,J) = QCSTEN(I,K,J)+FALTNDC*DUM2
-            NC3DTEN(I,K,J) = NC3DTEN(I,K,J)+FALTNDNC*DUM2
-            QGSTEN(I,K,J) = QGSTEN(I,K,J)+FALTNDG*DUM2
-            NG3DTEN(I,K,J) = NG3DTEN(I,K,J)+FALTNDNG*DUM2
+              ! PRECIP RATES (KG/M^2/S)
+              CSED(I,K,J) = CSED(I,K,J) + FALOUTC_loc(K)/NSTEP_COL
+              ISED(I,K,J) = ISED(I,K,J) + FALOUTI_loc(K)/NSTEP_COL
+              SSED(I,K,J) = SSED(I,K,J) + FALOUTS_loc(K)/NSTEP_COL
+              GSED(I,K,J) = GSED(I,K,J) + FALOUTG_loc(K)/NSTEP_COL
+              RSED(I,K,J) = RSED(I,K,J) + FALOUTR_loc(K)/NSTEP_COL
+        END IF
 
-            DUMT = DT/NSTEP_COL
-            DUMR(I,K,J) = DUMR(I,K,J)+FALTNDR*DUMT
-            DUMI(I,K,J) = DUMI(I,K,J)+FALTNDI*DUMT
-            DUMFNI(I,K,J) = DUMFNI(I,K,J)+FALTNDNI*DUMT
-            DUMQS(I,K,J) = DUMQS(I,K,J)+FALTNDS*DUMT
-            DUMFNS(I,K,J) = DUMFNS(I,K,J)+FALTNDNS*DUMT
-            DUMFNR(I,K,J) = DUMFNR(I,K,J)+FALTNDNR*DUMT
-            DUMC(I,K,J) = DUMC(I,K,J)+FALTNDC*DUMT
-            DUMFNC(I,K,J) = DUMFNC(I,K,J)+FALTNDNC*DUMT
-            DUMG(I,K,J) = DUMG(I,K,J)+FALTNDG*DUMT
-            DUMFNG(I,K,J) = DUMFNG(I,K,J)+FALTNDNG*DUMT
+        END DO  ! K flux divergence
 
-      ! FOR WRF-CHEM, NEED PRECIP RATES (UNITS OF KG/M^2/S)
-            CSED(I,K,J)=CSED(I,K,J)+FALOUTC(I,K,J)/NSTEP_COL
-            ISED(I,K,J)=ISED(I,K,J)+FALOUTI(I,K,J)/NSTEP_COL
-            SSED(I,K,J)=SSED(I,K,J)+FALOUTS(I,K,J)/NSTEP_COL
-            GSED(I,K,J)=GSED(I,K,J)+FALOUTG(I,K,J)/NSTEP_COL
-            RSED(I,K,J)=RSED(I,K,J)+FALOUTR(I,K,J)/NSTEP_COL
-
-      END IF
-
-      END DO  ! K flux divergence
-
-! GET PRECIPITATION AND SNOWFALL ACCUMULATION DURING THE TIME STEP
-! FACTOR OF 1000 CONVERTS FROM M TO MM, BUT DIVISION BY DENSITY
-! OF LIQUID WATER CANCELS THIS FACTOR OF 1000
-
-        PRECPRT1D(I,J) = PRECPRT1D(I,J)+(FALOUTR(I,KTS,J)+FALOUTC(I,KTS,J)+FALOUTS(I,KTS,J)+FALOUTI(I,KTS,J)+FALOUTG(I,KTS,J))  &
-                     *DT/NSTEP_COL
-        SNOWRT1D(I,J) = SNOWRT1D(I,J)+(FALOUTS(I,KTS,J)+FALOUTI(I,KTS,J)+FALOUTG(I,KTS,J))*DT/NSTEP_COL
-! hm added 7/13/13
-        SNOWPRT1D(I,J) = SNOWPRT1D(I,J)+(FALOUTI(I,KTS,J)+FALOUTS(I,KTS,J))*DT/NSTEP_COL
-        GRPLPRT1D(I,J) = GRPLPRT1D(I,J)+(FALOUTG(I,KTS,J))*DT/NSTEP_COL
+        ! Surface precip + snow accumulation (read FALOUT_loc at KTS — column-local)
+        PRECPRT1D(I,J) = PRECPRT1D(I,J) + &
+            (FALOUTR_loc(KTS) + FALOUTC_loc(KTS) + FALOUTS_loc(KTS) + &
+             FALOUTI_loc(KTS) + FALOUTG_loc(KTS)) * DT/NSTEP_COL
+        SNOWRT1D(I,J)  = SNOWRT1D(I,J) + &
+            (FALOUTS_loc(KTS) + FALOUTI_loc(KTS) + FALOUTG_loc(KTS)) * DT/NSTEP_COL
+        SNOWPRT1D(I,J) = SNOWPRT1D(I,J) + (FALOUTI_loc(KTS) + FALOUTS_loc(KTS)) * DT/NSTEP_COL
+        GRPLPRT1D(I,J) = GRPLPRT1D(I,J) + (FALOUTG_loc(KTS)) * DT/NSTEP_COL
 
       END DO  ! N sub-steps
 
