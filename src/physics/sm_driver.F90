@@ -681,7 +681,7 @@ contains
         !    the helper would skip the cell entirely.
         !    NoahmpIO currently holds NoahmpHICARmain's spoofed-no-snow
         !    output for these cells; we overwrite that with HICAR truth.
-        !$acc parallel loop collapse(2) default(present)
+        !$acc parallel loop gang vector tile(32,16) default(present)
         do j = jts, jte
             do i = its, ite
                 if (snow_height(i,j) <= 0.0 .and. melt_basal(i,j) <= 0.0) cycle
@@ -723,7 +723,7 @@ contains
         !    G_base was zeroed by snowpack_driver's bare-ground branch, so
         !    HeatGroundTotMean = 0 here is correct: no spurious heat flux
         !    is injected for the part of the step after the snow vanished.
-        !$acc parallel loop collapse(2) default(present)
+        !$acc parallel loop gang vector tile(32,16) default(present)
         do j = jts, jte
             do i = its, ite
                 if (snow_height(i,j) <= 0.0 .and. melt_basal(i,j) <= 0.0) cycle
@@ -756,7 +756,7 @@ contains
         !    per-cell gate other than IndicatorIceSfc==-1) but its result is
         !    ignored: their writeback is gated on snow_height>0, and noahmp
         !    state is reset by next step's *VarInTransfer.
-        !$acc parallel loop collapse(2) default(present)
+        !$acc parallel loop gang vector tile(32,16) default(present)
         do j = jts, jte
             do i = its, ite
                 noahmp%water%flux%SoilSfcInflowMean (i,j) = 0.0
@@ -804,7 +804,7 @@ contains
         !    The noahmp%* state for non-snow cells was perturbed by our
         !    second-call solve, but it is reset by the next LSM step's
         !    *VarInTransfer (which reads from the still-clean NoahmpIO).
-        !$acc parallel loop collapse(2) default(present)
+        !$acc parallel loop gang vector tile(32,16) default(present)
         do j = jts, jte
             do i = its, ite
                 ! Same gate as steps 1, 3, 5 — snow cells AND meltout-step

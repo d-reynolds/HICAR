@@ -28,6 +28,7 @@ module adv_std
 
     public :: adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind
     public :: adv_std_compute_wind_2d_fm, flux_2d_fm, sum_kernel_2d_fm, adv_std_clean_wind_arrays_fm
+    public :: adv_std_clean_wind_arrays
     public :: flux_x_fm, flux_y_fm, flux_z_fm
 
 contains
@@ -592,17 +593,39 @@ contains
         ! alloc/free cycle was wasteful (and consistent with the wind solver lesson:
         ! per-call alloc churn hurts at scale). Caller's intent changed from `out` to
         ! `inout` to allow reuse; first call still allocates from an unallocated argument.
-        if (.not. allocated(U_m))   allocate(U_m   (i_s_w:i_e_w+1, kms:kme,   j_s_w:j_e_w+1))
-        if (.not. allocated(V_m))   allocate(V_m   (i_s_w:i_e_w+1, kms:kme,   j_s_w:j_e_w+1))
-        if (.not. allocated(W_m))   allocate(W_m   (i_s_w:i_e_w+1, kms:kme,   j_s_w:j_e_w+1))
-        if (.not. allocated(denom)) allocate(denom (ims:ime,       kms:kme,   jms:jme))
-        if (.not. allocated(flux_x)) allocate(flux_x(i_s:i_e+1, kms:kme,   j_s:j_e+1))
-        if (.not. allocated(flux_y)) allocate(flux_y(i_s:i_e+1, kms:kme,   j_s:j_e+1))
-        if (.not. allocated(flux_z)) allocate(flux_z(i_s:i_e+1, kms:kme+1, j_s:j_e+1))
+        ! Pair each host allocation with a one-shot `enter data create` — repeating
+        ! `enter data create` on every call inflates the dynamic refcount and turns
+        ! cleanup at nest-switch into a partial-present trap.
+        if (.not. allocated(U_m))   then
+            allocate(U_m   (i_s_w:i_e_w+1, kms:kme,   j_s_w:j_e_w+1))
+            !$acc enter data create(U_m)
+        endif
+        if (.not. allocated(V_m))   then
+            allocate(V_m   (i_s_w:i_e_w+1, kms:kme,   j_s_w:j_e_w+1))
+            !$acc enter data create(V_m)
+        endif
+        if (.not. allocated(W_m))   then
+            allocate(W_m   (i_s_w:i_e_w+1, kms:kme,   j_s_w:j_e_w+1))
+            !$acc enter data create(W_m)
+        endif
+        if (.not. allocated(denom)) then
+            allocate(denom (ims:ime,       kms:kme,   jms:jme))
+            !$acc enter data create(denom)
+        endif
+        if (.not. allocated(flux_x)) then
+            allocate(flux_x(i_s:i_e+1, kms:kme,   j_s:j_e+1))
+            !$acc enter data create(flux_x)
+        endif
+        if (.not. allocated(flux_y)) then
+            allocate(flux_y(i_s:i_e+1, kms:kme,   j_s:j_e+1))
+            !$acc enter data create(flux_y)
+        endif
+        if (.not. allocated(flux_z)) then
+            allocate(flux_z(i_s:i_e+1, kms:kme+1, j_s:j_e+1))
+            !$acc enter data create(flux_z)
+        endif
 
         advect_density = options%adv%advect_density
-        ! Register on device once (subsequent calls see them already present)
-        !$acc enter data create(U_m,V_m,W_m,denom, flux_x, flux_y, flux_z)
 
 
         !$acc data present(u,v,w,density,jaco,jaco_u,jaco_v,jaco_w,dz, dx, U_m, V_m, W_m, denom) create(rho)
@@ -960,6 +983,36 @@ contains
         if (allocated(flux_y_fm)) deallocate(flux_y_fm)
 
     end subroutine adv_std_clean_wind_arrays_fm
+
+    !>------------------------------------------------------------
+    !! Deallocate persistent module-level flux arrays + device copies.
+    !! Required on nest context switch: bounds (i_s/i_e/...) change in
+    !! adv_std_init, but the persistent arrays remain at the previous
+    !! nest's shape, leading to OOB on device.
+    !!------------------------------------------------------------
+    subroutine adv_std_clean_wind_arrays()
+        implicit none
+
+        ! `finalize` forces the dynamic reference count to zero regardless of how
+        ! many `enter data create` calls accumulated in adv_std_compute_wind across
+        ! timesteps. Plain `exit data delete` only decrements by 1, leaving stale
+        ! device mappings tied to a host pointer that deallocate() is about to
+        ! free — those leftovers later collide with other arrays the allocator
+        ! places in the same host range ("partially present" fatal in rte_lw etc).
+        if (allocated(flux_x)) then
+            !$acc exit data delete(flux_x) finalize
+            deallocate(flux_x)
+        endif
+        if (allocated(flux_y)) then
+            !$acc exit data delete(flux_y) finalize
+            deallocate(flux_y)
+        endif
+        if (allocated(flux_z)) then
+            !$acc exit data delete(flux_z) finalize
+            deallocate(flux_z)
+        endif
+
+    end subroutine adv_std_clean_wind_arrays
 
 
 end module adv_std

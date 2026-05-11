@@ -218,7 +218,10 @@ contains
             enddo
         enddo
         
-        !$acc parallel loop gang collapse(2) wait(1) async(10)
+        ! gang vector tile(32,16) gives a warp-wide thread group over (i,j); each
+        ! thread runs the k-sequential sweep.  Original gang collapse(2) without
+        ! vector ran one thread per gang, leaving 31/32 lanes idle per warp.
+        !$acc parallel loop gang vector tile(32,16) wait(1) async(10)
         do j = jms,jme
         do i = ims,ime
         !$acc loop seq
@@ -359,15 +362,20 @@ contains
                 enddo
                 !$acc end parallel
             endif ! end if use_dqdt
-            !$acc parallel loop gang vector collapse(3) async(0)
-            do j = jms, jme
-                do k = kms, kme-1
-                do i = ims, ime
-                    !Interpolate density to w grid
-                    rho_i(i,k,j) = ( rho(i,k,j)*dz(i,k+1,j) + rho(i,k+1,j)*dz(i,k,j) ) / (dz(i,k,j)+dz(i,k+1,j))
+            ! rho_i here is only read by the w_met / vertical-divergence block below,
+            ! which is gated on (.NOT. horz).  In the horz_only path (every per-step
+            ! balance_uvw call) this kernel's output is never consumed — skip it.
+            if (.not. horz) then
+                !$acc parallel loop gang vector collapse(3) async(0)
+                do j = jms, jme
+                    do k = kms, kme-1
+                    do i = ims, ime
+                        !Interpolate density to w grid
+                        rho_i(i,k,j) = ( rho(i,k,j)*dz(i,k+1,j) + rho(i,k+1,j)*dz(i,k,j) ) / (dz(i,k,j)+dz(i,k+1,j))
+                    enddo
+                    enddo
                 enddo
-                enddo
-            enddo
+            endif
         else ! else if not advecting density, just apply metric terms to get face-staggered winds
             if (dqdt) then
                 !$acc parallel async(0)

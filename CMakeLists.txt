@@ -489,11 +489,9 @@ option(HICAR_NATIVE_SOLVER "Use HICAR's native iterative wind solver instead of 
 if(HICAR_NATIVE_SOLVER OR (NOT AMGX_LIBRARY AND NOT PETSC_FOUND))
 	add_definitions(-DUSE_HICAR_SOLVER)
 	list(APPEND SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_hicar.F90)
-	set_source_files_properties(
-		${PROJECT_SOURCE_DIR}/src/physics/wind.F90
-		PROPERTIES OBJECT_DEPENDS
-		${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/hicar_lib.dir/src/physics/wind_iterative_hicar.F90.o
-	)
+	# Note: CMake's Fortran scanner handles `use` dependencies automatically from
+	# the source code, so no explicit OBJECT_DEPENDS is needed. Previously had one
+	# that created a ninja dep cycle (Fortran.dd -> wind.F90.o.ddi -> wind_iterative_hicar.F90.o -> Fortran.dd).
 	if(HICAR_NATIVE_SOLVER AND (AMGX_LIBRARY OR PETSC_FOUND))
 		message(STATUS "HICAR native wind solver REQUESTED (overrides AMGX/PETSc dispatch)")
 		# Drop the other backends' macros so wind.F90 dispatch picks native

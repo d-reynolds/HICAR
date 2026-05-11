@@ -7,7 +7,8 @@
 !! ----------------------------------------------------------------------------
 module advection
     use icar_constants
-    use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind
+    use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, &
+                                           adv_std_clean_wind_arrays
     use adv_fluxcorr,               only : init_fluxcorr, set_sign_arrays, compute_upwind_fluxes_async
     ! use debug_module,               only : domain_fix
     use options_interface,          only: options_t
@@ -20,6 +21,13 @@ module advection
     implicit none
     private
     integer :: ims, ime, kms, kme, jms, jme
+
+    ! Persistent module-level wind/denom buffers, populated by adv_std_compute_wind
+    ! on first call of each nest and reused across timesteps. Promoted from `save`
+    ! locals inside `advect` so the nest-switch path can free them — otherwise their
+    ! shape (and device mapping) lags behind the new nest's bounds and triggers OOB.
+    real, allocatable :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
+
     public :: advect, adv_init, adv_var_request
 contains
 
@@ -41,6 +49,10 @@ contains
         if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing Advection"
         if (options%physics%advection==kADV_STD) then
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Standard"
+            ! Drop persistent buffers before re-bounding for the new nest. They
+            ! will be re-allocated (host + device) on next adv_std_compute_wind.
+            call clean_wind_arrays()
+            call adv_std_clean_wind_arrays()
             call adv_std_init(domain,options)
             if (options%adv%flux_corr > 0) call init_fluxcorr(domain)
         endif
@@ -50,6 +62,32 @@ contains
         jms = domain%jms; jme = domain%jme
         
     end subroutine adv_init
+
+    subroutine clean_wind_arrays()
+        implicit none
+
+        ! `finalize` zeros the dynamic refcount in one shot. adv_std_compute_wind
+        ! calls `enter data create` on these every timestep, so the refcount has
+        ! grown to ~Nsteps; without finalize the device mapping survives
+        ! deallocate() and later collides with other arrays in the freed host
+        ! range (partial-present fatal).
+        if (allocated(U_m)) then
+            !$acc exit data delete(U_m) finalize
+            deallocate(U_m)
+        endif
+        if (allocated(V_m)) then
+            !$acc exit data delete(V_m) finalize
+            deallocate(V_m)
+        endif
+        if (allocated(W_m)) then
+            !$acc exit data delete(W_m) finalize
+            deallocate(W_m)
+        endif
+        if (allocated(denom)) then
+            !$acc exit data delete(denom) finalize
+            deallocate(denom)
+        endif
+    end subroutine clean_wind_arrays
 
     subroutine adv_var_request(options)
         implicit none
@@ -70,10 +108,6 @@ contains
         type(timer_t), intent(inout) :: flux_time, flux_corr_time, sum_time, adv_wind_time
         type(variable_t) :: var_to_advect
         integer :: n
-
-        ! Persist across timesteps via save — allocated once on first call by
-        ! adv_std_compute_wind, reused thereafter. Avoids per-timestep alloc/dealloc cycle.
-        real, allocatable, save :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
 
         if (options%physics%advection==kADV_STD) then
 

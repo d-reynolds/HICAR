@@ -1114,8 +1114,11 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
                               be  => this%east_buffer_3d,      bw  => this%west_buffer_3d,      &
                               bnw => this%northwest_buffer_3d, bne => this%northeast_buffer_3d, &
                               bsw => this%southwest_buffer_3d, bse => this%southeast_buffer_3d)
+                    ! async(n) lets the host issue all per-variable pack launches
+                    ! back-to-back without blocking; trailing !$acc wait fences before
+                    ! the cuda_event_record on acc_async_sync.
                     !$acc parallel loop gang vector present(var, bn, bs, be, bw, bnw, bne, bsw, bse) &
-                    !$acc private(idx_local, ii, jj, kk)
+                    !$acc private(idx_local, ii, jj, kk) async(n)
                     do idx = 0, total_pack - 1
                         if (idx < s_off) then
                             idx_local = idx - n_off
@@ -1182,6 +1185,10 @@ module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
             endif
         endif
     enddo
+
+    ! Fence all async(n) pack kernels before the event handshake on acc_async_sync.
+    ! Without this, cuda_event_record below would capture an empty stream.
+    !$acc wait
 
 #ifdef USE_NCCL
 
@@ -1411,6 +1418,12 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
     n_vars = size(var_data)
     if (present(wait_timer)) call wait_timer%start()
 
+    ! Fence on the cuda_stream_wait_event queued above (USE_NCCL) or the synchronous
+    ! MPI_Win_Wait calls (non-NCCL). Required because the per-variable unpack kernels
+    ! below run on async(n) queues that aren't ordered against acc_async_sync, so the
+    ! host must guarantee receive buffers are populated before they launch.
+    !$acc wait
+
     ! Now iterate through the dictionary as long as there are more elements present
     do p = 1, size(vars_to_ret)
         if (vars_to_ret(p)%v <= n_vars) then
@@ -1451,8 +1464,11 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
                               be  => this%east_batch_in_3d,      bw  => this%west_batch_in_3d,      &
                               bnw => this%northwest_batch_in_3d, bne => this%northeast_batch_in_3d, &
                               bsw => this%southwest_batch_in_3d, bse => this%southeast_batch_in_3d)
+                    ! async(n) lets the host issue all per-variable unpack launches
+                    ! back-to-back without blocking; trailing !$acc wait fences before
+                    ! wait_timer%stop() so the timer still reflects completion.
                     !$acc parallel loop gang vector present(var, bn, bs, be, bw, bnw, bne, bsw, bse) &
-                    !$acc private(idx_local, ii, jj, kk)
+                    !$acc private(idx_local, ii, jj, kk) async(n)
                     do idx = 0, total_unpack - 1
                         if (idx < s_off) then
                             idx_local = idx - n_off
@@ -1519,6 +1535,10 @@ module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer
             endif
         endif
     enddo
+
+    ! Fence all async(n) unpack kernels before stopping the timer so the timing
+    ! reflects actual GPU completion rather than just launch overhead.
+    !$acc wait
 
     if (present(wait_timer)) call wait_timer%stop()
 
