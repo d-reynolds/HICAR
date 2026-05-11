@@ -2713,6 +2713,9 @@ contains
 
         type(interpolable_type) :: forc_u_from_mass, forc_v_from_mass
         integer :: nx, ny, nz, i, j, k, ims, ime, jms, jme
+        integer :: nz_f, nz_d, ierr
+        logical :: bad_local, bad_global
+        real    :: max_z_d, max_z_f
         real, allocatable, dimension(:,:) :: AGL_cap, AGL_u_cap, AGL_v_cap, AGL_n, AGL_u_n, AGL_v_n
 
         ! this%geo and forcing%geo have to be of class interpolable
@@ -2853,16 +2856,32 @@ contains
             !$acc enter data copyin(forcing%geo%z)
             !$acc enter data copyin(this%geo%z)
 
-            ! check that the forcing z is higher than the domain z
-            ! if ( maxval(forcing%z) < maxval(this%geo%z) ) then
-            !     write(*,*) "ERROR: Forcing or parent-nest z is lower than domain z."
-            !     write(*,*) "ERROR: Check earlier output during domain initialization"
-            !     write(*,*) "ERROR: to ensure that nested domains fit within their parent domain."
-            !     write(*,*) "ERROR: Otherwise, ensure that the vertical extent of all domains"
-            !     write(*,*) "ERROR: fits within the forcing domain."
-            !     stop
-            ! endif
-
+            ! Check that the forcing/parent-nest top is at least as high as this nest's
+            ! top at every column. If any column has child top above forcing top, the
+            ! vinterp LUT clamps upper child levels to the forcing top value (see
+            ! vLUT in src/utilities/vinterp.F90), producing flat pressure/temperature
+            ! bands that downstream physics (notably RRTMG via coldry=0) can't handle.
+            nz_f = ubound(forcing%geo%z, 2)
+            nz_d = ubound(this%geo%z, 2)
+            bad_local = any(forcing%geo%z(:,nz_f,:) < this%geo%z(:,nz_d,:))
+            call MPI_Allreduce(bad_local, bad_global, 1, MPI_LOGICAL, MPI_LOR, &
+                               this%compute_comms, ierr)
+            if (bad_global) then
+                max_z_d = maxval(this%geo%z(:,nz_d,:))
+                max_z_f = maxval(forcing%geo%z(:,nz_f,:))
+                call MPI_Allreduce(MPI_IN_PLACE, max_z_d, 1, MPI_REAL, MPI_MAX, this%compute_comms, ierr)
+                call MPI_Allreduce(MPI_IN_PLACE, max_z_f, 1, MPI_REAL, MPI_MAX, this%compute_comms, ierr)
+                if (STD_OUT_PE) then
+                    write(*,*) "ERROR: This nest's model top is higher than its forcing/parent-nest top."
+                    write(*,*) "       nest_indx               = ", this%nest_indx
+                    write(*,*) "       max child   top z (m)   = ", max_z_d
+                    write(*,*) "       max forcing top z (m)   = ", max_z_f
+                    write(*,*) "       Reduce nz or trim dz_levels for this nest, or raise the parent's"
+                    write(*,*) "       model top so the child fits within it."
+                endif
+                call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+                stop
+            endif
         end if
         
 
