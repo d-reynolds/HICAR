@@ -106,6 +106,53 @@ module wind_iterative_hicar
     integer :: solver_rank = -1
     integer :: east_neighbor = -1, west_neighbor = -1, north_neighbor = -1, south_neighbor = -1
 
+    ! Multi-nest cache: each nest's full state lives in its own slot. On nest
+    ! context switch (nest_manager.F90:switch_nest_context), init_iter_winds_hicar
+    ! saves the active state and restores the target. O(1) switching once each
+    ! nest has been visited once. Mirrors the AMGX module's cache (which is
+    ! itself based on the long-standing physics module pattern in HICAR).
+    integer, parameter :: MAX_NESTS = 4
+    integer :: active_nest_indx = -1
+
+    type :: hicar_cache_t
+        logical :: valid = .false.
+        ! Grid scalars
+        integer :: i_s, i_e, k_s, k_e, j_s, j_e
+        integer :: ims, ime, jms, jme, ids, ide, jds, jde
+        integer :: xs, ys, zs, xm, ym, zm, mx, my, mz
+        integer :: hs, n_rows, n_rows_global
+        real    :: dx
+        integer :: solver_rank, east_neighbor, west_neighbor, north_neighbor, south_neighbor
+        type(MPI_Comm) :: solver_comm
+        ! Flags
+        logical :: structure_uploaded
+        integer :: wind_solver_max_iters
+        ! Geometry (single precision, owned-range allocations)
+        real, allocatable, dimension(:,:,:) :: A_coef, B_coef, C_coef, D_coef, E_coef
+        real, allocatable, dimension(:,:,:) :: F_coef, G_coef, H_coef, I_coef, J_coef
+        real, allocatable, dimension(:,:,:) :: K_coef, L_coef, M_coef, N_coef, O_coef
+        real, allocatable, dimension(:,:,:) :: div, dz_if, jaco, dzdx, dzdy, sigma, alpha
+        real, allocatable, dimension(:,:)   :: dzdx_surf, dzdy_surf
+        real, allocatable, dimension(:,:,:) :: jaco_w, dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag
+        real, allocatable, dimension(:)     :: adv_dz_col
+        ! Krylov / RHS / precond (double precision, halo'd allocations)
+        real(c_double), allocatable, dimension(:,:,:) :: x_sol, r_vec, r_hat
+        real(c_double), allocatable, dimension(:,:,:) :: p_vec, p_hat, v_vec
+        real(c_double), allocatable, dimension(:,:,:) :: s_vec, s_hat, t_vec
+        real(c_double), allocatable, dimension(:,:,:) :: rhs, D_inv, prec_res
+        ! Halo face buffers (target attribute only needed on the live module-level
+        ! variables for c_loc — not on cache slots, which are pure host storage)
+        real(c_double), allocatable, dimension(:,:) :: east_send,  east_recv
+        real(c_double), allocatable, dimension(:,:) :: west_send,  west_recv
+        real(c_double), allocatable, dimension(:,:) :: north_send, north_recv
+        real(c_double), allocatable, dimension(:,:) :: south_send, south_recv
+#ifdef USE_NCCL
+        real(c_double), allocatable, dimension(:) :: sigma_dev, red5_dev, rho0_dev
+#endif
+    end type hicar_cache_t
+
+    type(hicar_cache_t) :: domain_cache(MAX_NESTS)
+
 #ifdef USE_NCCL
     ! NCCL communicator + stream. Stream is aliased to OpenACC's sync queue so
     ! all NCCL ops are stream-ordered with the OpenACC pack/unpack/reduction kernels
@@ -144,36 +191,57 @@ contains
         type(options_t), intent(in) :: options
         integer :: ierr
         integer :: nprocs, device_num
+        integer :: target_nest
+        integer :: my_rank_in_comm
 #ifdef USE_NCCL
         integer(c_int) :: nccl_rc
 #endif
 
-        if (initialized_hicar) return
+        ! NCCL communicator is shared across nests (created once on first call).
+        ! It's tied to compute_comms which we assume is the same across nests.
+#ifdef USE_NCCL
+        if (.not. nccl_initialized) then
+            call MPI_Comm_size(domain%compute_comms, nprocs,         ierr)
+            call MPI_Comm_rank(domain%compute_comms, my_rank_in_comm, ierr)
+            device_num = acc_get_device_num(acc_device_nvidia)
+            nccl_rc = nccl_comm_init(nccl_comm, nprocs, my_rank_in_comm, &
+                                      domain%compute_comms%MPI_VAL, device_num)
+            if (nccl_rc /= 0 .and. STD_OUT_PE) then
+                print*, "WARNING: nccl_comm_init failed in wind_iterative_hicar, rc=", nccl_rc
+            endif
+            nccl_stream = transfer(acc_get_cuda_stream(acc_async_sync), nccl_stream)
+            nccl_initialized = .true.
+        endif
+#endif
 
+        target_nest = domain%nest_indx
+
+        ! Already on this nest — nothing to do
+        if (target_nest == active_nest_indx) return
+
+        ! Save current state to its cache slot (if any)
+        if (active_nest_indx > 0 .and. active_nest_indx <= MAX_NESTS) then
+            call save_to_cache(active_nest_indx)
+        endif
+
+        ! Restore from cache if we've seen this nest before — O(1) context switch
+        if (target_nest > 0 .and. target_nest <= MAX_NESTS .and. &
+            domain_cache(target_nest)%valid) then
+            call restore_from_cache(target_nest)
+            active_nest_indx = target_nest
+            if (STD_OUT_PE) print*, "HICAR native wind solver: restored cached state for nest ", target_nest
+            return
+        endif
+
+        ! --- Fresh init for a nest seen for the first time ---
         solver_comm = domain%compute_comms
 
-        ! Cache MPI rank + neighbour ranks once — exchange_krylov_halos hits these
-        ! ~200x per solve in the inner loop.
+        ! Cache MPI rank + neighbour ranks (exchange_krylov_halos hits these ~200x/solve)
         call MPI_Comm_rank(solver_comm, solver_rank, ierr)
         east_neighbor  = solver_rank + 1
         west_neighbor  = solver_rank - 1
         north_neighbor = solver_rank + domain%grid%ximages
         south_neighbor = solver_rank - domain%grid%ximages
-
-#ifdef USE_NCCL
-        ! Initialise NCCL communicator over the same MPI comm the solver uses.
-        ! Alias the NCCL stream to OpenACC's sync queue so kernels and NCCL ops
-        ! are ordered within a single stream.
-        call MPI_Comm_size(solver_comm, nprocs, ierr)
-        device_num = acc_get_device_num(acc_device_nvidia)
-        nccl_rc = nccl_comm_init(nccl_comm, nprocs, solver_rank, &
-                                  solver_comm%MPI_VAL, device_num)
-        if (nccl_rc /= 0 .and. STD_OUT_PE) then
-            print*, "WARNING: nccl_comm_init failed in wind_iterative_hicar, rc=", nccl_rc
-        endif
-        nccl_stream = transfer(acc_get_cuda_stream(acc_async_sync), nccl_stream)
-        nccl_initialized = .true.
-#endif
 
         wind_solver_max_iters = options%wind%wind_solver_iterations
 
@@ -184,8 +252,9 @@ contains
 
         initialized_hicar  = .true.
         structure_uploaded = .false.
+        active_nest_indx   = target_nest
 
-        if (STD_OUT_PE) print*, "HICAR native wind solver initialised (Phase 1: classic BiCGStab + MPI)"
+        if (STD_OUT_PE) print*, "HICAR native wind solver initialised for nest ", target_nest
     end subroutine init_iter_winds_hicar
 
 
@@ -825,6 +894,23 @@ contains
         real(c_double), dimension(i_s-1:i_e+1, k_s-1:k_e+1, j_s-1:j_e+1), intent(in)    :: in_vec
         real(c_double), dimension(i_s-1:i_e+1, k_s-1:k_e+1, j_s-1:j_e+1), intent(inout) :: out_vec
         integer :: i, j, k, sweep
+
+        ! Zero entire out_vec INCLUDING halo cells before sweeps. The inner SpMV
+        ! in sweep 2+ reads out_vec at halo positions; for block-Jacobi convention
+        ! those must be zero (homogeneous Dirichlet at rank boundary). Without
+        ! this, halo cells leak previous outer-iter's exchange_krylov_halos data
+        ! into the smoother and convergence drifts on multi-rank runs (bug
+        ! manifested as slow residual growth at ~0.25%/iter, 2-GPU 2026-05-10).
+        ! Halo cells of out_vec stay at zero throughout the precond apply since
+        ! sweeps only write to owned cells.
+        !$acc parallel loop gang vector collapse(3) present(out_vec)
+        do j = j_s-1, j_e+1
+            do k = k_s-1, k_e+1
+                do i = i_s-1, i_e+1
+                    out_vec(i,k,j) = 0.0_c_double
+                enddo
+            enddo
+        enddo
 
         ! Sweep 1: y_1 = D^{-1} in   (starting from y_0 = 0)
         !$acc parallel loop gang vector collapse(3) present(in_vec, out_vec, D_inv)
@@ -1650,8 +1736,45 @@ contains
     !!------------------------------------------------------------
     subroutine finalize_hicar()
         implicit none
+        integer :: n
 
         if (.not. initialized_hicar) return
+
+        ! Finalize all cached nests by restoring each one and cleaning it up.
+        ! Mirrors finalize_amgx pattern.
+        do n = 1, MAX_NESTS
+            if (n /= active_nest_indx .and. domain_cache(n)%valid) then
+                call restore_from_cache(n)
+                call finalize_active_state()
+            endif
+        enddo
+
+        ! Finalize the currently-active state
+        call finalize_active_state()
+
+#ifdef USE_NCCL
+        if (nccl_initialized) then
+            call nccl_comm_destroy(nccl_comm)
+            nccl_comm = c_null_ptr
+            ! nccl_stream is aliased to OpenACC's sync queue — do NOT destroy
+            nccl_stream = c_null_ptr
+            nccl_initialized = .false.
+        endif
+#endif
+
+        initialized_hicar  = .false.
+        structure_uploaded = .false.
+        active_nest_indx   = -1
+    end subroutine finalize_hicar
+
+
+    !>------------------------------------------------------------
+    !! Clean up the currently-active state (device data + host alloc).
+    !! Used by finalize_hicar both for the live state and for each
+    !! cached nest after restoring it.
+    !!------------------------------------------------------------
+    subroutine finalize_active_state()
+        implicit none
 
         if (structure_uploaded) then
             !$acc exit data delete(x_sol, r_vec, r_hat, p_vec, p_hat, v_vec, &
@@ -1735,9 +1858,8 @@ contains
         if (allocated(jaco_v_stag))  deallocate(jaco_v_stag)
         if (allocated(adv_dz_col))   deallocate(adv_dz_col)
 
-        initialized_hicar  = .false.
         structure_uploaded = .false.
-    end subroutine finalize_hicar
+    end subroutine finalize_active_state
 
 
     !>------------------------------------------------------------
@@ -2039,6 +2161,250 @@ contains
             enddo
         enddo
     end subroutine update_coefs_gpu
+
+
+    !>------------------------------------------------------------
+    !! Save current module state into a cache slot via MOVE_ALLOC.
+    !! Host arrays are transferred (no copy); device data must be
+    !! removed first because OpenACC tracks attachments by host
+    !! address. After this routine, the cache slot owns all the
+    !! state; the module's allocatables are unallocated.
+    !!------------------------------------------------------------
+    subroutine save_to_cache(slot)
+        implicit none
+        integer, intent(in) :: slot
+
+        ! Grid scalars
+        domain_cache(slot)%i_s = i_s; domain_cache(slot)%i_e = i_e
+        domain_cache(slot)%k_s = k_s; domain_cache(slot)%k_e = k_e
+        domain_cache(slot)%j_s = j_s; domain_cache(slot)%j_e = j_e
+        domain_cache(slot)%ims = ims; domain_cache(slot)%ime = ime
+        domain_cache(slot)%jms = jms; domain_cache(slot)%jme = jme
+        domain_cache(slot)%ids = ids; domain_cache(slot)%ide = ide
+        domain_cache(slot)%jds = jds; domain_cache(slot)%jde = jde
+        domain_cache(slot)%xs  = xs;  domain_cache(slot)%ys  = ys;  domain_cache(slot)%zs  = zs
+        domain_cache(slot)%xm  = xm;  domain_cache(slot)%ym  = ym;  domain_cache(slot)%zm  = zm
+        domain_cache(slot)%mx  = mx;  domain_cache(slot)%my  = my;  domain_cache(slot)%mz  = mz
+        domain_cache(slot)%hs  = hs;  domain_cache(slot)%dx  = dx
+        domain_cache(slot)%n_rows        = n_rows
+        domain_cache(slot)%n_rows_global = n_rows_global
+        domain_cache(slot)%solver_rank   = solver_rank
+        domain_cache(slot)%east_neighbor  = east_neighbor
+        domain_cache(slot)%west_neighbor  = west_neighbor
+        domain_cache(slot)%north_neighbor = north_neighbor
+        domain_cache(slot)%south_neighbor = south_neighbor
+        domain_cache(slot)%solver_comm    = solver_comm
+        domain_cache(slot)%structure_uploaded   = structure_uploaded
+        domain_cache(slot)%wind_solver_max_iters = wind_solver_max_iters
+
+        ! Sync device → host before removing device attachments
+        !$acc wait
+        if (structure_uploaded) then
+            !$acc update host(A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
+            !$acc             H_coef, I_coef, J_coef, K_coef, L_coef, M_coef, N_coef, O_coef)
+            !$acc update host(x_sol, r_vec, r_hat, p_vec, p_hat, v_vec, &
+            !$acc             s_vec, s_hat, t_vec, rhs, D_inv, prec_res)
+            !$acc update host(east_send, east_recv, west_send, west_recv, &
+            !$acc             north_send, north_recv, south_send, south_recv)
+            !$acc exit data delete(A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
+            !$acc                  H_coef, I_coef, J_coef, K_coef, L_coef, M_coef, N_coef, O_coef)
+            !$acc exit data delete(x_sol, r_vec, r_hat, p_vec, p_hat, v_vec, &
+            !$acc                  s_vec, s_hat, t_vec, rhs, D_inv, prec_res)
+            !$acc exit data delete(east_send, east_recv, west_send, west_recv, &
+            !$acc                  north_send, north_recv, south_send, south_recv)
+#ifdef USE_NCCL
+            if (allocated(sigma_dev)) then
+                !$acc update host(sigma_dev, red5_dev, rho0_dev)
+                !$acc exit data delete(sigma_dev, red5_dev, rho0_dev)
+            endif
+#endif
+        endif
+        if (allocated(dz_if)) then
+            !$acc exit data delete(dz_if, div, alpha, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma)
+            !$acc exit data delete(jaco_w, dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag, adv_dz_col)
+        endif
+
+        ! Geometry / coefficient arrays
+        if (allocated(A_coef))       call move_alloc(A_coef,       domain_cache(slot)%A_coef)
+        if (allocated(B_coef))       call move_alloc(B_coef,       domain_cache(slot)%B_coef)
+        if (allocated(C_coef))       call move_alloc(C_coef,       domain_cache(slot)%C_coef)
+        if (allocated(D_coef))       call move_alloc(D_coef,       domain_cache(slot)%D_coef)
+        if (allocated(E_coef))       call move_alloc(E_coef,       domain_cache(slot)%E_coef)
+        if (allocated(F_coef))       call move_alloc(F_coef,       domain_cache(slot)%F_coef)
+        if (allocated(G_coef))       call move_alloc(G_coef,       domain_cache(slot)%G_coef)
+        if (allocated(H_coef))       call move_alloc(H_coef,       domain_cache(slot)%H_coef)
+        if (allocated(I_coef))       call move_alloc(I_coef,       domain_cache(slot)%I_coef)
+        if (allocated(J_coef))       call move_alloc(J_coef,       domain_cache(slot)%J_coef)
+        if (allocated(K_coef))       call move_alloc(K_coef,       domain_cache(slot)%K_coef)
+        if (allocated(L_coef))       call move_alloc(L_coef,       domain_cache(slot)%L_coef)
+        if (allocated(M_coef))       call move_alloc(M_coef,       domain_cache(slot)%M_coef)
+        if (allocated(N_coef))       call move_alloc(N_coef,       domain_cache(slot)%N_coef)
+        if (allocated(O_coef))       call move_alloc(O_coef,       domain_cache(slot)%O_coef)
+        if (allocated(div))          call move_alloc(div,          domain_cache(slot)%div)
+        if (allocated(dz_if))        call move_alloc(dz_if,        domain_cache(slot)%dz_if)
+        if (allocated(jaco))         call move_alloc(jaco,         domain_cache(slot)%jaco)
+        if (allocated(dzdx))         call move_alloc(dzdx,         domain_cache(slot)%dzdx)
+        if (allocated(dzdy))         call move_alloc(dzdy,         domain_cache(slot)%dzdy)
+        if (allocated(sigma))        call move_alloc(sigma,        domain_cache(slot)%sigma)
+        if (allocated(alpha))        call move_alloc(alpha,        domain_cache(slot)%alpha)
+        if (allocated(dzdx_surf))    call move_alloc(dzdx_surf,    domain_cache(slot)%dzdx_surf)
+        if (allocated(dzdy_surf))    call move_alloc(dzdy_surf,    domain_cache(slot)%dzdy_surf)
+        if (allocated(jaco_w))       call move_alloc(jaco_w,       domain_cache(slot)%jaco_w)
+        if (allocated(dzdx_u_stag))  call move_alloc(dzdx_u_stag,  domain_cache(slot)%dzdx_u_stag)
+        if (allocated(jaco_u_stag))  call move_alloc(jaco_u_stag,  domain_cache(slot)%jaco_u_stag)
+        if (allocated(dzdy_v_stag))  call move_alloc(dzdy_v_stag,  domain_cache(slot)%dzdy_v_stag)
+        if (allocated(jaco_v_stag))  call move_alloc(jaco_v_stag,  domain_cache(slot)%jaco_v_stag)
+        if (allocated(adv_dz_col))   call move_alloc(adv_dz_col,   domain_cache(slot)%adv_dz_col)
+
+        ! Krylov / RHS / precond
+        if (allocated(x_sol))    call move_alloc(x_sol,    domain_cache(slot)%x_sol)
+        if (allocated(r_vec))    call move_alloc(r_vec,    domain_cache(slot)%r_vec)
+        if (allocated(r_hat))    call move_alloc(r_hat,    domain_cache(slot)%r_hat)
+        if (allocated(p_vec))    call move_alloc(p_vec,    domain_cache(slot)%p_vec)
+        if (allocated(p_hat))    call move_alloc(p_hat,    domain_cache(slot)%p_hat)
+        if (allocated(v_vec))    call move_alloc(v_vec,    domain_cache(slot)%v_vec)
+        if (allocated(s_vec))    call move_alloc(s_vec,    domain_cache(slot)%s_vec)
+        if (allocated(s_hat))    call move_alloc(s_hat,    domain_cache(slot)%s_hat)
+        if (allocated(t_vec))    call move_alloc(t_vec,    domain_cache(slot)%t_vec)
+        if (allocated(rhs))      call move_alloc(rhs,      domain_cache(slot)%rhs)
+        if (allocated(D_inv))    call move_alloc(D_inv,    domain_cache(slot)%D_inv)
+        if (allocated(prec_res)) call move_alloc(prec_res, domain_cache(slot)%prec_res)
+
+        ! Halo buffers
+        if (allocated(east_send))   call move_alloc(east_send,   domain_cache(slot)%east_send)
+        if (allocated(east_recv))   call move_alloc(east_recv,   domain_cache(slot)%east_recv)
+        if (allocated(west_send))   call move_alloc(west_send,   domain_cache(slot)%west_send)
+        if (allocated(west_recv))   call move_alloc(west_recv,   domain_cache(slot)%west_recv)
+        if (allocated(north_send))  call move_alloc(north_send,  domain_cache(slot)%north_send)
+        if (allocated(north_recv))  call move_alloc(north_recv,  domain_cache(slot)%north_recv)
+        if (allocated(south_send))  call move_alloc(south_send,  domain_cache(slot)%south_send)
+        if (allocated(south_recv))  call move_alloc(south_recv,  domain_cache(slot)%south_recv)
+
+#ifdef USE_NCCL
+        if (allocated(sigma_dev))   call move_alloc(sigma_dev,   domain_cache(slot)%sigma_dev)
+        if (allocated(red5_dev))    call move_alloc(red5_dev,    domain_cache(slot)%red5_dev)
+        if (allocated(rho0_dev))    call move_alloc(rho0_dev,    domain_cache(slot)%rho0_dev)
+#endif
+
+        domain_cache(slot)%valid = .true.
+    end subroutine save_to_cache
+
+
+    !>------------------------------------------------------------
+    !! Restore module state from a cache slot via MOVE_ALLOC.
+    !! After this routine, the cache slot is empty and the module
+    !! owns all the state. Device data is re-registered on GPU.
+    !!------------------------------------------------------------
+    subroutine restore_from_cache(slot)
+        implicit none
+        integer, intent(in) :: slot
+
+        ! Grid scalars
+        i_s = domain_cache(slot)%i_s; i_e = domain_cache(slot)%i_e
+        k_s = domain_cache(slot)%k_s; k_e = domain_cache(slot)%k_e
+        j_s = domain_cache(slot)%j_s; j_e = domain_cache(slot)%j_e
+        ims = domain_cache(slot)%ims; ime = domain_cache(slot)%ime
+        jms = domain_cache(slot)%jms; jme = domain_cache(slot)%jme
+        ids = domain_cache(slot)%ids; ide = domain_cache(slot)%ide
+        jds = domain_cache(slot)%jds; jde = domain_cache(slot)%jde
+        xs  = domain_cache(slot)%xs;  ys  = domain_cache(slot)%ys;  zs  = domain_cache(slot)%zs
+        xm  = domain_cache(slot)%xm;  ym  = domain_cache(slot)%ym;  zm  = domain_cache(slot)%zm
+        mx  = domain_cache(slot)%mx;  my  = domain_cache(slot)%my;  mz  = domain_cache(slot)%mz
+        hs  = domain_cache(slot)%hs;  dx  = domain_cache(slot)%dx
+        n_rows        = domain_cache(slot)%n_rows
+        n_rows_global = domain_cache(slot)%n_rows_global
+        solver_rank   = domain_cache(slot)%solver_rank
+        east_neighbor  = domain_cache(slot)%east_neighbor
+        west_neighbor  = domain_cache(slot)%west_neighbor
+        north_neighbor = domain_cache(slot)%north_neighbor
+        south_neighbor = domain_cache(slot)%south_neighbor
+        solver_comm    = domain_cache(slot)%solver_comm
+        structure_uploaded   = domain_cache(slot)%structure_uploaded
+        wind_solver_max_iters = domain_cache(slot)%wind_solver_max_iters
+
+        ! Geometry / coefficient arrays
+        if (allocated(domain_cache(slot)%A_coef))       call move_alloc(domain_cache(slot)%A_coef,       A_coef)
+        if (allocated(domain_cache(slot)%B_coef))       call move_alloc(domain_cache(slot)%B_coef,       B_coef)
+        if (allocated(domain_cache(slot)%C_coef))       call move_alloc(domain_cache(slot)%C_coef,       C_coef)
+        if (allocated(domain_cache(slot)%D_coef))       call move_alloc(domain_cache(slot)%D_coef,       D_coef)
+        if (allocated(domain_cache(slot)%E_coef))       call move_alloc(domain_cache(slot)%E_coef,       E_coef)
+        if (allocated(domain_cache(slot)%F_coef))       call move_alloc(domain_cache(slot)%F_coef,       F_coef)
+        if (allocated(domain_cache(slot)%G_coef))       call move_alloc(domain_cache(slot)%G_coef,       G_coef)
+        if (allocated(domain_cache(slot)%H_coef))       call move_alloc(domain_cache(slot)%H_coef,       H_coef)
+        if (allocated(domain_cache(slot)%I_coef))       call move_alloc(domain_cache(slot)%I_coef,       I_coef)
+        if (allocated(domain_cache(slot)%J_coef))       call move_alloc(domain_cache(slot)%J_coef,       J_coef)
+        if (allocated(domain_cache(slot)%K_coef))       call move_alloc(domain_cache(slot)%K_coef,       K_coef)
+        if (allocated(domain_cache(slot)%L_coef))       call move_alloc(domain_cache(slot)%L_coef,       L_coef)
+        if (allocated(domain_cache(slot)%M_coef))       call move_alloc(domain_cache(slot)%M_coef,       M_coef)
+        if (allocated(domain_cache(slot)%N_coef))       call move_alloc(domain_cache(slot)%N_coef,       N_coef)
+        if (allocated(domain_cache(slot)%O_coef))       call move_alloc(domain_cache(slot)%O_coef,       O_coef)
+        if (allocated(domain_cache(slot)%div))          call move_alloc(domain_cache(slot)%div,          div)
+        if (allocated(domain_cache(slot)%dz_if))        call move_alloc(domain_cache(slot)%dz_if,        dz_if)
+        if (allocated(domain_cache(slot)%jaco))         call move_alloc(domain_cache(slot)%jaco,         jaco)
+        if (allocated(domain_cache(slot)%dzdx))         call move_alloc(domain_cache(slot)%dzdx,         dzdx)
+        if (allocated(domain_cache(slot)%dzdy))         call move_alloc(domain_cache(slot)%dzdy,         dzdy)
+        if (allocated(domain_cache(slot)%sigma))        call move_alloc(domain_cache(slot)%sigma,        sigma)
+        if (allocated(domain_cache(slot)%alpha))        call move_alloc(domain_cache(slot)%alpha,        alpha)
+        if (allocated(domain_cache(slot)%dzdx_surf))    call move_alloc(domain_cache(slot)%dzdx_surf,    dzdx_surf)
+        if (allocated(domain_cache(slot)%dzdy_surf))    call move_alloc(domain_cache(slot)%dzdy_surf,    dzdy_surf)
+        if (allocated(domain_cache(slot)%jaco_w))       call move_alloc(domain_cache(slot)%jaco_w,       jaco_w)
+        if (allocated(domain_cache(slot)%dzdx_u_stag))  call move_alloc(domain_cache(slot)%dzdx_u_stag,  dzdx_u_stag)
+        if (allocated(domain_cache(slot)%jaco_u_stag))  call move_alloc(domain_cache(slot)%jaco_u_stag,  jaco_u_stag)
+        if (allocated(domain_cache(slot)%dzdy_v_stag))  call move_alloc(domain_cache(slot)%dzdy_v_stag,  dzdy_v_stag)
+        if (allocated(domain_cache(slot)%jaco_v_stag))  call move_alloc(domain_cache(slot)%jaco_v_stag,  jaco_v_stag)
+        if (allocated(domain_cache(slot)%adv_dz_col))   call move_alloc(domain_cache(slot)%adv_dz_col,   adv_dz_col)
+
+        ! Krylov / RHS / precond
+        if (allocated(domain_cache(slot)%x_sol))    call move_alloc(domain_cache(slot)%x_sol,    x_sol)
+        if (allocated(domain_cache(slot)%r_vec))    call move_alloc(domain_cache(slot)%r_vec,    r_vec)
+        if (allocated(domain_cache(slot)%r_hat))    call move_alloc(domain_cache(slot)%r_hat,    r_hat)
+        if (allocated(domain_cache(slot)%p_vec))    call move_alloc(domain_cache(slot)%p_vec,    p_vec)
+        if (allocated(domain_cache(slot)%p_hat))    call move_alloc(domain_cache(slot)%p_hat,    p_hat)
+        if (allocated(domain_cache(slot)%v_vec))    call move_alloc(domain_cache(slot)%v_vec,    v_vec)
+        if (allocated(domain_cache(slot)%s_vec))    call move_alloc(domain_cache(slot)%s_vec,    s_vec)
+        if (allocated(domain_cache(slot)%s_hat))    call move_alloc(domain_cache(slot)%s_hat,    s_hat)
+        if (allocated(domain_cache(slot)%t_vec))    call move_alloc(domain_cache(slot)%t_vec,    t_vec)
+        if (allocated(domain_cache(slot)%rhs))      call move_alloc(domain_cache(slot)%rhs,      rhs)
+        if (allocated(domain_cache(slot)%D_inv))    call move_alloc(domain_cache(slot)%D_inv,    D_inv)
+        if (allocated(domain_cache(slot)%prec_res)) call move_alloc(domain_cache(slot)%prec_res, prec_res)
+
+        ! Halo buffers
+        if (allocated(domain_cache(slot)%east_send))   call move_alloc(domain_cache(slot)%east_send,   east_send)
+        if (allocated(domain_cache(slot)%east_recv))   call move_alloc(domain_cache(slot)%east_recv,   east_recv)
+        if (allocated(domain_cache(slot)%west_send))   call move_alloc(domain_cache(slot)%west_send,   west_send)
+        if (allocated(domain_cache(slot)%west_recv))   call move_alloc(domain_cache(slot)%west_recv,   west_recv)
+        if (allocated(domain_cache(slot)%north_send))  call move_alloc(domain_cache(slot)%north_send,  north_send)
+        if (allocated(domain_cache(slot)%north_recv))  call move_alloc(domain_cache(slot)%north_recv,  north_recv)
+        if (allocated(domain_cache(slot)%south_send))  call move_alloc(domain_cache(slot)%south_send,  south_send)
+        if (allocated(domain_cache(slot)%south_recv))  call move_alloc(domain_cache(slot)%south_recv,  south_recv)
+
+#ifdef USE_NCCL
+        if (allocated(domain_cache(slot)%sigma_dev))   call move_alloc(domain_cache(slot)%sigma_dev,   sigma_dev)
+        if (allocated(domain_cache(slot)%red5_dev))    call move_alloc(domain_cache(slot)%red5_dev,    red5_dev)
+        if (allocated(domain_cache(slot)%rho0_dev))    call move_alloc(domain_cache(slot)%rho0_dev,    rho0_dev)
+#endif
+
+        ! Re-register on device
+        if (allocated(dz_if)) then
+            !$acc enter data copyin(dz_if, div, alpha, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma)
+            !$acc enter data copyin(jaco_w, dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag, adv_dz_col)
+        endif
+        if (structure_uploaded) then
+            !$acc enter data copyin(A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
+            !$acc                   H_coef, I_coef, J_coef, K_coef, L_coef, M_coef, N_coef, O_coef)
+            !$acc enter data copyin(x_sol, r_vec, r_hat, p_vec, p_hat, v_vec, &
+            !$acc                   s_vec, s_hat, t_vec, rhs, D_inv, prec_res)
+            !$acc enter data copyin(east_send, east_recv, west_send, west_recv, &
+            !$acc                   north_send, north_recv, south_send, south_recv)
+#ifdef USE_NCCL
+            if (allocated(sigma_dev)) then
+                !$acc enter data copyin(sigma_dev, red5_dev, rho0_dev)
+            endif
+#endif
+        endif
+
+        domain_cache(slot)%valid = .false.
+    end subroutine restore_from_cache
 
 
 end module wind_iterative_hicar
