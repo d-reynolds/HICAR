@@ -55,7 +55,14 @@ module wind_iterative_hicar
     ! but the *outer* iter count typically drops 1.5-2x for Poisson-like problems.
     ! Net: similar total time, but fewer outer iters means fewer halo exchanges
     ! and allreduces — strict win at multi-rank scale.
-    integer, parameter :: precond_n_sweeps = 2
+    !
+    ! Adaptive retry: if a solve diverges/stagnates, calc_iter_winds_hicar bumps
+    ! this up to MAX_PREC_SWEEPS, retrying after each bump. On successful
+    ! convergence we reset to BASE_PREC_SWEEPS for the next call. Mirrors the
+    ! AMGX module's prec_max_iters retry. Per-nest state is cached.
+    integer, parameter :: BASE_PREC_SWEEPS = 2
+    integer, parameter :: MAX_PREC_SWEEPS  = 4
+    integer :: precond_n_sweeps = BASE_PREC_SWEEPS
 
     ! 15-point stencil coefficients (same names as AMGX module)
     real, allocatable, dimension(:,:,:) :: A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
@@ -127,6 +134,7 @@ module wind_iterative_hicar
         ! Flags
         logical :: structure_uploaded
         integer :: wind_solver_max_iters
+        integer :: precond_n_sweeps = BASE_PREC_SWEEPS
         ! Geometry (single precision, owned-range allocations)
         real, allocatable, dimension(:,:,:) :: A_coef, B_coef, C_coef, D_coef, E_coef
         real, allocatable, dimension(:,:,:) :: F_coef, G_coef, H_coef, I_coef, J_coef
@@ -229,7 +237,6 @@ contains
             domain_cache(target_nest)%valid) then
             call restore_from_cache(target_nest)
             active_nest_indx = target_nest
-            if (STD_OUT_PE) print*, "HICAR native wind solver: restored cached state for nest ", target_nest
             return
         endif
 
@@ -371,11 +378,12 @@ contains
 
         !$acc wait
 
-        ! Solve A x = b
+        ! Solve A x = b at the current preconditioner sweep count
         call bicgstab_solve(domain, wind_solver_max_iters, status, n_iters, res0, res_final)
 
         if (STD_OUT_PE) then
-            write(*,*) ' HICAR BiCGStab status=', status, ' iterations=', n_iters
+            write(*,*) ' HICAR BiCGStab status=', status, ' iterations=', n_iters, &
+                       ' precond_n_sweeps=', precond_n_sweeps
             write(*,*) '   Residual at iter 0:    ', res0
             write(*,*) '   Residual at final iter:', res_final
             if (t_total_acc > 0.0_c_double) then
@@ -400,27 +408,61 @@ contains
             endif
         endif
 
-        if (status /= 0 .and. res_final > res0) then
-            if (STD_OUT_PE) then
-                associate(density => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
-                          u       => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
-                          v       => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
-                          w_grid  => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
-                          w_real  => domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
-                          alpha_d => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d)
-                    write(*,*) '---------------HICAR BiCGStab DIVERGED-----------'
-                    !$acc update host(density, u, v, w_grid, w_real, alpha_d, div)
-                    write(*,*) "max abs val of density: ", maxval(abs(density))
-                    write(*,*) "max abs val of u:       ", maxval(abs(u))
-                    write(*,*) "max abs val of v:       ", maxval(abs(v))
-                    write(*,*) "max abs val of w_grid:  ", maxval(abs(w_grid))
-                    write(*,*) "max abs val of w_real:  ", maxval(abs(w_real))
-                    write(*,*) "max abs val of alpha:   ", maxval(abs(alpha_d))
-                    write(*,*) "max abs val of div:     ", maxval(abs(div))
-                    call domain_check_winds(domain, "Solver Diverged: ", dqdt=.True.)
-                end associate
+        ! Adaptive preconditioner retry: if the solver diverged/stagnated
+        ! (status non-zero AND residual didn't shrink by 100x), bump the
+        ! Block-Jacobi sweep count and retry. Each retry restarts from
+        ! x_sol = 0 (bicgstab_solve assumes x0=0 — see r_vec = rhs init).
+        ! Mirrors wind_iterative_amgx.F90's prec_max_iters retry.
+        if (status /= 0 .and. n_iters > 0 .and. res_final > 0.01_c_double * res0) then
+            do while (status /= 0 .and. res_final > 0.01_c_double * res0 &
+                      .and. precond_n_sweeps < MAX_PREC_SWEEPS)
+                precond_n_sweeps = precond_n_sweeps + 1
+                if (STD_OUT_PE) write(*,*) ' Convergence unsatisfactory, retrying solve with precond_n_sweeps=', &
+                                           precond_n_sweeps
+
+                ! Restart from x = 0 so bicgstab_solve's r0 = b - A*x0 = b assumption holds.
+                call vec_zero(x_sol)
+                !$acc wait
+
+                call bicgstab_solve(domain, wind_solver_max_iters, status, n_iters, res0, res_final)
+
+                if (STD_OUT_PE) then
+                    write(*,*) '  Retry status=', status, ' iterations=', n_iters
+                    write(*,*) '  Residual at iter 0:     ', res0
+                    write(*,*) '  Residual at final iter: ', res_final
+                endif
+            end do
+
+            ! Retry succeeded — reset sweep count to base for the next call
+            if (status == 0 .or. res_final <= 0.01_c_double * res0) then
+                if (STD_OUT_PE) write(*,*) ' Retry converged, resetting precond_n_sweeps=', BASE_PREC_SWEEPS
             endif
-            stop
+            precond_n_sweeps = BASE_PREC_SWEEPS
+
+            ! Still diverged after max retries and residual is worse than start — fatal
+            if (status /= 0 .and. res_final > res0) then
+                if (STD_OUT_PE) then
+                    associate(density => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
+                              u       => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                              v       => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                              w_grid  => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+                              w_real  => domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
+                              alpha_d => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d)
+                        write(*,*) '---------------HICAR BiCGStab DIVERGED (precond_n_sweeps=', &
+                                   precond_n_sweeps, ')-----------'
+                        !$acc update host(density, u, v, w_grid, w_real, alpha_d, div)
+                        write(*,*) "max abs val of density: ", maxval(abs(density))
+                        write(*,*) "max abs val of u:       ", maxval(abs(u))
+                        write(*,*) "max abs val of v:       ", maxval(abs(v))
+                        write(*,*) "max abs val of w_grid:  ", maxval(abs(w_grid))
+                        write(*,*) "max abs val of w_real:  ", maxval(abs(w_real))
+                        write(*,*) "max abs val of alpha:   ", maxval(abs(alpha_d))
+                        write(*,*) "max abs val of div:     ", maxval(abs(div))
+                        call domain_check_winds(domain, "Solver Diverged: ", dqdt=.True.)
+                    end associate
+                endif
+                stop
+            endif
         endif
 
         call calc_updated_winds_hicar(domain, adv_den)
@@ -2196,6 +2238,7 @@ contains
         domain_cache(slot)%solver_comm    = solver_comm
         domain_cache(slot)%structure_uploaded   = structure_uploaded
         domain_cache(slot)%wind_solver_max_iters = wind_solver_max_iters
+        domain_cache(slot)%precond_n_sweeps      = precond_n_sweeps
 
         ! Sync device → host before removing device attachments
         !$acc wait
@@ -2321,6 +2364,7 @@ contains
         solver_comm    = domain_cache(slot)%solver_comm
         structure_uploaded   = domain_cache(slot)%structure_uploaded
         wind_solver_max_iters = domain_cache(slot)%wind_solver_max_iters
+        precond_n_sweeps      = domain_cache(slot)%precond_n_sweeps
 
         ! Geometry / coefficient arrays
         if (allocated(domain_cache(slot)%A_coef))       call move_alloc(domain_cache(slot)%A_coef,       A_coef)
