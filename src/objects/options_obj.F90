@@ -255,11 +255,12 @@ contains
             stop "  ERROR, a surface layer scheme is required when using a PBL scheme"
         endif
         ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
-        if ((this%physics%surfacelayer==0).and.(this%physics%watersurface==kWATER_SIMPLE)) then
+        if ((this%physics%surfacelayer==0).and. &
+            ((this%physics%watersurface==kWATER_SIMPLE).or.(this%physics%watersurface==kWATER_FLAKE))) then
             if (STD_OUT_PE) write(*,*) "  "
-            if (STD_OUT_PE) write(*,*) "  ERROR, a surface layer scheme is required when the simple open water scheme,"
+            if (STD_OUT_PE) write(*,*) "  ERROR, a surface layer scheme is required for the simple or FLake open-water schemes,"
             if (STD_OUT_PE) write(*,*) "  ERROR, set sfc > 0 in the namelist."
-            stop "  ERROR, a surface layer scheme is required when using the simple open water scheme"
+            stop "  ERROR, a surface layer scheme is required when using the simple or FLake open-water scheme"
         endif
 
         ! prior to v 0.9.3 this was assumed, so throw a warning now just in case.
@@ -386,8 +387,12 @@ contains
             if((this%physics%watersurface==kWATER_LAKE) .AND. (STD_OUT_PE)) then
                 write(*,*) "  WARNING: Lake model selected (water=2), but USGS LU-categories has no lake category"
             endif
+            if((this%physics%watersurface==kWATER_FLAKE) .AND. (STD_OUT_PE)) then
+                write(*,*) "  WARNING: FLake model selected (water=3), but USGS LU-categories has no lake category"
+            endif
         elseif (trim(this%lsm%LU_Categories)=="NLCD40") then
             if(this%physics%watersurface==kWATER_LAKE) write(*,*) "  WARNING: Lake model selected (water=2), but NLCD40 LU-categories has no lake category"
+            if(this%physics%watersurface==kWATER_FLAKE) write(*,*) "  WARNING: FLake model selected (water=3), but NLCD40 LU-categories has no lake category"
         endif
 
         ! There needs to be a unique domain file for each nest. Additionally, dx needs to be set for each nest. Check for these here.

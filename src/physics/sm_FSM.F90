@@ -305,7 +305,10 @@ contains
                     ! The state variables in FSM to set are Ds (array of snow depth by layer)
                     ! Sice (array of ice content by layer), Sliq (array of liquid water content by layer),
                     ! Nsnow (number of snow layers), fsnow (fraction of snow cover)
-                    if ( (domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(hi,hj) > 0) .and. .not.(options%physics%watersurface==kWATER_SIMPLE .and. domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(hi,hj)==kLC_WATER)) then
+                    ! Skip water cells whose surface state is owned by ANY active water scheme
+                    ! (simple / lake / FLake). Previously this gate only excluded kWATER_SIMPLE,
+                    ! which let FSM clobber FLake's lake-ice-snow cells once they grew snow.
+                    if ( (domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(hi,hj) > 0) .and. .not.(options%physics%watersurface>0 .and. domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(hi,hj)==kLC_WATER)) then
 
                         !find out how many even layers of snow we have
                         do k = 1,(NNsmax_HICAR-1)
@@ -501,7 +504,10 @@ contains
             do i=i_s,i_e
                 hj = j-j_s+domain%jts
                 hi = i-i_s+domain%its
-                if ( SWE_(j,i)+SWE_pre(hi,hj) > 0 .and. .not.(options%physics%watersurface==kWATER_SIMPLE .and. domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(hi,hj)==kLC_WATER)) then
+                ! Same gate as line ~308: skip water cells owned by any active water scheme,
+                ! not just kWATER_SIMPLE, otherwise FSM overwrites FLake/lake-model fluxes
+                ! (SH, LH, qfx, chs, skin_temperature, etc.) on lake-ice-snow cells.
+                if ( SWE_(j,i)+SWE_pre(hi,hj) > 0 .and. .not.(options%physics%watersurface>0 .and. domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(hi,hj)==kLC_WATER)) then
                     if (ieee_is_nan(H_(j,i)) .or. ieee_is_nan(LE_(j,i)) .or. ieee_is_nan(Tsrf(j,i)) .or. ieee_is_nan(KH_(j,i))) then
                         write(*,*) 'WARNING: FSM NaN at (j,i)=', j, i, ' H=', H_(j,i), ' LE=', LE_(j,i), ' Tsrf=', Tsrf(j,i), ' KH=', KH_(j,i)
                         stop

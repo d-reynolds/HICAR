@@ -35,6 +35,7 @@
 module land_surface
     use module_water_simple, only : water_simple
     use module_water_lake,   only : lake, lakeini, nlevsoil, nlevsnow, nlevlake
+    use module_water_flake,  only : flake_init, flake_step
     use icar_constants
     use options_interface,   only : options_t
     use domain_interface,    only : domain_t
@@ -95,7 +96,7 @@ module land_surface
     ! Lake model: (allocated on lake init)
     real, allocatable, dimension (:,:)      ::      TH2
     integer :: lakeflag, lake_depth_flag, use_lakedepth
-    LOGICAL, allocatable, DIMENSION( :,: ) :: lake_or_not
+    LOGICAL, allocatable, DIMENSION( :,: ) :: lake_mask_out
 
 contains
 
@@ -229,7 +230,7 @@ contains
             kVARS%t_soisno3d, kVARS%h2osoi_ice3d, kVARS%h2osoi_liq3d, kVARS%h2osoi_vol3d, kVARS%z3d,                &
             kVARS%dz3d, kVARS%watsat3d, kVARS%csol3d, kVARS%tkmg3d, kVARS%lakemask, kVARS%zi3d,                     &
             kVARS%QFX, kVARS%chs, kVARS%land_emissivity, kVARS%xice, kVARS%lsm_last_precip, &
-            kVARS%tksatu3d, kVARS%tkdry3d, kVARS%snl2d, kVARS%t_grnd2d,  kVARS%savedtke12d, kVARS%lakedepth2d,      & !  kVARS%snowdp2d, kVARS%h2osno2d,
+            kVARS%tksatu3d, kVARS%tkdry3d, kVARS%snl2d, kVARS%t_grnd2d,  kVARS%savedtke12d,      & !  kVARS%snowdp2d, kVARS%h2osno2d,
             kVARS%lake_icefrac3d, kVARS%z_lake3d,kVARS%water_vapor, kVARS%potential_temperature     ])
 
             call options%restart_vars( &
@@ -240,8 +241,32 @@ contains
             kVARS%t_soisno3d, kVARS%h2osoi_ice3d, kVARS%h2osoi_liq3d, kVARS%h2osoi_vol3d, kVARS%z3d,                &
             kVARS%dz3d, kVARS%watsat3d, kVARS%csol3d, kVARS%tkmg3d, kVARS%lakemask, kVARS%zi3d,                     &
             kVARS%QFX, kVARS%land_emissivity, kVARS%xice, kVARS%lsm_last_precip,                                    &
-            kVARS%tksatu3d, kVARS%tkdry3d, kVARS%snl2d, kVARS%t_grnd2d, kVARS%savedtke12d, kVARS%lakedepth2d,       & !kVARS%snowdp2d, kVARS%h2osno2d,
+            kVARS%tksatu3d, kVARS%tkdry3d, kVARS%snl2d, kVARS%t_grnd2d, kVARS%savedtke12d,       & !kVARS%snowdp2d, kVARS%h2osno2d,
             kVARS%lake_icefrac3d, kVARS%z_lake3d,kVARS%water_vapor, kVARS%potential_temperature ])
+        endif
+
+        if (options%physics%watersurface == kWATER_FLAKE) then
+            ! FLake (Mironov 2008) bulk lake model. Reuses kVARS%skin_temperature (T_sfc),
+            ! kVARS%snow_height (h_snow), and kVARS%lake_depth (depth_w); adds 10 new 2D
+            ! prognostic fields for the FLake bulk state (incl. sediment module).
+            call options%alloc_vars( &
+            [kVARS%lake_depth, kVARS%lakemask, kVARS%veg_type, kVARS%land_mask, kVARS%terrain,                 &
+             kVARS%latitude, kVARS%longitude, kVARS%temperature, kVARS%pressure_interface,                     &
+             kVARS%surface_pressure, kVARS%dz_interface, kVARS%shortwave, kVARS%longwave,                      &
+             kVARS%water_vapor, kVARS%sensible_heat, kVARS%latent_heat, kVARS%ground_heat_flux,                &
+             kVARS%qfx, kVARS%chs, kVARS%land_emissivity, kVARS%albedo, kVARS%xice,                            &
+             kVARS%skin_temperature, kVARS%u_10m, kVARS%v_10m, kVARS%sst,                                      &
+             kVARS%snow_water_equivalent, kVARS%snow_height, kVARS%precipitation, kVARS%lsm_last_precip,       &
+             ! FLake bulk prognostic state (2D)                                                                &
+             kVARS%flake_t_snow, kVARS%flake_t_ice, kVARS%flake_t_mnw, kVARS%flake_t_wml, kVARS%flake_t_bot,   &
+             kVARS%flake_t_b1, kVARS%flake_c_t, kVARS%flake_h_ice, kVARS%flake_h_ml, kVARS%flake_h_b1 ])
+
+            call options%restart_vars( &
+            [kVARS%lake_depth, kVARS%lakemask, kVARS%xice, kVARS%land_emissivity, kVARS%albedo,                &
+             kVARS%skin_temperature, kVARS%snow_height, kVARS%snow_water_equivalent,                           &
+             kVARS%sensible_heat, kVARS%latent_heat, kVARS%qfx, kVARS%ground_heat_flux,                        &
+             kVARS%flake_t_snow, kVARS%flake_t_ice, kVARS%flake_t_mnw, kVARS%flake_t_wml, kVARS%flake_t_bot,   &
+             kVARS%flake_t_b1, kVARS%flake_c_t, kVARS%flake_h_ice, kVARS%flake_h_ml, kVARS%flake_h_b1 ])
         endif
 
 
@@ -676,7 +701,7 @@ contains
             end associate
         endif ! Noah-MP LSM
 
-        if(options%physics%watersurface==kWATER_LAKE) then
+        if(options%physics%watersurface==kWATER_LAKE .or. options%physics%watersurface==kWATER_FLAKE) then
         ! ____________ Lake model ______________________
         ! From WRF's /run/README.namelist:  These could at some point become namelist options in ICAR?
         ! lakedepth_default(max_dom)          = 50,      ! default lake depth (If there is no lake_depth information in the input data, then lake depth is assumed to be 50m)
@@ -689,19 +714,24 @@ contains
 
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "Initializing Lake model"
 
-            ! allocate arrays:
-            if (allocated(lake_or_not)) deallocate( lake_or_not)
-            if (allocated(TH2)) deallocate( TH2)
-            allocate(lake_or_not(ims:ime, jms:jme))
-            allocate(TH2( ims:ime, jms:jme ))
-
             ISICE   = options%lsm%ice_category
             ISWATER = options%lsm%water_category
             ISLAKE  = options%lsm%lake_category
 
-
             if(ISLAKE==-1) then
-                if(STD_OUT_PE .and. .not.context_change) write(*,*)  "   WARNING: no lake category in LU data: The model will try to guess lake-gridpoints. This option has not been properly tested!"
+                if(STD_OUT_PE .and. .not.context_change) write(*,*)  "   WARNING: no lake category in LU data: The model will try to guess lake-gridpoints"
+                
+                do j = jts, MIN(jde-1,jte)
+                    do i = its, MIN(ide-1,ite)
+                        if (domain%vars_2d(domain%var_indx(kVARS%veg_type)%v)%data_2di(i,j) == ISWATER .and. domain%vars_2d(domain%var_indx(kVARS%terrain)%v)%data_2d(i,j) >= 1.) then
+                            domain%vars_2d(domain%var_indx(kVARS%lakemask)%v)%data_2d(i,j) = 1
+                        else
+                            domain%vars_2d(domain%var_indx(kVARS%lakemask)%v)%data_2d(i,j) = 0
+                        end if
+                    end do
+                end do
+                !$acc update device(domain%vars_2d(domain%var_indx(kVARS%lakemask)%v)%data_2d)
+
                 lakeflag=0  ! If no lake cat is provided, the lake model will determine lakes based
                             ! on the criterion (ivgtyp(i,j)==iswater .and. ht(i,j)>=lake_min_elev))
             else
@@ -718,6 +748,16 @@ contains
                     END DO
                 END DO
             endif
+        endif
+
+        if (options%physics%watersurface==kWATER_LAKE) then
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "Using WRF Lake model"
+
+            ! allocate arrays:
+            if (allocated(lake_mask_out)) deallocate( lake_mask_out)
+            if (allocated(TH2)) deallocate( TH2)
+            allocate(lake_mask_out(ims:ime, jms:jme))
+            allocate(TH2( ims:ime, jms:jme ))
 
             ! setlake_depth_flag and use_lakedepth flag. (They seem to be redundant, but whatever):
             if(domain%var_indx(kVARS%lake_depth)%v > 0) then
@@ -738,7 +778,7 @@ contains
                 ,restart=restart                & ! if restart, this (lakeini) subroutine is simply skipped.
                 ,lakedepth_default=50.                          & ! default lake depth (If there is no lake_depth information in the input data, then lake depth is assumed to be 50m)
                 ,lake_depth=domain%vars_2d(domain%var_indx(kVARS%lake_depth)%v)%data_2d           & !INTENT(IN)
-                ,lakedepth2d=domain%vars_2d(domain%var_indx(kVARS%lakedepth2d)%v)%data_2d         & !INTENT(OUT) (will be equal to lake_depth if lake_depth data is provided in hi-res input, otherwise lakedepth_default)
+                ,lakedepth2d=domain%vars_2d(domain%var_indx(kVARS%lake_depth)%v)%data_2d         & !INTENT(OUT) (will be equal to lake_depth if lake_depth data is provided in hi-res input, otherwise lakedepth_default)
                 ,savedtke12d=domain%vars_2d(domain%var_indx(kVARS%savedtke12d)%v)%data_2d         & !INTENT(OUT)
                 ,snowdp2d=domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d            & ! domain%snowdp2d%data_2d
                 ,h2osno2d=domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d  & !domain%h2osno2d%data_2d
@@ -766,11 +806,17 @@ contains
                 ,lake_depth_flag=lake_depth_flag,   use_lakedepth=use_lakedepth               & ! flags to use the provided lake depth data (in hi-res input domain file) or not.
                 ,tkdry3d=domain%vars_3d(domain%var_indx(kVARS%tkdry3d)%v)%data_3d                  &
                 ,tksatu3d=domain%vars_3d(domain%var_indx(kVARS%tksatu3d)%v)%data_3d                  &
-                ,lake=lake_or_not                               & ! Logical (:,:) if gridpoint is lake or not (INTENT(OUT)) not used further?
+                ,lake=lake_mask_out                               & ! Logical (:,:) if gridpoint is lake or not (INTENT(OUT)) not used further?
                 ,its=its, ite=ite, jts=jts, jte=jte             &
                 ,ims=ims, ime=ime, jms=jms, jme=jme             &
                 )
         endif ! WRF lake model
+
+        ! FLake bulk lake model (Mironov 2008). Skipped on restart (state read from restart file).
+        if (options%physics%watersurface==kWATER_FLAKE) then
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "Using FLake Lake model"
+            call flake_init(domain, options, restart=restart, context_change=context_change)
+        endif
 
         end associate
 
@@ -832,7 +878,8 @@ contains
             if (options%physics%watersurface > 0) then
 
             if((options%physics%watersurface==kWATER_SIMPLE) .or.      &
-                (options%physics%watersurface==kWATER_LAKE) ) then
+                (options%physics%watersurface==kWATER_LAKE)   .or.      &
+                (options%physics%watersurface==kWATER_FLAKE) ) then
                     call water_simple(options,                              &
                                       domain%vars_2d(domain%var_indx(kVARS%sst)%v)%data_2d,                   &
                                       domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v)%data_2d,      &
@@ -842,6 +889,7 @@ contains
                                       domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d,         &
                                       domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d,           &
                                       land_mask,                     &
+                                      domain%vars_2d(domain%var_indx(kVARS%lakemask)%v)%data_2d,                      &
                                       QSFC,                                 &
                                       domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d,                   &
                                       domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,      &
@@ -882,7 +930,7 @@ contains
                     ,xlat_urb2d=domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d                         & ! optional ?
                     ,z_lake3d=domain%vars_3d(domain%var_indx(kVARS%z_lake3d)%v)%data_3d                           &
                     ,dz_lake3d=domain%vars_3d(domain%var_indx(kVARS%dz_lake3d)%v)%data_3d                         &
-                    ,lakedepth2d=domain%vars_2d(domain%var_indx(kVARS%lakedepth2d)%v)%data_2d                     &
+                    ,lakedepth2d=domain%vars_2d(domain%var_indx(kVARS%lake_depth)%v)%data_2d                     &
                     ,watsat3d=domain%vars_3d(domain%var_indx(kVARS%watsat3d)%v)%data_3d                           &
                     ,csol3d=domain%vars_3d(domain%var_indx(kVARS%csol3d)%v)%data_3d                               &
                     ,tkmg3d=domain%vars_3d(domain%var_indx(kVARS%tkmg3d)%v)%data_3d                               &
@@ -922,6 +970,24 @@ contains
                     ,q2=domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v)%data_2d                              & !(OUT)-- q2         diagnostic 2-m mixing ratio from surface layer and lsm
                 )
 
+            endif
+
+            !___________________ FLake bulk lake model _____________________
+            ! Runs on cells where lakemask==1. Non-lake water cells (oceans) are still
+            ! handled by water_simple above. FLake updates skin_temperature, sensible_heat,
+            ! latent_heat, qfx, ground_heat_flux, albedo, and xice for lake cells using
+            ! the chs exchange coefficient from sfclayrev (same flux pathway as water_simple).
+            if (options%physics%watersurface==kWATER_FLAKE) then
+
+                associate(lsm_last_precip => domain%vars_2d(domain%var_indx(kVARS%lsm_last_precip)%v)%data_2d, &
+                          precipitation   => domain%vars_2d(domain%var_indx(kVARS%precipitation)%v)%data_2d)
+                !$acc kernels
+                current_precipitation = (precipitation - lsm_last_precip)
+                !$acc end kernels
+                end associate
+
+                call flake_step(domain, options, dt=lsm_dt, &
+                                current_precipitation=current_precipitation, windspd=windspd)
             endif
 
             endif ! options%physics%watersurface > 0

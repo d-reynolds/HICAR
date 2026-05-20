@@ -2034,7 +2034,9 @@ contains
             endif
         endif
 
-        if ((options%physics%watersurface==kWATER_LAKE) .AND.(options%domain%lakedepthvar /= "")) then
+        if (((options%physics%watersurface==kWATER_LAKE) .OR. &
+             (options%physics%watersurface==kWATER_FLAKE)) .AND. &
+            (options%domain%lakedepthvar /= "")) then
             if (STD_OUT_PE) write(*,*) "   reading lake depth data from hi-res file"
 
             call io_read(options%domain%init_conditions_file,   &

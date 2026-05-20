@@ -3338,17 +3338,7 @@ contains
                                attribute_t("long_name", "Sea ice fraction"),     &
                                attribute_t("units",         "1"),                               &
                                attribute_t("coordinates",   "lat lon")]
-        
-        !>------------------------------------------------------------
-        !!  Lake lakedepth2d
-        !!------------------------------------------------------------
-        else if (var_idx==kVARS%lakedepth2d) then
-            var_meta%name        = "lakedepth2d"
-            var_meta%dimensions  = two_d_dimensions
-            var_meta%attributes  = [attribute_t("long_name", "Lake depth"),     &
-                               attribute_t("units",         "m"),                               &
-                               attribute_t("coordinates",   "lat lon")]
-        
+                
         !>------------------------------------------------------------
         !!  lake savedtke12d
         !!------------------------------------------------------------
@@ -3380,7 +3370,107 @@ contains
             var_meta%attributes  = [attribute_t("long_name", "Thermal conductivity of dry soil"),     &
                                attribute_t("units",         "W m-1 K-1"),                               &
                                attribute_t("coordinates",   "lat lon")]
-        
+
+        !>------------------------------------------------------------
+        !!  FLake: snow upper-surface temperature
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%flake_t_snow) then
+            var_meta%name        = "flake_t_snow"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "FLake snow upper-surface temperature"),  &
+                               attribute_t("units",         "K"),                                       &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  FLake: ice upper-surface temperature
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%flake_t_ice) then
+            var_meta%name        = "flake_t_ice"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "FLake ice upper-surface temperature"),   &
+                               attribute_t("units",         "K"),                                       &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  FLake: mean temperature of the water column
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%flake_t_mnw) then
+            var_meta%name        = "flake_t_mnw"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "FLake mean water-column temperature"),   &
+                               attribute_t("units",         "K"),                                       &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  FLake: mixed-layer temperature
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%flake_t_wml) then
+            var_meta%name        = "flake_t_wml"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "FLake mixed-layer temperature"),         &
+                               attribute_t("units",         "K"),                                       &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  FLake: water-bottom (sediment interface) temperature
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%flake_t_bot) then
+            var_meta%name        = "flake_t_bot"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "FLake water-bottom sediment-interface temperature"), &
+                               attribute_t("units",         "K"),                                       &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  FLake: temperature at the bottom of the upper sediment layer
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%flake_t_b1) then
+            var_meta%name        = "flake_t_b1"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "FLake bottom-of-upper-sediment-layer temperature"), &
+                               attribute_t("units",         "K"),                                       &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  FLake: thermocline shape factor
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%flake_c_t) then
+            var_meta%name        = "flake_c_t"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "FLake thermocline shape factor"),        &
+                               attribute_t("units",         "1"),                                       &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  FLake: ice thickness
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%flake_h_ice) then
+            var_meta%name        = "flake_h_ice"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "FLake ice thickness"),                   &
+                               attribute_t("units",         "m"),                                       &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  FLake: mixed-layer depth
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%flake_h_ml) then
+            var_meta%name        = "flake_h_ml"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "FLake mixed-layer depth"),               &
+                               attribute_t("units",         "m"),                                       &
+                               attribute_t("coordinates",   "lat lon")]
+
+        !>------------------------------------------------------------
+        !!  FLake: thermally active sediment layer thickness
+        !!------------------------------------------------------------
+        else if (var_idx==kVARS%flake_h_b1) then
+            var_meta%name        = "flake_h_b1"
+            var_meta%dimensions  = two_d_t_dimensions
+            var_meta%attributes  = [attribute_t("long_name", "FLake thermally active sediment layer thickness"), &
+                               attribute_t("units",         "m"),                                       &
+                               attribute_t("coordinates",   "lat lon")]
+
 
 
 

@@ -2596,11 +2596,12 @@ contains
             case ("water")
                 description = "Water model to use:  "//achar(10)//BLNK_CHR_N// &
                                                    "'none'   = no open water fluxes,"//achar(10)//BLNK_CHR_N// &
-                                                   "'simple' = Simple fluxes (uses SST in forcing data, otherwise SST=280°C)"//achar(10)//BLNK_CHR_N// &
-                                                   "'lake'   = WRF's lake model (needs lake depth in hi-res data))"
+                                                   "'simple' = Simple fluxes (uses SST in forcing data, otherwise SST=280°C),"//achar(10)//BLNK_CHR_N// &
+                                                   "'lake'   = WRF's CLM 4.5 lake model (10-layer; needs lake depth in hi-res data),"//achar(10)//BLNK_CHR_N// &
+                                                   "'flake'  = FLake bulk lake model (Mironov 2008; 2D state, with ice and sediment)"
                 default = "none"
                 if (present(val_keys)) then
-                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "simple", trim(str(kWATER_SIMPLE)), "lake", trim(str(kWATER_LAKE))]
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "simple", trim(str(kWATER_SIMPLE)), "lake", trim(str(kWATER_LAKE)), "flake", trim(str(kWATER_FLAKE))]
                 endif
                 group = "Physics"
             case ("wind")

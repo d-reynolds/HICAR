@@ -304,7 +304,20 @@ module icar_constants
         integer :: tksatu3d
         integer :: tkdry3d
         integer :: savedtke12d
-        integer :: lakedepth2d
+
+        ! FLake lake model: 2D bulk prognostic state (no vertical grid).
+        ! Snow-on-ice depth reuses kVARS%snow_height; surface temp reuses
+        ! kVARS%skin_temperature; lake depth reuses kVARS%lake_depth.
+        integer :: flake_t_snow      ! snow upper-surface temperature [K]
+        integer :: flake_t_ice       ! ice upper-surface temperature [K]
+        integer :: flake_t_mnw       ! mean temperature of the water column [K]
+        integer :: flake_t_wml       ! mixed-layer temperature [K]
+        integer :: flake_t_bot       ! water-bottom (sediment interface) temperature [K]
+        integer :: flake_t_b1        ! temperature at the bottom of the upper sediment layer [K]
+        integer :: flake_c_t         ! thermocline shape factor [-]
+        integer :: flake_h_ice       ! ice thickness [m]
+        integer :: flake_h_ml        ! mixed-layer depth [m]
+        integer :: flake_h_b1        ! thickness of the thermally active sediment layer [m]
 
 
         integer :: ivt
@@ -540,6 +553,7 @@ module icar_constants
 
     integer, parameter :: kWATER_SIMPLE  = 1
     integer, parameter :: kWATER_LAKE    = 2
+    integer, parameter :: kWATER_FLAKE   = 3
 
     integer, parameter :: kSFC_MM5REV    = 1
 
