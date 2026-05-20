@@ -281,6 +281,13 @@ contains
             stop
         endif
         
+        if(this%adv%h_order == 1 .and. this%adv%cz_diff_order > 0) then
+            if (STD_OUT_PE) write(*,*) "  -------------------------------- WARNING --------------------------------"
+            if (STD_OUT_PE) write(*,*) "  Constant-z diffusion (cz_diff_order > 0) is not supported with h_order=1"
+            if (STD_OUT_PE) write(*,*) "  -------------------------------- WARNING --------------------------------"
+            stop
+        endif
+
         if (this%time%RK3) then
             if (this%adv%h_order == 1) then
                 if (STD_OUT_PE) write(*,*) "  ----------------- WARNING -----------------"

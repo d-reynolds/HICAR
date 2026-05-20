@@ -31,11 +31,15 @@ module adv_std
     real, dimension(:,:,:), allocatable   :: adv_theta_ref
 
     ! ----- constant-z horizontal-reconstruction LUT -----
+    ! Layout: (ims:ime, kms:kme, jms:jme, 2). The pair-index (1=hi, 2=lo) is the
+    ! slowest-varying dim so consecutive-i threads in a warp load fully coalesced.
     ! x: self = column i, west = column i-1 (u-face between i-1 and i).
     ! y: self = column j, south = column j-1 (v-face between j-1 and j).
     integer, dimension(:,:,:,:), allocatable :: zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev
     real,    dimension(:,:,:,:), allocatable :: zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt
-    real,    dimension(:,:,:),   allocatable :: zb_alpha_x, zb_alpha_y
+    ! Zaengl-2012 vertical alpha ramp: purely a function of k (=1 at surface,
+    ! linearly -> 0 at band top). Stored 1D; previously was two 3D copies.
+    real,    dimension(:),       allocatable :: zb_alpha_k
     ! F2 (zb_diff_order=4): wider-stencil constz reconstruction for the 4-point
     ! biharmonic. x: xw2 = column i-2, xe = column i+1 (to the u-face z).
     ! y: yn2 = column j-2, yp = column j+1 (to the v-face z). Built only when
@@ -126,7 +130,7 @@ contains
 
     end subroutine
 
-    subroutine flux3(q,U_m,V_m,W_m,flux_x,flux_z,flux_y,t_factor)
+    subroutine flux3(q,U_m,V_m,W_m,flux_x,flux_z,flux_y,t_factor,apply_cz_diff)
         implicit none
         real, dimension(ims:ime,  kms:kme,jms:jme),   intent(in)       :: q
         real, dimension(i_s_w:i_e_w+1,kms:kme,j_s_w:j_e_w+1), intent(in)       :: U_m, V_m, W_m
@@ -134,6 +138,13 @@ contains
         real, dimension(i_s:i_e+1,  kms:kme,j_s:j_e+1), intent(out)    :: flux_y
         real, dimension(i_s:i_e+1,  kms:kme+1,j_s:j_e+1), intent(out)    :: flux_z
         real, intent(in) :: t_factor
+        ! Per-variable opt-in to constant-z diffusion. When .false. the upwind
+        ! kernel keeps its implicit |u|-diffusion (diff_fac=1) and the cz_diff
+        ! correction block is skipped — saves the bulk of the cz_diff cost for
+        ! species that don't need horizontal-surface diffusion (everything
+        ! except theta, and qv if opted in). Default .true. preserves legacy
+        ! behavior of any caller that doesn't pass the argument.
+        logical, intent(in), optional :: apply_cz_diff
         integer :: i, j, k
         real :: tmp, coef, u, v, w, q0, q1, q2, qn1, qn2, qn3, abs_u, t_factor_compact
         real :: qin1, qin2, qi1, qk1, qj1, qkn1, qkn2, qjn1, qjn2
@@ -142,15 +153,23 @@ contains
         real :: diff_fac   ! 1.0 = keep scheme's implicit diffusion; 0.0 = even-order centered (zb_diff)
         real :: deta, dcz, dlim   ! Phase D: explicit constant-z diffusion
         real :: qm2z, qp1z                ! F3: wider-stencil constz values (4th-order)
+        real :: gate                      ! branchless minmod sign-agreement gate
+        logical :: cz_diff_on             ! effective cz_diff dispatch for this call
 
-        ! GPU optimization variables
-        real :: q_cache(7), u_val, v_val, w_val, abs_u_val
+        ! GPU optimization variables. qc1..qc7 are stencil-cache *scalars*
+        ! (one register each) rather than a small array — NVHPC spills
+        ! private q_cache(:) arrays to local memory even with literal indices.
+        real :: u_val, v_val, w_val, abs_u_val
+        real :: qc1, qc2, qc3, qc4, qc5, qc6, qc7
 
-        ! If the user has opted for Zaengl-style truly horizontal diffusion
-        ! then we dont apply the implicit |u|-diffusion in the flux calculation (diff_fac=0), instead
-        ! we compute the Zaengl-style diffusion afterwards.
+        cz_diff_on = (cz_diff_order > 0)
+        if (present(apply_cz_diff)) cz_diff_on = cz_diff_on .and. apply_cz_diff
+
+        ! If cz_diff is active for this variable we skip the upwind kernel's
+        ! implicit |u|-diffusion (diff_fac=0) and compute the constant-z
+        ! diffusion below. Otherwise leave the scheme's original diffusion in.
         diff_fac = 1.0
-        if (cz_diff_order > 0) diff_fac = 0.0
+        if (cz_diff_on) diff_fac = 0.0
 
         !$acc data present(q,U_m,V_m,W_m,flux_x,flux_y,flux_z)
 
@@ -228,43 +247,34 @@ contains
         else if (horder==3) then
             coef = (1./12) * t_factor
 
-            ! Using tile(32,2) for 3D loop with complex stencil operations
-            !$acc parallel loop gang vector tile(32,2,1) async(1) private(u_val, abs_u_val, q_cache, tmp)
+            ! Stencil scalars (qc1..qc7) kept in registers via named scalars;
+            ! a private q_cache(:) array gets spilled to local memory by
+            ! NVHPC even when indices are compile-time literals.
+            !$acc parallel loop gang vector tile(32,2,1) async(1) &
+            !$acc   private(u_val, abs_u_val, tmp, qc1, qc2, qc3, qc4, qc5, qc6, qc7)
             do j = j_s,j_e+1
             do k = kms,kme
             do i = i_s,i_e+1
-                ! Cache q values to reduce memory accesses
-                q_cache(1) = q(i,k,j-2)  ! qn2
-                q_cache(2) = q(i,k,j-1)  ! qn1
-                q_cache(3) = q(i-2,k,j)  ! qn2
-                q_cache(4) = q(i-1,k,j)  ! qn1
-                q_cache(5) = q(i,k,j)    ! q0
-                q_cache(6) = q(i+1,k,j)  ! q1
-                q_cache(7) = q(i,k,j+1)  ! q1
+                qc1 = q(i,k,j-2)  ! qn2 (j-2)
+                qc2 = q(i,k,j-1)  ! qn1 (j-1)
+                qc3 = q(i-2,k,j)  ! qn2 (i-2)
+                qc4 = q(i-1,k,j)  ! qn1 (i-1)
+                qc5 = q(i,k,j)    ! q0
+                qc6 = q(i+1,k,j)  ! q1 (i+1)
+                qc7 = q(i,k,j+1)  ! q1 (j+1)
 
                 u_val = U_m(i,k,j)
                 abs_u_val = ABS(u_val)
-                
-                ! Optimized 4th order flux calculation using cached values
-                tmp = 7.0 * (q_cache(5) + q_cache(4)) - (q_cache(6) + q_cache(3))
+                tmp = 7.0 * (qc5 + qc4) - (qc6 + qc3)
                 tmp = u_val * tmp
-                
-                ! Optimized 3rd order diffusive terms using cached values
-                tmp = tmp - diff_fac * abs_u_val * (3.0 * (q_cache(5) - q_cache(4)) - (q_cache(6) - q_cache(3)))
-                
-                ! Optimized upwind flux calculation using cached values
+                tmp = tmp - diff_fac * abs_u_val * (3.0 * (qc5 - qc4) - (qc6 - qc3))
                 flux_x(i,k,j) = tmp * coef
+
                 u_val = V_m(i,k,j)
                 abs_u_val = ABS(u_val)
-                
-                ! Optimized 4th order flux calculation using cached values
-                tmp = 7.0 * (q_cache(5) + q_cache(2)) - (q_cache(7) + q_cache(1))
+                tmp = 7.0 * (qc5 + qc2) - (qc7 + qc1)
                 tmp = u_val * tmp
-                
-                ! Optimized 3rd order diffusive terms using cached values
-                tmp = tmp - diff_fac * abs_u_val * (3.0 * (q_cache(5) - q_cache(2)) - (q_cache(7) - q_cache(1)))
-
-                ! Optimized upwind flux calculation using cached values
+                tmp = tmp - diff_fac * abs_u_val * (3.0 * (qc5 - qc2) - (qc7 - qc1))
                 flux_y(i,k,j) = tmp * coef
             enddo
             enddo
@@ -274,55 +284,50 @@ contains
             coef = (1./60)*t_factor
             !$acc parallel async(1)
             ! Using tile(32,2) for complex 5th order stencil computations
-            !$acc loop gang vector tile(32,2,1)  private(u_val, abs_u_val, q_cache, tmp)
+            !$acc loop gang vector tile(32,2,1) &
+            !$acc   private(u_val, abs_u_val, tmp, qc1, qc2, qc3, qc4, qc5)
             do j = j_s,j_e
             do k = kms,kme
             do i = i_s,i_e+1
-                ! Cache all required q values in registers to minimize memory accesses
-                q_cache(1) = q(i-3,k,j)  ! qn3
-                q_cache(2) = q(i-2,k,j)  ! qn2
-                q_cache(3) = q(i-1,k,j)  ! qn1
-                q_cache(4) = q(i,k,j)    ! q0
-                q_cache(5) = q(i+1,k,j)  ! q1
-                ! Note: q2 = q(i+2,k,j) accessed directly when needed
-                
+                qc1 = q(i-3,k,j)  ! qn3
+                qc2 = q(i-2,k,j)  ! qn2
+                qc3 = q(i-1,k,j)  ! qn1
+                qc4 = q(i,k,j)    ! q0
+                qc5 = q(i+1,k,j)  ! q1
+                ! q2 = q(i+2,k,j) accessed directly when needed
+
                 u_val = U_m(i,k,j)
                 abs_u_val = ABS(u_val)
 
-                ! Optimized 6th order flux calculation using cached values
-                ! Original: tmp = 37*(q0+qn1) - 8*(q1+qn2) + (q2+qn3)
-                tmp = 37.0 * (q_cache(4) + q_cache(3)) - 8.0 * (q_cache(5) + q_cache(2)) + (q(i+2,k,j) + q_cache(1))
+                ! 6th order centered flux: 37*(q0+qn1) - 8*(q1+qn2) + (q2+qn3)
+                tmp = 37.0 * (qc4 + qc3) - 8.0 * (qc5 + qc2) + (q(i+2,k,j) + qc1)
                 tmp = u_val * tmp
-                
-                ! Optimized 5th order diffusive terms using cached values
-                ! Original: tmp = tmp - abs(u) * (10*(q0-qn1) - 5*(q1-qn2) + (q2-qn3))
-                tmp = tmp - diff_fac * abs_u_val * (10.0 * (q_cache(4) - q_cache(3)) - 5.0 * (q_cache(5) - q_cache(2)) + (q(i+2,k,j) - q_cache(1)))
+                ! 5th order diffusive correction (gated by diff_fac):
+                ! abs(u) * (10*(q0-qn1) - 5*(q1-qn2) + (q2-qn3))
+                tmp = tmp - diff_fac * abs_u_val * (10.0 * (qc4 - qc3) - 5.0 * (qc5 - qc2) + (q(i+2,k,j) - qc1))
                 flux_x(i,k,j) = tmp * coef
             enddo
             enddo
             enddo
             
-            !$acc loop gang vector tile(32,2,1)  private(u_val, abs_u_val, q_cache, tmp)
+            !$acc loop gang vector tile(32,2,1) &
+            !$acc   private(u_val, abs_u_val, tmp, qc1, qc2, qc3, qc4, qc5)
             do j = j_s,j_e+1
             do k = kms,kme
             do i = i_s,i_e
-                ! Cache all required q values in registers to minimize memory accesses
-                q_cache(1) = q(i,k,j-3)  ! qn3
-                q_cache(2) = q(i,k,j-2)  ! qn2
-                q_cache(3) = q(i,k,j-1)  ! qn1
-                q_cache(4) = q(i,k,j)    ! q0
-                q_cache(5) = q(i,k,j+1)  ! q1
-                ! Note: q2 = q(i,k,j+2) accessed directly when needed
-                
+                qc1 = q(i,k,j-3)  ! qn3
+                qc2 = q(i,k,j-2)  ! qn2
+                qc3 = q(i,k,j-1)  ! qn1
+                qc4 = q(i,k,j)    ! q0
+                qc5 = q(i,k,j+1)  ! q1
+                ! q2 = q(i,k,j+2) accessed directly when needed
+
                 u_val = V_m(i,k,j)
                 abs_u_val = ABS(u_val)
-                
-                ! Optimized 6th order flux calculation using cached values
-                tmp = 37.0 * (q_cache(4) + q_cache(3)) - 8.0 * (q_cache(5) + q_cache(2)) + (q(i,k,j+2) + q_cache(1))
+
+                tmp = 37.0 * (qc4 + qc3) - 8.0 * (qc5 + qc2) + (q(i,k,j+2) + qc1)
                 tmp = u_val * tmp
-                
-                ! Optimized 5th order diffusive terms using cached values
-                tmp = tmp - diff_fac * abs_u_val * (10.0 * (q_cache(4) - q_cache(3)) - 5.0 * (q_cache(5) - q_cache(2)) + (q(i,k,j+2) - q_cache(1)))
+                tmp = tmp - diff_fac * abs_u_val * (10.0 * (qc4 - qc3) - 5.0 * (qc5 - qc2) + (q(i,k,j+2) - qc1))
                 flux_y(i,k,j) = tmp * coef
             enddo
             enddo
@@ -330,13 +335,16 @@ contains
             !$acc end parallel
         endif
 
-        ! ---- CONSTANT-Z horizontal diffusion 
+        ! ---- CONSTANT-Z horizontal diffusion
         ! Replaces the implicit |u|-diffusion removed in earlier C (diff_fac=0) with
-        ! the scheme's own diffusion, evaluated along constant-z via the zb LUT, alpha-ramp blended
-        ! with the along-eta difference, then MINMOD-limited against the scheme's
-        ! own (proven-monotone) eta-diffusion -> the explicit term can never
-        ! exceed it nor anti-diffuse
-        if (cz_diff_order == 4) then
+        ! the scheme's own diffusion, evaluated along constant-z via the zb LUT,
+        ! alpha-ramp blended with the along-eta difference, then MINMOD-limited
+        ! against the scheme's own (proven-monotone) eta-diffusion. Below split
+        ! per-face for register pressure, branchless minmod, and the alpha=0
+        ! top-slab fast path that skips all LUT loads. Whole block is gated on
+        ! cz_diff_on, which combines cz_diff_order>0 with the per-variable
+        ! apply_cz_diff dispatch (default off for non-theta species).
+        if (cz_diff_on .and. cz_diff_order == 4) then
             ! ---- F3: faithful 4-point CONSTANT-Z biharmonic (zb_diff_order=4).
             ! The 3rd-order-upwind scheme's own d4 diffusive stencil
             !   3*(q_i-q_{i-1}) - (q_{i+1}-q_{i-2})
@@ -344,61 +352,85 @@ contains
             ! face z via the F2 LUT), alpha-blended with along-eta, minmod-
             ! limited against the scheme's own (proven-stable) d4 eta-stencil.
             coef = (1.0/12.0) * t_factor
-            !$acc parallel loop gang vector tile(32,2,1) async(1) &
-            !$acc   present(q,U_m,V_m,flux_x,flux_y, &
-            !$acc           zb_xs_lev,zb_xw_lev,zb_xs_wt,zb_xw_wt,zb_alpha_x, &
-            !$acc           zb_ys_lev,zb_yn_lev,zb_ys_wt,zb_yn_wt,zb_alpha_y, &
+
+            ! x-face, k=kms..kme-1 (alpha > 0 region: LUT path)
+            !$acc parallel loop gang vector tile(32,4,1) async(1) &
+            !$acc   present(q,U_m,flux_x, &
+            !$acc           zb_xs_lev,zb_xw_lev,zb_xs_wt,zb_xw_wt, &
             !$acc           zb_xw2_lev,zb_xe_lev,zb_xw2_wt,zb_xe_wt, &
-            !$acc           zb_yn2_lev,zb_yp_lev,zb_yn2_wt,zb_yp_wt) &
-            !$acc   private(u_val,v_val,abs_u_val,ax,ay,q0z,qn1z,qn3z,qm2z,qp1z,deta,dcz,dlim)
+            !$acc           zb_alpha_k) &
+            !$acc   private(u_val,abs_u_val,ax,q0z,qn1z,qm2z,qp1z,deta,dcz,dlim,gate)
             do j = j_s, j_e
-                do k = kms, kme
+                do k = kms, kme-1
                     do i = i_s, i_e
-                        ! ---- x-face: 3*(q_i-q_{i-1}) - (q_{i+1}-q_{i-2}) ----
-                        ax   = zb_alpha_x(i,k,j)
+                        ax   = zb_alpha_k(k)
                         deta = 3.0*(q(i,k,j)-q(i-1,k,j)) - (q(i+1,k,j)-q(i-2,k,j))
-                        q0z  = zb_xs_wt (1,i,k,j)*q(i,   zb_xs_lev (1,i,k,j), j) &
-                             + zb_xs_wt (2,i,k,j)*q(i,   zb_xs_lev (2,i,k,j), j)
-                        qn1z = zb_xw_wt (1,i,k,j)*q(i-1, zb_xw_lev (1,i,k,j), j) &
-                             + zb_xw_wt (2,i,k,j)*q(i-1, zb_xw_lev (2,i,k,j), j)
-                        qm2z = zb_xw2_wt(1,i,k,j)*q(i-2, zb_xw2_lev(1,i,k,j), j) &
-                             + zb_xw2_wt(2,i,k,j)*q(i-2, zb_xw2_lev(2,i,k,j), j)
-                        qp1z = zb_xe_wt (1,i,k,j)*q(i+1, zb_xe_lev (1,i,k,j), j) &
-                             + zb_xe_wt (2,i,k,j)*q(i+1, zb_xe_lev (2,i,k,j), j)
+                        q0z  = zb_xs_wt (i,k,j,1)*q(i,   zb_xs_lev (i,k,j,1), j) &
+                             + zb_xs_wt (i,k,j,2)*q(i,   zb_xs_lev (i,k,j,2), j)
+                        qn1z = zb_xw_wt (i,k,j,1)*q(i-1, zb_xw_lev (i,k,j,1), j) &
+                             + zb_xw_wt (i,k,j,2)*q(i-1, zb_xw_lev (i,k,j,2), j)
+                        qm2z = zb_xw2_wt(i,k,j,1)*q(i-2, zb_xw2_lev(i,k,j,1), j) &
+                             + zb_xw2_wt(i,k,j,2)*q(i-2, zb_xw2_lev(i,k,j,2), j)
+                        qp1z = zb_xe_wt (i,k,j,1)*q(i+1, zb_xe_lev (i,k,j,1), j) &
+                             + zb_xe_wt (i,k,j,2)*q(i+1, zb_xe_lev (i,k,j,2), j)
                         dcz  = 3.0*(q0z-qn1z) - (qp1z-qm2z)
                         dlim = (1.0 - ax)*deta + ax*dcz
-                        if (dlim*deta <= 0.0) then
-                            dlim = 0.0
-                        else
-                            dlim = sign(min(abs(dlim), abs(deta)), deta)
-                        endif
+                        ! Branchless minmod: gate = 1 if dlim,deta same sign, else 0.
+                        gate = 0.5*(1.0 + sign(1.0, dlim*deta))
+                        dlim = gate * sign(min(abs(dlim), abs(deta)), deta)
                         u_val = U_m(i,k,j); abs_u_val = ABS(u_val)
                         flux_x(i,k,j) = flux_x(i,k,j) - abs_u_val * coef * dlim
-                        ! ---- y-face: 3*(q_j-q_{j-1}) - (q_{j+1}-q_{j-2}) ----
-                        ay   = zb_alpha_y(i,k,j)
+                    enddo
+                enddo
+            enddo
+
+            ! y-face, k=kms..kme-1 (alpha > 0 region: LUT path)
+            !$acc parallel loop gang vector tile(32,4,1) async(1) &
+            !$acc   present(q,V_m,flux_y, &
+            !$acc           zb_ys_lev,zb_yn_lev,zb_ys_wt,zb_yn_wt, &
+            !$acc           zb_yn2_lev,zb_yp_lev,zb_yn2_wt,zb_yp_wt, &
+            !$acc           zb_alpha_k) &
+            !$acc   private(v_val,abs_u_val,ay,q0z,qn3z,qm2z,qp1z,deta,dcz,dlim,gate)
+            do j = j_s, j_e
+                do k = kms, kme-1
+                    do i = i_s, i_e
+                        ay   = zb_alpha_k(k)
                         deta = 3.0*(q(i,k,j)-q(i,k,j-1)) - (q(i,k,j+1)-q(i,k,j-2))
-                        q0z  = zb_ys_wt (1,i,k,j)*q(i, zb_ys_lev (1,i,k,j), j  ) &
-                             + zb_ys_wt (2,i,k,j)*q(i, zb_ys_lev (2,i,k,j), j  )
-                        qn3z = zb_yn_wt (1,i,k,j)*q(i, zb_yn_lev (1,i,k,j), j-1) &
-                             + zb_yn_wt (2,i,k,j)*q(i, zb_yn_lev (2,i,k,j), j-1)
-                        qm2z = zb_yn2_wt(1,i,k,j)*q(i, zb_yn2_lev(1,i,k,j), j-2) &
-                             + zb_yn2_wt(2,i,k,j)*q(i, zb_yn2_lev(2,i,k,j), j-2)
-                        qp1z = zb_yp_wt (1,i,k,j)*q(i, zb_yp_lev (1,i,k,j), j+1) &
-                             + zb_yp_wt (2,i,k,j)*q(i, zb_yp_lev (2,i,k,j), j+1)
+                        q0z  = zb_ys_wt (i,k,j,1)*q(i, zb_ys_lev (i,k,j,1), j  ) &
+                             + zb_ys_wt (i,k,j,2)*q(i, zb_ys_lev (i,k,j,2), j  )
+                        qn3z = zb_yn_wt (i,k,j,1)*q(i, zb_yn_lev (i,k,j,1), j-1) &
+                             + zb_yn_wt (i,k,j,2)*q(i, zb_yn_lev (i,k,j,2), j-1)
+                        qm2z = zb_yn2_wt(i,k,j,1)*q(i, zb_yn2_lev(i,k,j,1), j-2) &
+                             + zb_yn2_wt(i,k,j,2)*q(i, zb_yn2_lev(i,k,j,2), j-2)
+                        qp1z = zb_yp_wt (i,k,j,1)*q(i, zb_yp_lev (i,k,j,1), j+1) &
+                             + zb_yp_wt (i,k,j,2)*q(i, zb_yp_lev (i,k,j,2), j+1)
                         dcz  = 3.0*(q0z-qn3z) - (qp1z-qm2z)
                         dlim = (1.0 - ay)*deta + ay*dcz
-                        if (dlim*deta <= 0.0) then
-                            dlim = 0.0
-                        else
-                            dlim = sign(min(abs(dlim), abs(deta)), deta)
-                        endif
+                        gate = 0.5*(1.0 + sign(1.0, dlim*deta))
+                        dlim = gate * sign(min(abs(dlim), abs(deta)), deta)
                         v_val = V_m(i,k,j); abs_u_val = ABS(v_val)
                         flux_y(i,k,j) = flux_y(i,k,j) - abs_u_val * coef * dlim
                     enddo
                 enddo
             enddo
-        else if (cz_diff_order == 2) then
-            ! ---- 2nd-order ----
+
+            ! Top slab k=kme where alpha=0: dlim collapses to deta, so no LUT
+            ! loads are needed. x and y fused (tiny per-thread work).
+            !$acc parallel loop gang vector tile(32,1) async(1) &
+            !$acc   present(q,U_m,V_m,flux_x,flux_y) &
+            !$acc   private(u_val,v_val,abs_u_val,deta)
+            do j = j_s, j_e
+                do i = i_s, i_e
+                    deta = 3.0*(q(i,kme,j)-q(i-1,kme,j)) - (q(i+1,kme,j)-q(i-2,kme,j))
+                    u_val = U_m(i,kme,j); abs_u_val = ABS(u_val)
+                    flux_x(i,kme,j) = flux_x(i,kme,j) - abs_u_val * coef * deta
+                    deta = 3.0*(q(i,kme,j)-q(i,kme,j-1)) - (q(i,kme,j+1)-q(i,kme,j-2))
+                    v_val = V_m(i,kme,j); abs_u_val = ABS(v_val)
+                    flux_y(i,kme,j) = flux_y(i,kme,j) - abs_u_val * coef * deta
+                enddo
+            enddo
+        else if (cz_diff_on .and. cz_diff_order == 2) then
+            ! ---- 2nd-order Laplacian ----
             if (horder == 1) then
                 coef = 0.5 * t_factor
             else if (horder == 3) then
@@ -406,47 +438,69 @@ contains
             else
                 coef = (1.0/6.0) * t_factor
             endif
-            !$acc parallel loop gang vector tile(32,2,1) async(1) &
-            !$acc   present(q,U_m,V_m,flux_x,flux_y, &
-            !$acc           zb_xs_lev,zb_xw_lev,zb_xs_wt,zb_xw_wt,zb_alpha_x, &
-            !$acc           zb_ys_lev,zb_yn_lev,zb_ys_wt,zb_yn_wt,zb_alpha_y) &
-            !$acc   private(u_val,v_val,abs_u_val,ax,ay,q0z,qn1z,qn3z,deta,dcz,dlim)
+
+            ! x-face, k=kms..kme-1 (alpha > 0 region: LUT path)
+            !$acc parallel loop gang vector tile(32,4,1) async(1) &
+            !$acc   present(q,U_m,flux_x, &
+            !$acc           zb_xs_lev,zb_xw_lev,zb_xs_wt,zb_xw_wt, &
+            !$acc           zb_alpha_k) &
+            !$acc   private(u_val,abs_u_val,ax,q0z,qn1z,deta,dcz,dlim,gate)
             do j = j_s, j_e
-                do k = kms, kme
+                do k = kms, kme-1
                     do i = i_s, i_e
-                        ! ---- x-face ----
-                        ax   = zb_alpha_x(i,k,j)
+                        ax   = zb_alpha_k(k)
                         deta = q(i,k,j) - q(i-1,k,j)
-                        q0z  = zb_xs_wt(1,i,k,j)*q(i,   zb_xs_lev(1,i,k,j), j) &
-                             + zb_xs_wt(2,i,k,j)*q(i,   zb_xs_lev(2,i,k,j), j)
-                        qn1z = zb_xw_wt(1,i,k,j)*q(i-1, zb_xw_lev(1,i,k,j), j) &
-                             + zb_xw_wt(2,i,k,j)*q(i-1, zb_xw_lev(2,i,k,j), j)
+                        q0z  = zb_xs_wt(i,k,j,1)*q(i,   zb_xs_lev(i,k,j,1), j) &
+                             + zb_xs_wt(i,k,j,2)*q(i,   zb_xs_lev(i,k,j,2), j)
+                        qn1z = zb_xw_wt(i,k,j,1)*q(i-1, zb_xw_lev(i,k,j,1), j) &
+                             + zb_xw_wt(i,k,j,2)*q(i-1, zb_xw_lev(i,k,j,2), j)
                         dcz  = q0z - qn1z
                         dlim = (1.0 - ax)*deta + ax*dcz
-                        if (dlim*deta <= 0.0) then
-                            dlim = 0.0
-                        else
-                            dlim = sign(min(abs(dlim), abs(deta)), deta)
-                        endif
+                        gate = 0.5*(1.0 + sign(1.0, dlim*deta))
+                        dlim = gate * sign(min(abs(dlim), abs(deta)), deta)
                         u_val = U_m(i,k,j); abs_u_val = ABS(u_val)
                         flux_x(i,k,j) = flux_x(i,k,j) - abs_u_val * coef * dlim
-                        ! ---- y-face ----
-                        ay   = zb_alpha_y(i,k,j)
+                    enddo
+                enddo
+            enddo
+
+            ! y-face, k=kms..kme-1 (alpha > 0 region: LUT path)
+            !$acc parallel loop gang vector tile(32,4,1) async(1) &
+            !$acc   present(q,V_m,flux_y, &
+            !$acc           zb_ys_lev,zb_yn_lev,zb_ys_wt,zb_yn_wt, &
+            !$acc           zb_alpha_k) &
+            !$acc   private(v_val,abs_u_val,ay,q0z,qn3z,deta,dcz,dlim,gate)
+            do j = j_s, j_e
+                do k = kms, kme-1
+                    do i = i_s, i_e
+                        ay   = zb_alpha_k(k)
                         deta = q(i,k,j) - q(i,k,j-1)
-                        q0z  = zb_ys_wt(1,i,k,j)*q(i, zb_ys_lev(1,i,k,j), j) &
-                             + zb_ys_wt(2,i,k,j)*q(i, zb_ys_lev(2,i,k,j), j)
-                        qn3z = zb_yn_wt(1,i,k,j)*q(i, zb_yn_lev(1,i,k,j), j-1) &
-                             + zb_yn_wt(2,i,k,j)*q(i, zb_yn_lev(2,i,k,j), j-1)
+                        q0z  = zb_ys_wt(i,k,j,1)*q(i, zb_ys_lev(i,k,j,1), j) &
+                             + zb_ys_wt(i,k,j,2)*q(i, zb_ys_lev(i,k,j,2), j)
+                        qn3z = zb_yn_wt(i,k,j,1)*q(i, zb_yn_lev(i,k,j,1), j-1) &
+                             + zb_yn_wt(i,k,j,2)*q(i, zb_yn_lev(i,k,j,2), j-1)
                         dcz  = q0z - qn3z
                         dlim = (1.0 - ay)*deta + ay*dcz
-                        if (dlim*deta <= 0.0) then
-                            dlim = 0.0
-                        else
-                            dlim = sign(min(abs(dlim), abs(deta)), deta)
-                        endif
+                        gate = 0.5*(1.0 + sign(1.0, dlim*deta))
+                        dlim = gate * sign(min(abs(dlim), abs(deta)), deta)
                         v_val = V_m(i,k,j); abs_u_val = ABS(v_val)
                         flux_y(i,k,j) = flux_y(i,k,j) - abs_u_val * coef * dlim
                     enddo
+                enddo
+            enddo
+
+            ! Top slab k=kme where alpha=0: dlim = deta. No LUT loads needed.
+            !$acc parallel loop gang vector tile(32,1) async(1) &
+            !$acc   present(q,U_m,V_m,flux_x,flux_y) &
+            !$acc   private(u_val,v_val,abs_u_val,deta)
+            do j = j_s, j_e
+                do i = i_s, i_e
+                    deta = q(i,kme,j) - q(i-1,kme,j)
+                    u_val = U_m(i,kme,j); abs_u_val = ABS(u_val)
+                    flux_x(i,kme,j) = flux_x(i,kme,j) - abs_u_val * coef * deta
+                    deta = q(i,kme,j) - q(i,kme,j-1)
+                    v_val = V_m(i,kme,j); abs_u_val = ABS(v_val)
+                    flux_y(i,kme,j) = flux_y(i,kme,j) - abs_u_val * coef * deta
                 enddo
             enddo
         endif
@@ -533,71 +587,69 @@ contains
             coef = (1./60)*t_factor
             !$acc parallel async(2)
             ! Using tile(32,2) for complex 5th order vertical computations
-            !$acc loop gang vector tile(32,2,1) private(u_val, abs_u_val, q_cache, tmp)
+            !$acc loop gang vector tile(32,2,1) &
+            !$acc   private(u_val, abs_u_val, tmp, qc1, qc2, qc3, qc4, qc5)
             do j = j_s,j_e
             do k = kms+3,kme-2
             do i = i_s,i_e
-                ! Cache all required q values to minimize memory accesses
-                q_cache(1) = q(i,k-3,j)  ! qn3
-                q_cache(2) = q(i,k-2,j)  ! qn2  
-                q_cache(3) = q(i,k-1,j)  ! qn1
-                q_cache(4) = q(i,k,j)    ! q0
-                q_cache(5) = q(i,k+1,j)  ! q1
-                ! Note: q2 = q(i,k+2,j) accessed directly when needed
-                
+                qc1 = q(i,k-3,j)  ! qn3
+                qc2 = q(i,k-2,j)  ! qn2
+                qc3 = q(i,k-1,j)  ! qn1
+                qc4 = q(i,k,j)    ! q0
+                qc5 = q(i,k+1,j)  ! q1
+                ! q2 = q(i,k+2,j) accessed directly when needed
+
                 u_val = W_m(i,k-1,j)
                 abs_u_val = ABS(u_val)
-                
-                ! Optimized 6th order flux calculation using cached values
-                tmp = 37.0 * (q_cache(4) + q_cache(3)) - 8.0 * (q_cache(5) + q_cache(2)) + (q(i,k+2,j) + q_cache(1))
+
+                tmp = 37.0 * (qc4 + qc3) - 8.0 * (qc5 + qc2) + (q(i,k+2,j) + qc1)
                 tmp = u_val * tmp
-                
-                ! Optimized 5th order diffusive terms using cached values
-                tmp = tmp - abs_u_val * (10.0 * (q_cache(4) - q_cache(3)) - 5.0 * (q_cache(5) - q_cache(2)) + (q(i,k+2,j) - q_cache(1)))
+                tmp = tmp - abs_u_val * (10.0 * (qc4 - qc3) - 5.0 * (qc5 - qc2) + (q(i,k+2,j) - qc1))
                 flux_z(i,k,j) = tmp * coef
             enddo
             enddo
             enddo
             
             coef = (1./12)*t_factor
-            !$acc loop gang vector tile(64,1) private(u_val, abs_u_val, q_cache, tmp, q0, qn1)
+            !$acc loop gang vector tile(64,1) &
+            !$acc   private(u_val, abs_u_val, tmp, q0, qn1, qc1, qc2, qc3, qc4)
             do j = j_s,j_e
                 do i = i_s,i_e
-                    
+
                     ! flux_z(i,kms,j) = 0
 
-                    ! Boundary treatment for cells with insufficient stencil - use simpler upwind
+                    ! Boundary k=kms+1: 1st-order upwind (insufficient stencil)
                     u_val = W_m(i,kms,j)
                     abs_u_val = ABS(u_val)
                     q0 = q(i,kms+1,j)
                     qn1 = q(i,kms,j)
                     flux_z(i,kms+1,j) = ((u_val + abs_u_val) * qn1 + (u_val - abs_u_val) * q0) * 0.5 * t_factor
 
-                    ! Use 3rd order for kms+2 cell  
+                    ! Use 3rd order for kms+2 cell
                     u_val = W_m(i,kms+1,j)
                     abs_u_val = ABS(u_val)
-                    q_cache(1) = q(i,kms,j)    ! qn2
-                    q_cache(2) = q(i,kms+1,j)  ! qn1
-                    q_cache(3) = q(i,kms+2,j)  ! q0
-                    q_cache(4) = q(i,kms+3,j)  ! q1
-                    
-                    tmp = 7.0 * (q_cache(3) + q_cache(2)) - (q_cache(4) + q_cache(1))
+                    qc1 = q(i,kms,j)    ! qn2
+                    qc2 = q(i,kms+1,j)  ! qn1
+                    qc3 = q(i,kms+2,j)  ! q0
+                    qc4 = q(i,kms+3,j)  ! q1
+
+                    tmp = 7.0 * (qc3 + qc2) - (qc4 + qc1)
                     tmp = u_val * tmp
-                    tmp = tmp - abs_u_val * (3.0 * (q_cache(3) - q_cache(2)) - (q_cache(4) - q_cache(1)))
-                    flux_z(i,kms+2,j) = tmp * coef               
-                    
+                    tmp = tmp - abs_u_val * (3.0 * (qc3 - qc2) - (qc4 - qc1))
+                    flux_z(i,kms+2,j) = tmp * coef
+
                     ! Use 3rd order for kme-1 cell
                     u_val = W_m(i,kme-2,j)
                     abs_u_val = ABS(u_val)
-                    q_cache(1) = q(i,kme-3,j)  ! qn2
-                    q_cache(2) = q(i,kme-2,j)  ! qn1
-                    q_cache(3) = q(i,kme-1,j)  ! q0
-                    q_cache(4) = q(i,kme,j)    ! q1
+                    qc1 = q(i,kme-3,j)  ! qn2
+                    qc2 = q(i,kme-2,j)  ! qn1
+                    qc3 = q(i,kme-1,j)  ! q0
+                    qc4 = q(i,kme,j)    ! q1
 
-                    tmp = 7.0 * (q_cache(3) + q_cache(2)) - (q_cache(4) + q_cache(1))
+                    tmp = 7.0 * (qc3 + qc2) - (qc4 + qc1)
                     tmp = u_val * tmp
-                    tmp = tmp - abs_u_val * (3.0 * (q_cache(3) - q_cache(2)) - (q_cache(4) - q_cache(1)))
-                    flux_z(i,kme-1,j) = tmp * coef               
+                    tmp = tmp - abs_u_val * (3.0 * (qc3 - qc2) - (qc4 - qc1))
+                    flux_z(i,kme-1,j) = tmp * coef
 
                     u_val = W_m(i,kme-1,j)
                     abs_u_val = ABS(u_val)
@@ -615,7 +667,7 @@ contains
         !$acc end data
     end subroutine flux3
 
-    subroutine adv_std_advect3d(qfluxes,qold,U_m,V_m,W_m,denom,dz, flux_time, flux_corr_time, sum_time, t_factor_in,flux_corr_in,q_id_in)
+    subroutine adv_std_advect3d(qfluxes,qold,U_m,V_m,W_m,denom,dz, flux_time, flux_corr_time, sum_time, t_factor_in,flux_corr_in,q_id_in,apply_cz_diff_in)
         ! !DIR$ INLINEALWAYS adv_std_advect3d
         implicit none
         real, dimension(ims:ime,  kms:kme,jms:jme),  intent(inout)   :: qfluxes
@@ -625,10 +677,12 @@ contains
         type(timer_t), optional, intent(inout) :: flux_time, flux_corr_time, sum_time
         real, optional,                              intent(in)      :: t_factor_in
         integer, optional,                           intent(in)      :: flux_corr_in, q_id_in
+        logical, optional,                           intent(in)      :: apply_cz_diff_in
 
         ! interal parameters
         real    :: t_factor, flux_diff_x, flux_diff_y, denom_val, dz_val
         integer :: i, k, j, flux_corr, q_id
+        logical :: apply_cz_diff
 
         
         q_id = 1
@@ -639,6 +693,12 @@ contains
         
         flux_corr = 0
         if (present(flux_corr_in)) flux_corr = flux_corr_in
+
+        ! Per-variable cz_diff dispatch. Default .true. preserves legacy
+        ! behavior of any caller that doesn't pass it (current callers should
+        ! always pass it explicitly for clarity).
+        apply_cz_diff = .true.
+        if (present(apply_cz_diff_in)) apply_cz_diff = apply_cz_diff_in
 
         ! Choose optimized path based on whether flux correction is needed
         if (flux_corr == 0) then
@@ -653,7 +713,7 @@ contains
             ! else
                 if(present(flux_time)) call flux_time%start()
                 !$acc wait(q_id) !qold is needed for following function
-                call flux3(qfluxes,U_m,V_m,W_m,flux_x,flux_z,flux_y,t_factor)
+                call flux3(qfluxes,U_m,V_m,W_m,flux_x,flux_z,flux_y,t_factor,apply_cz_diff=apply_cz_diff)
                 if(present(flux_time)) call flux_time%stop()
 
                 if(present(sum_time)) call sum_time%start()
@@ -665,7 +725,7 @@ contains
             ! STANDARD PATH: Flux correction enabled
             ! Must store fluxes for correction step
             if(present(flux_time)) call flux_time%start()
-            call flux3(qfluxes,U_m, V_m, W_m, flux_x,flux_z,flux_y,t_factor)
+            call flux3(qfluxes,U_m, V_m, W_m, flux_x,flux_z,flux_y,t_factor,apply_cz_diff=apply_cz_diff)
             !$acc wait(q_id) !qold is not needed until after this point
             if(present(flux_time)) call flux_time%stop()
             
@@ -690,25 +750,20 @@ contains
         real, dimension(ims:ime,kms:kme,jms:jme), intent(inout) :: qprime
         real, dimension(ims:ime,kms:kme,jms:jme), intent(in)    :: w_real, zheight
         real, intent(in) :: dt
-        integer :: i, j, k
-        real :: dthdz, dvg
+        integer :: i, j, k, ku, kd
+        real :: dthdz
 
-        !$acc parallel loop gang vector collapse(3) default(present) private(dthdz, dvg)
+        ! Branchless interior + boundary: clamp k+1 / k-1 to [kms,kme]. At
+        ! k=kms (kd=kms, ku=kms+1) and k=kme (ku=kme, kd=kme-1) this collapses
+        ! to the one-sided form; interior remains centered.
+        !$acc parallel loop gang vector collapse(3) default(present) private(dthdz,ku,kd)
         do j = jts, jte
             do k = kms, kme
                 do i = its, ite
-                    ! (1) advective -w_real * d(theta_bar)/dz
-                    if (k == kms) then
-                        dthdz = (adv_theta_ref(i,kms+1,j) - adv_theta_ref(i,kms,j)) &
-                              / (zheight(i,kms+1,j) - zheight(i,kms,j))
-                    else if (k == kme) then
-                        dthdz = (adv_theta_ref(i,kme,j) - adv_theta_ref(i,kme-1,j)) &
-                              / (zheight(i,kme,j) - zheight(i,kme-1,j))
-                    else
-                        dthdz = (adv_theta_ref(i,k+1,j) - adv_theta_ref(i,k-1,j)) &
-                              / (zheight(i,k+1,j) - zheight(i,k-1,j))
-                    endif
-
+                    ku = min(k+1, kme)
+                    kd = max(k-1, kms)
+                    dthdz = (adv_theta_ref(i,ku,j) - adv_theta_ref(i,kd,j)) &
+                          / (zheight(i,ku,j) - zheight(i,kd,j))
                     qprime(i,k,j) = qprime(i,k,j) &
                         - w_real(i,k,j) * dthdz * dt
                 enddo
@@ -1217,12 +1272,12 @@ contains
         if (allocated(zb_xs_lev)) then
             !$acc exit data delete(zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev, &
             !$acc                   zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt,  &
-            !$acc                   zb_alpha_x, zb_alpha_y, &
+            !$acc                   zb_alpha_k, &
             !$acc                   zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev, &
             !$acc                   zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt) finalize
             deallocate(zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev, &
                        zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt,  &
-                       zb_alpha_x, zb_alpha_y, &
+                       zb_alpha_k, &
                        zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev, &
                        zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt)
         endif
@@ -1398,67 +1453,69 @@ contains
             error stop
         endif
 
-        allocate(zb_xs_lev(2,ims:ime,kms:kme,jms:jme), zb_xw_lev(2,ims:ime,kms:kme,jms:jme))
-        allocate(zb_ys_lev(2,ims:ime,kms:kme,jms:jme), zb_yn_lev(2,ims:ime,kms:kme,jms:jme))
-        allocate(zb_xs_wt (2,ims:ime,kms:kme,jms:jme), zb_xw_wt (2,ims:ime,kms:kme,jms:jme))
-        allocate(zb_ys_wt (2,ims:ime,kms:kme,jms:jme), zb_yn_wt (2,ims:ime,kms:kme,jms:jme))
-        allocate(zb_alpha_x(ims:ime,kms:kme,jms:jme),  zb_alpha_y(ims:ime,kms:kme,jms:jme))
-        allocate(zb_xw2_lev(2,ims:ime,kms:kme,jms:jme), zb_xe_lev(2,ims:ime,kms:kme,jms:jme))
-        allocate(zb_yn2_lev(2,ims:ime,kms:kme,jms:jme), zb_yp_lev(2,ims:ime,kms:kme,jms:jme))
-        allocate(zb_xw2_wt (2,ims:ime,kms:kme,jms:jme), zb_xe_wt (2,ims:ime,kms:kme,jms:jme))
-        allocate(zb_yn2_wt (2,ims:ime,kms:kme,jms:jme), zb_yp_wt (2,ims:ime,kms:kme,jms:jme))
+        allocate(zb_xs_lev(ims:ime,kms:kme,jms:jme,2), zb_xw_lev(ims:ime,kms:kme,jms:jme,2))
+        allocate(zb_ys_lev(ims:ime,kms:kme,jms:jme,2), zb_yn_lev(ims:ime,kms:kme,jms:jme,2))
+        allocate(zb_xs_wt (ims:ime,kms:kme,jms:jme,2), zb_xw_wt (ims:ime,kms:kme,jms:jme,2))
+        allocate(zb_ys_wt (ims:ime,kms:kme,jms:jme,2), zb_yn_wt (ims:ime,kms:kme,jms:jme,2))
+        allocate(zb_alpha_k(kms:kme))
+        allocate(zb_xw2_lev(ims:ime,kms:kme,jms:jme,2), zb_xe_lev(ims:ime,kms:kme,jms:jme,2))
+        allocate(zb_yn2_lev(ims:ime,kms:kme,jms:jme,2), zb_yp_lev(ims:ime,kms:kme,jms:jme,2))
+        allocate(zb_xw2_wt (ims:ime,kms:kme,jms:jme,2), zb_xe_wt (ims:ime,kms:kme,jms:jme,2))
+        allocate(zb_yn2_wt (ims:ime,kms:kme,jms:jme,2), zb_yp_wt (ims:ime,kms:kme,jms:jme,2))
 
         ! Safe defaults everywhere: identity bracket, pure along-eta (alpha=0).
         zb_xs_lev = kms; zb_xw_lev = kms; zb_ys_lev = kms; zb_yn_lev = kms
-        zb_xs_wt(1,:,:,:) = 1.0; zb_xs_wt(2,:,:,:) = 0.0
-        zb_xw_wt(1,:,:,:) = 1.0; zb_xw_wt(2,:,:,:) = 0.0
-        zb_ys_wt(1,:,:,:) = 1.0; zb_ys_wt(2,:,:,:) = 0.0
-        zb_yn_wt(1,:,:,:) = 1.0; zb_yn_wt(2,:,:,:) = 0.0
-        zb_alpha_x = 0.0; zb_alpha_y = 0.0
+        zb_xs_wt(:,:,:,1) = 1.0; zb_xs_wt(:,:,:,2) = 0.0
+        zb_xw_wt(:,:,:,1) = 1.0; zb_xw_wt(:,:,:,2) = 0.0
+        zb_ys_wt(:,:,:,1) = 1.0; zb_ys_wt(:,:,:,2) = 0.0
+        zb_yn_wt(:,:,:,1) = 1.0; zb_yn_wt(:,:,:,2) = 0.0
+        zb_alpha_k = 0.0
         ! F2 wider-stencil defaults (identity): xw2/xe default to the i-1/i
         ! columns' fallback so the biharmonic outer difference degrades safely
         ! at build-loop edges (those edge faces are not in the consumption range).
         zb_xw2_lev = kms; zb_xe_lev = kms; zb_yn2_lev = kms; zb_yp_lev = kms
-        zb_xw2_wt(1,:,:,:) = 1.0; zb_xw2_wt(2,:,:,:) = 0.0
-        zb_xe_wt (1,:,:,:) = 1.0; zb_xe_wt (2,:,:,:) = 0.0
-        zb_yn2_wt(1,:,:,:) = 1.0; zb_yn2_wt(2,:,:,:) = 0.0
-        zb_yp_wt (1,:,:,:) = 1.0; zb_yp_wt (2,:,:,:) = 0.0
+        zb_xw2_wt(:,:,:,1) = 1.0; zb_xw2_wt(:,:,:,2) = 0.0
+        zb_xe_wt (:,:,:,1) = 1.0; zb_xe_wt (:,:,:,2) = 0.0
+        zb_yn2_wt(:,:,:,1) = 1.0; zb_yn2_wt(:,:,:,2) = 0.0
+        zb_yp_wt (:,:,:,1) = 1.0; zb_yp_wt (:,:,:,2) = 0.0
 
         ncov_x = 0; ntot_x = 0; ncov_y = 0; ntot_y = 0
+
+        ! Zaengl-2012 vertical alpha ramp: =1 at surface (k=kms),
+        ! linearly -> 0 at band top (k=kme). Removes the binary
+        ! 0/1 hard edge that otherwise seeds grid-scale NaN.
+        do k = kms, kme
+            ramp = real(kme - k) / real(kme - kms)
+            zb_alpha_k(k) = max(0.0, min(1.0, ramp))
+        end do
 
         associate(zc => domain%vars_3d(zv)%data_3d)
         do j = jms, jme
             do k = kms, kme
-                ! Zaengl-2012 vertical alpha ramp: =1 at surface (k=kms),
-                ! linearly -> 0 at band top (k=kme). Removes the binary
-                ! 0/1 hard edge that otherwise seeds grid-scale NaN.
-                ramp = real(kme - k) / real(kme - kms)
-                ramp = max(0.0, min(1.0, ramp))
                 do i = ims, ime
                     ! x-direction: u-face (i,k,j) between cells (i-1) and (i)
                     if (i > ims) then
                         ntot_x = ntot_x + 1
                         tgt = domain%geo_u%z(i,k,j)
                         call resolve_col(tgt, zc(i,:,j),   lh, ll, wh, wl, bself)
-                        zb_xs_lev(1,i,k,j) = lh; zb_xs_lev(2,i,k,j) = ll
-                        zb_xs_wt (1,i,k,j) = wh; zb_xs_wt (2,i,k,j) = wl
+                        zb_xs_lev(i,k,j,1) = lh; zb_xs_lev(i,k,j,2) = ll
+                        zb_xs_wt (i,k,j,1) = wh; zb_xs_wt (i,k,j,2) = wl
                         call resolve_col(tgt, zc(i-1,:,j), lh, ll, wh, wl, bnbr)
-                        zb_xw_lev(1,i,k,j) = lh; zb_xw_lev(2,i,k,j) = ll
-                        zb_xw_wt (1,i,k,j) = wh; zb_xw_wt (2,i,k,j) = wl
-                        zb_alpha_x(i,k,j)  = ramp
+                        zb_xw_lev(i,k,j,1) = lh; zb_xw_lev(i,k,j,2) = ll
+                        zb_xw_wt (i,k,j,1) = wh; zb_xw_wt (i,k,j,2) = wl
                         if (bself .and. bnbr) ncov_x = ncov_x + 1
                         ! F2: wider-stencil columns for the 4-point biharmonic
                         ! (i-2, i+1) reconstructed to the same u-face z. Guarded
                         ! at the memory edges (edge faces not consumed anyway).
                         if (i-2 >= ims) then
                             call resolve_col(tgt, zc(i-2,:,j), lh, ll, wh, wl, bnbr)
-                            zb_xw2_lev(1,i,k,j) = lh; zb_xw2_lev(2,i,k,j) = ll
-                            zb_xw2_wt (1,i,k,j) = wh; zb_xw2_wt (2,i,k,j) = wl
+                            zb_xw2_lev(i,k,j,1) = lh; zb_xw2_lev(i,k,j,2) = ll
+                            zb_xw2_wt (i,k,j,1) = wh; zb_xw2_wt (i,k,j,2) = wl
                         endif
                         if (i+1 <= ime) then
                             call resolve_col(tgt, zc(i+1,:,j), lh, ll, wh, wl, bnbr)
-                            zb_xe_lev(1,i,k,j) = lh; zb_xe_lev(2,i,k,j) = ll
-                            zb_xe_wt (1,i,k,j) = wh; zb_xe_wt (2,i,k,j) = wl
+                            zb_xe_lev(i,k,j,1) = lh; zb_xe_lev(i,k,j,2) = ll
+                            zb_xe_wt (i,k,j,1) = wh; zb_xe_wt (i,k,j,2) = wl
                         endif
                     endif
                     ! y-direction: v-face (i,k,j) between cells (j-1) and (j)
@@ -1466,24 +1523,23 @@ contains
                         ntot_y = ntot_y + 1
                         tgt = domain%geo_v%z(i,k,j)
                         call resolve_col(tgt, zc(i,:,j),   lh, ll, wh, wl, bself)
-                        zb_ys_lev(1,i,k,j) = lh; zb_ys_lev(2,i,k,j) = ll
-                        zb_ys_wt (1,i,k,j) = wh; zb_ys_wt (2,i,k,j) = wl
+                        zb_ys_lev(i,k,j,1) = lh; zb_ys_lev(i,k,j,2) = ll
+                        zb_ys_wt (i,k,j,1) = wh; zb_ys_wt (i,k,j,2) = wl
                         call resolve_col(tgt, zc(i,:,j-1), lh, ll, wh, wl, bnbr)
-                        zb_yn_lev(1,i,k,j) = lh; zb_yn_lev(2,i,k,j) = ll
-                        zb_yn_wt (1,i,k,j) = wh; zb_yn_wt (2,i,k,j) = wl
-                        zb_alpha_y(i,k,j)  = ramp
+                        zb_yn_lev(i,k,j,1) = lh; zb_yn_lev(i,k,j,2) = ll
+                        zb_yn_wt (i,k,j,1) = wh; zb_yn_wt (i,k,j,2) = wl
                         if (bself .and. bnbr) ncov_y = ncov_y + 1
                         ! F2: wider-stencil columns for the 4-point biharmonic
                         ! (j-2, j+1) reconstructed to the same v-face z.
                         if (j-2 >= jms) then
                             call resolve_col(tgt, zc(i,:,j-2), lh, ll, wh, wl, bnbr)
-                            zb_yn2_lev(1,i,k,j) = lh; zb_yn2_lev(2,i,k,j) = ll
-                            zb_yn2_wt (1,i,k,j) = wh; zb_yn2_wt (2,i,k,j) = wl
+                            zb_yn2_lev(i,k,j,1) = lh; zb_yn2_lev(i,k,j,2) = ll
+                            zb_yn2_wt (i,k,j,1) = wh; zb_yn2_wt (i,k,j,2) = wl
                         endif
                         if (j+1 <= jme) then
                             call resolve_col(tgt, zc(i,:,j+1), lh, ll, wh, wl, bnbr)
-                            zb_yp_lev(1,i,k,j) = lh; zb_yp_lev(2,i,k,j) = ll
-                            zb_yp_wt (1,i,k,j) = wh; zb_yp_wt (2,i,k,j) = wl
+                            zb_yp_lev(i,k,j,1) = lh; zb_yp_lev(i,k,j,2) = ll
+                            zb_yp_wt (i,k,j,1) = wh; zb_yp_wt (i,k,j,2) = wl
                         endif
                     endif
                 enddo
@@ -1493,12 +1549,12 @@ contains
 
         !$acc enter data create(zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev, &
         !$acc                    zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt,  &
-        !$acc                    zb_alpha_x, zb_alpha_y, &
+        !$acc                    zb_alpha_k, &
         !$acc                    zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev, &
         !$acc                    zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt)
         !$acc update device(zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev, &
         !$acc               zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt,  &
-        !$acc               zb_alpha_x, zb_alpha_y, &
+        !$acc               zb_alpha_k, &
         !$acc               zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev, &
         !$acc               zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt)
 

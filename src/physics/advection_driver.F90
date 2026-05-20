@@ -150,6 +150,7 @@ contains
         type(timer_t), intent(inout) :: flux_time, flux_corr_time, sum_time, adv_wind_time
 
         integer :: RK3_step, n, n_adv, flux_corr, flux_corr_n, q_id
+        logical :: apply_cz_diff_n
         real :: t_fac
         real, allocatable :: temp_all(:,:,:,:)
 
@@ -213,6 +214,13 @@ contains
                 flux_corr_n = flux_corr
                 if (domain%adv_vars(n)%id == domain%var_indx(kVARS%potential_temperature)%id) flux_corr_n = 0
 
+                ! Per-variable cz_diff dispatch: theta always gets it (when
+                ! cz_diff_order > 0); qv optionally (cz_diff_qv namelist); other
+                ! species never — they aren't strongly stratified and would
+                ! waste the constant-z reconstruction cost on every flux3 call.
+                apply_cz_diff_n = (domain%adv_vars(n)%id == domain%var_indx(kVARS%potential_temperature)%id .or. &
+                                   domain%adv_vars(n)%id == domain%var_indx(kVARS%water_vapor)%id)
+
                 if (flux_corr_n==kFLUXCOR_MONO) then
                     call flux_corr_time%start()
                     call compute_upwind_fluxes_async(temp_all(:,:,:,n), U_m, V_m, W_m, &
@@ -224,7 +232,7 @@ contains
                 call adv_std_advect3d(domain%vars_3d(domain%adv_vars(n)%v)%data_3d, &
                     temp_all(:,:,:,n), U_m, V_m, W_m, denom, &
                     domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, flux_time, flux_corr_time, sum_time, &
-                    t_factor_in=t_fac, q_id_in=q_id, flux_corr_in=flux_corr_n)
+                    t_factor_in=t_fac, q_id_in=q_id, flux_corr_in=flux_corr_n, apply_cz_diff_in=apply_cz_diff_n)
             enddo
 
             if (RK3_step < 3) then
