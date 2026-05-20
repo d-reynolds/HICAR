@@ -12,16 +12,36 @@ module adv_std
     use domain_interface,  only: domain_t
     use adv_fluxcorr,      only: WRF_flux_corr
     use timer_interface,   only: timer_t
+    use vertical_interpolation, only: find_match, weights   ! Zaengl Variant-B constant-z LUT
+    use mpi_f08,           only: MPI_Allreduce, MPI_IN_PLACE, MPI_SUM, MPI_REAL, MPI_MIN, MPI_MAX
     implicit none
     private
 
     integer :: ims, ime, jms, jme, kms, kme, its, ite, jts, jte
-    integer :: i_s_w, i_e_w, j_s_w, j_e_w, i_s, i_e, j_s, j_e, horder, vorder
+    integer :: i_s_w, i_e_w, j_s_w, j_e_w, i_s, i_e, j_s, j_e, horder, vorder, cz_diff_order
     !type(timer_t) :: flux_time, flux_up_time, flux_corr_time, sum_time
     ! For use advecting a (convective?) wind field
     ! real,dimension(:,:,:),allocatable :: U_4cu_u, V_4cu_u, W_4cu_u
     ! real,dimension(:,:,:),allocatable :: U_4cu_v, V_4cu_v, W_4cu_v
     real, dimension(:,:,:), allocatable   :: flux_x, flux_y, flux_z
+
+    ! adv_theta_ref(i,k,j) = theta_bar(z(i,k,j))
+    ! mean is a static snapshot, so this is filled once and freed on nest
+    ! switch, mirroring the diagnostic arrays.
+    real, dimension(:,:,:), allocatable   :: adv_theta_ref
+
+    ! ----- constant-z horizontal-reconstruction LUT -----
+    ! x: self = column i, west = column i-1 (u-face between i-1 and i).
+    ! y: self = column j, south = column j-1 (v-face between j-1 and j).
+    integer, dimension(:,:,:,:), allocatable :: zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev
+    real,    dimension(:,:,:,:), allocatable :: zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt
+    real,    dimension(:,:,:),   allocatable :: zb_alpha_x, zb_alpha_y
+    ! F2 (zb_diff_order=4): wider-stencil constz reconstruction for the 4-point
+    ! biharmonic. x: xw2 = column i-2, xe = column i+1 (to the u-face z).
+    ! y: yn2 = column j-2, yp = column j+1 (to the v-face z). Built only when
+    ! zb_corr/zb_diff; consumed only when zb_diff_order==4
+    integer, dimension(:,:,:,:), allocatable :: zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev
+    real,    dimension(:,:,:,:), allocatable :: zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt
 
     ! Fine-mesh flux arrays (used by flux3_fm / sum_kernel_fm)
     real, dimension(:,:,:), allocatable   :: flux_x_fm, flux_y_fm, flux_z_fm
@@ -30,6 +50,8 @@ module adv_std
     public :: adv_std_compute_wind_2d_fm, flux_2d_fm, sum_kernel_2d_fm, adv_std_clean_wind_arrays_fm
     public :: adv_std_clean_wind_arrays
     public :: flux_x_fm, flux_y_fm, flux_z_fm
+
+    public :: adv_theta_ref, adv_std_apply_ref_vert
 
 contains
 
@@ -53,6 +75,9 @@ contains
         !set order of advection
         horder = options%adv%h_order
         vorder = options%adv%v_order
+
+        !order of constant-z diffusion. If > 0, turned on, otherwise does nothing
+        cz_diff_order = options%adv%cz_diff_order
         
         !Define bounds of advection computation. If using monotonic flux-limiter, it is necesarry to increase
         !advection bounds by 1. The necesarry extension of the halo is handeled in domain_object
@@ -80,6 +105,11 @@ contains
             j_e_w = j_e + 1
         endif
         
+        call adv_std_init_theta_ref(domain)
+        ! Zaengl const-z diffusion: build the constant-z LUT once per nest
+        if (options%adv%cz_diff_order > 0) then
+            call adv_std_init_zb_lut(domain)
+        endif
     end subroutine
 
     subroutine adv_std_var_request(options)
@@ -108,9 +138,20 @@ contains
         real :: tmp, coef, u, v, w, q0, q1, q2, qn1, qn2, qn3, abs_u, t_factor_compact
         real :: qin1, qin2, qi1, qk1, qj1, qkn1, qkn2, qjn1, qjn2
         integer :: top, bot, bot2, nor, sou, sou2, eas, wes, wes2
+        real :: ax, ay, q0z, qn1z, qn3z
+        real :: diff_fac   ! 1.0 = keep scheme's implicit diffusion; 0.0 = even-order centered (zb_diff)
+        real :: deta, dcz, dlim   ! Phase D: explicit constant-z diffusion
+        real :: qm2z, qp1z                ! F3: wider-stencil constz values (4th-order)
+
         ! GPU optimization variables
         real :: q_cache(7), u_val, v_val, w_val, abs_u_val
-                      
+
+        ! If the user has opted for Zaengl-style truly horizontal diffusion
+        ! then we dont apply the implicit |u|-diffusion in the flux calculation (diff_fac=0), instead
+        ! we compute the Zaengl-style diffusion afterwards.
+        diff_fac = 1.0
+        if (cz_diff_order > 0) diff_fac = 0.0
+
         !$acc data present(q,U_m,V_m,W_m,flux_x,flux_y,flux_z)
 
         if (horder==1) then
@@ -209,7 +250,7 @@ contains
                 tmp = u_val * tmp
                 
                 ! Optimized 3rd order diffusive terms using cached values
-                tmp = tmp - abs_u_val * (3.0 * (q_cache(5) - q_cache(4)) - (q_cache(6) - q_cache(3)))
+                tmp = tmp - diff_fac * abs_u_val * (3.0 * (q_cache(5) - q_cache(4)) - (q_cache(6) - q_cache(3)))
                 
                 ! Optimized upwind flux calculation using cached values
                 flux_x(i,k,j) = tmp * coef
@@ -221,7 +262,7 @@ contains
                 tmp = u_val * tmp
                 
                 ! Optimized 3rd order diffusive terms using cached values
-                tmp = tmp - abs_u_val * (3.0 * (q_cache(5) - q_cache(2)) - (q_cache(7) - q_cache(1)))
+                tmp = tmp - diff_fac * abs_u_val * (3.0 * (q_cache(5) - q_cache(2)) - (q_cache(7) - q_cache(1)))
 
                 ! Optimized upwind flux calculation using cached values
                 flux_y(i,k,j) = tmp * coef
@@ -255,7 +296,7 @@ contains
                 
                 ! Optimized 5th order diffusive terms using cached values
                 ! Original: tmp = tmp - abs(u) * (10*(q0-qn1) - 5*(q1-qn2) + (q2-qn3))
-                tmp = tmp - abs_u_val * (10.0 * (q_cache(4) - q_cache(3)) - 5.0 * (q_cache(5) - q_cache(2)) + (q(i+2,k,j) - q_cache(1)))
+                tmp = tmp - diff_fac * abs_u_val * (10.0 * (q_cache(4) - q_cache(3)) - 5.0 * (q_cache(5) - q_cache(2)) + (q(i+2,k,j) - q_cache(1)))
                 flux_x(i,k,j) = tmp * coef
             enddo
             enddo
@@ -281,14 +322,135 @@ contains
                 tmp = u_val * tmp
                 
                 ! Optimized 5th order diffusive terms using cached values
-                tmp = tmp - abs_u_val * (10.0 * (q_cache(4) - q_cache(3)) - 5.0 * (q_cache(5) - q_cache(2)) + (q(i,k,j+2) - q_cache(1)))
+                tmp = tmp - diff_fac * abs_u_val * (10.0 * (q_cache(4) - q_cache(3)) - 5.0 * (q_cache(5) - q_cache(2)) + (q(i,k,j+2) - q_cache(1)))
                 flux_y(i,k,j) = tmp * coef
             enddo
             enddo
             enddo
             !$acc end parallel
         endif
-        
+
+        ! ---- CONSTANT-Z horizontal diffusion 
+        ! Replaces the implicit |u|-diffusion removed in earlier C (diff_fac=0) with
+        ! the scheme's own diffusion, evaluated along constant-z via the zb LUT, alpha-ramp blended
+        ! with the along-eta difference, then MINMOD-limited against the scheme's
+        ! own (proven-monotone) eta-diffusion -> the explicit term can never
+        ! exceed it nor anti-diffuse
+        if (cz_diff_order == 4) then
+            ! ---- F3: faithful 4-point CONSTANT-Z biharmonic (zb_diff_order=4).
+            ! The 3rd-order-upwind scheme's own d4 diffusive stencil
+            !   3*(q_i-q_{i-1}) - (q_{i+1}-q_{i-2})
+            ! evaluated constant-z (each of the 4 columns reconstructed to the
+            ! face z via the F2 LUT), alpha-blended with along-eta, minmod-
+            ! limited against the scheme's own (proven-stable) d4 eta-stencil.
+            coef = (1.0/12.0) * t_factor
+            !$acc parallel loop gang vector tile(32,2,1) async(1) &
+            !$acc   present(q,U_m,V_m,flux_x,flux_y, &
+            !$acc           zb_xs_lev,zb_xw_lev,zb_xs_wt,zb_xw_wt,zb_alpha_x, &
+            !$acc           zb_ys_lev,zb_yn_lev,zb_ys_wt,zb_yn_wt,zb_alpha_y, &
+            !$acc           zb_xw2_lev,zb_xe_lev,zb_xw2_wt,zb_xe_wt, &
+            !$acc           zb_yn2_lev,zb_yp_lev,zb_yn2_wt,zb_yp_wt) &
+            !$acc   private(u_val,v_val,abs_u_val,ax,ay,q0z,qn1z,qn3z,qm2z,qp1z,deta,dcz,dlim)
+            do j = j_s, j_e
+                do k = kms, kme
+                    do i = i_s, i_e
+                        ! ---- x-face: 3*(q_i-q_{i-1}) - (q_{i+1}-q_{i-2}) ----
+                        ax   = zb_alpha_x(i,k,j)
+                        deta = 3.0*(q(i,k,j)-q(i-1,k,j)) - (q(i+1,k,j)-q(i-2,k,j))
+                        q0z  = zb_xs_wt (1,i,k,j)*q(i,   zb_xs_lev (1,i,k,j), j) &
+                             + zb_xs_wt (2,i,k,j)*q(i,   zb_xs_lev (2,i,k,j), j)
+                        qn1z = zb_xw_wt (1,i,k,j)*q(i-1, zb_xw_lev (1,i,k,j), j) &
+                             + zb_xw_wt (2,i,k,j)*q(i-1, zb_xw_lev (2,i,k,j), j)
+                        qm2z = zb_xw2_wt(1,i,k,j)*q(i-2, zb_xw2_lev(1,i,k,j), j) &
+                             + zb_xw2_wt(2,i,k,j)*q(i-2, zb_xw2_lev(2,i,k,j), j)
+                        qp1z = zb_xe_wt (1,i,k,j)*q(i+1, zb_xe_lev (1,i,k,j), j) &
+                             + zb_xe_wt (2,i,k,j)*q(i+1, zb_xe_lev (2,i,k,j), j)
+                        dcz  = 3.0*(q0z-qn1z) - (qp1z-qm2z)
+                        dlim = (1.0 - ax)*deta + ax*dcz
+                        if (dlim*deta <= 0.0) then
+                            dlim = 0.0
+                        else
+                            dlim = sign(min(abs(dlim), abs(deta)), deta)
+                        endif
+                        u_val = U_m(i,k,j); abs_u_val = ABS(u_val)
+                        flux_x(i,k,j) = flux_x(i,k,j) - abs_u_val * coef * dlim
+                        ! ---- y-face: 3*(q_j-q_{j-1}) - (q_{j+1}-q_{j-2}) ----
+                        ay   = zb_alpha_y(i,k,j)
+                        deta = 3.0*(q(i,k,j)-q(i,k,j-1)) - (q(i,k,j+1)-q(i,k,j-2))
+                        q0z  = zb_ys_wt (1,i,k,j)*q(i, zb_ys_lev (1,i,k,j), j  ) &
+                             + zb_ys_wt (2,i,k,j)*q(i, zb_ys_lev (2,i,k,j), j  )
+                        qn3z = zb_yn_wt (1,i,k,j)*q(i, zb_yn_lev (1,i,k,j), j-1) &
+                             + zb_yn_wt (2,i,k,j)*q(i, zb_yn_lev (2,i,k,j), j-1)
+                        qm2z = zb_yn2_wt(1,i,k,j)*q(i, zb_yn2_lev(1,i,k,j), j-2) &
+                             + zb_yn2_wt(2,i,k,j)*q(i, zb_yn2_lev(2,i,k,j), j-2)
+                        qp1z = zb_yp_wt (1,i,k,j)*q(i, zb_yp_lev (1,i,k,j), j+1) &
+                             + zb_yp_wt (2,i,k,j)*q(i, zb_yp_lev (2,i,k,j), j+1)
+                        dcz  = 3.0*(q0z-qn3z) - (qp1z-qm2z)
+                        dlim = (1.0 - ay)*deta + ay*dcz
+                        if (dlim*deta <= 0.0) then
+                            dlim = 0.0
+                        else
+                            dlim = sign(min(abs(dlim), abs(deta)), deta)
+                        endif
+                        v_val = V_m(i,k,j); abs_u_val = ABS(v_val)
+                        flux_y(i,k,j) = flux_y(i,k,j) - abs_u_val * coef * dlim
+                    enddo
+                enddo
+            enddo
+        else if (cz_diff_order == 2) then
+            ! ---- 2nd-order ----
+            if (horder == 1) then
+                coef = 0.5 * t_factor
+            else if (horder == 3) then
+                coef = 0.25 * t_factor
+            else
+                coef = (1.0/6.0) * t_factor
+            endif
+            !$acc parallel loop gang vector tile(32,2,1) async(1) &
+            !$acc   present(q,U_m,V_m,flux_x,flux_y, &
+            !$acc           zb_xs_lev,zb_xw_lev,zb_xs_wt,zb_xw_wt,zb_alpha_x, &
+            !$acc           zb_ys_lev,zb_yn_lev,zb_ys_wt,zb_yn_wt,zb_alpha_y) &
+            !$acc   private(u_val,v_val,abs_u_val,ax,ay,q0z,qn1z,qn3z,deta,dcz,dlim)
+            do j = j_s, j_e
+                do k = kms, kme
+                    do i = i_s, i_e
+                        ! ---- x-face ----
+                        ax   = zb_alpha_x(i,k,j)
+                        deta = q(i,k,j) - q(i-1,k,j)
+                        q0z  = zb_xs_wt(1,i,k,j)*q(i,   zb_xs_lev(1,i,k,j), j) &
+                             + zb_xs_wt(2,i,k,j)*q(i,   zb_xs_lev(2,i,k,j), j)
+                        qn1z = zb_xw_wt(1,i,k,j)*q(i-1, zb_xw_lev(1,i,k,j), j) &
+                             + zb_xw_wt(2,i,k,j)*q(i-1, zb_xw_lev(2,i,k,j), j)
+                        dcz  = q0z - qn1z
+                        dlim = (1.0 - ax)*deta + ax*dcz
+                        if (dlim*deta <= 0.0) then
+                            dlim = 0.0
+                        else
+                            dlim = sign(min(abs(dlim), abs(deta)), deta)
+                        endif
+                        u_val = U_m(i,k,j); abs_u_val = ABS(u_val)
+                        flux_x(i,k,j) = flux_x(i,k,j) - abs_u_val * coef * dlim
+                        ! ---- y-face ----
+                        ay   = zb_alpha_y(i,k,j)
+                        deta = q(i,k,j) - q(i,k,j-1)
+                        q0z  = zb_ys_wt(1,i,k,j)*q(i, zb_ys_lev(1,i,k,j), j) &
+                             + zb_ys_wt(2,i,k,j)*q(i, zb_ys_lev(2,i,k,j), j)
+                        qn3z = zb_yn_wt(1,i,k,j)*q(i, zb_yn_lev(1,i,k,j), j-1) &
+                             + zb_yn_wt(2,i,k,j)*q(i, zb_yn_lev(2,i,k,j), j-1)
+                        dcz  = q0z - qn3z
+                        dlim = (1.0 - ay)*deta + ay*dcz
+                        if (dlim*deta <= 0.0) then
+                            dlim = 0.0
+                        else
+                            dlim = sign(min(abs(dlim), abs(deta)), deta)
+                        endif
+                        v_val = V_m(i,k,j); abs_u_val = ABS(v_val)
+                        flux_y(i,k,j) = flux_y(i,k,j) - abs_u_val * coef * dlim
+                    enddo
+                enddo
+            enddo
+        endif
+
         if (vorder==1) then
             t_factor_compact = 0.5  * t_factor
             !$acc parallel async(2)
@@ -518,6 +680,43 @@ contains
         endif
 
     end subroutine adv_std_advect3d
+
+    !>------------------------------------------------------------
+    !! Fix 3: apply theta_bar's vertical transport after the
+    !! full RK3 loop AND the FCT flux corrector
+    !!------------------------------------------------------------
+    subroutine adv_std_apply_ref_vert(qprime, w_real, zheight, dt)
+        implicit none
+        real, dimension(ims:ime,kms:kme,jms:jme), intent(inout) :: qprime
+        real, dimension(ims:ime,kms:kme,jms:jme), intent(in)    :: w_real, zheight
+        real, intent(in) :: dt
+        integer :: i, j, k
+        real :: dthdz, dvg
+
+        !$acc parallel loop gang vector collapse(3) default(present) private(dthdz, dvg)
+        do j = jts, jte
+            do k = kms, kme
+                do i = its, ite
+                    ! (1) advective -w_real * d(theta_bar)/dz
+                    if (k == kms) then
+                        dthdz = (adv_theta_ref(i,kms+1,j) - adv_theta_ref(i,kms,j)) &
+                              / (zheight(i,kms+1,j) - zheight(i,kms,j))
+                    else if (k == kme) then
+                        dthdz = (adv_theta_ref(i,kme,j) - adv_theta_ref(i,kme-1,j)) &
+                              / (zheight(i,kme,j) - zheight(i,kme-1,j))
+                    else
+                        dthdz = (adv_theta_ref(i,k+1,j) - adv_theta_ref(i,k-1,j)) &
+                              / (zheight(i,k+1,j) - zheight(i,k-1,j))
+                    endif
+
+                    qprime(i,k,j) = qprime(i,k,j) &
+                        - w_real(i,k,j) * dthdz * dt
+                enddo
+            enddo
+        enddo
+
+    end subroutine adv_std_apply_ref_vert
+
 
     subroutine sum_kernel(flux_x, flux_y, flux_z, qold, qfluxes, denom, dz, q_id)
         implicit none
@@ -1011,8 +1210,358 @@ contains
             !$acc exit data delete(flux_z) finalize
             deallocate(flux_z)
         endif
+        if (allocated(adv_theta_ref)) then
+            !$acc exit data delete(adv_theta_ref) finalize
+            deallocate(adv_theta_ref)
+        endif
+        if (allocated(zb_xs_lev)) then
+            !$acc exit data delete(zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev, &
+            !$acc                   zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt,  &
+            !$acc                   zb_alpha_x, zb_alpha_y, &
+            !$acc                   zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev, &
+            !$acc                   zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt) finalize
+            deallocate(zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev, &
+                       zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt,  &
+                       zb_alpha_x, zb_alpha_y, &
+                       zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev, &
+                       zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt)
+        endif
 
     end subroutine adv_std_clean_wind_arrays
+
+    !>------------------------------------------------------------
+    !! Fix 3: build the PARAMETER-FREE reference profile theta_bar(z) =
+    !! the domain horizontal-MEAN potential temperature binned by PHYSICAL
+    !! HEIGHT (NOT by terrain-following index k — a constant-k surface spans
+    !! valley floor to mountaintop, so a per-k mean smears air across a wide
+    !! height range and is exact only for a linear profile). theta_bar is a
+    !! single, horizontally-uniform-in-physical-space profile (the
+    !! load-bearing property: zero horizontal advection of theta_bar);
+    !! evaluated per column at the true height:
+    !!   adv_theta_ref(i,k,j) = theta_bar( z(i,k,j) )
+    !! Built from a TRUE global mean (MPI_Allreduce over domain%compute_comms
+    !! of interior height-bin sums) so it is decomposition-invariant. z is
+    !! static per nest and the mean is a one-time snapshot, so this is filled
+    !! once; idempotent + freed on nest switch (adv_std_clean_wind_arrays),
+    !! so it re-fills with the new nest's state after a context switch.
+    !!------------------------------------------------------------
+    subroutine adv_std_init_theta_ref(domain)
+        implicit none
+        type(domain_t), intent(in) :: domain
+        integer :: zv, thv, i, j, k, nz, nbins, b, nc, m
+        real, allocatable :: th_sum(:), z_sum(:), bcnt(:), zb_c(:), th_c(:)
+        real :: zmin, zmax, dzbin, zt, w1
+
+        if (allocated(adv_theta_ref)) return
+        zv  = domain%var_indx(kVARS%z)%v
+        thv = domain%var_indx(kVARS%potential_temperature)%v
+
+        nz    = kme - kms + 1
+        nbins = nz                      ! parameter-free: tie bin count to the
+                                        ! model's own vertical resolution
+        allocate(adv_theta_ref(ims:ime, kms:kme, jms:jme))
+        allocate(th_sum(nbins), z_sum(nbins), bcnt(nbins), zb_c(nbins), th_c(nbins))
+        !$acc enter data create(adv_theta_ref)
+
+        associate(z  => domain%vars_3d(zv )%data_3d, &
+                  th => domain%vars_3d(thv)%data_3d)
+
+        ! ---- theta_bar(z) = horizontal mean of theta binned by PHYSICAL
+        ! HEIGHT (NOT by terrain-following index k). A constant-k surface
+        ! spans valley-floor to mountaintop, so a per-k mean blends air
+        ! across a huge height range (coordinate smear, exact only for a
+        ! linear profile). Binning by geometric height gives a clean,
+        ! single, horizontally-uniform-in-physical-space theta_bar(z) (the
+        ! load-bearing property: zero horizontal advection of theta_bar).
+        ! Global physical-height range over interior real cells (its:ite,
+        ! jts:jte; no halo double-count), MPI-reduced so the bin axis is
+        ! decomposition-invariant.
+        zmin =  huge(1.0)
+        zmax = -huge(1.0)
+        !$acc parallel loop gang vector collapse(3) default(present) &
+        !$acc          reduction(min:zmin) reduction(max:zmax)
+        do j = jts, jte
+            do k = kms, kme
+                do i = its, ite
+                    zmin = min(zmin, z(i,k,j))
+                    zmax = max(zmax, z(i,k,j))
+                enddo
+            enddo
+        enddo
+        call MPI_Allreduce(MPI_IN_PLACE, zmin, 1, MPI_REAL, MPI_MIN, domain%compute_comms)
+        call MPI_Allreduce(MPI_IN_PLACE, zmax, 1, MPI_REAL, MPI_MAX, domain%compute_comms)
+
+        dzbin = (zmax - zmin) / real(nbins)
+        if (dzbin <= 0.0) dzbin = 1.0   ! defensive (degenerate single-height)
+
+        ! ---- histogram: accumulate theta and z into fixed geometric-height
+        ! bins (device atomics; once-per-nest init, not perf-critical), then
+        ! a TRUE global sum via MPI_Allreduce over the compute communicator.
+        th_sum = 0.0; z_sum = 0.0; bcnt = 0.0
+        !$acc enter data copyin(th_sum, z_sum, bcnt)
+        !$acc parallel loop gang vector collapse(3) default(present) &
+        !$acc          present(th_sum,z_sum,bcnt) private(b,zt)
+        do j = jts, jte
+            do k = kms, kme
+                do i = its, ite
+                    zt = z(i,k,j)
+                    b  = int((zt - zmin)/dzbin) + 1
+                    if (b < 1)     b = 1
+                    if (b > nbins) b = nbins
+                    !$acc atomic update
+                    th_sum(b) = th_sum(b) + th(i,k,j)
+                    !$acc atomic update
+                    z_sum(b)  = z_sum(b)  + zt
+                    !$acc atomic update
+                    bcnt(b)   = bcnt(b)   + 1.0
+                enddo
+            enddo
+        enddo
+        !$acc exit data copyout(th_sum, z_sum, bcnt)
+
+        call MPI_Allreduce(MPI_IN_PLACE, th_sum, nbins, MPI_REAL, MPI_SUM, domain%compute_comms)
+        call MPI_Allreduce(MPI_IN_PLACE, z_sum,  nbins, MPI_REAL, MPI_SUM, domain%compute_comms)
+        call MPI_Allreduce(MPI_IN_PLACE, bcnt,   nbins, MPI_REAL, MPI_SUM, domain%compute_comms)
+
+        ! ---- compact NON-EMPTY bins into a monotone (zb_c, th_c) table.
+        ! Bin mean height z_sum/bcnt (not the geometric bin centre) so each
+        ! sample sits where the data actually is; disjoint ordered bins =>
+        ! zb_c strictly increasing across the nc kept points.
+        nc = 0
+        do b = 1, nbins
+            if (bcnt(b) > 0.0) then
+                nc = nc + 1
+                zb_c(nc) = z_sum(b)  / bcnt(b)
+                th_c(nc) = th_sum(b) / bcnt(b)
+            endif
+        enddo
+
+        ! ---- adv_theta_ref(i,k,j) = theta_bar at physical height z(i,k,j),
+        ! linearly interpolated on (zb_c, th_c). Out-of-range -> nearest
+        ! endpoint (zero-gradient clamp: weight-1 copy of an existing mean
+        ! value -> always well-defined, no new extrema).
+        !$acc parallel loop gang vector collapse(3) default(present) &
+        !$acc          copyin(zb_c,th_c) private(m,zt,w1)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    zt = z(i,k,j)
+                    if (nc == 1) then
+                        adv_theta_ref(i,k,j) = th_c(1)
+                    else if (zt <= zb_c(1)) then
+                        adv_theta_ref(i,k,j) = th_c(1)
+                    else if (zt >= zb_c(nc)) then
+                        adv_theta_ref(i,k,j) = th_c(nc)
+                    else
+                        m = 1
+                        do while (m < nc-1 .and. zb_c(m+1) <= zt)
+                            m = m + 1
+                        enddo
+                        if (zb_c(m+1) > zb_c(m)) then
+                            w1 = (zt - zb_c(m)) / (zb_c(m+1) - zb_c(m))
+                        else
+                            w1 = 0.0
+                        endif
+                        adv_theta_ref(i,k,j) = (1.0 - w1)*th_c(m) + w1*th_c(m+1)
+                    endif
+                enddo
+            enddo
+        enddo
+        end associate
+
+        deallocate(th_sum, z_sum, bcnt, zb_c, th_c)
+
+    end subroutine adv_std_init_theta_ref
+
+    !>------------------------------------------------------------
+    !! Zaengl Variant-B: build the constant-z reconstruction LUT +
+    !! slope-limited (alpha) blend from static geometry. Native to
+    !! adv_std (same module as flux3). Idempotent; freed on nest
+    !! switch (adv_std_clean_wind_arrays). RUNTIME-INERT until flux3
+    !! consumes it (Step 3). Prints a coverage summary for validation.
+    !!------------------------------------------------------------
+    subroutine adv_std_init_zb_lut(domain)
+        implicit none
+        type(domain_t),  intent(in) :: domain
+
+        integer :: zv, i, j, k, ncov_x, ntot_x, ncov_y, ntot_y
+        integer :: lh, ll
+        real    :: tgt, ramp, wh, wl
+        logical :: bself, bnbr
+
+        if (allocated(zb_xs_lev)) return
+
+        zv = domain%var_indx(kVARS%z)%v
+
+        if (.not. allocated(domain%geo_u%z) .or. .not. allocated(domain%geo_v%z)) then
+            if (STD_OUT_PE) write(*,*) "ERROR adv_std_init_zb_lut: geo_u%z/geo_v%z not allocated."
+            error stop
+        endif
+
+        allocate(zb_xs_lev(2,ims:ime,kms:kme,jms:jme), zb_xw_lev(2,ims:ime,kms:kme,jms:jme))
+        allocate(zb_ys_lev(2,ims:ime,kms:kme,jms:jme), zb_yn_lev(2,ims:ime,kms:kme,jms:jme))
+        allocate(zb_xs_wt (2,ims:ime,kms:kme,jms:jme), zb_xw_wt (2,ims:ime,kms:kme,jms:jme))
+        allocate(zb_ys_wt (2,ims:ime,kms:kme,jms:jme), zb_yn_wt (2,ims:ime,kms:kme,jms:jme))
+        allocate(zb_alpha_x(ims:ime,kms:kme,jms:jme),  zb_alpha_y(ims:ime,kms:kme,jms:jme))
+        allocate(zb_xw2_lev(2,ims:ime,kms:kme,jms:jme), zb_xe_lev(2,ims:ime,kms:kme,jms:jme))
+        allocate(zb_yn2_lev(2,ims:ime,kms:kme,jms:jme), zb_yp_lev(2,ims:ime,kms:kme,jms:jme))
+        allocate(zb_xw2_wt (2,ims:ime,kms:kme,jms:jme), zb_xe_wt (2,ims:ime,kms:kme,jms:jme))
+        allocate(zb_yn2_wt (2,ims:ime,kms:kme,jms:jme), zb_yp_wt (2,ims:ime,kms:kme,jms:jme))
+
+        ! Safe defaults everywhere: identity bracket, pure along-eta (alpha=0).
+        zb_xs_lev = kms; zb_xw_lev = kms; zb_ys_lev = kms; zb_yn_lev = kms
+        zb_xs_wt(1,:,:,:) = 1.0; zb_xs_wt(2,:,:,:) = 0.0
+        zb_xw_wt(1,:,:,:) = 1.0; zb_xw_wt(2,:,:,:) = 0.0
+        zb_ys_wt(1,:,:,:) = 1.0; zb_ys_wt(2,:,:,:) = 0.0
+        zb_yn_wt(1,:,:,:) = 1.0; zb_yn_wt(2,:,:,:) = 0.0
+        zb_alpha_x = 0.0; zb_alpha_y = 0.0
+        ! F2 wider-stencil defaults (identity): xw2/xe default to the i-1/i
+        ! columns' fallback so the biharmonic outer difference degrades safely
+        ! at build-loop edges (those edge faces are not in the consumption range).
+        zb_xw2_lev = kms; zb_xe_lev = kms; zb_yn2_lev = kms; zb_yp_lev = kms
+        zb_xw2_wt(1,:,:,:) = 1.0; zb_xw2_wt(2,:,:,:) = 0.0
+        zb_xe_wt (1,:,:,:) = 1.0; zb_xe_wt (2,:,:,:) = 0.0
+        zb_yn2_wt(1,:,:,:) = 1.0; zb_yn2_wt(2,:,:,:) = 0.0
+        zb_yp_wt (1,:,:,:) = 1.0; zb_yp_wt (2,:,:,:) = 0.0
+
+        ncov_x = 0; ntot_x = 0; ncov_y = 0; ntot_y = 0
+
+        associate(zc => domain%vars_3d(zv)%data_3d)
+        do j = jms, jme
+            do k = kms, kme
+                ! Zaengl-2012 vertical alpha ramp: =1 at surface (k=kms),
+                ! linearly -> 0 at band top (k=kme). Removes the binary
+                ! 0/1 hard edge that otherwise seeds grid-scale NaN.
+                ramp = real(kme - k) / real(kme - kms)
+                ramp = max(0.0, min(1.0, ramp))
+                do i = ims, ime
+                    ! x-direction: u-face (i,k,j) between cells (i-1) and (i)
+                    if (i > ims) then
+                        ntot_x = ntot_x + 1
+                        tgt = domain%geo_u%z(i,k,j)
+                        call resolve_col(tgt, zc(i,:,j),   lh, ll, wh, wl, bself)
+                        zb_xs_lev(1,i,k,j) = lh; zb_xs_lev(2,i,k,j) = ll
+                        zb_xs_wt (1,i,k,j) = wh; zb_xs_wt (2,i,k,j) = wl
+                        call resolve_col(tgt, zc(i-1,:,j), lh, ll, wh, wl, bnbr)
+                        zb_xw_lev(1,i,k,j) = lh; zb_xw_lev(2,i,k,j) = ll
+                        zb_xw_wt (1,i,k,j) = wh; zb_xw_wt (2,i,k,j) = wl
+                        zb_alpha_x(i,k,j)  = ramp
+                        if (bself .and. bnbr) ncov_x = ncov_x + 1
+                        ! F2: wider-stencil columns for the 4-point biharmonic
+                        ! (i-2, i+1) reconstructed to the same u-face z. Guarded
+                        ! at the memory edges (edge faces not consumed anyway).
+                        if (i-2 >= ims) then
+                            call resolve_col(tgt, zc(i-2,:,j), lh, ll, wh, wl, bnbr)
+                            zb_xw2_lev(1,i,k,j) = lh; zb_xw2_lev(2,i,k,j) = ll
+                            zb_xw2_wt (1,i,k,j) = wh; zb_xw2_wt (2,i,k,j) = wl
+                        endif
+                        if (i+1 <= ime) then
+                            call resolve_col(tgt, zc(i+1,:,j), lh, ll, wh, wl, bnbr)
+                            zb_xe_lev(1,i,k,j) = lh; zb_xe_lev(2,i,k,j) = ll
+                            zb_xe_wt (1,i,k,j) = wh; zb_xe_wt (2,i,k,j) = wl
+                        endif
+                    endif
+                    ! y-direction: v-face (i,k,j) between cells (j-1) and (j)
+                    if (j > jms) then
+                        ntot_y = ntot_y + 1
+                        tgt = domain%geo_v%z(i,k,j)
+                        call resolve_col(tgt, zc(i,:,j),   lh, ll, wh, wl, bself)
+                        zb_ys_lev(1,i,k,j) = lh; zb_ys_lev(2,i,k,j) = ll
+                        zb_ys_wt (1,i,k,j) = wh; zb_ys_wt (2,i,k,j) = wl
+                        call resolve_col(tgt, zc(i,:,j-1), lh, ll, wh, wl, bnbr)
+                        zb_yn_lev(1,i,k,j) = lh; zb_yn_lev(2,i,k,j) = ll
+                        zb_yn_wt (1,i,k,j) = wh; zb_yn_wt (2,i,k,j) = wl
+                        zb_alpha_y(i,k,j)  = ramp
+                        if (bself .and. bnbr) ncov_y = ncov_y + 1
+                        ! F2: wider-stencil columns for the 4-point biharmonic
+                        ! (j-2, j+1) reconstructed to the same v-face z.
+                        if (j-2 >= jms) then
+                            call resolve_col(tgt, zc(i,:,j-2), lh, ll, wh, wl, bnbr)
+                            zb_yn2_lev(1,i,k,j) = lh; zb_yn2_lev(2,i,k,j) = ll
+                            zb_yn2_wt (1,i,k,j) = wh; zb_yn2_wt (2,i,k,j) = wl
+                        endif
+                        if (j+1 <= jme) then
+                            call resolve_col(tgt, zc(i,:,j+1), lh, ll, wh, wl, bnbr)
+                            zb_yp_lev(1,i,k,j) = lh; zb_yp_lev(2,i,k,j) = ll
+                            zb_yp_wt (1,i,k,j) = wh; zb_yp_wt (2,i,k,j) = wl
+                        endif
+                    endif
+                enddo
+            enddo
+        enddo
+        end associate
+
+        !$acc enter data create(zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev, &
+        !$acc                    zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt,  &
+        !$acc                    zb_alpha_x, zb_alpha_y, &
+        !$acc                    zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev, &
+        !$acc                    zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt)
+        !$acc update device(zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev, &
+        !$acc               zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt,  &
+        !$acc               zb_alpha_x, zb_alpha_y, &
+        !$acc               zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev, &
+        !$acc               zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt)
+
+    contains
+
+        ! Resolve target physical height tgt_in against a 1-based column of
+        ! monotone-increasing heights colz. q~ = w_hi*q(lev_hi)+w_lo*q(lev_lo):
+        !  - true bracket -> linear interpolation
+        !  - tgt below the column's lowest level -> zero-gradient bottom clamp
+        !    (w=1 on q(kms); no new extrema -> proven-stable Phase-3 form)
+        !  - tgt above the column top -> top-value clamp
+        subroutine resolve_col(tgt_in, colz, lev_hi, lev_lo, w_hi, w_lo, bracketed)
+            real,    intent(in)  :: tgt_in
+            real,    intent(in)  :: colz(:)
+            integer, intent(out) :: lev_hi, lev_lo
+            real,    intent(out) :: w_hi, w_lo
+            logical, intent(out) :: bracketed
+            integer :: fmm(2), nz
+            real    :: ww(2), dzc, t
+
+            nz  = size(colz)
+            fmm = find_match(tgt_in, colz)
+            if (fmm(1) > 0) then
+                ww     = weights(tgt_in, colz(fmm(2)), colz(fmm(1)))
+                lev_hi = kms + fmm(2) - 1;  lev_lo = kms + fmm(1) - 1
+                w_hi   = ww(1);             w_lo   = ww(2)
+                bracketed = .true.
+            else if (fmm(1) == -1) then
+                ! below the column's lowest level
+                bracketed = .false.
+                if (nz >= 2) then
+                    dzc = colz(2) - colz(1)
+                    if (dzc <= 0.0) then
+                        lev_hi = kms;  lev_lo = kms;  w_hi = 1.0;  w_lo = 0.0
+                    else
+                        t = (tgt_in - colz(1)) / dzc      ! < 0
+                        t = max(t, -1.0)                  ! slope-limit: <= 1 cell
+                        lev_hi = kms + 1;  lev_lo = kms
+                        w_hi   = t;        w_lo   = 1.0 - t
+                    endif
+                else
+                    lev_hi = kms;  lev_lo = kms;  w_hi = 1.0;  w_lo = 0.0
+                endif
+            else
+                ! above the column's top level
+                bracketed = .false.
+                if (nz >= 2) then
+                    dzc = colz(nz) - colz(nz-1)
+                    if (dzc <= 0.0) then
+                        lev_hi = kme;  lev_lo = kme;  w_hi = 1.0;  w_lo = 0.0
+                    else
+                        t = (tgt_in - colz(nz-1)) / dzc   ! > 1
+                        t = min(t, 2.0)                   ! slope-limit: <= 1 cell
+                        lev_hi = kme;  lev_lo = kme - 1
+                        w_hi   = t;     w_lo   = 1.0 - t
+                    endif
+                else
+                    lev_hi = kme;  lev_lo = kme;  w_hi = 1.0;  w_lo = 0.0
+                endif
+            endif
+        end subroutine resolve_col
+
+    end subroutine adv_std_init_zb_lut
 
 
 end module adv_std

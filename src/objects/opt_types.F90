@@ -117,6 +117,7 @@ module options_types
         integer :: v_order                  ! Designates which order the vertical advection should be
         logical :: advect_density       ! properly incorporate density into the advection calculations.
                                         ! Doesn't play nice with linear winds
+        integer :: cz_diff_order        ! cz_diff explicit constant-z diffusion order: 0, 2 or 4
 
     end type adv_options_type
 

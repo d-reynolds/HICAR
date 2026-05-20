@@ -8,7 +8,7 @@
 module advection
     use icar_constants
     use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, &
-                                           adv_std_clean_wind_arrays
+                                           adv_std_clean_wind_arrays, adv_theta_ref, adv_std_apply_ref_vert
     use adv_fluxcorr,               only : init_fluxcorr, set_sign_arrays, compute_upwind_fluxes_async
     ! use debug_module,               only : domain_fix
     use options_interface,          only: options_t
@@ -129,7 +129,7 @@ contains
         endif
 
         if (options%time%RK3 .and. options%physics%advection==kADV_STD) then
-            call RK3_adv(domain, options, U_m, V_m, W_m, denom, flux_time, flux_corr_time, sum_time, adv_wind_time)
+            call RK3_adv(domain, options, U_m, V_m, W_m, denom, dt, flux_time, flux_corr_time, sum_time, adv_wind_time)
         elseif (options%physics%advection==kADV_STD) then
             do n = 1, size(domain%adv_vars)
             if (options%physics%advection==kADV_STD) then
@@ -141,18 +141,36 @@ contains
 
     end subroutine advect
 
-    subroutine RK3_adv(domain, options, U_m, V_m, W_m, denom, flux_time, flux_corr_time, sum_time, adv_wind_time)
+    subroutine RK3_adv(domain, options, U_m, V_m, W_m, denom, dt, flux_time, flux_corr_time, sum_time, adv_wind_time)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t), intent(in) :: options
         real, allocatable, intent(in) :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
+        real, intent(in) :: dt
         type(timer_t), intent(inout) :: flux_time, flux_corr_time, sum_time, adv_wind_time
 
-        integer :: RK3_step, n, n_adv, flux_corr, q_id
+        integer :: RK3_step, n, n_adv, flux_corr, flux_corr_n, q_id
         real :: t_fac
         real, allocatable :: temp_all(:,:,:,:)
 
+        integer :: i, j, k
+
         n_adv = size(domain%adv_vars)
+
+        ! ----  convert theta -> theta' = theta - theta_bar(z) before the
+        ! RK3 save, so the whole RK3 (and its inter-stage halo exchanges) acts
+        ! on the smooth, weakly-stratified perturbation. theta is rebuilt after
+        ! the RK3 loop, so no other code ever sees the perturbation.
+        associate(th => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d)
+        !$acc parallel loop gang vector collapse(3) default(present)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    th(i,k,j) = th(i,k,j) - adv_theta_ref(i,k,j)
+                enddo
+            enddo
+        enddo
+        end associate
 
         ! Allocate 4D temporary array: one 3D slab per advected variable
         allocate(temp_all(ims:ime, kms:kme, jms:jme, n_adv))
@@ -186,7 +204,16 @@ contains
             do n = 1, n_adv
                 q_id = n
 
-                if (flux_corr==kFLUXCOR_MONO) then
+                ! Phase E: under zb_diff, theta BYPASSES the FCT limiter (it
+                ! relies on centered advection + the explicit constant-z
+                ! diffusion + its minmod limiter; FCT would otherwise re-inject
+                ! along-eta upwind diffusion on clipped slope cells). All other
+                ! advected vars keep FCT. Skipping FCT for theta also skips its
+                ! upwind-reference precompute.
+                flux_corr_n = flux_corr
+                if (domain%adv_vars(n)%id == domain%var_indx(kVARS%potential_temperature)%id) flux_corr_n = 0
+
+                if (flux_corr_n==kFLUXCOR_MONO) then
                     call flux_corr_time%start()
                     call compute_upwind_fluxes_async(temp_all(:,:,:,n), U_m, V_m, W_m, &
                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, denom, (q_id+100))
@@ -197,7 +224,7 @@ contains
                 call adv_std_advect3d(domain%vars_3d(domain%adv_vars(n)%v)%data_3d, &
                     temp_all(:,:,:,n), U_m, V_m, W_m, denom, &
                     domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, flux_time, flux_corr_time, sum_time, &
-                    t_factor_in=t_fac, q_id_in=q_id, flux_corr_in=flux_corr)
+                    t_factor_in=t_fac, q_id_in=q_id, flux_corr_in=flux_corr_n)
             enddo
 
             if (RK3_step < 3) then
@@ -206,6 +233,28 @@ contains
                 call domain%halo_3d_retrieve()
             endif
         enddo
+
+        ! ---- theta currently holds the RK3-advected perturbation
+        ! theta'. Apply vertical advection of background field (field
+        ! defined such that horizontal gradients are zero). Then rebuild full
+        ! theta = theta_bar + theta' over the FULL memory range (incl.
+        ! boundaries, where theta' = theta_forcing - theta_bar, so the
+        ! reconstruction restores theta_forcing exactly).
+        call adv_std_apply_ref_vert(domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d, &
+            domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
+            domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d, dt)
+
+        associate(th => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d)
+        !$acc parallel loop gang vector collapse(3) default(present)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    th(i,k,j) = th(i,k,j) + adv_theta_ref(i,k,j)
+                enddo
+            enddo
+        enddo
+        end associate
+
 
         !$acc end data
         deallocate(temp_all)

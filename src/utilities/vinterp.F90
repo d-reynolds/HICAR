@@ -17,6 +17,8 @@ module vertical_interpolation
     public vLUT
     public vLUT_forcing
     public vinterp
+    public find_match    ! reused by adv_std Zaengl Variant-B constant-z LUT
+    public weights       ! reused by adv_std Zaengl Variant-B constant-z LUT
 contains
 
     function weights(zin,ztop,zbot)
@@ -48,18 +50,26 @@ contains
         integer, optional, intent(inout)::guess
         integer,dimension(2) :: find_match
         integer::n,i,endpt
+        integer::lguess
 
         n=size(z)
         find_match(1)=-1
 
-        if (.not.present(guess)) then
-            guess=n/2
+        ! Use a LOCAL search-start: assigning to `guess` when it is absent
+        ! (it is an optional dummy) is a segfault. find_match never wrote
+        ! back to guess when present, so present-guess callers are unchanged.
+        if (present(guess)) then
+            lguess=guess
+        else
+            lguess=n/2
         endif
+        if (lguess<1) lguess=1
+        if (lguess>n) lguess=n
 
-        if (z(guess)>=zin) then
-            ! then we should search downward from z(guess)
+        if (z(lguess)>=zin) then
+            ! then we should search downward from z(lguess)
             endpt=1
-            i=guess
+            i=lguess
             do while ((i>=endpt).and.(find_match(1)==-1))
                 if (z(i)<=zin) then
                     find_match(1)=i
@@ -73,9 +83,9 @@ contains
                 i=i-1
             end do
         else
-            ! then we should search upward from z(guess)
+            ! then we should search upward from z(lguess)
             endpt=n
-            i=guess
+            i=lguess
             do while ((i<=endpt).and.(find_match(1)==-1))
                 if (z(i)>zin) then
                     find_match(1)=i-1
@@ -148,7 +158,8 @@ contains
                         write(*,*) "z to match = ",hi%z(i,k,j)
                         write(*,*) "from Z-column="
                         write(*,*) lo%z(i,:,j)
-                        stop
+                        flush(6)
+                        error stop "DIAG-TAG[vinterp:vLUT find_match failed]"
                     endif
 
                     lo%vert_lut%z(:,i,k,j)=curpos
@@ -218,7 +229,8 @@ contains
                         write(*,*) "z to match = ",hi%z(i,k,j)
                         write(*,*) "from Z-column="
                         write(*,*) lo%z(i,k,:)  ! difference from vLUT
-                        stop
+                        flush(6)
+                        error stop "DIAG-TAG[vinterp:vLUT_forcing find_match failed]"
                     endif
                     lo%vert_lut%z(:,i,k,j)=curpos
                     lo%vert_lut%w(:,i,k,j)=curweights

@@ -1681,11 +1681,11 @@ contains
         logical :: print_info, gennml
 
         logical :: advect_density(kMAX_NESTS)
-        integer, dimension(kMAX_NESTS) :: flux_corr, h_order, v_order
+        integer, dimension(kMAX_NESTS) :: flux_corr, h_order, v_order, cz_diff_order
         CHARACTER(LEN=200) :: error_msg
 
         ! define the namelist
-        namelist /adv_parameters/ flux_corr, h_order, v_order, advect_density
+        namelist /adv_parameters/ flux_corr, h_order, v_order, advect_density, cz_diff_order
 
         print_info = .False.
         if (present(info_only)) print_info = info_only
@@ -1694,6 +1694,7 @@ contains
         if (present(gen_nml)) gennml = gen_nml
 
         call set_nml_var_default(advect_density, 'advect_density', print_info, gennml)
+        call set_nml_var_default(cz_diff_order, 'cz_diff_order', print_info, gennml)
         call set_nml_var_default(flux_corr, 'flux_corr', print_info, gennml)
         call set_nml_var_default(h_order, 'h_order', print_info, gennml)
         call set_nml_var_default(v_order, 'v_order', print_info, gennml)
@@ -1716,6 +1717,7 @@ contains
             endif
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             advect_density(n_indx) = advect_density(1)
+            cz_diff_order(n_indx) = cz_diff_order(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
             ! read the namelist options
             open(io_newunit(name_unit), file=filename)
@@ -1732,6 +1734,7 @@ contains
         call set_nml_var(adv_options%h_order, h_order(n_indx), 'h_order', h_order(1))
         call set_nml_var(adv_options%v_order, v_order(n_indx), 'v_order', v_order(1))
         call set_nml_var(adv_options%advect_density, advect_density(n_indx), 'advect_density', advect_density(1))
+        call set_nml_var(adv_options%cz_diff_order, cz_diff_order(n_indx), 'cz_diff_order', cz_diff_order(1))
 
     end subroutine adv_parameters_namelist
 
@@ -3089,6 +3092,7 @@ contains
         call append_kv_int    (config_str, pos, 'adv', 'h_order',        this%adv%h_order)
         call append_kv_int    (config_str, pos, 'adv', 'v_order',        this%adv%v_order)
         call append_kv_logical(config_str, pos, 'adv', 'advect_density', this%adv%advect_density)
+        call append_kv_int    (config_str, pos, 'adv', 'cz_diff_order',  this%adv%cz_diff_order)
 
         ! --- cu group ---
         call append_kv_real(config_str, pos, 'cu', 'stochastic_cu',     this%cu%stochastic_cu)

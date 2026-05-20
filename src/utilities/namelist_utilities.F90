@@ -2974,6 +2974,14 @@ contains
                 description = "use air density in the advection equations (T/F)"
                 default = ".True."
                 group = "ADV_Parameters"
+            case ("cz_diff_order")
+                description = "Numeric of constant-z diffusive term used in advection flux."// &
+                              "A value above 0 turns on constant-z diffusion (ala Zaengl 2002)."// &
+                              "Order: 2 (Laplacian) or 4 (biharmonic)"
+                allocate(values(3))
+                values = [0, 2, 4]
+                default = "4"
+                group = "ADV_Parameters"
             case ("flux_corr")
                 description = "flux correction scheme to use for standard advection. Recommended use with RK3=.True."//achar(10)//BLNK_CHR_N// &
                     "0=None, 1=WRF positive definite monotonic flux correction"
