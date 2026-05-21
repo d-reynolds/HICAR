@@ -1268,7 +1268,7 @@ contains
                 ! case 2: second-order polynomial half-levels (COSMO style, s. COSMO-TR No.21 p.33, Baldauf(2013)); stretch_fac needs to be between 0.0 and 1.0!!!
                 do jk = 1, nlevp1
                     x1 = real(nz - (nlevp1 - jk)) / real(nz) ! diverting from the original here (using nz instead of nz+1 in nominator) to ensure vector_a(0) = 0 as in auto_level case 1
-                    vct_a(nint(jk)) = top_height * x1 * ( stretch_fac * x1 + 1.0-stretch_fac )
+                    vct_a(jk) = top_height * x1 * ( stretch_fac * x1 + 1.0-stretch_fac )
                 end do
 
             case (3)
@@ -1295,7 +1295,7 @@ contains
                 ! z_exp has been calculated above in order to return min_lay_thckn as thickness
                 ! of the lowest model layer
                 DO jk = 1, nlevp1
-                    vct_a(nint(jk)) = top_height*(2.0/piconst*ACOS(REAL(nlevp1 - jk)**stretch_fac/ &
+                    vct_a(jk) = top_height*(2.0/piconst*ACOS(REAL(nlevp1 - jk)**stretch_fac/ &
                     &              REAL(nz)**stretch_fac))**z_exp
                 ENDDO
 
