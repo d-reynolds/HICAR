@@ -772,11 +772,11 @@ module module_sm_SNOWPACKdrv
         call try_read_snp_var(filename, options%domain%snowpack_cdot_var, domain, kVARS%CDot)
         ! call try_read_snp_var(filename, options%domain%snowpack_snow_stress_var, domain, kVARS%snow_stress)
 
-        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d,1.0),0.0)
-        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d,1.0),0.0)
-        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d,1.0),0.0)
-        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d,1.0),0.0)
-        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d,1.0),0.0)
+        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d(:,:,:) = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d,1.0),0.0)
+        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d(:,:,:) = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d,1.0),0.0)
+        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d(:,:,:) = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_A)%v)%data_3d,1.0),0.0)
+        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d(:,:,:) = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_S)%v)%data_3d,1.0),0.0)
+        domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d(:,:,:) = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_WP)%v)%data_3d,1.0),0.0)
 
         ! Initialize N3 (coordination number) from density for any snow layer
         ! whose N3 is missing/zero. N3 is never read from the init file (no

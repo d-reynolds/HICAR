@@ -85,7 +85,7 @@ contains
             end do
         end do
         
-        domain%vars_2d(domain%var_indx(kVARS%TPI)%v)%data_2d = neighbor_TPI(domain%grid2d%ims:domain%grid2d%ime,domain%grid2d%jms:domain%grid2d%jme)
+        domain%vars_2d(domain%var_indx(kVARS%TPI)%v)%data_2d(:,:) = neighbor_TPI(domain%grid2d%ims:domain%grid2d%ime,domain%grid2d%jms:domain%grid2d%jme)
         
         
         ! if ( STD_OUT_PE ) then

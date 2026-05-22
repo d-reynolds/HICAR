@@ -1035,14 +1035,14 @@ contains
         call io_read(options%domain%init_conditions_file,   &
                        options%domain%hgt_hi,                 &
                        temporary_data)
-        this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+        this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
         
-        this%vars_2d(this%var_indx(kVARS%neighbor_terrain)%v)%data_2d = temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
+        this%vars_2d(this%var_indx(kVARS%neighbor_terrain)%v)%data_2d(:,:) = temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
 
         allocate(temp_offset(1:this%grid%ide+1,1:this%grid%jde+1))
 
         if (options%wind%linear_theory) then
-                this%vars_2d(this%var_indx(kVARS%global_terrain)%v)%data_2d = temporary_data
+                this%vars_2d(this%var_indx(kVARS%global_terrain)%v)%data_2d(:,:) = temporary_data
         end if
 
         !while we have global terrain loaded, pass to split_topography
@@ -1054,7 +1054,7 @@ contains
                        temporary_data)
 
         call make_2d_y(temporary_data, this%grid%ims, this%grid%ime)
-        this%vars_2d(this%var_indx(kVARS%latitude)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+        this%vars_2d(this%var_indx(kVARS%latitude)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
         ! allocate(this%grid_vars(this%var_indx(kVARS%latitude_global)%v), source=temporary_data)
 
         ! Read the longitude data
@@ -1062,7 +1062,7 @@ contains
                        options%domain%lon_hi,                 &
                        temporary_data)
         call make_2d_x(temporary_data, this%grid%jms, this%grid%jme)
-        this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+        this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
         ! allocate(this%grid_vars(this%var_indx(kVARS%longitude_global)%v), source=temporary_data)
 
         !-----------------------------------------
@@ -1078,7 +1078,7 @@ contains
                            temporary_data)
 
             call make_2d_y(temporary_data, 1, this%jde)
-            this%vars_2d(this%var_indx(kVARS%u_longitude)%v)%data_2d = temporary_data(this%u_grid%ims:this%u_grid%ime,this%u_grid%jms:this%u_grid%jme)
+            this%vars_2d(this%var_indx(kVARS%u_longitude)%v)%data_2d(:,:) = temporary_data(this%u_grid%ims:this%u_grid%ime,this%u_grid%jms:this%u_grid%jme)
         else
             ! load the mass grid data again to get the full grid
             call io_read(options%domain%init_conditions_file,   &
@@ -1087,7 +1087,7 @@ contains
 
             call make_2d_y(temporary_data, 1, this%jde)
             call array_offset_x(temporary_data, temp_offset)
-            this%vars_2d(this%var_indx(kVARS%u_longitude)%v)%data_2d = temp_offset(this%u_grid%ims:this%u_grid%ime,this%u_grid%jms:this%u_grid%jme)
+            this%vars_2d(this%var_indx(kVARS%u_longitude)%v)%data_2d(:,:) = temp_offset(this%u_grid%ims:this%u_grid%ime,this%u_grid%jms:this%u_grid%jme)
         endif
 
         ! Read the u-grid latitude data if specified, other wise interpolate from mass grid
@@ -1097,7 +1097,7 @@ contains
                            temporary_data)
 
             call make_2d_x(temporary_data, 1, this%ide+1)
-            this%vars_2d(this%var_indx(kVARS%u_latitude)%v)%data_2d = temporary_data(this%u_grid%ims:this%u_grid%ime,this%u_grid%jms:this%u_grid%jme)
+            this%vars_2d(this%var_indx(kVARS%u_latitude)%v)%data_2d(:,:) = temporary_data(this%u_grid%ims:this%u_grid%ime,this%u_grid%jms:this%u_grid%jme)
         else
             ! load the mass grid data again to get the full grid
             call io_read(options%domain%init_conditions_file,   &
@@ -1106,7 +1106,7 @@ contains
 
             call make_2d_x(temporary_data, 1, this%ide+1)
             call array_offset_x(temporary_data, temp_offset)
-            this%vars_2d(this%var_indx(kVARS%u_latitude)%v)%data_2d = temp_offset(this%u_grid%ims:this%u_grid%ime,this%u_grid%jms:this%u_grid%jme)
+            this%vars_2d(this%var_indx(kVARS%u_latitude)%v)%data_2d(:,:) = temp_offset(this%u_grid%ims:this%u_grid%ime,this%u_grid%jms:this%u_grid%jme)
         endif
 
         ! Read the v-grid longitude data if specified, other wise interpolate from mass grid
@@ -1116,7 +1116,7 @@ contains
                            temporary_data)
 
             call make_2d_y(temporary_data, 1, this%jde+1)
-            this%vars_2d(this%var_indx(kVARS%v_longitude)%v)%data_2d = temporary_data(this%v_grid%ims:this%v_grid%ime,this%v_grid%jms:this%v_grid%jme)
+            this%vars_2d(this%var_indx(kVARS%v_longitude)%v)%data_2d(:,:) = temporary_data(this%v_grid%ims:this%v_grid%ime,this%v_grid%jms:this%v_grid%jme)
         else
             ! load the mass grid data again to get the full grid
             call io_read(options%domain%init_conditions_file,   &
@@ -1125,7 +1125,7 @@ contains
 
             call make_2d_y(temporary_data, 1, this%jde+1)
             call array_offset_y(temporary_data, temp_offset)
-            this%vars_2d(this%var_indx(kVARS%v_longitude)%v)%data_2d = temp_offset(this%v_grid%ims:this%v_grid%ime,this%v_grid%jms:this%v_grid%jme)
+            this%vars_2d(this%var_indx(kVARS%v_longitude)%v)%data_2d(:,:) = temp_offset(this%v_grid%ims:this%v_grid%ime,this%v_grid%jms:this%v_grid%jme)
         endif
 
         ! Read the v-grid latitude data if specified, other wise interpolate from mass grid
@@ -1135,7 +1135,7 @@ contains
                            temporary_data)
 
             call make_2d_x(temporary_data, 1, this%ide)
-            this%vars_2d(this%var_indx(kVARS%v_latitude)%v)%data_2d = temporary_data(this%v_grid%ims:this%v_grid%ime,this%v_grid%jms:this%v_grid%jme)
+            this%vars_2d(this%var_indx(kVARS%v_latitude)%v)%data_2d(:,:) = temporary_data(this%v_grid%ims:this%v_grid%ime,this%v_grid%jms:this%v_grid%jme)
         else
             ! load the mass grid data again to get the full grid
             call io_read(options%domain%init_conditions_file,   &
@@ -1144,7 +1144,7 @@ contains
 
             call make_2d_x(temporary_data, 1, this%ide)
             call array_offset_y(temporary_data, temp_offset)
-            this%vars_2d(this%var_indx(kVARS%v_latitude)%v)%data_2d = temp_offset(this%v_grid%ims:this%v_grid%ime,this%v_grid%jms:this%v_grid%jme)
+            this%vars_2d(this%var_indx(kVARS%v_latitude)%v)%data_2d(:,:) = temp_offset(this%v_grid%ims:this%v_grid%ime,this%v_grid%jms:this%v_grid%jme)
         endif
 
         if (STD_OUT_PE) write(*,*) "  Finished reading core domain variables"
@@ -1685,10 +1685,10 @@ contains
             if (STD_OUT_PE) flush(output_unit)
 
             call io_read(options%domain%init_conditions_file, options%domain%sinalpha_var, lon)
-            this%vars_2d(this%var_indx(kVARS%sintheta)%v)%data_2d = lon(i_s:i_e, j_s:j_e)
+            this%vars_2d(this%var_indx(kVARS%sintheta)%v)%data_2d(:,:) = lon(i_s:i_e, j_s:j_e)
 
             call io_read(options%domain%init_conditions_file, options%domain%cosalpha_var, lon)
-            this%vars_2d(this%var_indx(kVARS%costheta)%v)%data_2d = lon(i_s:i_e, j_s:j_e)
+            this%vars_2d(this%var_indx(kVARS%costheta)%v)%data_2d(:,:) = lon(i_s:i_e, j_s:j_e)
 
         else
 
@@ -1990,26 +1990,26 @@ contains
             if (STD_OUT_PE) write(*,*) "  Read surface temperature field from: ", trim(options%domain%surface_temp_var)
 
             if (this%var_indx(kVARS%skin_temperature)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%skin_temperature)%v)%data_2d = &
+                this%vars_2d(this%var_indx(kVARS%skin_temperature)%v)%data_2d(:,:) = &
                     surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
 
             if (this%var_indx(kVARS%temperature_2m)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d = &
+                this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d(:,:) = &
                     surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
 
             if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d = &
+                this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d(:,:) = &
                     surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
             if (this%var_indx(kVARS%ground_surf_temperature)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%ground_surf_temperature)%v)%data_2d = &
+                this%vars_2d(this%var_indx(kVARS%ground_surf_temperature)%v)%data_2d(:,:) = &
                     surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
 
             if (this%var_indx(kVARS%canopy_temperature)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d = &
+                this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d(:,:) = &
                     surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         else
@@ -2029,8 +2029,8 @@ contains
                            options%domain%landvar,         &
                            temporary_data)
             if (this%var_indx(kVARS%land_mask)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
-                where(this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di==0) this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di = kLC_WATER  ! To ensure conisitency. land_mask can be 0 or 2 for water, enforce a single value.
+                this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                where(this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di==0) this%vars_2d(this%var_indx(kVARS%land_mask)%v)%data_2di(:,:) = kLC_WATER  ! To ensure conisitency. land_mask can be 0 or 2 for water, enforce a single value.
             endif
         endif
 
@@ -2043,7 +2043,7 @@ contains
                            options%domain%lakedepthvar,         &
                            temporary_data)
             if (this%var_indx(kVARS%lake_depth)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%lake_depth)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%lake_depth)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
 
         endif
@@ -2053,7 +2053,7 @@ contains
                            options%domain%soiltype_var,         &
                            temporary_data)
             if (this%var_indx(kVARS%soil_type)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%soil_type)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%soil_type)%v)%data_2di(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         endif
 
@@ -2062,7 +2062,7 @@ contains
                            options%domain%cropcategory_var,         &
                            temporary_data)
             if (this%var_indx(kVARS%crop_category)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%crop_category)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%crop_category)%v)%data_2di(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         endif
 
@@ -2072,7 +2072,7 @@ contains
                            options%domain%soil_deept_var,       &
                            temporary_data)
             if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
 
                 if (minval(temporary_data)< 200) then
                     if (STD_OUT_PE) write(*,*) "WARNING, VERY COLD SOIL TEMPERATURES SPECIFIED:", minval(temporary_data)
@@ -2080,12 +2080,12 @@ contains
                 endif
                 if (minval(this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d)< 200) then
                     where(this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d<200) &
-                        this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = options%domain%init_surf_temp
+                        this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d(:,:) = options%domain%init_surf_temp
                 endif
             endif
         else
             if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = &
+                this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d(:,:) = &
                     surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         endif
@@ -2100,7 +2100,7 @@ contains
                 enddo
                 if (options%domain%soil_deept_var == "") then
                     if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) then
-                        this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d = this%vars_3d(this%var_indx(kVARS%soil_temperature)%v)%data_3d(:,nsoil,:)
+                        this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d(:,:) = this%vars_3d(this%var_indx(kVARS%soil_temperature)%v)%data_3d(:,nsoil,:)
                     endif
                 endif
             endif
@@ -2120,7 +2120,7 @@ contains
                            options%domain%swe_var,         &
                            temporary_data)
             if (this%var_indx(kVARS%snow_water_equivalent)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         endif
 
@@ -2129,19 +2129,19 @@ contains
                            options%domain%snowh_var,         &
                            temporary_data)
             if (this%var_indx(kVARS%snow_height)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%snow_height)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%snow_height)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         endif
         
         if ( (this%var_indx(kVARS%snow_height)%v > 0) .and. (this%var_indx(kVARS%snow_water_equivalent)%v > 0)) then
             !Do check if we read in SWE but not snow height -- convert with user supplied constant density
             if (options%domain%swe_var /= "" .and. options%domain%snowh_var == "") then
-                this%vars_2d(this%var_indx(kVARS%snow_height)%v)%data_2d = this%vars_2d(this%var_indx(kVARS%snow_water_equivalent)%v)%data_2d/options%lsm%snow_den_const
+                this%vars_2d(this%var_indx(kVARS%snow_height)%v)%data_2d(:,:) = this%vars_2d(this%var_indx(kVARS%snow_water_equivalent)%v)%data_2d/options%lsm%snow_den_const
             endif
             
             !Do check if we read in snow height but not SWE -- convert with user supplied constant density
             if (options%domain%snowh_var /= "" .and. options%domain%swe_var == "") then
-                this%vars_2d(this%var_indx(kVARS%snow_water_equivalent)%v)%data_2d = this%vars_2d(this%var_indx(kVARS%snow_height)%v)%data_2d*options%lsm%snow_den_const
+                this%vars_2d(this%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(:,:) = this%vars_2d(this%var_indx(kVARS%snow_height)%v)%data_2d*options%lsm%snow_den_const
             endif
         endif
 
@@ -2163,7 +2163,7 @@ contains
                            options%domain%vegtype_var,          &
                            temporary_data)
             if (this%var_indx(kVARS%veg_type)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%veg_type)%v)%data_2di = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%veg_type)%v)%data_2di(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         endif
 
@@ -2172,11 +2172,11 @@ contains
                             options%domain%albedo_var,          &
                             temporary_data)
             if (this%var_indx(kVARS%albedo)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
 
                 if (maxval(temporary_data) > 1) then
                     if (STD_OUT_PE) write(*,*) "Changing input ALBEDO % to fraction"
-                    this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d = this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d / 100
+                    this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d(:,:) = this%vars_2d(this%var_indx(kVARS%albedo)%v)%data_2d / 100
                 endif
             endif
         endif
@@ -2206,10 +2206,10 @@ contains
         endif
 
         if (this%var_indx(kVARS%soil_totalmoisture)%v > 0) then
-            this%vars_2d(this%var_indx(kVARS%soil_totalmoisture)%v)%data_2d = 0
+            this%vars_2d(this%var_indx(kVARS%soil_totalmoisture)%v)%data_2d(:,:) = 0
             if (this%var_indx(kVARS%soil_water_content)%v > 0) then
                 do i=1, nsoil
-                    this%vars_2d(this%var_indx(kVARS%soil_totalmoisture)%v)%data_2d = this%vars_2d(this%var_indx(kVARS%soil_totalmoisture)%v)%data_2d + this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d(:,i,:) * soil_thickness(i) * 1000 !! MJ added
+                    this%vars_2d(this%var_indx(kVARS%soil_totalmoisture)%v)%data_2d(:,:) = this%vars_2d(this%var_indx(kVARS%soil_totalmoisture)%v)%data_2d + this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d(:,i,:) * soil_thickness(i) * 1000 !! MJ added
                 enddo
             endif
         endif
@@ -2219,7 +2219,7 @@ contains
                            options%domain%vegfracmax_var,       &
                            temporary_data)
             if (this%var_indx(kVARS%vegetation_fraction_max)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%vegetation_fraction_max)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%vegetation_fraction_max)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         endif
 
@@ -2228,7 +2228,7 @@ contains
                            options%domain%lai_var,              &
                            temporary_data)
             if (this%var_indx(kVARS%lai)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%lai)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%lai)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         endif
 
@@ -2245,10 +2245,10 @@ contains
                 temporary_data = temporary_data * DEGRAD
             endif
             if (this%var_indx(kVARS%slope_angle)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%slope_angle)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
             if (this%var_indx(kVARS%neighbor_slope_angle)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d = &
+                this%vars_2d(this%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d(:,:) = &
                     temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
             endif
         else ! calculate manually
@@ -2298,10 +2298,10 @@ contains
                 temporary_data = temporary_data * DEGRAD
             endif
             if (this%var_indx(kVARS%aspect_angle)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
             if (this%var_indx(kVARS%neighbor_aspect_angle)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d = &
+                this%vars_2d(this%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d(:,:) = &
                     temporary_data(this%ihs:this%ihe, this%jhs:this%jhe)
             endif
         else ! calculate manually
@@ -2347,7 +2347,7 @@ contains
                            options%domain%shd_var,       &
                            temporary_data)
             if (this%var_indx(kVARS%shd)%v > 0) then
-                this%vars_2d(this%var_indx(kVARS%shd)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                this%vars_2d(this%var_indx(kVARS%shd)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
         else
             if (this%var_indx(kVARS%shd)%v > 0) then
@@ -2388,7 +2388,7 @@ contains
                                options%domain%svf_var,         &
                                temporary_data)
                 if (this%var_indx(kVARS%svf)%v > 0) then
-                    this%vars_2d(this%var_indx(kVARS%svf)%v)%data_2d = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                    this%vars_2d(this%var_indx(kVARS%svf)%v)%data_2d(:,:) = temporary_data(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
                 endif
             else
                 stop "svf_var not specified in domain file, but required for terrain shading"
