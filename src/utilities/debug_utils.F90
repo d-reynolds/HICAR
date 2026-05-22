@@ -83,12 +83,17 @@ contains
 
     end subroutine domain_check_winds
 
-    subroutine check_var(var, msg, fix, dqdt)
+    subroutine check_var(var, msg, fix, dqdt, is, ie, js, je)
         implicit none
         type(variable_t),                intent(inout)      :: var
         character(len=*),   intent(in)                      :: msg
         logical,            intent(in),    optional         :: fix, dqdt
+        ! Optional i/j bounds restrict the check to a sub-region (e.g. the tile /
+        ! interior). Default is the full memory array. Callers pass these to avoid
+        ! tripping on stale halo cells that are never used downstream.
+        integer,            intent(in),    optional         :: is, ie, js, je
         integer :: n, i,j,k
+        integer :: lis, lie, ljs, lje, lks, lke
         real :: vmax, vmin, greater_than, less_than
         real, allocatable :: var_3d(:,:,:)
         real, allocatable :: var_2d(:,:)
@@ -110,15 +115,22 @@ contains
         if (var%three_d) then
             var_3d = var%data_3d
             if (do_dqdt) var_3d = var%dqdt_3d
-            vmax = maxval(var_3d)
-            vmin = minval(var_3d)
-            n = COUNT(ieee_is_nan(var_3d))
+            lis = lbound(var_3d,1); lie = ubound(var_3d,1)
+            lks = lbound(var_3d,2); lke = ubound(var_3d,2)
+            ljs = lbound(var_3d,3); lje = ubound(var_3d,3)
+            if (present(is)) then; lis = is; lie = ie; ljs = js; lje = je; endif
+            vmax = maxval(var_3d(lis:lie, lks:lke, ljs:lje))
+            vmin = minval(var_3d(lis:lie, lks:lke, ljs:lje))
+            n = COUNT(ieee_is_nan(var_3d(lis:lie, lks:lke, ljs:lje)))
         else if (var%two_d) then
             var_2d = var%data_2d
             if (do_dqdt) var_2d = var%dqdt_2d
-            vmax = maxval(var_2d)
-            vmin = minval(var_2d)
-            n = COUNT(ieee_is_nan(var_2d))
+            lis = lbound(var_2d,1); lie = ubound(var_2d,1)
+            ljs = lbound(var_2d,2); lje = ubound(var_2d,2)
+            if (present(is)) then; lis = is; lie = ie; ljs = js; lje = je; endif
+            vmax = maxval(var_2d(lis:lie, ljs:lje))
+            vmin = minval(var_2d(lis:lie, ljs:lje))
+            n = COUNT(ieee_is_nan(var_2d(lis:lie, ljs:lje)))
         else
             write(*,*) "check_var only works for 2D or 3D variables."
             error stop
@@ -155,9 +167,9 @@ contains
 
             !print index of first occurance and break out of loop
             if (var%three_d) then
-                outer: do j=lbound(var_3d,3),ubound(var_3d,3)
-                    do k=lbound(var_3d,2),ubound(var_3d,2)
-                        do i=lbound(var_3d,1),ubound(var_3d,1)
+                outer: do j=ljs,lje
+                    do k=lks,lke
+                        do i=lis,lie
                             if (var_3d(i,k,j) > greater_than) then
                                 print*, "First Error was in grid cell:", i,k,j, var_3d(i,k,j), " on PE: ", PE_rank_global
                                 exit outer
@@ -175,9 +187,9 @@ contains
 
             !print index of first occurance and break out of loop
             if (var%three_d) then
-                outer2: do j=lbound(var_3d,3),ubound(var_3d,3)
-                    do k=lbound(var_3d,2),ubound(var_3d,2)
-                        do i=lbound(var_3d,1),ubound(var_3d,1)
+                outer2: do j=ljs,lje
+                    do k=lks,lke
+                        do i=lis,lie
                             if (var_3d(i,k,j) < less_than) then
                                 print*, "First Error was in grid cell:", i,k,j, var_3d(i,k,j), " on PE: ", PE_rank_global
                                 exit outer2

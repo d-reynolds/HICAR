@@ -484,7 +484,7 @@ contains
             if (this%vars_for_nest(i) == '') cycle
             var_indx = get_varindx(this%vars_for_nest(i))
             tmp_var = get_varmeta(var_indx)
-            var_val_check = (var%maxval /= kUNSET_REAL .and. var%minval /= kUNSET_REAL)
+            var_val_check = (tmp_var%maxval /= kUNSET_REAL .and. tmp_var%minval /= kUNSET_REAL)
 
             if (tmp_var%two_d) cycle
 
@@ -517,7 +517,10 @@ contains
 
             if (var_val_check) then
                 err_msg = 'Warning on ioclient_obj::update_nest: Nest level: '// str(domain%nest_indx)
-                call check_var(var, trim(err_msg))
+                ! Check only the tile/interior region that is actually packed and sent
+                ! to the child nest. Halo cells hold stale intermediate-stage values
+                ! (uncorrected high-order RK3 leftovers) that are never used here.
+                call check_var(var, trim(err_msg), is=i_s_w, ie=i_e_w, js=j_s_w, je=j_e_w)
             endif
 
             n_3d = n_3d+1
