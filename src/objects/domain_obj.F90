@@ -18,7 +18,7 @@ submodule(domain_interface) domain_implementation
     use array_utilities,      only : array_offset_x, array_offset_y, smooth_array, smooth_array_2d, make_2d_x, make_2d_y
     use vertical_interpolation,only : vinterp, vLUT
     use output_metadata,            only : get_varname, get_varmeta, get_varindx
-    use mod_wrf_constants,    only : gravity, R_d, KARMAN, cp, DEGRAD
+    use mod_wrf_constants,    only : gravity, R_d, KARMAN, cp, DEGRAD, piconst
     use iso_fortran_env
     use debug_module,       only : domain_check
 
@@ -1217,6 +1217,143 @@ contains
 
 
     !> -------------------------------
+    !! Automatic vertical level generation.
+    !!   Generates dz_levels in options based on the auto_level setting.
+    !!   If auto_level == 0, dz_levels is left unchanged.
+    !!   If auto_level == 1, uses a cubic polynomial (ICON itype_laydistr==2).
+    !!   If auto_level == 2, uses a quadratic polynomial (COSMO style, ICON itype_laydistr==3).
+    !!   If auto_level == 3, uses exponential stretching (eta-style as in WRF).
+    !!   If auto_level == 4, uses an arccosine-based distribution (COSMO-like, ICON itype_laydistr==1).
+    !! --------------------------------
+    subroutine auto_dz(options)
+        implicit none
+        type(options_t), intent(inout) :: options
+
+        real :: z_exp
+        real, allocatable :: vct_a(:), dz(:)
+        real :: x1, a, b, c, alpha, exp_alpha, x_lin
+        integer :: nlevp1, jk
+        logical :: auto_level_warnings
+
+        associate(                                                    &
+            auto_level    => options%domain%auto_level,               &
+            nz            => options%domain%nz,                       &
+            min_lay_thckn => options%domain%height_lowest_level,      &
+            top_height    => options%domain%model_top_height,         &
+            stretch_fac   => options%domain%stretch_fac,              &
+            dz_lev        => options%domain%dz_levels)
+
+            if (auto_level == 0) return
+
+            nlevp1 = nz + 1
+            allocate(vct_a(nlevp1))
+            allocate(dz(nz))
+
+            select case (auto_level)
+            case (1)
+                ! case 1: ICON-style third-order polynomial half-levels that allows choice of min_lay_thckn; stretch_fac needs to be between 0.5 and 1.0!!!
+                !         There's quite a lot that can go wrong, if stretch_fac, min_lay_thckn, top_height, nz are not chosen well!
+                x1 = (2.0*stretch_fac - 1.0) * min_lay_thckn
+                b  = ( top_height &
+                    - (x1/6.0)*nz**3 &
+                    - (min_lay_thckn - x1/6.0)*nz &
+                     ) / (nz**2-1.0/3.0*nz**3-2.0/3.0*nz)
+                a  = (x1 - 2.0*b) / 6.0
+                c  = min_lay_thckn - (a + b)
+                do jk = 0, nz
+                    vct_a(jk+1) = a*jk**3 + b*jk**2 + c*jk ! jk=1 is model bottom, jk=nz+1 is model top half-level
+                end do
+
+            case (2)
+                ! case 2: second-order polynomial half-levels (COSMO style, s. COSMO-TR No.21 p.33, Baldauf(2013)); stretch_fac needs to be between 0.0 and 1.0!!!
+                do jk = 1, nlevp1
+                    x1 = real(nz - (nlevp1 - jk)) / real(nz) ! diverting from the original here (using nz instead of nz+1 in nominator) to ensure vector_a(0) = 0 as in auto_level case 1
+                    vct_a(jk) = top_height * x1 * ( stretch_fac * x1 + 1.0-stretch_fac )
+                end do
+
+            case (3)
+                ! case 3: eta-style exponential half-level stretching
+                alpha     = stretch_fac
+                exp_alpha = exp(alpha)
+                ! compute raw exponential half-levels
+                do jk = 1, nlevp1
+                    x_lin     = real(jk - 1) / real(nz)
+                    vct_a(jk) = top_height * (exp(alpha*x_lin) - 1.0) / (exp_alpha - 1.0)
+                end do
+
+            case (4)
+                ! case 4: arccosine-based half-level distribution (another COSMO-like option as seen in src_artifdata; can be set in ICON using itype_laydistr == 1)
+                !         Best suited for compressing levels at mid-height.
+                !         stretch_fac -> 0 gives stronger compression, first at mid height, then lower and lower heights.
+                !         stretch_fac = 1.1 to 1.2 gives almost a linear distribution of levels.
+                !         stretch_fac -> higher values (e.g. 3) gives more compression towards the top.
+                z_exp = LOG(min_lay_thckn/top_height)/LOG(2.0/piconst*ACOS(REAL(nz-1)**stretch_fac/ &
+                    &     REAL(nz)**stretch_fac))
+
+                ! Set up distribution of coordinate surfaces according to the analytical formula
+                ! vct = h_top*(2/pi*arccos(jk-1/nz))**z_exp (taken from the COSMO model, src_artifdata)
+                ! z_exp has been calculated above in order to return min_lay_thckn as thickness
+                ! of the lowest model layer
+                DO jk = 1, nlevp1
+                    vct_a(jk) = top_height*(2.0/piconst*ACOS(REAL(nlevp1 - jk)**stretch_fac/ &
+                    &              REAL(nz)**stretch_fac))**z_exp
+                ENDDO
+
+            case default
+                write(*,*) 'ERROR: auto_level must be 0,1,2,3 or 4. Not', auto_level
+                stop
+            end select
+
+            ! check that generated levels are valid: vct_a(1) = 0, afterwards monotonically increasing, and last level ~= top_height
+            auto_level_warnings = .false.
+            if ( abs(vct_a(1)) > 1.0e-6 ) then
+                auto_level_warnings = .true.
+                write(*,*) 'WARNING in automatic level generation: lowest half-level is suspicious: ', vct_a(1)
+                stop
+            else if ( abs(vct_a(nlevp1) - top_height) > 0.01*top_height ) then
+                auto_level_warnings = .true.
+                write(*,*) 'WARNING in automatic level generation: highest half-level deviates too far from model_top_height setting (', top_height,'). It is ', vct_a(nlevp1)
+            else
+                do jk = 2, nlevp1
+                    if ( vct_a(jk) <= vct_a(jk-1) ) then
+                        auto_level_warnings = .true.
+                        write(*,*) 'ERROR in automatic level generation: half-levels are NOT monotonically increasing at level ', jk, ' : ', vct_a(jk-1), ' >= ', vct_a(jk)
+                        stop
+                    end if
+                end do
+            end if
+
+            if ( auto_level_warnings .eqv. .true. ) then
+                write(*,*) 'Check your auto_level, stretch_fac, height_lowest_level, model_top_height and nz settings.'
+                write(*,*) 'When using auto_level = 1 consider plotting the half-level distribution first to ensure validity (https://www.geogebra.org/u/maxsesselmann), as this setting is quite sensitive to changes in said parameters.'
+            end if
+
+            ! compute layer thicknesses
+            do jk = 1, nz
+                dz(jk) = vct_a(jk+1) - vct_a(jk)
+            end do
+
+            ! save dz to options component so it can be used elsewhere (relevant if dz=0.0 in namelist)
+            dz_lev = dz(1:nz)
+
+            ! Diagnostics
+            if (STD_OUT_PE) then
+                write(*,*) '    Using automatic level generation with auto_level = ', auto_level
+                write(*,*) '    Lowest 10 model layer heights dz(1:10) = ', dz(1:10), ' m above ground.'
+                write(*,*) '    Model top (sum(dz))  = ', sum(dz), ' m.a.s.l.'
+                write(*,*) '    Stretch factor = ', stretch_fac, &
+                           ',   min layer thickness = ', minval(dz), ' m'
+            endif
+
+            deallocate(vct_a)
+            deallocate(dz)
+
+        end associate
+
+    end subroutine auto_dz
+
+
+    !> -------------------------------
     !! Setup the SLEVE vertical grid structure.
     !!   This basically entails 2 transformations: First a linear one so that sum(dz) ranges from 0 to smooth_height H.
     !!   (boundary cnd (3) in Schär et al 2002)  Next, the nonlinear SLEVE transformation
@@ -1231,13 +1368,15 @@ contains
     subroutine setup_sleve(this, options)
         implicit none
         class(domain_t), intent(inout)  :: this
-        type(options_t), intent(in)     :: options
+        type(options_t), intent(inout)     :: options
 
         real, allocatable :: temp(:,:,:), gamma_n(:), neighbor_jacobian(:,:,:), neighbor_z(:,:,:)
         integer :: i, max_level
         real :: s, n, s1, s2, gamma, gamma_min
         real :: b1_i, b1_mass, db1_i, db1_mass, b2_i, b2_mass, db2_i, db2_mass
-        
+
+        real, allocatable :: dz(:)
+
         associate(ims => this%ims,      ime => this%ime,                        &
             jms => this%jms,      jme => this%jme,                        &
             kms => this%kms,      kme => this%kme,                        &
@@ -1246,7 +1385,10 @@ contains
             z_v                   => this%geo_v%z,                        &
             z_interface           => this%vars_3d(this%var_indx(kVARS%z_interface)%v)%data_3d,            &
             nz                    => options%domain%nz,               &
-            dz                    => options%domain%dz_levels,        &
+            dz_lev                => options%domain%dz_levels,        &
+            min_lay_thckn         => options%domain%height_lowest_level,        &
+            top_height            => options%domain%model_top_height,                &
+            stretch_fac           => options%domain%stretch_fac,              &
             dz_mass               => this%vars_3d(this%var_indx(kVARS%dz)%v)%data_3d,                &
             dz_interface          => this%vars_3d(this%var_indx(kVARS%dz_interface)%v)%data_3d,           &
             terrain               => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d,                &
@@ -1271,9 +1413,17 @@ contains
             ! Still not 100% convinced this works well in cases other than flat_z_height = 0 (w sleve). So for now best to keep at 0 when using sleve?
             max_level = nz !find_flat_model_level(options, nz, dz)
 
+            allocate(dz(nz))
+
+            ! Automatic level generation: computes dz_levels analytically when auto_level >= 1.
+            call auto_dz(options)
+            dz(1:nz) = dz_lev(1:nz)
+
+
+
             smooth_height = sum(dz(1:max_level))!+dz(max_level)*0.5
 
-            ! Terminology from Schär et al 2002, Leuenberger 2009: (can be simpliied later on, but for clarity)
+            ! Terminology from Schär et al 2002, Leuenberger 2009: (can be simplified later on, but for clarity)
             s1 = smooth_height / options%domain%decay_rate_L_topo
             s2 = smooth_height / options%domain%decay_rate_S_topo
             n  =  options%domain%sleve_n 
@@ -1321,7 +1471,7 @@ contains
                 write(*,*) "    Using a sleve_n of ", options%domain%sleve_n
                 write(*,*) "    Smooth height is ", smooth_height, "m.a.s.l     (model top ", sum(dz(1:nz)), "m.a.s.l.)"
                 write(*,*) "    invertibility parameter gamma is: ", gamma_min
-                if(gamma_min <= 0) write(*,*) " CAUTION: coordinate transformation is not invertible (gamma <= 0 ) !!! reduce decay rate(s), and/or increase flat_z_height!"
+                if(gamma_min <= 0) write(*,*) " CAUTION: coordinate transformation is not invertible (gamma <= 0 ) !!! Reduce decay rate(s), and/or increase flat_z_height! When using sleve_auto, also reduce height_lowest_level and/or stretch_fac!"
                 ! if(options%general%debug)  write(*,*) "   (for (debugging) reference: 'gamma(n=1)'= ", gamma,")"
                 write(*,*) ""
                 flush(output_unit)
@@ -1503,10 +1653,13 @@ contains
     subroutine setup_simple_z(this, options)
         implicit none
         class(domain_t), intent(inout)  :: this
-        type(options_t), intent(in)     :: options
+        type(options_t), intent(inout)  :: options
 
         real, allocatable :: temp(:,:,:), temp_offset(:,:), global_jacobian(:,:,:)
         integer :: i, max_level
+
+        ! Automatic level generation: computes dz_levels analytically when auto_level >= 1.
+        call auto_dz(options)
 
         associate(  ims => this%ims,      ime => this%ime,                        &
                     jms => this%jms,      jme => this%jme,                        &
@@ -1631,7 +1784,7 @@ contains
     subroutine initialize_core_variables(this, options)
         implicit none
         class(domain_t), intent(inout)  :: this
-        type(options_t), intent(in)     :: options
+        type(options_t), intent(inout)     :: options
 
         real, allocatable :: temp(:,:,:)
         integer :: i, j
@@ -1644,10 +1797,6 @@ contains
         allocate( this%geo_u%z(this%u_grid%ims:this%u_grid%ime, this%u_grid%nz, this%u_grid%jms:this%u_grid%jme))
         allocate( this%geo_v%z(this%v_grid%ims:this%v_grid%ime, this%v_grid%nz, this%v_grid%jms:this%v_grid%jme))
 
-        do i=this%grid%kms, this%grid%kme
-            this%vars_3d(this%var_indx(kVARS%advection_dz)%v)%data_3d(:,i,:) = options%domain%dz_levels(i)
-        enddo
-
         ! Setup the vertical grid structure, either as a SLEVE coordinate, or a more 'simple' vertical structure:
         if (options%domain%sleve) then
             call setup_sleve(this, options)
@@ -1655,6 +1804,10 @@ contains
             ! This will set up either a Gal-Chen terrainfollowing coordinate, or no terrain following.
             call setup_simple_z(this, options)
         endif
+
+        do i=this%grid%kms, this%grid%kme
+            this%vars_3d(this%var_indx(kVARS%advection_dz)%v)%data_3d(:,i,:) = options%domain%dz_levels(i)
+        enddo
         
         call setup_geo(this%geo,   this%vars_2d(this%var_indx(kVARS%latitude)%v)%data_2d,   this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d, options%domain%longitude_system,  this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d)
         call setup_geo(this%geo_agl,   this%vars_2d(this%var_indx(kVARS%latitude)%v)%data_2d,   this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d, options%domain%longitude_system,  this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d)
