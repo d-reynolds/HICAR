@@ -195,6 +195,21 @@ contains
         if (STD_OUT_PE_IO) write(*,*) "IOServer: Setting up MPI Windows..."
         if (STD_OUT_PE_IO) write(*,*) "---------------------------------------------------" 
 
+        this%n_out_3d = 0; this%n_out_2d = 0
+        this%n_rst_only_3d = 0; this%n_rst_only_2d = 0
+        do n = 1, this%outputer%n_vars
+            var_indx = get_varindx(this%outputer%var_meta(n)%name)
+            is_output = (options(nest_indx)%output%vars_for_output(var_indx) > 0)
+            is_rst_only = (.not. is_output) .and. (options(nest_indx)%vars_for_restart(var_indx) > 0)
+            if (this%outputer%var_meta(n)%three_d) then
+                if (is_output) this%n_out_3d = this%n_out_3d + 1
+                if (is_rst_only) this%n_rst_only_3d = this%n_rst_only_3d + 1
+            else if (this%outputer%var_meta(n)%two_d) then
+                if (is_output) this%n_out_2d = this%n_out_2d + 1
+                if (is_rst_only) this%n_rst_only_2d = this%n_rst_only_2d + 1
+            endif
+        enddo
+
         call setup_MPI_windows(this)
 
 
@@ -230,22 +245,6 @@ contains
             endif
         enddo
 
-        ! Change 2: Compute classification counts and build ordered index arrays
-        ! Count output vs restart-only for 3D and 2D
-        this%n_out_3d = 0; this%n_out_2d = 0
-        this%n_rst_only_3d = 0; this%n_rst_only_2d = 0
-        do n = 1, this%outputer%n_vars
-            var_indx = get_varindx(this%outputer%var_meta(n)%name)
-            is_output = (options(nest_indx)%output%vars_for_output(var_indx) > 0)
-            is_rst_only = (.not. is_output) .and. (options(nest_indx)%vars_for_restart(var_indx) > 0)
-            if (this%outputer%var_meta(n)%three_d) then
-                if (is_output) this%n_out_3d = this%n_out_3d + 1
-                if (is_rst_only) this%n_rst_only_3d = this%n_rst_only_3d + 1
-            else if (this%outputer%var_meta(n)%two_d) then
-                if (is_output) this%n_out_2d = this%n_out_2d + 1
-                if (is_rst_only) this%n_rst_only_2d = this%n_rst_only_2d + 1
-            endif
-        enddo
 
         ! Build ordered index arrays mapping buffer position -> outputer var index
         allocate(this%out_ordered_indices(this%n_out_3d + this%n_out_2d))
@@ -832,6 +831,14 @@ contains
 
         call MPI_Allreduce(MPI_IN_PLACE,this%n_r,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
 
+        ! Propagate output-only counts to the matching MPI_Allreduce on the
+        ! client side (ioclient_obj::setup_MPI_windows). Both ends use the
+        ! same client_comms / parent_comms; the server holds the real value
+        ! and clients pass 0, so MAX gives both sides a consistent count
+        ! for building the output-only Isend/Irecv MPI vector types.
+        call MPI_Allreduce(MPI_IN_PLACE,this%n_out_3d,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,this%n_out_2d,1,MPI_INT,MPI_MAX,this%client_comms,ierr)
+
         allocate(this%write_buffer_2d(this%n_children))
         allocate(this%write_buffer_3d(this%n_children))
         allocate(this%read_buffer(this%n_children))
@@ -845,6 +852,26 @@ contains
             this%write_buffer_2d(n)%buff = kEMPT_BUFF
         enddo
 
+        ! MPI vector types matching the output-only Isends from the client
+        ! (ioclient_obj::push, output-only branch). On non-restart steps the
+        ! Irecv at write_file uses these to consume just the leading-dim
+        ! slice (1:n_out_*) of the write_buffer with stride n_w_*. If there
+        ! is no restart-only tail (n_out == n_w), fall back to flat MPI_REAL.
+        if (this%n_out_3d > 0 .and. this%n_out_3d < this%n_w_3d) then
+            call MPI_Type_vector(this%nx_re*this%nz_w*this%ny_re, this%n_out_3d, this%n_w_3d, &
+                                 MPI_REAL, this%recv_type_3d_out, ierr)
+            call MPI_Type_commit(this%recv_type_3d_out, ierr)
+        else
+            this%recv_type_3d_out = MPI_REAL
+        endif
+        if (this%n_out_2d > 0 .and. this%n_out_2d < this%n_w_2d) then
+            call MPI_Type_vector(this%nx_re*this%ny_re, this%n_out_2d, this%n_w_2d, &
+                                 MPI_REAL, this%recv_type_2d_out, ierr)
+            call MPI_Type_commit(this%recv_type_2d_out, ierr)
+        else
+            this%recv_type_2d_out = MPI_REAL
+        endif
+
         ! Plain per-child receive buffers for nest forcing — filled by
         ! Irecv in gather_forcing / gather_forcing_2d / gather_forcing_3d_init.
         if (this%n_f > 0) then
@@ -852,6 +879,8 @@ contains
                 allocate(this%child_gather_buffers(n)%buff(this%n_f, this%nx_w, this%nz_w, this%ny_w))
                 this%child_gather_buffers(n)%buff = kEMPT_BUFF
             enddo
+            ! Persistent Irecv requests for gather_forcing pre-posting.
+            allocate(this%gather_reqs(this%n_children))
         endif
 
         if (this%n_f_2d > 0) then
@@ -1001,15 +1030,28 @@ contains
 
         ! Gather packed buffers from every child.  Matching Isend pairs are
         ! posted in ioclient_obj::push (tags kIO_TAG_WRITE_3D / _2D).
+        ! Restart steps receive the full union-sized buffer flat; non-restart
+        ! steps receive just the leading-dim output slice via the prebuilt
+        ! vector type (recv_type_*_out) — matching the client's conditional
+        ! send size.
         do cc = 1, this%n_children
-            call MPI_Irecv(this%write_buffer_3d(cc)%buff, &
-                            size(this%write_buffer_3d(cc)%buff), MPI_REAL, &
-                            cc - 1, kIO_TAG_WRITE_3D, this%client_comms, &
-                            reqs(2*cc - 1), ierr)
-            call MPI_Irecv(this%write_buffer_2d(cc)%buff, &
-                            size(this%write_buffer_2d(cc)%buff), MPI_REAL, &
-                            cc - 1, kIO_TAG_WRITE_2D, this%client_comms, &
-                            reqs(2*cc), ierr)
+            if (should_write_restart .or. this%first_write) then
+                call MPI_Irecv(this%write_buffer_3d(cc)%buff, &
+                                size(this%write_buffer_3d(cc)%buff), MPI_REAL, &
+                                cc - 1, kIO_TAG_WRITE_3D, this%client_comms, &
+                                reqs(2*cc - 1), ierr)
+                call MPI_Irecv(this%write_buffer_2d(cc)%buff, &
+                                size(this%write_buffer_2d(cc)%buff), MPI_REAL, &
+                                cc - 1, kIO_TAG_WRITE_2D, this%client_comms, &
+                                reqs(2*cc), ierr)
+            else
+                call MPI_Irecv(this%write_buffer_3d(cc)%buff, 1, this%recv_type_3d_out, &
+                                cc - 1, kIO_TAG_WRITE_3D, this%client_comms, &
+                                reqs(2*cc - 1), ierr)
+                call MPI_Irecv(this%write_buffer_2d(cc)%buff, 1, this%recv_type_2d_out, &
+                                cc - 1, kIO_TAG_WRITE_2D, this%client_comms, &
+                                reqs(2*cc), ierr)
+            endif
         enddo
         call MPI_Waitall(2 * this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
 
@@ -1107,28 +1149,43 @@ contains
         class(ioserver_t), intent(inout) :: this
 
         integer :: i, ierr
-        type(MPI_Request), allocatable :: reqs(:)
 
         if (this%n_f <= 0) then
             if (STD_OUT_PE) write(*,*) 'No forcing fields to gather, but we entered gather_forcing. This is a bug.'
             return
         endif
 
-        ! Irecv child-packed forcing buffers into server-side per-child
-        ! receive buffers.  Matching Isend is in ioclient::update_nest.
-        allocate(reqs(this%n_children))
-        do i = 1, this%n_children
-            call MPI_Irecv(this%child_gather_buffers(i)%buff, &
-                           size(this%child_gather_buffers(i)%buff), MPI_REAL, &
-                           i - 1, kIO_TAG_NEST_3D, this%client_comms, reqs(i), ierr)
-        enddo
-        call MPI_Waitall(this%n_children, reqs, MPI_STATUSES_IGNORE, ierr)
-        deallocate(reqs)
+        ! Persistent-request pattern: by the time we re-enter this routine,
+        ! a previous call's tail has already pre-posted the Irecvs we need
+        ! to wait on. On the very first call, post them just-in-time so the
+        ! bootstrap behaves identically to the original code. Matching
+        ! Isend is in ioclient::update_nest.
+        if (.not. this%gather_posted) then
+            do i = 1, this%n_children
+                call MPI_Irecv(this%child_gather_buffers(i)%buff, &
+                               size(this%child_gather_buffers(i)%buff), MPI_REAL, &
+                               i - 1, kIO_TAG_NEST_3D, this%client_comms, this%gather_reqs(i), ierr)
+            enddo
+            this%gather_posted = .true.
+        endif
+
+        call MPI_Waitall(this%n_children, this%gather_reqs, MPI_STATUSES_IGNORE, ierr)
 
         ! Unpack received child buffers into the server's gather buffer
         do i=1,this%n_children
             this%gather_buffer(:,this%iswc(i):this%iewc(i)+1,this%k_s_w:this%k_e_f,this%jswc(i):this%jewc(i)+1) = &
                 this%child_gather_buffers(i)%buff(:,1:(this%iewc(i)-this%iswc(i)+2),this%k_s_w:this%k_e_f,1:(this%jewc(i)-this%jswc(i)+2))
+        enddo
+
+        ! Pre-post the next round of Irecvs now so the parent's next
+        ! update_nest Isend finds a matching receive already in flight.
+        ! Safe to overlap with whatever the IO server does next because
+        ! child_gather_buffers won't be touched again until the matching
+        ! Waitall at the top of the next gather_forcing call.
+        do i = 1, this%n_children
+            call MPI_Irecv(this%child_gather_buffers(i)%buff, &
+                           size(this%child_gather_buffers(i)%buff), MPI_REAL, &
+                           i - 1, kIO_TAG_NEST_3D, this%client_comms, this%gather_reqs(i), ierr)
         enddo
 
     end subroutine gather_forcing

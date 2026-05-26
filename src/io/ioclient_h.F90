@@ -76,6 +76,10 @@ module ioclient_interface
       real, dimension(:,:,:),   pointer :: forcing_buffer_2d => null()
       real, dimension(:,:,:,:), pointer :: forcing_buffer_3d_init => null()
 
+      ! MPI vector types for output-only send.
+      type(MPI_Datatype) :: send_type_3d_out
+      type(MPI_Datatype) :: send_type_2d_out
+
       ! Outstanding Irecv on read_buffer (kIO_TAG_READ). Posted early in
       ! init_ioclient so the server-side Isend from parent scatter_forcing
       ! during our wake does not race ahead of our reaching receive().
@@ -183,10 +187,11 @@ module ioclient_interface
         !! Update the nest
         !!
         !!----------------------------------------------------------
-        module subroutine update_nest(this, domain)
+        module subroutine update_nest(this, domain, options)
             implicit none
             class(ioclient_t), intent(inout) :: this
             type(domain_t),    intent(in) :: domain
+            type(options_t),   intent(in) :: options
         end subroutine
 
   end interface

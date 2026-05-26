@@ -1444,6 +1444,14 @@ contains
         real    :: tgt, ramp, wh, wl
         logical :: bself, bnbr
 
+        ! Routine-local helper holding zc transposed to (k, i, j) layout so
+        ! that resolve_col's assumed-shape colz argument receives a stride-1
+        ! section. zc(i, :, j) is strided in column-major Fortran (stride =
+        ! ime-ims+1), which NVHPC's acc-routine-seq runtime rejects; zc_kij(:,
+        ! i, j) is contiguous. One-shot LUT init -> allocated, transposed,
+        ! used, then freed within this subroutine.
+        real, allocatable :: zc_kij(:,:,:)
+
         if (allocated(zb_xs_lev)) return
 
         zv = domain%var_indx(kVARS%z)%v
@@ -1463,7 +1471,14 @@ contains
         allocate(zb_xw2_wt (ims:ime,kms:kme,jms:jme,2), zb_xe_wt (ims:ime,kms:kme,jms:jme,2))
         allocate(zb_yn2_wt (ims:ime,kms:kme,jms:jme,2), zb_yp_wt (ims:ime,kms:kme,jms:jme,2))
 
+        !$acc enter data create(zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev, &
+        !$acc                    zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt,  &
+        !$acc                    zb_alpha_k, &
+        !$acc                    zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev, &
+        !$acc                    zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt)
+
         ! Safe defaults everywhere: identity bracket, pure along-eta (alpha=0).
+        !$acc kernels default(present)
         zb_xs_lev = kms; zb_xw_lev = kms; zb_ys_lev = kms; zb_yn_lev = kms
         zb_xs_wt(:,:,:,1) = 1.0; zb_xs_wt(:,:,:,2) = 0.0
         zb_xw_wt(:,:,:,1) = 1.0; zb_xw_wt(:,:,:,2) = 0.0
@@ -1478,29 +1493,47 @@ contains
         zb_xe_wt (:,:,:,1) = 1.0; zb_xe_wt (:,:,:,2) = 0.0
         zb_yn2_wt(:,:,:,1) = 1.0; zb_yn2_wt(:,:,:,2) = 0.0
         zb_yp_wt (:,:,:,1) = 1.0; zb_yp_wt (:,:,:,2) = 0.0
-
+        !$acc end kernels
         ncov_x = 0; ntot_x = 0; ncov_y = 0; ntot_y = 0
 
         ! Zaengl-2012 vertical alpha ramp: =1 at surface (k=kms),
         ! linearly -> 0 at band top (k=kme). Removes the binary
         ! 0/1 hard edge that otherwise seeds grid-scale NaN.
+        !$acc parallel loop present(zb_alpha_k)
         do k = kms, kme
             ramp = real(kme - k) / real(kme - kms)
             zb_alpha_k(k) = max(0.0, min(1.0, ramp))
         end do
 
+        ! Transpose zc into a k-leading helper so column slices passed to
+        ! resolve_col are stride-1 on the device. One-shot at LUT-init.
+        allocate(zc_kij(kms:kme, ims:ime, jms:jme))
+        !$acc enter data create(zc_kij)
+
         associate(zc => domain%vars_3d(zv)%data_3d)
+        !$acc parallel loop gang vector collapse(3) default(present)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    zc_kij(k, i, j) = zc(i, k, j)
+                enddo
+            enddo
+        enddo
+        end associate
+
+        associate(geo_u_z => domain%geo_u%z, geo_v_z => domain%geo_v%z)
+        !$acc parallel loop gang vector collapse(3) default(present) copyin(geo_u_z, geo_v_z)
         do j = jms, jme
             do k = kms, kme
                 do i = ims, ime
                     ! x-direction: u-face (i,k,j) between cells (i-1) and (i)
                     if (i > ims) then
                         ntot_x = ntot_x + 1
-                        tgt = domain%geo_u%z(i,k,j)
-                        call resolve_col(tgt, zc(i,:,j),   lh, ll, wh, wl, bself)
+                        tgt = geo_u_z(i,k,j)
+                        call resolve_col(tgt, zc_kij(:,i,j),   kms, kme, lh, ll, wh, wl, bself)
                         zb_xs_lev(i,k,j,1) = lh; zb_xs_lev(i,k,j,2) = ll
                         zb_xs_wt (i,k,j,1) = wh; zb_xs_wt (i,k,j,2) = wl
-                        call resolve_col(tgt, zc(i-1,:,j), lh, ll, wh, wl, bnbr)
+                        call resolve_col(tgt, zc_kij(:,i-1,j), kms, kme, lh, ll, wh, wl, bnbr)
                         zb_xw_lev(i,k,j,1) = lh; zb_xw_lev(i,k,j,2) = ll
                         zb_xw_wt (i,k,j,1) = wh; zb_xw_wt (i,k,j,2) = wl
                         if (bself .and. bnbr) ncov_x = ncov_x + 1
@@ -1508,12 +1541,12 @@ contains
                         ! (i-2, i+1) reconstructed to the same u-face z. Guarded
                         ! at the memory edges (edge faces not consumed anyway).
                         if (i-2 >= ims) then
-                            call resolve_col(tgt, zc(i-2,:,j), lh, ll, wh, wl, bnbr)
+                            call resolve_col(tgt, zc_kij(:,i-2,j), kms, kme, lh, ll, wh, wl, bnbr)
                             zb_xw2_lev(i,k,j,1) = lh; zb_xw2_lev(i,k,j,2) = ll
                             zb_xw2_wt (i,k,j,1) = wh; zb_xw2_wt (i,k,j,2) = wl
                         endif
                         if (i+1 <= ime) then
-                            call resolve_col(tgt, zc(i+1,:,j), lh, ll, wh, wl, bnbr)
+                            call resolve_col(tgt, zc_kij(:,i+1,j), kms, kme, lh, ll, wh, wl, bnbr)
                             zb_xe_lev(i,k,j,1) = lh; zb_xe_lev(i,k,j,2) = ll
                             zb_xe_wt (i,k,j,1) = wh; zb_xe_wt (i,k,j,2) = wl
                         endif
@@ -1521,23 +1554,23 @@ contains
                     ! y-direction: v-face (i,k,j) between cells (j-1) and (j)
                     if (j > jms) then
                         ntot_y = ntot_y + 1
-                        tgt = domain%geo_v%z(i,k,j)
-                        call resolve_col(tgt, zc(i,:,j),   lh, ll, wh, wl, bself)
+                        tgt = geo_v_z(i,k,j)
+                        call resolve_col(tgt, zc_kij(:,i,j),   kms, kme, lh, ll, wh, wl, bself)
                         zb_ys_lev(i,k,j,1) = lh; zb_ys_lev(i,k,j,2) = ll
                         zb_ys_wt (i,k,j,1) = wh; zb_ys_wt (i,k,j,2) = wl
-                        call resolve_col(tgt, zc(i,:,j-1), lh, ll, wh, wl, bnbr)
+                        call resolve_col(tgt, zc_kij(:,i,j-1), kms, kme, lh, ll, wh, wl, bnbr)
                         zb_yn_lev(i,k,j,1) = lh; zb_yn_lev(i,k,j,2) = ll
                         zb_yn_wt (i,k,j,1) = wh; zb_yn_wt (i,k,j,2) = wl
                         if (bself .and. bnbr) ncov_y = ncov_y + 1
                         ! F2: wider-stencil columns for the 4-point biharmonic
                         ! (j-2, j+1) reconstructed to the same v-face z.
                         if (j-2 >= jms) then
-                            call resolve_col(tgt, zc(i,:,j-2), lh, ll, wh, wl, bnbr)
+                            call resolve_col(tgt, zc_kij(:,i,j-2), kms, kme, lh, ll, wh, wl, bnbr)
                             zb_yn2_lev(i,k,j,1) = lh; zb_yn2_lev(i,k,j,2) = ll
                             zb_yn2_wt (i,k,j,1) = wh; zb_yn2_wt (i,k,j,2) = wl
                         endif
                         if (j+1 <= jme) then
-                            call resolve_col(tgt, zc(i,:,j+1), lh, ll, wh, wl, bnbr)
+                            call resolve_col(tgt, zc_kij(:,i,j+1), kms, kme, lh, ll, wh, wl, bnbr)
                             zb_yp_lev(i,k,j,1) = lh; zb_yp_lev(i,k,j,2) = ll
                             zb_yp_wt (i,k,j,1) = wh; zb_yp_wt (i,k,j,2) = wl
                         endif
@@ -1547,77 +1580,68 @@ contains
         enddo
         end associate
 
-        !$acc enter data create(zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev, &
-        !$acc                    zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt,  &
-        !$acc                    zb_alpha_k, &
-        !$acc                    zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev, &
-        !$acc                    zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt)
-        !$acc update device(zb_xs_lev, zb_xw_lev, zb_ys_lev, zb_yn_lev, &
-        !$acc               zb_xs_wt,  zb_xw_wt,  zb_ys_wt,  zb_yn_wt,  &
-        !$acc               zb_alpha_k, &
-        !$acc               zb_xw2_lev, zb_xe_lev, zb_yn2_lev, zb_yp_lev, &
-        !$acc               zb_xw2_wt,  zb_xe_wt,  zb_yn2_wt,  zb_yp_wt)
-
-    contains
-
-        ! Resolve target physical height tgt_in against a 1-based column of
-        ! monotone-increasing heights colz. q~ = w_hi*q(lev_hi)+w_lo*q(lev_lo):
-        !  - true bracket -> linear interpolation
-        !  - tgt below the column's lowest level -> zero-gradient bottom clamp
-        !    (w=1 on q(kms); no new extrema -> proven-stable Phase-3 form)
-        !  - tgt above the column top -> top-value clamp
-        subroutine resolve_col(tgt_in, colz, lev_hi, lev_lo, w_hi, w_lo, bracketed)
-            real,    intent(in)  :: tgt_in
-            real,    intent(in)  :: colz(:)
-            integer, intent(out) :: lev_hi, lev_lo
-            real,    intent(out) :: w_hi, w_lo
-            logical, intent(out) :: bracketed
-            integer :: fmm(2), nz
-            real    :: ww(2), dzc, t
-
-            nz  = size(colz)
-            fmm = find_match(tgt_in, colz)
-            if (fmm(1) > 0) then
-                ww     = weights(tgt_in, colz(fmm(2)), colz(fmm(1)))
-                lev_hi = kms + fmm(2) - 1;  lev_lo = kms + fmm(1) - 1
-                w_hi   = ww(1);             w_lo   = ww(2)
-                bracketed = .true.
-            else if (fmm(1) == -1) then
-                ! below the column's lowest level
-                bracketed = .false.
-                if (nz >= 2) then
-                    dzc = colz(2) - colz(1)
-                    if (dzc <= 0.0) then
-                        lev_hi = kms;  lev_lo = kms;  w_hi = 1.0;  w_lo = 0.0
-                    else
-                        t = (tgt_in - colz(1)) / dzc      ! < 0
-                        t = max(t, -1.0)                  ! slope-limit: <= 1 cell
-                        lev_hi = kms + 1;  lev_lo = kms
-                        w_hi   = t;        w_lo   = 1.0 - t
-                    endif
-                else
-                    lev_hi = kms;  lev_lo = kms;  w_hi = 1.0;  w_lo = 0.0
-                endif
-            else
-                ! above the column's top level
-                bracketed = .false.
-                if (nz >= 2) then
-                    dzc = colz(nz) - colz(nz-1)
-                    if (dzc <= 0.0) then
-                        lev_hi = kme;  lev_lo = kme;  w_hi = 1.0;  w_lo = 0.0
-                    else
-                        t = (tgt_in - colz(nz-1)) / dzc   ! > 1
-                        t = min(t, 2.0)                   ! slope-limit: <= 1 cell
-                        lev_hi = kme;  lev_lo = kme - 1
-                        w_hi   = t;     w_lo   = 1.0 - t
-                    endif
-                else
-                    lev_hi = kme;  lev_lo = kme;  w_hi = 1.0;  w_lo = 0.0
-                endif
-            endif
-        end subroutine resolve_col
+        !$acc exit data delete(zc_kij)
+        deallocate(zc_kij)
 
     end subroutine adv_std_init_zb_lut
 
+    ! Resolve target physical height tgt_in against a 1-based column of
+    ! monotone-increasing heights colz. q~ = w_hi*q(lev_hi)+w_lo*q(lev_lo):
+    !  - true bracket -> linear interpolation
+    !  - tgt below the column's lowest level -> zero-gradient bottom clamp
+    !    (w=1 on q(kms); no new extrema -> proven-stable Phase-3 form)
+    !  - tgt above the column top -> top-value clamp
+    subroutine resolve_col(tgt_in, colz, kms_loc, kme_loc, lev_hi, lev_lo, w_hi, w_lo, bracketed)
+        !$acc routine seq
+        real,    intent(in)  :: tgt_in
+        real,    intent(in)  :: colz(:)
+        integer, intent(in)  :: kms_loc, kme_loc
+        integer, intent(out) :: lev_hi, lev_lo
+        real,    intent(out) :: w_hi, w_lo
+        logical, intent(out) :: bracketed
+        integer :: fmm(2), nz
+        real    :: ww(2), dzc, t
+
+        nz  = size(colz)
+        fmm = find_match(tgt_in, colz)
+        if (fmm(1) > 0) then
+            ww     = weights(tgt_in, colz(fmm(2)), colz(fmm(1)))
+            lev_hi = kms_loc + fmm(2) - 1;  lev_lo = kms_loc + fmm(1) - 1
+            w_hi   = ww(1);             w_lo   = ww(2)
+            bracketed = .true.
+        else if (fmm(1) == -1) then
+            ! below the column's lowest level
+            bracketed = .false.
+            if (nz >= 2) then
+                dzc = colz(2) - colz(1)
+                if (dzc <= 0.0) then
+                    lev_hi = kms_loc;  lev_lo = kms_loc;  w_hi = 1.0;  w_lo = 0.0
+                else
+                    t = (tgt_in - colz(1)) / dzc      ! < 0
+                    t = max(t, -1.0)                  ! slope-limit: <= 1 cell
+                    lev_hi = kms_loc + 1;  lev_lo = kms_loc
+                    w_hi   = t;        w_lo   = 1.0 - t
+                endif
+            else
+                lev_hi = kms_loc;  lev_lo = kms_loc;  w_hi = 1.0;  w_lo = 0.0
+            endif
+        else
+            ! above the column's top level
+            bracketed = .false.
+            if (nz >= 2) then
+                dzc = colz(nz) - colz(nz-1)
+                if (dzc <= 0.0) then
+                    lev_hi = kme_loc;  lev_lo = kme_loc;  w_hi = 1.0;  w_lo = 0.0
+                else
+                    t = (tgt_in - colz(nz-1)) / dzc   ! > 1
+                    t = min(t, 2.0)                   ! slope-limit: <= 1 cell
+                    lev_hi = kme_loc;  lev_lo = kme_loc - 1
+                    w_hi   = t;     w_lo   = 1.0 - t
+                endif
+            else
+                lev_hi = kme_loc;  lev_lo = kme_loc;  w_hi = 1.0;  w_lo = 0.0
+            endif
+        endif
+    end subroutine resolve_col
 
 end module adv_std

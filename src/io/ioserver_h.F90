@@ -90,6 +90,15 @@ module ioserver_interface
         type(buffer_2d_t), allocatable :: write_buffer_2d(:)
         type(buffer_2d_t), allocatable :: child_gather_buffers_2d(:)
 
+        ! Persistent Irecv slot(s) for gather_forcing. Pre-posted at the tail
+        ! of each gather_forcing call so the parent's next update_nest Isend
+        ! finds a matching receive already in flight and can skip the
+        ! rendezvous handshake. gather_posted is the bootstrap flag: false
+        ! until the first call posts the initial Irecvs.
+        type(MPI_Request), allocatable :: gather_reqs(:)
+        logical :: gather_posted = .false.
+
+
         ! Contiguous per-child-compute-rank send buffers for distribute_init_forcing.
         ! forcing_buffer_2d/_3d_init are allocated over the full IO-server-wide range
         ! (i_s_r:i_e_r+1, j_s_r:j_e_r+1); the per-rank slice (isrc:ierc+1, jsrc:jerc+1)
@@ -106,6 +115,13 @@ module ioserver_interface
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types, buffer_nest_types
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types_2d, buffer_nest_types_2d
         type(MPI_Datatype), allocatable, dimension(:,:) :: send_nest_types_3d_init, buffer_nest_types_3d_init
+        ! MPI vector types matching the output-only Isends from the client.
+        ! Used in write_file when this%restart_counter does not trip the
+        ! restart gate, so the matching Irecv consumes only the leading-dim
+        ! slice (1:n_out_*) of write_buffer_* with stride n_w_*.
+        type(MPI_Datatype) :: recv_type_3d_out
+        type(MPI_Datatype) :: recv_type_2d_out
+
         logical, allocatable :: nest_types_2d_initialized(:), nest_types_3d_init_initialized(:)
 
         ! Per-child cached cell geometry shared across the three setup_nest_types_* variants

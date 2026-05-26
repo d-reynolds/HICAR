@@ -224,7 +224,7 @@ contains
         class(ioclient_t),   intent(inout)  :: this
 
         integer :: nx_w, nz_w, ny_w, nx_re, ny_re, n_w_2d, n_f, n_f_2d, n_f_3d_init, n_w_3d, ierr
-        integer :: nx_r, nz_r, ny_r, n_r
+        integer :: nx_r, nz_r, ny_r, n_r, n_out_3d, n_out_2d
 
         nx_w = 0
         nz_w = 0
@@ -242,7 +242,10 @@ contains
         ny_r = 0
         n_r = 0
 
-       ! Setup MPI windows for inter-process communication        
+        n_out_3d = 0
+        n_out_2d = 0
+
+       ! Setup MPI windows for inter-process communication
         call MPI_Allreduce(MPI_IN_PLACE,nx_w,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,ny_w,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
         call MPI_Allreduce(MPI_IN_PLACE,nz_w,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
@@ -262,6 +265,11 @@ contains
         call MPI_Allreduce(MPI_IN_PLACE,this%nz_init_3d,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
         call MPI_Allreduce(MPI_IN_PLACE,n_r,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+
+        ! Output-only var counts (populated by the server end of the
+        ! Allreduce; clients pass 0). Needed by the vector-type build below.
+        call MPI_Allreduce(MPI_IN_PLACE,n_out_3d,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
+        call MPI_Allreduce(MPI_IN_PLACE,n_out_2d,1,MPI_INT,MPI_MAX,this%parent_comms,ierr)
 
         ! Plain allocations — sent to server via Isend in push()
         allocate(this%write_buffer_3d(n_w_3d, nx_re, nz_w, ny_re))
@@ -294,6 +302,28 @@ contains
         allocate(this%read_buffer(n_r, nx_r, nz_r, ny_r))
         this%read_buffer = kEMPT_BUFF
         !$acc enter data copyin(this%read_buffer)
+
+        ! Build MPI vector types for the output-only Isend. On non-restart
+        ! steps push() ships only the populated leading-dim slice
+        ! write_buffer_*(1:n_out_*, :, ...) rather than the union-sized
+        ! buffer; the vector type packs that slice from each (i,k,j) tile
+        ! with stride n_w_* between blocks. If there is no restart-only
+        ! tail (n_out == n_w) we keep using MPI_REAL — a flat send is
+        ! cheaper than going through the type machinery.
+        if (n_out_3d > 0 .and. n_out_3d < n_w_3d) then
+            call MPI_Type_vector(nx_re*nz_w*ny_re, n_out_3d, n_w_3d, &
+                                 MPI_REAL, this%send_type_3d_out, ierr)
+            call MPI_Type_commit(this%send_type_3d_out, ierr)
+        else
+            this%send_type_3d_out = MPI_REAL
+        endif
+        if (n_out_2d > 0 .and. n_out_2d < n_w_2d) then
+            call MPI_Type_vector(nx_re*ny_re, n_out_2d, n_w_2d, &
+                                 MPI_REAL, this%send_type_2d_out, ierr)
+            call MPI_Type_commit(this%send_type_2d_out, ierr)
+        else
+            this%send_type_2d_out = MPI_REAL
+        endif
 
     end subroutine setup_MPI_windows
 
@@ -437,10 +467,8 @@ contains
             enddo
         endif
 
-        !decrement for indexing write_buffer_3d next
-        n_3d = n_3d - 1
         !$acc wait
-        !$acc update host(this%write_buffer_3d(1:n_3d,:,:,:), this%write_buffer_2d)
+        !$acc update host(this%write_buffer_3d, this%write_buffer_2d)
 
         this%written = .True.
         call domain%increment_output_time()
@@ -454,20 +482,28 @@ contains
         ! MPI_Irecv in ioserver_obj::write_file.  Blocking Waitall below
         ! keeps the Isend buffers live until the server has received; they
         ! can then be safely overwritten by the next push().
-        call MPI_Isend(this%write_buffer_3d, size(this%write_buffer_3d), MPI_REAL, &
-                        this%server, kIO_TAG_WRITE_3D, this%parent_comms, reqs(1), ierr)
-        call MPI_Isend(this%write_buffer_2d, size(this%write_buffer_2d), MPI_REAL, &
-                        this%server, kIO_TAG_WRITE_2D, this%parent_comms, reqs(2), ierr)
+
+        if (should_do_restart) then
+            call MPI_Isend(this%write_buffer_3d, size(this%write_buffer_3d), MPI_REAL, &
+                            this%server, kIO_TAG_WRITE_3D, this%parent_comms, reqs(1), ierr)
+            call MPI_Isend(this%write_buffer_2d, size(this%write_buffer_2d), MPI_REAL, &
+                            this%server, kIO_TAG_WRITE_2D, this%parent_comms, reqs(2), ierr)
+        else
+            call MPI_Isend(this%write_buffer_3d, 1, this%send_type_3d_out, &
+                            this%server, kIO_TAG_WRITE_3D, this%parent_comms, reqs(1), ierr)
+            call MPI_Isend(this%write_buffer_2d, 1, this%send_type_2d_out, &
+                            this%server, kIO_TAG_WRITE_2D, this%parent_comms, reqs(2), ierr)
+        endif
         call MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE, ierr)
 
     end subroutine 
 
-    module subroutine update_nest(this, domain)
+    module subroutine update_nest(this, domain, options)
         implicit none
         class(ioclient_t),   intent(inout) :: this
         type(domain_t),      intent(in)    :: domain
+        type(options_t),     intent(in)    :: options
 
-        type(variable_t) :: var
         type(meta_data_t) :: tmp_var
         type(MPI_Request) :: req
         integer :: i, n_3d, nx, ny, i_s_w, i_e_w, j_s_w, j_e_w, var_indx, idx
@@ -497,14 +533,14 @@ contains
 
             i_s_w = this%i_s_w; i_e_w = this%i_e_w
             j_s_w = this%j_s_w; j_e_w = this%j_e_w
-            var = domain%vars_3d(idx)
-            i_e_w = i_e_w+var%xstag !Add extra to accomodate staggered vars
-            j_e_w = j_e_w+var%ystag !Add extra to accomodate staggered vars
+            i_e_w = i_e_w+tmp_var%xstag !Add extra to accomodate staggered vars
+            j_e_w = j_e_w+tmp_var%ystag !Add extra to accomodate staggered vars
             nx = i_e_w - i_s_w + 1
             ny = j_e_w - j_s_w + 1
 
-            nz_v = var%dim_len(2)
             associate(src => domain%vars_3d(idx)%data_3d, dst => this%forcing_buffer)
+            nz_v = ubound(src, 2)
+            
             !$acc parallel loop gang vector collapse(3) present(dst, src)
             do jj = 1, ny
               do kk = 1, nz_v
@@ -515,12 +551,12 @@ contains
             enddo
             end associate
 
-            if (var_val_check) then
+            if (options%general%debug .and. var_val_check) then
                 err_msg = 'Warning on ioclient_obj::update_nest: Nest level: '// str(domain%nest_indx)
                 ! Check only the tile/interior region that is actually packed and sent
                 ! to the child nest. Halo cells hold stale intermediate-stage values
                 ! (uncorrected high-order RK3 leftovers) that are never used here.
-                call check_var(var, trim(err_msg), is=i_s_w, ie=i_e_w, js=j_s_w, je=j_e_w)
+                call check_var(domain%vars_3d(idx), trim(err_msg), is=i_s_w, ie=i_e_w, js=j_s_w, je=j_e_w)
             endif
 
             n_3d = n_3d+1

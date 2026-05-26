@@ -22,6 +22,7 @@ module vertical_interpolation
 contains
 
     function weights(zin,ztop,zbot)
+        !$acc routine seq
         ! Compute weights to interpolate between ztop and zbottom to get to zin
         implicit none
         real, intent(in) :: zin,ztop,zbot
@@ -43,7 +44,7 @@ contains
     !   else zin>=z(find_match(1)) and zin<z(find_match(2))
     ! guess is an optional value that allows one to start searching z for zin in a good location
     function find_match(zin,z,guess)
-
+        !$acc routine seq
         implicit none
         real, intent(in) :: zin
         real, intent(in),dimension(:) :: z

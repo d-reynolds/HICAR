@@ -62,7 +62,7 @@ contains
         !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
         !$acc                   this%ihs, this%ihe, this%jhs, this%jhe, &
         !$acc                   this%ids, this%ide, this%kds, this%kde, this%jds, this%jde, this%filter_width, &
-        !$acc                   this%vars_2d, this%vars_3d, this%var_indx, this%forcing_var_indx, this%forcing_hi, &
+        !$acc                   this%var_indx, this%forcing_var_indx, &
         !$acc                   this%adv_vars, this%exch_vars, this%tend, this%halo)
         
         !update all relevant data_2d/data_3d fields of vars_2d/vars_3d to device
@@ -1014,6 +1014,8 @@ contains
             allocate(this%tend%v(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme),        source=0.0)
             !$acc enter data copyin(this%tend%v)
         endif
+
+        !$acc enter data copyin(this%vars_2d, this%vars_3d, this%forcing_hi)
 
     end subroutine
 

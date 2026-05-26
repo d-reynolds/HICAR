@@ -1956,14 +1956,35 @@ contains
             allocate(dz_if    (i_s:i_e, k_s:k_e+1, j_s:j_e))
             allocate(alpha    (i_s:i_e, k_s:k_e,   j_s:j_e))
             allocate(div      (i_s:i_e, k_s:k_e,   j_s:j_e))
+            allocate(jaco_w     (i_s:i_e,   k_s:k_e, j_s:j_e))
+            allocate(dzdx_u_stag(i_s:i_e+1, k_s:k_e, j_s:j_e))
+            allocate(jaco_u_stag(i_s:i_e+1, k_s:k_e, j_s:j_e))
+            allocate(dzdy_v_stag(i_s:i_e,   k_s:k_e, j_s:j_e+1))
+            allocate(jaco_v_stag(i_s:i_e,   k_s:k_e, j_s:j_e+1))
+            allocate(adv_dz_col (k_s:k_e))
+
+            !$acc enter data create(dz_if, div, alpha, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma)
+            !$acc enter data create(jaco_w, dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag, adv_dz_col)
+
             dx = domain%dx
 
             associate(advection_dz_var    => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                       neighbor_terrain_var=> domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d, &
+                      adv_dz_dom         => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                       dzdx_domain         => domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, &
                       dzdy_domain         => domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d, &
+                      dzdx_u_domain      => domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, &
+                      dzdy_v_domain      => domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, &
+                      jaco_u_domain      => domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, &
+                      jaco_v_domain      => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
+                      jaco_w_domain      => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
                       jaco_domain         => domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d)
 
+            !$acc data present(advection_dz_var, neighbor_terrain_var, adv_dz_dom, dzdx_domain, dzdy_domain, dzdx_u_domain, dzdy_v_domain, &
+            !$acc                  jaco_u_domain, jaco_v_domain, jaco_w_domain, jaco_domain, dz_if, div, alpha, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma, &
+            !$acc                  jaco_w, dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag, adv_dz_col)
+
+            !$acc parallel loop gang vector collapse(3)
             do j = j_s, j_e
                 do k = k_s+1, k_e
                     do i = i_s, i_e
@@ -1971,6 +1992,7 @@ contains
                     enddo
                 enddo
             enddo
+            !$acc parallel loop gang vector collapse(2)
             do j = j_s, j_e
                 do i = i_s, i_e
                     dz_if(i,k_s,j)   = advection_dz_var(i,k_s,j)
@@ -1979,47 +2001,60 @@ contains
                     dzdy_surf(i,j) = dzdy_domain(i,k_s,j)
                 enddo
             enddo
+            !$acc parallel loop gang vector collapse(3)
             do j = j_s, j_e
                 do k = k_s, k_e
                     do i = i_s, i_e
                         dzdx(i,k,j)  = dzdx_domain(i,k,j)
                         dzdy(i,k,j)  = dzdy_domain(i,k,j)
                         jaco(i,k,j)  = jaco_domain(i,k,j)
+                        jaco_w(i,k,j)  = jaco_w_domain(i,k,j)
                         sigma(i,k,j) = dz_if(i,k,j) / dz_if(i,k+1,j)
                     enddo
                 enddo
             enddo
+            !$acc parallel loop gang vector collapse(3)
+            do j = j_s, j_e
+                do k = k_s, k_e
+                    do i = i_s, i_e+1
+                        dzdx_u_stag(i,k,j)  = dzdx_u_domain(i,k,j)
+                        jaco_u_stag(i,k,j)  = jaco_u_domain(i,k,j)
+                    enddo
+                enddo
+            enddo
+            !$acc parallel loop gang vector collapse(3)
+            do j = j_s, j_e+1
+                do k = k_s, k_e
+                    do i = i_s, i_e
+                        dzdy_v_stag(i,k,j)  = dzdy_v_domain(i,k,j)
+                        jaco_v_stag(i,k,j)  = jaco_v_domain(i,k,j)
+                    enddo
+                enddo
+            enddo
+
+            !$acc parallel loop gang vector collapse(2)
             do j = j_s, j_e
                 do i = i_s_bnd, i_e_bnd
                     dzdx_surf(i,j) = (neighbor_terrain_var(i+1,j) - neighbor_terrain_var(i-1,j)) / (2*dx)
                 enddo
             enddo
+            !$acc parallel loop gang vector collapse(2)
             do j = j_s_bnd, j_e_bnd
                 do i = i_s, i_e
                     dzdy_surf(i,j) = (neighbor_terrain_var(i,j+1) - neighbor_terrain_var(i,j-1)) / (2*dx)
                 enddo
             enddo
+            !$acc parallel loop
+            do k = k_s, k_e
+                adv_dz_col(k) = adv_dz_dom(i_s, k, j_s)
+            enddo
+            !$acc end data
             end associate
 
-            allocate(jaco_w     (i_s:i_e,   k_s:k_e, j_s:j_e))
-            allocate(dzdx_u_stag(i_s:i_e+1, k_s:k_e, j_s:j_e))
-            allocate(jaco_u_stag(i_s:i_e+1, k_s:k_e, j_s:j_e))
-            allocate(dzdy_v_stag(i_s:i_e,   k_s:k_e, j_s:j_e+1))
-            allocate(jaco_v_stag(i_s:i_e,   k_s:k_e, j_s:j_e+1))
-            allocate(adv_dz_col (k_s:k_e))
-
-            jaco_w     (:,:,:) = domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d (i_s:i_e,   k_s:k_e, j_s:j_e)
-            dzdx_u_stag(:,:,:) = domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d     (i_s:i_e+1, k_s:k_e, j_s:j_e)
-            jaco_u_stag(:,:,:) = domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d (i_s:i_e+1, k_s:k_e, j_s:j_e)
-            dzdy_v_stag(:,:,:) = domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d     (i_s:i_e,   k_s:k_e, j_s:j_e+1)
-            jaco_v_stag(:,:,:) = domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d (i_s:i_e,   k_s:k_e, j_s:j_e+1)
-            do k = k_s, k_e
-                adv_dz_col(k) = domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i_s, k, j_s)
-            enddo
         endif
+        !$acc update host(dz_if, div, alpha, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma)
+        !$acc update host(jaco_w, dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag, adv_dz_col)
 
-        !$acc enter data copyin(dz_if, div, alpha, dzdx, dzdy, jaco, dzdx_surf, dzdy_surf, sigma)
-        !$acc enter data copyin(jaco_w, dzdx_u_stag, jaco_u_stag, dzdy_v_stag, jaco_v_stag, adv_dz_col)
     end subroutine init_module_vars
 
 

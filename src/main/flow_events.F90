@@ -83,7 +83,7 @@ subroutine wake_component(comp_arr, options, boundary, ioclient)
             ! side's gather_forcing only fires via update_component_nest,
             ! which is also gated on should_update_nests.
             if (should_update_nests(comp_arr, options)) then
-                call ioclient%update_nest(comp)
+                call ioclient%update_nest(comp, options)
             endif
 
             call comp%total_timer%stop()
@@ -158,7 +158,7 @@ subroutine update_component_nest(comp_arr,options,ioclient)
     select type (comp)
         type is (domain_t)
             call comp%nest_timer%start()
-            call ioclient%update_nest(comp)
+            call ioclient%update_nest(comp, options)
             call comp%nest_timer%stop()
         type is (ioserver_t)
             ! This call will gather the model state of the forcing fields from the nest parent
