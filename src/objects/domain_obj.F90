@@ -2100,6 +2100,7 @@ contains
         if (this%var_indx(kVARS%veg_leaf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%veg_leaf_temperature)%v)%data_2d = options%domain%init_surf_temp
         if (this%var_indx(kVARS%ground_surf_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%ground_surf_temperature)%v)%data_2d = options%domain%init_surf_temp
         if (this%var_indx(kVARS%canopy_temperature)%v > 0) this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d = options%domain%init_surf_temp
+        if (this%var_indx(kVARS%soil_temperature)%v > 0) this%vars_3d(this%var_indx(kVARS%soil_temperature)%v)%data_3d = options%domain%init_surf_temp
 
         ! SST uses its own option (separate from land surface temperature)
         if (this%var_indx(kVARS%sst)%v > 0) this%vars_2d(this%var_indx(kVARS%sst)%v)%data_2d = options%domain%init_sst
@@ -2137,6 +2138,12 @@ contains
 
         call this%update_host()
         
+        if (this%var_indx(kVARS%soil_water_content)%v > 0) then
+            nsoil = size(this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d, 2)
+        elseif (this%var_indx(kVARS%soil_temperature)%v > 0) then
+            nsoil = size(this%vars_3d(this%var_indx(kVARS%soil_temperature)%v)%data_3d, 2)
+        endif
+
         ! Read optional 2D surface temperature field from domain file
         if (options%domain%surface_temp_var /= "") then
             call io_read(options%domain%init_conditions_file, options%domain%surface_temp_var, surf_temp)
@@ -2149,6 +2156,11 @@ contains
 
             if (this%var_indx(kVARS%temperature_2m)%v > 0) then
                 this%vars_2d(this%var_indx(kVARS%temperature_2m)%v)%data_2d(:,:) = &
+                    surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+            endif
+
+            if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) then
+                this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d(:,:) = &
                     surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
 
@@ -2165,16 +2177,15 @@ contains
                 this%vars_2d(this%var_indx(kVARS%canopy_temperature)%v)%data_2d(:,:) = &
                     surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
             endif
+
+            if (this%var_indx(kVARS%soil_temperature)%v > 0) then
+                do i=1,nsoil
+                    this%vars_3d(this%var_indx(kVARS%soil_temperature)%v)%data_3d(:,i,:) = surf_temp(this%grid%ims:this%grid%ime, this%grid%jms:this%grid%jme)
+                enddo
+            endif
         else
             allocate(surf_temp(this%grid%ims:this%grid%ime,this%grid%jms:this%grid%jme))
             surf_temp = options%domain%init_surf_temp
-        endif
-
-
-        if (this%var_indx(kVARS%soil_water_content)%v > 0) then
-            nsoil = size(this%vars_3d(this%var_indx(kVARS%soil_water_content)%v)%data_3d, 2)
-        elseif (this%var_indx(kVARS%soil_temperature)%v > 0) then
-            nsoil = size(this%vars_3d(this%var_indx(kVARS%soil_temperature)%v)%data_3d, 2)
         endif
 
         if (options%domain%landvar /= "") then
@@ -2255,14 +2266,6 @@ contains
                     if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) then
                         this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d(:,:) = this%vars_3d(this%var_indx(kVARS%soil_temperature)%v)%data_3d(:,nsoil,:)
                     endif
-                endif
-            endif
-        else
-            if (this%var_indx(kVARS%soil_temperature)%v > 0) then
-                if (this%var_indx(kVARS%soil_deep_temperature)%v > 0) then
-                    do i=1,nsoil
-                        this%vars_3d(this%var_indx(kVARS%soil_temperature)%v)%data_3d(:,i,:) = this%vars_2d(this%var_indx(kVARS%soil_deep_temperature)%v)%data_2d
-                    enddo
                 endif
             endif
         endif

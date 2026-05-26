@@ -392,7 +392,7 @@ contains
                 )
 
             windspd = sqrt(u_10m**2 + v_10m**2)
-            where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
+            where(windspd<0.01) windspd=0.01 ! minimum wind speed to prevent the exchange coefficient from blowing up
 
             ! Setup the input data for the snow models. For SNOWPACK use the
             ! per-deposit snapshots so held mass below hn<0.001 m carries

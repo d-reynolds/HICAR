@@ -209,13 +209,13 @@ contains
 
         if (options%physics%surfacelayer==kSFC_MM5REV) then
         
-            associate(u_mass => domain%vars_3d(domain%var_indx(kVARS%u_mass)%v)%data_3d, &
-                      v_mass => domain%vars_3d(domain%var_indx(kVARS%v_mass)%v)%data_3d)
-            !$acc parallel loop gang vector collapse(2) present(u_mass, v_mass,windspd)
+            associate(u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
+                        v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d)
+            !$acc parallel loop gang vector collapse(2) present(u_10m, v_10m,windspd)
             do j = jms, jme
                 do i = ims, ime
-                    windspd(i,j) = sqrt(u_mass(i,kms,j)**2 + v_mass(i,kms,j)**2)
-                    if (windspd(i,j) < 1e-5) windspd(i,j) = 1e-5
+                    windspd(i,j) = sqrt(u_10m(i,j)**2 + v_10m(i,j)**2)
+                    if (windspd(i,j) < 0.01) windspd(i,j) = 0.01
                 end do
             end do
             end associate

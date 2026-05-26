@@ -353,7 +353,7 @@ contains
 
         allocate(QSFC(ims:ime,jms:jme), source=water_vapor(:,kms,:))
         allocate(current_precipitation(ims:ime,jms:jme), source=0.0)
-        allocate(windspd(ims:ime,jms:jme), source=1.0)
+        allocate(windspd(ims:ime,jms:jme), source=0.1)
         allocate(land_mask(ims:ime,jms:jme), source=real(domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di))
         allocate(land_mask_noahmp(ims:ime,jms:jme), source=land_mask)
         !$acc enter data copyin(QSFC, current_precipitation, windspd, land_mask, land_mask_noahmp)
@@ -869,7 +869,7 @@ contains
                           v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d)
                 !$acc kernels
                 windspd = sqrt(u_10m**2 + v_10m**2)
-                where(windspd<1) windspd=1 ! minimum wind speed to prevent the exchange coefficient from blowing up
+                where(windspd<0.01) windspd=0.01 ! minimum wind speed to prevent the exchange coefficient from blowing up
                 !$acc end kernels
                 end associate
 

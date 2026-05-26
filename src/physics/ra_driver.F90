@@ -1380,23 +1380,20 @@ contains
 
                                 zwp(col_indx,k) = 0._wp
                                 swp(col_indx,k) = 1000.0*qs(i,k,j) * air_mass_lay
+                                rel(col_indx,k) = max(relmin, min(relmax, re_c_dom(i,k,j) * 1.0e6_wp))
+                                ! DR: 03.2026 : strangely, RRTMGP expects effective radius for cloud water and diameter for cloud ice and snow
+                                ! could change in the future
+                                rei(col_indx,k) = max(reimin, min(reimax, re_i_dom(i,k,j) * 1.0e6_wp * 2)) ! additional "*2" converts radius to diameter
+                                res(col_indx,k) = max(reimin, min(reimax, re_s_dom(i,k,j) * 1.0e6_wp * 2)) ! additional "*2" converts radius to diameter
 
                                 if (cldfra(i,k,j) > 0.0_wp) then
                                     cld_frc = MAX(EPSILON(1.0_wp),cldfra(i,k,j))
                                     
                                     lwp(col_indx,k) = 1000.0*qc(i,k,j) * air_mass_lay / cld_frc
                                     iwp(col_indx,k) = 1000.0*qi(i,k,j) * air_mass_lay / cld_frc
-                                    rel(col_indx,k) = max(relmin, min(relmax, re_c_dom(i,k,j) * 1.0e6_wp))
-                                    ! DR: 03.2026 : strangely, RRTMGP expects effective radius for cloud water and diameter for cloud ice and snow
-                                    ! could change in the future
-                                    rei(col_indx,k) = max(reimin, min(reimax, re_i_dom(i,k,j) * 1.0e6_wp * 2)) ! additional "*2" converts radius to diameter
-                                    res(col_indx,k) = max(reimin, min(reimax, re_s_dom(i,k,j) * 1.0e6_wp * 2)) ! additional "*2" converts radius to diameter
                                 else
                                     lwp(col_indx,k) = 0.0_wp
                                     iwp(col_indx,k) = 0.0_wp
-                                    rel(col_indx,k) = relmin
-                                    rei(col_indx,k) = reimin
-                                    res(col_indx,k) = reimin
                                 end if
                             enddo
 
