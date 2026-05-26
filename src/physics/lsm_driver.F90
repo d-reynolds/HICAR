@@ -751,7 +751,7 @@ contains
         endif
 
         if (options%physics%watersurface==kWATER_LAKE) then
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "Using WRF Lake model"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "  Using WRF Lake model"
 
             ! allocate arrays:
             if (allocated(lake_mask_out)) deallocate( lake_mask_out)
@@ -814,7 +814,7 @@ contains
 
         ! FLake bulk lake model (Mironov 2008). Skipped on restart (state read from restart file).
         if (options%physics%watersurface==kWATER_FLAKE) then
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "Using FLake Lake model"
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "  Using FLake Lake model"
             call flake_init(domain, options, restart=restart, context_change=context_change)
         endif
 

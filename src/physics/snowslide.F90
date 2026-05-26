@@ -1094,7 +1094,7 @@ contains
                 ! --- Step 7: Diagnose temperatures from internal energy ---
                 !$acc loop seq
                 do k = 1, Nsnow_loc
-                    csnow_k = (Sice_loc(k)*hcap_ice + Sliq_loc(k)*hcap_wat)
+                    csnow_k = (Sice_loc(k)*hcap_ice + Sliq_loc(k)*hcap_wat) / max(fsnow_loc, 1.0e-10)
                     if (csnow_k > 1.0e-10) then
                         Tsnow_loc(k) = Tm + U_loc(k) / csnow_k
                     else

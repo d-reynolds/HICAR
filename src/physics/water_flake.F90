@@ -90,14 +90,16 @@ contains
         integer :: i, j, its, ite, jts, jte
         real    :: depth_w, t_init
 
-        ! On restart, prognostic state comes from the restart file - do not seed.
-        if (restart) return
 
         its = domain%its ; ite = domain%ite
         jts = domain%jts ; jte = domain%jte
         ims = domain%ims ; ime = domain%ime
         kms = domain%kms ; kme = domain%kme
         jms = domain%jms ; jme = domain%jme
+
+        ! On restart, prognostic state comes from the restart file - do not seed.
+        if (restart) return
+
         ! lakemask is populated by lsm_init's shared `kWATER_LAKE .OR. kWATER_FLAKE`
         ! block (lsm_driver.F90:721-750), which handles both ISLAKE>0 (vegtype==ISLAKE)
         ! and ISLAKE==-1 (vegtype==ISWATER .AND. terrain>=1m) cases. We rely on that

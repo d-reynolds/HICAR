@@ -106,13 +106,12 @@ contains
 
         do_dqdt = .False.
         if (present(dqdt)) do_dqdt = dqdt
-
-        !$acc update host(var%data_2d, var%data_3d)
         
         !get name for given id
         name = trim(get_varname(var%id))
 
         if (var%three_d) then
+            !$acc update host(var%data_3d)
             var_3d = var%data_3d
             if (do_dqdt) var_3d = var%dqdt_3d
             lis = lbound(var_3d,1); lie = ubound(var_3d,1)
@@ -123,6 +122,7 @@ contains
             vmin = minval(var_3d(lis:lie, lks:lke, ljs:lje))
             n = COUNT(ieee_is_nan(var_3d(lis:lie, lks:lke, ljs:lje)))
         else if (var%two_d) then
+            !$acc update host(var%data_2d)
             var_2d = var%data_2d
             if (do_dqdt) var_2d = var%dqdt_2d
             lis = lbound(var_2d,1); lie = ubound(var_2d,1)
